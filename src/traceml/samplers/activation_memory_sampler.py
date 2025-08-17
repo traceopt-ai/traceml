@@ -8,7 +8,7 @@ import time
 import torch
 
 from .base_sampler import BaseSampler
-from traceml.utils.patch import get_activation_queue
+from traceml.utils.activation_hook import get_activation_queue
 
 
 @dataclass

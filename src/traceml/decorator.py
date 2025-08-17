@@ -4,10 +4,8 @@ from typing import Callable
 import torch.nn as nn
 
 
-from traceml.utils.patch import (
-    model_queue,
-    attach_activation_hooks,
-)
+from traceml.utils.patch import model_queue
+from traceml.utils.activation_hook import attach_activation_hooks
 
 
 def trace_model(
