@@ -1,6 +1,6 @@
 [project]
 name = "traceml"
-version = "0.1.0"
+version = "0.0.1"
 description = "TraceML: Lightweight ML Profiler"
 authors = [{ name = "Abhinav Srivastav", email = "abhinavsriva@gmail.com" }]
 readme = "README.md"
