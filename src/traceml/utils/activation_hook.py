@@ -7,7 +7,7 @@ import time
 import torch
 import torch.nn as nn
 
-
+# Shared queue for activation events
 activation_queue: Queue = Queue(maxsize=2048)
 
 # Registry to prevent multiple hook attachments per model
