@@ -6,12 +6,13 @@ import torch.nn as nn
 
 from traceml.utils.patch import model_queue
 from traceml.utils.activation_hook import attach_activation_hooks
+from traceml.utils.gradient_hook import attach_all_gradient_hooks
 
 
 def trace_model(
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
-    trace_gradients: bool = False,
+    trace_gradients: bool = True,
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -20,8 +21,8 @@ def trace_model(
 
     Args:
         sample_layer_memory: enqueue model for memory sampling.
-        trace_gradients: placeholder for future gradient tracing.
         trace_activations: attach activation hooks to capture activations.
+        trace_gradients: attach gradient hooks to capture grad sizes (module + param).
     """
 
     def decorator(cls):
@@ -40,7 +41,8 @@ def trace_model(
                     model_queue.put(self)
                 if trace_activations:
                     attach_activation_hooks(self)
-                # TODO: register gradient hooks here
+                if trace_gradients:
+                    attach_all_gradient_hooks(self)
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
 
@@ -54,7 +56,7 @@ def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
-    trace_gradients: bool = False,
+    trace_gradients: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -63,7 +65,7 @@ def trace_model_instance(
         model (nn.Module): The model instance to trace.
         sample_layer_memory: enqueue model for memory sampling.
         trace_activations: attach activation hooks to capture activations.
-        trace_gradients: placeholder for future gradient tracing.
+        trace_gradients: attach gradient hooks to capture grad sizes (module + param).
     """
     try:
         if not isinstance(model, nn.Module):
@@ -72,6 +74,7 @@ def trace_model_instance(
             model_queue.put(model)
         if trace_activations:
             attach_activation_hooks(model)
-        # TODO: implement trace gradients
+        if trace_gradients:
+            attach_all_gradient_hooks(model)
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)
