@@ -3,9 +3,7 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
-from rich.table import Table
-from rich.align import Align
-from typing import Dict, Any, Callable, Optional, List
+from typing import Dict, Any, Callable, Optional
 import threading
 import sys
 

@@ -2,7 +2,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.console import Group
 from rich.console import Console
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import MODEL_SUMMARY_LAYOUT_NAME

@@ -5,7 +5,6 @@ from typing import Dict, Any, Optional
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_LAYOUT_NAME
-from .display_manager import StdoutDisplayManager
 
 
 class SystemStdoutLogger(BaseStdoutLogger):
@@ -44,7 +43,6 @@ class SystemStdoutLogger(BaseStdoutLogger):
             return "N/A"
 
     def _get_panel_renderable(self) -> Panel:
-        env = self._latest_env or {}
         d = self._latest_snapshot or {}
 
         # CPU and RAM

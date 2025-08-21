@@ -28,6 +28,7 @@ class GradientEvent:
       - layer_name is the parameter's qualified name.
       - per_param contains {param_name: {device: mb}}.
     """
+
     model_id: int
     timestamp: float
     layer_name: Optional[str]
@@ -43,7 +44,7 @@ def get_gradient_queue() -> Queue:
 
 def _tensor_size_mb(t: torch.Tensor) -> float:
     try:
-        return float(t.numel() * t.element_size()) / (1024 ** 2)
+        return float(t.numel() * t.element_size()) / (1024**2)
     except Exception:
         return 0.0
 
@@ -72,6 +73,7 @@ class ModuleGradientHook:
     """
     Full backward hook capturing gradient sizes from grad_output for a layer.
     """
+
     def __init__(self, model_id: int, layer_name: str):
         self.model_id = model_id
         self.layer_name = layer_name
@@ -94,7 +96,10 @@ class ModuleGradientHook:
             except Full:
                 pass
         except Exception:
-            print(f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}", file=sys.stderr)
+            print(
+                f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}",
+                file=sys.stderr,
+            )
 
 
 class ParamGradientHook:
@@ -124,9 +129,10 @@ class ParamGradientHook:
             except Full:
                 pass
         except Exception:
-            print(f"[TraceML] Error in ParamGradientHook for param {self.param_name}", file=sys.stderr)
-
-
+            print(
+                f"[TraceML] Error in ParamGradientHook for param {self.param_name}",
+                file=sys.stderr,
+            )
 
 
 def attach_module_gradient_hooks(model: nn.Module) -> None:
@@ -175,4 +181,3 @@ def attach_all_gradient_hooks(model: nn.Module) -> None:
     """
     attach_module_gradient_hooks(model)
     attach_param_gradient_hooks(model)
-

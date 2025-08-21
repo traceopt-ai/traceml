@@ -105,7 +105,7 @@ def test_system_sampler_with_pytorch_model():
         tracker.log_summaries()
 
     print(
-        f"\n[TraceML Test] PyTorch model memory tracking test passed successfully.",
+        "\n[TraceML Test] PyTorch model memory tracking test passed successfully.",
         file=sys.stderr,
     )
 

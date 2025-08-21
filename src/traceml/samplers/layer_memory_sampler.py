@@ -5,7 +5,6 @@ import gc
 import sys
 from typing import Dict, Any, List, Tuple, Optional, Deque, Set
 
-from scipy.linalg import fiedler
 
 from .base_sampler import BaseSampler
 from traceml.utils.patch import get_model_queue
@@ -172,7 +171,7 @@ class LayerMemorySampler(BaseSampler):
         else:
             envelope = self.make_snapshot(
                 ok=False,
-                message=f"no model found",
+                message="no model found",
                 source="process",
                 data=None,
             )

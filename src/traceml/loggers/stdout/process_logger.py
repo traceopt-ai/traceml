@@ -1,14 +1,12 @@
-from rich.text import Text
 from rich.panel import Panel
 from rich.table import Table
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from rich.console import Console
 
 import psutil
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import PROCESS_LAYOUT_NAME
-from .display_manager import StdoutDisplayManager
 
 
 class ProcessStdoutLogger(BaseStdoutLogger):
@@ -49,7 +47,6 @@ class ProcessStdoutLogger(BaseStdoutLogger):
         """
         Generates the Rich Panel for live display:
         """
-        env = self._latest_env or {}
         d = self._latest_snapshot or {}
 
         cpu_val = d.get("process_cpu_percent", 0.0)

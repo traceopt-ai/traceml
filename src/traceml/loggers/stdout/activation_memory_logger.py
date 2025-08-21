@@ -5,7 +5,7 @@ from rich.table import Table
 from rich.console import Console
 
 from .base_logger import BaseStdoutLogger
-from .display_manager import ACTIVATION_SUMMARY_LAYOUT_NAME, StdoutDisplayManager
+from .display_manager import ACTIVATION_SUMMARY_LAYOUT_NAME
 
 
 class ActivationMemoryStdoutLogger(BaseStdoutLogger):

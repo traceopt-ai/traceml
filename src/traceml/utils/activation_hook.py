@@ -31,8 +31,6 @@ def get_activation_queue() -> Queue:
     return activation_queue
 
 
-
-
 def _tensor_size_mb(tensor: torch.Tensor) -> float:
     """
     Compute the memory footprint of a tensor in megabytes.
@@ -107,4 +105,3 @@ def attach_activation_hooks(model: nn.Module):
         module.register_forward_hook(ActivationHook(model_id, name))
 
     _activation_hook_registry[model_id] = True
-

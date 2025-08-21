@@ -1,7 +1,5 @@
-import os
 import time
 import sys
-import shutil
 from sklearn.datasets import make_regression
 from sklearn.linear_model import LinearRegression
 
@@ -66,7 +64,7 @@ def test_system_sampler_with_heavy_task():
         StdoutDisplayManager.stop_display()
 
     print(
-        f"\n[TraceML Test] SystemSampler (CPU & RAM) test passed successfully.",
+        "\n[TraceML Test] SystemSampler (CPU & RAM) test passed successfully.",
         file=sys.stderr,
     )
 

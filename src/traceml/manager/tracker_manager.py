@@ -78,7 +78,7 @@ class TrackerManager:
 
             if self._thread.is_alive():
                 print(
-                    f"[TraceML] WARNING: Tracker thread did not terminate within timeout.",
+                    "[TraceML] WARNING: Tracker thread did not terminate within timeout.",
                     file=sys.stderr,
                 )
 

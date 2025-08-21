@@ -1,7 +1,4 @@
-from rich.console import Console, Group
-from rich.table import Table
-
-from typing import Dict, Any, Callable, Optional, List
+from typing import Dict, Any
 
 from .display_manager import StdoutDisplayManager
 

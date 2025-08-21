@@ -107,7 +107,7 @@ def run_with_tracing(
         # Catch any other unhandled exceptions (e.g., RuntimeError, MemoryError)
         exception_caught = e
         exit_code = 1  # Failure
-        print(f"\n--- User script crashed! ---", file=sys.stderr)
+        print("\n--- User script crashed! ---", file=sys.stderr)
         print(f"Exception Type: {type(e).__name__}", file=sys.stderr)
         print(f"Exception Message: {e}", file=sys.stderr)
         print("\n--- TraceML Crash Report (Partial) ---", file=sys.stderr)
