@@ -260,6 +260,7 @@ class GradientMemorySampler(BaseSampler):
             )
             return self.snapshot_dict(envelope)
 
+
     def get_summary(self) -> Dict[str, Any]:
         """
         Summarize all drained data so far using cumulative counters.
@@ -279,7 +280,7 @@ class GradientMemorySampler(BaseSampler):
                 "ever_seen": self._ever_seen,
                 "per_device_cumulative": per_dev_summary,
                 "raw_events_kept": len(self._raw_events),
-                "last_snapshot": self._latest_snapshot.__dict__ if self._latest_snapshot else None,
+                "last_snapshot": self._latest_snapshot.__dict__,
             }
         except Exception as e:
             print(f"[TraceML] GradientMemorySampler.get_summary() error: {e}", file=sys.stderr)
