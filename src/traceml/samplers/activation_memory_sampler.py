@@ -88,7 +88,7 @@ class ActivationMemorySampler(BaseSampler):
     def _compute_batch_stats(values: List[float]) -> _BatchStats:
         """Compute summary stats."""
         if not values:
-            return _BatchStats(0, 0.0, 0.0, 0.0, None)
+            return _BatchStats()
         sum_memory = float(sum(values))
         max_memory = float(max(values))
         non_zero_memory = [v for v in values if v > 0.0]
@@ -145,9 +145,6 @@ class ActivationMemorySampler(BaseSampler):
             drained_events += 1
             per_dev = getattr(ev, "per_device_activation_memory", None)
             ts = getattr(ev, "timestamp", now)
-
-            if not isinstance(per_dev, dict):
-                continue
 
             self._append_raw_event(ts, per_dev)
             self._accumulate_cumulative(per_dev)
