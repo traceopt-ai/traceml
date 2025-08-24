@@ -337,7 +337,7 @@ class SystemSampler(BaseSampler):
                 "ram_peak_used": round(ram_peak_used, 2),
                 "ram_average_available": round(ram_avg_avail, 2),
                 "ram_min_available": round(ram_min_avail, 2),
-                "ram_total_mb": round(ram_total_mb, 2),
+                "ram_total_memory": round(ram_total_mb, 2),
             }
 
             # GPU summary
@@ -395,10 +395,10 @@ class SystemSampler(BaseSampler):
                         "gpu_total_count": self.gpu_count,
                         "gpu_average_util_percent": 0.0,
                         "gpu_peak_util_percent": 0.0,
-                        "gpu_memory_global_peak_used_mb": 0.0,
-                        "gpu_memory_global_lowest_nonzero_used_mb": 0.0,
-                        "gpu_memory_average_used_mb": 0.0,
-                        "gpu_memory_variance_mb": 0.0,
+                        "gpu_memory_global_peak_used": 0.0,
+                        "gpu_memory_global_lowest_nonzero_used": 0.0,
+                        "gpu_memory_average_used": 0.0,
+                        "gpu_memory_variance": 0.0,
                     }
                 )
 
