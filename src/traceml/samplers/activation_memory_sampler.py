@@ -51,28 +51,23 @@ class ActivationMemorySampler(BaseSampler):
         self,
         max_raw_events: int = 10_000,
         pressure_threshold: float = 0.9,
-        store_raw: bool = True,
     ):
         super().__init__()
         self.pressure_threshold = float(pressure_threshold)
-        self.store_raw = bool(store_raw)
-
         # raw event(each item: {"ts": float, "per_device_mb": {dev: mb}})
         self._raw_events: Deque[Dict[str, Any]] = deque(maxlen=int(max_raw_events))
-
         # Cumulative stats: dev -> (count_samples, sum_mb, max_mb)
         self._cumulative: Dict[str, Tuple[int, float, float]] = defaultdict(
             lambda: (0, 0.0, 0.0)
         )
-
         # Last live snapshot + flag to know if we ever saw any data
         self._latest_snapshot: Optional[ActivationSnapshot] = None
         self._ever_seen: bool = False
 
-    def _append_raw_event(self, ts: float, per_dev_memory: Dict[str, float]) -> None:
-        """Push one raw event into the bounded buffer (if enabled)."""
-        if not self.store_raw:
-            return
+    def _append_raw_event(
+            self, ts: float, per_dev_memory: Dict[str, float]
+    ) -> None:
+        """Push one raw event into the bounded buffer."""
         self._raw_events.append(
             {"ts": float(ts), "per_dev_memory": dict(per_dev_memory)}
         )
@@ -204,7 +199,7 @@ class ActivationMemorySampler(BaseSampler):
                     snap = ActivationSnapshot(
                         timestamp=self._latest_snapshot.timestamp,
                         devices=dict(self._latest_snapshot.devices),
-                        overall_avg_memory=self._latest_snapshot.overall_avg_mb,
+                        overall_avg_memory=self._latest_snapshot.overall_avg_memory,
                         drained_events=0,
                         stale=True,
                         note=None,

@@ -47,8 +47,13 @@ class ProcessSampler(BaseSampler):
         super().__init__()
 
         # Monitor current process by default
-        self.pid = pid or os.getpid()
-        self.process = psutil.Process(self.pid)
+        try:
+            self.pid = pid or os.getpid()
+            self.process = psutil.Process(self.pid)
+        except Exception as e:
+            print(f"[TraceML] WARNING: Failed to attach to process {pid or os.getpid()}: {e}", file=sys.stderr)
+            self.pid = None
+            self.process = None
 
         # Sampling history
         self.cpu_history: Deque[ProcessCPUSample] = deque(maxlen=10_000)
