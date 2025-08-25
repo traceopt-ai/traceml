@@ -1,8 +1,7 @@
 import time
 import sys
-import pytest
 import numpy as np
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch
 
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.manager.tracker_manager import TrackerManager

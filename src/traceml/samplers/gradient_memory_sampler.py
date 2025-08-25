@@ -8,7 +8,7 @@ import time
 import torch
 
 from .base_sampler import BaseSampler
-from traceml.utils.gradient_hooks import get_gradient_queue
+from traceml.utils.gradient_hook import get_gradient_queue
 
 
 @dataclass
