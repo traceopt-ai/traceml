@@ -101,7 +101,9 @@ class SystemSampler(BaseSampler):
             for i in range(self.gpu_count):
                 try:
                     handle = nvmlDeviceGetHandleByIndex(i)
-                    total_memory = float(nvmlDeviceGetMemoryInfo(handle).total) / (1024**2)
+                    total_memory = float(nvmlDeviceGetMemoryInfo(handle).total) / (
+                        1024**2
+                    )
                 except Exception:
                     total_memory = 0.0
                 self.gpus[i] = PerGPUState(total_mem=total_memory)

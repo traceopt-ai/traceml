@@ -33,7 +33,6 @@ class GradientMemoryStdoutLogger(BaseStdoutLogger):
         )
         self._latest_snapshot: Dict[str, Any] = {}
 
-
     def log_summary(self, summary: Dict[str, Any]):
         """Pretty-print final cumulative summary from GradientMemorySampler.get_summary()."""
         console = Console()
@@ -74,7 +73,6 @@ class GradientMemoryStdoutLogger(BaseStdoutLogger):
             border_style="magenta3",
         )
         console.print(panel)
-
 
     def _format_mb(self, value: Optional[float]) -> str:
         try:
