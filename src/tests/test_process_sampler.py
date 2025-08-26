@@ -49,18 +49,27 @@ def test_process_sampler_real_or_mocked_gpu():
         fake_pid = 43210
         fake_used_mb = 256.0
 
-        with patch("traceml.samplers.process_sampler.os.getpid", return_value=fake_pid), \
-             patch("traceml.samplers.process_sampler.psutil.Process") as mock_proc, \
-             patch("traceml.samplers.process_sampler.nvmlInit", return_value=None), \
-             patch("traceml.samplers.process_sampler.nvmlDeviceGetCount", return_value=1), \
-             patch("traceml.samplers.process_sampler.nvmlDeviceGetHandleByIndex", return_value="handle0"), \
-             patch(
-                 "traceml.samplers.process_sampler.nvmlDeviceGetComputeRunningProcesses",
-                 return_value=[
-                     _MockNVMLProcess(fake_pid, fake_used_mb),
-                     _MockNVMLProcess(99999, 1024.0),  # another process; should be ignored
-                 ],
-             ):
+        with (
+            patch("traceml.samplers.process_sampler.os.getpid", return_value=fake_pid),
+            patch("traceml.samplers.process_sampler.psutil.Process") as mock_proc,
+            patch("traceml.samplers.process_sampler.nvmlInit", return_value=None),
+            patch(
+                "traceml.samplers.process_sampler.nvmlDeviceGetCount", return_value=1
+            ),
+            patch(
+                "traceml.samplers.process_sampler.nvmlDeviceGetHandleByIndex",
+                return_value="handle0",
+            ),
+            patch(
+                "traceml.samplers.process_sampler.nvmlDeviceGetComputeRunningProcesses",
+                return_value=[
+                    _MockNVMLProcess(fake_pid, fake_used_mb),
+                    _MockNVMLProcess(
+                        99999, 1024.0
+                    ),  # another process; should be ignored
+                ],
+            ),
+        ):
             proc_instance = MagicMock()
             proc_instance.cpu_percent.return_value = 12.5
             proc_instance.memory_info.return_value.rss = 80 * 1024 * 1024
@@ -77,14 +86,20 @@ def test_process_sampler_real_or_mocked_gpu():
             assert snap is not None
             assert snap.process_cpu_percent == 12.5
             assert snap.process_ram == 80.0
-            assert snap.process_gpu_memory == pytest.approx(fake_used_mb, rel=0, abs=0.1)
+            assert snap.process_gpu_memory == pytest.approx(
+                fake_used_mb, rel=0, abs=0.1
+            )
 
             summary = sampler.get_summary()
             assert summary["total_process_samples"] >= 1
             assert summary["cpu_average_percent"] >= 0.0
             assert summary["ram_average"] >= 0.0
-            assert summary["gpu_average_memory"] == pytest.approx(fake_used_mb, rel=0, abs=0.1)
-            assert summary["gpu_peak_memory"] == pytest.approx(fake_used_mb, rel=0, abs=0.1)
+            assert summary["gpu_average_memory"] == pytest.approx(
+                fake_used_mb, rel=0, abs=0.1
+            )
+            assert summary["gpu_peak_memory"] == pytest.approx(
+                fake_used_mb, rel=0, abs=0.1
+            )
 
 
 def test_process_sampler_nvml_init_failure_graceful_fallback():
@@ -94,6 +109,7 @@ def test_process_sampler_nvml_init_failure_graceful_fallback():
     """
     try:
         from pynvml import NVMLError
+
         nvml_error = NVMLError(999)
     except Exception:
         nvml_error = Exception("NVML init fail")

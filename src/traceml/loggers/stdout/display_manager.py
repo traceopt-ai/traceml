@@ -15,6 +15,7 @@ SYSTEM_LAYOUT_NAME = "system_metrics_section"
 PROCESS_LAYOUT_NAME = "process_metrics_section"
 MODEL_SUMMARY_LAYOUT_NAME = "current_model_summary_section"
 ACTIVATION_SUMMARY_LAYOUT_NAME = "activation_memory_summary_section"
+GRADIENT_SUMMARY_LAYOUT_NAME = "gradient_memory_summary_section"
 
 
 class StdoutDisplayManager:
@@ -45,6 +46,7 @@ class StdoutDisplayManager:
             Layout(name=PROCESS_LAYOUT_NAME),
             Layout(name=MODEL_SUMMARY_LAYOUT_NAME),
             Layout(name=ACTIVATION_SUMMARY_LAYOUT_NAME),
+            Layout(name=GRADIENT_SUMMARY_LAYOUT_NAME),
         )
 
         # Initialize panels with placeholder text
@@ -59,6 +61,9 @@ class StdoutDisplayManager:
         )
         cls._layout[ACTIVATION_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Activation Memory...", justify="center"))
+        )
+        cls._layout[GRADIENT_SUMMARY_LAYOUT_NAME].update(
+            Panel(Text("Waiting for Gradient Memory...", justify="center"))
         )
 
     @classmethod

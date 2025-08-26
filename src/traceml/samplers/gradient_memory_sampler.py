@@ -65,15 +65,22 @@ class GradientMemorySampler(BaseSampler):
         self._latest_snapshot: Optional[GradientSnapshot] = None
         self._ever_seen: bool = False
 
-
-    def _append_raw_event(self, ts: float, per_dev_memory: Dict[str, float], kind: str) -> None:
+    def _append_raw_event(
+        self, ts: float, per_dev_memory: Dict[str, float], kind: str
+    ) -> None:
         try:
             self._raw_events.append(
-                {"ts": float(ts), "per_dev_memory": dict(per_dev_memory), "kind": str(kind)}
+                {
+                    "ts": float(ts),
+                    "per_dev_memory": dict(per_dev_memory),
+                    "kind": str(kind),
+                }
             )
         except Exception as e:
-            print(f"[TraceML] WARNING: failed to append raw gradient event: {e}", file=sys.stderr)
-
+            print(
+                f"[TraceML] WARNING: failed to append raw gradient event: {e}",
+                file=sys.stderr,
+            )
 
     def _accumulate_cumulative(self, per_dev_memory: Dict[str, float]) -> None:
         for dev, mem in per_dev_memory.items():
@@ -82,8 +89,10 @@ class GradientMemorySampler(BaseSampler):
                 m = float(mem)
                 self._cumulative[dev] = (c_count + 1, c_sum + m, max(c_max, m))
             except Exception as e:
-                print(f"[TraceML] WARNING: cumulative update failed for {dev}: {e}", file=sys.stderr)
-
+                print(
+                    f"[TraceML] WARNING: cumulative update failed for {dev}: {e}",
+                    file=sys.stderr,
+                )
 
     @staticmethod
     def _compute_batch_stats(values: List[float]) -> _BatchStats:
@@ -102,9 +111,11 @@ class GradientMemorySampler(BaseSampler):
                 min_nonzero_memory=mnz,
             )
         except Exception as e:
-            print(f"[TraceML] WARNING: compute_batch_stats (grad) failed: {e}", file=sys.stderr)
+            print(
+                f"[TraceML] WARNING: compute_batch_stats (grad) failed: {e}",
+                file=sys.stderr,
+            )
             return _BatchStats()
-
 
     def _pressure_flag(self, dev: str, batch_max_memory: float) -> Optional[bool]:
         """True if batch max exceeds threshold of device capacity; None if unknown/not CUDA."""
@@ -113,11 +124,10 @@ class GradientMemorySampler(BaseSampler):
         try:
             idx = int(dev.split(":", 1)[1])
             props = torch.cuda.get_device_properties(idx)
-            total_memory = props.total_memory / (1024 ** 2)
+            total_memory = props.total_memory / (1024**2)
             return (batch_max_memory / total_memory) >= self.pressure_threshold
         except Exception:
             return None
-
 
     def _drain_queue(self) -> Tuple[int, Dict[str, List[float]]]:
         """
@@ -141,7 +151,10 @@ class GradientMemorySampler(BaseSampler):
             except Empty:
                 break
             except Exception as e:
-                print(f"[TraceML] WARNING: gradient queue.get_nowait failed: {e}", file=sys.stderr)
+                print(
+                    f"[TraceML] WARNING: gradient queue.get_nowait failed: {e}",
+                    file=sys.stderr,
+                )
                 break
 
             drained_events += 1
@@ -158,14 +171,16 @@ class GradientMemorySampler(BaseSampler):
                     batch_per_dev[dev].append(float(mem))
 
             except Exception as e:
-                print(f"[TraceML] WARNING: gradient event processing failed: {e}", file=sys.stderr)
+                print(
+                    f"[TraceML] WARNING: gradient event processing failed: {e}",
+                    file=sys.stderr,
+                )
                 continue
 
         return drained_events, batch_per_dev
 
-
     def _build_snapshot(
-            self, drained_events: int, batch_per_dev: Dict[str, List[float]]
+        self, drained_events: int, batch_per_dev: Dict[str, List[float]]
     ) -> GradientSnapshot:
         """Construct the live snapshot from this drain’s per-device values."""
         try:
@@ -183,7 +198,9 @@ class GradientMemorySampler(BaseSampler):
                     "avg_memory": round(stats.avg_memory, 4),
                     "max_memory": round(stats.max_memory, 4),
                     "min_nonzero_memory": (
-                        round(stats.min_nonzero_memory, 4) if stats.min_nonzero_memory is not None else None
+                        round(stats.min_nonzero_memory, 4)
+                        if stats.min_nonzero_memory is not None
+                        else None
                     ),
                     "pressure_90pct": pressure,
                 }
@@ -198,9 +215,11 @@ class GradientMemorySampler(BaseSampler):
                 stale=False,
             )
         except Exception as e:
-            print(f"[TraceML] ERROR: building gradient snapshot failed: {e}", file=sys.stderr)
+            print(
+                f"[TraceML] ERROR: building gradient snapshot failed: {e}",
+                file=sys.stderr,
+            )
             return GradientSnapshot.error_snapshot(e)
-
 
     def sample(self) -> Dict[str, Any]:
         """
@@ -236,11 +255,17 @@ class GradientMemorySampler(BaseSampler):
                         ),
                     )
             else:
-                self._latest_snapshot = self._build_snapshot(drained_events, batch_per_dev)
+                self._latest_snapshot = self._build_snapshot(
+                    drained_events, batch_per_dev
+                )
                 self._ever_seen = True
 
             ok = self._latest_snapshot.error is None
-            msg = "sampled successfully" if ok else f"sampling completed with error: {self._latest_snapshot.error}"
+            msg = (
+                "sampled successfully"
+                if ok
+                else f"sampling completed with error: {self._latest_snapshot.error}"
+            )
             envelope = self.make_snapshot(
                 ok=ok,
                 message=msg,
@@ -250,7 +275,9 @@ class GradientMemorySampler(BaseSampler):
             return self.snapshot_dict(envelope)
 
         except Exception as e:
-            print(f"[TraceML] GradientMemorySampler.sample() error: {e}", file=sys.stderr)
+            print(
+                f"[TraceML] GradientMemorySampler.sample() error: {e}", file=sys.stderr
+            )
             snap = GradientSnapshot.error_snapshot(e)
             envelope = self.make_snapshot(
                 ok=False,
@@ -259,7 +286,6 @@ class GradientMemorySampler(BaseSampler):
                 data=snap.__dict__,
             )
             return self.snapshot_dict(envelope)
-
 
     def get_summary(self) -> Dict[str, Any]:
         """
@@ -283,7 +309,10 @@ class GradientMemorySampler(BaseSampler):
                 "last_snapshot": self._latest_snapshot.__dict__,
             }
         except Exception as e:
-            print(f"[TraceML] GradientMemorySampler.get_summary() error: {e}", file=sys.stderr)
+            print(
+                f"[TraceML] GradientMemorySampler.get_summary() error: {e}",
+                file=sys.stderr,
+            )
             return {
                 "error": str(e),
                 "ever_seen": self._ever_seen,

@@ -8,14 +8,17 @@ from traceml.manager.tracker_manager import TrackerManager
 from traceml.loggers.stdout.system_logger import SystemStdoutLogger
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
 
+
 class _MockUtilization:
     def __init__(self, gpu=42):
         self.gpu = gpu
 
+
 class _MockMemInfo:
     def __init__(self, used=512, total=4096):
-        self.used = int(used * 1024 * 1024)   # bytes
-        self.total = int(total * 1024 * 1024) # bytes
+        self.used = int(used * 1024 * 1024)  # bytes
+        self.total = int(total * 1024 * 1024)  # bytes
+
 
 # ============================================================
 # 1) Real-system test:
@@ -47,7 +50,10 @@ def test_system_sampler_with_heavy_task():
             iterations += 1
             time.sleep(0.01)
 
-        print(f"\n[TraceML Test] Heavy task finished ({iterations} iterations).", file=sys.stderr)
+        print(
+            f"\n[TraceML Test] Heavy task finished ({iterations} iterations).",
+            file=sys.stderr,
+        )
 
         # Snapshot checks
         snap = system_sampler.latest
@@ -109,13 +115,12 @@ def test_system_sampler_with_heavy_task():
 def test_system_sampler_handles_nvml_errors_gracefully():
     try:
         from pynvml import NVMLError
+
         nvml_error = NVMLError(999)
     except NVMLError:
         nvml_error = Exception("NVML init fail")
 
-    with patch(
-            "traceml.samplers.system_sampler.nvmlInit",
-            side_effect=nvml_error):
+    with patch("traceml.samplers.system_sampler.nvmlInit", side_effect=nvml_error):
         sampler = SystemSampler()
         assert sampler.gpu_available is False
         assert sampler.gpu_count == 0
@@ -165,14 +170,22 @@ def test_system_sampler_gpu_present_or_mocked():
 
     else:
         # No real GPU → mock the NVML stack to simulate one GPU
-        with patch("traceml.samplers.system_sampler.nvmlInit", return_value=None), \
-                patch("traceml.samplers.system_sampler.nvmlDeviceGetCount", return_value=1), \
-                patch("traceml.samplers.system_sampler.nvmlDeviceGetHandleByIndex", return_value="handle0"), \
-                patch("traceml.samplers.system_sampler.nvmlDeviceGetUtilizationRates",
-                      return_value=_MockUtilization(gpu=42)), \
-                patch("traceml.samplers.system_sampler.nvmlDeviceGetMemoryInfo",
-                      return_value=_MockMemInfo(used=512, total=4096)):
-
+        with (
+            patch("traceml.samplers.system_sampler.nvmlInit", return_value=None),
+            patch("traceml.samplers.system_sampler.nvmlDeviceGetCount", return_value=1),
+            patch(
+                "traceml.samplers.system_sampler.nvmlDeviceGetHandleByIndex",
+                return_value="handle0",
+            ),
+            patch(
+                "traceml.samplers.system_sampler.nvmlDeviceGetUtilizationRates",
+                return_value=_MockUtilization(gpu=42),
+            ),
+            patch(
+                "traceml.samplers.system_sampler.nvmlDeviceGetMemoryInfo",
+                return_value=_MockMemInfo(used=512, total=4096),
+            ),
+        ):
             sampler = SystemSampler()
             assert sampler.gpu_available is True
             assert sampler.gpu_count == 1

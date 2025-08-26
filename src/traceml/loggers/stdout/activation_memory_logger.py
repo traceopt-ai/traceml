@@ -34,20 +34,16 @@ class ActivationMemoryStdoutLogger(BaseStdoutLogger):
     def log_summary(self, summary: Dict[str, Any]):
         """Pretty-print final cumulative summary from sampler.get_summary()."""
         console = Console()
-
         table = Table.grid(padding=(0, 1))
         table.add_column(justify="left", style="bold magenta3")
         table.add_column(justify="center", style="dim", no_wrap=True)
         table.add_column(justify="right", style="bold white")
-
         ever_seen = summary.get("ever_seen", False)
         table.add_row(
             "EVER SEEN EVENTS", "[magenta3]|[/magenta3]", "Yes" if ever_seen else "No"
         )
-
         raw_kept = summary.get("raw_events_kept", 0)
         table.add_row("RAW EVENTS KEPT", "[magenta3]|[/magenta3]", str(raw_kept))
-
         per_dev = summary.get("per_device_cumulative", {}) or {}
         if per_dev:
             table.add_row("", "", "")

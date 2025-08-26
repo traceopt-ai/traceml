@@ -51,7 +51,10 @@ class ProcessSampler(BaseSampler):
             self.pid = pid or os.getpid()
             self.process = psutil.Process(self.pid)
         except Exception as e:
-            print(f"[TraceML] WARNING: Failed to attach to process {pid or os.getpid()}: {e}", file=sys.stderr)
+            print(
+                f"[TraceML] WARNING: Failed to attach to process {pid or os.getpid()}: {e}",
+                file=sys.stderr,
+            )
             self.pid = None
             self.process = None
 

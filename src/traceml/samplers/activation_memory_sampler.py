@@ -64,9 +64,7 @@ class ActivationMemorySampler(BaseSampler):
         self._latest_snapshot: Optional[ActivationSnapshot] = None
         self._ever_seen: bool = False
 
-    def _append_raw_event(
-            self, ts: float, per_dev_memory: Dict[str, float]
-    ) -> None:
+    def _append_raw_event(self, ts: float, per_dev_memory: Dict[str, float]) -> None:
         """Push one raw event into the bounded buffer."""
         self._raw_events.append(
             {"ts": float(ts), "per_dev_memory": dict(per_dev_memory)}
