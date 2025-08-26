@@ -321,13 +321,6 @@ class SystemSampler(BaseSampler):
             ram_peak_pct = (
                 float(np.max(ram_percent_values)) if ram_percent_values else 0.0
             )
-            ram_avg_used = float(np.mean(ram_used_values)) if ram_used_values else 0.0
-            ram_peak_used = float(np.max(ram_used_values)) if ram_used_values else 0.0
-            ram_avg_avail = (
-                float(np.mean(ram_avail_values)) if ram_avail_values else 0.0
-            )
-            ram_min_avail = float(np.min(ram_avail_values)) if ram_avail_values else 0.0
-            ram_total = float(ram_total_values[0]) if ram_total_values else 0.0
 
             summary: Dict[str, Any] = {
                 "total_system_samples": len(self.cpu_history),
@@ -335,11 +328,6 @@ class SystemSampler(BaseSampler):
                 "cpu_peak_percent": round(cpu_peak, 2),
                 "ram_average_percent_used": round(ram_avg_pct, 2),
                 "ram_peak_percent_used": round(ram_peak_pct, 2),
-                "ram_average_used": round(ram_avg_used, 2),
-                "ram_peak_used": round(ram_peak_used, 2),
-                "ram_average_available": round(ram_avg_avail, 2),
-                "ram_min_available": round(ram_min_avail, 2),
-                "ram_total_memory": round(ram_total, 2),
             }
 
             # GPU summary
@@ -366,9 +354,6 @@ class SystemSampler(BaseSampler):
                     float(np.min(nonzero_mem_arr)) if nonzero_mem_arr.size else 0.0
                 )
                 avg_mem = float(np.mean(all_mem_arr)) if all_mem_arr.size else 0.0
-                var_mem = (
-                    float(np.var(all_mem_arr, ddof=1)) if all_mem_arr.size > 1 else 0.0
-                )
 
                 util_arr = (
                     np.array(self.gpu_util_avg_history, dtype=float)
@@ -388,19 +373,6 @@ class SystemSampler(BaseSampler):
                             global_min_nonzero, 2
                         ),
                         "gpu_memory_average_used": round(avg_mem, 2),
-                        "gpu_memory_variance": round(var_mem, 2),
-                    }
-                )
-            else:
-                summary.update(
-                    {
-                        "gpu_total_count": self.gpu_count,
-                        "gpu_average_util_percent": 0.0,
-                        "gpu_peak_util_percent": 0.0,
-                        "gpu_memory_global_peak_used": 0.0,
-                        "gpu_memory_global_lowest_nonzero_used": 0.0,
-                        "gpu_memory_average_used": 0.0,
-                        "gpu_memory_variance": 0.0,
                     }
                 )
 

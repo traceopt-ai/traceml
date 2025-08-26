@@ -174,15 +174,14 @@ class ProcessSampler(BaseSampler):
                     else 0.0
                 ),
                 "ram_peak": round(max(ram_values), 2) if ram_values else 0.0,
-                "gpu_average_memory": (
-                    round(float(sum(gpu_mem_values) / len(gpu_mem_values)), 2)
-                    if gpu_mem_values
-                    else 0.0
-                ),
-                "gpu_peak_memory": (
-                    round(max(gpu_mem_values), 2) if gpu_mem_values else 0.0
-                ),
             }
+            if gpu_mem_values:
+                summary.update(
+                    {
+                        "gpu_average_memory": round(float(sum(gpu_mem_values) / len(gpu_mem_values)), 2),
+                        "gpu_peak_memory": round(max(gpu_mem_values), 2),
+                    }
+                )
             return summary
 
         except Exception as e:

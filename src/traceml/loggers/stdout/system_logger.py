@@ -6,6 +6,7 @@ import shutil
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_LAYOUT_NAME
+from traceml.utils.formatting import fmt_mem, fmt_percent, fmt_ratio
 
 
 class SystemStdoutLogger(BaseStdoutLogger):
@@ -17,32 +18,6 @@ class SystemStdoutLogger(BaseStdoutLogger):
         super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT_NAME)
         self._latest_env: Optional[Dict[str, Any]] = None
         self._latest_snapshot: Dict[str, Any] = {}
-
-    def _fmt_percent(self, value: Any) -> str:
-        try:
-            v = float(value)
-            if v > 90:
-                return f"[bold red]{v:.1f}%[/bold red]"
-            if v > 70:
-                return f"[yellow]{v:.1f}%[/yellow]"
-            return f"[green]{v:.1f}%[/green]"
-        except Exception:
-            return "N/A"
-
-    def _fmt_ratio(self, value: Any) -> str:
-        try:
-            return f"{float(value):.2f}"
-        except Exception:
-            return "N/A"
-
-    def _fmt_mem(self, mb: Any) -> str:
-        try:
-            mbf = float(mb)
-            if mbf >= 1024:
-                return f"{mbf/1024:.1f}G"
-            return f"{mbf:.0f}M"
-        except Exception:
-            return "N/A"
 
     def _get_panel_renderable(self) -> Panel:
         d = self._latest_snapshot or {}
@@ -78,20 +53,20 @@ class SystemStdoutLogger(BaseStdoutLogger):
 
         # CPU + RAM row
         table.add_row(
-            f"[cyan]CPU[/cyan]: {self._fmt_percent(cpu_val)}   "
-            f"[cyan]RAM[/cyan]: {self._fmt_mem(ram_used)}/{self._fmt_mem(ram_total)}{ram_pct}"
+            f"[cyan]CPU[/cyan]: {fmt_percent(cpu_val)}   "
+            f"[cyan]RAM[/cyan]: {fmt_mem(ram_used)}/{fmt_mem(ram_total)}{ram_pct}"
         )
 
         # GPU Utilization block
         if gpu_util_avg is not None:
             table.add_row("")  # spacer
-            util_parts = [f"AVG {self._fmt_percent(gpu_util_avg)}"]
+            util_parts = [f"AVG {fmt_percent(gpu_util_avg)}"]
             if gpu_util_min not in (None, 0):
-                util_parts.append(f"MIN {self._fmt_percent(gpu_util_min)}")
+                util_parts.append(f"MIN {fmt_percent(gpu_util_min)}")
             if gpu_util_max not in (None, 0):
-                util_parts.append(f"MAX {self._fmt_percent(gpu_util_max)}")
+                util_parts.append(f"MAX {fmt_percent(gpu_util_max)}")
             if imbalance not in (None, 0):
-                util_parts.append(f"IMB {self._fmt_ratio(imbalance)}")
+                util_parts.append(f"IMB {fmt_ratio(imbalance)}")
 
             table.add_row("[magenta]GPU Util[/magenta]: " + " | ".join(util_parts))
 
@@ -99,9 +74,9 @@ class SystemStdoutLogger(BaseStdoutLogger):
         if gpu_mem_high or gpu_mem_low or total_gpus is not None:
             table.add_row("")
             if gpu_mem_high is not None:
-                table.add_row(f"[yellow]GPU Mem High[/yellow]: {self._fmt_mem(gpu_mem_high)}")
+                table.add_row(f"[yellow]GPU Mem High[/yellow]: {fmt_mem(gpu_mem_high)}")
             if gpu_mem_low not in (None, 0):
-                table.add_row(f"[yellow]GPU Mem Low[/yellow]: {self._fmt_mem(gpu_mem_low)}")
+                table.add_row(f"[yellow]GPU Mem Low[/yellow]: {fmt_mem(gpu_mem_low)}")
             if total_gpus is not None:
                 table.add_row(f"[yellow]High Pressure[/yellow]: {high_pressure}/{total_gpus} (GPUs >90%)")
                 table.add_row(f"[yellow]Total GPUs[/yellow]: {total_gpus}")
@@ -129,9 +104,9 @@ class SystemStdoutLogger(BaseStdoutLogger):
             if value is None:
                 return "N/A"
             if "percent" in key:
-                return self._fmt_percent(value)
+                return fmt_percent(value)
             if "imbalance" in key:
-                return self._fmt_ratio(value)
+                return fmt_ratio(value)
             if "count" in key or isinstance(value, int):
                 return str(value)
             if any(sub in key for sub in ("memory", "used", "available", "total")):
