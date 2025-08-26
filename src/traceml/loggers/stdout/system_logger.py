@@ -2,6 +2,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.console import Console
 from typing import Dict, Any, Optional
+import shutil
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_LAYOUT_NAME
@@ -9,11 +10,7 @@ from .display_manager import SYSTEM_LAYOUT_NAME
 
 class SystemStdoutLogger(BaseStdoutLogger):
     """
-    Stdout logger showing:
-      - CPU on one row
-      - RAM on one row
-      - GPU UTILIZATION block: AVG / MIN / MAX / IMBALANCE
-      - GPU MEMORY block: HIGHEST / LOWEST / HighP (over 90%) and total GPUs
+    Shows CPU, RAM, GPU Utilization, and GPU Memory in a clean panel.
     """
 
     def __init__(self):
@@ -21,23 +18,28 @@ class SystemStdoutLogger(BaseStdoutLogger):
         self._latest_env: Optional[Dict[str, Any]] = None
         self._latest_snapshot: Dict[str, Any] = {}
 
-    def _format_percent(self, value: Any) -> str:
+    def _fmt_percent(self, value: Any) -> str:
         try:
-            return f"{float(value):.1f}%"
+            v = float(value)
+            if v > 90:
+                return f"[bold red]{v:.1f}%[/bold red]"
+            if v > 70:
+                return f"[yellow]{v:.1f}%[/yellow]"
+            return f"[green]{v:.1f}%[/green]"
         except Exception:
             return "N/A"
 
-    def _format_ratio(self, value: Any) -> str:
+    def _fmt_ratio(self, value: Any) -> str:
         try:
             return f"{float(value):.2f}"
         except Exception:
             return "N/A"
 
-    def _format_memory(self, mb: Any) -> str:
+    def _fmt_mem(self, mb: Any) -> str:
         try:
             mbf = float(mb)
             if mbf >= 1024:
-                return f"{mbf / 1024:.1f}G"
+                return f"{mbf/1024:.1f}G"
             return f"{mbf:.0f}M"
         except Exception:
             return "N/A"
@@ -45,106 +47,91 @@ class SystemStdoutLogger(BaseStdoutLogger):
     def _get_panel_renderable(self) -> Panel:
         d = self._latest_snapshot or {}
 
-        # CPU and RAM
+        # CPU & RAM
         cpu_val = d.get("cpu_percent", 0.0)
         ram_used = d.get("ram_used", 0.0)
         ram_total = d.get("ram_total", 0.0)
 
-        # GPU utilization metrics
+        ram_pct = ""
+        try:
+            if ram_total > 0:
+                pct = (ram_used / ram_total) * 100
+                ram_pct = f" ({pct:.1f}%)"
+        except Exception:
+            pass
+
+        # GPU Utilization
         gpu_util_avg = d.get("gpu_util_avg_percent")
         gpu_util_min = d.get("gpu_util_min_nonzero_percent")
         gpu_util_max = d.get("gpu_util_max_percent")
         imbalance = d.get("gpu_util_imbalance_ratio")
 
-        # GPU memory metrics
+        # GPU Memory
         gpu_mem_high = d.get("gpu_memory_highest_used")
         gpu_mem_low = d.get("gpu_memory_lowest_nonzero_used")
         high_pressure = d.get("gpu_count_high_pressure", 0)
         total_gpus = d.get("gpu_total_count", None)
 
-        # Build table
-        table = Table(box=None, show_header=False, padding=(0, 2))
-        table.add_column(justify="left", style="bold magenta")
+        # Build compact table
+        table = Table.grid(padding=(0, 2))
+        table.add_column(justify="left", style="white")
 
-        # CPU row
-        table.add_row(f"CPU: [white]{self._format_percent(cpu_val)}[/white]")
-
-        # RAM row
-        ram_pct = ""
-        try:
-            if ram_total and ram_total > 0:
-                ram_pct = f" ({float(ram_used) / float(ram_total) * 100:.1f}%)"
-        except Exception:
-            ram_pct = ""
+        # CPU + RAM row
         table.add_row(
-            f"RAM: [white]{self._format_memory(ram_used)}/{self._format_memory(ram_total)}{ram_pct}[/white]"
+            f"[cyan]CPU[/cyan]: {self._fmt_percent(cpu_val)}   "
+            f"[cyan]RAM[/cyan]: {self._fmt_mem(ram_used)}/{self._fmt_mem(ram_total)}{ram_pct}"
         )
 
-        # GPU UTILIZATION block
+        # GPU Utilization block
         if gpu_util_avg is not None:
             table.add_row("")  # spacer
-            table.add_row("[bold magenta]GPU UTILIZATION:[/bold magenta]")
-            table.add_row(f"  AVG: [white]{self._format_percent(gpu_util_avg)}[/white]")
+            util_parts = [f"AVG {self._fmt_percent(gpu_util_avg)}"]
             if gpu_util_min not in (None, 0):
-                table.add_row(
-                    f"  MIN: [white]{self._format_percent(gpu_util_min)}[/white]"
-                )
+                util_parts.append(f"MIN {self._fmt_percent(gpu_util_min)}")
             if gpu_util_max not in (None, 0):
-                table.add_row(
-                    f"  MAX: [white]{self._format_percent(gpu_util_max)}[/white]"
-                )
+                util_parts.append(f"MAX {self._fmt_percent(gpu_util_max)}")
             if imbalance not in (None, 0):
-                table.add_row(
-                    f"  IMBALANCE: [white]{self._format_ratio(imbalance)}[/white]"
-                )
+                util_parts.append(f"IMB {self._fmt_ratio(imbalance)}")
 
-        # GPU MEMORY block
-        if (
-            gpu_mem_high is not None
-            or gpu_mem_low not in (None, 0)
-            or total_gpus is not None
-        ):
-            table.add_row("")  # spacer
-            table.add_row("[bold yellow]GPU MEMORY:[/bold yellow]")
+            table.add_row("[magenta]GPU Util[/magenta]: " + " | ".join(util_parts))
+
+        # GPU Memory block
+        if gpu_mem_high or gpu_mem_low or total_gpus is not None:
+            table.add_row("")
             if gpu_mem_high is not None:
-                table.add_row(f"  HIGHEST: {self._format_memory(gpu_mem_high)}")
+                table.add_row(f"[yellow]GPU Mem High[/yellow]: {self._fmt_mem(gpu_mem_high)}")
             if gpu_mem_low not in (None, 0):
-                table.add_row(f"  LOWEST: {self._format_memory(gpu_mem_low)}")
+                table.add_row(f"[yellow]GPU Mem Low[/yellow]: {self._fmt_mem(gpu_mem_low)}")
             if total_gpus is not None:
-                table.add_row(f"  HighP: {high_pressure}/{total_gpus} (GPUs >90%)")
-                table.add_row(f"  TOTAL GPUs: {total_gpus}")
-            else:
-                table.add_row(f"  HighP: {high_pressure} (GPUs >90%)")
+                table.add_row(f"[yellow]High Pressure[/yellow]: {high_pressure}/{total_gpus} (GPUs >90%)")
+                table.add_row(f"[yellow]Total GPUs[/yellow]: {total_gpus}")
 
-        panel = Panel(
+        # Adaptive width
+        cols, _ = shutil.get_terminal_size()
+        panel_width = min(max(50, int(cols * 0.5)), 70)
+
+        return Panel(
             table,
-            title="Live System Metrics",
+            title="[bold cyan]System Metrics[/bold cyan]",
             title_align="center",
-            border_style="dim white",
-            width=80,
+            border_style="cyan",
+            width=panel_width,
         )
-        return panel
 
     def log_summary(self, summary: Dict[str, Any]):
         console = Console()
         table = Table.grid(padding=(0, 1))
-        table.add_column(justify="left", style="bold bright_red")
-        table.add_column(justify="center", style="bright_red", no_wrap=True)
-        table.add_column(justify="right", style="bold white")
+        table.add_column(justify="left", style="cyan")
+        table.add_column(justify="center", style="dim", no_wrap=True)
+        table.add_column(justify="right", style="white")
 
         def fmt(key: str, value: Any) -> str:
             if value is None:
                 return "N/A"
             if "percent" in key:
-                try:
-                    return f"{float(value):.1f}%"
-                except Exception:
-                    return "N/A"
+                return self._fmt_percent(value)
             if "imbalance" in key:
-                try:
-                    return f"{float(value):.2f}"
-                except Exception:
-                    return "N/A"
+                return self._fmt_ratio(value)
             if "count" in key or isinstance(value, int):
                 return str(value)
             if any(sub in key for sub in ("memory", "used", "available", "total")):
@@ -155,13 +142,11 @@ class SystemStdoutLogger(BaseStdoutLogger):
             return str(value)
 
         for key, value in summary.items():
-            display_key = key.replace("_", " ").upper()
-            display_value = fmt(key, value)
-            table.add_row(display_key, "[bright_red]|[/bright_red]", display_value)
+            table.add_row(key.replace("_", " ").upper(), "[cyan]|[/cyan]", fmt(key, value))
 
         panel = Panel(
             table,
-            title=f"[bold bright_red]{self.name} - Final Summary",
-            border_style="bright_red",
+            title=f"[bold cyan]{self.name} - Summary[/bold cyan]",
+            border_style="cyan",
         )
         console.print(panel)
