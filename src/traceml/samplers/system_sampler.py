@@ -311,10 +311,6 @@ class SystemSampler(BaseSampler):
 
             # RAM
             ram_percent_values = [s.percent for s in self.ram_history]
-            ram_used_values = [s.used for s in self.ram_history]
-            ram_avail_values = [s.available for s in self.ram_history]
-            ram_total_values = [s.total for s in self.ram_history]
-
             ram_avg_pct = (
                 float(np.mean(ram_percent_values)) if ram_percent_values else 0.0
             )

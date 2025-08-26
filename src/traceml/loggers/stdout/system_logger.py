@@ -78,7 +78,9 @@ class SystemStdoutLogger(BaseStdoutLogger):
             if gpu_mem_low not in (None, 0):
                 table.add_row(f"[yellow]GPU Mem Low[/yellow]: {fmt_mem(gpu_mem_low)}")
             if total_gpus is not None:
-                table.add_row(f"[yellow]High Pressure[/yellow]: {high_pressure}/{total_gpus} (GPUs >90%)")
+                table.add_row(
+                    f"[yellow]High Pressure[/yellow]: {high_pressure}/{total_gpus} (GPUs >90%)"
+                )
                 table.add_row(f"[yellow]Total GPUs[/yellow]: {total_gpus}")
 
         # Adaptive width
@@ -117,7 +119,9 @@ class SystemStdoutLogger(BaseStdoutLogger):
             return str(value)
 
         for key, value in summary.items():
-            table.add_row(key.replace("_", " ").upper(), "[cyan]|[/cyan]", fmt(key, value))
+            table.add_row(
+                key.replace("_", " ").upper(), "[cyan]|[/cyan]", fmt(key, value)
+            )
 
         panel = Panel(
             table,

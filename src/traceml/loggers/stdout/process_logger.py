@@ -1,6 +1,6 @@
 from rich.panel import Panel
 from rich.table import Table
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from rich.console import Console
 import shutil
 import os
@@ -21,8 +21,8 @@ class ProcessStdoutLogger(BaseStdoutLogger):
 
         self._latest_snapshot: Dict[str, Any] = {
             "process_cpu_percent": 0.0,
-            "process_ram": 0.0,            # MB
-            "process_gpu_memory": None,    # MB or None
+            "process_ram": 0.0,  # MB
+            "process_gpu_memory": None,  # MB or None
         }
 
         # CPU topology
@@ -35,7 +35,6 @@ class ProcessStdoutLogger(BaseStdoutLogger):
         self.threads_per_core = (
             (self.logical_cores // self.physical_cores) if self.physical_cores else 1
         )
-
 
     def _get_panel_renderable(self) -> Panel:
         d = self._latest_snapshot or {}
@@ -102,7 +101,9 @@ class ProcessStdoutLogger(BaseStdoutLogger):
             return str(value)
 
         for key, value in summary.items():
-            table.add_row(key.replace("_", " ").upper(), "[cyan]|[/cyan]", fmt(key, value))
+            table.add_row(
+                key.replace("_", " ").upper(), "[cyan]|[/cyan]", fmt(key, value)
+            )
 
         panel = Panel(
             table,

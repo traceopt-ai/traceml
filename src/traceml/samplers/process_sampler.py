@@ -178,7 +178,9 @@ class ProcessSampler(BaseSampler):
             if gpu_mem_values:
                 summary.update(
                     {
-                        "gpu_average_memory": round(float(sum(gpu_mem_values) / len(gpu_mem_values)), 2),
+                        "gpu_average_memory": round(
+                            float(sum(gpu_mem_values) / len(gpu_mem_values)), 2
+                        ),
                         "gpu_peak_memory": round(max(gpu_mem_values), 2),
                     }
                 )

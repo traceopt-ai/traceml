@@ -1,5 +1,6 @@
 from typing import Any
 
+
 def fmt_mem(mb: Any) -> str:
     try:
         v = float(mb)

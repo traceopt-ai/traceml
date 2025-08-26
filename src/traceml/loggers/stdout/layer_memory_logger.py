@@ -21,22 +21,24 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         Args:
             top_n: If provided, show only top-N layers by memory (else show all).
         """
-        super().__init__(name="Layer Memory", layout_section_name=MODEL_SUMMARY_LAYOUT_NAME)
+        super().__init__(
+            name="Layer Memory", layout_section_name=MODEL_SUMMARY_LAYOUT_NAME
+        )
         self._latest_snapshot: Dict[str, Any] = {}
         self.top_n = top_n
-
 
     def _truncate(self, s: str, max_len: int = 42) -> str:
         if not isinstance(s, str):
             return str(s)
         return s if len(s) <= max_len else s[: max_len - 1] + "…"
 
-
     def _get_panel_renderable(self) -> Panel:
         """
         Live snapshot of current model's memory usage.
         """
-        layer_data: Dict[str, float] = self._latest_snapshot.get("layer_memory", {}) or {}
+        layer_data: Dict[str, float] = (
+            self._latest_snapshot.get("layer_memory", {}) or {}
+        )
         total_mb = float(self._latest_snapshot.get("total_memory", 0.0) or 0.0)
         model_index = self._latest_snapshot.get("model_index", "—")
 
@@ -117,7 +119,9 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
 
         for key in keys_to_display:
             val = summary.get(key, 0)
-            table.add_row(key.replace("_", " ").upper(), "[blue]|[/blue]", fmt_val(key, val))
+            table.add_row(
+                key.replace("_", " ").upper(), "[blue]|[/blue]", fmt_val(key, val)
+            )
 
         panel = Panel(
             table,
