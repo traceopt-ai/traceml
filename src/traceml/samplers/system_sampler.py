@@ -101,10 +101,10 @@ class SystemSampler(BaseSampler):
             for i in range(self.gpu_count):
                 try:
                     handle = nvmlDeviceGetHandleByIndex(i)
-                    total_mb = float(nvmlDeviceGetMemoryInfo(handle).total) / (1024**2)
+                    total_memory = float(nvmlDeviceGetMemoryInfo(handle).total) / (1024**2)
                 except Exception:
-                    total_mb = 0.0
-                self.gpus[i] = PerGPUState(total_mem=total_mb)
+                    total_memory = 0.0
+                self.gpus[i] = PerGPUState(total_mem=total_memory)
         except NVMLError as e:
             print(f"[TraceML] WARNING: GPU not available: {e}", file=sys.stderr)
 
@@ -160,20 +160,20 @@ class SystemSampler(BaseSampler):
                         meminfo = nvmlDeviceGetMemoryInfo(handle)
 
                         util_pct = float(util.gpu)
-                        used_mb = float(meminfo.used) / (1024**2)
-                        total_mb = float(meminfo.total) / (1024**2)
+                        used_memory = float(meminfo.used) / (1024**2)
+                        total_memory = float(meminfo.total) / (1024**2)
 
                         if i not in self.gpus:
-                            self.gpus[i] = PerGPUState(total_mem=total_mb)
-                        if self.gpus[i].total_mem == 0.0 and total_mb > 0.0:
-                            self.gpus[i].total_mem = total_mb
+                            self.gpus[i] = PerGPUState(total_mem=total_memory)
+                        if self.gpus[i].total_mem == 0.0 and total_memory > 0.0:
+                            self.gpus[i].total_mem = total_memory
 
                         self.gpus[i].util.append(util_pct)
-                        self.gpus[i].mem_used.append(used_mb)
+                        self.gpus[i].mem_used.append(used_memory)
 
                         gpu_utils.append(util_pct)
-                        gpu_mem_used.append(used_mb)
-                        gpu_mem_total.append(total_mb)
+                        gpu_mem_used.append(used_memory)
+                        gpu_mem_total.append(total_memory)
 
                     except NVMLError as e:
                         print(
@@ -325,7 +325,7 @@ class SystemSampler(BaseSampler):
                 float(np.mean(ram_avail_values)) if ram_avail_values else 0.0
             )
             ram_min_avail = float(np.min(ram_avail_values)) if ram_avail_values else 0.0
-            ram_total_mb = float(ram_total_values[0]) if ram_total_values else 0.0
+            ram_total = float(ram_total_values[0]) if ram_total_values else 0.0
 
             summary: Dict[str, Any] = {
                 "total_system_samples": len(self.cpu_history),
@@ -337,7 +337,7 @@ class SystemSampler(BaseSampler):
                 "ram_peak_used": round(ram_peak_used, 2),
                 "ram_average_available": round(ram_avg_avail, 2),
                 "ram_min_available": round(ram_min_avail, 2),
-                "ram_total_memory": round(ram_total_mb, 2),
+                "ram_total_memory": round(ram_total, 2),
             }
 
             # GPU summary
