@@ -81,7 +81,7 @@ class ProcessStdoutLogger(BaseStdoutLogger):
             table.add_row(f"[magenta]GPU Mem[/magenta]: {self._fmt_mem(gpu_mem_mb)}")
 
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(50, int(cols * 0.4)), 70)
+        panel_width = min(max(50, int(cols * 0.5)), 70)
 
         return Panel(
             table,
