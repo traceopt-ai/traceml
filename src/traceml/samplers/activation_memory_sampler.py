@@ -27,7 +27,6 @@ class ActivationSnapshot:
     overall_avg_memory: float = 0.0
     drained_events: int = 0
     stale: bool = False
-    note: Optional[str] = None
     error: Optional[str] = None
 
     @classmethod
@@ -200,7 +199,6 @@ class ActivationMemorySampler(BaseSampler):
                         overall_avg_memory=self._latest_snapshot.overall_avg_memory,
                         drained_events=0,
                         stale=True,
-                        note=None,
                     )
                     self._latest_snapshot = snap
                 else:
@@ -211,15 +209,10 @@ class ActivationMemorySampler(BaseSampler):
                         overall_avg_memory=0.0,
                         drained_events=0,
                         stale=True,
-                        note=(
-                            "No activation events received yet. "
-                            "Attach hooks with @trace_model(..., trace_activations=True) "
-                            "or trace_model_instance(model, trace_activations=True)."
-                        ),
                     )
-
-            self._latest_snapshot = self._build_snapshot(drained_events, batch_per_dev)
-            self._ever_seen = True
+            else:
+                self._latest_snapshot = self._build_snapshot(drained_events, batch_per_dev)
+                self._ever_seen = True
 
             ok = self._latest_snapshot.error is None
             msg = (

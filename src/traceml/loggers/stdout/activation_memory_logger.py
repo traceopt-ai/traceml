@@ -141,10 +141,6 @@ class ActivationMemoryStdoutLogger(BaseStdoutLogger):
         body = Table.grid()
         body.add_row(header)
         body.add_row(dev_table)
-        if note:
-            body.add_row(
-                Panel(str(note), border_style="dim", title="Note", padding=(0, 1))
-            )
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(50, int(cols * 0.5)), 90)

@@ -29,13 +29,22 @@ class BaseStdoutLogger:
             "Subclasses must implement _get_panel_renderable to provide content for the shared display."
         )
 
-    def log(self, snapshot_dict: Dict[str, Any]):
+    def log(self, snapshots: Dict[str, Any]):
         """
-        Receives the raw snapshot data from the sampler and triggers a display update.
+        Receives snapshots from one or more samplers.
+        Structure is always:
+            { "SamplerClassName": { "ok": ..., "data": {...}, ... }, ... }
         """
-        self._latest_env = snapshot_dict
-        self._latest_snapshot = snapshot_dict.get("data") or {}
-        StdoutDisplayManager.update_display()  # Request a global update
+        self._latest_env = snapshots
+
+        # If only one sampler
+        if len(snapshots) == 1:
+            first = next(iter(snapshots.values()))
+            self._latest_snapshot = first.get("data") or {}
+        else:
+            self._latest_snapshot = snapshots
+
+        StdoutDisplayManager.update_display()
 
     def log_summary(self, summary: Dict[str, Any]):
         """

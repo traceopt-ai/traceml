@@ -27,7 +27,6 @@ class GradientSnapshot:
     overall_avg_memory: float = 0.0
     drained_events: int = 0
     stale: bool = False
-    note: Optional[str] = None
     error: Optional[str] = None
 
     @classmethod
@@ -44,7 +43,6 @@ class GradientMemorySampler(BaseSampler):
       - Aggregates per-device stats over those new events.
       - Returns a live snapshot dict.
       - If no new events arrive, returns the last snapshot (stale=True).
-      - If no event has ever arrived, returns a guidance note (hooks likely not attached).
     """
 
     def __init__(
@@ -237,7 +235,6 @@ class GradientMemorySampler(BaseSampler):
                         overall_avg_memory=self._latest_snapshot.overall_avg_memory,
                         drained_events=0,
                         stale=True,
-                        note=None,
                     )
                     self._latest_snapshot = snap
                 else:
@@ -247,12 +244,6 @@ class GradientMemorySampler(BaseSampler):
                         overall_avg_memory=0.0,
                         drained_events=0,
                         stale=True,
-                        note=(
-                            "No gradient events received yet. "
-                            "Make sure gradient hooks are attached and call loss.backward(). "
-                            "Use @trace_model(..., trace_gradients=True) "
-                            "or trace_model_instance(model, trace_gradients=True)."
-                        ),
                     )
             else:
                 self._latest_snapshot = self._build_snapshot(

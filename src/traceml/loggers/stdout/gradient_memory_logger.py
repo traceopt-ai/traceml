@@ -24,7 +24,6 @@ class GradientMemoryStdoutLogger(BaseStdoutLogger):
         "overall_avg_memory": float,
         "drained_events": int,
         "stale": bool,
-        "note": Optional[str],
         "error": Optional[str]
       }
     """
@@ -90,7 +89,6 @@ class GradientMemoryStdoutLogger(BaseStdoutLogger):
         overall_avg = float(snap.get("overall_avg_memory", 0.0) or 0.0)
         drained = int(snap.get("drained_events", 0) or 0)
         stale = bool(snap.get("stale", False))
-        note = snap.get("note")
         error = snap.get("error")
 
         # Header (Overall Avg | Events | Status)
@@ -150,10 +148,6 @@ class GradientMemoryStdoutLogger(BaseStdoutLogger):
         if error:
             body.add_row(
                 Panel(str(error), border_style="red", title="Error", padding=(0, 1))
-            )
-        elif note:
-            body.add_row(
-                Panel(str(note), border_style="dim", title="Note", padding=(0, 1))
             )
 
         cols, _ = shutil.get_terminal_size()

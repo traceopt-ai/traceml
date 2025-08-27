@@ -2,7 +2,6 @@ import threading
 import sys
 from typing import List, Tuple, Any, Dict
 
-
 class TrackerManager:
     """
     Manages periodic sampling and logging of system metrics (CPU, memory, tensors, etc.)
@@ -31,23 +30,28 @@ class TrackerManager:
         Background thread loop that continuously samples and logs live snapshots.
         """
         while not self._stop_event.is_set():
-            for sampler, loggers in self.components:
-                try:
-                    snapshot = sampler.sample()
-                except Exception as e:
-                    print(
-                        f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}",
-                        file=sys.stderr,
-                    )
-                    snapshot = {
-                        "error": str(e),
-                        "sampler_name": sampler.__class__.__name__,
-                    }
+            for samplers, loggers in self.components:
+                if not isinstance(samplers, (list, tuple)):
+                    samplers = [samplers]  # backwards compatible
+
+                snapshots = {}
+                for sampler in samplers:
+                    try:
+                        snapshots[sampler.__class__.__name__] = sampler.sample()
+                    except Exception as e:
+                        print(
+                            f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}",
+                            file=sys.stderr,
+                        )
+                        snapshots[sampler.__class__.__name__] = {
+                            "error": str(e),
+                            "sampler_name": sampler.__class__.__name__,
+                        }
 
                 # 2. Log snapshot to all associated loggers
                 for logger in loggers:
                     try:
-                        logger.log(snapshot)
+                        logger.log(snapshots)
                     except Exception as e:
                         print(
                             f"[TraceML] Error in logger '{logger.__class__.__name__}'.log() for sampler '{sampler.__class__.__name__}': {e}",

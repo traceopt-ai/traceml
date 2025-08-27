@@ -13,6 +13,7 @@ ROOT_LAYOUT_NAME = "root"
 LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
 SYSTEM_LAYOUT_NAME = "system_metrics_section"
 PROCESS_LAYOUT_NAME = "process_metrics_section"
+SYSTEM_PROCESS_LAYOUT_NAME = "system_process_section"
 MODEL_SUMMARY_LAYOUT_NAME = "current_model_summary_section"
 ACTIVATION_SUMMARY_LAYOUT_NAME = "activation_memory_summary_section"
 GRADIENT_SUMMARY_LAYOUT_NAME = "gradient_memory_summary_section"
@@ -42,20 +43,20 @@ class StdoutDisplayManager:
         Defines the improved structure of the Rich Layout with flexible ratios.
         """
         cls._layout.split_column(
-            Layout(name=SYSTEM_LAYOUT_NAME),
-            Layout(name=PROCESS_LAYOUT_NAME),
-            Layout(name=MODEL_SUMMARY_LAYOUT_NAME),
-            Layout(name=ACTIVATION_SUMMARY_LAYOUT_NAME),
-            Layout(name=GRADIENT_SUMMARY_LAYOUT_NAME),
+            Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, minimum_size=5, ratio=1),
+            # Layout(name=PROCESS_LAYOUT_NAME, minimum_size=5, ratio=1),
+            Layout(name=MODEL_SUMMARY_LAYOUT_NAME, minimum_size=15, ratio=4),
+            Layout(name=ACTIVATION_SUMMARY_LAYOUT_NAME, minimum_size=8, ratio=2),
+            Layout(name=GRADIENT_SUMMARY_LAYOUT_NAME, minimum_size=8, ratio=2),
         )
 
         # Initialize panels with placeholder text
-        cls._layout[SYSTEM_LAYOUT_NAME].update(
+        cls._layout[SYSTEM_PROCESS_LAYOUT_NAME].update(
             Panel(Text("Waiting for System Metrics...", justify="center"))
         )
-        cls._layout[PROCESS_LAYOUT_NAME].update(
-            Panel(Text("Waiting for Process Metrics...", justify="center"))
-        )
+        # cls._layout[PROCESS_LAYOUT_NAME].update(
+        #     Panel(Text("Waiting for Process Metrics...", justify="center"))
+        # )
         cls._layout[MODEL_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Current Model...", justify="center"))
         )
