@@ -25,7 +25,6 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
 
 
     def _get_panel_renderable(self) -> Panel:
-        print("here", self._latest_snapshot)
         snaps = self._latest_snapshot or {}
         sysd = snaps.get("SystemSampler").get("data") or {}
         procd = snaps.get("ProcessSampler").get("data") or {}
@@ -117,8 +116,8 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
 
         # If caller passes a merged summary, expect:
         # { "system": {...}, "process": {...} }
-        sys_summary = (summary or {}).get("system") or {}
-        proc_summary = (summary or {}).get("process") or {}
+        sys_summary = (summary or {}).get("SystemSampler") or {}
+        proc_summary = (summary or {}).get("ProcessSampler") or {}
 
         # Fallback: if a flat dict came in, just render keys/values.
         def render_block(name: str, block: Dict[str, Any]):
@@ -144,5 +143,4 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             if proc_summary:
                 render_block("Process", proc_summary)
         else:
-            # Flat summary fallback
             render_block(self.name, summary or {})

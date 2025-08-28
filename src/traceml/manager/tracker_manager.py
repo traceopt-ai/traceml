@@ -109,27 +109,36 @@ class TrackerManager:
 
     def log_summaries(self) -> None:
         """
-        Logs final summaries from each sampler after tracking stops.
-        Useful for reporting peak usage or historical stats.
+        Logs final summaries from each sampler (or group of samplers) after tracking stops.
         """
         print("\n[TraceML] Generating summaries...", file=sys.stderr)
-        for sampler, loggers in self.components:
-            summary: Dict[str, Any] = {}
-            try:
-                summary = sampler.get_summary()
-            except Exception as e:
-                print(
-                    f"[TraceML] Error getting summary from sampler '{sampler.__class__.__name__}': {e}",
-                    file=sys.stderr,
-                )
-                summary = {"error": str(e), "sampler_name": sampler.__class__.__name__}
 
-            for logger in loggers:
+        for samplers, loggers in self.components:
+            if not isinstance(samplers, (list, tuple)):
+                samplers = [samplers]
+
+            # collect summaries from all samplers in this group
+            summaries: Dict[str, Any] = {}
+            for sampler in samplers:
                 try:
-                    logger.log_summary(summary)
+                    summaries[sampler.__class__.__name__] = sampler.get_summary()
                 except Exception as e:
                     print(
-                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log_summary() for sampler '{sampler.__class__.__name__}': {e}",
+                        f"[TraceML] Error getting summary from sampler '{sampler.__class__.__name__}': {e}",
+                        file=sys.stderr,
+                    )
+                    summaries[sampler.__class__.__name__] = {
+                        "error": str(e),
+                        "sampler_name": sampler.__class__.__name__,
+                    }
+
+            # pass merged summaries to all loggers for this group
+            for logger in loggers:
+                try:
+                    logger.log_summary(summaries)
+                except Exception as e:
+                    print(
+                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log_summary(): {e}",
                         file=sys.stderr,
                     )
         print("[TraceML] Summaries generated.", file=sys.stderr)
