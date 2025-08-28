@@ -27,8 +27,8 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
     def _get_panel_renderable(self) -> Panel:
         print("here", self._latest_snapshot)
         snaps = self._latest_snapshot or {}
-        sysd = snaps.get("SystemSampler").get("data")
-        procd = snaps.get("ProcessSampler").get("data")
+        sysd = snaps.get("SystemSampler").get("data") or {}
+        procd = snaps.get("ProcessSampler").get("data") or {}
 
         # ------- System (host) -------
         cpu_host = sysd.get("cpu_percent", 0.0)
@@ -96,7 +96,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
 
         # Adaptive width
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(60, int(cols * 0.75)), 100)
+        panel_width = min(max(100, int(cols * 0.75)), 100)
 
         return Panel(
             table,
