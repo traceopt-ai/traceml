@@ -142,7 +142,6 @@ class ActivationMemoryStdoutLogger(BaseStdoutLogger):
         body.add_row(header)
         body.add_row(dev_table)
 
-
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(50, int(cols * 0.5)), 90)
 

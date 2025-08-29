@@ -12,7 +12,7 @@ import sys
 ROOT_LAYOUT_NAME = "root"
 LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
 SYSTEM_PROCESS_LAYOUT_NAME = "system_process_section"
-MODEL_SUMMARY_LAYOUT_NAME = "current_model_summary_section"
+LAYER_SUMMARY_LAYOUT_NAME = "model_layer_summary_section"
 ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME = "activation_gradient_summary_section"
 
 
@@ -41,8 +41,7 @@ class StdoutDisplayManager:
         """
         cls._layout.split_column(
             Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, minimum_size=5, ratio=1),
-            # Layout(name=PROCESS_LAYOUT_NAME, minimum_size=5, ratio=1),
-            Layout(name=MODEL_SUMMARY_LAYOUT_NAME, minimum_size=15, ratio=4),
+            Layout(name=LAYER_SUMMARY_LAYOUT_NAME, minimum_size=15, ratio=4),
             Layout(
                 name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, minimum_size=12, ratio=2
             ),
@@ -52,7 +51,7 @@ class StdoutDisplayManager:
         cls._layout[SYSTEM_PROCESS_LAYOUT_NAME].update(
             Panel(Text("Waiting for System Metrics...", justify="center"))
         )
-        cls._layout[MODEL_SUMMARY_LAYOUT_NAME].update(
+        cls._layout[LAYER_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Current Model...", justify="center"))
         )
         cls._layout[ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME].update(

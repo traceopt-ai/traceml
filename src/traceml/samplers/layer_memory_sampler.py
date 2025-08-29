@@ -39,13 +39,11 @@ class LayerMemorySampler(BaseSampler):
         # Counters
         self.total_samples: int = 0
 
-
     def _get_model_signature(self, model: torch.nn.Module) -> Tuple:
         """
         Generate a unique signature for the model.
         """
         return tuple((name, tuple(p.shape)) for name, p in model.named_parameters())
-
 
     def _build_snapshot_from_model(
         self, model: torch.nn.Module, signature: Tuple
@@ -71,7 +69,6 @@ class LayerMemorySampler(BaseSampler):
         )
         return snapshot
 
-
     def _get_model_memory(self, model: torch.nn.Module) -> ModelMemorySnapshot:
         """Compute memory usage of a single model if it hasn't been sampled before."""
         try:
@@ -89,7 +86,6 @@ class LayerMemorySampler(BaseSampler):
             self.logger.error(f"[TraceML] Error sampling model: {e}")
             return None
 
-
     def _sample_from_queue(self) -> Optional[ModelMemorySnapshot]:
         """Iterate the traced model queue and sample the first unseen model."""
         try:
@@ -105,7 +101,6 @@ class LayerMemorySampler(BaseSampler):
         except Exception as e:
             self.logger.error(f"[TraceML] Queue sampling failed: {e}")
         return None
-
 
     def sample(self) -> Dict[str, Any]:
         """
@@ -137,7 +132,6 @@ class LayerMemorySampler(BaseSampler):
                 data=None,
             )
         return self.snapshot_dict(envelope)
-
 
     def get_summary(self) -> Dict[str, Any]:
         """

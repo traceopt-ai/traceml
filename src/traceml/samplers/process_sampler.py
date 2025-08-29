@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from collections import deque
 import psutil
 import os
-import sys
 from typing import Dict, Any, Optional, Deque
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import setup_error_logger, get_error_logger
@@ -54,7 +53,9 @@ class ProcessSampler(BaseSampler):
             self.pid = pid or os.getpid()
             self.process = psutil.Process(self.pid)
         except Exception as e:
-            self.logger.error(f"[TraceML] WARNING: Failed to attach to process {pid or os.getpid()}: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: Failed to attach to process {pid or os.getpid()}: {e}"
+            )
             self.pid = None
             self.process = None
 
@@ -69,7 +70,9 @@ class ProcessSampler(BaseSampler):
         try:
             self.process.cpu_percent(interval=None)
         except Exception as e:
-            self.logger.error(f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}"
+            )
 
         # GPU Tracking
         try:
@@ -94,14 +97,13 @@ class ProcessSampler(BaseSampler):
                 procs = nvmlDeviceGetComputeRunningProcesses(handle)
                 for proc in procs:
                     if proc.pid == self.pid:
-                        total_memory += (proc.usedGpuMemory / (1024**2))
+                        total_memory += proc.usedGpuMemory / (1024**2)
             return total_memory
         except NVMLError as e:
             self.logger.error(f"[TraceML] NVML GPU memory read failed: {e}")
         except Exception as e:
             self.logger.error(f"[TraceML] Unexpected error reading GPU memory: {e}")
         return None
-
 
     def sample(self) -> Dict[str, Any]:
         """

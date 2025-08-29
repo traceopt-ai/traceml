@@ -5,14 +5,14 @@ from typing import Dict, Any, Optional
 import shutil
 
 from .base_logger import BaseStdoutLogger
-from .display_manager import MODEL_SUMMARY_LAYOUT_NAME
+from .display_manager import LAYER_SUMMARY_LAYOUT_NAME
 from traceml.utils.formatting import fmt_mem
 
 
 class LayerMemoryStdoutLogger(BaseStdoutLogger):
     """
     Compact layer memory logger:
-      - Sorts layers by memory (desc)
+      - Sorts layers by memory (desc show top n)
       - Shows Memory (MB/GB) + % of total
     """
 
@@ -22,7 +22,7 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
             top_n: If provided, show only top-N layers by memory (else show all).
         """
         super().__init__(
-            name="Layer Memory", layout_section_name=MODEL_SUMMARY_LAYOUT_NAME
+            name="Layer Memory", layout_section_name=LAYER_SUMMARY_LAYOUT_NAME
         )
         self._latest_snapshot: Dict[str, Any] = {}
         self.top_n = top_n

@@ -42,12 +42,13 @@ def test_process_sampler_with_heavy_task():
         snap = getattr(sampler, "latest", None)
         assert snap is not None, "ProcessSampler did not produce a snapshot"
 
-        assert hasattr(snap, "process_cpu_percent"), \
-            "Expected process CPU metric on snapshot"
-        assert hasattr(snap, "process_ram"), \
-            "Expected process RAM metric on snapshot"
-        assert hasattr(snap, "process_gpu_memory"), \
-            "Expected process GPU memory metric on snapshot"
+        assert hasattr(
+            snap, "process_cpu_percent"
+        ), "Expected process CPU metric on snapshot"
+        assert hasattr(snap, "process_ram"), "Expected process RAM metric on snapshot"
+        assert hasattr(
+            snap, "process_gpu_memory"
+        ), "Expected process GPU memory metric on snapshot"
 
         # Summary should at least be a dict; keys may vary by implementation
         summary = sampler.get_summary()
@@ -78,12 +79,8 @@ def test_process_sampler_handles_missing_nvml_gracefully():
     """
     # Simulate NVML import or init failure paths
     with (
-            patch("traceml.samplers.process_sampler.nvmlInit",
-                  return_value=None
-            ),
-            patch("traceml.samplers.process_sampler.nvmlDeviceGetCount",
-                 return_value=1
-            ),
+        patch("traceml.samplers.process_sampler.nvmlInit", return_value=None),
+        patch("traceml.samplers.process_sampler.nvmlDeviceGetCount", return_value=1),
     ):
         sampler = ProcessSampler()
         # Take a couple samples
@@ -92,8 +89,9 @@ def test_process_sampler_handles_missing_nvml_gracefully():
             time.sleep(0.05)
 
         snap = getattr(sampler, "latest", None)
-        assert snap is not None, \
-        "ProcessSampler did not produce a snapshot under NVML failure simulation"
+        assert (
+            snap is not None
+        ), "ProcessSampler did not produce a snapshot under NVML failure simulation"
 
         if hasattr(snap, "process_gpu_memory"):
             val = snap.process_gpu_memory
