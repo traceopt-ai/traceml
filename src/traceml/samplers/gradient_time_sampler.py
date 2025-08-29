@@ -1,7 +1,7 @@
 import sys
 import time
-from dataclasses import dataclass, field
-from collections import defaultdict, deque
+from dataclasses import dataclass
+from collections import deque
 from queue import Empty
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
@@ -46,7 +46,10 @@ class GradientTimeSampler(BaseSampler):
             except Empty:
                 break
             except Exception as e:
-                print(f"[TraceML] WARNING: gradient_time_queue.get_nowait failed: {e}", file=sys.stderr)
+                print(
+                    f"[TraceML] WARNING: gradient_time_queue.get_nowait failed: {e}",
+                    file=sys.stderr,
+                )
                 break
             drained.append(ev)
         return len(drained), drained
@@ -104,7 +107,11 @@ class GradientTimeSampler(BaseSampler):
                 self._history.append(snap)
 
             ok = self._latest_snapshot.error is None
-            msg = "sampled successfully" if ok else f"sampling error: {self._latest_snapshot.error}"
+            msg = (
+                "sampled successfully"
+                if ok
+                else f"sampling error: {self._latest_snapshot.error}"
+            )
             envelope = self.make_snapshot(
                 ok=ok,
                 message=msg,
@@ -126,9 +133,21 @@ class GradientTimeSampler(BaseSampler):
 
     def get_summary(self) -> Dict[str, Any]:
         try:
-            avg_backward = self._cumulative_backward / self._cumulative_count if self._cumulative_count else 0.0
-            avg_optimizer = self._cumulative_optimizer / self._cumulative_count if self._cumulative_count else 0.0
-            avg_total = self._cumulative_total / self._cumulative_count if self._cumulative_count else 0.0
+            avg_backward = (
+                self._cumulative_backward / self._cumulative_count
+                if self._cumulative_count
+                else 0.0
+            )
+            avg_optimizer = (
+                self._cumulative_optimizer / self._cumulative_count
+                if self._cumulative_count
+                else 0.0
+            )
+            avg_total = (
+                self._cumulative_total / self._cumulative_count
+                if self._cumulative_count
+                else 0.0
+            )
 
             return {
                 "ever_seen": self._ever_seen,
@@ -139,7 +158,10 @@ class GradientTimeSampler(BaseSampler):
                 "last_snapshot": self._latest_snapshot,
             }
         except Exception as e:
-            print(f"[TraceML] GradientTimeSampler.get_summary() error: {e}", file=sys.stderr)
+            print(
+                f"[TraceML] GradientTimeSampler.get_summary() error: {e}",
+                file=sys.stderr,
+            )
             return {
                 "error": str(e),
                 "ever_seen": self._ever_seen,

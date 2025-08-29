@@ -17,6 +17,7 @@ from transformers import (
 
 # TraceML imports
 from traceml.decorator import trace_model_instance
+
 # Optional: if you added StepTimer earlier
 try:
     from traceml.utils.gradient_time import StepTimer
@@ -26,7 +27,7 @@ except Exception:
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"  # light & laptop-friendly
-MAX_TRAIN_EXAMPLES = 2000               # keep small for quick runs
+MAX_TRAIN_EXAMPLES = 2000  # keep small for quick runs
 MAX_VAL_EXAMPLES = 800
 BATCH_SIZE = 32
 EPOCHS = 2
@@ -71,8 +72,12 @@ def prepare_data():
 
     collator = DataCollatorWithPadding(tokenizer=tokenizer, padding="longest")
 
-    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator)
-    val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collator)
+    train_loader = DataLoader(
+        train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator
+    )
+    val_loader = DataLoader(
+        val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collator
+    )
     return tokenizer, train_loader, val_loader
 
 
@@ -106,7 +111,9 @@ def main():
     optimizer = AdamW(model.parameters(), lr=LR)
     total_steps = EPOCHS * math.ceil(len(train_loader))
     warmup_steps = int(WARMUP_RATIO * total_steps)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps)
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+    )
 
     scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
 
@@ -122,25 +129,34 @@ def main():
             # Optional timing for your GradientTimeSampler if available
             if StepTimer is not None:
                 with StepTimer(model, label="train") as t:
-                    if hasattr(t, "mark_backward_start"): t.mark_backward_start()
+                    if hasattr(t, "mark_backward_start"):
+                        t.mark_backward_start()
                     optimizer.zero_grad(set_to_none=True)
-                    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+                    with torch.cuda.amp.autocast(
+                        enabled=torch.cuda.is_available(), dtype=dtype
+                    ):
                         out = model(**batch)
                         loss = out.loss
                         logits = out.logits
 
-                    if hasattr(t, "mark_backward_done"): pass
+                    if hasattr(t, "mark_backward_done"):
+                        pass
                     scaler.scale(loss).backward()
-                    if hasattr(t, "mark_backward_done"): t.mark_backward_done()
+                    if hasattr(t, "mark_backward_done"):
+                        t.mark_backward_done()
 
-                    if hasattr(t, "mark_optimizer_step_start"): t.mark_optimizer_step_start()
+                    if hasattr(t, "mark_optimizer_step_start"):
+                        t.mark_optimizer_step_start()
                     scaler.step(optimizer)
                     scaler.update()
                     scheduler.step()
-                    if hasattr(t, "mark_optimizer_step_done"): t.mark_optimizer_step_done()
+                    if hasattr(t, "mark_optimizer_step_done"):
+                        t.mark_optimizer_step_done()
             else:
                 optimizer.zero_grad(set_to_none=True)
-                with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+                with torch.cuda.amp.autocast(
+                    enabled=torch.cuda.is_available(), dtype=dtype
+                ):
                     out = model(**batch)
                     loss = out.loss
                     logits = out.logits
@@ -155,7 +171,9 @@ def main():
             global_step += 1
 
             if global_step % 50 == 0:
-                print(f"[Train] epoch {epoch+1} step {global_step} | loss {running_loss/50:.4f} | acc {running_acc/50:.4f}")
+                print(
+                    f"[Train] epoch {epoch + 1} step {global_step} | loss {running_loss / 50:.4f} | acc {running_acc / 50:.4f}"
+                )
                 running_loss = 0.0
                 running_acc = 0.0
 
@@ -167,7 +185,9 @@ def main():
         with torch.no_grad():
             for batch in val_loader:
                 batch = {k: v.to(device) for k, v in batch.items()}
-                with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+                with torch.cuda.amp.autocast(
+                    enabled=torch.cuda.is_available(), dtype=dtype
+                ):
                     out = model(**batch)
                     loss = out.loss
                     logits = out.logits
@@ -175,7 +195,9 @@ def main():
                 val_acc += accuracy_from_logits(logits, batch["labels"])
                 n_batches += 1
 
-        print(f"[Val] epoch {epoch+1} | loss {val_loss/max(1,n_batches):.4f} | acc {val_acc/max(1,n_batches):.4f}")
+        print(
+            f"[Val] epoch {epoch + 1} | loss {val_loss / max(1, n_batches):.4f} | acc {val_acc / max(1, n_batches):.4f}"
+        )
         model.train()
 
     # Save a tiny checkpoint for demo

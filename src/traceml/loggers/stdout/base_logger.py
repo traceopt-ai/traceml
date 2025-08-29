@@ -36,13 +36,7 @@ class BaseStdoutLogger:
             { "SamplerClassName": { "ok": ..., "data": {...}, ... }, ... }
         """
         self._latest_env = snapshots
-
-        # If only one sampler
-        if len(snapshots) == 1:
-            first = next(iter(snapshots.values()))
-            self._latest_snapshot = first.get("data") or {}
-        else:
-            self._latest_snapshot = snapshots
+        self._latest_snapshot = snapshots
 
         StdoutDisplayManager.update_display()
 

@@ -5,6 +5,7 @@ import os
 import sys
 from typing import Dict, Any, Optional, Deque
 from .base_sampler import BaseSampler
+from traceml.loggers.error_log import setup_error_logger, get_error_logger
 
 from pynvml import (
     nvmlInit,
@@ -45,16 +46,15 @@ class ProcessSampler(BaseSampler):
 
     def __init__(self, pid: Optional[int] = None):
         super().__init__()
+        setup_error_logger()
+        self.logger = get_error_logger("ProcessSampler")
 
         # Monitor current process by default
         try:
             self.pid = pid or os.getpid()
             self.process = psutil.Process(self.pid)
         except Exception as e:
-            print(
-                f"[TraceML] WARNING: Failed to attach to process {pid or os.getpid()}: {e}",
-                file=sys.stderr,
-            )
+            self.logger.error(f"[TraceML] WARNING: Failed to attach to process {pid or os.getpid()}: {e}")
             self.pid = None
             self.process = None
 
@@ -62,26 +62,22 @@ class ProcessSampler(BaseSampler):
         self.cpu_history: Deque[ProcessCPUSample] = deque(maxlen=10_000)
         self.ram_history: Deque[ProcessRAMSample] = deque(maxlen=10_000)
         self.gpu_mem_history: Deque[ProcessGPUMemSample] = deque(maxlen=10_000)
-
         self.gpu_available = False
         self.gpu_count = 0
+
         # CPU usage measurement
         try:
             self.process.cpu_percent(interval=None)
         except Exception as e:
-            print(
-                f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}",
-                file=sys.stderr,
-            )
+            self.logger.error(f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}")
+
         # GPU Tracking
         try:
             nvmlInit()
             self.gpu_count = nvmlDeviceGetCount()
             self.gpu_available = True
         except NVMLError as e:
-            print(
-                f"[TraceML] WARNING: NVML GPU support unavailable: {e}", file=sys.stderr
-            )
+            self.logger.error(f"[TraceML] WARNING: NVML GPU support unavailable: {e}")
 
         # Latest snapshot
         self.latest: Optional[ProcessSnapshot] = None
@@ -99,12 +95,11 @@ class ProcessSampler(BaseSampler):
                     if proc.pid == self.pid:
                         return proc.usedGpuMemory / (1024**2)
         except NVMLError as e:
-            print(f"[TraceML] NVML GPU memory read failed: {e}", file=sys.stderr)
+            self.logger.error(f"[TraceML] NVML GPU memory read failed: {e}")
         except Exception as e:
-            print(
-                f"[TraceML] Unexpected error reading GPU memory: {e}", file=sys.stderr
-            )
+            self.logger.error(f"[TraceML] Unexpected error reading GPU memory: {e}")
         return None
+
 
     def sample(self) -> Dict[str, Any]:
         """
@@ -141,7 +136,7 @@ class ProcessSampler(BaseSampler):
             return self.snapshot_dict(snap)
 
         except Exception as e:
-            print(f"[TraceML] Process sampling error: {e}", file=sys.stderr)
+            self.logger.error(f"[TraceML] Process sampling error: {e}")
             self.latest = None
             snap = self.make_snapshot(
                 ok=False,
@@ -187,7 +182,7 @@ class ProcessSampler(BaseSampler):
             return summary
 
         except Exception as e:
-            print(f"[TraceML] Process summary error: {e}", file=sys.stderr)
+            self.logger.error(f"[TraceML] Process summary error: {e}")
             return {
                 "error": str(e),
                 "total_process_samples": 0,

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.system_logger import SystemStdoutLogger
+from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
 
 
@@ -33,8 +33,9 @@ def test_system_sampler_with_heavy_task():
       - Works regardless of GPU presence
     """
     system_sampler = SystemSampler()
-    system_stdout_logger = SystemStdoutLogger()
-    tracker_components = [(system_sampler, [system_stdout_logger])]
+    system_process_stdout_logger = SystemProcessStdoutLogger()
+    tracker_components = [(system_sampler, [system_process_stdout_logger])]
+
     tracker = TrackerManager(components=tracker_components, interval_sec=0.5)
     try:
         tracker.start()
@@ -72,12 +73,6 @@ def test_system_sampler_with_heavy_task():
             "cpu_peak_percent",
             "ram_average_percent_used",
             "ram_peak_percent_used",
-            "ram_average_used",
-            "ram_peak_used",
-            "ram_average_available",
-            "ram_min_available",
-            "ram_total_memory",
-            "gpu_total_count",
         ]:
             assert key in summary, f"Missing summary key: {key}"
 

@@ -6,11 +6,13 @@ from typing import Optional, Dict, Any
 
 gradient_time_queue: Queue = Queue(maxsize=2048)
 
+
 @dataclass
 class GradientTimeEvent:
     """
     Represents timing of one backward/optimizer step.
     """
+
     model_id: int
     timestamp: float
     label: str
@@ -81,7 +83,6 @@ class StepTimer:
                 pass
         except Exception as e:
             print(f"[TraceML] StepTimer error: {e}", file=sys.stderr)
-
 
     def mark_backward_start(self):
         self._backward_start = time.time()

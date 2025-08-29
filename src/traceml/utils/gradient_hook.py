@@ -175,7 +175,6 @@ def attach_param_gradient_hooks(model: nn.Module) -> None:
         print(f"[TraceML] Failed to attach param gradient hooks: {e}", file=sys.stderr)
 
 
-
 def attach_all_gradient_hooks(model: nn.Module, include_module: bool = False) -> None:
     """
     Attach gradient hooks to a model.
@@ -184,6 +183,8 @@ def attach_all_gradient_hooks(model: nn.Module, include_module: bool = False) ->
     """
     attach_param_gradient_hooks(model)
     if include_module:
-        print("[TraceML] WARNING: Attaching module backward hooks. "
-              "These may break with AMP or DDP. Use with caution.")
+        print(
+            "[TraceML] WARNING: Attaching module backward hooks. "
+            "These may break with AMP or DDP. Use with caution."
+        )
         attach_module_gradient_hooks(model)

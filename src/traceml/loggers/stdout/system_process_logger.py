@@ -8,6 +8,7 @@ from .base_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_PROCESS_LAYOUT_NAME
 from traceml.utils.formatting import fmt_mem, fmt_percent, fmt_ratio
 
+
 class SystemProcessStdoutLogger(BaseStdoutLogger):
     """
     Combined System + Process panel.
@@ -19,28 +20,34 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
     """
 
     def __init__(self):
-        super().__init__(name="System/Process", layout_section_name=SYSTEM_PROCESS_LAYOUT_NAME)
+        super().__init__(
+            name="System/Process", layout_section_name=SYSTEM_PROCESS_LAYOUT_NAME
+        )
         self._latest_env: Optional[Dict[str, Any]] = None
         self._latest_snapshot: Dict[str, Any] = {}
 
-
     def _get_panel_renderable(self) -> Panel:
         snaps = self._latest_snapshot or {}
-        sysd = snaps.get("SystemSampler").get("data") or {}
-        procd = snaps.get("ProcessSampler").get("data") or {}
+        sysd = (snaps.get("SystemSampler") or {}).get("data") or {}
+        procd = (snaps.get("ProcessSampler") or {}).get("data") or {}
 
         # ------- System (host) -------
         cpu_host = sysd.get("cpu_percent", 0.0)
         ram_used = sysd.get("ram_used", 0.0)
         ram_total = sysd.get("ram_total", 0.0)
         ram_pct_str = ""
-        if isinstance(ram_used, (int, float)) and isinstance(ram_total, (int, float)) and ram_total > 0:
+        if (
+            isinstance(ram_used, (int, float))
+            and isinstance(ram_total, (int, float))
+            and ram_total > 0
+        ):
             try:
                 ram_pct_str = f" ({ram_used * 100.0 / ram_total:.1f}%)"
             except Exception:
                 ram_pct_str = ""
 
         # GPU (aggregate)
+        gpu_count = sysd.get("gpu_total_count", 0)
         gpu_util_avg = sysd.get("gpu_util_avg_percent")
         gpu_util_min = sysd.get("gpu_util_min_nonzero_percent")
         gpu_util_max = sysd.get("gpu_util_max_percent")
@@ -69,7 +76,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         )
 
         # Row 2: GPU Util (if present)
-        if gpu_util_avg is not None:
+        if gpu_count:
             util_bits = [f"AVG {fmt_percent(gpu_util_avg)}"]
             if gpu_util_min not in (None, 0):
                 util_bits.append(f"MIN {fmt_percent(gpu_util_min)}")
@@ -79,19 +86,15 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
                 util_bits.append(f"IMB {fmt_ratio(imbalance)}")
             table.add_row("[magenta]GPU Util[/magenta]: " + " | ".join(util_bits))
 
-        # Row 3: GPU Mem (host aggregate + process)
-        gpu_mem_parts = []
-        if gpu_mem_high is not None:
+            # Row 3: GPU Mem (host aggregate + process)
+            gpu_mem_parts = []
             gpu_mem_parts.append(f"High {fmt_mem(gpu_mem_high)}")
-        if gpu_mem_low not in (None, 0):
             gpu_mem_parts.append(f"Low {fmt_mem(gpu_mem_low)}")
-        if total_gpus is not None:
             gpu_mem_parts.append(f">90% {high_pressure}/{total_gpus}")
-        if pid_gpu_mem is not None:
             gpu_mem_parts.append(f"Proc {fmt_mem(pid_gpu_mem)}")
 
-        if gpu_mem_parts:
-            table.add_row("[yellow]GPU Mem[/yellow]: " + " | ".join(gpu_mem_parts))
+            if gpu_mem_parts:
+                table.add_row("[yellow]GPU Mem[/yellow]: " + " | ".join(gpu_mem_parts))
 
         # Adaptive width
         cols, _ = shutil.get_terminal_size()
@@ -112,6 +115,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         Pass a merged summary dict from your manager if desired.
         """
         from rich.console import Console
+
         console = Console()
 
         # If caller passes a merged summary, expect:
@@ -130,12 +134,20 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
                 key = str(k).replace("_", " ").upper()
                 if isinstance(v, (int, float)) and "percent" in k:
                     val = fmt_percent(v)
-                elif any(s in k for s in ("ram", "gpu", "memory", "mb")) and isinstance(v, (int, float)):
+                elif any(s in k for s in ("ram", "gpu", "memory", "mb")) and isinstance(
+                    v, (int, float)
+                ):
                     val = fmt_mem(v)
                 else:
                     val = str(v)
                 t.add_row(key, "[cyan]|[/cyan]", val)
-            console.print(Panel(t, title=f"[bold cyan]{name} - Summary[/bold cyan]", border_style="cyan"))
+            console.print(
+                Panel(
+                    t,
+                    title=f"[bold cyan]{name} - Summary[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
 
         if sys_summary or proc_summary:
             if sys_summary:

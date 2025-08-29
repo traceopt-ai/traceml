@@ -2,6 +2,7 @@ import threading
 import sys
 from typing import List, Tuple, Any, Dict
 
+
 class TrackerManager:
     """
     Manages periodic sampling and logging of system metrics (CPU, memory, tensors, etc.)
@@ -32,7 +33,7 @@ class TrackerManager:
         while not self._stop_event.is_set():
             for samplers, loggers in self.components:
                 if not isinstance(samplers, (list, tuple)):
-                    samplers = [samplers]  # backwards compatible
+                    samplers = [samplers]
 
                 snapshots = {}
                 for sampler in samplers:

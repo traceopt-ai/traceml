@@ -13,8 +13,7 @@ from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
 
 from traceml.manager.tracker_manager import TrackerManager
 
-from traceml.loggers.stdout.system_logger import SystemStdoutLogger
-from traceml.loggers.stdout.process_logger import ProcessStdoutLogger
+from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
 from traceml.loggers.stdout.layer_memory_logger import LayerMemoryStdoutLogger
 from traceml.loggers.stdout.activation_memory_logger import ActivationMemoryStdoutLogger
 
@@ -47,14 +46,12 @@ def test_system_sampler_with_pytorch_model():
     layer_memory_sampler = LayerMemorySampler()
     activation_memory_sampler = ActivationMemorySampler()
 
-    system_stdout_logger = SystemStdoutLogger()
-    process_stdout_logger = ProcessStdoutLogger()
+    system_process_stdout_logger = SystemProcessStdoutLogger()
     layer_memory_stdout_logger = LayerMemoryStdoutLogger()
     activation_memory_logger = ActivationMemoryStdoutLogger()
 
     tracker_components = [
-        (system_sampler, [system_stdout_logger]),
-        (process_sampler, [process_stdout_logger]),
+        ([system_sampler, process_sampler], [system_process_stdout_logger]),
         (layer_memory_sampler, [layer_memory_stdout_logger]),
         (activation_memory_sampler, [activation_memory_logger]),
     ]

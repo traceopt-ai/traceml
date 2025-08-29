@@ -15,7 +15,9 @@ class GradientTimeStdoutLogger(BaseStdoutLogger):
     """
 
     def __init__(self):
-        super().__init__(name="Gradient Time", layout_section_name=GRADIENT_TIME_LAYOUT_NAME)
+        super().__init__(
+            name="Gradient Time", layout_section_name=GRADIENT_TIME_LAYOUT_NAME
+        )
         self._latest_snapshot: Dict[str, Any] = {}
 
     def _get_panel_renderable(self) -> Panel:
@@ -75,5 +77,9 @@ class GradientTimeStdoutLogger(BaseStdoutLogger):
                 display_val = str(val)
             table.add_row(display, "[cyan3]|[/cyan3]", display_val)
 
-        panel = Panel(table, title=f"[bold cyan3]{self.name} - Final Summary", border_style="cyan3")
+        panel = Panel(
+            table,
+            title=f"[bold cyan3]{self.name} - Final Summary",
+            border_style="cyan3",
+        )
         console.print(panel)

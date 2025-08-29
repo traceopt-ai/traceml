@@ -211,7 +211,9 @@ class ActivationMemorySampler(BaseSampler):
                         stale=True,
                     )
             else:
-                self._latest_snapshot = self._build_snapshot(drained_events, batch_per_dev)
+                self._latest_snapshot = self._build_snapshot(
+                    drained_events, batch_per_dev
+                )
                 self._ever_seen = True
 
             ok = self._latest_snapshot.error is None

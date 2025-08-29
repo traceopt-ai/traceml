@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
 from collections import deque
 import psutil
-import sys
 from typing import List, Dict, Any, Optional, Deque
-from .base_sampler import BaseSampler
 import numpy as np
+from .base_sampler import BaseSampler
+from traceml.loggers.error_log import setup_error_logger, get_error_logger
+
 
 from pynvml import (
     nvmlInit,
@@ -25,7 +26,6 @@ class CPUSample:
 class RAMSample:
     percent: float
     used: float
-    available: float
     total: float
 
 
@@ -45,9 +45,7 @@ class PerGPUState:
 @dataclass
 class Snapshot:
     cpu_percent: float
-    ram_percent: float
     ram_used: float
-    ram_available: float
     ram_total: float
     gpu_available: bool
     gpu_count: int
@@ -61,21 +59,22 @@ class SystemSampler(BaseSampler):
     Sampler that tracks CPU RAM and GPU usage over time using psutil.
     Collects usage percentages periodically and exposes live snapshots
     and statistical summaries.
-    Keeps per-GPU history internally, and exposes distilled live metrics
+    Keeps per-GPU history internally, and exposes live metrics
     (min/max/avg/imbalance) as well as a summary (global peak, lowest non-zero,
     average, variance).
     """
 
     def __init__(self):
         super().__init__()
+        setup_error_logger()
+        self.logger = get_error_logger("SystemSampler")
 
         # Initialize psutil.cpu_percent for non-blocking calls
         try:
             psutil.cpu_percent(interval=None)
         except Exception as e:
-            print(
-                f"[TraceML] WARNING: psutil.cpu_percent initial call failed: {e}",
-                file=sys.stderr,
+            self.logger.error(
+                f"[TraceML] WARNING: psutil.cpu_percent initial call failed: {e}"
             )
 
         self.cpu_history: Deque[CPUSample] = deque(maxlen=10_000)
@@ -108,7 +107,7 @@ class SystemSampler(BaseSampler):
                     total_memory = 0.0
                 self.gpus[i] = PerGPUState(total_mem=total_memory)
         except NVMLError as e:
-            print(f"[TraceML] WARNING: GPU not available: {e}", file=sys.stderr)
+            self.logger.error(f"[TraceML] WARNING: GPU not available: {e}")
 
         self.latest: Optional[Snapshot] = None
 
@@ -128,25 +127,17 @@ class SystemSampler(BaseSampler):
             mem = psutil.virtual_memory()
             ram_percent_used = float(mem.percent)
             ram_used = float(mem.used) / (1024**2)
-            ram_available = float(mem.available) / (1024**2)
             ram_total = float(mem.total) / (1024**2)
 
             # Store raw samples for summary calculation
             self.cpu_history.append(CPUSample(percent=cpu_usage))
             self.ram_history.append(
-                RAMSample(
-                    percent=ram_percent_used,
-                    used=ram_used,
-                    available=ram_available,
-                    total=ram_total,
-                )
+                RAMSample(percent=ram_percent_used, used=ram_used, total=ram_total)
             )
 
             current_sample: Dict[str, Any] = {
                 "cpu_percent": round(cpu_usage, 2),
-                "ram_percent_used": round(ram_percent_used, 2),
                 "ram_used": round(ram_used, 2),
-                "ram_available": round(ram_available, 2),
                 "ram_total": round(ram_total, 2),
             }
 
@@ -178,31 +169,17 @@ class SystemSampler(BaseSampler):
                         gpu_mem_total.append(total_memory)
 
                     except NVMLError as e:
-                        print(
-                            f"[TraceML] NVML read failed for GPU {i}: {e}",
-                            file=sys.stderr,
+                        self.logger.error(
+                            f"[TraceML] NVML read failed for GPU {i}: {e}"
                         )
                     except Exception as e:
-                        print(
-                            f"[TraceML] Unexpected error reading GPU {i}: {e}",
-                            file=sys.stderr,
+                        self.logger.error(
+                            f"[TraceML] Unexpected error reading GPU {i}: {e}"
                         )
 
-                util_arr = (
-                    np.array(gpu_utils, dtype=float)
-                    if gpu_utils
-                    else np.array([], dtype=float)
-                )
-                mem_used_arr = (
-                    np.array(gpu_mem_used, dtype=float)
-                    if gpu_mem_used
-                    else np.array([], dtype=float)
-                )
-                mem_total_arr = (
-                    np.array(gpu_mem_total, dtype=float)
-                    if gpu_mem_total
-                    else np.array([], dtype=float)
-                )
+                util_arr = np.array(gpu_utils, dtype=float)
+                mem_used_arr = np.array(gpu_mem_used, dtype=float)
+                mem_total_arr = np.array(gpu_mem_total, dtype=float)
 
                 avg_util = float(np.mean(util_arr)) if util_arr.size else 0.0
                 max_util = float(np.max(util_arr)) if util_arr.size else 0.0
@@ -253,12 +230,9 @@ class SystemSampler(BaseSampler):
                     }
                 )
 
-                # Maintain a typed Snapshot for internal use
             self.latest = Snapshot(
                 cpu_percent=float(current_sample["cpu_percent"]),
-                ram_percent=float(current_sample["ram_percent_used"]),
                 ram_used=float(current_sample["ram_used"]),
-                ram_available=float(current_sample["ram_available"]),
                 ram_total=float(current_sample["ram_total"]),
                 gpu_available=self.gpu_available,
                 gpu_count=self.gpu_count,
@@ -279,7 +253,6 @@ class SystemSampler(BaseSampler):
                 ),
             )
 
-            # Return envelope via BaseSampler helpers
             snap = self.make_snapshot(
                 ok=True,
                 message="sampled successfully",
@@ -289,7 +262,7 @@ class SystemSampler(BaseSampler):
             return self.snapshot_dict(snap)
 
         except Exception as e:
-            print(f"[TraceML] System sampling error: {e}", file=sys.stderr)
+            self.logger.error(f"[TraceML] System sampling error: {e}")
             self.latest = None
             snap = self.make_snapshot(
                 ok=False,
@@ -330,6 +303,7 @@ class SystemSampler(BaseSampler):
             if self.gpu_available and self.gpus:
                 all_mem_usages: List[float] = []
                 nonzero_mem_usages: List[float] = []
+
                 for state in self.gpus.values():
                     all_mem_usages.extend(state.mem_used)
                     nonzero_mem_usages.extend([u for u in state.mem_used if u > 0])
@@ -375,7 +349,7 @@ class SystemSampler(BaseSampler):
             return summary
 
         except Exception as e:
-            print(f"[TraceML] System summary calculation error: {e}", file=sys.stderr)
+            self.logger.error(f"[TraceML] System summary calculation error: {e}")
             return {
                 "error": str(e),
                 "total_system_samples": 0,
