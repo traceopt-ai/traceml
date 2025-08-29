@@ -90,10 +90,8 @@ class SystemSampler(BaseSampler):
         # GPU setup
         self.gpu_available = False
         self.gpu_count = 0
-        self._nvml_inited = False
         try:
             nvmlInit()
-            self._nvml_inited = True
             self.gpu_count = nvmlDeviceGetCount()
             self.gpu_available = self.gpu_count > 0
             # Initialize per-GPU with known total mem (if accessible now)

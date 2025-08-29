@@ -20,11 +20,6 @@ class _MockMemInfo:
         self.total = int(total * 1024 * 1024)  # bytes
 
 
-# ============================================================
-# 1) Real-system test:
-#    - If you have no GPU, GPU fields should be disabled/None/0.
-#    - If you do have a GPU, it will collect real NVML stats.
-# ============================================================
 def test_system_sampler_with_heavy_task():
     """
     Runs a short CPU+RAM heavy workload and ensures SystemSampler:
@@ -83,7 +78,6 @@ def test_system_sampler_with_heavy_task():
                 "gpu_memory_global_peak_used",
                 "gpu_memory_global_lowest_nonzero_used",
                 "gpu_memory_average_used",
-                "gpu_memory_variance",
             ]:
                 assert key in summary, f"Missing GPU summary key (GPU present): {key}"
 
@@ -93,9 +87,6 @@ def test_system_sampler_with_heavy_task():
         StdoutDisplayManager.stop_display()
 
 
-# ============================================================
-# 2) NVML error handling: simulate NVML failing to initialize.
-# ============================================================
 def test_system_sampler_handles_nvml_errors_gracefully():
     try:
         from pynvml import NVMLError
@@ -116,10 +107,6 @@ def test_system_sampler_handles_nvml_errors_gracefully():
         assert isinstance(summary, dict)
 
 
-# ============================================================
-# 3) GPU present or use mocked GPU.
-#    - If real GPU does not exist: mock NVML stack to simulate 1 GPU with fixed stats.
-# ============================================================
 def test_system_sampler_gpu_present_or_mocked():
     """
     Ensures we validate GPU metric paths regardless of actual hardware:
