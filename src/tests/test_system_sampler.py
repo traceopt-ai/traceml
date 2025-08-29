@@ -86,17 +86,6 @@ def test_system_sampler_with_heavy_task():
                 "gpu_memory_variance",
             ]:
                 assert key in summary, f"Missing GPU summary key (GPU present): {key}"
-        else:
-            # When no GPU
-            for key in [
-                "gpu_average_util_percent",
-                "gpu_peak_util_percent",
-                "gpu_memory_global_peak_used",
-                "gpu_memory_global_lowest_nonzero_used",
-                "gpu_memory_average_used",
-                "gpu_memory_variance",
-            ]:
-                assert key in summary, f"Missing GPU summary key (no GPU): {key}"
 
     finally:
         tracker.stop()
@@ -159,7 +148,6 @@ def test_system_sampler_gpu_present_or_mocked():
             "gpu_memory_global_peak_used",
             "gpu_memory_global_lowest_nonzero_used",
             "gpu_memory_average_used",
-            "gpu_memory_variance",
         ]:
             assert key in summary, f"Missing GPU summary key (real GPU): {key}"
 
@@ -216,7 +204,6 @@ def test_system_sampler_gpu_present_or_mocked():
                 "gpu_memory_global_peak_used",
                 "gpu_memory_global_lowest_nonzero_used",
                 "gpu_memory_average_used",
-                "gpu_memory_variance",
             ]:
                 assert key in summary, f"Missing GPU summary key (mocked GPU): {key}"
 

@@ -47,7 +47,6 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
                 ram_pct_str = ""
 
         # GPU (aggregate)
-        gpu_count = sysd.get("gpu_total_count", 0)
         gpu_util_avg = sysd.get("gpu_util_avg_percent")
         gpu_util_min = sysd.get("gpu_util_min_nonzero_percent")
         gpu_util_max = sysd.get("gpu_util_max_percent")
@@ -76,7 +75,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         )
 
         # Row 2: GPU Util (if present)
-        if gpu_count:
+        if total_gpus:
             util_bits = [f"AVG {fmt_percent(gpu_util_avg)}"]
             if gpu_util_min not in (None, 0):
                 util_bits.append(f"MIN {fmt_percent(gpu_util_min)}")
