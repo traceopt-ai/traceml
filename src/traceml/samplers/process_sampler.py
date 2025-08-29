@@ -87,15 +87,15 @@ class ProcessSampler(BaseSampler):
         if not self.gpu_available:
             return None
 
-        total_mb = 0
+        total_memory = 0
         try:
             for i in range(self.gpu_count):
                 handle = nvmlDeviceGetHandleByIndex(i)
                 procs = nvmlDeviceGetComputeRunningProcesses(handle)
                 for proc in procs:
                     if proc.pid == self.pid:
-                        total_mb += (proc.usedGpuMemory / (1024**2))
-            return total_mb
+                        total_memory += (proc.usedGpuMemory / (1024**2))
+            return total_memory
         except NVMLError as e:
             self.logger.error(f"[TraceML] NVML GPU memory read failed: {e}")
         except Exception as e:
