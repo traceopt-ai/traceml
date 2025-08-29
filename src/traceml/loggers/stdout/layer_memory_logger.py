@@ -16,7 +16,7 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
       - Shows Memory (MB/GB) + % of total
     """
 
-    def __init__(self, top_n: Optional[int] = None):
+    def __init__(self, top_n: Optional[int] = 10):
         """
         Args:
             top_n: If provided, show only top-N layers by memory (else show all).
