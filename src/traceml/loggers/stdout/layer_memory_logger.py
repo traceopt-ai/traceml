@@ -39,15 +39,12 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         layer_data: Dict[str, float] = (
             self._latest_snapshot.get("layer_memory", {}) or {}
         )
-        total_mb = float(self._latest_snapshot.get("total_memory", 0.0) or 0.0)
+        total_memory = float(self._latest_snapshot.get("total_memory", 0.0) or 0.0)
         model_index = self._latest_snapshot.get("model_index", "—")
-
-        if total_mb <= 0 and layer_data:
-            total_mb = float(sum(layer_data.values()))
 
         # Sort by memory (desc), slice top-N if required
         items = sorted(layer_data.items(), key=lambda kv: float(kv[1]), reverse=True)
-        if self.top_n is not None and self.top_n > 0:
+        if self.top_n > 0:
             items = items[: self.top_n]
 
         table = Table(
@@ -62,17 +59,17 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         table.add_column("% of total", justify="right", style="white", no_wrap=True)
 
         if items:
-            for name, mem_mb in items:
-                pct = (float(mem_mb) / total_mb * 100.0) if total_mb > 0 else 0.0
+            for name, memory in items:
+                pct = (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
                 table.add_row(
                     self._truncate(str(name)),
-                    fmt_mem(mem_mb),
+                    fmt_mem(memory),
                     f"{pct:.1f}%",
                 )
         else:
             table.add_row("[dim]No layers detected[/dim]", "—", "—")
 
-        title_total = fmt_mem(total_mb)
+        title_total = fmt_mem(total_memory)
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(50, int(cols * 0.5)), 100)
@@ -84,7 +81,6 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
             width=panel_width,
         )
 
-    # ---------- summary ----------
     def log_summary(self, summary: Dict[str, Any]):
         """
         Pretty-print final cumulative summary.
@@ -113,8 +109,8 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         keys_to_display = [
             "total_models_seen",
             "total_samples_taken",
-            "average_model_memory_mb",
-            "peak_model_memory_mb",
+            "average_model_memory",
+            "peak_model_memory",
         ]
 
         for key in keys_to_display:
