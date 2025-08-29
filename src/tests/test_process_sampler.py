@@ -129,7 +129,7 @@ def test_process_sampler_multiple_samples_summary_trends():
             assert isinstance(summary[k], (int, float))
 
 
-if __name__ == "__main__":
+if __name__ == "__main_l_":
     test_process_sampler_with_heavy_task()
     test_process_sampler_handles_missing_nvml_gracefully()
     test_process_sampler_multiple_samples_summary_trends()
