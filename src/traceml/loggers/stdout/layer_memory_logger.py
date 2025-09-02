@@ -60,7 +60,9 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
 
         if items:
             for name, memory in items:
-                pct = (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                pct = (
+                    (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                )
                 table.add_row(
                     self._truncate(str(name)),
                     fmt_mem(memory),
