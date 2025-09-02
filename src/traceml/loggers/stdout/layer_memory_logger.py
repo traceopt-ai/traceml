@@ -36,11 +36,14 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         """
         Live snapshot of current model's memory usage.
         """
+        snaps = self._latest_snapshot or {}
+        layer_memory_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
+
         layer_data: Dict[str, float] = (
-            self._latest_snapshot.get("layer_memory", {}) or {}
+            layer_memory_sampler.get("layer_memory", {}) or {}
         )
-        total_memory = float(self._latest_snapshot.get("total_memory", 0.0) or 0.0)
-        model_index = self._latest_snapshot.get("model_index", "—")
+        total_memory = float(layer_memory_sampler.get("total_memory", 0.0) or 0.0)
+        model_index = layer_memory_sampler.get("model_index", "—")
 
         # Sort by memory (desc), slice top-N if required
         items = sorted(layer_data.items(), key=lambda kv: float(kv[1]), reverse=True)
