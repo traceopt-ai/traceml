@@ -11,7 +11,6 @@ from traceml.loggers.stdout.layer_memory_logger import LayerMemoryStdoutLogger
 from traceml.manager.tracker_manager import TrackerManager
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
 from traceml.decorator import trace_model_instance
-from traceml.utils.patch import get_model_queue
 
 
 def _make_linear(in_f=8, out_f=4):
