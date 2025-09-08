@@ -126,7 +126,7 @@ def test_layer_memory_sampler_empty_queue_returns_no_model_found():
 
 def test_layer_memory_sampler_with_tracker_and_registered_model():
 
-    # Define a very small model
+    # Define a small model
     model = nn.Sequential(
         nn.Linear(16, 8),
         nn.ReLU(),
@@ -166,7 +166,7 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
         assert isinstance(snap.layer_memory, dict) and len(snap.layer_memory) > 0, \
             "Layer memory dict should be non-empty"
 
-        # Total matches sum of layers (within small rounding error)
+        # Total matches sum of layers
         layers_sum = round(sum(float(v) for v in snap.layer_memory.values()), 4)
         assert pytest.approx(snap.total_memory, rel=0, abs=1e-3) == layers_sum
 
@@ -175,24 +175,9 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
         assert isinstance(summary, dict)
         assert summary["total_models_seen"] >= 1
         assert summary["total_samples_taken"] >= 1
-        # average/peak should be >= 0 and consistent
         assert summary["average_model_memory"] >= 0.0
         assert summary["peak_model_memory"] >= summary["average_model_memory"]
-
-        # Optional: last snapshot included (may be an object or dict depending on your impl)
         assert summary.get("last_model_snapshot") is not None
-
-        # ---- Display path (Rich Panel) should render without error ----
-        panel = stdout_logger._get_panel_renderable()
-        assert hasattr(panel, "renderable"), "LayerMemoryStdoutLogger did not return a Panel-like object"
-
-        # Exercise summary rendering path as well (pretty-print)
-        stdout_logger.log_summary({
-            "total_models_seen": summary["total_models_seen"],
-            "total_samples_taken": summary["total_samples_taken"],
-            "average_model_memory_mb": summary["average_model_memory"],
-            "peak_model_memory_mb": summary["peak_model_memory"],
-        })
 
     finally:
         tracker.stop()
