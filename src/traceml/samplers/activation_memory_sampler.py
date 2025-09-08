@@ -9,6 +9,7 @@ import torch
 
 from .base_sampler import BaseSampler
 from traceml.utils.activation_hook import get_activation_queue
+from traceml.loggers.error_log import get_error_logger, setup_error_logger
 
 
 @dataclass
@@ -52,16 +53,16 @@ class ActivationMemorySampler(BaseSampler):
         pressure_threshold: float = 0.9,
     ):
         super().__init__()
+        setup_error_logger()
+        self.logger = get_error_logger("ActivationMemorySampler")
         self.pressure_threshold = float(pressure_threshold)
-        # raw event(each item: {"ts": float, "per_device_mb": {dev: mb}})
         self._raw_events: Deque[Dict[str, Any]] = deque(maxlen=int(max_raw_events))
-        # Cumulative stats: dev -> (count_samples, sum_mb, max_mb)
         self._cumulative: Dict[str, Tuple[int, float, float]] = defaultdict(
             lambda: (0, 0.0, 0.0)
         )
-        # Last live snapshot + flag to know if we ever saw any data
         self._latest_snapshot: Optional[ActivationSnapshot] = None
         self._ever_seen: bool = False
+
 
     def _append_raw_event(self, ts: float, per_dev_memory: Dict[str, float]) -> None:
         """Push one raw event into the bounded buffer."""
@@ -69,12 +70,14 @@ class ActivationMemorySampler(BaseSampler):
             {"ts": float(ts), "per_dev_memory": dict(per_dev_memory)}
         )
 
+
     def _accumulate_cumulative(self, per_dev_memory: Dict[str, float]) -> None:
         """Update cumulative counters for each device."""
         for dev, mem in per_dev_memory.items():
             c_count, c_sum, c_max = self._cumulative[dev]
             mb_f = float(mem)
             self._cumulative[dev] = (c_count + 1, c_sum + mb_f, max(c_max, mb_f))
+
 
     @staticmethod
     def _compute_batch_stats(values: List[float]) -> _BatchStats:
@@ -92,6 +95,7 @@ class ActivationMemorySampler(BaseSampler):
             max_memory=max_memory,
             min_nonzero_memory=min_nonzero_memory,
         )
+
 
     def _pressure_flag(self, dev: str, batch_max_memory: float) -> Optional[bool]:
         """True if batch max exceeds threshold of device capacity; None if unknown/not CUDA."""
@@ -114,9 +118,7 @@ class ActivationMemorySampler(BaseSampler):
         try:
             q = get_activation_queue()
         except Exception as e:
-            print(
-                f"[TraceML] ERROR: activation queue unavailable: {e}", file=sys.stderr
-            )
+            self.logger.error(f"[TraceML] ERROR: activation queue unavailable: {e}")
             return 0, {}
 
         drained_events = 0
@@ -191,7 +193,7 @@ class ActivationMemorySampler(BaseSampler):
         try:
             drained_events, batch_per_dev = self._drain_queue()
             if drained_events == 0:
-                # Nothing new
+                # nothing new then return the last snapshot
                 if self._ever_seen and self._latest_snapshot:
                     snap = ActivationSnapshot(
                         timestamp=self._latest_snapshot.timestamp,
@@ -202,7 +204,7 @@ class ActivationMemorySampler(BaseSampler):
                     )
                     self._latest_snapshot = snap
                 else:
-                    # First-time guidance snapshot
+                    # First-time snapshot
                     self._latest_snapshot = ActivationSnapshot(
                         timestamp=time.time(),
                         devices={},
@@ -231,10 +233,7 @@ class ActivationMemorySampler(BaseSampler):
             return self.snapshot_dict(envelope)
 
         except Exception as e:
-            print(
-                f"[TraceML] ActivationMemorySampler.sample() error: {e}",
-                file=sys.stderr,
-            )
+            self.logger.error(f"[TraceML] ActivationMemorySampler.sample() error: {e}")
             snap = ActivationSnapshot.error_snapshot(e)
             envelope = self.make_snapshot(
                 ok=False,
@@ -243,6 +242,7 @@ class ActivationMemorySampler(BaseSampler):
                 data=snap.__dict__,
             )
             return self.snapshot_dict(envelope)
+
 
     def get_summary(self) -> Dict[str, Any]:
         """
@@ -268,10 +268,7 @@ class ActivationMemorySampler(BaseSampler):
             }
 
         except Exception as e:
-            print(
-                f"[TraceML] ActivationMemorySampler.get_summary() error: {e}",
-                file=sys.stderr,
-            )
+            self.logger.error(f"[TraceML] ActivationMemorySampler.get_summary() error: {e}")
             return {
                 "error": str(e),
                 "ever_seen": self._ever_seen,

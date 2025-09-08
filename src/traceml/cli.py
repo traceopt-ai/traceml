@@ -14,8 +14,7 @@ from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 
 from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
 from traceml.loggers.stdout.layer_memory_logger import LayerMemoryStdoutLogger
-from traceml.loggers.stdout.activation_memory_logger import ActivationMemoryStdoutLogger
-from traceml.loggers.stdout.gradient_memory_logger import GradientMemoryStdoutLogger
+from traceml.loggers.stdout.activation_gradient_memory_logger import ActivationGradientMemoryStdoutLogger
 
 from traceml.manager.tracker_manager import TrackerManager
 
@@ -58,7 +57,6 @@ def run_with_tracing(
 
     # --- Initialize TraceML Samplers and Loggers ---
     # Create specific loggers for different types of data (CPU, GPU, NN memory and more)
-    # This design allows us to easily add more samplers/loggers later
     system_sampler = SystemSampler()
     process_sampler = ProcessSampler()
     layer_memory_sampler = LayerMemorySampler()
@@ -68,15 +66,16 @@ def run_with_tracing(
     # stdout loggers (on terminal info)
     system_process_logger = SystemProcessStdoutLogger()
     layer_memory_stdout_logger = LayerMemoryStdoutLogger()
-    activation_memory_stdout_logger = ActivationMemoryStdoutLogger()
-    gradient_memory_stdout_logger = GradientMemoryStdoutLogger()
+    activation_gradient_memory_stdout_logger = ActivationGradientMemoryStdoutLogger()
 
     # Collect all trackers
     sampler_logger_pairs = [
         ([system_sampler, process_sampler], [system_process_logger]),
         (layer_memory_sampler, [layer_memory_stdout_logger]),
-        (activation_memory_sampler, [activation_memory_stdout_logger]),
-        (gradient_memory_sampler, [gradient_memory_stdout_logger]),
+        (
+            [activation_memory_sampler, gradient_memory_sampler],
+            [activation_gradient_memory_stdout_logger]
+        ),
     ]
 
     tracker = TrackerManager(sampler_logger_pairs, interval_sec=interval)
@@ -94,16 +93,13 @@ def run_with_tracing(
 
     try:
         # Run the user's script as sub  process
-        # run_name="__main__" makes it behave as if it were executed directly
         print(f"\n--- Running: {sys.argv[0]} {' '.join(sys.argv[1:])} ---\n")
         runpy.run_path(script_path, run_name="__main__")
         print("\n--- User script finished successfully ---")
 
     except SystemExit as e:
-        # Catch sys.exit() calls from the user script
         exit_code = e.code
         print(f"\n--- User script exited with code {exit_code} ---", file=sys.stderr)
-        # You might still want to log a summary before exiting
 
     except Exception as e:
         # Catch any other unhandled exceptions (e.g., RuntimeError, MemoryError)
