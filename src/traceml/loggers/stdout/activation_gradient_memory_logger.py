@@ -14,7 +14,9 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
     Combined activation + gradient memory panel logger.
     """
 
-    def __init__(self, layout_section_name: str = ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME):
+    def __init__(
+        self, layout_section_name: str = ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
+    ):
         super().__init__(
             name="Activation & Gradient Memory",
             layout_section_name=layout_section_name,
@@ -55,16 +57,22 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         table.add_column(justify="right", style="white")
 
         ever_seen = bool(summary.get("ever_seen", False))
-        table.add_row("EVER SEEN EVENTS", "[green]|[/green]", "Yes" if ever_seen else "No")
+        table.add_row(
+            "EVER SEEN EVENTS", "[green]|[/green]", "Yes" if ever_seen else "No"
+        )
 
         raw_kept = int(summary.get("raw_events_kept", 0) or 0)
         table.add_row("RAW EVENTS KEPT", "[green]|[/green]", str(raw_kept))
 
         # Activation cumulative
-        act_per = ((summary.get("activation") or {}).get("per_device_cumulative") or {})
+        act_per = (summary.get("activation") or {}).get("per_device_cumulative") or {}
         if act_per:
             table.add_row("", "", "")
-            table.add_row("[bold underline]ACTIVATION — PER-DEVICE CUMULATIVE[/bold underline]", "", "")
+            table.add_row(
+                "[bold underline]ACTIVATION — PER-DEVICE CUMULATIVE[/bold underline]",
+                "",
+                "",
+            )
             for dev, stats in act_per.items():
                 c_count = int(stats.get("cumulative_count", 0) or 0)
                 c_sum = float(stats.get("cumulative_sum_memory", 0.0) or 0.0)
@@ -77,10 +85,14 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
                 table.add_row(row, "", "")
 
         # Gradient cumulative
-        grad_per = ((summary.get("gradient") or {}).get("per_device_cumulative") or {})
+        grad_per = (summary.get("gradient") or {}).get("per_device_cumulative") or {}
         if grad_per:
             table.add_row("", "", "")
-            table.add_row("[bold underline]GRADIENT — PER-DEVICE CUMULATIVE[/bold underline]", "", "")
+            table.add_row(
+                "[bold underline]GRADIENT — PER-DEVICE CUMULATIVE[/bold underline]",
+                "",
+                "",
+            )
             for dev, stats in grad_per.items():
                 c_count = int(stats.get("cumulative_count", 0) or 0)
                 c_sum = float(stats.get("cumulative_sum_memory", 0.0) or 0.0)
@@ -104,7 +116,9 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
     def _header_block(self) -> Table:
         act, grad = self._extract()
 
-        a_avg = float(act.get("overall_avg_memory", act.get("overall_avg_mb", 0.0)) or 0.0)
+        a_avg = float(
+            act.get("overall_avg_memory", act.get("overall_avg_mb", 0.0)) or 0.0
+        )
         a_events = int(act.get("drained_events", 0) or 0)
         a_stale = bool(act.get("stale", False))
         a_error = act.get("error")
@@ -112,7 +126,9 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         if a_error:
             a_status = "[bold red]ERROR[/bold red]"
 
-        g_avg = float(grad.get("overall_avg_memory", grad.get("overall_avg_mb", 0.0)) or 0.0)
+        g_avg = float(
+            grad.get("overall_avg_memory", grad.get("overall_avg_mb", 0.0)) or 0.0
+        )
         g_events = int(grad.get("drained_events", 0) or 0)
         g_stale = bool(grad.get("stale", False))
         g_error = grad.get("error")
@@ -143,11 +159,10 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         )
         return header
 
-
     def _merged_device_table(self) -> Table:
         act, grad = self._extract()
-        a_devs = (act.get("devices") or {})
-        g_devs = (grad.get("devices") or {})
+        a_devs = act.get("devices") or {}
+        g_devs = grad.get("devices") or {}
 
         table = Table(
             show_header=True,
@@ -185,16 +200,42 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         # Activation rows
         if a_devs:
             for dev in sorted(a_devs.keys()):
-                _row("[green]Activation[/green]", dev, a_devs[dev] or {}, allow_mb_keys=True)
+                _row(
+                    "[green]Activation[/green]",
+                    dev,
+                    a_devs[dev] or {},
+                    allow_mb_keys=True,
+                )
         else:
-            table.add_row("[green]Activation[/green]", "[dim]no devices[/dim]", "—", "—", "—", "0", "[dim]n/a[/dim]")
+            table.add_row(
+                "[green]Activation[/green]",
+                "[dim]no devices[/dim]",
+                "—",
+                "—",
+                "—",
+                "0",
+                "[dim]n/a[/dim]",
+            )
 
         # Gradient rows
         if g_devs:
             for dev in sorted(g_devs.keys()):
-                _row("[yellow]Gradient[/yellow]", dev, g_devs[dev] or {}, allow_mb_keys=False)
+                _row(
+                    "[yellow]Gradient[/yellow]",
+                    dev,
+                    g_devs[dev] or {},
+                    allow_mb_keys=False,
+                )
         else:
-            table.add_row("[yellow]Gradient[/yellow]", "[dim]no devices[/dim]", "—", "—", "—", "0", "[dim]n/a[/dim]")
+            table.add_row(
+                "[yellow]Gradient[/yellow]",
+                "[dim]no devices[/dim]",
+                "—",
+                "—",
+                "—",
+                "0",
+                "[dim]n/a[/dim]",
+            )
 
         return table
 

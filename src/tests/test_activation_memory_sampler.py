@@ -6,8 +6,13 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 
-from traceml.samplers.activation_memory_sampler import  ActivationMemorySampler, ActivationSnapshot
-from traceml.loggers.stdout.activation_gradient_memory_logger import ActivationGradientMemoryStdoutLogger
+from traceml.samplers.activation_memory_sampler import (
+    ActivationMemorySampler,
+    ActivationSnapshot,
+)
+from traceml.loggers.stdout.activation_gradient_memory_logger import (
+    ActivationGradientMemoryStdoutLogger,
+)
 
 from traceml.manager.tracker_manager import TrackerManager
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
@@ -50,19 +55,32 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
                 iterations += 1
                 time.sleep(0.01)
 
-            print(f"\n[TraceML Test] (ActivationSampler) forward-only iterations: {iterations}", file=sys.stderr)
+            print(
+                f"\n[TraceML Test] (ActivationSampler) forward-only iterations: {iterations}",
+                file=sys.stderr,
+            )
             time.sleep(0.35)
 
             snap = getattr(sampler, "_latest_snapshot", None)
-            assert isinstance(snap, ActivationSnapshot), "ActivationSampler produced no snapshot"
+            assert isinstance(snap, ActivationSnapshot), (
+                "ActivationSampler produced no snapshot"
+            )
 
             # Expected shape (keep flexible): {'devices': {...}, 'overall_avg_mb': float, ...}
             devices = snap.devices or {}
-            assert isinstance(devices, dict), "Expected 'devices' to be a dict in activation snapshot"
+            assert isinstance(devices, dict), (
+                "Expected 'devices' to be a dict in activation snapshot"
+            )
 
             for dev, stats in devices.items():
                 assert isinstance(stats, dict), f"Device stats for {dev} must be a dict"
-                for k in ("count", "sum_memory", "avg_memory", "max_memory", "min_nonzero_memory"):
+                for k in (
+                    "count",
+                    "sum_memory",
+                    "avg_memory",
+                    "max_memory",
+                    "min_nonzero_memory",
+                ):
                     if k in stats:
                         v = stats[k]
                         if k == "count":
@@ -75,7 +93,6 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
             assert isinstance(summary, dict)
             assert summary["ever_seen"] > 0
             assert isinstance(summary["per_device_cumulative"], dict)
-
 
         finally:
             tracker.stop()

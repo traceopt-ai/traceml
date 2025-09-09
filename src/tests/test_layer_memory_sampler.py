@@ -6,7 +6,10 @@ import numpy as np
 import torch.nn as nn
 import pytest
 
-from traceml.samplers.layer_memory_sampler import LayerMemorySampler, ModelMemorySnapshot
+from traceml.samplers.layer_memory_sampler import (
+    LayerMemorySampler,
+    ModelMemorySnapshot,
+)
 from traceml.loggers.stdout.layer_memory_logger import LayerMemoryStdoutLogger
 from traceml.manager.tracker_manager import TrackerManager
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
@@ -16,12 +19,13 @@ from traceml.decorator import trace_model_instance
 def _make_linear(in_f=8, out_f=4):
     return nn.Linear(in_f, out_f)
 
+
 def _sum_param_mem_mb(model: nn.Module) -> float:
     total_bytes = 0
     for p in model.named_parameters():
         t = p[1]
         total_bytes += t.element_size() * t.nelement()
-    return round(total_bytes / (1024 ** 2), 4)
+    return round(total_bytes / (1024**2), 4)
 
 
 def _queue_with_models(*models):
@@ -38,8 +42,8 @@ def test_layer_memory_sampler_from_queue_basic():
     sampler = LayerMemorySampler()
 
     with patch(
-            "traceml.samplers.layer_memory_sampler.get_model_queue",
-            return_value=_queue_with_models(model)
+        "traceml.samplers.layer_memory_sampler.get_model_queue",
+        return_value=_queue_with_models(model),
     ):
         env = sampler.sample()
 
@@ -73,8 +77,10 @@ def test_layer_memory_sampler_deduplicates_by_signature():
 
     sampler = LayerMemorySampler()
 
-    with patch("traceml.samplers.layer_memory_sampler.get_model_queue",
-               return_value=_queue_with_models(m1, m2)):
+    with patch(
+        "traceml.samplers.layer_memory_sampler.get_model_queue",
+        return_value=_queue_with_models(m1, m2),
+    ):
         env1 = sampler.sample()
         env2 = sampler.sample()
 
@@ -95,8 +101,10 @@ def test_layer_memory_sampler_multiple_models_summary():
 
     sampler = LayerMemorySampler()
 
-    with patch("traceml.samplers.layer_memory_sampler.get_model_queue",
-               return_value=_queue_with_models(a, b)):
+    with patch(
+        "traceml.samplers.layer_memory_sampler.get_model_queue",
+        return_value=_queue_with_models(a, b),
+    ):
         sampler.sample()
         sampler.sample()
 
@@ -114,8 +122,10 @@ def test_layer_memory_sampler_multiple_models_summary():
 def test_layer_memory_sampler_empty_queue_returns_no_model_found():
     sampler = LayerMemorySampler()
 
-    with patch("traceml.samplers.layer_memory_sampler.get_model_queue",
-               return_value=_queue_with_models()):
+    with patch(
+        "traceml.samplers.layer_memory_sampler.get_model_queue",
+        return_value=_queue_with_models(),
+    ):
         env = sampler.sample()
 
     assert isinstance(env, dict)
@@ -125,7 +135,6 @@ def test_layer_memory_sampler_empty_queue_returns_no_model_found():
 
 
 def test_layer_memory_sampler_with_tracker_and_registered_model():
-
     # Define a small model
     model = nn.Sequential(
         nn.Linear(16, 8),
@@ -161,10 +170,13 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
 
         # ---- Snapshot checks ----
         snap = getattr(sampler, "_latest_snapshot", None)
-        assert isinstance(snap, ModelMemorySnapshot), "No model memory snapshot produced"
+        assert isinstance(snap, ModelMemorySnapshot), (
+            "No model memory snapshot produced"
+        )
         assert snap.error is None, f"Snapshot error: {snap.error}"
-        assert isinstance(snap.layer_memory, dict) and len(snap.layer_memory) > 0, \
+        assert isinstance(snap.layer_memory, dict) and len(snap.layer_memory) > 0, (
             "Layer memory dict should be non-empty"
+        )
 
         # Total matches sum of layers
         layers_sum = round(sum(float(v) for v in snap.layer_memory.values()), 4)
@@ -183,6 +195,7 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
         tracker.stop()
         tracker.log_summaries()
         StdoutDisplayManager.stop_display()
+
 
 if __name__ == "__main__":
     test_layer_memory_sampler_from_queue_basic()

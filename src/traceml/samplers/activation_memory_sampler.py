@@ -63,13 +63,11 @@ class ActivationMemorySampler(BaseSampler):
         self._latest_snapshot: Optional[ActivationSnapshot] = None
         self._ever_seen: bool = False
 
-
     def _append_raw_event(self, ts: float, per_dev_memory: Dict[str, float]) -> None:
         """Push one raw event into the bounded buffer."""
         self._raw_events.append(
             {"ts": float(ts), "per_dev_memory": dict(per_dev_memory)}
         )
-
 
     def _accumulate_cumulative(self, per_dev_memory: Dict[str, float]) -> None:
         """Update cumulative counters for each device."""
@@ -77,7 +75,6 @@ class ActivationMemorySampler(BaseSampler):
             c_count, c_sum, c_max = self._cumulative[dev]
             mb_f = float(mem)
             self._cumulative[dev] = (c_count + 1, c_sum + mb_f, max(c_max, mb_f))
-
 
     @staticmethod
     def _compute_batch_stats(values: List[float]) -> _BatchStats:
@@ -95,7 +92,6 @@ class ActivationMemorySampler(BaseSampler):
             max_memory=max_memory,
             min_nonzero_memory=min_nonzero_memory,
         )
-
 
     def _pressure_flag(self, dev: str, batch_max_memory: float) -> Optional[bool]:
         """True if batch max exceeds threshold of device capacity; None if unknown/not CUDA."""
@@ -243,7 +239,6 @@ class ActivationMemorySampler(BaseSampler):
             )
             return self.snapshot_dict(envelope)
 
-
     def get_summary(self) -> Dict[str, Any]:
         """
         Summarize all drained data so far using cumulative counters.
@@ -268,7 +263,9 @@ class ActivationMemorySampler(BaseSampler):
             }
 
         except Exception as e:
-            self.logger.error(f"[TraceML] ActivationMemorySampler.get_summary() error: {e}")
+            self.logger.error(
+                f"[TraceML] ActivationMemorySampler.get_summary() error: {e}"
+            )
             return {
                 "error": str(e),
                 "ever_seen": self._ever_seen,
