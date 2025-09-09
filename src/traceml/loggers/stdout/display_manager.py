@@ -41,9 +41,9 @@ class StdoutDisplayManager:
         """
         cls._layout.split_column(
             Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, minimum_size=5, ratio=1),
-            Layout(name=LAYER_SUMMARY_LAYOUT_NAME, minimum_size=15, ratio=4),
+            Layout(name=LAYER_SUMMARY_LAYOUT_NAME, minimum_size=12, ratio=3),
             Layout(
-                name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, minimum_size=12, ratio=2
+                name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, minimum_size=10, ratio=3
             ),
         )
 

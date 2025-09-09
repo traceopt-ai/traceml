@@ -30,10 +30,6 @@ class ActivationSnapshot:
     stale: bool = False
     error: Optional[str] = None
 
-    @classmethod
-    def error_snapshot(cls, message: str) -> "ActivationSnapshot":
-        return cls(timestamp=time.time(), error=str(message))
-
 
 class ActivationMemorySampler(BaseSampler):
     """
@@ -127,9 +123,7 @@ class ActivationMemorySampler(BaseSampler):
             except Empty:
                 break
             except Exception as e:
-                print(
-                    f"[TraceML] WARNING: queue.get_nowait failed: {e}", file=sys.stderr
-                )
+                self.logger.error(f"[TraceML] WARNING: queue.get_nowait failed: {e}")
                 break
 
             drained_events += 1
@@ -230,14 +224,14 @@ class ActivationMemorySampler(BaseSampler):
 
         except Exception as e:
             self.logger.error(f"[TraceML] ActivationMemorySampler.sample() error: {e}")
-            snap = ActivationSnapshot.error_snapshot(e)
             envelope = self.make_snapshot(
                 ok=False,
                 message=f"sampling failed: {e}",
                 source="activation_memory",
-                data=snap.__dict__,
+                data=None,
             )
             return self.snapshot_dict(envelope)
+
 
     def get_summary(self) -> Dict[str, Any]:
         """

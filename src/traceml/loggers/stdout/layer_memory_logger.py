@@ -77,7 +77,7 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         title_total = fmt_mem(total_memory)
 
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(50, int(cols * 0.5)), 100)
+        panel_width = min(max(100, int(cols * 0.75)), 100)
 
         return Panel(
             Group(table),
