@@ -307,20 +307,14 @@ class SystemSampler(BaseSampler):
                     nonzero_mem_usages.extend([u for u in state.mem_used if u > 0])
 
                 all_mem_arr = (
-                    np.array(all_mem_usages, dtype=float)
-                    if all_mem_usages
-                    else np.array([], dtype=float)
+                    np.array(all_mem_usages, dtype=float) if all_mem_usages else np.array([], dtype=float)
                 )
                 nonzero_mem_arr = (
-                    np.array(nonzero_mem_usages, dtype=float)
-                    if nonzero_mem_usages
-                    else np.array([], dtype=float)
+                    np.array(nonzero_mem_usages, dtype=float) if nonzero_mem_usages else np.array([], dtype=float)
                 )
 
                 global_peak = float(np.max(all_mem_arr)) if all_mem_arr.size else 0.0
-                global_min_nonzero = (
-                    float(np.min(nonzero_mem_arr)) if nonzero_mem_arr.size else 0.0
-                )
+                global_min_nonzero = float(np.min(nonzero_mem_arr)) if nonzero_mem_arr.size else 0.0
                 avg_mem = float(np.mean(all_mem_arr)) if all_mem_arr.size else 0.0
 
                 util_arr = (
@@ -331,18 +325,33 @@ class SystemSampler(BaseSampler):
                 average_gpu_util = float(np.mean(util_arr)) if util_arr.size else 0.0
                 peak_gpu_util = float(np.max(util_arr)) if util_arr.size else 0.0
 
-                summary.update(
-                    {
-                        "gpu_total_count": self.gpu_count,
-                        "gpu_average_util_percent": round(average_gpu_util, 2),
-                        "gpu_peak_util_percent": round(peak_gpu_util, 2),
-                        "gpu_memory_global_peak_used": round(global_peak, 2),
-                        "gpu_memory_global_lowest_nonzero_used": round(
-                            global_min_nonzero, 2
-                        ),
-                        "gpu_memory_average_used": round(avg_mem, 2),
-                    }
-                )
+                # 🔹 Get total GPU memory (first GPU as baseline)
+                handle = nvmlDeviceGetHandleByIndex(0)
+                total_gpu_mem = nvmlDeviceGetMemoryInfo(handle).total / (1024 ** 2)
+
+                if total_gpu_mem and total_gpu_mem > 0:
+                    summary.update(
+                        {
+                            "gpu_total_count": self.gpu_count,
+                            "gpu_average_util_percent": round(average_gpu_util, 2),
+                            "gpu_peak_util_percent": round(peak_gpu_util, 2),
+                            "gpu_memory_global_peak_percent": round(global_peak / total_gpu_mem * 100, 2),
+                            "gpu_memory_global_lowest_nonzero_percent": round(global_min_nonzero / total_gpu_mem * 100,
+                                                                              2),
+                            "gpu_memory_average_percent": round(avg_mem / total_gpu_mem * 100, 2),
+                        }
+                    )
+                else:
+                    summary.update(
+                        {
+                            "gpu_total_count": self.gpu_count,
+                            "gpu_average_util_percent": round(average_gpu_util, 2),
+                            "gpu_peak_util_percent": round(peak_gpu_util, 2),
+                            "gpu_memory_global_peak_used": round(global_peak, 2),
+                            "gpu_memory_global_lowest_nonzero_used": round(global_min_nonzero, 2),
+                            "gpu_memory_average_used": round(avg_mem, 2),
+                        }
+                    )
 
             return summary
 
