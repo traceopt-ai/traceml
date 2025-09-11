@@ -137,9 +137,11 @@ class LayerMemorySampler(BaseSampler):
         """
         Return summary statistics over all models seen.
         """
+        print()
         total_models = len(self.seen_signatures)
         avg_total_memory = 0.0
         max_total_memory = 0.0
+        print(total_models)
 
         if self.total_samples:
             totals = [s.total_memory for s in self.memory_history if s.error is None]

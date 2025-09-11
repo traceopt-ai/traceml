@@ -18,19 +18,19 @@ from transformers import (
 # TraceML imports
 from traceml.decorator import trace_model_instance
 
-# Optional: if you added StepTimer earlier
+# TODO add step timer later
 try:
     from traceml.utils.gradient_time import StepTimer
 except Exception:
-    StepTimer = None  # timing is optional
+    StepTimer = None
 
 
 SEED = 42
-MODEL_NAME = "distilbert-base-uncased"  # light & laptop-friendly
-MAX_TRAIN_EXAMPLES = 2000  # keep small for quick runs
-MAX_VAL_EXAMPLES = 800
+MODEL_NAME = "distilbert-base-uncased"
+MAX_TRAIN_EXAMPLES = 500
+MAX_VAL_EXAMPLES = 100
 BATCH_SIZE = 32
-EPOCHS = 2
+EPOCHS = 1
 LR = 2e-5
 WARMUP_RATIO = 0.06
 

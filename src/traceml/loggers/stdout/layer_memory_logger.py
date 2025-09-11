@@ -91,6 +91,7 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         Pretty-print final cumulative summary.
         """
         console = Console()
+        summary = (summary or {}).get("LayerMemorySampler") or {}
 
         table = Table.grid(padding=(0, 1))
         table.add_column(justify="left", style="blue")
