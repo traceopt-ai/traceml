@@ -3,7 +3,6 @@ from collections import defaultdict, deque
 from queue import Empty
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
-import sys
 import time
 import torch
 
@@ -40,7 +39,6 @@ class ActivationMemorySampler(BaseSampler):
       - Aggregates per-device stats over those new events.
       - Returns a live snapshot dict.
       - If no new events arrive, returns the last snapshot.
-      - If no event has ever arrived, returns a guidance note (hooks likely not attached).
     """
 
     def __init__(
@@ -232,7 +230,6 @@ class ActivationMemorySampler(BaseSampler):
             )
             return self.snapshot_dict(envelope)
 
-
     def get_summary(self) -> Dict[str, Any]:
         """
         Summarize all drained data so far using cumulative counters.
@@ -253,7 +250,7 @@ class ActivationMemorySampler(BaseSampler):
                 "ever_seen": self._ever_seen,
                 "per_device_cumulative": per_dev_summary,
                 "raw_events_kept": len(self._raw_events),
-                "last_snapshot": self._latest_snapshot,
+                "last_snapshot": self._latest_snapshot.__dict__,
             }
 
         except Exception as e:

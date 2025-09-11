@@ -1,7 +1,6 @@
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Console
 import shutil
 
 from .base_logger import BaseStdoutLogger
@@ -37,83 +36,66 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         grad_data = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
         return act_data, grad_data
 
-    # --- Summary --------------------------------------------------------------
+    # Summary
     def log_summary(self, summary: Dict[str, Any]):
         """
-        Pretty-print final cumulative summary using a single combined object:
-
-        summary = {
-          "ever_seen": bool,
-          "raw_events_kept": int,
-          "activation": {"per_device_cumulative": {...}},
-          "gradient":   {"per_device_cumulative": {...}},
-        }
+        Pretty-print summaries for Activation and Gradient samplers.
         """
+        from rich.console import Console
+
         console = Console()
 
-        table = Table.grid(padding=(0, 1))
-        table.add_column(justify="left", style="white")
-        table.add_column(justify="center", style="dim", no_wrap=True)
-        table.add_column(justify="right", style="white")
+        act_summary = (summary or {}).get("ActivationMemorySampler") or {}
+        grad_summary = (summary or {}).get("GradientMemorySampler") or {}
 
-        ever_seen = bool(summary.get("ever_seen", False))
-        table.add_row(
-            "EVER SEEN EVENTS", "[green]|[/green]", "Yes" if ever_seen else "No"
-        )
+        def render_block(name: str, block: Dict[str, Any], color: str):
+            t = Table.grid(padding=(0, 1))
+            t.add_column(justify="left", style=color)
+            t.add_column(justify="center", style="dim", no_wrap=True)
+            t.add_column(justify="right", style="white")
 
-        raw_kept = int(summary.get("raw_events_kept", 0) or 0)
-        table.add_row("RAW EVENTS KEPT", "[green]|[/green]", str(raw_kept))
+            ever_seen = bool(block.get("ever_seen", False))
+            t.add_row("EVER SEEN", "[cyan]|[/cyan]", "Yes" if ever_seen else "No")
 
-        # Activation cumulative
-        act_per = (summary.get("activation") or {}).get("per_device_cumulative") or {}
-        if act_per:
-            table.add_row("", "", "")
-            table.add_row(
-                "[bold underline]ACTIVATION — PER-DEVICE CUMULATIVE[/bold underline]",
-                "",
-                "",
-            )
-            for dev, stats in act_per.items():
-                c_count = int(stats.get("cumulative_count", 0) or 0)
-                c_sum = float(stats.get("cumulative_sum_memory", 0.0) or 0.0)
-                c_avg = float(stats.get("cumulative_avg_memory", 0.0) or 0.0)
-                c_max = float(stats.get("cumulative_max_memory", 0.0) or 0.0)
-                row = (
-                    f"{dev} | count={c_count}  "
-                    f"sum={fmt_mem(c_sum)}  avg={fmt_mem(c_avg)}  max={fmt_mem(c_max)}"
+            raw_kept = int(block.get("raw_events_kept", 0) or 0)
+            t.add_row("RAW EVENTS KEPT", "[cyan]|[/cyan]", str(raw_kept))
+
+            # per-device cumulative stats
+            per_dev = block.get("per_device_cumulative") or {}
+            if per_dev:
+                t.add_row("", "", "")
+                t.add_row("PER-DEVICE CUMULATIVE", "[cyan]|[/cyan]", "")
+                for dev, stats in per_dev.items():
+                    c_count = int(stats.get("cumulative_count", 0) or 0)
+                    c_sum = float(stats.get("cumulative_sum_memory", 0.0) or 0.0)
+                    c_avg = float(stats.get("cumulative_avg_memory", 0.0) or 0.0)
+                    c_max = float(stats.get("cumulative_max_memory", 0.0) or 0.0)
+                    row = (
+                        f"{dev} | "
+                        f"count={c_count}  "
+                        f"sum={fmt_mem(c_sum)}  "
+                        f"avg={fmt_mem(c_avg)}  "
+                        f"max={fmt_mem(c_max)}"
+                    )
+                    t.add_row(row, "", "")
+
+            console.print(
+                Panel(
+                    t,
+                    title=f"[bold {color}]{name} Summary[/bold {color}]",
+                    border_style=color,
                 )
-                table.add_row(row, "", "")
-
-        # Gradient cumulative
-        grad_per = (summary.get("gradient") or {}).get("per_device_cumulative") or {}
-        if grad_per:
-            table.add_row("", "", "")
-            table.add_row(
-                "[bold underline]GRADIENT — PER-DEVICE CUMULATIVE[/bold underline]",
-                "",
-                "",
             )
-            for dev, stats in grad_per.items():
-                c_count = int(stats.get("cumulative_count", 0) or 0)
-                c_sum = float(stats.get("cumulative_sum_memory", 0.0) or 0.0)
-                c_avg = float(stats.get("cumulative_avg_memory", 0.0) or 0.0)
-                c_max = float(stats.get("cumulative_max_memory", 0.0) or 0.0)
-                row = (
-                    f"{dev} | count={c_count}  "
-                    f"sum={fmt_mem(c_sum)}  avg={fmt_mem(c_avg)}  max={fmt_mem(c_max)}"
-                )
-                table.add_row(row, "", "")
 
-        panel = Panel(
-            table,
-            title=f"[bold cyan]{self.name} - Summary[/bold cyan]",
-            border_style="cyan",
-        )
-        console.print(panel)
-
+        if act_summary:
+            render_block("Activation", act_summary, "green")
+        if grad_summary:
+            render_block("Gradient", grad_summary, "yellow")
 
     def _section_header(self, label: str, data: Dict[str, Any], color: str) -> Table:
-        avg = float(data.get("overall_avg_memory", data.get("overall_avg_mb", 0.0)) or 0.0)
+        avg = float(
+            data.get("overall_avg_memory", data.get("overall_avg_mb", 0.0)) or 0.0
+        )
         events = int(data.get("drained_events", 0) or 0)
         stale = bool(data.get("stale", False))
         error = data.get("error")
@@ -198,17 +180,21 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         a_devs = act.get("devices") or {}
         g_devs = grad.get("devices") or {}
 
-        # Outer stack layout: Activation block, spacer, Gradient block
+        # Outer layout: Activation, space, Gradient
         outer = Table.grid(padding=(0, 0))
         outer.add_row(self._section_header("Activation", act, "green"))
-        outer.add_row(self._device_table("Activation", a_devs, "green", allow_mb_keys=True))
+        outer.add_row(
+            self._device_table("Activation", a_devs, "green", allow_mb_keys=True)
+        )
 
-        # spacer line
-        spacer = Table.grid(); spacer.add_row("")
+        spacer = Table.grid()
+        spacer.add_row("")
         outer.add_row(spacer)
 
         outer.add_row(self._section_header("Gradient", grad, "yellow"))
-        outer.add_row(self._device_table("Gradient", g_devs, "yellow", allow_mb_keys=False))
+        outer.add_row(
+            self._device_table("Gradient", g_devs, "yellow", allow_mb_keys=False)
+        )
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 100)

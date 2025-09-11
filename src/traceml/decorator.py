@@ -13,6 +13,7 @@ def trace_model(
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
     trace_gradients: bool = True,
+    include_module: bool = False,
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -42,7 +43,7 @@ def trace_model(
                 if trace_activations:
                     attach_activation_hooks(self)
                 if trace_gradients:
-                    attach_all_gradient_hooks(self)
+                    attach_all_gradient_hooks(self, include_module=include_module)
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
 
@@ -57,6 +58,7 @@ def trace_model_instance(
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
     trace_gradients: bool = True,
+    include_module: bool = False,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -75,6 +77,6 @@ def trace_model_instance(
         if trace_activations:
             attach_activation_hooks(model)
         if trace_gradients:
-            attach_all_gradient_hooks(model)
+            attach_all_gradient_hooks(model, include_module=include_module)
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)

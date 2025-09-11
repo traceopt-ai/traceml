@@ -5,9 +5,9 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 
-from traceml.samplers.activation_memory_sampler import (
-    ActivationMemorySampler,
-    ActivationSnapshot,
+from traceml.samplers.gradient_memory_sampler import (
+    GradientMemorySampler,
+    GradientSnapshot,
 )
 from traceml.loggers.stdout.activation_gradient_memory_logger import (
     ActivationGradientMemoryStdoutLogger,
@@ -27,16 +27,16 @@ def _tiny_model():
     ).to("cpu")
 
 
-def test_activation_sampler_with_tracker_and_registered_model_forward_activity():
+def test_gradient_sampler_with_tracker_and_backward_activity():
     """
-    For a tiny model, runs several forward passes to produce activations,
-    and checks that ActivationSampler produces a snapshot with device stats and
-    overall metrics
+    For a tiny model, runs several forward + backward passes to produce gradients,
+    and checks that GradientMemorySampler produces a snapshot with device stats and
+    overall metrics.
     """
     model = _tiny_model()
-    trace_model_instance(model)
+    trace_model_instance(model, include_module=True)
 
-    sampler = ActivationMemorySampler()
+    sampler = GradientMemorySampler()
     loggers = ActivationGradientMemoryStdoutLogger()
 
     tracker = TrackerManager(components=[(sampler, [loggers])], interval_sec=0.25)
@@ -49,27 +49,28 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
             iterations = 0
             while time.time() < end_time:
                 x = torch.randn(128, 32)
-                with torch.no_grad():
-                    _ = model(x)
+                y = model(x).sum()
+                y.backward()  # 🔑 triggers gradient hooks
+                model.zero_grad()
                 iterations += 1
                 time.sleep(0.01)
 
             print(
-                f"\n[TraceML Test] (ActivationSampler) forward-only iterations: {iterations}",
+                f"\n[TraceML Test] (GradientSampler) forward+backward iterations: {iterations}",
                 file=sys.stderr,
             )
             time.sleep(0.35)
 
             snap = getattr(sampler, "_latest_snapshot", None)
             assert isinstance(
-                snap, ActivationSnapshot
-            ), "ActivationSampler produced no snapshot"
+                snap, GradientSnapshot
+            ), "GradientSampler produced no snapshot"
 
             # Expected shape (keep flexible): {'devices': {...}, 'overall_avg_mb': float, ...}
             devices = snap.devices or {}
             assert isinstance(
                 devices, dict
-            ), "Expected 'devices' to be a dict in activation snapshot"
+            ), "Expected 'devices' to be a dict in gradient snapshot"
 
             for dev, stats in devices.items():
                 assert isinstance(stats, dict), f"Device stats for {dev} must be a dict"
@@ -99,20 +100,18 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
             StdoutDisplayManager.stop_display()
 
 
-def test_activation_sampler_no_activity_yet_returns_empty_or_zero_safely():
+def test_gradient_sampler_no_activity_yet_returns_empty_or_zero_safely():
     """
-    Ensure calling sample/get_summary before any activation events does not crash
+    Ensure calling sample/get_summary before any backward events does not crash
     and returns empty or zero-like structures safely.
     """
-    sampler = ActivationMemorySampler()
-    # No model registered, no forwards run
+    sampler = GradientMemorySampler()
+    # No model registered, no backward runs
     sampler.sample() if hasattr(sampler, "sample") else None
 
-    # sampler.latest/_latest_snapshot may be None; summary still should be a dict
     summary = sampler.get_summary()
     assert isinstance(summary, dict)
 
-    # If keys exist, they should be zeros or empty structures
     for key in ("ever_seen", "raw_events_kept"):
         if key in summary:
             v = summary[key]
@@ -121,5 +120,5 @@ def test_activation_sampler_no_activity_yet_returns_empty_or_zero_safely():
 
 
 if __name__ == "__main__":
-    test_activation_sampler_with_tracker_and_registered_model_forward_activity()
-    test_activation_sampler_no_activity_yet_returns_empty_or_zero_safely()
+    test_gradient_sampler_with_tracker_and_backward_activity()
+    test_gradient_sampler_no_activity_yet_returns_empty_or_zero_safely()
