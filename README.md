@@ -4,7 +4,7 @@
 [![GitHub Stars](https://img.shields.io/github/stars/abhinavsriva/trace_ml?style=social)](https://github.com/traceml-ai/traceml/stargazers)
 
 
-A simple CLI tool to automatically trace PyTorch training memory usage.
+ A lightweight library + CLI to make PyTorch training memory visible in real time.
 
 ## The Problem
 
@@ -42,7 +42,7 @@ To capture **memory usage**, you need to register your model with TraceML. There
 
 ```python
 import torch.nn as nn
-from traceml.utils.patch import trace_model
+from traceml.decorator import trace_model
 
 @trace_model()
 class TinyNet(nn.Module):
@@ -60,7 +60,7 @@ class TinyNet(nn.Module):
 
 ```python
 import torch.nn as nn
-from traceml.utils.patch import trace_model_instance
+from traceml.decorator import trace_model_instance
 
 model = nn.Sequential(
     nn.Linear(100, 50),
@@ -96,6 +96,7 @@ traceml run src/examples/tracing_with_class_decorator
 
 ## Coming Soon
 
+- Step & operation timers (forward, backward, optimizer)
 - Notebook support
 - Export logs as JSON / CSV
 
