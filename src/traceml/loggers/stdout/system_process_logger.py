@@ -3,10 +3,12 @@ import shutil
 
 from rich.panel import Panel
 from rich.table import Table
+from rich.console import Console
+#
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_PROCESS_LAYOUT_NAME
-from traceml.utils.formatting import fmt_mem, fmt_percent, fmt_ratio
+from traceml.utils.formatting import fmt_mem, fmt_percent, fmt_ratio, fmt_mem_new
 
 
 class SystemProcessStdoutLogger(BaseStdoutLogger):
@@ -57,7 +59,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         high_pressure = sysd.get("gpu_count_high_pressure", 0)
         total_gpus = sysd.get("gpu_total_count")
 
-        # ------- Process (current PID) -------
+        # ------- Process -------
         pid_cpu = procd.get("process_cpu_percent", 0.0)
         pid_ram = procd.get("process_ram", 0.0)  # MB
         pid_gpu_mem = procd.get("process_gpu_memory", None)  # MB or None
@@ -69,7 +71,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         # Row 1: Host CPU/RAM vs Process CPU/RAM
         table.add_row(
             "[bold cyan]Host[/bold cyan] "
-            f"CPU {fmt_percent(cpu_host)}   RAM {fmt_mem(ram_used)}/{fmt_mem(ram_total)}{ram_pct_str}     "
+            f"CPU {fmt_percent(cpu_host)}   RAM {fmt_mem_new(ram_used)}/{fmt_mem_new(ram_total)}{ram_pct_str}     "
             "[bold cyan]Proc[/bold cyan] "
             f"CPU {fmt_percent(pid_cpu)}   RAM {fmt_mem(pid_ram)}"
         )
@@ -107,51 +109,85 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             width=panel_width,
         )
 
-    def log_summary(self, summary: Dict[str, Any]):
-        """
-        You can decide which summary to show (system, process, or merged).
-        For simplicity, this prints both blocks if provided.
-        Pass a merged summary dict from your manager if desired.
-        """
-        from rich.console import Console
+    def _render_system_summary(self, block: Dict[str, Any], console) -> None:
+        t = Table.grid(padding=(0, 1))
+        t.add_column(justify="left", style="cyan")
+        t.add_column(justify="center", style="dim", no_wrap=True)
+        t.add_column(justify="right", style="white")
 
-        console = Console()
+        t.add_row("TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(block["total_samples"]))
+        t.add_row(
+            "CPU AVERAGE",
+            "[cyan]|[/cyan]",
+            f"{block['cpu_average_percent']:.1f}% of {block['cpu_logical_core_count']} cores",
+        )
+        t.add_row(
+            "CPU PEAK",
+            "[cyan]|[/cyan]",
+            f"{block['cpu_peak_percent']:.1f}% of {block['cpu_logical_core_count']} cores",
+        )
 
-        # If caller passes a merged summary, expect:
-        # { "system": {...}, "process": {...} }
+        # RAM summary
+        total_ram = block["ram_total"]
+        avg_ram_used = block["ram_average_used"]
+        peak_ram_used = block["ram_peak_used"]
+
+        t.add_row(
+            "RAM AVERAGE",
+            "[cyan]|[/cyan]",
+            f"{fmt_mem_new(avg_ram_used)} / {fmt_mem_new(total_ram)} "
+            f"({(avg_ram_used / total_ram) * 100:.1f}%)",
+        )
+
+        t.add_row(
+            "RAM PEAK",
+            "[cyan]|[/cyan]",
+            f"{fmt_mem_new(peak_ram_used)} / {fmt_mem_new(total_ram)} "
+            f"({(peak_ram_used / total_ram) * 100:.1f}%)",
+        )
+
+        console.print(
+            Panel(
+                t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"
+            )
+        )
+
+    def _render_process_summary(self, block: Dict[str, Any], console) -> None:
+        t = Table.grid(padding=(0, 1))
+        t.add_column(justify="left", style="magenta")
+        t.add_column(justify="center", style="dim", no_wrap=True)
+        t.add_column(justify="right", style="white")
+
+        for k, v in block.items():
+            key = str(k).replace("_", " ").upper()
+            if isinstance(v, (int, float)) and "percent" in k:
+                val = fmt_percent(v)
+            elif any(s in k for s in ("ram", "memory", "mb")) and isinstance(
+                v, (int, float)
+            ):
+                val = fmt_mem(v)
+            else:
+                val = str(v)
+            t.add_row(key, "[magenta]|[/magenta]", val)
+
+        console.print(
+            Panel(
+                t,
+                title="[bold magenta]Process - Summary[/bold magenta]",
+                border_style="magenta",
+            )
+        )
+
+    def log_summary(self, summary: Dict[str, Any]) -> None:
         sys_summary = (summary or {}).get("SystemSampler") or {}
         proc_summary = (summary or {}).get("ProcessSampler") or {}
 
-        # Fallback: if a flat dict came in, just render keys/values.
-        def render_block(name: str, block: Dict[str, Any]):
-            t = Table.grid(padding=(0, 1))
-            t.add_column(justify="left", style="cyan")
-            t.add_column(justify="center", style="dim", no_wrap=True)
-            t.add_column(justify="right", style="white")
-            for k, v in block.items():
-                # Simple heuristics for formatting
-                key = str(k).replace("_", " ").upper()
-                if isinstance(v, (int, float)) and "percent" in k:
-                    val = fmt_percent(v)
-                elif any(s in k for s in ("ram", "gpu", "memory", "mb")) and isinstance(
-                    v, (int, float)
-                ):
-                    val = fmt_mem(v)
-                else:
-                    val = str(v)
-                t.add_row(key, "[cyan]|[/cyan]", val)
-            console.print(
-                Panel(
-                    t,
-                    title=f"[bold cyan]{name} - Summary[/bold cyan]",
-                    border_style="cyan",
-                )
-            )
+        console = Console()
 
-        if sys_summary or proc_summary:
-            if sys_summary:
-                render_block("System", sys_summary)
-            if proc_summary:
-                render_block("Process", proc_summary)
-        else:
-            render_block(self.name, summary or {})
+        if sys_summary:
+            self._render_system_summary(sys_summary, console)
+        if proc_summary:
+            self._render_process_summary(proc_summary, console)
+        if not sys_summary and not proc_summary:
+            # fallback to generic
+            self._render_system_summary(summary or {})
