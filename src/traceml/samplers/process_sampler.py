@@ -108,13 +108,11 @@ class ProcessSampler(BaseSampler):
 
         try:
             if torch.cuda.is_available():
-                return torch.cuda.memory_allocated() / (1024 ** 2)
+                return torch.cuda.memory_allocated() / (1024**2)
         except Exception as e:
             self.logger.error(f"[TraceML] Torch GPU memory read failed: {e}")
 
         return None
-
-
 
     def sample(self) -> Dict[str, Any]:
         """
@@ -126,7 +124,6 @@ class ProcessSampler(BaseSampler):
             cpu_usage = self.process.cpu_percent(interval=None)
             ram_usage = self.process.memory_info().rss / (1024**2)
             gpu_mem_usage = self._get_process_gpu_memory()
-
 
             # Append to histories
             self.cpu_history.append(ProcessCPUSample(percent=cpu_usage))
@@ -173,19 +170,22 @@ class ProcessSampler(BaseSampler):
             gpu_mem_values = [s.used for s in self.gpu_mem_history]
 
             # Get system RAM total
-            total_ram = psutil.virtual_memory().total / (1024 ** 2)  # MB
+            total_ram = psutil.virtual_memory().total / (1024**2)  # MB
 
             # Get GPU total (use NVML first, fallback to torch)
             total_gpu = None
             try:
                 from pynvml import nvmlDeviceGetMemoryInfo
+
                 if self.gpu_available:
                     handle = nvmlDeviceGetHandleByIndex(0)
-                    total_gpu = nvmlDeviceGetMemoryInfo(handle).total / (1024 ** 2)
+                    total_gpu = nvmlDeviceGetMemoryInfo(handle).total / (1024**2)
             except Exception:
                 try:
                     if torch.cuda.is_available():
-                        total_gpu = torch.cuda.get_device_properties(0).total_memory / (1024 ** 2)
+                        total_gpu = torch.cuda.get_device_properties(0).total_memory / (
+                            1024**2
+                        )
                 except Exception:
                     total_gpu = None
 
@@ -193,18 +193,24 @@ class ProcessSampler(BaseSampler):
                 "total_process_samples": len(cpu_values),
                 "process_average_cpu_percent": (
                     round(float(sum(cpu_values) / len(cpu_values)), 2)
-                    if cpu_values else 0.0
+                    if cpu_values
+                    else 0.0
                 ),
-                "process_peak_cpu_percent": round(max(cpu_values), 2) if cpu_values else 0.0,
+                "process_peak_cpu_percent": round(max(cpu_values), 2)
+                if cpu_values
+                else 0.0,
             }
 
             if ram_values and total_ram:
                 summary.update(
                     {
                         "process_average_ram_percent": round(
-                            float(sum(ram_values) / len(ram_values)) / total_ram * 100, 2
+                            float(sum(ram_values) / len(ram_values)) / total_ram * 100,
+                            2,
                         ),
-                        "process_peak_ram_percent": round(max(ram_values) / total_ram * 100, 2),
+                        "process_peak_ram_percent": round(
+                            max(ram_values) / total_ram * 100, 2
+                        ),
                     }
                 )
 
@@ -212,9 +218,14 @@ class ProcessSampler(BaseSampler):
                 summary.update(
                     {
                         "process_average_gpu_percent": round(
-                            float(sum(gpu_mem_values) / len(gpu_mem_values)) / total_gpu * 100, 2
+                            float(sum(gpu_mem_values) / len(gpu_mem_values))
+                            / total_gpu
+                            * 100,
+                            2,
                         ),
-                        "process_peak_gpu_percent": round(max(gpu_mem_values) / total_gpu * 100, 2),
+                        "process_peak_gpu_percent": round(
+                            max(gpu_mem_values) / total_gpu * 100, 2
+                        ),
                     }
                 )
 
@@ -226,4 +237,3 @@ class ProcessSampler(BaseSampler):
                 "error": str(e),
                 "total_process_samples": 0,
             }
-
