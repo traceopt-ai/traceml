@@ -190,7 +190,7 @@ class ProcessSampler(BaseSampler):
         }
 
     def _get_ram_summary(self) -> Dict[str, Any]:
-        
+        pass
 
     def get_summary(self) -> Dict[str, Any]:
         """
