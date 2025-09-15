@@ -32,7 +32,7 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
             return str(s)
         return s if len(s) <= max_len else s[: max_len - 1] + "…"
 
-    def _get_panel_renderable(self) -> Panel:
+    def get_panel_renderable(self) -> Panel:
         """
         Live snapshot of current model's memory usage.
         """

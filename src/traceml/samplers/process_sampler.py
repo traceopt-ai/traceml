@@ -7,13 +7,6 @@ from typing import Dict, Any, Optional, Deque, Union
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import setup_error_logger, get_error_logger
 
-from pynvml import (
-    nvmlInit,
-    nvmlDeviceGetHandleByIndex,
-    nvmlDeviceGetComputeRunningProcesses,
-    nvmlDeviceGetCount,
-    NVMLError,
-)
 
 
 @dataclass
@@ -60,19 +53,16 @@ class ProcessSampler(BaseSampler):
         # CPU usage measurement
         try:
             self.process.cpu_percent(interval=None)
+            self.cpu_count = psutil.cpu_count(logical=True)
         except Exception as e:
             self.logger.error( f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}")
 
     def _init_gpu(self) -> None:
         self.gpu_available = False
         self.gpu_count = 0
-        try:
-            nvmlInit()
-            self.gpu_count = nvmlDeviceGetCount()
+        if torch.cuda.is_available():
+            self.gpu_count = torch.cuda.device_count()
             self.gpu_available = True
-        except NVMLError as e:
-            self.logger.error(f"[TraceML] WARNING: NVML GPU support unavailable: {e}")
-
 
     def __init__(self):
         super().__init__()
@@ -104,21 +94,6 @@ class ProcessSampler(BaseSampler):
         """Return the GPU memory used by this process, or None if unavailable."""
         if not self.gpu_available:
             return None
-
-        total_memory = 0
-        try:
-            for i in range(self.gpu_count):
-                handle = nvmlDeviceGetHandleByIndex(i)
-                procs = nvmlDeviceGetComputeRunningProcesses(handle)
-                for proc in procs:
-                    if proc.pid == self.pid:
-                        total_memory += proc.usedGpuMemory
-            if total_memory > 0:
-                return total_memory
-        except NVMLError as e:
-            self.logger.error(f"[TraceML] NVML GPU memory read failed: {e}")
-        except Exception as e:
-            self.logger.error(f"[TraceML] Unexpected error reading GPU memory: {e}")
 
         try:
             if torch.cuda.is_available():
@@ -179,14 +154,15 @@ class ProcessSampler(BaseSampler):
         cpu_values = [s.percent for s in self.cpu_history]
         if not cpu_values:
             return {
-                "total_process_samples": 0
+                "total_samples": 0,
             }
         avg_cpu = float(sum(cpu_values)/len(cpu_values))
         peak_cpu = float(max(cpu_values))
         return {
-            "total_process_samples": len(cpu_values),
-            "process_average_cpu_percent": round(avg_cpu, 2),
-            "process_peak_cpu_percent": round(peak_cpu, 2),
+            "total_samples": len(cpu_values),
+            "average_cpu_percent": round(avg_cpu, 2),
+            "peak_cpu_percent": round(peak_cpu, 2),
+            "cpu_logical_core_count": self.cpu_count
         }
 
     def _get_ram_summary(self) -> Dict[str, Any]:
@@ -197,22 +173,25 @@ class ProcessSampler(BaseSampler):
         avg_ram = float(sum(ram_values)/len(ram_values))
         peak_ram = float(max(ram_values))
         return {
-            "process_average_ram_percent": round(avg_ram, 2),
-            "process_peak_ram_percent": round(peak_ram, 2),
+            "average_ram": round(avg_ram, 2),
+            "peak_ram": round(peak_ram, 2),
+            "total_ram": total_ram,
         }
 
     def _get_gpu_memory(self) -> Dict[str, Any]:
         gpu_mem_values = [s.used for s in self.gpu_mem_history]
         if not gpu_mem_values:
-            total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
-            return {
-                "process_average_gpu_percent": round(
-                        float(sum(gpu_mem_values) / len(gpu_mem_values))
-                        / total_gpu_memory* 100, 2),
-                "process_peak_gpu_percent": round(
-                        max(gpu_mem_values) / total_gpu_memory * 100, 2),
-            }
-        return {}
+            return {"is_GPU_available": self.gpu_available}
+
+        total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        return {
+            "is_GPU_available": self.gpu_available,
+            "average_gpu_percent": round(
+                    float(sum(gpu_mem_values) / len(gpu_mem_values))
+                    / total_gpu_memory* 100, 2),
+            "peak_gpu_percent": round(
+                    max(gpu_mem_values) / total_gpu_memory * 100, 2),
+        }
 
 
     def get_summary(self) -> Dict[str, Any]:

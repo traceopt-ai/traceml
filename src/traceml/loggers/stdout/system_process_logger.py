@@ -28,7 +28,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         self._latest_env: Optional[Dict[str, Any]] = None
         self._latest_snapshot: Dict[str, Any] = {}
 
-    def _get_panel_renderable(self) -> Panel:
+    def get_panel_renderable(self) -> Panel:
         snaps = self._latest_snapshot or {}
         sysd = (snaps.get("SystemSampler") or {}).get("data") or {}
         procd = (snaps.get("ProcessSampler") or {}).get("data") or {}
@@ -73,7 +73,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             "[bold cyan]Host[/bold cyan] "
             f"CPU {fmt_percent(cpu_host)}   RAM {fmt_mem_new(ram_used)}/{fmt_mem_new(ram_total)}{ram_pct_str}     "
             "[bold cyan]Proc[/bold cyan] "
-            f"CPU {fmt_percent(pid_cpu)}   RAM {fmt_mem(pid_ram)}"
+            f"CPU {fmt_percent(pid_cpu)}   RAM {fmt_mem_new(pid_ram)}"
         )
 
         # Row 2: GPU Util (if present)
@@ -109,13 +109,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             width=panel_width,
         )
 
-    def _render_system_summary(self, block: Dict[str, Any], console) -> None:
-        t = Table.grid(padding=(0, 1))
-        t.add_column(justify="left", style="cyan")
-        t.add_column(justify="center", style="dim", no_wrap=True)
-        t.add_column(justify="right", style="white")
-
-        t.add_row("TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(block["total_samples"]))
+    def _sys_cpu_summary(self, t:Table.grid, block):
         t.add_row(
             "CPU AVERAGE",
             "[cyan]|[/cyan]",
@@ -127,7 +121,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"{block['cpu_peak_percent']:.1f}% of {block['cpu_logical_core_count']} cores",
         )
 
-        # RAM summary
+    def _sys_ram_summary(self, t:Table.grid, block):
         total_ram = block["ram_total"]
         avg_ram_used = block["ram_average_used"]
         peak_ram_used = block["ram_peak_used"]
@@ -146,11 +140,111 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"({(peak_ram_used / total_ram) * 100:.1f}%)",
         )
 
+    def _sys_gpu_memory(self, t:Table.grid, block):
+        if block.get("is_GPU_available", False) and block.get("gpu_total_count", 0) > 0:
+            total_gpu_mem = block.get("gpu_memory_global_total", 0)
+            t.add_row(
+                "GPU COUNT",
+                "[cyan]|[/cyan]",
+                str(block["gpu_total_count"]),
+            )
+            t.add_row(
+                "GPU UTIL AVERAGE",
+                "[cyan]|[/cyan]",
+                f"{block['gpu_average_util_percent']:.1f}%",
+            )
+            t.add_row(
+                "GPU UTIL PEAK",
+                "[cyan]|[/cyan]",
+                f"{block['gpu_peak_util_percent']:.1f}%",
+            )
+            t.add_row(
+                "GPU MEMORY AVERAGE",
+                "[cyan]|[/cyan]",
+                f"{fmt_mem_new(block['gpu_memory_average_used'])} / {fmt_mem_new(total_gpu_mem)}",
+            )
+            t.add_row(
+                "GPU MEMORY PEAK",
+                "[cyan]|[/cyan]",
+                f"{fmt_mem_new(block['gpu_memory_global_peak_used'])} / {fmt_mem_new(total_gpu_mem)}",
+            )
+            t.add_row(
+                "GPU MEMORY LOWEST NONZERO",
+                "[cyan]|[/cyan]",
+                f"{fmt_mem_new(block['gpu_memory_global_lowest_nonzero_used'])} / {fmt_mem_new(total_gpu_mem)}",
+            )
+        else:
+            t.add_row("GPU", "[cyan]|[/cyan]", "[red]Not available[/red]")
+
+    def _render_system_summary(self, block: Dict[str, Any], console) -> None:
+        t = Table.grid(padding=(0, 1))
+        t.add_column(justify="left", style="cyan")
+        t.add_column(justify="center", style="dim", no_wrap=True)
+        t.add_column(justify="right", style="white")
+
+        t.add_row("TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(block["total_samples"]))
+        if block["total_samples"]:
+            self._sys_cpu_summary(t, block)
+            self._sys_ram_summary(t, block)
+            self._sys_gpu_memory(t, block)
         console.print(
             Panel(
                 t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"
             )
         )
+
+    def _proc_cpu_summary(self, t: Table.grid, block: dict) -> None:
+        average_cpu_percent = block["average_cpu_percent"]
+        peak_cpu_percent = block["peak_cpu_percent"]
+        avg_cores_used = round(average_cpu_percent / 100, 2)
+        peak_cores_used = round(peak_cpu_percent / 100, 2)
+
+        t.add_row(
+            "CPU AVERAGE",
+            "[magenta]|[/magenta]",
+            f"{average_cpu_percent:.1f}% (~{avg_cores_used:.1f} cores of "
+            f"{block['cpu_logical_core_count']:.1f} cores)"
+        )
+        t.add_row(
+            "CPU PEAK",
+            "[magenta]|[/magenta]",
+            f"{peak_cpu_percent:.1f}% (~{peak_cores_used:.1f} cores of "
+            f"{block['cpu_logical_core_count']:.1f} cores)"
+        )
+
+    def _proc_ram_summary(self, t: Table.grid, block: dict) -> None:
+        # RAM Summary
+        avg_ram_used = block['average_ram']
+        peak_ram_used = block['peak_ram']
+        total_ram = block['total_ram']
+
+        t.add_row(
+            "RAM AVERAGE",
+            "[magenta]|[/magenta]",
+            f"{fmt_mem_new(avg_ram_used)} / {fmt_mem_new(total_ram)} "
+            f"({(avg_ram_used / total_ram) * 100:.1f}%)",
+        )
+        t.add_row(
+            "RAM PEAK",
+            "[magenta]|[/magenta]",
+            f"{fmt_mem_new(peak_ram_used)} / {fmt_mem_new(total_ram)} "
+            f"({(peak_ram_used / total_ram) * 100:.1f}%)",
+        )
+
+    def _proc_gpu_memory(self, t: Table.grid, block: dict) -> None:
+        if block["is_GPU_available"]:
+            t.add_row(
+                "GPU AVERAGE",
+                "[magenta]|[/magenta]",
+                f"{block['process_average_gpu_percent']:.1f}%",
+            )
+            t.add_row(
+                "GPU PEAK",
+                "[magenta]|[/magenta]",
+                f"{block['process_peak_gpu_percent']:.1f}%",
+            )
+        else:
+            t.add_row("GPU", "[cyan]|[/cyan]", "[red]Not available[/red]")
 
     def _render_process_summary(self, block: Dict[str, Any], console) -> None:
         t = Table.grid(padding=(0, 1))
@@ -158,17 +252,14 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         t.add_column(justify="center", style="dim", no_wrap=True)
         t.add_column(justify="right", style="white")
 
-        for k, v in block.items():
-            key = str(k).replace("_", " ").upper()
-            if isinstance(v, (int, float)) and "percent" in k:
-                val = fmt_percent(v)
-            elif any(s in k for s in ("ram", "memory", "mb")) and isinstance(
-                v, (int, float)
-            ):
-                val = fmt_mem(v)
-            else:
-                val = str(v)
-            t.add_row(key, "[magenta]|[/magenta]", val)
+        # CPU summary
+        t.add_row(
+            "TOTAL PROCESS SAMPLES", "[magenta]|[/magenta]", str(block["total_samples"])
+        )
+        if block["total_samples"]:
+            self._proc_cpu_summary(t, block)
+            self._proc_ram_summary(t, block)
+            self._proc_gpu_memory(t, block)
 
         console.print(
             Panel(
@@ -179,15 +270,11 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         )
 
     def log_summary(self, summary: Dict[str, Any]) -> None:
-        sys_summary = (summary or {}).get("SystemSampler") or {}
-        proc_summary = (summary or {}).get("ProcessSampler") or {}
-
         console = Console()
 
+        sys_summary = (summary or {}).get("SystemSampler") or {}
+        proc_summary = (summary or {}).get("ProcessSampler") or {}
         if sys_summary:
             self._render_system_summary(sys_summary, console)
         if proc_summary:
             self._render_process_summary(proc_summary, console)
-        if not sys_summary and not proc_summary:
-            # fallback to generic
-            self._render_system_summary(summary or {})

@@ -17,10 +17,10 @@ class BaseStdoutLogger:
         # Ensure display is started and register this logger's content function
         StdoutDisplayManager.start_display()
         StdoutDisplayManager.register_layout_content(
-            self.layout_section_name, self._get_panel_renderable
+            self.layout_section_name, self.get_panel_renderable
         )
 
-    def _get_panel_renderable(self) -> Any:  # This will be implemented by subclasses
+    def get_panel_renderable(self) -> Any:  # This will be implemented by subclasses
         """
         Abstract method: Subclasses must implement this to return a Rich Renderable
         (e.g., Panel, Table, Text) based on their `_latest_data`.

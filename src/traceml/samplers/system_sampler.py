@@ -283,7 +283,7 @@ class SystemSampler(BaseSampler):
 
     def _get_gpu_summary(self) -> Dict[str, Any]:
         if not self.gpu_available:
-            return {}
+            return {"is_GPU_available": self.gpu_available}
 
         all_mem_usages: List[float] = []
         nonzero_mem_usages: List[float] = []
@@ -325,35 +325,17 @@ class SystemSampler(BaseSampler):
             total_gpu_mem = 0
 
         summary = {
+            "is_GPU_available": self.gpu_available,
             "gpu_total_count": self.gpu_count,
             "gpu_average_util_percent": round(average_gpu_util, 2),
             "gpu_peak_util_percent": round(peak_gpu_util, 2),
+            "gpu_memory_global_peak_used": round(global_peak, 2),
+            "gpu_memory_global_lowest_nonzero_used": round(
+                global_min_nonzero, 2
+            ),
+            "gpu_memory_average_used": round(avg_mem, 2),
+            "gpu_memory_global_total": round(total_gpu_mem, 2),
         }
-
-        if total_gpu_mem > 0:
-            summary.update(
-                {
-                    "gpu_memory_global_peak_percent": round(
-                        global_peak / total_gpu_mem * 100, 2
-                    ),
-                    "gpu_memory_global_lowest_nonzero_percent": round(
-                        global_min_nonzero / total_gpu_mem * 100, 2
-                    ),
-                    "gpu_memory_average_percent": round(
-                        avg_mem / total_gpu_mem * 100, 2
-                    ),
-                }
-            )
-        else:
-            summary.update(
-                {
-                    "gpu_memory_global_peak_used": round(global_peak, 2),
-                    "gpu_memory_global_lowest_nonzero_used": round(
-                        global_min_nonzero, 2
-                    ),
-                    "gpu_memory_average_used": round(avg_mem, 2),
-                }
-            )
 
         return summary
 

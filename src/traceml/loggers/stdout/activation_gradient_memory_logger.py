@@ -175,7 +175,7 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
             )
         return table
 
-    def _get_panel_renderable(self) -> Panel:
+    def get_panel_renderable(self) -> Panel:
         act, grad = self._extract()
         a_devs = act.get("devices") or {}
         g_devs = grad.get("devices") or {}
