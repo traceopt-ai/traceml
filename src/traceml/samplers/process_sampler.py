@@ -185,12 +185,35 @@ class ProcessSampler(BaseSampler):
         peak_cpu = float(max(cpu_values))
         return {
             "total_process_samples": len(cpu_values),
-            "process_average_cpu_percent": avg_cpu,
-            "process_peak_cpu_percent": peak_cpu,
+            "process_average_cpu_percent": round(avg_cpu, 2),
+            "process_peak_cpu_percent": round(peak_cpu, 2),
         }
 
     def _get_ram_summary(self) -> Dict[str, Any]:
-        pass
+        ram_values = [s.used for s in self.ram_history]
+        if not ram_values:
+            return {}
+        total_ram = psutil.virtual_memory().total
+        avg_ram = float(sum(ram_values)/len(ram_values))
+        peak_ram = float(max(ram_values))
+        return {
+            "process_average_ram_percent": round(avg_ram, 2),
+            "process_peak_ram_percent": round(peak_ram, 2),
+        }
+
+    def _get_gpu_memory(self) -> Dict[str, Any]:
+        gpu_mem_values = [s.used for s in self.gpu_mem_history]
+        if not gpu_mem_values:
+            total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
+            return {
+                "process_average_gpu_percent": round(
+                        float(sum(gpu_mem_values) / len(gpu_mem_values))
+                        / total_gpu_memory* 100, 2),
+                "process_peak_gpu_percent": round(
+                        max(gpu_mem_values) / total_gpu_memory * 100, 2),
+            }
+        return {}
+
 
     def get_summary(self) -> Dict[str, Any]:
         """
@@ -200,57 +223,8 @@ class ProcessSampler(BaseSampler):
         try:
             summary: Dict[str, Any] = {}
             summary.update(self._get_cpu_summary())
-
-            ram_values = [s.used for s in self.ram_history]
-            gpu_mem_values = [s.used for s in self.gpu_mem_history]
-
-            # Get system RAM total
-            total_ram = psutil.virtual_memory().total / (1024**2)  # MB
-
-            # Get GPU total (use NVML first, fallback to torch)
-            total_gpu = None
-            try:
-                from pynvml import nvmlDeviceGetMemoryInfo
-
-                if self.gpu_available:
-                    handle = nvmlDeviceGetHandleByIndex(0)
-                    total_gpu = nvmlDeviceGetMemoryInfo(handle).total / (1024**2)
-            except Exception:
-                try:
-                    if torch.cuda.is_available():
-                        total_gpu = torch.cuda.get_device_properties(0).total_memory / (
-                            1024**2
-                        )
-                except Exception:
-                    total_gpu = None
-
-            if ram_values and total_ram:
-                summary.update(
-                    {
-                        "process_average_ram_percent": round(
-                            float(sum(ram_values) / len(ram_values)) / total_ram * 100,
-                            2,
-                        ),
-                        "process_peak_ram_percent": round(
-                            max(ram_values) / total_ram * 100, 2
-                        ),
-                    }
-                )
-
-            if gpu_mem_values and total_gpu:
-                summary.update(
-                    {
-                        "process_average_gpu_percent": round(
-                            float(sum(gpu_mem_values) / len(gpu_mem_values))
-                            / total_gpu
-                            * 100,
-                            2,
-                        ),
-                        "process_peak_gpu_percent": round(
-                            max(gpu_mem_values) / total_gpu * 100, 2
-                        ),
-                    }
-                )
+            summary.update(self._get_ram_summary())
+            summary.update(self._get_gpu_memory())
 
             return summary
 
