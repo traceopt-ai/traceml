@@ -198,9 +198,9 @@ class SystemSampler(BaseSampler):
             "gpu_util_avg_percent": round(avg_util, 2),
             "gpu_util_min_nonzero_percent": round(min_nonzero_util, 2),
             "gpu_util_max_percent": round(max_util, 2),
-            "gpu_util_imbalance_ratio": round(imbalance_util, 2)
-            if imbalance_util
-            else None,
+            "gpu_util_imbalance_ratio": (
+                round(imbalance_util, 2) if imbalance_util else None
+            ),
             "gpu_memory_highest_used": round(highest_mem, 2),
             "gpu_memory_lowest_nonzero_used": round(lowest_nonzero_mem, 2),
             "gpu_count_high_pressure": count_high_pressure,
@@ -214,15 +214,21 @@ class SystemSampler(BaseSampler):
             ram_total=float(self.ram_total_memory),
             gpu_available=self.gpu_available,
             gpu_count=self.gpu_count,
-            gpu_util_avg=float(current_sample.get("gpu_util_avg_percent", 0.0))
-            if self.gpu_available
-            else None,
-            gpu_mem_used_total=float(current_sample.get("gpu_memory_highest_used", 0.0))
-            if self.gpu_available
-            else None,
-            gpu_mem_total=float(self.gpu_mem_total_avg_history[-1])
-            if self.gpu_available
-            else None,
+            gpu_util_avg=(
+                float(current_sample.get("gpu_util_avg_percent", 0.0))
+                if self.gpu_available
+                else None
+            ),
+            gpu_mem_used_total=(
+                float(current_sample.get("gpu_memory_highest_used", 0.0))
+                if self.gpu_available
+                else None
+            ),
+            gpu_mem_total=(
+                float(self.gpu_mem_total_avg_history[-1])
+                if self.gpu_available
+                else None
+            ),
         )
 
     def sample(self) -> Dict[str, Any]:
@@ -330,9 +336,7 @@ class SystemSampler(BaseSampler):
             "gpu_average_util_percent": round(average_gpu_util, 2),
             "gpu_peak_util_percent": round(peak_gpu_util, 2),
             "gpu_memory_global_peak_used": round(global_peak, 2),
-            "gpu_memory_global_lowest_nonzero_used": round(
-                global_min_nonzero, 2
-            ),
+            "gpu_memory_global_lowest_nonzero_used": round(global_min_nonzero, 2),
             "gpu_memory_average_used": round(avg_mem, 2),
             "gpu_memory_global_total": round(total_gpu_mem, 2),
         }

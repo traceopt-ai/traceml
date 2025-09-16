@@ -8,7 +8,6 @@ from .base_sampler import BaseSampler
 from traceml.loggers.error_log import setup_error_logger, get_error_logger
 
 
-
 @dataclass
 class ProcessCPUSample:
     percent: float
@@ -55,7 +54,9 @@ class ProcessSampler(BaseSampler):
             self.process.cpu_percent(interval=None)
             self.cpu_count = psutil.cpu_count(logical=True)
         except Exception as e:
-            self.logger.error( f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}"
+            )
 
     def _init_gpu(self) -> None:
         self.gpu_available = False
@@ -102,7 +103,6 @@ class ProcessSampler(BaseSampler):
             self.logger.error(f"[TraceML] Torch GPU memory read failed: {e}")
         return None
 
-
     def _sample_gpu(self) -> Optional[ProcessGPUMemSample]:
         gpu_memory_usage = self._sample_gpu_memory()
         if gpu_memory_usage is not None:
@@ -110,7 +110,6 @@ class ProcessSampler(BaseSampler):
             self.gpu_mem_history.append(sample)
             return sample
         return None
-
 
     def sample(self) -> Dict[str, Any]:
         """
@@ -127,7 +126,9 @@ class ProcessSampler(BaseSampler):
             self.latest = ProcessSnapshot(
                 process_cpu_percent=round(cpu_sample.percent, 2),
                 process_ram=round(ram_sample.used, 2),
-                process_gpu_memory=round(gpu_sample.used, 2) if gpu_sample is not None else None,
+                process_gpu_memory=(
+                    round(gpu_sample.used, 2) if gpu_sample is not None else None
+                ),
             )
 
             snap = self.make_snapshot(
@@ -149,20 +150,19 @@ class ProcessSampler(BaseSampler):
             )
             return self.snapshot_dict(snap)
 
-
     def _get_cpu_summary(self) -> Dict[str, Any]:
         cpu_values = [s.percent for s in self.cpu_history]
         if not cpu_values:
             return {
                 "total_samples": 0,
             }
-        avg_cpu = float(sum(cpu_values)/len(cpu_values))
+        avg_cpu = float(sum(cpu_values) / len(cpu_values))
         peak_cpu = float(max(cpu_values))
         return {
             "total_samples": len(cpu_values),
             "average_cpu_percent": round(avg_cpu, 2),
             "peak_cpu_percent": round(peak_cpu, 2),
-            "cpu_logical_core_count": self.cpu_count
+            "cpu_logical_core_count": self.cpu_count,
         }
 
     def _get_ram_summary(self) -> Dict[str, Any]:
@@ -170,7 +170,7 @@ class ProcessSampler(BaseSampler):
         if not ram_values:
             return {}
         total_ram = psutil.virtual_memory().total
-        avg_ram = float(sum(ram_values)/len(ram_values))
+        avg_ram = float(sum(ram_values) / len(ram_values))
         peak_ram = float(max(ram_values))
         return {
             "average_ram": round(avg_ram, 2),
@@ -186,13 +186,10 @@ class ProcessSampler(BaseSampler):
         total_gpu_memory = torch.cuda.get_device_properties(0).total_memory
         return {
             "is_GPU_available": self.gpu_available,
-            "average_gpu_percent": round(
-                    float(sum(gpu_mem_values) / len(gpu_mem_values))
-                    / total_gpu_memory* 100, 2),
-            "peak_gpu_percent": round(
-                    max(gpu_mem_values) / total_gpu_memory * 100, 2),
+            "average_gpu_memory_used": float(sum(gpu_mem_values) / len(gpu_mem_values)),
+            "peak_gpu_memory_used": max(gpu_mem_values),
+            "total_gpu_memory_used": total_gpu_memory,
         }
-
 
     def get_summary(self) -> Dict[str, Any]:
         """

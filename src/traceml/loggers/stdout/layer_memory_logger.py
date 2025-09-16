@@ -6,7 +6,7 @@ import shutil
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import LAYER_SUMMARY_LAYOUT_NAME
-from traceml.utils.formatting import fmt_mem
+from traceml.utils.formatting import fmt_mem_new
 
 
 class LayerMemoryStdoutLogger(BaseStdoutLogger):
@@ -68,13 +68,13 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
                 )
                 table.add_row(
                     self._truncate(str(name)),
-                    fmt_mem(memory),
+                    fmt_mem_new(memory),
                     f"{pct:.1f}%",
                 )
         else:
             table.add_row("[dim]No layers detected[/dim]", "—", "—")
 
-        title_total = fmt_mem(total_memory)
+        title_total = fmt_mem_new(total_memory)
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 100)
@@ -98,36 +98,34 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
         table.add_column(justify="center", style="dim", no_wrap=True)
         table.add_column(justify="right", style="white")
 
-        def fmt_val(key: str, value: Any) -> str:
-            if value is None:
-                return "N/A"
-            if "memory" in key:
-                try:
-                    v = float(value)
-                    return fmt_mem(v)
-                except Exception:
-                    return "N/A"
-            try:
-                return str(int(value))
-            except Exception:
-                return str(value)
+        table.add_row(
+            "TOTAL SAMPLES TAKEN", "[blue]|[/blue]", str(summary["total_samples"])
+        )
+        table.add_row(
+            "TOTAL MODELS SEEN", "[blue]|[/blue]", str(summary["total_models_seen"])
+        )
+        table.add_row(
+            "AVERAGE MODEL MEMORY",
+            "[blue]|[/blue]",
+            fmt_mem_new(summary["average_model_memory"]),
+        )
+        table.add_row(
+            "PEAK MODEL MEMORY",
+            "[blue]|[/blue]",
+            fmt_mem_new(summary["peak_model_memory"]),
+        )
 
-        keys_to_display = [
-            "total_models_seen",
-            "total_samples_taken",
-            "average_model_memory",
-            "peak_model_memory",
-        ]
-
-        for key in keys_to_display:
-            val = summary.get(key, 0)
-            table.add_row(
-                key.replace("_", " ").upper(), "[blue]|[/blue]", fmt_val(key, val)
-            )
+        # Optional: show last model snapshot info if available
+        # last_snapshot = summary.get("last_model_snapshot")
+        # if last_snapshot:
+        #     table.add_row(
+        #         "LAST MODEL SNAPSHOT", "[blue]|[/blue]",
+        #         str(last_snapshot)  # or format more nicely if it's a dict
+        #     )
 
         panel = Panel(
             table,
-            title=f"[bold blue]{self.name} - Summary[/bold blue]",
+            title=f"[bold blue]Model Layer - Summary[/bold blue]",
             border_style="blue",
         )
         console.print(panel)
