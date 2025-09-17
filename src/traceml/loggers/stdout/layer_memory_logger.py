@@ -115,14 +115,6 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
             fmt_mem_new(summary["peak_model_memory"]),
         )
 
-        # Optional: show last model snapshot info if available
-        # last_snapshot = summary.get("last_model_snapshot")
-        # if last_snapshot:
-        #     table.add_row(
-        #         "LAST MODEL SNAPSHOT", "[blue]|[/blue]",
-        #         str(last_snapshot)  # or format more nicely if it's a dict
-        #     )
-
         panel = Panel(
             table,
             title=f"[bold blue]Model Layer - Summary[/bold blue]",
