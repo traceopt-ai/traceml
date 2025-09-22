@@ -169,13 +169,13 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
 
         # ---- Snapshot checks ----
         snap = getattr(sampler, "_latest_snapshot", None)
-        assert isinstance(snap, ModelMemorySnapshot), (
-            "No model memory snapshot produced"
-        )
+        assert isinstance(
+            snap, ModelMemorySnapshot
+        ), "No model memory snapshot produced"
         assert snap.error is None, f"Snapshot error: {snap.error}"
-        assert isinstance(snap.layer_memory, dict) and len(snap.layer_memory) > 0, (
-            "Layer memory dict should be non-empty"
-        )
+        assert (
+            isinstance(snap.layer_memory, dict) and len(snap.layer_memory) > 0
+        ), "Layer memory dict should be non-empty"
 
         # Total matches sum of layers
         layers_sum = round(sum(float(v) for v in snap.layer_memory.values()), 4)

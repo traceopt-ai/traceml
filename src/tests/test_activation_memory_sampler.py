@@ -61,15 +61,15 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
             time.sleep(0.35)
 
             snap = getattr(sampler, "_latest_snapshot", None)
-            assert isinstance(snap, ActivationSnapshot), (
-                "ActivationSampler produced no snapshot"
-            )
+            assert isinstance(
+                snap, ActivationSnapshot
+            ), "ActivationSampler produced no snapshot"
 
             # Expected shape (keep flexible): {'devices': {...}, 'overall_avg_mb': float, ...}
             devices = snap.devices or {}
-            assert isinstance(devices, dict), (
-                "Expected 'devices' to be a dict in activation snapshot"
-            )
+            assert isinstance(
+                devices, dict
+            ), "Expected 'devices' to be a dict in activation snapshot"
 
             for dev, stats in devices.items():
                 assert isinstance(stats, dict), f"Device stats for {dev} must be a dict"

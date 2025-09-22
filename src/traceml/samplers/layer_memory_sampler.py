@@ -55,14 +55,13 @@ class LayerMemorySampler(BaseSampler):
         total_memory = 0.0
 
         for name, param in model.named_parameters():
-            memory = (param.element_size() * param.nelement()) / (1024**2)
-            memory = round(float(memory), 4)
+            memory = param.element_size() * param.nelement()
             layer_memory[name] = memory
             total_memory += memory
 
         snapshot = ModelMemorySnapshot(
             model_index=len(self.seen_signatures),
-            total_memory=round(float(total_memory), 4),
+            total_memory=total_memory,
             layer_memory=layer_memory,
             model_signature=str(signature),
             error=None,
@@ -137,11 +136,9 @@ class LayerMemorySampler(BaseSampler):
         """
         Return summary statistics over all models seen.
         """
-        print()
         total_models = len(self.seen_signatures)
         avg_total_memory = 0.0
         max_total_memory = 0.0
-        print(total_models)
 
         if self.total_samples:
             totals = [s.total_memory for s in self.memory_history if s.error is None]
@@ -151,8 +148,8 @@ class LayerMemorySampler(BaseSampler):
             max_total_memory = round(max(totals), 4) if totals else 0.0
 
         return {
+            "total_samples": self.total_samples,
             "total_models_seen": total_models,
-            "total_samples_taken": self.total_samples,
             "average_model_memory": avg_total_memory,
             "peak_model_memory": max_total_memory,
             "last_model_snapshot": self._latest_snapshot,
