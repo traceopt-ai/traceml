@@ -1,6 +1,7 @@
 import threading
 import sys
 from typing import List, Tuple, Any, Dict
+from traceml.loggers.stdout.display_manager import StdoutDisplayManager
 
 
 class TrackerManager:
@@ -13,7 +14,10 @@ class TrackerManager:
 
     # components: List[Tuple[SamplerType, List[LoggerType]]]
     def __init__(
-        self, components: List[Tuple[Any, List[Any]]], interval_sec: float = 1.0
+        self,
+        components: List[Tuple[Any, List[Any]]],
+        interval_sec: float = 1.0,
+        notebook: bool = False
     ):
         """
         Args:
@@ -25,11 +29,15 @@ class TrackerManager:
         self.interval_sec = interval_sec
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
+        StdoutDisplayManager.enable_notebook_mode(notebook)
+
 
     def _run(self):
         """
         Background thread loop that continuously samples and logs live snapshots.
         """
+        StdoutDisplayManager.start_display()
+
         while not self._stop_event.is_set():
             for samplers, loggers in self.components:
                 if not isinstance(samplers, (list, tuple)):
@@ -51,6 +59,9 @@ class TrackerManager:
 
                 # 2. Log snapshot to all associated loggers
                 for logger in loggers:
+                    StdoutDisplayManager.register_layout_content(
+                        logger.layout_section_name, logger.get_panel_renderable
+                    )
                     try:
                         logger.log(snapshots)
                     except Exception as e:
@@ -58,6 +69,7 @@ class TrackerManager:
                             f"[TraceML] Error in logger '{logger.__class__.__name__}'.log() for sampler '{sampler.__class__.__name__}': {e}",
                             file=sys.stderr,
                         )
+                StdoutDisplayManager.update_display()
 
             # 3. Wait for the next interval
             self._stop_event.wait(self.interval_sec)
@@ -91,19 +103,18 @@ class TrackerManager:
 
             # Logger shutdown is now handled more broadly by the main execution context
             # calling StdoutDisplayManager.stop_display() and individual log_summaries.
-            # However, if any logger has specific internal cleanup (e.g., closing files),
-            # it might still have a 'shutdown' method.
             for _, loggers in self.components:
                 for logger in loggers:
-                    shutdown_fn = getattr(logger, "shutdown", None)
-                    if callable(shutdown_fn):
-                        try:
-                            shutdown_fn()
-                        except Exception as e:
-                            print(
-                                f"[TraceML] Logger '{logger.__class__.__name__}' shutdown error: {e}",
-                                file=sys.stderr,
-                            )
+                    try:
+                        StdoutDisplayManager.release_display()
+                        print(
+                            f"[TraceML][{self.name}] Logger shutdown complete, {StdoutDisplayManager._active_logger_count} Loggers left."
+                        )
+                    except Exception as e:
+                        print(
+                            f"[TraceML] Logger '{logger.__class__.__name__}' shutdown error: {e}",
+                            file=sys.stderr,
+                        )
 
         except Exception as e:
             print(f"[TraceML] Failed to stop TrackerManager: {e}", file=sys.stderr)

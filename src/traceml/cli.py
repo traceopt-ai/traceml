@@ -25,6 +25,7 @@ def run_with_tracing(
     script_path: str,
     interval: float = 1.0,
     log_dir: str = None,
+    notebook: bool = False,
     script_args: list = None,
 ):
     """
@@ -65,7 +66,6 @@ def run_with_tracing(
     activation_memory_sampler = ActivationMemorySampler()
     gradient_memory_sampler = GradientMemorySampler()
 
-    # stdout loggers (on terminal info)
     system_process_logger = SystemProcessStdoutLogger()
     layer_memory_stdout_logger = LayerMemoryStdoutLogger()
     activation_gradient_memory_stdout_logger = ActivationGradientMemoryStdoutLogger()
@@ -80,7 +80,7 @@ def run_with_tracing(
         ),
     ]
 
-    tracker = TrackerManager(sampler_logger_pairs, interval_sec=interval)
+    tracker = TrackerManager(sampler_logger_pairs, interval_sec=interval, notebook=notebook)
 
     # --- Arguments for the target script ---
     original_argv = list(sys.argv)
@@ -165,6 +165,12 @@ def main():
         default=os.path.join(os.getcwd(), ".traceml_runs"),
         help="Root directory to save TraceML's profiling logs and reports (default: '.traceml_runs/').",
     )
+    run_parser.add_argument(
+        "--notebook",
+        action="store_true",
+        help="Render TraceML output for Jupyter notebook (inline HTML) instead of terminal live display.",
+    )
+
 
     # This captures all remaining arguments after --log-dir etc.
     run_parser.add_argument(
@@ -172,7 +178,6 @@ def main():
         nargs=argparse.REMAINDER,  # Capture all remaining arguments
         help="Additional arguments to pass directly to the script being run.",
     )
-
     args = parser.parse_args()
 
     if args.command == "run":
@@ -182,6 +187,7 @@ def main():
             args.script,
             interval=args.interval,
             log_dir=args.log_dir,
+            notebook=args.notebook,
             script_args=script_args,
         )
     else:

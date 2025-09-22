@@ -4,6 +4,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 from typing import Dict, Any, Callable, Optional
+from IPython.display import display, HTML, clear_output, update_display
 import threading
 import sys
 
@@ -33,6 +34,16 @@ class StdoutDisplayManager:
     # For thread safety if multiple threads update _panel_content_fns
     _lock = threading.Lock()
     _active_logger_count: int = 0
+    _notebook_mode: bool = False
+    _display_id = "traceml_display"
+
+    @classmethod
+    def enable_notebook_mode(cls, enabled: bool = True):
+        """
+        Enable/disable notebook rendering mode.
+        When enabled, updates are rendered inline as HTML instead of Rich Live.
+        """
+        cls._notebook_mode = enabled
 
     @classmethod
     def _create_initial_layout(cls):
@@ -121,7 +132,28 @@ class StdoutDisplayManager:
                     file=sys.stderr,
                 )
                 return
-            cls._layout_content_fns[layout_section] = content_fn
+            cls._layout_content_fns.setdefault(layout_section, content_fn)
+
+    @classmethod
+    def _render_notebook(cls):
+        console = Console(record=True, force_terminal=False)
+        for section_name, content_fn in cls._layout_content_fns.items():
+            try:
+                renderable = content_fn()
+                if renderable is not None:
+                    console.print(renderable)
+            except Exception as e:
+                console.print(f"[red]Error rendering {section_name}: {e}[/red]")
+
+        html = console.export_html(inline_styles=True)
+
+        # Always write into the same cell
+        if not hasattr(cls, "_first_rendered"):
+            display(HTML(html), display_id=cls._display_id)
+            cls._first_rendered = True
+        else:
+            update_display(HTML(html), display_id=cls._display_id)
+
 
     @classmethod
     def update_display(cls):
@@ -130,6 +162,13 @@ class StdoutDisplayManager:
         content functions and updating the layout.
         """
         with cls._lock:
+            if cls._notebook_mode:
+                try:
+                    cls._render_notebook()
+                except Exception as e:
+                    print(f"[TraceML] Notebook display error: {e}", file=sys.stderr)
+                return
+
             if cls._live_display is None:
                 # If display fails to start log to console directly
                 # print("Live display not active. Logging directly to console.", file=sys.stderr)
