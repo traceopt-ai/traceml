@@ -80,7 +80,9 @@ def run_with_tracing(
         ),
     ]
 
-    tracker = TrackerManager(sampler_logger_pairs, interval_sec=interval, notebook=notebook)
+    tracker = TrackerManager(
+        sampler_logger_pairs, interval_sec=interval, notebook=notebook
+    )
 
     # --- Arguments for the target script ---
     original_argv = list(sys.argv)
@@ -170,7 +172,6 @@ def main():
         action="store_true",
         help="Render TraceML output for Jupyter notebook (inline HTML) instead of terminal live display.",
     )
-
 
     # This captures all remaining arguments after --log-dir etc.
     run_parser.add_argument(

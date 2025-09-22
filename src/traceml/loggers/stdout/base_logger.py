@@ -30,7 +30,6 @@ class BaseStdoutLogger:
         self._latest_env = snapshots
         self._latest_snapshot = snapshots
 
-
     def log_summary(self, summary: Dict[str, Any]):
         """
         Abstract method: Subclasses must implement to log a final summary.
