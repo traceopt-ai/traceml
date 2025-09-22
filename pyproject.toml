@@ -1,6 +1,6 @@
 [project]
 name = "traceml"
-version = "0.0.1"
+version = "0.0.2"
 description = "TraceML: Lightweight ML Profiler"
 authors = [{ name = "Abhinav Srivastav", email = "abhinavsriva@gmail.com" }]
 readme = "README.md"
@@ -19,7 +19,8 @@ dependencies = [
     "pandas>=2.0.3",
     "pytest>=8.4.1",
     "coverage>=7.10.5",
-    "pytest-cov>=6.2.1"
+    "pytest-cov>=6.2.1",
+    "ipython>=8.18.1"
 ]
 
 [project.optional-dependencies]

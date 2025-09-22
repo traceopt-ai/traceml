@@ -1,7 +1,5 @@
 from typing import Dict, Any
 
-from .display_manager import StdoutDisplayManager
-
 
 class BaseStdoutLogger:
     """
@@ -13,12 +11,6 @@ class BaseStdoutLogger:
         self.name = name
         self.layout_section_name = layout_section_name
         self._latest_data: Dict[str, Any] = {}
-
-        # Ensure display is started and register this logger's content function
-        StdoutDisplayManager.start_display()
-        StdoutDisplayManager.register_layout_content(
-            self.layout_section_name, self.get_panel_renderable
-        )
 
     def get_panel_renderable(self) -> Any:  # This will be implemented by subclasses
         """
@@ -38,21 +30,9 @@ class BaseStdoutLogger:
         self._latest_env = snapshots
         self._latest_snapshot = snapshots
 
-        StdoutDisplayManager.update_display()
-
     def log_summary(self, summary: Dict[str, Any]):
         """
         Abstract method: Subclasses must implement to log a final summary.
         This will typically be called after the main display is stopped.
         """
         raise NotImplementedError("Subclasses must implement log_summary method.")
-
-    def shutdown(self):
-        """
-        Performs any specific shutdown for this logger.
-        The main live display is stopped globally by the TrackerManager.
-        """
-        StdoutDisplayManager.release_display()
-        print(
-            f"[TraceML][{self.name}] Logger shutdown complete, {StdoutDisplayManager._active_logger_count} Loggers left."
-        )
