@@ -36,6 +36,110 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         grad_data = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
         return act_data, grad_data
 
+    def _section_header(self, label: str, data: Dict[str, Any], color: str) -> Table:
+        avg = float(
+            data.get("overall_avg_memory", data.get("overall_avg_mb", 0.0)) or 0.0
+        )
+        events = int(data.get("drained_events", 0) or 0)
+        stale = bool(data.get("stale", False))
+        error = data.get("error")
+
+        if error:
+            status = "[bold red]ERROR[/bold red]"
+        elif stale:
+            status = "[yellow]STALE[/yellow]"
+        else:
+            status = "[green]LIVE[/green]"
+
+        t = Table.grid(padding=(0, 3))
+        t.add_column(justify="left", style="white")
+        t.add_column(justify="left", style="white")
+        t.add_column(justify="left", style="white")
+
+        t.add_row(
+            f"[bold {color}]{label} Avg:[/bold {color}] {fmt_mem(avg)}",
+            f"[bold {color}]Events:[/bold {color}] {events}",
+            f"[bold {color}]Status:[/bold {color}] {status}",
+        )
+        return t
+
+    def _device_table(
+        self,
+        section_label: str,
+        devs: Dict[str, Any],
+        color: str,
+    ) -> Table:
+        table = Table(
+            show_header=True,
+            header_style="bold cyan",
+            box=None,
+            expand=True,
+            padding=(0, 1),
+        )
+        table.add_column("Section", justify="left", style="cyan", no_wrap=True)
+        table.add_column("Device", justify="left", style="magenta", no_wrap=True)
+        table.add_column("Avg", justify="right", style="white", no_wrap=True)
+        table.add_column("Max", justify="right", style="white", no_wrap=True)
+        table.add_column("Min>0", justify="right", style="white", no_wrap=True)
+        table.add_column("Count", justify="right", style="white", no_wrap=True)
+        table.add_column("Pressure", justify="center", style="white", no_wrap=True)
+
+        def _row(dev: str, stats: Dict[str, Any]):
+            avg = stats.get("avg_memory")
+            mx = stats.get("max_memory")
+            mnz = stats.get("min_nonzero_memory")
+            table.add_row(
+                f"[{color}]{section_label}[/{color}]",
+                str(dev),
+                fmt_mem(avg),
+                fmt_mem(mx),
+                fmt_mem(mnz) if mnz is not None else "—",
+                str(int(stats.get("count", 0) or 0)),
+                self._pressure_badge(stats.get("pressure_90pct")),
+            )
+
+        if devs:
+            for dev in sorted(devs.keys()):
+                _row(dev, devs[dev] or {})
+        else:
+            table.add_row(
+                f"[{color}]{section_label}[/{color}]",
+                "[dim]no devices[/dim]",
+                "—",
+                "—",
+                "—",
+                "0",
+                "[dim]n/a[/dim]",
+            )
+        return table
+
+    def get_panel_renderable(self) -> Panel:
+        act, grad = self._extract()
+        a_devs = act.get("devices") or {}
+        g_devs = grad.get("devices") or {}
+
+        # Outer layout: Activation, space, Gradient
+        outer = Table.grid(padding=(0, 0))
+        outer.add_row(self._section_header("Activation", act, "green"))
+        outer.add_row(self._device_table("Activation", a_devs, "green"))
+
+        spacer = Table.grid()
+        spacer.add_row("")
+        outer.add_row(spacer)
+
+        outer.add_row(self._section_header("Gradient", grad, "yellow"))
+        outer.add_row(self._device_table("Gradient", g_devs, "yellow"))
+
+        cols, _ = shutil.get_terminal_size()
+        panel_width = min(max(100, int(cols * 0.75)), 100)
+
+        return Panel(
+            outer,
+            title="[bold cyan]Live Activation & Gradient Memory[/bold cyan]",
+            border_style="cyan",
+            width=panel_width,
+        )
+
     # Summary
     def log_summary(self, summary: Dict[str, Any]):
         """
@@ -91,117 +195,3 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
             render_block("Activation", act_summary, "green")
         if grad_summary:
             render_block("Gradient", grad_summary, "yellow")
-
-    def _section_header(self, label: str, data: Dict[str, Any], color: str) -> Table:
-        avg = float(
-            data.get("overall_avg_memory", data.get("overall_avg_mb", 0.0)) or 0.0
-        )
-        events = int(data.get("drained_events", 0) or 0)
-        stale = bool(data.get("stale", False))
-        error = data.get("error")
-
-        if error:
-            status = "[bold red]ERROR[/bold red]"
-        elif stale:
-            status = "[yellow]STALE[/yellow]"
-        else:
-            status = "[green]LIVE[/green]"
-
-        t = Table.grid(padding=(0, 3))
-        t.add_column(justify="left", style="white")
-        t.add_column(justify="left", style="white")
-        t.add_column(justify="left", style="white")
-
-        t.add_row(
-            f"[bold {color}]{label} Avg:[/bold {color}] {fmt_mem(avg)}",
-            f"[bold {color}]Events:[/bold {color}] {events}",
-            f"[bold {color}]Status:[/bold {color}] {status}",
-        )
-        return t
-
-    def _device_table(
-        self,
-        section_label: str,
-        devs: Dict[str, Any],
-        color: str,
-        *,
-        allow_mb_keys: bool,
-    ) -> Table:
-        table = Table(
-            show_header=True,
-            header_style="bold cyan",
-            box=None,
-            expand=True,
-            padding=(0, 1),
-        )
-        table.add_column("Section", justify="left", style="cyan", no_wrap=True)
-        table.add_column("Device", justify="left", style="magenta", no_wrap=True)
-        table.add_column("Avg", justify="right", style="white", no_wrap=True)
-        table.add_column("Max", justify="right", style="white", no_wrap=True)
-        table.add_column("Min>0", justify="right", style="white", no_wrap=True)
-        table.add_column("Count", justify="right", style="white", no_wrap=True)
-        table.add_column("Pressure", justify="center", style="white", no_wrap=True)
-
-        def _row(dev: str, stats: Dict[str, Any]):
-            avg = stats.get("avg_memory")
-            mx = stats.get("max_memory")
-            mnz = stats.get("min_nonzero_memory")
-            if allow_mb_keys:
-                avg = avg if avg is not None else stats.get("avg_mb")
-                mx = mx if mx is not None else stats.get("max_mb")
-                mnz = mnz if mnz is not None else stats.get("min_nonzero_mb")
-            table.add_row(
-                f"[{color}]{section_label}[/{color}]",
-                str(dev),
-                fmt_mem(avg),
-                fmt_mem(mx),
-                fmt_mem(mnz) if mnz is not None else "—",
-                str(int(stats.get("count", 0) or 0)),
-                self._pressure_badge(stats.get("pressure_90pct")),
-            )
-
-        if devs:
-            for dev in sorted(devs.keys()):
-                _row(dev, devs[dev] or {})
-        else:
-            table.add_row(
-                f"[{color}]{section_label}[/{color}]",
-                "[dim]no devices[/dim]",
-                "—",
-                "—",
-                "—",
-                "0",
-                "[dim]n/a[/dim]",
-            )
-        return table
-
-    def get_panel_renderable(self) -> Panel:
-        act, grad = self._extract()
-        a_devs = act.get("devices") or {}
-        g_devs = grad.get("devices") or {}
-
-        # Outer layout: Activation, space, Gradient
-        outer = Table.grid(padding=(0, 0))
-        outer.add_row(self._section_header("Activation", act, "green"))
-        outer.add_row(
-            self._device_table("Activation", a_devs, "green", allow_mb_keys=True)
-        )
-
-        spacer = Table.grid()
-        spacer.add_row("")
-        outer.add_row(spacer)
-
-        outer.add_row(self._section_header("Gradient", grad, "yellow"))
-        outer.add_row(
-            self._device_table("Gradient", g_devs, "yellow", allow_mb_keys=False)
-        )
-
-        cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(100, int(cols * 0.75)), 100)
-
-        return Panel(
-            outer,
-            title="[bold cyan]Live Activation & Gradient Memory[/bold cyan]",
-            border_style="cyan",
-            width=panel_width,
-        )
