@@ -8,7 +8,7 @@
 
 ## The Problem
 
-Training large machine learning models often feels like a black box. One minute everything's running — the next, you're staring at a cryptic **"CUDA out of memory"** error.
+Training large machine learning models often feels like a black box. One minute everything's running and the next, you're staring at a cryptic **"CUDA out of memory"** error.
 
 Pinpointing which part of the model is consuming too much memory or slowing things down is frustrating and time-consuming. Traditional profiling tools can be overly complex or lack the granularity deep learning developers need.
 
