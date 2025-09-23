@@ -51,7 +51,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         # GPU (aggregate)
         gpu_available = sysd.get("gpu_available", False)
         gpu_util_avg = sysd.get("gpu_util_avg")
-        gpu_mem_avg_used = sysd.get("gpu_mem_avg_used")
+        gpu_mem_sum_used = sysd.get("gpu_mem_sum_used")
         gpu_mem_total = sysd.get("gpu_mem_total")
 
         # ------- Process -------
@@ -74,7 +74,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         if gpu_available:
             sys_info.append(f"[bold green]GPU[/bold green] {fmt_percent(gpu_util_avg)}")
             sys_info.append(
-                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(gpu_mem_avg_used)}/{fmt_mem_new(gpu_mem_total)}"
+                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(gpu_mem_sum_used)}/{fmt_mem_new(gpu_mem_total)}"
             )
 
         table.add_row("   ".join(sys_info))
