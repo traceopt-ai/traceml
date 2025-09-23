@@ -26,7 +26,6 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         super().__init__(
             name="System/Process", layout_section_name=SYSTEM_PROCESS_LAYOUT_NAME
         )
-        self._latest_env: Optional[Dict[str, Any]] = None
         self._latest_snapshot: Dict[str, Any] = {}
 
     def get_panel_renderable(self) -> Panel:
@@ -91,7 +90,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         ]
         if gpu_available:
             proc_info.append(
-                f"[bold yellow]GPU MEM[/bold yellow] {fmt_mem_new(pid_gpu_mem)}"
+                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(pid_gpu_mem)}"
             )
 
         table.add_row("   ".join(proc_info))
