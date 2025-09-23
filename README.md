@@ -23,7 +23,7 @@ Pinpointing which part of the model is consuming too much memory or slowing thin
 ## 📦 Installation
 
 ```bash
-pip install -e .
+pip install .
 ```
 
 ## 🚀 Usage
