@@ -51,7 +51,7 @@ class StdoutDisplayManager:
         Defines the improved structure of the Rich Layout with flexible ratios.
         """
         cls._layout.split_column(
-            Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, ratio=1),
+            Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, ratio=2),
             Layout(name=LAYER_SUMMARY_LAYOUT_NAME, ratio=3),
             Layout(name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, ratio=3),
         )

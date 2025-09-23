@@ -50,54 +50,51 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
                 ram_pct_str = ""
 
         # GPU (aggregate)
-        gpu_available = sysd.get("is_gpu_available", False)
-        gpu_util_avg = sysd.get("gpu_util_avg_percent")
-        gpu_util_min = sysd.get("gpu_util_min_nonzero_percent")
-        gpu_util_max = sysd.get("gpu_util_max_percent")
-        imbalance = sysd.get("gpu_util_imbalance_ratio")
-
-        gpu_mem_high = sysd.get("gpu_memory_highest_used")
-        gpu_mem_low = sysd.get("gpu_memory_lowest_nonzero_used")
-        high_pressure = sysd.get("gpu_count_high_pressure", 0)
-        total_gpus = sysd.get("gpu_count", 0)
+        gpu_available = sysd.get("gpu_available", False)
+        gpu_util_avg = sysd.get("gpu_util_avg")
+        gpu_mem_avg_used = sysd.get("gpu_mem_avg_used")
+        gpu_mem_total = sysd.get("gpu_mem_total")
 
         # ------- Process -------
         pid_cpu = procd.get("process_cpu_percent", 0.0)
-        pid_ram = procd.get("process_ram", 0.0)  # MB
-        pid_gpu_mem = procd.get("process_gpu_memory", None)  # MB or None
+        pid_ram = procd.get("process_ram", 0.0)
+        pid_gpu_mem = procd.get("process_gpu_memory", None)
 
         # Build compact merged table
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="white")
+        table.add_column(justify="left", style="white")
+        table.add_column(justify="left", style="white")
 
-        # Row 1: Host CPU/RAM vs Process CPU/RAM
-        table.add_row(
-            "[bold cyan]Host[/bold cyan] "
-            f"CPU {fmt_percent(cpu_host)}   RAM {fmt_mem_new(ram_used)}/{fmt_mem_new(ram_total)}{ram_pct_str}     "
-            "[bold cyan]Proc[/bold cyan] "
-            f"CPU {fmt_percent(pid_cpu)}   RAM {fmt_mem_new(pid_ram)}"
-        )
-
-        # Row 2: GPU Util (if present)
+        # --- system row ---
+        sys_info = [
+            "[bold cyan]System[/bold cyan]",
+            f"[bold green]CPU[/bold green] {fmt_percent(cpu_host)}",
+            f"[bold green]RAM[/bold green] {fmt_mem_new(ram_used)}/{fmt_mem_new(ram_total)}{ram_pct_str}",
+        ]
         if gpu_available:
-            util_bits = [f"AVG {fmt_percent(gpu_util_avg)}"]
-            if gpu_util_min not in (None, 0):
-                util_bits.append(f"MIN {fmt_percent(gpu_util_min)}")
-            if gpu_util_max not in (None, 0):
-                util_bits.append(f"MAX {fmt_percent(gpu_util_max)}")
-            if imbalance not in (None, 0):
-                util_bits.append(f"IMB {fmt_ratio(imbalance)}")
-            table.add_row("[magenta]GPU Util[/magenta]: " + " | ".join(util_bits))
+            sys_info.append(f"[bold green]GPU[/bold green] {fmt_percent(gpu_util_avg)}")
+            sys_info.append(
+                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(gpu_mem_avg_used)}/{fmt_mem_new(gpu_mem_total)}"
+            )
 
-            # Row 3: GPU Mem (host aggregate + process)
-            gpu_mem_parts = []
-            gpu_mem_parts.append(f"High {fmt_mem_new(gpu_mem_high)}")
-            gpu_mem_parts.append(f"Low {fmt_mem_new(gpu_mem_low)}")
-            gpu_mem_parts.append(f">90% {high_pressure}/{total_gpus}")
-            gpu_mem_parts.append(f"Proc {fmt_mem_new(pid_gpu_mem)}")
+        table.add_row("   ".join(sys_info))
 
-            if gpu_mem_parts:
-                table.add_row("[yellow]GPU Mem[/yellow]: " + " | ".join(gpu_mem_parts))
+        # gap
+        table.add_row("")
+
+        # --- process row ---
+        proc_info = [
+            "[bold cyan]Process[/bold cyan]",
+            f"[bold green]CPU[/bold green] {fmt_percent(pid_cpu)}",
+            f"[bold green]RAM[/bold green] {fmt_mem_new(pid_ram)}",
+        ]
+        if gpu_available:
+            proc_info.append(
+                f"[bold yellow]GPU MEM[/bold yellow] {fmt_mem_new(pid_gpu_mem)}"
+            )
+
+        table.add_row("   ".join(proc_info))
 
         # Adaptive width
         cols, _ = shutil.get_terminal_size()
@@ -169,11 +166,6 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
                 "GPU MEMORY PEAK",
                 "[cyan]|[/cyan]",
                 f"{fmt_mem_new(block['gpu_memory_global_peak_used'])} / {fmt_mem_new(total_gpu_mem)}",
-            )
-            t.add_row(
-                "GPU MEMORY LOWEST NONZERO",
-                "[cyan]|[/cyan]",
-                f"{fmt_mem_new(block['gpu_memory_global_lowest_nonzero_used'])} / {fmt_mem_new(total_gpu_mem)}",
             )
         else:
             t.add_row("GPU", "[cyan]|[/cyan]", "[red]Not available[/red]")
