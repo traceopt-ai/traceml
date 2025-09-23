@@ -94,13 +94,21 @@ class SystemSampler(BaseSampler):
 
     def _sample_cpu(self):
         """Sample CPU usage and update history."""
-        cpu_usage = psutil.cpu_percent(interval=None)
+        try:
+            cpu_usage = psutil.cpu_percent(interval=None)
+        except Exception as e:
+            self.logger.error(f"[TraceML] WARNING: psutil.cpu_percent initial call failed: {e}")
+            cpu_usage = 0.0
         self.cpu_history.append(cpu_usage)
 
     def _sample_ram(self):
         """Sample RAM usage and update history."""
-        mem = psutil.virtual_memory()
-        ram_used = float(mem.used)
+        try:
+            mem = psutil.virtual_memory()
+            ram_used = float(mem.used)
+        except Exception as e:
+            self.logger.error(f"[TraceML] WARNING: psutil.virtual_memory initial call failed: {e}")
+            ram_used = 0.0
         self.ram_history.append(ram_used)
 
     def _sample_gpu(self):
@@ -119,22 +127,21 @@ class SystemSampler(BaseSampler):
                 used_memory = float(meminfo.used)
                 total_memory = float(meminfo.total)
 
-                gpu_utils.append(util_pct)
-                gpu_mem_used.append(used_memory)
-                gpu_mem_total.append(total_memory)
-
             except Exception as e:
                 self.logger.error(f"[TraceML] GPU {i} sampling failed: {e}")
+                util_pct = 0.0
+                used_memory = 0.0
+                total_memory = 0.0
 
-        if not gpu_utils:
-            return
+            gpu_utils.append(util_pct)
+            gpu_mem_used.append(used_memory)
+            gpu_mem_total.append(total_memory)
 
         util_arr = np.array(gpu_utils)
         mem_used_arr = np.array(gpu_mem_used)
         mem_total_arr = np.array(gpu_mem_total)
 
         avg_util = float(np.mean(util_arr))
-        max_util = float(np.max(util_arr))
 
         sum_mem_used = float(np.sum(mem_used_arr)) if mem_used_arr.size else 0.0
         max_mem_used = float(np.max(mem_used_arr)) if mem_used_arr.size else 0.0
