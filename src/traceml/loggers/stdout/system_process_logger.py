@@ -164,7 +164,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             t.add_row(
                 "GPU MEMORY PEAK",
                 "[cyan]|[/cyan]",
-                f"{fmt_mem_new(block['gpu_memory_global_peak_used'])} / {fmt_mem_new(total_gpu_mem)}",
+                f"{fmt_mem_new(block['gpu_memory_peak_used'])} / {fmt_mem_new(total_gpu_mem)}",
             )
         else:
             t.add_row("GPU", "[cyan]|[/cyan]", "[red]Not available[/red]")
