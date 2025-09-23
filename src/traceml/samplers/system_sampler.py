@@ -18,30 +18,6 @@ from pynvml import (
 
 
 @dataclass
-class CPUSample:
-    percent: float
-
-
-@dataclass
-class RAMSample:
-    percent: float
-    used: float
-
-
-@dataclass
-class GPUSample:
-    util_percent: float
-    mem_used: float
-
-
-@dataclass
-class PerGPUState:
-    total_mem: float
-    util: Deque[float] = field(default_factory=lambda: deque(maxlen=10_000))
-    mem_used: Deque[float] = field(default_factory=lambda: deque(maxlen=10_000))
-
-
-@dataclass
 class Snapshot:
     cpu_percent: float
     ram_used: float
@@ -49,7 +25,9 @@ class Snapshot:
     gpu_available: bool
     gpu_count: int
     gpu_util_avg: Optional[float] = None
-    gpu_mem_used_total: Optional[float] = None
+    gpu_util_max: Optional[float] = None
+    gpu_mem_sum_used: Optional[float] = None
+    gpu_mem_max_used: Optional[float] = None
     gpu_mem_total: Optional[float] = None
 
 
@@ -91,15 +69,6 @@ class SystemSampler(BaseSampler):
             nvmlInit()
             self.gpu_count = nvmlDeviceGetCount()
             self.gpu_available = self.gpu_count > 0
-            self.gpus: Dict[int, PerGPUState] = {}
-            # Initialize per-GPU with known total mem (if accessible now)
-            for i in range(self.gpu_count):
-                try:
-                    handle = nvmlDeviceGetHandleByIndex(i)
-                    total_memory = float(nvmlDeviceGetMemoryInfo(handle).total)
-                except Exception:
-                    total_memory = 0.0
-                self.gpus[i] = PerGPUState(total_mem=total_memory)
         except NVMLError as e:
             self.logger.error(f"[TraceML] WARNING: GPU not available: {e}")
 
@@ -112,33 +81,40 @@ class SystemSampler(BaseSampler):
         self._init_ram()
         self._init_gpu()
 
-        self.cpu_history: Deque[CPUSample] = deque(maxlen=10_000)
-        self.ram_history: Deque[RAMSample] = deque(maxlen=10_000)
-        if self.gpu_available:
-            self.gpu_util_avg_history: Deque[float] = deque(maxlen=10_000)
-            self.gpu_mem_peak_used_history: Deque[float] = deque(maxlen=10_000)
-            self.gpu_mem_total_avg_history: Deque[float] = deque(maxlen=10_000)
+        self.cpu_history: Deque[float] = deque(maxlen=10_000)
+        self.ram_history: Deque[float] = deque(maxlen=10_000)
+        self.gpu_util_avg_history: Deque[float] = deque(maxlen=10_000)
+
+        self.gpu_mem_sum_history: Deque[float] = deque(maxlen=10_000)
+        self.gpu_mem_max_history: Deque[float] = deque(maxlen=10_000)
+        self.gpu_mem_min_history: Deque[float] = deque(maxlen=10_000)
+        self.gpu_mem_total_history: Deque[float] = deque(maxlen=10_000)
+
         self.latest: Optional[Snapshot] = None
 
-    def _sample_cpu(self) -> Dict:
+    def _sample_cpu(self):
         """Sample CPU usage and update history."""
-        cpu_usage = psutil.cpu_percent(interval=None)
-        self.cpu_history.append(CPUSample(percent=cpu_usage))
-        return {"cpu_percent": round(cpu_usage, 2)}
+        try:
+            cpu_usage = psutil.cpu_percent(interval=None)
+        except Exception as e:
+            self.logger.error(f"[TraceML] WARNING: psutil.cpu_percent initial call failed: {e}")
+            cpu_usage = 0.0
+        self.cpu_history.append(cpu_usage)
 
-    def _sample_ram(self) -> Dict:
+    def _sample_ram(self):
         """Sample RAM usage and update history."""
-        mem = psutil.virtual_memory()
-        ram_percent_used = float(mem.percent)
-        ram_used = float(mem.used)
-        self.ram_history.append(RAMSample(percent=ram_percent_used, used=ram_used))
-        return {"ram_used": round(ram_used, 2)}
+        try:
+            mem = psutil.virtual_memory()
+            ram_used = float(mem.used)
+        except Exception as e:
+            self.logger.error(f"[TraceML] WARNING: psutil.virtual_memory initial call failed: {e}")
+            ram_used = 0.0
+        self.ram_history.append(ram_used)
 
-    def _sample_gpu(self) -> Dict:
+    def _sample_gpu(self):
         """Sample GPU usage and update histories. Returns dict."""
-        gpu_summary = {"is_GPU_available": self.gpu_available}
         if not self.gpu_available:
-            return gpu_summary
+            return
 
         gpu_utils, gpu_mem_used, gpu_mem_total = [], [], []
         for i in range(self.gpu_count):
@@ -151,85 +127,58 @@ class SystemSampler(BaseSampler):
                 used_memory = float(meminfo.used)
                 total_memory = float(meminfo.total)
 
-                if i not in self.gpus:
-                    self.gpus[i] = PerGPUState(total_mem=total_memory)
-                if self.gpus[i].total_mem == 0.0 and total_memory > 0.0:
-                    self.gpus[i].total_mem = total_memory
-
-                self.gpus[i].util.append(util_pct)
-                self.gpus[i].mem_used.append(used_memory)
-
-                gpu_utils.append(util_pct)
-                gpu_mem_used.append(used_memory)
-                gpu_mem_total.append(total_memory)
-
             except Exception as e:
                 self.logger.error(f"[TraceML] GPU {i} sampling failed: {e}")
+                util_pct = 0.0
+                used_memory = 0.0
+                total_memory = 0.0
 
-        if not gpu_utils:
-            return gpu_summary
+            gpu_utils.append(util_pct)
+            gpu_mem_used.append(used_memory)
+            gpu_mem_total.append(total_memory)
 
         util_arr = np.array(gpu_utils)
         mem_used_arr = np.array(gpu_mem_used)
         mem_total_arr = np.array(gpu_mem_total)
 
         avg_util = float(np.mean(util_arr))
-        max_util = float(np.max(util_arr))
-        nonzero_utils = util_arr[util_arr > 0]
-        min_nonzero_util = float(np.min(nonzero_utils)) if nonzero_utils.size else 0.0
-        imbalance_util = (max_util / min_nonzero_util) if min_nonzero_util > 0 else None
 
-        highest_mem = float(np.max(mem_used_arr)) if mem_used_arr.size else 0.0
-        nonzero_mem = mem_used_arr[mem_used_arr > 0]
-        lowest_nonzero_mem = float(np.min(nonzero_mem)) if nonzero_mem.size else 0.0
-
-        count_high_pressure = sum(
-            1
-            for used, total in zip(mem_used_arr, mem_total_arr)
-            if total > 0 and (used / total) > 0.9
-        )
+        sum_mem_used = float(np.sum(mem_used_arr)) if mem_used_arr.size else 0.0
+        max_mem_used = float(np.max(mem_used_arr)) if mem_used_arr.size else 0.0
+        min_mem_used = float(np.min(mem_used_arr)) if mem_used_arr.size else 0.0
 
         # Update aggregated histories
         self.gpu_util_avg_history.append(avg_util)
-        self.gpu_mem_peak_used_history.append(highest_mem)
-        self.gpu_mem_total_avg_history.append(float(np.mean(mem_total_arr)))
+        self.gpu_mem_sum_history.append(sum_mem_used)
+        self.gpu_mem_max_history.append(max_mem_used)
+        self.gpu_mem_min_history.append(min_mem_used)
+        self.gpu_mem_total_history.append(float(np.sum(mem_total_arr)))
 
-        return ({
-            "is_GPU_available": self.gpu_available,
-            "gpu_total_count": self.gpu_count,
-            "gpu_util_avg_percent": round(avg_util, 2),
-            "gpu_util_min_nonzero_percent": round(min_nonzero_util, 2),
-            "gpu_util_max_percent": round(max_util, 2),
-            "gpu_util_imbalance_ratio": (
-                round(imbalance_util, 2) if imbalance_util else None
-            ),
-            "gpu_memory_highest_used": round(highest_mem, 2),
-            "gpu_memory_lowest_nonzero_used": round(lowest_nonzero_mem, 2),
-            "gpu_count_high_pressure": count_high_pressure,
-        })
 
-    def _generate_snapshot(self, current_sample):
+    def _generate_snapshot(self):
         """Convert current sample dict into Snapshot object."""
         return Snapshot(
-            cpu_percent=float(current_sample.get("cpu_percent", 0.0)),
-            ram_used=float(current_sample.get("ram_used", 0.0)),
+            cpu_percent=self.cpu_history[-1],
+            ram_used=self.ram_history[-1],
             ram_total=float(self.ram_total_memory),
             gpu_available=self.gpu_available,
             gpu_count=self.gpu_count,
             gpu_util_avg=(
-                float(current_sample.get("gpu_util_avg_percent", 0.0))
+                float(self.gpu_util_avg_history[-1])
                 if self.gpu_available
                 else None
             ),
-            gpu_mem_used_total=(
-                float(current_sample.get("gpu_memory_highest_used", 0.0))
-                if self.gpu_available
-                else None
+            gpu_mem_sum_used=(
+                float(self.gpu_mem_sum_history[-1])
+                if self.gpu_available else None
+            ),
+            gpu_mem_max_used=(
+                float(self.gpu_mem_max_history[-1])
+                if self.gpu_available else None
             ),
             gpu_mem_total=(
-                float(self.gpu_mem_total_avg_history[-1])
-                if self.gpu_available
-                else None
+                float(self.gpu_mem_total_history[-1])
+                if self.gpu_available else None
             ),
         )
 
@@ -242,18 +191,17 @@ class SystemSampler(BaseSampler):
             Dict[str, Any]: Includes "error" key if sampling fails.
         """
         try:
-            current_sample: Dict[str, Any] = {}
-            current_sample.update(self._sample_cpu())
-            current_sample.update(self._sample_ram())
-            current_sample.update(self._sample_gpu())
+            self._sample_cpu()
+            self._sample_ram()
+            self._sample_gpu()
 
-            self.latest = self._generate_snapshot(current_sample)
+            self.latest = self._generate_snapshot()
 
             snap = self.make_snapshot(
                 ok=True,
                 message="sampled successfully",
                 source="system",
-                data=self.latest.__dict__,  # or asdict(self.latest)
+                data=self.latest.__dict__,
             )
             return self.snapshot_dict(snap)
 
@@ -269,7 +217,7 @@ class SystemSampler(BaseSampler):
             return self.snapshot_dict(snap)
 
     def _get_cpu_summary(self) -> Dict[str, Any]:
-        cpu_values = [s.percent for s in self.cpu_history]
+        cpu_values = [s for s in self.cpu_history]
         cpu_avg = float(np.mean(cpu_values)) if cpu_values else 0.0
         cpu_peak = float(np.max(cpu_values)) if cpu_values else 0.0
         return {
@@ -280,7 +228,7 @@ class SystemSampler(BaseSampler):
         }
 
     def _get_ram_summary(self) -> Dict[str, Any]:
-        ram_values = [s.used for s in self.ram_history]
+        ram_values = [s for s in self.ram_history]
         ram_avg_used = float(np.mean(ram_values)) if ram_values else 0.0
         ram_peak_used = float(np.max(ram_values)) if ram_values else 0.0
         return {
@@ -293,30 +241,6 @@ class SystemSampler(BaseSampler):
         if not self.gpu_available:
             return {"is_GPU_available": self.gpu_available}
 
-        all_mem_usages: List[float] = []
-        nonzero_mem_usages: List[float] = []
-
-        for state in self.gpus.values():
-            all_mem_usages.extend(state.mem_used)
-            nonzero_mem_usages.extend([u for u in state.mem_used if u > 0])
-
-        all_mem_arr = (
-            np.array(all_mem_usages, dtype=float)
-            if all_mem_usages
-            else np.array([], dtype=float)
-        )
-        nonzero_mem_arr = (
-            np.array(nonzero_mem_usages, dtype=float)
-            if nonzero_mem_usages
-            else np.array([], dtype=float)
-        )
-
-        global_peak = float(np.max(all_mem_arr)) if all_mem_arr.size else 0.0
-        global_min_nonzero = (
-            float(np.min(nonzero_mem_arr)) if nonzero_mem_arr.size else 0.0
-        )
-        avg_mem = float(np.mean(all_mem_arr)) if all_mem_arr.size else 0.0
-
         util_arr = (
             np.array(self.gpu_util_avg_history, dtype=float)
             if self.gpu_util_avg_history
@@ -325,22 +249,23 @@ class SystemSampler(BaseSampler):
         average_gpu_util = float(np.mean(util_arr)) if util_arr.size else 0.0
         peak_gpu_util = float(np.max(util_arr)) if util_arr.size else 0.0
 
-        # Try to read total GPU memory (use first GPU as baseline)
-        try:
-            handle = nvmlDeviceGetHandleByIndex(0)
-            total_gpu_mem = nvmlDeviceGetMemoryInfo(handle).total
-        except Exception:
-            total_gpu_mem = 0
+        sum_gpu_memory = [s for s in self.gpu_mem_sum_history]
+        avg_mem = float(np.mean(sum_gpu_memory))
+
+        peak_gpu_memory = [s for s in self.gpu_mem_max_history]
+        peak_mem = float(np.mean(peak_gpu_memory))
+
+        total_mem = [s for s in self.gpu_mem_total_history]
+        total_mem = float(np.mean(total_mem))
 
         summary = {
             "is_GPU_available": self.gpu_available,
             "gpu_total_count": self.gpu_count,
             "gpu_average_util_percent": round(average_gpu_util, 2),
             "gpu_peak_util_percent": round(peak_gpu_util, 2),
-            "gpu_memory_global_peak_used": round(global_peak, 2),
-            "gpu_memory_global_lowest_nonzero_used": round(global_min_nonzero, 2),
+            "gpu_memory_peak_used": round(peak_mem, 2),
             "gpu_memory_average_used": round(avg_mem, 2),
-            "gpu_memory_global_total": round(total_gpu_mem, 2),
+            "gpu_memory_total": round(float(total_mem), 2),
         }
 
         return summary

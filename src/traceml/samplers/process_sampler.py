@@ -9,21 +9,6 @@ from traceml.loggers.error_log import setup_error_logger, get_error_logger
 
 
 @dataclass
-class ProcessCPUSample:
-    percent: float
-
-
-@dataclass
-class ProcessRAMSample:
-    used: float
-
-
-@dataclass
-class ProcessGPUMemSample:
-    used: float
-
-
-@dataclass
 class ProcessSnapshot:
     process_cpu_percent: float
     process_ram: float
@@ -71,9 +56,9 @@ class ProcessSampler(BaseSampler):
         self.logger = get_error_logger("ProcessSampler")
 
         # Sampling history
-        self.cpu_history: Deque[ProcessCPUSample] = deque(maxlen=10_000)
-        self.ram_history: Deque[ProcessRAMSample] = deque(maxlen=10_000)
-        self.gpu_mem_history: Deque[ProcessGPUMemSample] = deque(maxlen=10_000)
+        self.cpu_history: Deque[float] = deque(maxlen=10_000)
+        self.ram_history: Deque[float] = deque(maxlen=10_000)
+        self.gpu_mem_history: Deque[float] = deque(maxlen=10_000)
         # Initiate
         self._init_process()
         self._warmup_cpu()
@@ -81,35 +66,36 @@ class ProcessSampler(BaseSampler):
         # Latest snapshot
         self.latest: Optional[ProcessSnapshot] = None
 
-    def _sample_cpu(self) -> ProcessCPUSample:
-        sample = ProcessCPUSample(percent=self.process.cpu_percent(interval=None))
-        self.cpu_history.append(sample)
-        return sample
+    def _sample_cpu(self):
+        try:
+            cpu_percent = self.process.cpu_percent(interval=None)
+        except Exception as e:
+            self.logger.error(f"[TraceML] WARNING: Failed to sample CPU usage from process CPU usage: {e}")
+            cpu_percent = 0.0
+        self.cpu_history.append(float(cpu_percent))
 
-    def _sample_ram(self) -> ProcessRAMSample:
-        sample = ProcessRAMSample(used=self.process.memory_info().rss)
-        self.ram_history.append(sample)
-        return sample
+    def _sample_ram(self):
+        try:
+            ram_percent = self.process.memory_info().rss
+        except Exception as e:
+            self.logger.error(f"[TraceML] WARNING: Failed to sample RAM usage from process RAM usage: {e}")
+            ram_percent = 0.0
+        self.ram_history.append(float(ram_percent))
 
-    def _sample_gpu_memory(self) -> int:
+    def _sample_gpu_memory(self):
         """Return the GPU memory used by this process, or None if unavailable."""
         if not self.gpu_available:
             return None
-
         try:
-            if torch.cuda.is_available():
-                return torch.cuda.memory_allocated()
+            return torch.cuda.memory_allocated()
         except Exception as e:
             self.logger.error(f"[TraceML] Torch GPU memory read failed: {e}")
-        return None
+        return 0.0
 
-    def _sample_gpu(self) -> Optional[ProcessGPUMemSample]:
+    def _sample_gpu(self):
         gpu_memory_usage = self._sample_gpu_memory()
         if gpu_memory_usage is not None:
-            sample = ProcessGPUMemSample(used=gpu_memory_usage)
-            self.gpu_mem_history.append(sample)
-            return sample
-        return None
+            self.gpu_mem_history.append(float(gpu_memory_usage))
 
     def sample(self) -> Dict[str, Any]:
         """
@@ -118,16 +104,16 @@ class ProcessSampler(BaseSampler):
             envelope dict via BaseSampler helpers
         """
         try:
-            cpu_sample = self._sample_cpu()
-            ram_sample = self._sample_ram()
-            gpu_sample = self._sample_gpu()
+            self._sample_cpu()
+            self._sample_ram()
+            self._sample_gpu()
 
             # Create snapshot
             self.latest = ProcessSnapshot(
-                process_cpu_percent=round(cpu_sample.percent, 2),
-                process_ram=round(ram_sample.used, 2),
+                process_cpu_percent=round(self.cpu_history[-1], 2),
+                process_ram=round(self.ram_history[-1], 2),
                 process_gpu_memory=(
-                    round(gpu_sample.used, 2) if gpu_sample is not None else None
+                    round(self.gpu_mem_history[-1], 2) if self.gpu_available else None
                 ),
             )
 
@@ -151,7 +137,7 @@ class ProcessSampler(BaseSampler):
             return self.snapshot_dict(snap)
 
     def _get_cpu_summary(self) -> Dict[str, Any]:
-        cpu_values = [s.percent for s in self.cpu_history]
+        cpu_values = [s for s in self.cpu_history]
         if not cpu_values:
             return {
                 "total_samples": 0,
@@ -166,7 +152,7 @@ class ProcessSampler(BaseSampler):
         }
 
     def _get_ram_summary(self) -> Dict[str, Any]:
-        ram_values = [s.used for s in self.ram_history]
+        ram_values = [s for s in self.ram_history]
         if not ram_values:
             return {}
         total_ram = psutil.virtual_memory().total
@@ -179,7 +165,7 @@ class ProcessSampler(BaseSampler):
         }
 
     def _get_gpu_memory(self) -> Dict[str, Any]:
-        gpu_mem_values = [s.used for s in self.gpu_mem_history]
+        gpu_mem_values = [s for s in self.gpu_mem_history]
         if not gpu_mem_values:
             return {"is_GPU_available": self.gpu_available}
 
