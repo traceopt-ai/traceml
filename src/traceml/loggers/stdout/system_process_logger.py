@@ -140,7 +140,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
 
     def _sys_gpu_memory(self, t: Table.grid, block):
         if block.get("is_GPU_available", False) and block.get("gpu_total_count", 0) > 0:
-            total_gpu_mem = block.get("gpu_memory_global_total", 0)
+            total_gpu_mem = block.get("gpu_memory_total", 0)
             t.add_row(
                 "GPU COUNT",
                 "[cyan]|[/cyan]",
