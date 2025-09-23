@@ -45,7 +45,6 @@ class StdoutDisplayManager:
         """
         cls._notebook_mode = enabled
 
-
     @classmethod
     def _create_initial_layout(cls):
         """
@@ -54,9 +53,7 @@ class StdoutDisplayManager:
         cls._layout.split_column(
             Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, ratio=1),
             Layout(name=LAYER_SUMMARY_LAYOUT_NAME, ratio=3),
-            Layout(
-                name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, ratio=3
-            ),
+            Layout(name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, ratio=3),
         )
 
         # Initialize panels with placeholder text
@@ -69,7 +66,6 @@ class StdoutDisplayManager:
         cls._layout[ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Activation & Gradient Memory...", justify="center"))
         )
-
 
     @classmethod
     def start_display(cls):
@@ -99,7 +95,6 @@ class StdoutDisplayManager:
 
             cls._active_logger_count += 1
 
-
     @classmethod
     def stop_display(cls):
         """Stops the shared Rich Live display."""
@@ -114,7 +109,6 @@ class StdoutDisplayManager:
                 # Re-initialize layout to reset state for next run
                 cls._layout = Layout(name=ROOT_LAYOUT_NAME)
 
-
     @classmethod
     def release_display(cls):
         """Decrements active logger count and stops display if none remain."""
@@ -123,7 +117,6 @@ class StdoutDisplayManager:
 
             if cls._active_logger_count == 0:
                 cls.stop_display()
-
 
     @classmethod
     def register_layout_content(
@@ -140,7 +133,6 @@ class StdoutDisplayManager:
                 return
             cls._layout_content_fns.setdefault(layout_section, content_fn)
 
-
     @classmethod
     def _render_notebook(cls):
         console = Console(record=True, force_terminal=False, file=io.StringIO())
@@ -156,7 +148,6 @@ class StdoutDisplayManager:
         html = console.export_html(inline_styles=True)
         clear_output(wait=True)
         display(HTML(html), display_id=cls._display_id)
-
 
     @classmethod
     def update_display(cls):

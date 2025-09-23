@@ -117,7 +117,7 @@ class LayerMemoryStdoutLogger(BaseStdoutLogger):
 
         panel = Panel(
             table,
-            title=f"[bold blue]Model Layer - Summary[/bold blue]",
+            title="[bold blue]Model Layer - Summary[/bold blue]",
             border_style="blue",
         )
         console.print(panel)

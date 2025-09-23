@@ -3,7 +3,7 @@ from collections import deque
 import psutil
 import torch
 import os
-from typing import Dict, Any, Optional, Deque, Union
+from typing import Dict, Any, Optional, Deque
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import setup_error_logger, get_error_logger
 

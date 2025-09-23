@@ -3,7 +3,6 @@ from collections import defaultdict, deque
 from queue import Empty
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
-import sys
 import time
 import torch
 

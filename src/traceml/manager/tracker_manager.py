@@ -1,5 +1,4 @@
 import threading
-import sys
 from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
