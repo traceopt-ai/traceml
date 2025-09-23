@@ -9,7 +9,7 @@ from rich.console import Console
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_PROCESS_LAYOUT_NAME
-from traceml.utils.formatting import fmt_mem, fmt_percent, fmt_ratio, fmt_mem_new
+from traceml.utils.formatting import fmt_percent, fmt_ratio, fmt_mem_new
 
 
 class SystemProcessStdoutLogger(BaseStdoutLogger):
@@ -90,10 +90,10 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
 
             # Row 3: GPU Mem (host aggregate + process)
             gpu_mem_parts = []
-            gpu_mem_parts.append(f"High {fmt_mem(gpu_mem_high)}")
-            gpu_mem_parts.append(f"Low {fmt_mem(gpu_mem_low)}")
+            gpu_mem_parts.append(f"High {fmt_mem_new(gpu_mem_high)}")
+            gpu_mem_parts.append(f"Low {fmt_mem_new(gpu_mem_low)}")
             gpu_mem_parts.append(f">90% {high_pressure}/{total_gpus}")
-            gpu_mem_parts.append(f"Proc {fmt_mem(pid_gpu_mem)}")
+            gpu_mem_parts.append(f"Proc {fmt_mem_new(pid_gpu_mem)}")
 
             if gpu_mem_parts:
                 table.add_row("[yellow]GPU Mem[/yellow]: " + " | ".join(gpu_mem_parts))

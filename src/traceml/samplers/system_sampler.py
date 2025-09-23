@@ -120,13 +120,13 @@ class SystemSampler(BaseSampler):
             self.gpu_mem_total_avg_history: Deque[float] = deque(maxlen=10_000)
         self.latest: Optional[Snapshot] = None
 
-    def _sample_cpu(self):
+    def _sample_cpu(self) -> Dict:
         """Sample CPU usage and update history."""
         cpu_usage = psutil.cpu_percent(interval=None)
         self.cpu_history.append(CPUSample(percent=cpu_usage))
         return {"cpu_percent": round(cpu_usage, 2)}
 
-    def _sample_ram(self):
+    def _sample_ram(self) -> Dict:
         """Sample RAM usage and update history."""
         mem = psutil.virtual_memory()
         ram_percent_used = float(mem.percent)
@@ -134,9 +134,8 @@ class SystemSampler(BaseSampler):
         self.ram_history.append(RAMSample(percent=ram_percent_used, used=ram_used))
         return {"ram_used": round(ram_used, 2)}
 
-    @property
     def _sample_gpu(self) -> Dict:
-        """Sample GPU usage and update histories. Returns empty dict if no GPUs."""
+        """Sample GPU usage and update histories. Returns dict."""
         gpu_summary = {"is_GPU_available": self.gpu_available}
         if not self.gpu_available:
             return gpu_summary
@@ -195,20 +194,19 @@ class SystemSampler(BaseSampler):
         self.gpu_mem_peak_used_history.append(highest_mem)
         self.gpu_mem_total_avg_history.append(float(np.mean(mem_total_arr)))
 
-        return gpu_summary.update(
-            {
-                "gpu_total_count": self.gpu_count,
-                "gpu_util_avg_percent": round(avg_util, 2),
-                "gpu_util_min_nonzero_percent": round(min_nonzero_util, 2),
-                "gpu_util_max_percent": round(max_util, 2),
-                "gpu_util_imbalance_ratio": (
-                    round(imbalance_util, 2) if imbalance_util else None
-                ),
-                "gpu_memory_highest_used": round(highest_mem, 2),
-                "gpu_memory_lowest_nonzero_used": round(lowest_nonzero_mem, 2),
-                "gpu_count_high_pressure": count_high_pressure,
-            }
-        )
+        return ({
+            "is_GPU_available": self.gpu_available,
+            "gpu_total_count": self.gpu_count,
+            "gpu_util_avg_percent": round(avg_util, 2),
+            "gpu_util_min_nonzero_percent": round(min_nonzero_util, 2),
+            "gpu_util_max_percent": round(max_util, 2),
+            "gpu_util_imbalance_ratio": (
+                round(imbalance_util, 2) if imbalance_util else None
+            ),
+            "gpu_memory_highest_used": round(highest_mem, 2),
+            "gpu_memory_lowest_nonzero_used": round(lowest_nonzero_mem, 2),
+            "gpu_count_high_pressure": count_high_pressure,
+        })
 
     def _generate_snapshot(self, current_sample):
         """Convert current sample dict into Snapshot object."""
@@ -247,7 +245,7 @@ class SystemSampler(BaseSampler):
             current_sample: Dict[str, Any] = {}
             current_sample.update(self._sample_cpu())
             current_sample.update(self._sample_ram())
-            current_sample.update(self._sample_gpu)
+            current_sample.update(self._sample_gpu())
 
             self.latest = self._generate_snapshot(current_sample)
 
