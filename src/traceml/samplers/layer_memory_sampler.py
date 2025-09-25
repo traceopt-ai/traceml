@@ -44,29 +44,31 @@ class LayerMemorySampler(BaseSampler):
         Generate a unique signature for the model.
         """
         return tuple((name, tuple(p.shape)) for name, p in model.named_parameters())
+    
 
     def _build_snapshot_from_model(
-        self, model: torch.nn.Module, signature: Tuple
+            self, model: torch.nn.Module, signature: Tuple
     ) -> ModelMemorySnapshot:
-        """
-        Compute per-layer parameter memory and aggregate total.
-        """
         layer_memory: Dict[str, float] = {}
         total_memory = 0.0
 
-        for name, param in model.named_parameters():
-            memory = param.element_size() * param.nelement()
-            layer_memory[name] = memory
-            total_memory += memory
+        for name, module in model.named_modules():
+            if any(module.children()):  # skip containers
+                continue
+            layer_param_mem = 0.0
+            for p in module.parameters(recurse=False):
+                layer_param_mem += p.element_size() * p.nelement()
+            if layer_param_mem > 0:
+                layer_memory[name] = layer_param_mem
+                total_memory += layer_param_mem
 
-        snapshot = ModelMemorySnapshot(
+        return ModelMemorySnapshot(
             model_index=len(self.seen_signatures),
             total_memory=total_memory,
             layer_memory=layer_memory,
             model_signature=str(signature),
             error=None,
         )
-        return snapshot
 
     def _get_model_memory(self, model: torch.nn.Module) -> ModelMemorySnapshot:
         """Compute memory usage of a single model if it hasn't been sampled before."""
