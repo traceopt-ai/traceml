@@ -5,7 +5,7 @@ import shutil
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
-from traceml.utils.formatting import fmt_mem
+from traceml.utils.formatting import fmt_mem_new
 
 
 class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
@@ -42,11 +42,8 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         )
         events = int(data.get("drained_events", 0) or 0)
         stale = bool(data.get("stale", False))
-        error = data.get("error")
 
-        if error:
-            status = "[bold red]ERROR[/bold red]"
-        elif stale:
+        if stale:
             status = "[yellow]STALE[/yellow]"
         else:
             status = "[green]LIVE[/green]"
@@ -57,7 +54,7 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
         t.add_column(justify="left", style="white")
 
         t.add_row(
-            f"[bold {color}]{label} Avg:[/bold {color}] {fmt_mem(avg)}",
+            f"[bold {color}]{label} Avg:[/bold {color}] {fmt_mem_new(avg)}",
             f"[bold {color}]Events:[/bold {color}] {events}",
             f"[bold {color}]Status:[/bold {color}] {status}",
         )
@@ -91,9 +88,9 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
             table.add_row(
                 f"[{color}]{section_label}[/{color}]",
                 str(dev),
-                fmt_mem(avg),
-                fmt_mem(mx),
-                fmt_mem(mnz) if mnz is not None else "—",
+                fmt_mem_new(avg),
+                fmt_mem_new(mx),
+                fmt_mem_new(mnz) if mnz is not None else "—",
                 str(int(stats.get("count", 0) or 0)),
                 self._pressure_badge(stats.get("pressure_90pct")),
             )
@@ -177,9 +174,9 @@ class ActivationGradientMemoryStdoutLogger(BaseStdoutLogger):
                     row = (
                         f"{dev} | "
                         f"count={c_count}  "
-                        f"sum={fmt_mem(c_sum)}  "
-                        f"avg={fmt_mem(c_avg)}  "
-                        f"max={fmt_mem(c_max)}"
+                        f"sum={fmt_mem_new(c_sum)}  "
+                        f"avg={fmt_mem_new(c_avg)}  "
+                        f"max={fmt_mem_new(c_max)}"
                     )
                     t.add_row(row, "", "")
 

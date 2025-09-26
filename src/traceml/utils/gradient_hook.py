@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Any, Dict, Optional
+from traceml.loggers.error_log import get_error_logger, setup_error_logger
 
 import torch
 import torch.nn as nn
@@ -11,7 +12,7 @@ import torch.nn as nn
 gradient_queue: Queue = Queue(maxsize=2048)
 
 # Registries to prevent multiple hook attachments per model
-_grad_module_registry: Dict[int, bool] = {}
+_grad_layer_registry: Dict[int, bool] = {}
 _grad_param_registry: Dict[int, bool] = {}
 
 
@@ -21,20 +22,17 @@ class GradientEvent:
     Represents gradient memory for a single layer / param batch during backprop.
 
     For module hooks:
-      - per_device_grad_memory sums sizes over grad_output tensors of that layer.
-      - per_layer contains {layer_name: {device: mb}}.
+      - per_device_memory sizes over grad_output tensors of that layer.
 
     For parameter hooks:
       - layer_name is the parameter's qualified name.
-      - per_param contains {param_name: {device: mb}}.
     """
 
     model_id: int
     timestamp: float
-    layer_name: Optional[str]
-    per_device_grad_memory: Dict[str, float]
-    per_layer: Dict[str, Dict[str, float]]
-    per_param: Dict[str, Dict[str, float]]
+    layer_name: str  # layer/module name
+    param_name: Optional[str]
+    per_device_memory: Dict[str, float]
 
 
 def get_gradient_queue() -> Queue:
@@ -44,7 +42,7 @@ def get_gradient_queue() -> Queue:
 
 def _tensor_size_mb(t: torch.Tensor) -> float:
     try:
-        return float(t.numel() * t.element_size()) / (1024**2)
+        return float(t.numel() * t.element_size())
     except Exception:
         return 0.0
 
@@ -65,11 +63,11 @@ def _accumulate_tensor_sizes_mb(obj: Any, out: Dict[str, float]) -> None:
             for x in obj.values():
                 _accumulate_tensor_sizes_mb(x, out)
     except Exception:
-        # continue; don't want hooks to break training
+        # don't want hooks to break training
         pass
 
 
-class ModuleGradientHook:
+class LayerGradientHook:
     """
     Full backward hook capturing gradient sizes from grad_output for a layer.
     """
@@ -77,29 +75,27 @@ class ModuleGradientHook:
     def __init__(self, model_id: int, layer_name: str):
         self.model_id = model_id
         self.layer_name = layer_name
+        setup_error_logger()
+        self.logger = get_error_logger("LayerGradientHook")
 
     def __call__(self, module: nn.Module, grad_input: Any, grad_output: Any):
         try:
             device_mb: Dict[str, float] = {}
             _accumulate_tensor_sizes_mb(grad_output, device_mb)
 
-            ev = GradientEvent(
+            elem = GradientEvent(
                 model_id=self.model_id,
                 timestamp=time.time(),
                 layer_name=self.layer_name,
-                per_device_grad_memory=device_mb.copy(),
-                per_layer={self.layer_name: device_mb.copy()},
-                per_param={},
+                param_name=None,
+                per_device_memory=device_mb.copy()
             )
             try:
-                gradient_queue.put_nowait(ev)
+                gradient_queue.put_nowait(elem)
             except Full:
                 pass
         except Exception:
-            print(
-                f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}",
-                file=sys.stderr,
-            )
+            self.logger.error(f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}")
 
 
 class ParamGradientHook:
@@ -107,8 +103,9 @@ class ParamGradientHook:
     Per-parameter grad hook (registered on Tensor) to capture grad sizes for that param.
     """
 
-    def __init__(self, model_id: int, param_name: str):
+    def __init__(self, model_id: int, layer_name: str, param_name: str):
         self.model_id = model_id
+        self.layer_name = layer_name
         self.param_name = param_name
 
     def __call__(self, grad: torch.Tensor):
@@ -116,32 +113,28 @@ class ParamGradientHook:
             device_mb: Dict[str, float] = {}
             _accumulate_tensor_sizes_mb(grad, device_mb)
 
-            ev = GradientEvent(
+            elem = GradientEvent(
                 model_id=self.model_id,
                 timestamp=time.time(),
-                layer_name=None,
-                per_device_grad_memory=device_mb.copy(),
-                per_layer={},  # not populated by param hook
-                per_param={self.param_name: device_mb.copy()},
+                layer_name=self.layer_name,
+                param_name=self.param_name,
+                per_device_memory=device_mb.copy(),
             )
             try:
-                gradient_queue.put_nowait(ev)
+                gradient_queue.put_nowait(elem)
             except Full:
                 pass
         except Exception:
-            print(
-                f"[TraceML] Error in ParamGradientHook for param {self.param_name}",
-                file=sys.stderr,
-            )
+            self.logger.error( f"[TraceML] Error in ParamGradientHook for param {self.param_name}")
 
 
-def attach_module_gradient_hooks(model: nn.Module) -> None:
+def attach_layer_gradient_hooks(model: nn.Module) -> None:
     """
     Attach `register_full_backward_hook` to all leaf modules to capture grad_output sizes.
     Idempotent per model object.
     """
     model_id = id(model)
-    if _grad_module_registry.get(model_id):
+    if _grad_layer_registry.get(model_id):
         return
 
     try:
@@ -150,10 +143,19 @@ def attach_module_gradient_hooks(model: nn.Module) -> None:
             if any(module.children()):
                 continue
             # full backward hook works on module outputs
-            module.register_full_backward_hook(ModuleGradientHook(model_id, name))
-        _grad_module_registry[model_id] = True
+            module.register_full_backward_hook(LayerGradientHook(model_id, name))
+        _grad_layer_registry[model_id] = True
     except Exception as e:
         print(f"[TraceML] Failed to attach module gradient hooks: {e}", file=sys.stderr)
+
+
+def _build_param_to_module_map(model: nn.Module) -> Dict[str, str]:
+    mapping = {}
+    for module_name, module in model.named_modules():
+        for pname, _ in module.named_parameters(recurse=False):
+            full_name = f"{module_name}.{pname}" if module_name else pname
+            mapping[full_name] = module_name or "<root>"
+    return mapping
 
 
 def attach_param_gradient_hooks(model: nn.Module) -> None:
@@ -166,10 +168,13 @@ def attach_param_gradient_hooks(model: nn.Module) -> None:
         return
 
     try:
+        param_to_module = _build_param_to_module_map(model)
+
         for name, p in model.named_parameters(recurse=True):
             if p.requires_grad:
                 # register_hook attaches to the Tensor that will receive .grad
-                p.register_hook(ParamGradientHook(model_id, name))
+                layer_name = param_to_module.get(name, "<unknown>")
+                p.register_hook(ParamGradientHook(model_id, layer_name, name, ))
         _grad_param_registry[model_id] = True
     except Exception as e:
         print(f"[TraceML] Failed to attach param gradient hooks: {e}", file=sys.stderr)
@@ -187,4 +192,4 @@ def attach_all_gradient_hooks(model: nn.Module, include_module: bool = False) ->
             "[TraceML] WARNING: Attaching module backward hooks. "
             "These may break with AMP or DDP. Use with caution."
         )
-        attach_module_gradient_hooks(model)
+        attach_layer_gradient_hooks(model)

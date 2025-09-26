@@ -44,7 +44,7 @@ class LayerMemorySampler(BaseSampler):
         Generate a unique signature for the model.
         """
         return tuple((name, tuple(p.shape)) for name, p in model.named_parameters())
-    
+
 
     def _build_snapshot_from_model(
             self, model: torch.nn.Module, signature: Tuple
