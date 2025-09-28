@@ -12,8 +12,7 @@ from traceml.utils.gradient_hook import attach_all_gradient_hooks
 def trace_model(
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
-    trace_gradients: bool = True,
-    include_module: bool = False,
+    trace_gradients: bool = True
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -43,7 +42,7 @@ def trace_model(
                 if trace_activations:
                     attach_activation_hooks(self)
                 if trace_gradients:
-                    attach_all_gradient_hooks(self, include_module=include_module)
+                    attach_all_gradient_hooks(self)
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
 
@@ -57,8 +56,7 @@ def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
-    trace_gradients: bool = True,
-    include_module: bool = False,
+    trace_gradients: bool = True
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -77,6 +75,6 @@ def trace_model_instance(
         if trace_activations:
             attach_activation_hooks(model)
         if trace_gradients:
-            attach_all_gradient_hooks(model, include_module=include_module)
+            attach_all_gradient_hooks(model)
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)

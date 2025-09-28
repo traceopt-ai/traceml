@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Any, Dict, Optional
+
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 
 import torch
@@ -52,19 +53,26 @@ def _accumulate_tensor_sizes_mb(obj: Any, out: Dict[str, float]) -> None:
     Accumulate tensor sizes by device into `out`.
     Accepts a Tensor or nested structures (list/tuple/dict) of Tensors.
     """
-    try:
-        if isinstance(obj, torch.Tensor):
+    if obj is None:
+        return
+
+    if isinstance(obj, torch.Tensor):
+        try:
             dev = str(obj.device)
             out[dev] = out.get(dev, 0.0) + _tensor_size_mb(obj)
-        elif isinstance(obj, (list, tuple)):
-            for x in obj:
-                _accumulate_tensor_sizes_mb(x, out)
-        elif isinstance(obj, dict):
-            for x in obj.values():
-                _accumulate_tensor_sizes_mb(x, out)
-    except Exception:
-        # don't want hooks to break training
-        pass
+        except Exception:
+            pass
+        return
+
+    if isinstance(obj, (list, tuple)):
+        for x in obj:
+            _accumulate_tensor_sizes_mb(x, out)
+        return
+
+    if isinstance(obj, dict):
+        for x in obj.values():
+            _accumulate_tensor_sizes_mb(x, out)
+        return
 
 
 class LayerGradientHook:
@@ -83,17 +91,18 @@ class LayerGradientHook:
             device_mb: Dict[str, float] = {}
             _accumulate_tensor_sizes_mb(grad_output, device_mb)
 
-            elem = GradientEvent(
-                model_id=self.model_id,
-                timestamp=time.time(),
-                layer_name=self.layer_name,
-                param_name=None,
-                per_device_memory=device_mb.copy()
-            )
-            try:
-                gradient_queue.put_nowait(elem)
-            except Full:
-                pass
+            if device_mb:
+                elem = GradientEvent(
+                    model_id=self.model_id,
+                    timestamp=time.time(),
+                    layer_name=self.layer_name,
+                    param_name=None,
+                    per_device_memory=device_mb.copy()
+                )
+                try:
+                    gradient_queue.put_nowait(elem)
+                except Full:
+                    pass
         except Exception:
             self.logger.error(f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}")
 
@@ -107,23 +116,26 @@ class ParamGradientHook:
         self.model_id = model_id
         self.layer_name = layer_name
         self.param_name = param_name
+        setup_error_logger()
+        self.logger = get_error_logger("ParamGradientHook")
 
     def __call__(self, grad: torch.Tensor):
         try:
             device_mb: Dict[str, float] = {}
             _accumulate_tensor_sizes_mb(grad, device_mb)
 
-            elem = GradientEvent(
-                model_id=self.model_id,
-                timestamp=time.time(),
-                layer_name=self.layer_name,
-                param_name=self.param_name,
-                per_device_memory=device_mb.copy(),
-            )
-            try:
-                gradient_queue.put_nowait(elem)
-            except Full:
-                pass
+            if device_mb:
+                elem = GradientEvent(
+                    model_id=self.model_id,
+                    timestamp=time.time(),
+                    layer_name=self.layer_name,
+                    param_name=self.param_name,
+                    per_device_memory=device_mb.copy(),
+                )
+                try:
+                    gradient_queue.put_nowait(elem)
+                except Full:
+                    pass
         except Exception:
             self.logger.error( f"[TraceML] Error in ParamGradientHook for param {self.param_name}")
 
@@ -180,16 +192,11 @@ def attach_param_gradient_hooks(model: nn.Module) -> None:
         print(f"[TraceML] Failed to attach param gradient hooks: {e}", file=sys.stderr)
 
 
-def attach_all_gradient_hooks(model: nn.Module, include_module: bool = False) -> None:
+def attach_all_gradient_hooks(model: nn.Module) -> None:
     """
     Attach gradient hooks to a model.
     Always attaches param hooks (safe).
     Optionally attaches module backward hooks (risky with AMP).
     """
     attach_param_gradient_hooks(model)
-    if include_module:
-        print(
-            "[TraceML] WARNING: Attaching module backward hooks. "
-            "These may break with AMP or DDP. Use with caution."
-        )
-        attach_layer_gradient_hooks(model)
+    attach_layer_gradient_hooks(model)

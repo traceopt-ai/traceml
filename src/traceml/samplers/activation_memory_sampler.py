@@ -271,6 +271,7 @@ class ActivationMemorySampler(BaseSampler):
             return {
                 "ever_seen": self._ever_seen,
                 "per_device_cumulative": per_dev_summary,
+                "layer_global_peaks": dict(self._cumulative_layer_peaks),
                 "raw_events_kept": len(self._raw_events),
                 "last_snapshot": self._latest_snapshot.__dict__  if self._latest_snapshot else None,
             }
@@ -283,6 +284,7 @@ class ActivationMemorySampler(BaseSampler):
                 "error": str(e),
                 "ever_seen": self._ever_seen,
                 "per_device_cumulative": {},
+                "layer_global_peaks": {},
                 "raw_events_kept": len(self._raw_events),
                 "last_snapshot": None,
             }
