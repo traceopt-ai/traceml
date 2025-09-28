@@ -25,10 +25,12 @@ EPOCHS = 1
 LR = 2e-5
 WARMUP_RATIO = 0.06
 
+
 def register_backward_hooks(model: nn.Module):
     """
     Attach a backward hook to every submodule to log gradient memory usage.
     """
+
     def _bw_hook(module, grad_input, grad_output):
         # grad_input and grad_output are tuples of tensors
         total_mem = 0
@@ -37,8 +39,10 @@ def register_backward_hooks(model: nn.Module):
                 total_mem += g.numel() * g.element_size()
 
         if total_mem > 0:
-            print(f"[Backward] {module.__class__.__name__:<30} | "
-                  f"grad mem {total_mem / (1024**2):.2f} MB")
+            print(
+                f"[Backward] {module.__class__.__name__:<30} | "
+                f"grad mem {total_mem / (1024**2):.2f} MB"
+            )
 
     for name, m in model.named_modules():
         # only register on leaf modules to avoid spam

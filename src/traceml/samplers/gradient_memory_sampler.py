@@ -4,7 +4,6 @@ from queue import Empty
 from typing import Any, Deque, Dict, List, Optional, Tuple
 import time
 import torch
-from numpy.distutils.cpuinfo import DarwinCPUInfo
 
 from .base_sampler import BaseSampler
 from traceml.utils.gradient_hook import get_gradient_queue
@@ -28,8 +27,11 @@ class GradientSnapshot:
       - layers:  {layer_name: {device: mb_total}}
       - params:  {param_name: {device: mb_total}}
     """
-    devices: Dict[str, Any] = field(default_factory=dict)   # per device stats
-    layers: Dict[str, Dict[str, float]] = field(default_factory=dict)  # per-layer totals
+
+    devices: Dict[str, Any] = field(default_factory=dict)  # per device stats
+    layers: Dict[str, Dict[str, float]] = field(
+        default_factory=dict
+    )  # per-layer totals
     overall_avg_memory: float = 0.0
     drained_events: int = 0
     stale: bool = False
@@ -41,7 +43,6 @@ class DrainResult:
     per_device: Dict[str, List[float]]
     per_layer: Dict[str, List[float]]
     per_param: Dict[str, Dict[str, List[float]]]
-
 
 
 class GradientMemorySampler(BaseSampler):
@@ -79,9 +80,14 @@ class GradientMemorySampler(BaseSampler):
         self._ever_seen: bool = False
 
     def _append_raw_event(
-        self, ts: float, per_dev_memory: Dict[str, float], layer: str, param: Optional[str]
+        self,
+        ts: float,
+        per_dev_memory: Dict[str, float],
+        layer: str,
+        param: Optional[str],
     ) -> None:
-        self._raw_events.append({
+        self._raw_events.append(
+            {
                 "ts": float(ts),
                 "per_dev_memory": dict(per_dev_memory),
                 "layer": layer,
@@ -124,11 +130,11 @@ class GradientMemorySampler(BaseSampler):
             return None
 
     def _process_event(
-            self,
-            ev,
-            batch_per_dev: Dict[str, List[float]],
-            batch_per_layer: Dict[str, List[float]],
-            batch_per_param: Dict[str, Dict[str, List[float]]]
+        self,
+        ev,
+        batch_per_dev: Dict[str, List[float]],
+        batch_per_layer: Dict[str, List[float]],
+        batch_per_param: Dict[str, Dict[str, List[float]]],
     ) -> None:
         """Update per-device, per-layer, per-param accumulators from one gradient event."""
         ts = getattr(ev, "timestamp", 0.0)
@@ -146,7 +152,7 @@ class GradientMemorySampler(BaseSampler):
                 batch_per_param[layer][param].append(float(mem))
 
     def _drain_queue(
-            self,
+        self,
     ) -> DrainResult:
         """Drain the gradient queue completely and return per-device, per-layer, per-param stats."""
         try:
@@ -158,7 +164,9 @@ class GradientMemorySampler(BaseSampler):
         drained_events = 0
         batch_per_device: Dict[str, List[float]] = defaultdict(list)
         batch_per_layer: Dict[str, List[float]] = defaultdict(list)
-        batch_per_param: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+        batch_per_param: Dict[str, Dict[str, List[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
 
         while True:
             try:
@@ -170,13 +178,16 @@ class GradientMemorySampler(BaseSampler):
                 break
 
             drained_events += 1
-            self._process_event(elem, batch_per_device, batch_per_layer, batch_per_param)
+            self._process_event(
+                elem, batch_per_device, batch_per_layer, batch_per_param
+            )
 
-        return DrainResult(drained_events, batch_per_device, batch_per_layer, batch_per_param)
+        return DrainResult(
+            drained_events, batch_per_device, batch_per_layer, batch_per_param
+        )
 
     def _build_device_stats(
-        self,
-        per_device: Dict[str, List[float]]
+        self, per_device: Dict[str, List[float]]
     ) -> Tuple[Dict[str, Any], float, int]:
         """Aggregate device-level stats and return (devices_out, total_avg, n_devices)."""
         devices_out: Dict[str, Any] = {}
@@ -201,7 +212,6 @@ class GradientMemorySampler(BaseSampler):
 
         return devices_out, overall_avg, n_devs
 
-
     def _build_layer_stats(
         self,
         per_layer: Dict[str, List[float]],
@@ -223,7 +233,9 @@ class GradientMemorySampler(BaseSampler):
                 if not pvals:
                     continue
                 p_curr_peak = float(max(pvals))
-                prev_p_global = float(self._cumulative_param_peaks[layer].get(pname, 0.0))
+                prev_p_global = float(
+                    self._cumulative_param_peaks[layer].get(pname, 0.0)
+                )
                 p_global = max(p_curr_peak, prev_p_global)
                 self._cumulative_param_peaks[layer][pname] = p_global
                 params_out[pname] = {
@@ -317,14 +329,19 @@ class GradientMemorySampler(BaseSampler):
                 "per_device_cumulative": per_dev_summary,
                 "layer_global_peaks": dict(self._cumulative_layer_peaks),
                 "param_global_peaks": {
-                    lname: dict(pmap) for lname, pmap in self._cumulative_param_peaks.items()
+                    lname: dict(pmap)
+                    for lname, pmap in self._cumulative_param_peaks.items()
                 },
                 "raw_events_kept": len(self._raw_events),
-                "last_snapshot": self._latest_snapshot.__dict__ if self._latest_snapshot else None,
+                "last_snapshot": (
+                    self._latest_snapshot.__dict__ if self._latest_snapshot else None
+                ),
             }
 
         except Exception as e:
-            self.logger.error(f"[TraceML] GradientMemorySampler.get_summary() error: {e}")
+            self.logger.error(
+                f"[TraceML] GradientMemorySampler.get_summary() error: {e}"
+            )
             return {
                 "error": str(e),
                 "ever_seen": self._ever_seen,

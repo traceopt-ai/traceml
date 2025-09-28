@@ -62,15 +62,15 @@ def test_gradient_sampler_with_tracker_and_backward_activity():
             time.sleep(0.35)
 
             snap = getattr(sampler, "_latest_snapshot", None)
-            assert isinstance(snap, GradientSnapshot), (
-                "GradientSampler produced no snapshot"
-            )
+            assert isinstance(
+                snap, GradientSnapshot
+            ), "GradientSampler produced no snapshot"
 
             # Expected shape (keep flexible): {'devices': {...}, 'overall_avg_mb': float, ...}
             devices = snap.devices or {}
-            assert isinstance(devices, dict), (
-                "Expected 'devices' to be a dict in gradient snapshot"
-            )
+            assert isinstance(
+                devices, dict
+            ), "Expected 'devices' to be a dict in gradient snapshot"
 
             for dev, stats in devices.items():
                 assert isinstance(stats, dict), f"Device stats for {dev} must be a dict"

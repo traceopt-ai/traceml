@@ -147,7 +147,7 @@ class ActivationMemorySampler(BaseSampler):
 
             if per_layer:
                 layer, dev_dict = next(iter(per_layer.items()))
-                for _, mem in  (dev_dict or {}).items():
+                for _, mem in (dev_dict or {}).items():
                     batch_per_layer[layer].append(float(mem))
 
         return DrainResult(drained_events, batch_per_device, batch_per_layer)
@@ -273,7 +273,9 @@ class ActivationMemorySampler(BaseSampler):
                 "per_device_cumulative": per_dev_summary,
                 "layer_global_peaks": dict(self._cumulative_layer_peaks),
                 "raw_events_kept": len(self._raw_events),
-                "last_snapshot": self._latest_snapshot.__dict__  if self._latest_snapshot else None,
+                "last_snapshot": (
+                    self._latest_snapshot.__dict__ if self._latest_snapshot else None
+                ),
             }
 
         except Exception as e:

@@ -70,7 +70,9 @@ class ProcessSampler(BaseSampler):
         try:
             cpu_percent = self.process.cpu_percent(interval=None)
         except Exception as e:
-            self.logger.error(f"[TraceML] WARNING: Failed to sample CPU usage from process CPU usage: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: Failed to sample CPU usage from process CPU usage: {e}"
+            )
             cpu_percent = 0.0
         self.cpu_history.append(float(cpu_percent))
 
@@ -78,7 +80,9 @@ class ProcessSampler(BaseSampler):
         try:
             ram_percent = self.process.memory_info().rss
         except Exception as e:
-            self.logger.error(f"[TraceML] WARNING: Failed to sample RAM usage from process RAM usage: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: Failed to sample RAM usage from process RAM usage: {e}"
+            )
             ram_percent = 0.0
         self.ram_history.append(float(ram_percent))
 

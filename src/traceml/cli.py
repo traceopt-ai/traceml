@@ -13,7 +13,9 @@ from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
 from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 
 from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.layer_combined_stdout_logger import LayerCombinedStdoutLogger
+from traceml.loggers.stdout.layer_combined_stdout_logger import (
+    LayerCombinedStdoutLogger,
+)
 
 from traceml.manager.tracker_manager import TrackerManager
 
@@ -71,7 +73,7 @@ def run_with_tracing(
         ([system_sampler, process_sampler], [system_process_logger]),
         (
             [layer_memory_sampler, activation_memory_sampler, gradient_memory_sampler],
-            [layer_combined_stdout_logger]
+            [layer_combined_stdout_logger],
         ),
     ]
 

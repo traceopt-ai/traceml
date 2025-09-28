@@ -1,7 +1,7 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from collections import deque
 import psutil
-from typing import List, Dict, Any, Optional, Deque
+from typing import Dict, Any, Optional, Deque
 import numpy as np
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import setup_error_logger, get_error_logger
@@ -97,7 +97,9 @@ class SystemSampler(BaseSampler):
         try:
             cpu_usage = psutil.cpu_percent(interval=None)
         except Exception as e:
-            self.logger.error(f"[TraceML] WARNING: psutil.cpu_percent initial call failed: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: psutil.cpu_percent initial call failed: {e}"
+            )
             cpu_usage = 0.0
         self.cpu_history.append(cpu_usage)
 
@@ -107,7 +109,9 @@ class SystemSampler(BaseSampler):
             mem = psutil.virtual_memory()
             ram_used = float(mem.used)
         except Exception as e:
-            self.logger.error(f"[TraceML] WARNING: psutil.virtual_memory initial call failed: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: psutil.virtual_memory initial call failed: {e}"
+            )
             ram_used = 0.0
         self.ram_history.append(ram_used)
 
@@ -154,7 +158,6 @@ class SystemSampler(BaseSampler):
         self.gpu_mem_min_history.append(min_mem_used)
         self.gpu_mem_total_history.append(float(np.sum(mem_total_arr)))
 
-
     def _generate_snapshot(self):
         """Convert current sample dict into Snapshot object."""
         return Snapshot(
@@ -164,21 +167,16 @@ class SystemSampler(BaseSampler):
             gpu_available=self.gpu_available,
             gpu_count=self.gpu_count,
             gpu_util_avg=(
-                float(self.gpu_util_avg_history[-1])
-                if self.gpu_available
-                else None
+                float(self.gpu_util_avg_history[-1]) if self.gpu_available else None
             ),
             gpu_mem_sum_used=(
-                float(self.gpu_mem_sum_history[-1])
-                if self.gpu_available else None
+                float(self.gpu_mem_sum_history[-1]) if self.gpu_available else None
             ),
             gpu_mem_max_used=(
-                float(self.gpu_mem_max_history[-1])
-                if self.gpu_available else None
+                float(self.gpu_mem_max_history[-1]) if self.gpu_available else None
             ),
             gpu_mem_total=(
-                float(self.gpu_mem_total_history[-1])
-                if self.gpu_available else None
+                float(self.gpu_mem_total_history[-1]) if self.gpu_available else None
             ),
         )
 

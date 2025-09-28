@@ -21,11 +21,16 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
 
     def __init__(self, top_n: Optional[int] = 10):
         super().__init__(
-            name="Layer Combined Memory", layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME
+            name="Layer Combined Memory",
+            layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
         )
         self._latest_snapshot: Dict[str, Any] = {}
-        self._activation_cache: Dict[str, Dict[str, float]] = {}  # {layer: {current, global}}
-        self._gradient_cache: Dict[str, Dict[str, float]] = {}    # {layer: {current, global}}
+        self._activation_cache: Dict[str, Dict[str, float]] = (
+            {}
+        )  # {layer: {current, global}}
+        self._gradient_cache: Dict[str, Dict[str, float]] = (
+            {}
+        )  # {layer: {current, global}}
         self.top_n = top_n
 
     def _truncate(self, s: str, max_len: int = 42) -> str:
@@ -55,7 +60,9 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
                     cache[layer] = {
                         "current": float(cur if cur is not None else 0.0),
                         "global": float(
-                            gbl if gbl is not None else (cur if cur is not None else 0.0)
+                            gbl
+                            if gbl is not None
+                            else (cur if cur is not None else 0.0)
                         ),
                     }
                 continue
@@ -64,7 +71,9 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
             if gbl is not None:
                 rec["global"] = max(float(gbl), float(rec.get("global", 0.0)))
 
-    def _format_cache_value(self, cache: Dict[str, Dict[str, float]], layer: str) -> str:
+    def _format_cache_value(
+        self, cache: Dict[str, Dict[str, float]], layer: str
+    ) -> str:
         """Return 'curr / global' string for a given layer from a cache; '—' if unknown."""
         rec = cache.get(layer)
         if not rec:
@@ -104,13 +113,19 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         table.add_column("Layer", justify="left", style="magenta")
         table.add_column("Memory", justify="right", style="white", no_wrap=True)
         table.add_column("% of total", justify="right", style="white", no_wrap=True)
-        table.add_column("Activation (curr/peak)", justify="right", style="cyan", no_wrap=True)
-        table.add_column("Gradient (curr/peak)", justify="right", style="green", no_wrap=True)
+        table.add_column(
+            "Activation (curr/peak)", justify="right", style="cyan", no_wrap=True
+        )
+        table.add_column(
+            "Gradient (curr/peak)", justify="right", style="green", no_wrap=True
+        )
 
         if items:
             for name, memory in items:
                 lname = str(name)
-                pct = (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                pct = (
+                    (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                )
                 table.add_row(
                     self._truncate(lname),
                     fmt_mem_new(memory),
@@ -133,13 +148,17 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         model_index = layer_sampler.get("model_index", "—")
 
         # Activation + Gradient snapshots (curr/global per layer)
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get("data") or {}
+        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
+            "data"
+        ) or {}
         activation_layers = activation_sampler.get("layers", {}) or {}
 
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
         gradient_layers = gradient_sampler.get("layers", {}) or {}
 
-        table = self._build_layer_table(layer_data, total_memory, activation_layers, gradient_layers)
+        table = self._build_layer_table(
+            layer_data, total_memory, activation_layers, gradient_layers
+        )
 
         title_total = fmt_mem_new(total_memory)
         cols, _ = shutil.get_terminal_size()
@@ -161,24 +180,30 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         summary = summary or {}
 
         # Layer memory stats
-        layer_mem = (summary.get("LayerMemorySampler") or {})
+        layer_mem = summary.get("LayerMemorySampler") or {}
         total_samples = layer_mem.get("total_samples", "—")
         total_models = layer_mem.get("total_models_seen", "—")
         avg_model_mem = fmt_mem_new(layer_mem.get("average_model_memory", 0.0))
         peak_model_mem = fmt_mem_new(layer_mem.get("peak_model_memory", 0.0))
 
         # Activation peaks
-        activation_sum = (summary.get("ActivationMemorySampler") or {}).get("data") or {}
+        activation_sum = (summary.get("ActivationMemorySampler") or {}).get(
+            "data"
+        ) or {}
         act_global = activation_sum.get("layer_global_peaks") or {}
         if not act_global and self._activation_cache:
-            act_global = {k: v.get("global", 0.0) for k, v in self._activation_cache.items()}
+            act_global = {
+                k: v.get("global", 0.0) for k, v in self._activation_cache.items()
+            }
         top_acts = self._top_n_from_dict(act_global, n=3)
 
         # Gradient peaks
         gradient_sum = (summary.get("GradientMemorySampler") or {}).get("data") or {}
         grad_global = gradient_sum.get("layer_global_peaks") or {}
         if not grad_global and self._gradient_cache:
-            grad_global = {k: v.get("global", 0.0) for k, v in self._gradient_cache.items()}
+            grad_global = {
+                k: v.get("global", 0.0) for k, v in self._gradient_cache.items()
+            }
         top_grads = self._top_n_from_dict(grad_global, n=3)
 
         # Build summary table
@@ -188,16 +213,26 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         table.add_column(justify="right", style="white")
 
         # Section: Stats
-        table.add_row("[blue]TOTAL SAMPLES TAKEN[/blue]", "[dim]|[/dim]", str(total_samples))
-        table.add_row("[blue]TOTAL MODELS SEEN[/blue]", "[dim]|[/dim]", str(total_models))
-        table.add_row("[blue]AVERAGE MODEL MEMORY[/blue]", "[dim]|[/dim]", avg_model_mem)
+        table.add_row(
+            "[blue]TOTAL SAMPLES TAKEN[/blue]", "[dim]|[/dim]", str(total_samples)
+        )
+        table.add_row(
+            "[blue]TOTAL MODELS SEEN[/blue]", "[dim]|[/dim]", str(total_models)
+        )
+        table.add_row(
+            "[blue]AVERAGE MODEL MEMORY[/blue]", "[dim]|[/dim]", avg_model_mem
+        )
         table.add_row("[blue]PEAK MODEL MEMORY[/blue]", "[dim]|[/dim]", peak_model_mem)
 
         # Section: Activations
         table.add_row("[cyan]TOP-3 ACTIVATIONS[/cyan]", "[dim]|[/dim]", "")
         if top_acts:
             for layer, g_peak in top_acts:
-                table.add_row(f"  [cyan]• {layer}[/cyan]", "", f"[cyan]{fmt_mem_new(g_peak)}[/cyan]")
+                table.add_row(
+                    f"  [cyan]• {layer}[/cyan]",
+                    "",
+                    f"[cyan]{fmt_mem_new(g_peak)}[/cyan]",
+                )
         else:
             table.add_row("  • None", "", "—")
 
@@ -205,7 +240,11 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         table.add_row("[green]TOP-3 GRADIENTS[/green]", "[dim]|[/dim]", "")
         if top_grads:
             for layer, g_peak in top_grads:
-                table.add_row(f"  [green]• {layer}[/green]", "", f"[green]{fmt_mem_new(g_peak)}[/green]")
+                table.add_row(
+                    f"  [green]• {layer}[/green]",
+                    "",
+                    f"[green]{fmt_mem_new(g_peak)}[/green]",
+                )
         else:
             table.add_row("  • None", "", "—")
 
@@ -215,4 +254,3 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
             border_style="blue",
         )
         console.print(panel)
-

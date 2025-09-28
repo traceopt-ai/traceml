@@ -97,14 +97,16 @@ class LayerGradientHook:
                     timestamp=time.time(),
                     layer_name=self.layer_name,
                     param_name=None,
-                    per_device_memory=device_mb.copy()
+                    per_device_memory=device_mb.copy(),
                 )
                 try:
                     gradient_queue.put_nowait(elem)
                 except Full:
                     pass
         except Exception:
-            self.logger.error(f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}")
+            self.logger.error(
+                f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}"
+            )
 
 
 class ParamGradientHook:
@@ -137,7 +139,9 @@ class ParamGradientHook:
                 except Full:
                     pass
         except Exception:
-            self.logger.error( f"[TraceML] Error in ParamGradientHook for param {self.param_name}")
+            self.logger.error(
+                f"[TraceML] Error in ParamGradientHook for param {self.param_name}"
+            )
 
 
 def attach_layer_gradient_hooks(model: nn.Module) -> None:
@@ -186,7 +190,13 @@ def attach_param_gradient_hooks(model: nn.Module) -> None:
             if p.requires_grad:
                 # register_hook attaches to the Tensor that will receive .grad
                 layer_name = param_to_module.get(name, "<unknown>")
-                p.register_hook(ParamGradientHook(model_id, layer_name, name, ))
+                p.register_hook(
+                    ParamGradientHook(
+                        model_id,
+                        layer_name,
+                        name,
+                    )
+                )
         _grad_param_registry[model_id] = True
     except Exception as e:
         print(f"[TraceML] Failed to attach param gradient hooks: {e}", file=sys.stderr)

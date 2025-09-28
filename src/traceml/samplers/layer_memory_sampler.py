@@ -45,9 +45,8 @@ class LayerMemorySampler(BaseSampler):
         """
         return tuple((name, tuple(p.shape)) for name, p in model.named_parameters())
 
-
     def _build_snapshot_from_model(
-            self, model: torch.nn.Module, signature: Tuple
+        self, model: torch.nn.Module, signature: Tuple
     ) -> ModelMemorySnapshot:
         layer_memory: Dict[str, float] = {}
         total_memory = 0.0

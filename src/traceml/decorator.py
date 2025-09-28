@@ -12,7 +12,7 @@ from traceml.utils.gradient_hook import attach_all_gradient_hooks
 def trace_model(
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
-    trace_gradients: bool = True
+    trace_gradients: bool = True,
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -56,7 +56,7 @@ def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
     trace_activations: bool = True,
-    trace_gradients: bool = True
+    trace_gradients: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
