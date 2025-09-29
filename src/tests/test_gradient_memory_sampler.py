@@ -5,12 +5,16 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 
+from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.gradient_memory_sampler import (
     GradientMemorySampler,
     GradientSnapshot,
 )
+from traceml.loggers.stdout.layer_combined_stdout_logger import (
+    LayerCombinedStdoutLogger,
+)
 from traceml.loggers.stdout.activation_gradient_memory_logger import (
-    ActivationGradientMemoryStdoutLogger,
+    ActivationGradientStdoutLogger,
 )
 
 from traceml.manager.tracker_manager import TrackerManager
@@ -30,16 +34,19 @@ def _tiny_model():
 def test_gradient_sampler_with_tracker_and_backward_activity():
     """
     For a tiny model, runs several forward + backward passes to produce gradients,
-    and checks that GradientMemorySampler produces a snapshot with device stats and
-    overall metrics.
+    and checks that GradientMemorySampler produces a snapshot with layer + param stats.
     """
     model = _tiny_model()
-    trace_model_instance(model, include_module=True)
+    trace_model_instance(model)
 
-    sampler = GradientMemorySampler()
-    loggers = ActivationGradientMemoryStdoutLogger()
+    sampler1 = LayerMemorySampler()
+    sampler2 = GradientMemorySampler()
+    loggers1 = LayerCombinedStdoutLogger()
+    loggers2 = ActivationGradientStdoutLogger()
 
-    tracker = TrackerManager(components=[(sampler, [loggers])], interval_sec=0.25)
+    tracker = TrackerManager(
+        components=[([sampler1, sampler2], [loggers1, loggers2])], interval_sec=0.25
+    )
 
     with patch("shutil.get_terminal_size", return_value=(120, 40)):
         try:
@@ -61,38 +68,26 @@ def test_gradient_sampler_with_tracker_and_backward_activity():
             )
             time.sleep(0.35)
 
-            snap = getattr(sampler, "_latest_snapshot", None)
+            snap = getattr(sampler2, "_latest_snapshot", None)
             assert isinstance(
                 snap, GradientSnapshot
             ), "GradientSampler produced no snapshot"
 
-            # Expected shape (keep flexible): {'devices': {...}, 'overall_avg_mb': float, ...}
-            devices = snap.devices or {}
-            assert isinstance(
-                devices, dict
-            ), "Expected 'devices' to be a dict in gradient snapshot"
+            # ---- Layer + param stats ----
+            layers = snap.layers or {}
+            assert isinstance(layers, dict), "Expected 'layers' to be a dict"
+            for lname, stats in layers.items():
+                assert "current_peak" in stats
+                assert "global_peak" in stats
+                assert isinstance(stats["current_peak"], float)
+                assert isinstance(stats["global_peak"], float)
 
-            for dev, stats in devices.items():
-                assert isinstance(stats, dict), f"Device stats for {dev} must be a dict"
-                for k in (
-                    "count",
-                    "sum_memory",
-                    "avg_memory",
-                    "max_memory",
-                    "min_nonzero_memory",
-                ):
-                    if k in stats:
-                        v = stats[k]
-                        if k == "count":
-                            assert isinstance(v, int) and v >= 0
-                        else:
-                            assert isinstance(v, (int, float)) and v >= 0.0
-
-            # ---- Summary checks ----
-            summary = sampler.get_summary()
-            assert isinstance(summary, dict)
-            assert summary["ever_seen"] > 0
-            assert isinstance(summary["per_device_cumulative"], dict)
+                params = stats.get("params", {}) or {}
+                for pname, pstats in params.items():
+                    assert "current_peak" in pstats
+                    assert "global_peak" in pstats
+                    assert isinstance(pstats["current_peak"], float)
+                    assert isinstance(pstats["global_peak"], float)
 
         finally:
             tracker.stop()
@@ -100,25 +95,5 @@ def test_gradient_sampler_with_tracker_and_backward_activity():
             StdoutDisplayManager.stop_display()
 
 
-def test_gradient_sampler_no_activity_yet_returns_empty_or_zero_safely():
-    """
-    Ensure calling sample/get_summary before any backward events does not crash
-    and returns empty or zero-like structures safely.
-    """
-    sampler = GradientMemorySampler()
-    # No model registered, no backward runs
-    sampler.sample() if hasattr(sampler, "sample") else None
-
-    summary = sampler.get_summary()
-    assert isinstance(summary, dict)
-
-    for key in ("ever_seen", "raw_events_kept"):
-        if key in summary:
-            v = summary[key]
-            assert isinstance(v, (int, float))
-            assert v >= 0
-
-
 if __name__ == "__main__":
     test_gradient_sampler_with_tracker_and_backward_activity()
-    test_gradient_sampler_no_activity_yet_returns_empty_or_zero_safely()

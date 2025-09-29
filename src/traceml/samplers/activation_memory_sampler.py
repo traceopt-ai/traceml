@@ -3,7 +3,6 @@ from collections import defaultdict
 from queue import Empty
 from typing import Any, Dict, List, Optional
 
-import time
 
 from .base_sampler import BaseSampler
 from traceml.utils.activation_hook import get_activation_queue
@@ -47,7 +46,6 @@ class ActivationMemorySampler(BaseSampler):
         self._latest_snapshot: Optional[ActivationSnapshot] = None
         self._ever_seen: bool = False
 
-
     def _drain_queue(self) -> DrainResult:
         """
         Drain the activation queue completely and return:
@@ -63,7 +61,6 @@ class ActivationMemorySampler(BaseSampler):
         drained_events = 0
         batch_per_device: Dict[str, List[float]] = defaultdict(list)
         batch_per_layer: Dict[str, List[float]] = defaultdict(list)
-        now = time.time()
 
         while True:
             try:
@@ -128,9 +125,7 @@ class ActivationMemorySampler(BaseSampler):
                     self._latest_snapshot = snap
                 else:
                     # First-time snapshot
-                    self._latest_snapshot = ActivationSnapshot(
-                        layers={}
-                    )
+                    self._latest_snapshot = ActivationSnapshot(layers={})
             else:
                 self._latest_snapshot = self._build_snapshot(result)
                 self._ever_seen = True

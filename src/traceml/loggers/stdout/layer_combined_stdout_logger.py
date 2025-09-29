@@ -42,7 +42,6 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         half = (max_len - 1) // 2
         return s[:half] + "…" + s[-half:]
 
-
     def _merge_cache(
         self, cache: Dict[str, Dict[str, float]], new_data: Dict[str, Dict[str, float]]
     ) -> None:
@@ -115,7 +114,9 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
             padding=(0, 1),
         )
         table.add_column("Layer", justify="left", style="magenta")
-        table.add_column("Memory", justify="right", style="white", no_wrap=False, overflow="fold")
+        table.add_column(
+            "Memory", justify="right", style="white", no_wrap=False, overflow="fold"
+        )
         table.add_column("% of total", justify="right", style="white", no_wrap=True)
         table.add_column(
             "Activation (curr/peak)", justify="right", style="cyan", no_wrap=True

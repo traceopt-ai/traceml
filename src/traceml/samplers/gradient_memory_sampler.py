@@ -18,7 +18,9 @@ class GradientSnapshot:
     """
 
     devices: Dict[str, Any] = field(default_factory=dict)  # per device stats
-    layers: Dict[str, Dict[str, float]] = field(default_factory=dict)  # per-layer totals
+    layers: Dict[str, Dict[str, float]] = field(
+        default_factory=dict
+    )  # per-layer totals
 
 
 @dataclass
@@ -58,7 +60,6 @@ class GradientMemorySampler(BaseSampler):
         self._cumulative_param_peaks: Dict[str, Dict[str, float]] = defaultdict(dict)
         self._latest_snapshot: Optional[GradientSnapshot] = None
         self._ever_seen: bool = False
-
 
     def _process_event(
         self,

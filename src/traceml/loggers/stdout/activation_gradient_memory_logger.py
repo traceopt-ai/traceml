@@ -23,7 +23,7 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
     def __init__(self, top_n: int = 10):
         super().__init__(
             name="Layer Combined Memory",
-            layout_section_name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
+            layout_section_name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME,
         )
         self._latest_snapshot: Dict[str, Any] = {}
 
@@ -41,9 +41,8 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
         self.top_n = top_n
 
     def _update_layer_cache(
-        self,
-        cache: Dict[str, float],
-        new_data: Dict[str, Dict[str, float]]):
+        self, cache: Dict[str, float], new_data: Dict[str, Dict[str, float]]
+    ):
         """Update per-layer cache with latest current_peak values."""
         for layer, entry in (new_data or {}).items():
             cur = float(entry.get("current_peak", 0.0))
@@ -78,7 +77,9 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
 
         # Extract samplers
         layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get("data") or {}
+        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
+            "data"
+        ) or {}
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
 
         # Update caches + totals
@@ -98,11 +99,16 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
 
         # Activation stats
         table.add_row("[cyan]Approx Activation Avg[/cyan]", fmt_mem_new(act_avg))
-        table.add_row("[cyan]Approx Activation Max[/cyan]", fmt_mem_new(self._activation_global_max))
+        table.add_row(
+            "[cyan]Approx Activation Max[/cyan]",
+            fmt_mem_new(self._activation_global_max),
+        )
 
         # Gradient stats
         table.add_row("[green]Approx Gradient Avg[/green]", fmt_mem_new(grad_avg))
-        table.add_row("[green]Approx Gradient Max[/green]", fmt_mem_new(self._gradient_global_max))
+        table.add_row(
+            "[green]Approx Gradient Max[/green]", fmt_mem_new(self._gradient_global_max)
+        )
 
         # Width control
         cols, _ = shutil.get_terminal_size()
@@ -126,10 +132,22 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
         table.add_column(justify="center", style="dim", no_wrap=True)
         table.add_column(justify="right", style="white")
 
-        table.add_row("[cyan]Approx ACTIVATION AVG[/cyan]", "[dim]|[/dim]", fmt_mem_new(act_avg))
-        table.add_row("[cyan]Approx ACTIVATION MAX[/cyan]", "[dim]|[/dim]", fmt_mem_new(self._activation_global_max))
-        table.add_row("[green]Approx GRADIENT AVG[/green]", "[dim]|[/dim]", fmt_mem_new(grad_avg))
-        table.add_row("[green]Approx GRADIENT MAX[/green]", "[dim]|[/dim]", fmt_mem_new(self._gradient_global_max))
+        table.add_row(
+            "[cyan]Approx ACTIVATION AVG[/cyan]", "[dim]|[/dim]", fmt_mem_new(act_avg)
+        )
+        table.add_row(
+            "[cyan]Approx ACTIVATION MAX[/cyan]",
+            "[dim]|[/dim]",
+            fmt_mem_new(self._activation_global_max),
+        )
+        table.add_row(
+            "[green]Approx GRADIENT AVG[/green]", "[dim]|[/dim]", fmt_mem_new(grad_avg)
+        )
+        table.add_row(
+            "[green]Approx GRADIENT MAX[/green]",
+            "[dim]|[/dim]",
+            fmt_mem_new(self._gradient_global_max),
+        )
 
         panel = Panel(
             table,
