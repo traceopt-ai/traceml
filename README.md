@@ -94,6 +94,7 @@ traceml run src/examples/tracing_with_model_instance
 # Trace a model using a class decorator (recommended)
 traceml run src/examples/tracing_with_class_decorator
 ```
+![TraceML Live Dashboard](demo.png)
 
 ## 🔎 How the Samplers Work
 
