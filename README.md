@@ -97,6 +97,18 @@ traceml run src/examples/tracing_with_class_decorator
 
 ![TraceML Live Dashboard](demo.png)
 
+
+### 📓 Notebook Support (Basic)
+
+You can also run TraceML inside Jupyter notebooks:
+
+```bash
+from traceml.cli import run_with_tracing
+run_with_tracing("src/examples/tracing_on_bert.py", interval=1, notebook=True)
+```
+
+ℹ️ Currently, notebook output clears and refreshes per interval, so you may need to scroll cells up/down to follow the live updates. Improvements coming soon.
+
 ## 🔎 How the Samplers Work
 
 TraceML introduces samplers that collect memory usage at intervals, not layer-by-layer traces only:
