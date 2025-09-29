@@ -35,7 +35,7 @@ def _tensor_size_mb(tensor: torch.Tensor) -> float:
     """
     Compute the memory footprint of a tensor in megabytes.
     """
-    return float(tensor.numel() * tensor.element_size()) / (1024**2)
+    return float(tensor.numel() * tensor.element_size())
 
 
 class ActivationHook:

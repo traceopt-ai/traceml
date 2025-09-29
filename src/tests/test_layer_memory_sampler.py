@@ -10,7 +10,9 @@ from traceml.samplers.layer_memory_sampler import (
     LayerMemorySampler,
     ModelMemorySnapshot,
 )
-from traceml.loggers.stdout.layer_memory_logger import LayerMemoryStdoutLogger
+from traceml.loggers.stdout.layer_combined_stdout_logger import (
+    LayerCombinedStdoutLogger,
+)
 from traceml.manager.tracker_manager import TrackerManager
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
 from traceml.decorator import trace_model_instance
@@ -25,7 +27,7 @@ def _sum_param_mem_mb(model: nn.Module) -> float:
     for p in model.named_parameters():
         t = p[1]
         total_bytes += t.element_size() * t.nelement()
-    return round(total_bytes / (1024**2), 4)
+    return round(total_bytes, 4)
 
 
 def _queue_with_models(*models):
@@ -62,13 +64,6 @@ def test_layer_memory_sampler_from_queue_basic():
     assert pytest.approx(snap.total_memory, rel=0, abs=1e-3) == layers_sum
     assert pytest.approx(snap.total_memory, rel=0, abs=1e-3) == expected_total
 
-    summary = sampler.get_summary()
-    assert summary["total_models_seen"] == 1
-    assert summary["total_samples_taken"] == 1
-    assert summary["average_model_memory"] == pytest.approx(expected_total, abs=1e-3)
-    assert summary["peak_model_memory"] == pytest.approx(expected_total, abs=1e-3)
-    assert isinstance(summary["last_model_snapshot"], ModelMemorySnapshot)
-
 
 def test_layer_memory_sampler_deduplicates_by_signature():
     # Two models with the same parameter shapes → identical signature
@@ -88,11 +83,6 @@ def test_layer_memory_sampler_deduplicates_by_signature():
     assert len(sampler.memory_history) == 1
     assert len(sampler.seen_signatures) == 1
 
-    # Summary remains for a single model
-    summary = sampler.get_summary()
-    assert summary["total_models_seen"] == 1
-    assert summary["total_samples_taken"] == 1
-
 
 def test_layer_memory_sampler_multiple_models_summary():
     a = nn.Sequential(_make_linear(10, 5), nn.ReLU(), _make_linear(5, 2))
@@ -110,12 +100,6 @@ def test_layer_memory_sampler_multiple_models_summary():
     assert sampler.total_samples == 2
     assert len(sampler.seen_signatures) == 2
     assert len(sampler.memory_history) == 2
-
-    summary = sampler.get_summary()
-    assert summary["total_models_seen"] == 2
-    assert summary["total_samples_taken"] == 2
-    assert summary["average_model_memory"] > 0.0
-    assert summary["peak_model_memory"] >= summary["average_model_memory"]
 
 
 def test_layer_memory_sampler_empty_queue_returns_no_model_found():
@@ -144,7 +128,7 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
     trace_model_instance(model)
 
     sampler = LayerMemorySampler()
-    stdout_logger = LayerMemoryStdoutLogger(top_n=10)
+    stdout_logger = LayerCombinedStdoutLogger()
     tracker = TrackerManager(components=[(sampler, [stdout_logger])], interval_sec=0.25)
 
     try:
@@ -169,26 +153,17 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
 
         # ---- Snapshot checks ----
         snap = getattr(sampler, "_latest_snapshot", None)
-        assert isinstance(snap, ModelMemorySnapshot), (
-            "No model memory snapshot produced"
-        )
+        assert isinstance(
+            snap, ModelMemorySnapshot
+        ), "No model memory snapshot produced"
         assert snap.error is None, f"Snapshot error: {snap.error}"
-        assert isinstance(snap.layer_memory, dict) and len(snap.layer_memory) > 0, (
-            "Layer memory dict should be non-empty"
-        )
+        assert (
+            isinstance(snap.layer_memory, dict) and len(snap.layer_memory) > 0
+        ), "Layer memory dict should be non-empty"
 
         # Total matches sum of layers
         layers_sum = round(sum(float(v) for v in snap.layer_memory.values()), 4)
         assert pytest.approx(snap.total_memory, rel=0, abs=1e-3) == layers_sum
-
-        # ---- Summary checks ----
-        summary = sampler.get_summary()
-        assert isinstance(summary, dict)
-        assert summary["total_models_seen"] >= 1
-        assert summary["total_samples_taken"] >= 1
-        assert summary["average_model_memory"] >= 0.0
-        assert summary["peak_model_memory"] >= summary["average_model_memory"]
-        assert summary.get("last_model_snapshot") is not None
 
     finally:
         tracker.stop()

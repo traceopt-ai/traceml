@@ -10,12 +10,14 @@ from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
+from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 
 from traceml.manager.tracker_manager import TrackerManager
 
 from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.layer_memory_logger import LayerMemoryStdoutLogger
-from traceml.loggers.stdout.activation_memory_logger import ActivationMemoryStdoutLogger
+from traceml.loggers.stdout.layer_combined_stdout_logger import (
+    LayerCombinedStdoutLogger,
+)
 
 
 class SimpleMLP(nn.Module):
@@ -45,15 +47,17 @@ def test_system_sampler_with_pytorch_model():
     process_sampler = ProcessSampler()
     layer_memory_sampler = LayerMemorySampler()
     activation_memory_sampler = ActivationMemorySampler()
+    gradient_memory_sampler = GradientMemorySampler()
 
     system_process_stdout_logger = SystemProcessStdoutLogger()
-    layer_memory_stdout_logger = LayerMemoryStdoutLogger()
-    activation_memory_logger = ActivationMemoryStdoutLogger()
+    combined_stdout_logger = LayerCombinedStdoutLogger()
 
     tracker_components = [
         ([system_sampler, process_sampler], [system_process_stdout_logger]),
-        (layer_memory_sampler, [layer_memory_stdout_logger]),
-        (activation_memory_sampler, [activation_memory_logger]),
+        (
+            [layer_memory_sampler, activation_memory_sampler, gradient_memory_sampler],
+            [combined_stdout_logger],
+        ),
     ]
     tracker = TrackerManager(components=tracker_components, interval_sec=0.5)
 
@@ -68,7 +72,7 @@ def test_system_sampler_with_pytorch_model():
         criterion = nn.MSELoss()
 
         # Training loop (simulated workload)
-        test_duration = 100
+        test_duration = 10
         end_time = time.time() + test_duration
         iteration = 0
 

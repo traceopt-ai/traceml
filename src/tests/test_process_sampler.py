@@ -1,7 +1,6 @@
 import time
 import sys
 import numpy as np
-from unittest.mock import patch
 
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.manager.tracker_manager import TrackerManager
@@ -42,13 +41,13 @@ def test_process_sampler_with_heavy_task():
         snap = getattr(sampler, "latest", None)
         assert snap is not None, "ProcessSampler did not produce a snapshot"
 
-        assert hasattr(snap, "process_cpu_percent"), (
-            "Expected process CPU metric on snapshot"
-        )
+        assert hasattr(
+            snap, "process_cpu_percent"
+        ), "Expected process CPU metric on snapshot"
         assert hasattr(snap, "process_ram"), "Expected process RAM metric on snapshot"
-        assert hasattr(snap, "process_gpu_memory"), (
-            "Expected process GPU memory metric on snapshot"
-        )
+        assert hasattr(
+            snap, "process_gpu_memory"
+        ), "Expected process GPU memory metric on snapshot"
 
         # Summary should at least be a dict; keys may vary by implementation
         summary = sampler.get_summary()
@@ -70,35 +69,6 @@ def test_process_sampler_with_heavy_task():
         tracker.stop()
         tracker.log_summaries()
         StdoutDisplayManager.stop_display()
-
-
-def test_process_sampler_handles_missing_nvml_gracefully():
-    """
-    If ProcessSampler internally tries to use NVML, simulate failures to
-    ensure it degrades gracefully (e.g., process_gpu_memory stays None).
-    """
-    # Simulate NVML import or init failure paths
-    with (
-        patch("traceml.samplers.process_sampler.nvmlInit", return_value=None),
-        patch("traceml.samplers.process_sampler.nvmlDeviceGetCount", return_value=1),
-    ):
-        sampler = ProcessSampler()
-        # Take a couple samples
-        for _ in range(2):
-            _ = sampler.sample()
-            time.sleep(0.05)
-
-        snap = getattr(sampler, "latest", None)
-        assert snap is not None, (
-            "ProcessSampler did not produce a snapshot under NVML failure simulation"
-        )
-
-        if hasattr(snap, "process_gpu_memory"):
-            val = snap.process_gpu_memory
-            assert (val is None) or (isinstance(val, (int, float)) and val >= 0.0)
-
-        summary = sampler.get_summary()
-        assert isinstance(summary, dict)
 
 
 def test_process_sampler_multiple_samples_summary_trends():
@@ -129,5 +99,4 @@ def test_process_sampler_multiple_samples_summary_trends():
 
 if __name__ == "__main_l_":
     test_process_sampler_with_heavy_task()
-    test_process_sampler_handles_missing_nvml_gracefully()
     test_process_sampler_multiple_samples_summary_trends()

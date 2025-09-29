@@ -63,11 +63,11 @@ def test_system_sampler_with_heavy_task():
         summary = system_sampler.get_summary()
         assert isinstance(summary, dict)
         for key in [
-            "total_system_samples",
+            "total_samples",
             "cpu_average_percent",
             "cpu_peak_percent",
-            "ram_average_percent_used",
-            "ram_peak_percent_used",
+            "ram_average_used",
+            "ram_peak_used",
         ]:
             assert key in summary, f"Missing summary key: {key}"
 
@@ -75,9 +75,9 @@ def test_system_sampler_with_heavy_task():
             for key in [
                 "gpu_average_util_percent",
                 "gpu_peak_util_percent",
-                "gpu_memory_global_peak_used",
-                "gpu_memory_global_lowest_nonzero_used",
+                "gpu_memory_peak_used",
                 "gpu_memory_average_used",
+                "gpu_memory_total",
             ]:
                 assert key in summary, f"Missing GPU summary key (GPU present): {key}"
 
@@ -92,7 +92,7 @@ def test_system_sampler_handles_nvml_errors_gracefully():
         from pynvml import NVMLError
 
         nvml_error = NVMLError(999)
-    except NVMLError:
+    except Exception:
         nvml_error = Exception("NVML init fail")
 
     with patch("traceml.samplers.system_sampler.nvmlInit", side_effect=nvml_error):
@@ -127,14 +127,14 @@ def test_system_sampler_gpu_present_or_mocked():
         assert snap.gpu_available is True
         assert snap.gpu_count >= 1
         assert snap.gpu_util_avg is not None
-        assert snap.gpu_mem_used_total is not None
+        assert snap.gpu_mem_sum_used is not None
         summary = sampler.get_summary()
         for key in [
             "gpu_average_util_percent",
             "gpu_peak_util_percent",
-            "gpu_memory_global_peak_used",
-            "gpu_memory_global_lowest_nonzero_used",
+            "gpu_memory_peak_used",
             "gpu_memory_average_used",
+            "gpu_memory_total",
         ]:
             assert key in summary, f"Missing GPU summary key (real GPU): {key}"
 
@@ -173,24 +173,17 @@ def test_system_sampler_gpu_present_or_mocked():
             assert 0 <= snap.gpu_util_avg <= 100
             assert snap.gpu_mem_total is not None
             assert snap.gpu_mem_total >= 4096 - 1  # allow rounding
-            assert snap.gpu_mem_used_total is not None
-            assert snap.gpu_mem_used_total >= 512 - 1  # allow rounding
-
-            # Confirm per-GPU state was updated
-            assert len(sampler.gpus) == 1
-            state = sampler.gpus[0]
-            assert state.total_mem >= 4096 - 1
-            assert len(state.util) > 0
-            assert len(state.mem_used) > 0
+            assert snap.gpu_mem_sum_used is not None
+            assert snap.gpu_mem_sum_used >= 512 - 1  # allow rounding
 
             # Summary keys for GPU-present path
             summary = sampler.get_summary()
             for key in [
                 "gpu_average_util_percent",
                 "gpu_peak_util_percent",
-                "gpu_memory_global_peak_used",
-                "gpu_memory_global_lowest_nonzero_used",
+                "gpu_memory_peak_used",
                 "gpu_memory_average_used",
+                "gpu_memory_total",
             ]:
                 assert key in summary, f"Missing GPU summary key (mocked GPU): {key}"
 

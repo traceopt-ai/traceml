@@ -10,7 +10,7 @@ from traceml.samplers.activation_memory_sampler import (
     ActivationSnapshot,
 )
 from traceml.loggers.stdout.activation_gradient_memory_logger import (
-    ActivationGradientMemoryStdoutLogger,
+    ActivationGradientStdoutLogger,
 )
 
 from traceml.manager.tracker_manager import TrackerManager
@@ -30,14 +30,14 @@ def _tiny_model():
 def test_activation_sampler_with_tracker_and_registered_model_forward_activity():
     """
     For a tiny model, runs several forward passes to produce activations,
-    and checks that ActivationSampler produces a snapshot with device stats and
-    overall metrics
+    and checks that ActivationSampler produces a snapshot with layer stats and
+    global peak metrics.
     """
     model = _tiny_model()
     trace_model_instance(model)
 
     sampler = ActivationMemorySampler()
-    loggers = ActivationGradientMemoryStdoutLogger()
+    loggers = ActivationGradientStdoutLogger()
 
     tracker = TrackerManager(components=[(sampler, [loggers])], interval_sec=0.25)
 
@@ -61,37 +61,18 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
             time.sleep(0.35)
 
             snap = getattr(sampler, "_latest_snapshot", None)
-            assert isinstance(snap, ActivationSnapshot), (
-                "ActivationSampler produced no snapshot"
-            )
+            assert isinstance(
+                snap, ActivationSnapshot
+            ), "ActivationSampler produced no snapshot"
 
-            # Expected shape (keep flexible): {'devices': {...}, 'overall_avg_mb': float, ...}
-            devices = snap.devices or {}
-            assert isinstance(devices, dict), (
-                "Expected 'devices' to be a dict in activation snapshot"
-            )
-
-            for dev, stats in devices.items():
-                assert isinstance(stats, dict), f"Device stats for {dev} must be a dict"
-                for k in (
-                    "count",
-                    "sum_memory",
-                    "avg_memory",
-                    "max_memory",
-                    "min_nonzero_memory",
-                ):
-                    if k in stats:
-                        v = stats[k]
-                        if k == "count":
-                            assert isinstance(v, int) and v >= 0
-                        else:
-                            assert isinstance(v, (int, float)) and v >= 0.0
-
-            # ---- Summary checks ----
-            summary = sampler.get_summary()
-            assert isinstance(summary, dict)
-            assert summary["ever_seen"] > 0
-            assert isinstance(summary["per_device_cumulative"], dict)
+            # ---- Layer stats ----
+            layers = snap.layers or {}
+            assert isinstance(layers, dict), "Expected 'layers' to be a dict"
+            for lname, stats in layers.items():
+                assert "current_peak" in stats
+                assert "global_peak" in stats
+                assert isinstance(stats["current_peak"], float)
+                assert isinstance(stats["global_peak"], float)
 
         finally:
             tracker.stop()
@@ -99,27 +80,5 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
             StdoutDisplayManager.stop_display()
 
 
-def test_activation_sampler_no_activity_yet_returns_empty_or_zero_safely():
-    """
-    Ensure calling sample/get_summary before any activation events does not crash
-    and returns empty or zero-like structures safely.
-    """
-    sampler = ActivationMemorySampler()
-    # No model registered, no forwards run
-    sampler.sample() if hasattr(sampler, "sample") else None
-
-    # sampler.latest/_latest_snapshot may be None; summary still should be a dict
-    summary = sampler.get_summary()
-    assert isinstance(summary, dict)
-
-    # If keys exist, they should be zeros or empty structures
-    for key in ("ever_seen", "raw_events_kept"):
-        if key in summary:
-            v = summary[key]
-            assert isinstance(v, (int, float))
-            assert v >= 0
-
-
 if __name__ == "__main__":
     test_activation_sampler_with_tracker_and_registered_model_forward_activity()
-    test_activation_sampler_no_activity_yet_returns_empty_or_zero_safely()

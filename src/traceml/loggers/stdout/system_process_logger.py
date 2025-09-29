@@ -1,4 +1,4 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import shutil
 
 from rich.panel import Panel
@@ -9,7 +9,7 @@ from rich.console import Console
 
 from .base_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_PROCESS_LAYOUT_NAME
-from traceml.utils.formatting import fmt_percent, fmt_ratio, fmt_mem_new
+from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
 
 class SystemProcessStdoutLogger(BaseStdoutLogger):
