@@ -19,7 +19,7 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
     Missing values show as "—".
     """
 
-    def __init__(self, top_n: Optional[int] = 10):
+    def __init__(self, top_n: Optional[int] = 20):
         super().__init__(
             name="Layer Combined Memory",
             layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
@@ -33,11 +33,15 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         )  # {layer: {current, global}}
         self.top_n = top_n
 
-    def _truncate(self, s: str, max_len: int = 42) -> str:
-        """Truncate long layer names for table display."""
+    def _truncate(self, s: str, max_len: int = 30) -> str:
+        """Truncate long layer names keeping start and end."""
         if not isinstance(s, str):
             s = str(s)
-        return s if len(s) <= max_len else s[: max_len - 1] + "…"
+        if len(s) <= max_len:
+            return s
+        half = (max_len - 1) // 2
+        return s[:half] + "…" + s[-half:]
+
 
     def _merge_cache(
         self, cache: Dict[str, Dict[str, float]], new_data: Dict[str, Dict[str, float]]
@@ -111,7 +115,7 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
             padding=(0, 1),
         )
         table.add_column("Layer", justify="left", style="magenta")
-        table.add_column("Memory", justify="right", style="white", no_wrap=True)
+        table.add_column("Memory", justify="right", style="white", no_wrap=False, overflow="fold")
         table.add_column("% of total", justify="right", style="white", no_wrap=True)
         table.add_column(
             "Activation (curr/peak)", justify="right", style="cyan", no_wrap=True

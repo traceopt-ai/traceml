@@ -16,6 +16,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
+
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
 MAX_TRAIN_EXAMPLES = 500
@@ -114,13 +115,6 @@ def main():
         num_labels=4,  # AG News has 4 classes
     ).to(device)
 
-    # Attach TraceML hooks so your samplers/loggers receive events
-    # trace_model_instance(
-    #     model,
-    #     sample_layer_memory=True,
-    #     trace_activations=True,
-    #     trace_gradients=True,
-    # )
     register_backward_hooks(model)
 
     # Optimizer & scheduler
