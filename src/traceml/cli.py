@@ -6,20 +6,6 @@ import time
 import traceback
 
 
-from traceml.samplers.system_sampler import SystemSampler
-from traceml.samplers.process_sampler import ProcessSampler
-from traceml.samplers.layer_memory_sampler import LayerMemorySampler
-from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
-from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
-
-from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.layer_combined_stdout_logger import (
-    LayerCombinedStdoutLogger,
-)
-from traceml.loggers.stdout.activation_gradient_memory_logger import (
-    ActivationGradientStdoutLogger,
-)
-
 from traceml.manager.tracker_manager import TrackerManager
 
 
@@ -37,6 +23,7 @@ def run_with_tracing(
         script_path (str): Script to execute with tracing.
         interval (int): Sampling interval.
         log_dir (str): Root directory for log output.
+        notebook (bool): Whether to run in notebook mode.
         script_args (list): List of arguments to pass to the target script.
     """
     # Checking script path existence
@@ -60,30 +47,8 @@ def run_with_tracing(
     print(f"Sampling interval: {interval} seconds")
     print(f"Log directory: {log_dir}")
 
-    # --- Initialize TraceML Samplers and Loggers ---
-    # Create specific loggers for different types of data (CPU, GPU, NN memory and more)
-    system_sampler = SystemSampler()
-    process_sampler = ProcessSampler()
-    layer_memory_sampler = LayerMemorySampler()
-    activation_memory_sampler = ActivationMemorySampler()
-    gradient_memory_sampler = GradientMemorySampler()
 
-    system_process_logger = SystemProcessStdoutLogger()
-    layer_combined_stdout_logger = LayerCombinedStdoutLogger()
-    activation_gradient_stdout_logger = ActivationGradientStdoutLogger()
-
-    # Collect all trackers
-    sampler_logger_pairs = [
-        ([system_sampler, process_sampler], [system_process_logger]),
-        (
-            [layer_memory_sampler, activation_memory_sampler, gradient_memory_sampler],
-            [layer_combined_stdout_logger, activation_gradient_stdout_logger],
-        ),
-    ]
-
-    tracker = TrackerManager(
-        sampler_logger_pairs, interval_sec=interval, notebook=notebook
-    )
+    tracker = TrackerManager(interval_sec=interval, notebook=notebook)
 
     # --- Arguments for the target script ---
     original_argv = list(sys.argv)

@@ -29,7 +29,7 @@ def test_system_sampler_with_heavy_task():
     """
     system_sampler = SystemSampler()
     system_process_stdout_logger = SystemProcessStdoutLogger()
-    tracker_components = [(system_sampler, [system_process_stdout_logger])]
+    tracker_components = [([system_sampler], [system_process_stdout_logger])]
 
     tracker = TrackerManager(components=tracker_components, interval_sec=0.5)
     try:

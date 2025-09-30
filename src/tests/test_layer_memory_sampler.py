@@ -129,7 +129,7 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
 
     sampler = LayerMemorySampler()
     stdout_logger = LayerCombinedStdoutLogger()
-    tracker = TrackerManager(components=[(sampler, [stdout_logger])], interval_sec=0.25)
+    tracker = TrackerManager(components=[([sampler], [stdout_logger])], interval_sec=0.25)
 
     try:
         tracker.start()

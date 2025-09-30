@@ -3,6 +3,21 @@ from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.loggers.stdout.display_manager import StdoutDisplayManager
 
+from traceml.samplers.base_sampler import BaseSampler
+from traceml.samplers.system_sampler import SystemSampler
+from traceml.samplers.process_sampler import ProcessSampler
+from traceml.samplers.layer_memory_sampler import LayerMemorySampler
+from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
+from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
+
+from traceml.loggers.stdout.base_logger import BaseStdoutLogger
+from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
+from traceml.loggers.stdout.layer_combined_stdout_logger import (
+    LayerCombinedStdoutLogger,
+)
+from traceml.loggers.stdout.activation_gradient_memory_logger import (
+    ActivationGradientStdoutLogger,
+)
 
 class TrackerManager:
     """
@@ -11,11 +26,32 @@ class TrackerManager:
 
     This class ensures consistent sampling even if some components fail intermittently.
     """
+    @staticmethod
+    def _components() -> List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]]:
+        system_sampler = SystemSampler()
+        process_sampler = ProcessSampler()
+        layer_memory_sampler = LayerMemorySampler()
+        activation_memory_sampler = ActivationMemorySampler()
+        gradient_memory_sampler = GradientMemorySampler()
 
-    # components: List[Tuple[SamplerType, List[LoggerType]]]
+        system_process_logger = SystemProcessStdoutLogger()
+        layer_combined_stdout_logger = LayerCombinedStdoutLogger()
+        activation_gradient_stdout_logger = ActivationGradientStdoutLogger()
+
+        # Collect all trackers
+        sampler_logger_pairs = [
+            ([system_sampler, process_sampler], [system_process_logger]),
+            (
+                [layer_memory_sampler, activation_memory_sampler, gradient_memory_sampler],
+                [layer_combined_stdout_logger, activation_gradient_stdout_logger],
+            ),
+        ]
+        return sampler_logger_pairs
+
+
     def __init__(
         self,
-        components: List[Tuple[Any, List[Any]]],
+        components: List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]] = None,
         interval_sec: float = 1.0,
         notebook: bool = False,
     ):
@@ -27,7 +63,10 @@ class TrackerManager:
         """
         setup_error_logger()
         self.logger = get_error_logger("TrackerManager")
-        self.components = components
+        if components is None:
+            self.components = self._components()
+        else:
+            self.components = components
         self.interval_sec = interval_sec
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
