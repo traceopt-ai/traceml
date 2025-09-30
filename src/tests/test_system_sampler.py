@@ -6,7 +6,7 @@ from unittest.mock import patch
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.manager.tracker_manager import TrackerManager
 from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.display_manager import StdoutDisplayManager
+from traceml.loggers.stdout.display_manager import CLIDisplayManager
 
 
 class _MockUtilization:
@@ -84,7 +84,7 @@ def test_system_sampler_with_heavy_task():
     finally:
         tracker.stop()
         tracker.log_summaries()
-        StdoutDisplayManager.stop_display()
+        CLIDisplayManager.stop_display()
 
 
 def test_system_sampler_handles_nvml_errors_gracefully():

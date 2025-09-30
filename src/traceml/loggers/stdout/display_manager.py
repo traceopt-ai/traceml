@@ -16,7 +16,7 @@ LAYER_COMBINED_SUMMARY_LAYOUT_NAME = "layer_combined_summary_section"
 ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME = "activation_gradient_summary_section"
 
 
-class StdoutDisplayManager:
+class CLIDisplayManager:
     """
     Manages a single shared Rich Live display and a dynamic Layout for all stdout loggers.
     """
@@ -35,7 +35,7 @@ class StdoutDisplayManager:
     _notebook_mode: bool = False
     _display_id = "traceml_display"
     setup_error_logger()
-    logger = get_error_logger("StdoutDisplayManager")
+    logger = get_error_logger("CLIDisplayManager")
 
     @classmethod
     def enable_notebook_mode(cls, enabled: bool = True):

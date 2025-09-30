@@ -1,7 +1,7 @@
 import threading
 from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.loggers.stdout.display_manager import StdoutDisplayManager
+from traceml.loggers.stdout.display_manager import CLIDisplayManager
 
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
@@ -70,13 +70,13 @@ class TrackerManager:
         self.interval_sec = interval_sec
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
-        StdoutDisplayManager.enable_notebook_mode(notebook)
+        CLIDisplayManager.enable_notebook_mode(notebook)
 
     def _run(self):
         """
         Background thread loop that continuously samples and logs live snapshots.
         """
-        StdoutDisplayManager.start_display()
+        CLIDisplayManager.start_display()
 
         while not self._stop_event.is_set():
             for samplers, loggers in self.components:
@@ -98,7 +98,7 @@ class TrackerManager:
 
                 # 2. Log snapshot to all associated loggers
                 for logger in loggers:
-                    StdoutDisplayManager.register_layout_content(
+                    CLIDisplayManager.register_layout_content(
                         logger.layout_section_name, logger.get_panel_renderable
                     )
                     try:
@@ -107,7 +107,7 @@ class TrackerManager:
                         self.logger.error(
                             f"[TraceML] Error in logger '{logger.__class__.__name__}'.log() for sampler '{sampler.__class__.__name__}': {e}"
                         )
-                StdoutDisplayManager.update_display()
+                CLIDisplayManager.update_display()
 
             # 3. Wait for the next interval
             self._stop_event.wait(self.interval_sec)
@@ -135,11 +135,11 @@ class TrackerManager:
                 )
 
             # Logger shutdown is now handled more broadly by the main execution context
-            # calling StdoutDisplayManager.stop_display() and individual log_summaries.
+            # calling CLIDisplayManager.stop_display() and individual log_summaries.
             for _, loggers in self.components:
                 for logger in loggers:
                     try:
-                        StdoutDisplayManager.release_display()
+                        CLIDisplayManager.release_display()
                     except Exception as e:
                         self.logger.error(
                             f"[TraceML] Logger '{logger.__class__.__name__}' shutdown error: {e}"
