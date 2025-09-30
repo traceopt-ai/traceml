@@ -10,7 +10,7 @@ from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
 from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 
-from traceml.loggers.stdout.base_logger import BaseStdoutLogger
+from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
 from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
 from traceml.loggers.stdout.layer_combined_stdout_logger import (
     LayerCombinedStdoutLogger,

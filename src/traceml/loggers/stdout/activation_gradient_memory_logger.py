@@ -5,7 +5,7 @@ from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 
-from .base_logger import BaseStdoutLogger
+from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
 from .display_manager import ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
 from traceml.utils.formatting import fmt_mem_new
 

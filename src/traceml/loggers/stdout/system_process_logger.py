@@ -4,10 +4,11 @@ import shutil
 from rich.panel import Panel
 from rich.table import Table
 from rich.console import Console
+from IPython.display import HTML
 
-#
 
-from .base_logger import BaseStdoutLogger
+
+from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
 from .display_manager import SYSTEM_PROCESS_LAYOUT_NAME
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
@@ -28,74 +29,72 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
         )
         self._latest_snapshot: Dict[str, Any] = {}
 
-    def get_panel_renderable(self) -> Panel:
+    def get_data(self) -> Dict[str, Any]:
         snaps = self._latest_snapshot or {}
         sysd = (snaps.get("SystemSampler") or {}).get("data") or {}
         procd = (snaps.get("ProcessSampler") or {}).get("data") or {}
+        return {
+            "system": {
+                "cpu": sysd.get("cpu_percent", 0.0),
+                "ram_used": sysd.get("ram_used", 0.0),
+                "ram_total": sysd.get("ram_total", 0.0),
+                "gpu": {
+                    "available": sysd.get("gpu_available", False),
+                    "util_avg": sysd.get("gpu_util_avg"),
+                    "mem_used": sysd.get("gpu_mem_sum_used"),
+                    "mem_total": sysd.get("gpu_mem_total"),
+                },
+            },
+            "process": {
+                "cpu": procd.get("process_cpu_percent", 0.0),
+                "ram": procd.get("process_ram", 0.0),
+                "gpu_mem": procd.get("process_gpu_memory", None),
+            },
+        }
 
-        # ------- System (host) -------
-        cpu_host = sysd.get("cpu_percent", 0.0)
-        ram_used = sysd.get("ram_used", 0.0)
-        ram_total = sysd.get("ram_total", 0.0)
+    ## CLI rendering in Terminal
+    def get_panel_renderable(self) -> Panel:
+        data = self.get_data()
+        sys = data["system"]
+        proc = data["process"]
+
         ram_pct_str = ""
-        if (
-            isinstance(ram_used, (int, float))
-            and isinstance(ram_total, (int, float))
-            and ram_total > 0
-        ):
+        if sys["ram_total"]:
             try:
-                ram_pct_str = f" ({ram_used * 100.0 / ram_total:.1f}%)"
+                ram_pct_str = f" ({sys['ram_used'] * 100.0 / sys['ram_total']:.1f}%)"
             except Exception:
-                ram_pct_str = ""
+                pass
 
-        # GPU (aggregate)
-        gpu_available = sysd.get("gpu_available", False)
-        gpu_util_avg = sysd.get("gpu_util_avg")
-        gpu_mem_sum_used = sysd.get("gpu_mem_sum_used")
-        gpu_mem_total = sysd.get("gpu_mem_total")
-
-        # ------- Process -------
-        pid_cpu = procd.get("process_cpu_percent", 0.0)
-        pid_ram = procd.get("process_ram", 0.0)
-        pid_gpu_mem = procd.get("process_gpu_memory", None)
-
-        # Build compact merged table
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="white")
         table.add_column(justify="left", style="white")
         table.add_column(justify="left", style="white")
 
-        # --- system row ---
+        # system row
         sys_info = [
             "[bold cyan]System[/bold cyan]",
-            f"[bold green]CPU[/bold green] {fmt_percent(cpu_host)}",
-            f"[bold green]RAM[/bold green] {fmt_mem_new(ram_used)}/{fmt_mem_new(ram_total)}{ram_pct_str}",
+            f"[bold green]CPU[/bold green] {fmt_percent(sys['cpu'])}",
+            f"[bold green]RAM[/bold green] {fmt_mem_new(sys['ram_used'])}/{fmt_mem_new(sys['ram_total'])}{ram_pct_str}",
         ]
-        if gpu_available:
-            sys_info.append(f"[bold green]GPU[/bold green] {fmt_percent(gpu_util_avg)}")
+        if sys["gpu"]["available"]:
+            sys_info.append(f"[bold green]GPU[/bold green] {fmt_percent(sys['gpu']['util_avg'])}")
             sys_info.append(
-                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(gpu_mem_sum_used)}/{fmt_mem_new(gpu_mem_total)}"
+                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(sys['gpu']['mem_used'])}/{fmt_mem_new(sys['gpu']['mem_total'])}"
             )
-
         table.add_row("   ".join(sys_info))
 
-        # gap
-        table.add_row("")
+        table.add_row("")  # gap
 
-        # --- process row ---
+        # process row
         proc_info = [
             "[bold cyan]Process[/bold cyan]",
-            f"[bold green]CPU[/bold green] {fmt_percent(pid_cpu)}",
-            f"[bold green]RAM[/bold green] {fmt_mem_new(pid_ram)}",
+            f"[bold green]CPU[/bold green] {fmt_percent(proc['cpu'])}",
+            f"[bold green]RAM[/bold green] {fmt_mem_new(proc['ram'])}",
         ]
-        if gpu_available:
-            proc_info.append(
-                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(pid_gpu_mem)}"
-            )
-
+        if proc["gpu_mem"] is not None:
+            proc_info.append(f"[bold green]GPU MEM[/bold green] {fmt_mem_new(proc['gpu_mem'])}")
         table.add_row("   ".join(proc_info))
 
-        # Adaptive width
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 100)
 
@@ -107,7 +106,45 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             width=panel_width,
         )
 
-    def _sys_cpu_summary(self, t: Table.grid, block):
+
+    # Notebook rendering
+    def get_notebook_renderable(self) -> HTML:
+        data = self.get_data()
+        sys = data["system"]
+        proc = data["process"]
+
+        sys_html = f"""
+        <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
+            <h4 style="color:#00bcd4; margin:0;">System</h4>
+            <p><b>CPU:</b> {fmt_percent(sys['cpu'])}</p>
+            <p><b>RAM:</b> {fmt_mem_new(sys['ram_used'])}/{fmt_mem_new(sys['ram_total'])}</p>
+        </div>
+        """
+
+        proc_html = f"""
+        <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
+            <h4 style="color:#00bcd4; margin:0;">Process</h4>
+            <p><b>CPU:</b> {fmt_percent(proc['cpu'])}</p>
+            <p><b>RAM:</b> {fmt_mem_new(proc['ram'])}</p>
+        </div>
+        """
+
+        if proc["gpu_mem"] is not None:
+            proc_html = proc_html.replace(
+                "</div>",
+                f"<p><b>GPU MEM:</b> {fmt_mem_new(proc['gpu_mem'])}</p></div>",
+            )
+
+        combined = f"""
+        <div style="display:flex; gap:20px; margin-top:10px;">
+            {sys_html}
+            {proc_html}
+        </div>
+        """
+
+        return HTML(combined)
+
+    def _sys_cpu_summary(self, t, block):
         t.add_row(
             "CPU AVERAGE",
             "[cyan]|[/cyan]",
@@ -119,7 +156,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"{block['cpu_peak_percent']:.1f}% of {block['cpu_logical_core_count']} cores",
         )
 
-    def _sys_ram_summary(self, t: Table.grid, block):
+    def _sys_ram_summary(self, t, block):
         total_ram = block["ram_total"]
         avg_ram_used = block["ram_average_used"]
         peak_ram_used = block["ram_peak_used"]
@@ -138,7 +175,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"({(peak_ram_used / total_ram) * 100:.1f}%)",
         )
 
-    def _sys_gpu_memory(self, t: Table.grid, block):
+    def _sys_gpu_memory(self, t, block):
         if block.get("is_GPU_available", False) and block.get("gpu_total_count", 0) > 0:
             total_gpu_mem = block.get("gpu_memory_total", 0)
             t.add_row(
@@ -186,7 +223,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             )
         )
 
-    def _proc_cpu_summary(self, t: Table.grid, block: dict) -> None:
+    def _proc_cpu_summary(self, t: Table, block: dict) -> None:
         average_cpu_percent = block["average_cpu_percent"]
         peak_cpu_percent = block["peak_cpu_percent"]
         avg_cores_used = round(average_cpu_percent / 100, 2)
@@ -205,7 +242,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"{block['cpu_logical_core_count']:.1f} cores)",
         )
 
-    def _proc_ram_summary(self, t: Table.grid, block: dict) -> None:
+    def _proc_ram_summary(self, t, block: dict) -> None:
         # RAM Summary
         avg_ram_used = block["average_ram"]
         peak_ram_used = block["peak_ram"]
@@ -224,7 +261,7 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"({(peak_ram_used / total_ram) * 100:.1f}%)",
         )
 
-    def _proc_gpu_memory(self, t: Table.grid, block: dict) -> None:
+    def _proc_gpu_memory(self, t, block: dict) -> None:
         if block.get("is_GPU_available", False):
             total_gpu = block.get("total_gpu_memory_used", 0)
 

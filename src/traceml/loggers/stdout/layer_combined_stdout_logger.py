@@ -1,10 +1,11 @@
 from rich.panel import Panel
 from rich.table import Table
 from rich.console import Group, Console
+from IPython.display import HTML
 from typing import Dict, Any, Optional
 import shutil
 
-from .base_logger import BaseStdoutLogger
+from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
 from .display_manager import LAYER_COMBINED_SUMMARY_LAYOUT_NAME
 from traceml.utils.formatting import fmt_mem_new
 
@@ -25,15 +26,11 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
             layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
         )
         self._latest_snapshot: Dict[str, Any] = {}
-        self._activation_cache: Dict[str, Dict[str, float]] = (
-            {}
-        )  # {layer: {current, global}}
-        self._gradient_cache: Dict[str, Dict[str, float]] = (
-            {}
-        )  # {layer: {current, global}}
+        self._activation_cache: Dict[str, Dict[str, float]] = {}
+        self._gradient_cache: Dict[str, Dict[str, float]] = {}
         self.top_n = top_n
 
-    def _truncate(self, s: str, max_len: int = 30) -> str:
+    def _truncate(self, s: str, max_len: int = 40) -> str:
         """Truncate long layer names keeping start and end."""
         if not isinstance(s, str):
             s = str(s)
@@ -83,26 +80,41 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
             return "—"
         return f"{fmt_mem_new(rec.get('current', 0.0))} / {fmt_mem_new(rec.get('global', 0.0))}"
 
-    def _top_n_from_dict(self, d: Dict[str, float], n: int = 3):
-        """Top-n items from a {key: value} dict, sorted by value desc."""
-        if not d:
-            return []
-        return sorted(d.items(), key=lambda kv: float(kv[1]), reverse=True)[:n]
+    def get_data(self) -> Dict[str, Any]:
+        snaps = self._latest_snapshot or {}
 
-    def _build_layer_table(
-        self,
-        layer_data: Dict[str, float],
-        total_memory: float,
-        activation_layers: Dict[str, Dict[str, float]],
-        gradient_layers: Dict[str, Dict[str, float]],
-    ) -> Table:
-        """Build the live table and update caches from latest snapshots."""
-        # Update caches first
+        layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
+        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get("data") or {}
+        gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
+
+        layer_data: Dict[str, float] = layer_sampler.get("layer_memory", {}) or {}
+        total_memory = float(layer_sampler.get("total_memory", 0.0) or 0.0)
+        model_index = layer_sampler.get("model_index", "—")
+
+        activation_layers = activation_sampler.get("layers", {}) or {}
+        gradient_layers = gradient_sampler.get("layers", {}) or {}
+
+        # update caches
         self._merge_cache(self._activation_cache, activation_layers)
         self._merge_cache(self._gradient_cache, gradient_layers)
 
-        # Sort by allocated memory
-        items = sorted(layer_data.items(), key=lambda kv: float(kv[1]), reverse=True)
+        return {
+            "layers": layer_data,
+            "total_memory": total_memory,
+            "model_index": model_index,
+            "activation_cache": self._activation_cache,
+            "gradient_cache": self._gradient_cache,
+        }
+
+    ## CLI rendering in Terminal
+    def get_panel_renderable(self) -> Panel:
+        data = self.get_data()
+        layers = data["layers"]
+        total_memory = data["total_memory"]
+        model_index = data["model_index"]
+
+        # sort + truncate
+        items = sorted(layers.items(), key=lambda kv: float(kv[1]), reverse=True)
         if self.top_n and self.top_n > 0:
             items = items[: self.top_n]
 
@@ -114,67 +126,89 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
             padding=(0, 1),
         )
         table.add_column("Layer", justify="left", style="magenta")
-        table.add_column(
-            "Memory", justify="right", style="white", no_wrap=False, overflow="fold"
-        )
-        table.add_column("% of total", justify="right", style="white", no_wrap=True)
-        table.add_column(
-            "Activation (curr/peak)", justify="right", style="cyan", no_wrap=True
-        )
-        table.add_column(
-            "Gradient (curr/peak)", justify="right", style="green", no_wrap=True
-        )
+        table.add_column("Memory", justify="right", style="white")
+        table.add_column("% of total", justify="right", style="white")
+        table.add_column("Activation (curr/peak)", justify="right", style="cyan")
+        table.add_column("Gradient (curr/peak)", justify="right", style="green")
 
         if items:
             for name, memory in items:
-                lname = str(name)
-                pct = (
-                    (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
-                )
+                pct = (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
                 table.add_row(
-                    self._truncate(lname),
+                    self._truncate(name),
                     fmt_mem_new(memory),
                     f"{pct:.1f}%",
-                    self._format_cache_value(self._activation_cache, lname),
-                    self._format_cache_value(self._gradient_cache, lname),
+                    self._format_cache_value(data["activation_cache"], name),
+                    self._format_cache_value(data["gradient_cache"], name),
                 )
         else:
             table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—")
 
-        return table
-
-    def get_panel_renderable(self) -> Panel:
-        snaps = self._latest_snapshot or {}
-
-        # LayerMemorySampler data (allocated per layer)
-        layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
-        layer_data: Dict[str, float] = layer_sampler.get("layer_memory", {}) or {}
-        total_memory = float(layer_sampler.get("total_memory", 0.0) or 0.0)
-        model_index = layer_sampler.get("model_index", "—")
-
-        # Activation + Gradient snapshots (curr/global per layer)
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
-            "data"
-        ) or {}
-        activation_layers = activation_sampler.get("layers", {}) or {}
-
-        gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
-        gradient_layers = gradient_sampler.get("layers", {}) or {}
-
-        table = self._build_layer_table(
-            layer_data, total_memory, activation_layers, gradient_layers
-        )
-
-        title_total = fmt_mem_new(total_memory)
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 100)
 
         return Panel(
             Group(table),
-            title=f"[bold blue]Model #{model_index}[/bold blue]  •  Total: [white]{title_total}[/white]",
+            title=f"[bold blue]Model #{model_index}[/bold blue] • Total: [white]{fmt_mem_new(total_memory)}[/white]",
             border_style="blue",
             width=panel_width,
         )
+
+    # Notebook rendering
+    def get_notebook_renderable(self) -> HTML:
+        data = self.get_data()
+        layers = data["layers"]
+        total_memory = data["total_memory"]
+        model_index = data["model_index"]
+
+        rows = ""
+        if layers:
+            items = sorted(layers.items(), key=lambda kv: float(kv[1]), reverse=True)
+            if self.top_n and self.top_n > 0:
+                items = items[: self.top_n]
+
+            for name, memory in items:
+                pct = (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                rows += f"""
+                <tr>
+                    <td style="text-align:left;">{self._truncate(name)}</td>
+                    <td style="text-align:right;">{fmt_mem_new(memory)}</td>
+                    <td style="text-align:right;">{pct:.1f}%</td>
+                    <td style="text-align:right;">{self._format_cache_value(data['activation_cache'], name)}</td>
+                    <td style="text-align:right;">{self._format_cache_value(data['gradient_cache'], name)}</td>
+                </tr>
+                """
+        else:
+            rows = """<tr><td colspan="5" style="text-align:center; color:gray;">No layers detected</td></tr>"""
+
+        html = f"""
+        <div style="border:2px solid #2196f3; border-radius:8px; padding:10px; margin-top:10px;">
+            <h4 style="color:#2196f3; margin:0;">
+                Model #{model_index} • Total: {fmt_mem_new(total_memory)}
+            </h4>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+                <thead style="background:#f0f8ff;">
+                    <tr>
+                        <th style="text-align:left;">Layer</th>
+                        <th style="text-align:right;">Memory</th>
+                        <th style="text-align:right;">% of total</th>
+                        <th style="text-align:right;">Activation (curr/peak)</th>
+                        <th style="text-align:right;">Gradient (curr/peak)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows}
+                </tbody>
+            </table>
+        </div>
+        """
+        return HTML(html)
+
+    def _top_n_from_dict(self, d: Dict[str, float], n: int = 3):
+        """Top-n items from a {key: value} dict, sorted by value desc."""
+        if not d:
+            return []
+        return sorted(d.items(), key=lambda kv: float(kv[1]), reverse=True)[:n]
 
     def log_summary(self, summary: Dict[str, Any]):
         """
