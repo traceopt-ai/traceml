@@ -166,12 +166,11 @@ This design makes TraceML lightweight compared to full profilers — you get pra
 - Live activation memory tracking (per layer, plus totals)
 - Live gradient memory tracking (per layer, plus totals)
 - Real-time terminal dashboards via Rich
-- Basic notebook support (tested in Google Colab)
+- Notebook support
 
 ## Coming Soon
 
 - Step & operation timers (forward, backward, optimizer)
-- Notebook support
 - Export logs as JSON / CSV
 - More visual dashboards
 
