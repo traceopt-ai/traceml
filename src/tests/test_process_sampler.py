@@ -5,7 +5,7 @@ import numpy as np
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.manager.tracker_manager import TrackerManager
 from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.display_manager import StdoutDisplayManager
+from traceml.loggers.stdout.display_manager import CLIDisplayManager
 
 
 def test_process_sampler_with_heavy_task():
@@ -14,7 +14,7 @@ def test_process_sampler_with_heavy_task():
     """
     sampler = ProcessSampler()
     stdout_logger = SystemProcessStdoutLogger()
-    tracker_components = [(sampler, [stdout_logger])]
+    tracker_components = [([sampler], [stdout_logger])]
 
     tracker = TrackerManager(components=tracker_components, interval_sec=0.5)
     try:
@@ -68,7 +68,7 @@ def test_process_sampler_with_heavy_task():
     finally:
         tracker.stop()
         tracker.log_summaries()
-        StdoutDisplayManager.stop_display()
+        CLIDisplayManager.stop_display()
 
 
 def test_process_sampler_multiple_samples_summary_trends():

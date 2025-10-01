@@ -14,7 +14,7 @@ from traceml.loggers.stdout.layer_combined_stdout_logger import (
     LayerCombinedStdoutLogger,
 )
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.display_manager import StdoutDisplayManager
+from traceml.loggers.stdout.display_manager import CLIDisplayManager
 from traceml.decorator import trace_model_instance
 
 
@@ -129,7 +129,9 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
 
     sampler = LayerMemorySampler()
     stdout_logger = LayerCombinedStdoutLogger()
-    tracker = TrackerManager(components=[(sampler, [stdout_logger])], interval_sec=0.25)
+    tracker = TrackerManager(
+        components=[([sampler], [stdout_logger])], interval_sec=0.25
+    )
 
     try:
         tracker.start()
@@ -168,7 +170,7 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
     finally:
         tracker.stop()
         tracker.log_summaries()
-        StdoutDisplayManager.stop_display()
+        CLIDisplayManager.stop_display()
 
 
 if __name__ == "__main__":

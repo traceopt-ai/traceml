@@ -1,7 +1,26 @@
 import threading
 from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.loggers.stdout.display_manager import StdoutDisplayManager
+from traceml.loggers.stdout.display.cli_display_manager import CLIDisplayManager
+from traceml.loggers.stdout.display.notebook_display_manager import (
+    NotebookDisplayManager,
+)
+
+from traceml.samplers.base_sampler import BaseSampler
+from traceml.samplers.system_sampler import SystemSampler
+from traceml.samplers.process_sampler import ProcessSampler
+from traceml.samplers.layer_memory_sampler import LayerMemorySampler
+from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
+from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
+
+from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
+from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
+from traceml.loggers.stdout.layer_combined_stdout_logger import (
+    LayerCombinedStdoutLogger,
+)
+from traceml.loggers.stdout.activation_gradient_memory_logger import (
+    ActivationGradientStdoutLogger,
+)
 
 
 class TrackerManager:
@@ -12,12 +31,37 @@ class TrackerManager:
     This class ensures consistent sampling even if some components fail intermittently.
     """
 
-    # components: List[Tuple[SamplerType, List[LoggerType]]]
+    @staticmethod
+    def _components() -> List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]]:
+        system_sampler = SystemSampler()
+        process_sampler = ProcessSampler()
+        layer_memory_sampler = LayerMemorySampler()
+        activation_memory_sampler = ActivationMemorySampler()
+        gradient_memory_sampler = GradientMemorySampler()
+
+        system_process_logger = SystemProcessStdoutLogger()
+        layer_combined_stdout_logger = LayerCombinedStdoutLogger()
+        activation_gradient_stdout_logger = ActivationGradientStdoutLogger()
+
+        # Collect all trackers
+        sampler_logger_pairs = [
+            ([system_sampler, process_sampler], [system_process_logger]),
+            (
+                [
+                    layer_memory_sampler,
+                    activation_memory_sampler,
+                    gradient_memory_sampler,
+                ],
+                [layer_combined_stdout_logger, activation_gradient_stdout_logger],
+            ),
+        ]
+        return sampler_logger_pairs
+
     def __init__(
         self,
-        components: List[Tuple[Any, List[Any]]],
+        components: List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]] = None,
         interval_sec: float = 1.0,
-        notebook: bool = False,
+        mode: str = "cli",  # "cli" or "notebook"
     ):
         """
         Args:
@@ -27,17 +71,27 @@ class TrackerManager:
         """
         setup_error_logger()
         self.logger = get_error_logger("TrackerManager")
-        self.components = components
+        if components is None:
+            self.components = self._components()
+        else:
+            self.components = components
         self.interval_sec = interval_sec
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
-        StdoutDisplayManager.enable_notebook_mode(notebook)
+        if mode == "cli":
+            self.display_manager = CLIDisplayManager
+            self._render_attr = "get_panel_renderable"
+        elif mode == "notebook":
+            self.display_manager = NotebookDisplayManager
+            self._render_attr = "get_notebook_renderable"
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
 
     def _run(self):
         """
         Background thread loop that continuously samples and logs live snapshots.
         """
-        StdoutDisplayManager.start_display()
+        self.display_manager.start_display()
 
         while not self._stop_event.is_set():
             for samplers, loggers in self.components:
@@ -59,16 +113,18 @@ class TrackerManager:
 
                 # 2. Log snapshot to all associated loggers
                 for logger in loggers:
-                    StdoutDisplayManager.register_layout_content(
-                        logger.layout_section_name, logger.get_panel_renderable
+                    render_fn = getattr(logger, self._render_attr)
+                    self.display_manager.register_layout_content(
+                        logger.layout_section_name, render_fn
                     )
+
                     try:
                         logger.log(snapshots)
                     except Exception as e:
                         self.logger.error(
                             f"[TraceML] Error in logger '{logger.__class__.__name__}'.log() for sampler '{sampler.__class__.__name__}': {e}"
                         )
-                StdoutDisplayManager.update_display()
+                self.display_manager.update_display()
 
             # 3. Wait for the next interval
             self._stop_event.wait(self.interval_sec)
@@ -96,11 +152,11 @@ class TrackerManager:
                 )
 
             # Logger shutdown is now handled more broadly by the main execution context
-            # calling StdoutDisplayManager.stop_display() and individual log_summaries.
+            # calling CLIDisplayManager.stop_display() and individual log_summaries.
             for _, loggers in self.components:
                 for logger in loggers:
                     try:
-                        StdoutDisplayManager.release_display()
+                        self.display_manager.release_display()
                     except Exception as e:
                         self.logger.error(
                             f"[TraceML] Logger '{logger.__class__.__name__}' shutdown error: {e}"

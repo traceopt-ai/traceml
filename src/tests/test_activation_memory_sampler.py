@@ -14,7 +14,7 @@ from traceml.loggers.stdout.activation_gradient_memory_logger import (
 )
 
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.display_manager import StdoutDisplayManager
+from traceml.loggers.stdout.display_manager import CLIDisplayManager
 from traceml.decorator import trace_model_instance
 
 
@@ -39,7 +39,7 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
     sampler = ActivationMemorySampler()
     loggers = ActivationGradientStdoutLogger()
 
-    tracker = TrackerManager(components=[(sampler, [loggers])], interval_sec=0.25)
+    tracker = TrackerManager(components=[([sampler], [loggers])], interval_sec=0.25)
 
     with patch("shutil.get_terminal_size", return_value=(120, 40)):
         try:
@@ -77,7 +77,7 @@ def test_activation_sampler_with_tracker_and_registered_model_forward_activity()
         finally:
             tracker.stop()
             tracker.log_summaries()
-            StdoutDisplayManager.stop_display()
+            CLIDisplayManager.stop_display()
 
 
 if __name__ == "__main__":
