@@ -4,7 +4,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)  
 [![GitHub Stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml/stargazers)
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
+
 
 
  A lightweight library to make PyTorch training memory visible in real time (in CLI and Notebook).
