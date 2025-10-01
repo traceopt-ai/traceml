@@ -5,7 +5,6 @@ from rich.panel import Panel
 from rich.text import Text
 from typing import Dict, Any, Callable, Optional
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-import threading
 
 ROOT_LAYOUT_NAME = "root"
 LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
@@ -138,6 +137,4 @@ class CLIDisplayManager:
 
             cls._live_display.refresh()
         except Exception as e:
-            cls.logger.error(
-                f"[TraceML] Error updating live display: {e}",
-            )
+            cls.logger.error(f"[TraceML] Error updating live display: {e}")

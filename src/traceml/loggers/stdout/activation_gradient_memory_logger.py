@@ -10,7 +10,6 @@ from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
 from traceml.loggers.stdout.display.cli_display_manager import ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
 from traceml.utils.formatting import fmt_mem_new
 
-
 class ActivationGradientStdoutLogger(BaseStdoutLogger):
     """
     Combined logger for:
@@ -127,29 +126,42 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
             width=panel_width,
         )
 
-
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
         data = self.get_data()
         act = data["activation"]
         grad = data["gradient"]
 
-        html = f"""
-        <div style="border:2px solid #2196f3; border-radius:8px; padding:10px; margin-top:10px;">
-            <h4 style="color:#2196f3; margin:0;">
-                Model #{data['model_index']} • Total Mem: {fmt_mem_new(data['total_memory'])}
+        # Activation panel
+        act_html = f"""
+        <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
+            <h4 style="color:#00bcd4; margin:0;">
+                Activation (Model #{data['model_index']})
             </h4>
-            <table style="width:100%; border-collapse:collapse; margin-top:8px;">
-                <tbody>
-                    <tr><td><b style="color:#00bcd4;">Activation Avg</b></td><td style="text-align:right;">{fmt_mem_new(act['avg'])}</td></tr>
-                    <tr><td><b style="color:#00bcd4;">Activation Max</b></td><td style="text-align:right;">{fmt_mem_new(act['max'])}</td></tr>
-                    <tr><td><b style="color:#4caf50;">Gradient Avg</b></td><td style="text-align:right;">{fmt_mem_new(grad['avg'])}</td></tr>
-                    <tr><td><b style="color:#4caf50;">Gradient Max</b></td><td style="text-align:right;">{fmt_mem_new(grad['max'])}</td></tr>
-                </tbody>
-            </table>
+            <p><b>Avg:</b> {fmt_mem_new(act['avg'])}</p>
+            <p><b>Max:</b> {fmt_mem_new(act['max'])}</p>
         </div>
         """
-        return HTML(html)
+
+        # Gradient panel
+        grad_html = f"""
+        <div style="flex:1; border:2px solid #4caf50; border-radius:8px; padding:10px;">
+            <h4 style="color:#4caf50; margin:0;">
+                Gradient (Model #{data['model_index']})
+            </h4>
+            <p><b>Avg:</b> {fmt_mem_new(grad['avg'])}</p>
+            <p><b>Max:</b> {fmt_mem_new(grad['max'])}</p>
+        </div>
+        """
+
+        # Combine in a row
+        combined = f"""
+        <div style="display:flex; gap:20px; margin-top:10px;">
+            {act_html}
+            {grad_html}
+        </div>
+        """
+        return HTML(combined)
 
     def log_summary(self, summary: Dict[str, Any]):
         console = Console()
