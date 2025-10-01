@@ -2,7 +2,7 @@
 <sub><em> If you find useful, consider giving it a ⭐ on GitHub — it helps others discover the project!</em></sub>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)  
-[![GitHub Stars](https://img.shields.io/github/stars/abhinavsriva/trace_ml?style=social)](https://github.com/traceml-ai/traceml/stargazers)
+[![GitHub Stars](https://img.shields.io/github/stars/traceopt-ai/trace_ml?style=social)](https://github.com/traceopt-ai/traceml/stargazers)
 
 
  A lightweight library to make PyTorch training memory visible in real time (in CLI and Notebook).
