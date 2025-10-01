@@ -47,8 +47,7 @@ def run_with_tracing(
     print(f"Sampling interval: {interval} seconds")
     print(f"Log directory: {log_dir}")
 
-
-    tracker = TrackerManager(interval_sec=interval, mode='cli')
+    tracker = TrackerManager(interval_sec=interval, mode="cli")
 
     # --- Arguments for the target script ---
     original_argv = list(sys.argv)

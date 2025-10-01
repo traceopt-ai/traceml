@@ -44,7 +44,6 @@ class BaseStdoutLogger:
         """
         # raise NotImplementedError("Subclasses must implement get_notebook_renderable()")
 
-
     def log(self, snapshots: Dict[str, Any]):
         """
         Receives snapshots from one or more samplers.

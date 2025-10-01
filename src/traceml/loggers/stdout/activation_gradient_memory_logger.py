@@ -7,8 +7,11 @@ from rich.table import Table
 from IPython.display import HTML
 
 from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from traceml.loggers.stdout.display.cli_display_manager import ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
+from traceml.loggers.stdout.display.cli_display_manager import (
+    ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME,
+)
 from traceml.utils.formatting import fmt_mem_new
+
 
 class ActivationGradientStdoutLogger(BaseStdoutLogger):
     """
@@ -77,7 +80,9 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
 
         # Extract samplers
         layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get("data") or {}
+        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
+            "data"
+        ) or {}
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
 
         # Update caches + stats
@@ -121,7 +126,7 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
         return Panel(
             Group(table),
             title=f"[bold blue]Model #{data['model_index']}[/bold blue]  •  "
-                  f"Total Mem: [white]{fmt_mem_new(data['total_memory'])}[/white]",
+            f"Total Mem: [white]{fmt_mem_new(data['total_memory'])}[/white]",
             border_style="blue",
             width=panel_width,
         )

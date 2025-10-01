@@ -7,9 +7,10 @@ from rich.console import Console
 from IPython.display import HTML
 
 
-
 from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from traceml.loggers.stdout.display.cli_display_manager import SYSTEM_PROCESS_LAYOUT_NAME
+from traceml.loggers.stdout.display.cli_display_manager import (
+    SYSTEM_PROCESS_LAYOUT_NAME,
+)
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
 
@@ -77,7 +78,9 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"[bold green]RAM[/bold green] {fmt_mem_new(sys['ram_used'])}/{fmt_mem_new(sys['ram_total'])}{ram_pct_str}",
         ]
         if sys["gpu"]["available"]:
-            sys_info.append(f"[bold green]GPU[/bold green] {fmt_percent(sys['gpu']['util_avg'])}")
+            sys_info.append(
+                f"[bold green]GPU[/bold green] {fmt_percent(sys['gpu']['util_avg'])}"
+            )
             sys_info.append(
                 f"[bold green]GPU MEM[/bold green] {fmt_mem_new(sys['gpu']['mem_used'])}/{fmt_mem_new(sys['gpu']['mem_total'])}"
             )
@@ -92,7 +95,9 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             f"[bold green]RAM[/bold green] {fmt_mem_new(proc['ram'])}",
         ]
         if proc["gpu_mem"] is not None:
-            proc_info.append(f"[bold green]GPU MEM[/bold green] {fmt_mem_new(proc['gpu_mem'])}")
+            proc_info.append(
+                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(proc['gpu_mem'])}"
+            )
         table.add_row("   ".join(proc_info))
 
         cols, _ = shutil.get_terminal_size()
@@ -105,7 +110,6 @@ class SystemProcessStdoutLogger(BaseStdoutLogger):
             border_style="cyan",
             width=panel_width,
         )
-
 
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:

@@ -6,7 +6,9 @@ from typing import Dict, Any, Optional
 import shutil
 
 from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from traceml.loggers.stdout.display.cli_display_manager import LAYER_COMBINED_SUMMARY_LAYOUT_NAME
+from traceml.loggers.stdout.display.cli_display_manager import (
+    LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
+)
 from traceml.utils.formatting import fmt_mem_new
 
 
@@ -84,7 +86,9 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
         snaps = self._latest_snapshot or {}
 
         layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get("data") or {}
+        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
+            "data"
+        ) or {}
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
 
         layer_data: Dict[str, float] = layer_sampler.get("layer_memory", {}) or {}
@@ -133,7 +137,9 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
 
         if items:
             for name, memory in items:
-                pct = (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                pct = (
+                    (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                )
                 table.add_row(
                     self._truncate(name),
                     fmt_mem_new(memory),
@@ -168,7 +174,9 @@ class LayerCombinedStdoutLogger(BaseStdoutLogger):
                 items = items[: self.top_n]
 
             for name, memory in items:
-                pct = (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                pct = (
+                    (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
+                )
                 rows += f"""
                 <tr>
                     <td style="text-align:left;">{self._truncate(name)}</td>

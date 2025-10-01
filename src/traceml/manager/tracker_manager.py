@@ -2,7 +2,9 @@ import threading
 from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.loggers.stdout.display.cli_display_manager import CLIDisplayManager
-from traceml.loggers.stdout.display.notebook_display_manager import NotebookDisplayManager
+from traceml.loggers.stdout.display.notebook_display_manager import (
+    NotebookDisplayManager,
+)
 
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
@@ -20,6 +22,7 @@ from traceml.loggers.stdout.activation_gradient_memory_logger import (
     ActivationGradientStdoutLogger,
 )
 
+
 class TrackerManager:
     """
     Manages periodic sampling and logging of system metrics (CPU, memory, tensors, etc.)
@@ -27,6 +30,7 @@ class TrackerManager:
 
     This class ensures consistent sampling even if some components fail intermittently.
     """
+
     @staticmethod
     def _components() -> List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]]:
         system_sampler = SystemSampler()
@@ -43,12 +47,15 @@ class TrackerManager:
         sampler_logger_pairs = [
             ([system_sampler, process_sampler], [system_process_logger]),
             (
-                [layer_memory_sampler, activation_memory_sampler, gradient_memory_sampler],
+                [
+                    layer_memory_sampler,
+                    activation_memory_sampler,
+                    gradient_memory_sampler,
+                ],
                 [layer_combined_stdout_logger, activation_gradient_stdout_logger],
             ),
         ]
         return sampler_logger_pairs
-
 
     def __init__(
         self,
@@ -108,8 +115,7 @@ class TrackerManager:
                 for logger in loggers:
                     render_fn = getattr(logger, self._render_attr)
                     self.display_manager.register_layout_content(
-                        logger.layout_section_name,
-                        render_fn
+                        logger.layout_section_name, render_fn
                     )
 
                     try:

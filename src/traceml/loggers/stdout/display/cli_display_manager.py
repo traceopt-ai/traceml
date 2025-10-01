@@ -67,9 +67,7 @@ class CLIDisplayManager:
             try:
                 cls._live_display.start()
             except Exception as e:
-                cls.logger.error(
-                    f"[TraceML] Failed to start shared live display: {e}"
-                )
+                cls.logger.error(f"[TraceML] Failed to start shared live display: {e}")
                 cls._live_display = None
 
         cls._active_logger_count += 1

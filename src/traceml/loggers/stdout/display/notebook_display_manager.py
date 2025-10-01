@@ -1,5 +1,4 @@
 from typing import Dict, Callable, Any
-import threading
 from IPython.display import display
 import ipywidgets as widgets
 
@@ -43,7 +42,9 @@ class NotebookDisplayManager:
             cls.stop_display()
 
     @classmethod
-    def register_layout_content(cls, layout_section: str, content_fn: Callable[[], Any]):
+    def register_layout_content(
+        cls, layout_section: str, content_fn: Callable[[], Any]
+    ):
         """Register a logger section and create its widget if needed."""
         cls._layout_content_fns[layout_section] = content_fn
         if layout_section not in cls._widgets:
