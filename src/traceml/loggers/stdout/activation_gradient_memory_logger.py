@@ -4,9 +4,10 @@ from typing import Dict, Any
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
+from IPython.display import HTML
 
 from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from .display_manager import ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
+from traceml.loggers.stdout.display.cli_display_manager import ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME
 from traceml.utils.formatting import fmt_mem_new
 
 
@@ -22,7 +23,7 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
 
     def __init__(self, top_n: int = 10):
         super().__init__(
-            name="Layer Combined Memory",
+            name="Activation & Gradient Stats",
             layout_section_name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME,
         )
         self._latest_snapshot: Dict[str, Any] = {}
@@ -72,54 +73,83 @@ class ActivationGradientStdoutLogger(BaseStdoutLogger):
             self._gradient_cache, self._gradient_stats, self._gradient_global_max
         )
 
-    def get_panel_renderable(self) -> Panel:
+    def get_data(self) -> Dict[str, Any]:
         snaps = self._latest_snapshot or {}
 
         # Extract samplers
         layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
-            "data"
-        ) or {}
+        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get("data") or {}
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
 
-        # Update caches + totals
+        # Update caches + stats
         self._process_activation_snapshot(activation_sampler)
         self._process_gradient_snapshot(gradient_sampler)
 
-        act_avg = self._activation_stats["avg"]
-        grad_avg = self._gradient_stats["avg"]
+        return {
+            "total_memory": float(layer_sampler.get("total_memory", 0.0) or 0.0),
+            "model_index": layer_sampler.get("model_index", "—"),
+            "activation": {
+                "avg": self._activation_stats["avg"],
+                "max": self._activation_global_max,
+            },
+            "gradient": {
+                "avg": self._gradient_stats["avg"],
+                "max": self._gradient_global_max,
+            },
+        }
 
-        total_memory = float(layer_sampler.get("total_memory", 0.0) or 0.0)
-        model_index = layer_sampler.get("model_index", "—")
+    # CLI rendering
+    def get_panel_renderable(self) -> Panel:
+        data = self.get_data()
+        act = data["activation"]
+        grad = data["gradient"]
 
-        # Table
         table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1))
         table.add_column("Metric", justify="left", style="bold")
         table.add_column("Value", justify="right", style="white")
 
         # Activation stats
-        table.add_row("[cyan]Approx Activation Avg[/cyan]", fmt_mem_new(act_avg))
-        table.add_row(
-            "[cyan]Approx Activation Max[/cyan]",
-            fmt_mem_new(self._activation_global_max),
-        )
+        table.add_row("[cyan]Approx Activation Avg[/cyan]", fmt_mem_new(act["avg"]))
+        table.add_row("[cyan]Approx Activation Max[/cyan]", fmt_mem_new(act["max"]))
 
         # Gradient stats
-        table.add_row("[green]Approx Gradient Avg[/green]", fmt_mem_new(grad_avg))
-        table.add_row(
-            "[green]Approx Gradient Max[/green]", fmt_mem_new(self._gradient_global_max)
-        )
+        table.add_row("[green]Approx Gradient Avg[/green]", fmt_mem_new(grad["avg"]))
+        table.add_row("[green]Approx Gradient Max[/green]", fmt_mem_new(grad["max"]))
 
-        # Width control
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(80, int(cols * 0.6)), 120)
 
         return Panel(
             Group(table),
-            title=f"[bold blue]Model #{model_index}[/bold blue]  •  Total Mem: [white]{fmt_mem_new(total_memory)}[/white]",
+            title=f"[bold blue]Model #{data['model_index']}[/bold blue]  •  "
+                  f"Total Mem: [white]{fmt_mem_new(data['total_memory'])}[/white]",
             border_style="blue",
             width=panel_width,
         )
+
+
+    # Notebook rendering
+    def get_notebook_renderable(self) -> HTML:
+        data = self.get_data()
+        act = data["activation"]
+        grad = data["gradient"]
+
+        html = f"""
+        <div style="border:2px solid #2196f3; border-radius:8px; padding:10px; margin-top:10px;">
+            <h4 style="color:#2196f3; margin:0;">
+                Model #{data['model_index']} • Total Mem: {fmt_mem_new(data['total_memory'])}
+            </h4>
+            <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+                <tbody>
+                    <tr><td><b style="color:#00bcd4;">Activation Avg</b></td><td style="text-align:right;">{fmt_mem_new(act['avg'])}</td></tr>
+                    <tr><td><b style="color:#00bcd4;">Activation Max</b></td><td style="text-align:right;">{fmt_mem_new(act['max'])}</td></tr>
+                    <tr><td><b style="color:#4caf50;">Gradient Avg</b></td><td style="text-align:right;">{fmt_mem_new(grad['avg'])}</td></tr>
+                    <tr><td><b style="color:#4caf50;">Gradient Max</b></td><td style="text-align:right;">{fmt_mem_new(grad['max'])}</td></tr>
+                </tbody>
+            </table>
+        </div>
+        """
+        return HTML(html)
 
     def log_summary(self, summary: Dict[str, Any]):
         console = Console()

@@ -1,7 +1,8 @@
 import threading
 from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.loggers.stdout.display_manager import CLIDisplayManager
+from traceml.loggers.stdout.display.cli_display_manager import CLIDisplayManager
+from traceml.loggers.stdout.display.notebook_display_manager import NotebookDisplayManager
 
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
@@ -53,7 +54,7 @@ class TrackerManager:
         self,
         components: List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]] = None,
         interval_sec: float = 1.0,
-        notebook: bool = False,
+        mode: str = "cli",  # "cli" or "notebook"
     ):
         """
         Args:
@@ -70,13 +71,20 @@ class TrackerManager:
         self.interval_sec = interval_sec
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
-        CLIDisplayManager.enable_notebook_mode(notebook)
+        if mode == "cli":
+            self.display_manager = CLIDisplayManager
+            self._render_attr = "get_panel_renderable"
+        elif mode == "notebook":
+            self.display_manager = NotebookDisplayManager
+            self._render_attr = "get_notebook_renderable"
+        else:
+            raise ValueError(f"Unsupported mode: {mode}")
 
     def _run(self):
         """
         Background thread loop that continuously samples and logs live snapshots.
         """
-        CLIDisplayManager.start_display()
+        self.display_manager.start_display()
 
         while not self._stop_event.is_set():
             for samplers, loggers in self.components:
@@ -98,16 +106,19 @@ class TrackerManager:
 
                 # 2. Log snapshot to all associated loggers
                 for logger in loggers:
-                    CLIDisplayManager.register_layout_content(
-                        logger.layout_section_name, logger.get_panel_renderable
+                    render_fn = getattr(logger, self._render_attr)
+                    self.display_manager.register_layout_content(
+                        logger.layout_section_name,
+                        render_fn
                     )
+
                     try:
                         logger.log(snapshots)
                     except Exception as e:
                         self.logger.error(
                             f"[TraceML] Error in logger '{logger.__class__.__name__}'.log() for sampler '{sampler.__class__.__name__}': {e}"
                         )
-                CLIDisplayManager.update_display()
+                self.display_manager.update_display()
 
             # 3. Wait for the next interval
             self._stop_event.wait(self.interval_sec)
@@ -139,7 +150,7 @@ class TrackerManager:
             for _, loggers in self.components:
                 for logger in loggers:
                     try:
-                        CLIDisplayManager.release_display()
+                        self.display_manager.release_display()
                     except Exception as e:
                         self.logger.error(
                             f"[TraceML] Logger '{logger.__class__.__name__}' shutdown error: {e}"

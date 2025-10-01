@@ -9,7 +9,7 @@ from IPython.display import HTML
 
 
 from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from .display_manager import SYSTEM_PROCESS_LAYOUT_NAME
+from traceml.loggers.stdout.display.cli_display_manager import SYSTEM_PROCESS_LAYOUT_NAME
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
 
