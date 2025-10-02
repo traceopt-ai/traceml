@@ -114,8 +114,7 @@ def main():
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
     )
-
-    scaler = torch.cuda.amp.GradScaler(enabled=torch.cuda.is_available())
+    scaler = torch.amp.GradScaler(device="cuda", enabled=torch.cuda.is_available())
 
     model.train()
     global_step = 0
