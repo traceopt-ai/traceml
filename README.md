@@ -1,11 +1,11 @@
-# TraceML
+ # TraceML
 <sub><em> If you find useful, consider giving it a ⭐ on GitHub — it helps others discover the project!</em></sub>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)  
-[![GitHub Stars](https://img.shields.io/github/stars/abhinavsriva/trace_ml?style=social)](https://github.com/traceml-ai/traceml/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)  [![GitHub Stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml/stargazers) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)  ![Python](https://img.shields.io/badge/python-3.9.23-blue)
 
 
- A lightweight library + CLI to make PyTorch training memory visible in real time.
+
+ A lightweight library to make PyTorch training memory visible in real time (in CLI and Notebook).
 
 ## The Problem
 
@@ -15,7 +15,7 @@ Pinpointing which part of the model is consuming too much memory or slowing thin
 
 ## 💡 Why TraceML?
 
-`traceml` is a lightweight CLI tool to instrument your PyTorch training scripts and get real-time, granular insights into:
+`traceml` is designed to give you real-time, granular insights into memory usage without heavy overhead. It works both in the **terminal (CLI) and inside Jupyter notebooks**, so you can pick the workflow that fits you best:
 
 ✅ System + process-level usage (CPU, RAM, GPU)
 
@@ -23,7 +23,8 @@ Pinpointing which part of the model is consuming too much memory or slowing thin
 
 ✅ Live activation & gradient memory
 
-All shown live in your terminal — no config, no setup, just plug-and-trace.
+No config, no setup, just plug-and-trace.
+
 
 ## 📦 Installation
 
@@ -39,15 +40,9 @@ pip install '.[dev]'
 
 ## 🚀 Usage
 
-TraceML wraps your training script and prints memory insights to the terminal as your model trains:
-
-```bash
-traceml run <your_training_script.py>
-```
-
 ### Registering your model for tracing
 
-To capture **memory usage**, you need to register your model with TraceML. There are two simple ways:
+To capture **memory usage**, you first need to register your model with TraceML. There are two simple ways:
 
 #### 1. With a class decorator (recommended)
 
@@ -85,6 +80,42 @@ trace_model_instance(model)
 
 ✅ Best when you build models dynamically or don't want to decorate the class.
 
+
+
+Then, choose whichever fits your workflow.
+
+### 📓 Notebook
+
+Run TraceML directly in Jupyter/Colab:
+
+```shell
+from traceml.decorator import trace_model_instance
+from traceml.manager.tracker_manager import TrackerManager
+
+# Attach TraceML hooks
+trace_model_instance(model)
+
+# Start live tracker
+tracker = TrackerManager(interval_sec=1.0, mode="notebook")
+tracker.start()
+
+# 🔄 Train as usual
+train_model(model, train_loader, val_loader, optimizer, scheduler, scaler, device, dtype)
+
+# Stop and show summaries
+tracker.stop()
+tracker.log_summaries()
+
+```
+
+### Terminal/CLI
+
+Wrap your training script to see live dashboards in your terminal:
+```bash
+traceml run <your_training_script.py>
+```
+
+
 ## Examples
 
 ```bash
@@ -98,16 +129,13 @@ traceml run src/examples/tracing_with_class_decorator
 ![TraceML Live Dashboard](demo.png)
 
 
-### 📓 Notebook Support (Basic)
+### 📓 Notebook Example
 
-You can also run TraceML inside Jupyter notebooks:
+You can also run TraceML inside Jupyter/Colab.
+See the full [example notebook](src/examples/tracing_bert_notebook.ipynb) for a working demo.
 
-```bash
-from traceml.cli import run_with_tracing
-run_with_tracing("src/examples/tracing_on_bert.py", interval=1, notebook=True)
-```
+ Notebook output will refresh live per interval, similar to the terminal dashboard.
 
-ℹ️ Currently, notebook output clears and refreshes per interval, so you may need to scroll cells up/down to follow the live updates. Improvements coming soon.
 
 ## 🔎 How the Samplers Work
 
@@ -138,12 +166,11 @@ This design makes TraceML lightweight compared to full profilers — you get pra
 - Live activation memory tracking (per layer, plus totals)
 - Live gradient memory tracking (per layer, plus totals)
 - Real-time terminal dashboards via Rich
-- Basic notebook support (tested in Google Colab)
+- Notebook support
 
 ## Coming Soon
 
 - Step & operation timers (forward, backward, optimizer)
-- Notebook support
 - Export logs as JSON / CSV
 - More visual dashboards
 

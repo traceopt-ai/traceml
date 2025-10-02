@@ -18,7 +18,7 @@ from traceml.loggers.stdout.activation_gradient_memory_logger import (
 )
 
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.display_manager import StdoutDisplayManager
+from traceml.loggers.stdout.display_manager import CLIDisplayManager
 from traceml.decorator import trace_model_instance
 
 
@@ -92,7 +92,7 @@ def test_gradient_sampler_with_tracker_and_backward_activity():
         finally:
             tracker.stop()
             tracker.log_summaries()
-            StdoutDisplayManager.stop_display()
+            CLIDisplayManager.stop_display()
 
 
 if __name__ == "__main__":
