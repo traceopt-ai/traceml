@@ -7,14 +7,14 @@ from rich.console import Console
 from IPython.display import HTML
 
 
-from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from traceml.loggers.stdout.display.cli_display_manager import (
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.cli_display_manager import (
     SYSTEM_PROCESS_LAYOUT_NAME,
 )
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
 
-class SystemProcessStdoutLogger(BaseStdoutLogger):
+class SystemProcessRenderer(BaseRenderer):
     """
     Combined System + Process panel.
     Expects BaseStdoutLogger.log() to receive a dict:

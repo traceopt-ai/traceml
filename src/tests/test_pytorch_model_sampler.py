@@ -14,8 +14,8 @@ from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 
 from traceml.manager.tracker_manager import TrackerManager
 
-from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.layer_combined_stdout_logger import (
+from traceml.renderers.system_process_renderer import SystemProcessStdoutLogger
+from traceml.renderers.layer_combined_stdout_renderer import (
     LayerCombinedStdoutLogger,
 )
 

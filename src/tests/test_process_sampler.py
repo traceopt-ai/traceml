@@ -4,7 +4,7 @@ import numpy as np
 
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
+from traceml.renderers.system_process_renderer import SystemProcessStdoutLogger
 from traceml.loggers.stdout.display_manager import CLIDisplayManager
 
 

@@ -10,10 +10,10 @@ from traceml.samplers.gradient_memory_sampler import (
     GradientMemorySampler,
     GradientSnapshot,
 )
-from traceml.loggers.stdout.layer_combined_stdout_logger import (
+from traceml.renderers.layer_combined_stdout_renderer import (
     LayerCombinedStdoutLogger,
 )
-from traceml.loggers.stdout.activation_gradient_memory_logger import (
+from traceml.renderers.activation_gradient_memory_renderer import (
     ActivationGradientStdoutLogger,
 )
 

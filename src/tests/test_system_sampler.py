@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
+from traceml.renderers.system_process_renderer import SystemProcessStdoutLogger
 from traceml.loggers.stdout.display_manager import CLIDisplayManager
 
 

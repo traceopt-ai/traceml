@@ -1,7 +1,7 @@
 from typing import Dict, Any
 
 
-class BaseStdoutLogger:
+class BaseRenderer:
     """
     Base class for specific stdout loggers. Each logger is responsible for
     providing data for a specific part of the shared display.

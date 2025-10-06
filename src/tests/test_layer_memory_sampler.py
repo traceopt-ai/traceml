@@ -10,7 +10,7 @@ from traceml.samplers.layer_memory_sampler import (
     LayerMemorySampler,
     ModelMemorySnapshot,
 )
-from traceml.loggers.stdout.layer_combined_stdout_logger import (
+from traceml.renderers.layer_combined_stdout_renderer import (
     LayerCombinedStdoutLogger,
 )
 from traceml.manager.tracker_manager import TrackerManager

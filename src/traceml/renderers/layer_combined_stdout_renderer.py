@@ -5,14 +5,14 @@ from IPython.display import HTML
 from typing import Dict, Any, Optional
 import shutil
 
-from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from traceml.loggers.stdout.display.cli_display_manager import (
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.cli_display_manager import (
     LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
 )
 from traceml.utils.formatting import fmt_mem_new
 
 
-class LayerCombinedStdoutLogger(BaseStdoutLogger):
+class LayerCombinedRenderer(BaseRenderer):
     """
     Combined logger for per-layer:
       - Memory (allocated params + buffers)

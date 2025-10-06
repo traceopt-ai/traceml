@@ -9,7 +9,7 @@ from traceml.samplers.activation_memory_sampler import (
     ActivationMemorySampler,
     ActivationSnapshot,
 )
-from traceml.loggers.stdout.activation_gradient_memory_logger import (
+from traceml.renderers.activation_gradient_memory_renderer import (
     ActivationGradientStdoutLogger,
 )
 
