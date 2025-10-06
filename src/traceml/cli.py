@@ -63,6 +63,23 @@ def run_with_tracing(
     try:
         # Run the user's script as sub  process
         print(f"\n--- Running: {sys.argv[0]} {' '.join(sys.argv[1:])} ---\n")
+
+        # Emulate Python interpreter import behavior
+        script_dir = os.path.dirname(os.path.abspath(script_path))
+        cwd = os.path.abspath(os.getcwd())
+
+        # Ensure both current working directory and script directory are importable
+        for path in [script_dir, cwd]:
+            if path not in sys.path:
+                sys.path.insert(0, path)
+
+        # Also normalize environment variable for subprocesses (e.g. multiprocessing)
+        os.environ["PYTHONPATH"] = os.pathsep.join(
+            [p for p in [script_dir, cwd] if p] + [os.environ.get("PYTHONPATH", "")]
+        )
+        # --------------------------------------------------------
+
+        # Execute user script in the same process, like `python script.py`
         runpy.run_path(script_path, run_name="__main__")
         print("\n--- User script finished successfully ---")
 
