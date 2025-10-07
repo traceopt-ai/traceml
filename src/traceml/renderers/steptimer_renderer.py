@@ -157,29 +157,41 @@ class StepTimerRenderer(BaseRenderer):
         data = self.get_data()
 
         rows = ""
-        for name, vals in data.items():
-            avg_cached = self._avg_cache.get(name, 0.0)
-            peak_cached = self._peak_cache.get(name, 0.0)
-            rows += f"""
-                <tr>
-                    <td><b>{name}</b></td>
-                    <td style='text-align:right'>{avg_cached:.4f}</td>
-                    <td style='text-align:right'>{peak_cached:.4f}</td>
+        if data:
+            items = sorted(data.items(), key=lambda kv: kv[0])
+            for name, vals in items:
+                avg_cached = self._avg_cache.get(name, 0.0)
+                peak_cached = self._peak_cache.get(name, 0.0)
+                rows += f"""
+                <tr style="border-bottom:1px solid #2c2c2c;">
+                    <td style="text-align:left; color:#e0e0e0;">{name}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{avg_cached:.4f}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{peak_cached:.4f}</td>
                 </tr>
-            """
+                """
+        else:
+            rows = """<tr><td colspan="3" style="text-align:center; color:gray;">No step timings recorded</td></tr>"""
 
         html = f"""
-        <div style="margin-top:10px;">
-            <h4 style="color:#00bcd4;">Step Timers</h4>
+        <div style="
+            border:2px solid #00bcd4;
+            border-radius:8px;
+            padding:10px;
+            margin-top:10px;
+            background-color:#111111;
+        ">
+            <h4 style="color:#00bcd4; margin:0 0 8px 0;">Step Timers</h4>
             <table style="width:100%; border-collapse:collapse;">
-                <thead>
+                <thead style="background-color:#1e1e1e;">
                     <tr style="border-bottom:2px solid #00bcd4;">
-                        <th align="left">Event</th>
-                        <th align="right">Avg (s)</th>
-                        <th align="right">Peak (s)</th>
+                        <th style="text-align:left; color:#00bcd4;">Event</th>
+                        <th style="text-align:right; color:#00bcd4;">Avg (s)</th>
+                        <th style="text-align:right; color:#00bcd4;">Peak (s)</th>
                     </tr>
                 </thead>
-                <tbody>{rows}</tbody>
+                <tbody>
+                    {rows}
+                </tbody>
             </table>
         </div>
         """
