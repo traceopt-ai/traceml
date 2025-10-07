@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.renderers.system_process_renderer import SystemProcessStdoutLogger
-from traceml.loggers.stdout.display_manager import CLIDisplayManager
+from traceml.renderers.system_process_renderer import SystemProcessRenderer
+from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 
 
 class _MockUtilization:
@@ -28,7 +28,7 @@ def test_system_sampler_with_heavy_task():
       - Works regardless of GPU presence
     """
     system_sampler = SystemSampler()
-    system_process_stdout_logger = SystemProcessStdoutLogger()
+    system_process_stdout_logger = SystemProcessRenderer()
     tracker_components = [([system_sampler], [system_process_stdout_logger])]
 
     tracker = TrackerManager(components=tracker_components, interval_sec=0.5)

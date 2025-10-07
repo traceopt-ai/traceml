@@ -4,8 +4,8 @@ import numpy as np
 
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.renderers.system_process_renderer import SystemProcessStdoutLogger
-from traceml.loggers.stdout.display_manager import CLIDisplayManager
+from traceml.renderers.system_process_renderer import SystemProcessRenderer
+from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 
 
 def test_process_sampler_with_heavy_task():
@@ -13,7 +13,7 @@ def test_process_sampler_with_heavy_task():
     Runs a short CPU+RAM heavy workload
     """
     sampler = ProcessSampler()
-    stdout_logger = SystemProcessStdoutLogger()
+    stdout_logger = SystemProcessRenderer()
     tracker_components = [([sampler], [stdout_logger])]
 
     tracker = TrackerManager(components=tracker_components, interval_sec=0.5)

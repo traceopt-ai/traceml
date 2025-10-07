@@ -11,14 +11,14 @@ from traceml.samplers.gradient_memory_sampler import (
     GradientSnapshot,
 )
 from traceml.renderers.layer_combined_stdout_renderer import (
-    LayerCombinedStdoutLogger,
+    LayerCombinedRenderer,
 )
 from traceml.renderers.activation_gradient_memory_renderer import (
-    ActivationGradientStdoutLogger,
+    ActivationGradientRenderer,
 )
 
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.display_manager import CLIDisplayManager
+from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.decorator import trace_model_instance
 
 
@@ -41,8 +41,8 @@ def test_gradient_sampler_with_tracker_and_backward_activity():
 
     sampler1 = LayerMemorySampler()
     sampler2 = GradientMemorySampler()
-    loggers1 = LayerCombinedStdoutLogger()
-    loggers2 = ActivationGradientStdoutLogger()
+    loggers1 = LayerCombinedRenderer()
+    loggers2 = ActivationGradientRenderer()
 
     tracker = TrackerManager(
         components=[([sampler1, sampler2], [loggers1, loggers2])], interval_sec=0.25
