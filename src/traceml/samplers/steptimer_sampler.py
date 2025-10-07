@@ -16,6 +16,7 @@ class StepTimeSnapshot:
     Snapshot of timings in the last interval.
     Contains average and max duration for each event name.
     """
+
     event_stats: Dict[str, Dict[str, float]]
 
 
@@ -31,8 +32,12 @@ class StepTimerSampler(BaseSampler):
         self.logger = get_error_logger("StepTimeSampler")
 
         # Internal history log: event_name -> deque of durations
-        self.cpu_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=maxlen))
-        self.gpu_history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=maxlen))
+        self.cpu_history: Dict[str, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=maxlen)
+        )
+        self.gpu_history: Dict[str, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=maxlen)
+        )
 
         self.latest: Optional[StepTimeSnapshot] = None
 
@@ -97,7 +102,7 @@ class StepTimerSampler(BaseSampler):
             snap = self._aggregate_events(events)
             self.latest = snap
 
-            envelope =  self.make_snapshot(
+            envelope = self.make_snapshot(
                 ok=True,
                 message="sampled successfully",
                 source="step_timer",
@@ -106,14 +111,13 @@ class StepTimerSampler(BaseSampler):
         except Exception as e:
             self.logger.error(f"[TraceML] StepTime sampling error: {e}")
             self.latest = None
-            envelope =  self.make_snapshot(
+            envelope = self.make_snapshot(
                 ok=False,
                 message=f"sampling failed: {e}",
                 source="step_timer",
                 data=None,
             )
         return self.snapshot_dict(envelope)
-
 
     def get_summary(self) -> Dict[str, Any]:
         """
@@ -123,13 +127,21 @@ class StepTimerSampler(BaseSampler):
         try:
             for name, vals in self.cpu_history.items():
                 cpu_arr = np.array(vals)
-                summary[f"{name}_cpu_avg_s"] = float(np.mean(cpu_arr)) if cpu_arr.size else 0.0
-                summary[f"{name}_cpu_max_s"] = float(np.max(cpu_arr)) if cpu_arr.size else 0.0
+                summary[f"{name}_cpu_avg_s"] = (
+                    float(np.mean(cpu_arr)) if cpu_arr.size else 0.0
+                )
+                summary[f"{name}_cpu_max_s"] = (
+                    float(np.max(cpu_arr)) if cpu_arr.size else 0.0
+                )
 
             for name, vals in self.gpu_history.items():
                 gpu_arr = np.array(vals)
-                summary[f"{name}_gpu_avg_s"] = float(np.mean(gpu_arr)) if gpu_arr.size else 0.0
-                summary[f"{name}_gpu_max_s"] = float(np.max(gpu_arr)) if gpu_arr.size else 0.0
+                summary[f"{name}_gpu_avg_s"] = (
+                    float(np.mean(gpu_arr)) if gpu_arr.size else 0.0
+                )
+                summary[f"{name}_gpu_max_s"] = (
+                    float(np.max(gpu_arr)) if gpu_arr.size else 0.0
+                )
 
             return summary
         except Exception as e:

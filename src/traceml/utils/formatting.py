@@ -1,5 +1,6 @@
 from typing import Any
 
+
 def fmt_percent(x):
     try:
         return f"{float(x):.1f}%"

@@ -44,7 +44,7 @@ class TrackerManager:
 
         system_process_renderer = SystemProcessRenderer()
         layer_combined_renderer = LayerCombinedRenderer()
-        activation_gradient_renderer= ActivationGradientRenderer()
+        activation_gradient_renderer = ActivationGradientRenderer()
         steptimer_renderer = StepTimerRenderer()
 
         # Collect all trackers

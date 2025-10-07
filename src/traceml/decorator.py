@@ -102,9 +102,9 @@ def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
                 start_event = torch.cuda.Event(enable_timing=True)
                 end_event = torch.cuda.Event(enable_timing=True)
 
-                start_event.record()          # queued in current CUDA stream
+                start_event.record()  # queued in current CUDA stream
                 result = func(*args, **kwargs)
-                end_event.record()            # queued after kernels
+                end_event.record()  # queued after kernels
 
                 cpu_end = time.time()
 

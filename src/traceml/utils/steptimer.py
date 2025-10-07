@@ -17,6 +17,7 @@ class StepTimeEvent:
     For GPU timing, CUDA events are stored and resolved later
     by the sampler whereas CPU timing is resolved immediately.
     """
+
     name: str
     cpu_start: float
     cpu_end: float
@@ -63,4 +64,3 @@ def record_step_time_event(evt: StepTimeEvent):
             f"[TraceML:StepTimer] Queue full, dropping event {evt.name}",
             file=sys.stderr,
         )
-

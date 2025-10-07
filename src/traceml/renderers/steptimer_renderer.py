@@ -56,7 +56,9 @@ class StepTimerRenderer(BaseRenderer):
             self._avg_cache[name] = stats["avg"]
             self._peak_cache[name] = max(self._peak_cache[name], peak_val)
 
-    def _merge_with_last_snapshot(self, snapshot: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+    def _merge_with_last_snapshot(
+        self, snapshot: Dict[str, Dict[str, float]]
+    ) -> Dict[str, Dict[str, float]]:
         """Merge current snapshot with last known values, keeping missing timers visible."""
         merged = dict(self._last_snapshot_cache)
         for name, vals in snapshot.items():
@@ -64,15 +66,18 @@ class StepTimerRenderer(BaseRenderer):
             self._last_snapshot_cache[name] = vals
         return merged
 
-
-    def _aggregate_top(self, snapshot: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+    def _aggregate_top(
+        self, snapshot: Dict[str, Dict[str, float]]
+    ) -> Dict[str, Dict[str, float]]:
         if not snapshot:
             return {}
 
         avg_source = {k: self._avg_cache.get(k, 0.0) for k in snapshot.keys()}
 
         # Sort by historical average (stable ordering)
-        sorted_items = sorted(snapshot.items(), key=lambda kv: avg_source.get(kv[0], 0.0), reverse=True)
+        sorted_items = sorted(
+            snapshot.items(), key=lambda kv: avg_source.get(kv[0], 0.0), reverse=True
+        )
 
         top_n = self.top_n - 1
         top_items = sorted_items[:top_n]
@@ -81,10 +86,26 @@ class StepTimerRenderer(BaseRenderer):
         top_dict = dict(top_items)
 
         if rest_items:
-            cpu_avg = np.mean([v.get("cpu_avg_s", 0.0) for _, v in rest_items]) if rest_items else 0.0
-            gpu_avg = np.mean([v.get("gpu_avg_s", 0.0) for _, v in rest_items]) if rest_items else 0.0
-            cpu_max = np.max([v.get("cpu_max_s", 0.0) for _, v in rest_items]) if rest_items else 0.0
-            gpu_max = np.max([v.get("gpu_max_s", 0.0) for _, v in rest_items]) if rest_items else 0.0
+            cpu_avg = (
+                np.mean([v.get("cpu_avg_s", 0.0) for _, v in rest_items])
+                if rest_items
+                else 0.0
+            )
+            gpu_avg = (
+                np.mean([v.get("gpu_avg_s", 0.0) for _, v in rest_items])
+                if rest_items
+                else 0.0
+            )
+            cpu_max = (
+                np.max([v.get("cpu_max_s", 0.0) for _, v in rest_items])
+                if rest_items
+                else 0.0
+            )
+            gpu_max = (
+                np.max([v.get("gpu_max_s", 0.0) for _, v in rest_items])
+                if rest_items
+                else 0.0
+            )
             top_dict["Other"] = {
                 "cpu_avg_s": cpu_avg,
                 "gpu_avg_s": gpu_avg,
@@ -95,14 +116,15 @@ class StepTimerRenderer(BaseRenderer):
         return top_dict
 
     def get_data(self) -> Dict[str, Any]:
-        raw_snapshot = (self._latest_snapshot or {}).get("StepTimerSampler", {}).get("data") or {}
+        raw_snapshot = (self._latest_snapshot or {}).get("StepTimerSampler", {}).get(
+            "data"
+        ) or {}
         self._update_cache(raw_snapshot)
         # Merge to keep missing timers visible
         merged_snapshot = self._merge_with_last_snapshot(raw_snapshot)
         # Aggregate top based on merged (persistent) snapshot
         filtered = self._aggregate_top(merged_snapshot)
         return filtered
-
 
     def get_panel_renderable(self) -> Panel:
         data = self.get_data()
@@ -112,8 +134,6 @@ class StepTimerRenderer(BaseRenderer):
         table.add_column("Peak (s)", justify="right", style="magenta")
 
         for name, vals in data.items():
-            avg_val = vals.get("gpu_avg_s") or vals.get("cpu_avg_s") or 0.0
-            peak_val = vals.get("gpu_max_s") or vals.get("cpu_max_s") or 0.0
             avg_cached = self._avg_cache.get(name, 0.0)
             peak_cached = self._peak_cache.get(name, 0.0)
 
@@ -132,7 +152,6 @@ class StepTimerRenderer(BaseRenderer):
             border_style="blue",
             width=panel_width,
         )
-
 
     def get_notebook_renderable(self) -> HTML:
         data = self.get_data()
@@ -166,7 +185,6 @@ class StepTimerRenderer(BaseRenderer):
         """
         return HTML(html)
 
-
     def log_summary(self, summary: Dict[str, Any]):
         console = Console()
         table = Table(show_header=True, header_style="bold blue", box=None)
@@ -178,5 +196,9 @@ class StepTimerRenderer(BaseRenderer):
             peak = self._peak_cache.get(name, 0.0)
             table.add_row(f"[bold]{name}[/bold]", f"{avg:.4f}", f"{peak:.4f}")
 
-        panel = Panel(table, title="[bold blue]Step Timer Summary[/bold blue]", border_style="blue")
+        panel = Panel(
+            table,
+            title="[bold blue]Step Timer Summary[/bold blue]",
+            border_style="blue",
+        )
         console.print(panel)

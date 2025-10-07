@@ -1,7 +1,6 @@
 import os
 import random
 import math
-from dataclasses import dataclass
 
 import torch
 from torch.utils.data import DataLoader
@@ -111,7 +110,9 @@ def run_validation(model, val_loader, dtype, device):
     with torch.no_grad():
         for batch in val_loader:
             batch = load_batch_to_device(batch, device)
-            with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+            with torch.cuda.amp.autocast(
+                enabled=torch.cuda.is_available(), dtype=dtype
+            ):
                 out = model(**batch)
                 loss = out.loss
                 logits = out.logits
