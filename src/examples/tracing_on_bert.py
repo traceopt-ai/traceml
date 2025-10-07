@@ -16,14 +16,7 @@ from transformers import (
 )
 
 # TraceML imports
-from traceml.decorator import trace_model_instance
-
-# TODO add step timer later
-try:
-    from traceml.utils.gradient_time import StepTimer
-except Exception:
-    StepTimer = None
-
+from traceml.decorator import trace_model_instance, trace_timestep
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
@@ -41,20 +34,17 @@ def set_seed(seed: int = SEED):
     torch.cuda.manual_seed_all(seed)
 
 
-@dataclass
-class Batch:
-    input_ids: torch.Tensor
-    attention_mask: torch.Tensor
-    labels: torch.Tensor
+def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> float:
+    preds = torch.argmax(logits, dim=-1)
+    correct = (preds == labels).sum().item()
+    return correct / max(1, labels.size(0))
 
 
 def prepare_data():
     """
-    Load a tiny AG News subset and tokenize.
-    AG News has fields: 'text' and 'label'.
+    Load and tokenize AG News (tiny subset for quick runs).
     """
     raw = load_dataset("ag_news")
-    # Trim to a tiny subset for quick laptop runs
     train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
     val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
 
@@ -66,7 +56,7 @@ def prepare_data():
     train_ds = train_raw.map(tok, batched=True, remove_columns=["text"])
     val_ds = val_raw.map(tok, batched=True, remove_columns=["text"])
 
-    # Rename 'label' → 'labels' for HF models
+    # rename 'label' → 'labels'
     train_ds = train_ds.rename_column("label", "labels")
     val_ds = val_ds.rename_column("label", "labels")
 
@@ -78,13 +68,59 @@ def prepare_data():
     val_loader = DataLoader(
         val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collator
     )
+
     return tokenizer, train_loader, val_loader
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> float:
-    preds = torch.argmax(logits, dim=-1)
-    correct = (preds == labels).sum().item()
-    return correct / max(1, labels.size(0))
+@trace_timestep("dataloader_fetch", use_gpu=False)
+def get_next_batch(it):
+    """Measure wait time for next() call — detects CPU/data pipeline lag."""
+    return next(it)
+
+
+@trace_timestep("data_loading", use_gpu=False)
+def load_batch_to_device(batch, device):
+    return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+
+
+@trace_timestep("forward", use_gpu=True)
+def forward_pass(model, batch, dtype):
+    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+        return model(**batch)
+
+
+@trace_timestep("backward", use_gpu=True)
+def backward_pass(loss, scaler):
+    scaler.scale(loss).backward()
+
+
+@trace_timestep("optimizer_step", use_gpu=True)
+def optimizer_step(scaler, optimizer, scheduler):
+    scaler.step(optimizer)
+    scaler.update()
+    scheduler.step()
+
+
+@trace_timestep("validation", use_gpu=True)
+def run_validation(model, val_loader, dtype, device):
+    model.eval()
+    val_loss = 0.0
+    val_acc = 0.0
+    n_batches = 0
+
+    with torch.no_grad():
+        for batch in val_loader:
+            batch = load_batch_to_device(batch, device)
+            with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+                out = model(**batch)
+                loss = out.loss
+                logits = out.logits
+            val_loss += loss.item()
+            val_acc += accuracy_from_logits(logits, batch["labels"])
+            n_batches += 1
+
+    model.train()
+    return val_loss / max(1, n_batches), val_acc / max(1, n_batches)
 
 
 def main():
@@ -95,11 +131,10 @@ def main():
     tokenizer, train_loader, val_loader = prepare_data()
 
     model = AutoModelForSequenceClassification.from_pretrained(
-        MODEL_NAME,
-        num_labels=4,  # AG News has 4 classes
+        MODEL_NAME, num_labels=4
     ).to(device)
 
-    # Attach TraceML hooks so your samplers/loggers receive events
+    # Attach TraceML tracing hooks (memory, activation, gradient)
     trace_model_instance(
         model,
         sample_layer_memory=True,
@@ -118,52 +153,36 @@ def main():
 
     model.train()
     global_step = 0
+
+    # Explicit iterator lets us call next() manually
+    train_iter = iter(train_loader)
+
     for epoch in range(EPOCHS):
         running_loss = 0.0
         running_acc = 0.0
 
-        for batch in train_loader:
-            batch = {k: v.to(device) for k, v in batch.items()}
+        for _ in range(len(train_loader)):
 
-            # Optional timing for your GradientTimeSampler if available
-            if StepTimer is not None:
-                with StepTimer(model, label="train") as t:
-                    if hasattr(t, "mark_backward_start"):
-                        t.mark_backward_start()
-                    optimizer.zero_grad(set_to_none=True)
-                    with torch.cuda.amp.autocast(
-                        enabled=torch.cuda.is_available(), dtype=dtype
-                    ):
-                        out = model(**batch)
-                        loss = out.loss
-                        logits = out.logits
+            # Dataloader fetch (measures wait time of GPU if available)
+            batch = get_next_batch(train_iter)
 
-                    if hasattr(t, "mark_backward_done"):
-                        pass
-                    scaler.scale(loss).backward()
-                    if hasattr(t, "mark_backward_done"):
-                        t.mark_backward_done()
+            # Transfer to GPU
+            batch = load_batch_to_device(batch, device)
 
-                    if hasattr(t, "mark_optimizer_step_start"):
-                        t.mark_optimizer_step_start()
-                    scaler.step(optimizer)
-                    scaler.update()
-                    scheduler.step()
-                    if hasattr(t, "mark_optimizer_step_done"):
-                        t.mark_optimizer_step_done()
-            else:
-                optimizer.zero_grad(set_to_none=True)
-                with torch.cuda.amp.autocast(
-                    enabled=torch.cuda.is_available(), dtype=dtype
-                ):
-                    out = model(**batch)
-                    loss = out.loss
-                    logits = out.logits
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-                scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
 
+            # Forward
+            out = forward_pass(model, batch, dtype)
+            loss = out.loss
+            logits = out.logits
+
+            # Backward
+            backward_pass(loss, scaler)
+
+            # Optimizer step
+            optimizer_step(scaler, optimizer, scheduler)
+
+            #  Metrics
             acc = accuracy_from_logits(logits.detach(), batch["labels"])
             running_loss += loss.item()
             running_acc += acc
@@ -171,35 +190,17 @@ def main():
 
             if global_step % 50 == 0:
                 print(
-                    f"[Train] epoch {epoch + 1} step {global_step} | loss {running_loss / 50:.4f} | acc {running_acc / 50:.4f}"
+                    f"[Train] epoch {epoch + 1} step {global_step} | "
+                    f"loss {running_loss / 50:.4f} | acc {running_acc / 50:.4f}"
                 )
                 running_loss = 0.0
                 running_acc = 0.0
 
         # Validation
-        model.eval()
-        val_loss = 0.0
-        val_acc = 0.0
-        n_batches = 0
-        with torch.no_grad():
-            for batch in val_loader:
-                batch = {k: v.to(device) for k, v in batch.items()}
-                with torch.cuda.amp.autocast(
-                    enabled=torch.cuda.is_available(), dtype=dtype
-                ):
-                    out = model(**batch)
-                    loss = out.loss
-                    logits = out.logits
-                val_loss += loss.item()
-                val_acc += accuracy_from_logits(logits, batch["labels"])
-                n_batches += 1
+        val_loss, val_acc = run_validation(model, val_loader, dtype, device)
+        print(f"[Val] epoch {epoch + 1} | loss {val_loss:.4f} | acc {val_acc:.4f}")
 
-        print(
-            f"[Val] epoch {epoch + 1} | loss {val_loss / max(1, n_batches):.4f} | acc {val_acc / max(1, n_batches):.4f}"
-        )
-        model.train()
-
-    # Save a tiny checkpoint for demo
+    # Save model checkpoint
     save_dir = "./distilbert_agnews_small"
     os.makedirs(save_dir, exist_ok=True)
     model.save_pretrained(save_dir)

@@ -11,6 +11,7 @@ LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
 SYSTEM_PROCESS_LAYOUT_NAME = "system_process_section"
 LAYER_COMBINED_SUMMARY_LAYOUT_NAME = "layer_combined_summary_section"
 ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME = "activation_gradient_summary_section"
+STEPTIMER_SUMMARY_LAYOUT_NAME = "steptimer_summary_section"
 
 
 class CLIDisplayManager:
@@ -38,7 +39,11 @@ class CLIDisplayManager:
         cls._layout.split_column(
             Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, ratio=1),
             Layout(name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME, ratio=3),
+            Layout(name="bottom_row", ratio=1),
+        )
+        cls._layout["bottom_row"].split_row(
             Layout(name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, ratio=1),
+            Layout(name=STEPTIMER_SUMMARY_LAYOUT_NAME, ratio=1),
         )
 
         # Initialize panels with placeholder text
@@ -50,6 +55,9 @@ class CLIDisplayManager:
         )
         cls._layout[ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Activation + Gradient...", justify="center"))
+        )
+        cls._layout[STEPTIMER_SUMMARY_LAYOUT_NAME].update(
+            Panel(Text("Waiting for Step Timers...", justify="center"))
         )
 
     @classmethod

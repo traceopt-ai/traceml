@@ -19,7 +19,7 @@ class StepTimeSnapshot:
     event_stats: Dict[str, Dict[str, float]]
 
 
-class StepTimeSampler(BaseSampler):
+class StepTimerSampler(BaseSampler):
     """
     Sampler that collects timing events from the step_time_queue,
     resolves them (CPU + GPU), and aggregates statistics.
@@ -115,7 +115,7 @@ class StepTimeSampler(BaseSampler):
         return self.snapshot_dict(envelope)
 
 
-    def log_summary(self) -> Dict[str, Any]:
+    def get_summary(self) -> Dict[str, Any]:
         """
         Compute max and average timing across all iterations.
         """

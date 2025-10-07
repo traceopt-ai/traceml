@@ -12,6 +12,7 @@ from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
 from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
+from traceml.samplers.steptimer_sampler import StepTimerSampler
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.system_process_renderer import SystemProcessRenderer
@@ -21,6 +22,7 @@ from traceml.renderers.layer_combined_stdout_renderer import (
 from traceml.renderers.activation_gradient_memory_renderer import (
     ActivationGradientRenderer,
 )
+from traceml.renderers.steptimer_renderer import StepTimerRenderer
 
 
 class TrackerManager:
@@ -38,22 +40,25 @@ class TrackerManager:
         layer_memory_sampler = LayerMemorySampler()
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
+        steptimer_sampler = StepTimerSampler()
 
-        system_process_logger = SystemProcessRenderer()
-        layer_combined_stdout_logger = LayerCombinedRenderer()
-        activation_gradient_stdout_logger = ActivationGradientRenderer()
+        system_process_renderer = SystemProcessRenderer()
+        layer_combined_renderer = LayerCombinedRenderer()
+        activation_gradient_renderer= ActivationGradientRenderer()
+        steptimer_renderer = StepTimerRenderer()
 
         # Collect all trackers
         sampler_logger_pairs = [
-            ([system_sampler, process_sampler], [system_process_logger]),
+            ([system_sampler, process_sampler], [system_process_renderer]),
             (
                 [
                     layer_memory_sampler,
                     activation_memory_sampler,
                     gradient_memory_sampler,
                 ],
-                [layer_combined_stdout_logger, activation_gradient_stdout_logger],
+                [layer_combined_renderer, activation_gradient_renderer],
             ),
+            ([steptimer_sampler], [steptimer_renderer]),
         ]
         return sampler_logger_pairs
 

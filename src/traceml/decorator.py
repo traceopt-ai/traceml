@@ -2,11 +2,14 @@ import functools
 import sys
 from typing import Callable
 import torch.nn as nn
+import time
+import torch
 
 
 from traceml.utils.patch import model_queue
 from traceml.utils.activation_hook import attach_activation_hooks
 from traceml.utils.gradient_hook import attach_all_gradient_hooks
+from traceml.utils.steptimer import StepTimeEvent, record_step_time_event
 
 
 def trace_model(
@@ -78,3 +81,48 @@ def trace_model_instance(
             attach_all_gradient_hooks(model)
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)
+
+
+def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
+    """
+    Decorator to measure execution time of a function.
+
+    Args:
+        name (str): Label for this timer.
+        use_gpu (bool): If True and CUDA is available, record GPU timing
+                        via CUDA events. Otherwise, only CPU wall-time.
+    """
+
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            cpu_start = time.time()
+
+            if use_gpu and torch.cuda.is_available():
+                start_event = torch.cuda.Event(enable_timing=True)
+                end_event = torch.cuda.Event(enable_timing=True)
+
+                start_event.record()          # queued in current CUDA stream
+                result = func(*args, **kwargs)
+                end_event.record()            # queued after kernels
+
+                cpu_end = time.time()
+
+                evt = StepTimeEvent(
+                    name=name,
+                    cpu_start=cpu_start,
+                    cpu_end=cpu_end,
+                    gpu_start=start_event,
+                    gpu_end=end_event,
+                )
+            else:
+                result = func(*args, **kwargs)
+                cpu_end = time.time()
+                evt = StepTimeEvent(name=name, cpu_start=cpu_start, cpu_end=cpu_end)
+
+            record_step_time_event(evt)
+            return result
+
+        return wrapper
+
+    return decorator
