@@ -137,7 +137,7 @@ def optimizer_step(scaler, optimizer, scheduler):
     scaler.update()
     scheduler.step()
 ```
-All timing data appears automatically in your live dashboard and notebook summary.
+Top timing data appears automatically in your live dashboard and notebook summary.
 🟢 Works seamlessly with your activation + gradient dashboards — all visible together in real-time.
 
 
