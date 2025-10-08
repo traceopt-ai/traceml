@@ -10,23 +10,25 @@
 
 
 
- A lightweight library to make PyTorch training memory visible in real time (in CLI and Notebook).
+ A lightweight library to make PyTorch training **memory and timing** visible in real time (in CLI and Notebook).
 
 ## The Problem
 
-Training large machine learning models often feels like a black box. One minute everything's running and the next, you're staring at a cryptic **"CUDA out of memory"** error.
+Training large machine learning models often feels like a black box. One minute everything's running and the next, you're staring at a cryptic **"CUDA out of memory"** error or wondering *why a single step is so slow*.
 
 Pinpointing which part of the model is consuming too much memory or slowing things down is frustrating and time-consuming. Traditional profiling tools can be overly complex or lack the granularity deep learning developers need.
 
 ## 💡 Why TraceML?
 
-`traceml` is designed to give you real-time, granular insights into memory usage without heavy overhead. It works both in the **terminal (CLI) and inside Jupyter notebooks**, so you can pick the workflow that fits you best:
+`traceml` is designed to give you **real-time, granular observability** for both **memory usage** and **timing** without heavy overhead. It works both in the **terminal (CLI) and inside Jupyter notebooks**, so you can pick the workflow that fits you best:
 
 ✅ System + process-level usage (CPU, RAM, GPU)
 
-✅ PyTorch layer-level memory allocation (via decorator/instance tracing)
+✅ PyTorch layer-level memory allocation (parameters, activations, gradients)
 
-✅ Live activation & gradient memory
+✅ Step-level timing (forward, backward, optimizer, etc.)  
+
+✅ Lightweight — minimal overhead  
 
 No config, no setup, just plug-and-trace.
 
@@ -86,7 +88,6 @@ trace_model_instance(model)
 ✅ Best when you build models dynamically or don't want to decorate the class.
 
 
-
 Then, choose whichever fits your workflow.
 
 ### 📓 Notebook
@@ -112,6 +113,33 @@ tracker.stop()
 tracker.log_summaries()
 
 ```
+
+### Step Timing and Performance Tracing
+
+TraceML now supports fine-grained step timing, letting you measure CPU/GPU latency for every major operation including data loading, device transfer, forward pass, backward pass, and optimizer steps.
+Simply decorate any function with `@trace_timestep`:
+
+```python 
+from traceml.decorator import trace_timestep
+
+@trace_timestep("forward", use_gpu=True)
+def forward_pass(model, batch, dtype):
+    with torch.cuda.amp.autocast():
+        return model(**batch)
+
+@trace_timestep("backward", use_gpu=True)
+def backward_pass(loss, scaler):
+    scaler.scale(loss).backward()
+
+@trace_timestep("optimizer_step", use_gpu=True)
+def optimizer_step(scaler, optimizer, scheduler):
+    scaler.step(optimizer)
+    scaler.update()
+    scheduler.step()
+```
+All timing data appears automatically in your live dashboard and notebook summary.
+🟢 Works seamlessly with your activation + gradient dashboards — all visible together in real-time.
+
 
 ### Terminal/CLI
 
@@ -154,15 +182,9 @@ TraceML introduces samplers that collect memory usage at intervals, not layer-by
 
 - GradientMemorySampler → Tracks per-layer backward gradients. Maintains current and global peak values, and estimates total gradient memory during backpropagation.
 
-This means what you see in your terminal is a rolling snapshot of memory over time, giving you:
+- StepTimeSampler -> CPU/GPU event durations (forward, backward, optimizer, etc.)
 
-- Live per-layer breakdowns
-
-- Current vs global peaks
-
-- Running totals of activation + gradient memory
-
-This design makes TraceML lightweight compared to full profilers — you get practical insights without slowing training to a crawl.
+Because TraceML samples asynchronously, it stays lightweight while providing practical observability.
 
 ## 📊 Current Features
 
@@ -171,11 +193,11 @@ This design makes TraceML lightweight compared to full profilers — you get pra
 - Live activation memory tracking (per layer, plus totals)
 - Live gradient memory tracking (per layer, plus totals)
 - Real-time terminal dashboards via Rich
-- Notebook support
+- Notebook support 
+- Step & operation timers (forward, backward, optimizer)
 
 ## Coming Soon
 
-- Step & operation timers (forward, backward, optimizer)
 - Export logs as JSON / CSV
 - More visual dashboards
 
