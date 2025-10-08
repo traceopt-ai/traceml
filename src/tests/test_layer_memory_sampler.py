@@ -10,11 +10,11 @@ from traceml.samplers.layer_memory_sampler import (
     LayerMemorySampler,
     ModelMemorySnapshot,
 )
-from traceml.loggers.stdout.layer_combined_stdout_logger import (
-    LayerCombinedStdoutLogger,
+from traceml.renderers.layer_combined_stdout_renderer import (
+    LayerCombinedRenderer,
 )
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.loggers.stdout.display_manager import CLIDisplayManager
+from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.decorator import trace_model_instance
 
 
@@ -128,7 +128,7 @@ def test_layer_memory_sampler_with_tracker_and_registered_model():
     trace_model_instance(model)
 
     sampler = LayerMemorySampler()
-    stdout_logger = LayerCombinedStdoutLogger()
+    stdout_logger = LayerCombinedRenderer()
     tracker = TrackerManager(
         components=[([sampler], [stdout_logger])], interval_sec=0.25
     )

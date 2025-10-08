@@ -6,14 +6,14 @@ from rich.panel import Panel
 from rich.table import Table
 from IPython.display import HTML
 
-from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from traceml.loggers.stdout.display.cli_display_manager import (
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.cli_display_manager import (
     ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME,
 )
 from traceml.utils.formatting import fmt_mem_new
 
 
-class ActivationGradientStdoutLogger(BaseStdoutLogger):
+class ActivationGradientRenderer(BaseRenderer):
     """
     Combined logger for:
       - Per-layer memory

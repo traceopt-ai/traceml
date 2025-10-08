@@ -14,9 +14,9 @@ from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 
 from traceml.manager.tracker_manager import TrackerManager
 
-from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.layer_combined_stdout_logger import (
-    LayerCombinedStdoutLogger,
+from traceml.renderers.system_process_renderer import SystemProcessRenderer
+from traceml.renderers.layer_combined_stdout_renderer import (
+    LayerCombinedRenderer,
 )
 
 
@@ -49,8 +49,8 @@ def test_system_sampler_with_pytorch_model():
     activation_memory_sampler = ActivationMemorySampler()
     gradient_memory_sampler = GradientMemorySampler()
 
-    system_process_stdout_logger = SystemProcessStdoutLogger()
-    combined_stdout_logger = LayerCombinedStdoutLogger()
+    system_process_stdout_logger = SystemProcessRenderer()
+    combined_stdout_logger = LayerCombinedRenderer()
 
     tracker_components = [
         ([system_sampler, process_sampler], [system_process_stdout_logger]),

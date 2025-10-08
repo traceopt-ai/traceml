@@ -1,8 +1,8 @@
 import threading
 from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.loggers.stdout.display.cli_display_manager import CLIDisplayManager
-from traceml.loggers.stdout.display.notebook_display_manager import (
+from traceml.renderers.display.cli_display_manager import CLIDisplayManager
+from traceml.renderers.display.notebook_display_manager import (
     NotebookDisplayManager,
 )
 
@@ -12,15 +12,17 @@ from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
 from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
+from traceml.samplers.steptimer_sampler import StepTimerSampler
 
-from traceml.loggers.stdout.base_stdout_logger import BaseStdoutLogger
-from traceml.loggers.stdout.system_process_logger import SystemProcessStdoutLogger
-from traceml.loggers.stdout.layer_combined_stdout_logger import (
-    LayerCombinedStdoutLogger,
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.system_process_renderer import SystemProcessRenderer
+from traceml.renderers.layer_combined_stdout_renderer import (
+    LayerCombinedRenderer,
 )
-from traceml.loggers.stdout.activation_gradient_memory_logger import (
-    ActivationGradientStdoutLogger,
+from traceml.renderers.activation_gradient_memory_renderer import (
+    ActivationGradientRenderer,
 )
+from traceml.renderers.steptimer_renderer import StepTimerRenderer
 
 
 class TrackerManager:
@@ -32,34 +34,37 @@ class TrackerManager:
     """
 
     @staticmethod
-    def _components() -> List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]]:
+    def _components() -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
         system_sampler = SystemSampler()
         process_sampler = ProcessSampler()
         layer_memory_sampler = LayerMemorySampler()
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
+        steptimer_sampler = StepTimerSampler()
 
-        system_process_logger = SystemProcessStdoutLogger()
-        layer_combined_stdout_logger = LayerCombinedStdoutLogger()
-        activation_gradient_stdout_logger = ActivationGradientStdoutLogger()
+        system_process_renderer = SystemProcessRenderer()
+        layer_combined_renderer = LayerCombinedRenderer()
+        activation_gradient_renderer = ActivationGradientRenderer()
+        steptimer_renderer = StepTimerRenderer()
 
         # Collect all trackers
         sampler_logger_pairs = [
-            ([system_sampler, process_sampler], [system_process_logger]),
+            ([system_sampler, process_sampler], [system_process_renderer]),
             (
                 [
                     layer_memory_sampler,
                     activation_memory_sampler,
                     gradient_memory_sampler,
                 ],
-                [layer_combined_stdout_logger, activation_gradient_stdout_logger],
+                [layer_combined_renderer, activation_gradient_renderer],
             ),
+            ([steptimer_sampler], [steptimer_renderer]),
         ]
         return sampler_logger_pairs
 
     def __init__(
         self,
-        components: List[Tuple[List[BaseSampler], List[BaseStdoutLogger]]] = None,
+        components: List[Tuple[List[BaseSampler], List[BaseRenderer]]] = None,
         interval_sec: float = 1.0,
         mode: str = "cli",  # "cli" or "notebook"
     ):
