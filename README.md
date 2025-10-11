@@ -213,6 +213,15 @@ TraceML is early-stage and evolving quickly. Contributions, feedback, and ideas 
 
 📧 Contact: traceml.ai@gmail.com
 
+## 🧾 License
+
+TraceML is distributed under an **MIT License with Commons Clause restriction**.
+
+- ✅ Free for personal, academic, and internal business use  
+- 🚫 Not for resale, SaaS hosting, or commercial redistribution  
+
+For commercial licensing, contact abhinavsriva@gmail.com.  
+
 ---
 
 *TraceML - Making PyTorch memory usage visible, one trace at a time.*
