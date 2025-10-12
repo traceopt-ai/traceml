@@ -1,5 +1,5 @@
 import threading
-from typing import List, Tuple, Any, Dict
+from typing import List, Tuple, Any, Dict, Optional
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import (
@@ -23,6 +23,7 @@ from traceml.renderers.activation_gradient_memory_renderer import (
     ActivationGradientRenderer,
 )
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
+from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 
 
 class TrackerManager:
@@ -34,7 +35,7 @@ class TrackerManager:
     """
 
     @staticmethod
-    def _components() -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
+    def _components(mode: str) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
         system_sampler = SystemSampler()
         process_sampler = ProcessSampler()
         layer_memory_sampler = LayerMemorySampler()
@@ -46,6 +47,7 @@ class TrackerManager:
         layer_combined_renderer = LayerCombinedRenderer()
         activation_gradient_renderer = ActivationGradientRenderer()
         steptimer_renderer = StepTimerRenderer()
+        stdout_stderr_renderer = StdoutStderrRenderer()
 
         # Collect all trackers
         sampler_logger_pairs = [
@@ -60,6 +62,8 @@ class TrackerManager:
             ),
             ([steptimer_sampler], [steptimer_renderer]),
         ]
+        if mode == "cli":
+            sampler_logger_pairs.append(([], [stdout_stderr_renderer]))
         return sampler_logger_pairs
 
     def __init__(
@@ -77,7 +81,7 @@ class TrackerManager:
         setup_error_logger()
         self.logger = get_error_logger("TrackerManager")
         if components is None:
-            self.components = self._components()
+            self.components = self._components(mode)
         else:
             self.components = components
         self.interval_sec = interval_sec
@@ -161,6 +165,8 @@ class TrackerManager:
             for _, loggers in self.components:
                 for logger in loggers:
                     try:
+                        if hasattr(logger, "shutdown"):
+                            logger.shutdown()
                         self.display_manager.release_display()
                     except Exception as e:
                         self.logger.error(

@@ -5,6 +5,7 @@ from rich.panel import Panel
 from rich.text import Text
 from typing import Dict, Any, Callable, Optional
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.renderers.display.stdout_stderr_capture import StreamCapture
 
 ROOT_LAYOUT_NAME = "root"
 LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
@@ -12,6 +13,7 @@ SYSTEM_PROCESS_LAYOUT_NAME = "system_process_section"
 LAYER_COMBINED_SUMMARY_LAYOUT_NAME = "layer_combined_summary_section"
 ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME = "activation_gradient_summary_section"
 STEPTIMER_SUMMARY_LAYOUT_NAME = "steptimer_summary_section"
+STDOUT_STDERR_LAYOUT_NAME = "stdout_stderr_section"
 
 
 class CLIDisplayManager:
@@ -37,27 +39,36 @@ class CLIDisplayManager:
         Defines the improved structure of the Rich Layout with flexible ratios.
         """
         cls._layout.split_column(
+            Layout(name="dashboard", ratio=4),
+            Layout(name=STDOUT_STDERR_LAYOUT_NAME, ratio=1),
+        )
+        dashboard = cls._layout["dashboard"]
+        dashboard.split_column(
             Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, ratio=1),
             Layout(name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME, ratio=3),
             Layout(name="bottom_row", ratio=1),
         )
-        cls._layout["bottom_row"].split_row(
+        dashboard["bottom_row"].split_row(
             Layout(name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, ratio=1),
             Layout(name=STEPTIMER_SUMMARY_LAYOUT_NAME, ratio=1),
         )
 
         # Initialize panels with placeholder text
-        cls._layout[SYSTEM_PROCESS_LAYOUT_NAME].update(
+        dashboard[SYSTEM_PROCESS_LAYOUT_NAME].update(
             Panel(Text("Waiting for System Metrics...", justify="center"))
         )
-        cls._layout[LAYER_COMBINED_SUMMARY_LAYOUT_NAME].update(
+        dashboard[LAYER_COMBINED_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Current Model...", justify="center"))
         )
-        cls._layout[ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME].update(
+        dashboard[ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Activation + Gradient...", justify="center"))
         )
-        cls._layout[STEPTIMER_SUMMARY_LAYOUT_NAME].update(
+        dashboard[STEPTIMER_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Step Timers...", justify="center"))
+        )
+        cls._layout[STDOUT_STDERR_LAYOUT_NAME].update(
+            Panel(Text("Waiting for stdout/stderr...", justify="center"),
+                  title="Logs", border_style="cyan")
         )
 
     @classmethod
@@ -74,6 +85,7 @@ class CLIDisplayManager:
             )
             try:
                 cls._live_display.start()
+                StreamCapture.redirect_to_capture()
             except Exception as e:
                 cls.logger.error(f"[TraceML] Failed to start shared live display: {e}")
                 cls._live_display = None
@@ -86,6 +98,7 @@ class CLIDisplayManager:
         if cls._live_display:
             try:
                 cls._live_display.stop()
+                StreamCapture.redirect_to_original()
             except Exception as e:
                 cls.logger.error(f"[TraceML] Error stopping live display: {e}")
             finally:
@@ -121,6 +134,7 @@ class CLIDisplayManager:
         Triggers an update of the entire live display by calling all registered
         content functions and updating the layout.
         """
+        pass
         if cls._live_display is None:
             return
 
@@ -141,6 +155,8 @@ class CLIDisplayManager:
                         f"[TraceML] Error in rendering content for panel {section_name}: {e}"
                     )
 
+            StreamCapture.redirect_to_original()
             cls._live_display.refresh()
+            StreamCapture.redirect_to_capture()
         except Exception as e:
             cls.logger.error(f"[TraceML] Error updating live display: {e}")

@@ -74,6 +74,7 @@ def prepare_data():
 @trace_timestep("dataloader_fetch", use_gpu=False)
 def get_next_batch(it):
     """Measure wait time for next() call — detects CPU/data pipeline lag."""
+    print("Fetching next batch...")
     return next(it)
 
 
