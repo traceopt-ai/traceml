@@ -7,8 +7,7 @@ class StreamCapture(StringIO):
     """
     Simple thread-safe capture utility for stdout/stderr.
     """
-    _stdout_capture = None
-    _stderr_capture = None
+    _stdout_stderr_capture = None ## shared instance
     _orig_stdout = sys.__stdout__
     _orig_stderr = sys.__stderr__
     _redirected = False
@@ -32,10 +31,9 @@ class StreamCapture(StringIO):
     def redirect_to_capture(cls):
         with cls._lock:
             if not cls._redirected:
-                cls._stdout_capture = StreamCapture()
-                cls._stderr_capture = StreamCapture()
-                sys.stdout = cls._stdout_capture
-                sys.stderr = cls._stderr_capture
+                cls._stdout_stderr_capture = StreamCapture()
+                sys.stdout = cls._stdout_stderr_capture
+                sys.stderr = cls._stdout_stderr_capture
                 cls._redirected = True
 
     @classmethod

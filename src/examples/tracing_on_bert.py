@@ -74,7 +74,6 @@ def prepare_data():
 @trace_timestep("dataloader_fetch", use_gpu=False)
 def get_next_batch(it):
     """Measure wait time for next() call — detects CPU/data pipeline lag."""
-    print("Fetching next batch...")
     return next(it)
 
 
@@ -163,9 +162,10 @@ def main():
         running_loss = 0.0
         running_acc = 0.0
 
-        for _ in range(len(train_loader)):
+        for i in range(len(train_loader)):
 
             # Dataloader fetch (measures wait time of GPU if available)
+            print(f"Fetching batch {i}")
             batch = get_next_batch(train_iter)
 
             # Transfer to GPU

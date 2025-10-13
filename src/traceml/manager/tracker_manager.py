@@ -96,6 +96,40 @@ class TrackerManager:
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
+    def _run_once(self):
+        """Single sampling + logging + display update pass."""
+        for samplers, loggers in self.components:
+            if not isinstance(samplers, (list, tuple)):
+                samplers = [samplers]
+
+            snapshots = {}
+            for sampler in samplers:
+                try:
+                    snapshots[sampler.__class__.__name__] = sampler.sample()
+                except Exception as e:
+                    self.logger.error(
+                        f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}"
+                    )
+                    snapshots[sampler.__class__.__name__] = {
+                        "error": str(e),
+                        "sampler_name": sampler.__class__.__name__,
+                    }
+
+            # Log to all renderers
+            for logger in loggers:
+                try:
+                    render_fn = getattr(logger, self._render_attr)
+                    self.display_manager.register_layout_content(
+                        logger.layout_section_name, render_fn
+                    )
+                    logger.log(snapshots)
+                except Exception as e:
+                    self.logger.error(
+                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
+                    )
+
+        self.display_manager.update_display()
+
     def _run(self):
         """
         Background thread loop that continuously samples and logs live snapshots.
@@ -103,39 +137,7 @@ class TrackerManager:
         self.display_manager.start_display()
 
         while not self._stop_event.is_set():
-            for samplers, loggers in self.components:
-                if not isinstance(samplers, (list, tuple)):
-                    samplers = [samplers]
-
-                snapshots = {}
-                for sampler in samplers:
-                    try:
-                        snapshots[sampler.__class__.__name__] = sampler.sample()
-                    except Exception as e:
-                        self.logger.error(
-                            f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}"
-                        )
-                        snapshots[sampler.__class__.__name__] = {
-                            "error": str(e),
-                            "sampler_name": sampler.__class__.__name__,
-                        }
-
-                # 2. Log snapshot to all associated loggers
-                for logger in loggers:
-                    render_fn = getattr(logger, self._render_attr)
-                    self.display_manager.register_layout_content(
-                        logger.layout_section_name, render_fn
-                    )
-
-                    try:
-                        logger.log(snapshots)
-                    except Exception as e:
-                        self.logger.error(
-                            f"[TraceML] Error in logger '{logger.__class__.__name__}'.log() for sampler '{sampler.__class__.__name__}': {e}"
-                        )
-                self.display_manager.update_display()
-
-            # 3. Wait for the next interval
+            self._run_once()
             self._stop_event.wait(self.interval_sec)
 
     def start(self) -> None:
@@ -152,6 +154,9 @@ class TrackerManager:
         Signals the background thread to stop and waits for it to terminate.
         """
         try:
+            # Flush one last sample before stopping
+            self._run_once()
+
             self._stop_event.set()
             self._thread.join(timeout=self.interval_sec * 2)
 
