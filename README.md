@@ -159,7 +159,7 @@ traceml run src/examples/tracing_with_model_instance
 traceml run src/examples/tracing_with_class_decorator
 ```
 
-![TraceML Live Dashboard](demo.png)
+![TraceML Live Dashboard](demo_v1.png)
 
 
 ### 📓 Notebook Example
