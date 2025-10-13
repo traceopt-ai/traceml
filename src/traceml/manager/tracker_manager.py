@@ -1,5 +1,5 @@
 import threading
-from typing import List, Tuple, Any, Dict
+from typing import List, Tuple, Any, Dict, Optional
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import (
@@ -23,6 +23,7 @@ from traceml.renderers.activation_gradient_memory_renderer import (
     ActivationGradientRenderer,
 )
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
+from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 
 
 class TrackerManager:
@@ -34,7 +35,7 @@ class TrackerManager:
     """
 
     @staticmethod
-    def _components() -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
+    def _components(mode: str) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
         system_sampler = SystemSampler()
         process_sampler = ProcessSampler()
         layer_memory_sampler = LayerMemorySampler()
@@ -46,6 +47,7 @@ class TrackerManager:
         layer_combined_renderer = LayerCombinedRenderer()
         activation_gradient_renderer = ActivationGradientRenderer()
         steptimer_renderer = StepTimerRenderer()
+        stdout_stderr_renderer = StdoutStderrRenderer()
 
         # Collect all trackers
         sampler_logger_pairs = [
@@ -60,6 +62,8 @@ class TrackerManager:
             ),
             ([steptimer_sampler], [steptimer_renderer]),
         ]
+        if mode == "cli":
+            sampler_logger_pairs.append(([], [stdout_stderr_renderer]))
         return sampler_logger_pairs
 
     def __init__(
@@ -77,7 +81,7 @@ class TrackerManager:
         setup_error_logger()
         self.logger = get_error_logger("TrackerManager")
         if components is None:
-            self.components = self._components()
+            self.components = self._components(mode)
         else:
             self.components = components
         self.interval_sec = interval_sec
@@ -92,6 +96,40 @@ class TrackerManager:
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
+    def _run_once(self):
+        """Single sampling + logging + display update pass."""
+        for samplers, loggers in self.components:
+            if not isinstance(samplers, (list, tuple)):
+                samplers = [samplers]
+
+            snapshots = {}
+            for sampler in samplers:
+                try:
+                    snapshots[sampler.__class__.__name__] = sampler.sample()
+                except Exception as e:
+                    self.logger.error(
+                        f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}"
+                    )
+                    snapshots[sampler.__class__.__name__] = {
+                        "error": str(e),
+                        "sampler_name": sampler.__class__.__name__,
+                    }
+
+            # Log to all renderers
+            for logger in loggers:
+                try:
+                    render_fn = getattr(logger, self._render_attr)
+                    self.display_manager.register_layout_content(
+                        logger.layout_section_name, render_fn
+                    )
+                    logger.log(snapshots)
+                except Exception as e:
+                    self.logger.error(
+                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
+                    )
+
+        self.display_manager.update_display()
+
     def _run(self):
         """
         Background thread loop that continuously samples and logs live snapshots.
@@ -99,39 +137,7 @@ class TrackerManager:
         self.display_manager.start_display()
 
         while not self._stop_event.is_set():
-            for samplers, loggers in self.components:
-                if not isinstance(samplers, (list, tuple)):
-                    samplers = [samplers]
-
-                snapshots = {}
-                for sampler in samplers:
-                    try:
-                        snapshots[sampler.__class__.__name__] = sampler.sample()
-                    except Exception as e:
-                        self.logger.error(
-                            f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}"
-                        )
-                        snapshots[sampler.__class__.__name__] = {
-                            "error": str(e),
-                            "sampler_name": sampler.__class__.__name__,
-                        }
-
-                # 2. Log snapshot to all associated loggers
-                for logger in loggers:
-                    render_fn = getattr(logger, self._render_attr)
-                    self.display_manager.register_layout_content(
-                        logger.layout_section_name, render_fn
-                    )
-
-                    try:
-                        logger.log(snapshots)
-                    except Exception as e:
-                        self.logger.error(
-                            f"[TraceML] Error in logger '{logger.__class__.__name__}'.log() for sampler '{sampler.__class__.__name__}': {e}"
-                        )
-                self.display_manager.update_display()
-
-            # 3. Wait for the next interval
+            self._run_once()
             self._stop_event.wait(self.interval_sec)
 
     def start(self) -> None:
@@ -148,6 +154,9 @@ class TrackerManager:
         Signals the background thread to stop and waits for it to terminate.
         """
         try:
+            # Flush one last sample before stopping
+            self._run_once()
+
             self._stop_event.set()
             self._thread.join(timeout=self.interval_sec * 2)
 
@@ -161,6 +170,8 @@ class TrackerManager:
             for _, loggers in self.components:
                 for logger in loggers:
                     try:
+                        if hasattr(logger, "shutdown"):
+                            logger.shutdown()
                         self.display_manager.release_display()
                     except Exception as e:
                         self.logger.error(
