@@ -139,6 +139,7 @@ class TrackerManager:
         while not self._stop_event.is_set():
             self._run_once()
             self._stop_event.wait(self.interval_sec)
+        self._run_once()  # Final pass on stop
 
     def start(self) -> None:
         """
@@ -154,11 +155,8 @@ class TrackerManager:
         Signals the background thread to stop and waits for it to terminate.
         """
         try:
-            # Flush one last sample before stopping
-            self._run_once()
-
             self._stop_event.set()
-            self._thread.join(timeout=self.interval_sec * 2)
+            self._thread.join(timeout=self.interval_sec * 5)
 
             if self._thread.is_alive():
                 self.logger.error(
