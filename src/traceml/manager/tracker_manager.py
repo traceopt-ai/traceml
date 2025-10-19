@@ -35,7 +35,10 @@ class TrackerManager:
     """
 
     @staticmethod
-    def _components(mode: str) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
+    def _components(
+        mode: str,
+        num_display_layers: int
+    ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
         system_sampler = SystemSampler()
         process_sampler = ProcessSampler()
         layer_memory_sampler = LayerMemorySampler()
@@ -44,7 +47,7 @@ class TrackerManager:
         steptimer_sampler = StepTimerSampler()
 
         system_process_renderer = SystemProcessRenderer()
-        layer_combined_renderer = LayerCombinedRenderer()
+        layer_combined_renderer = LayerCombinedRenderer(top_n_layers=num_display_layers)
         activation_gradient_renderer = ActivationGradientRenderer()
         steptimer_renderer = StepTimerRenderer()
         stdout_stderr_renderer = StdoutStderrRenderer()
@@ -71,6 +74,7 @@ class TrackerManager:
         components: List[Tuple[List[BaseSampler], List[BaseRenderer]]] = None,
         interval_sec: float = 1.0,
         mode: str = "cli",  # "cli" or "notebook"
+        num_display_layers: int = 20
     ):
         """
         Args:
@@ -81,7 +85,7 @@ class TrackerManager:
         setup_error_logger()
         self.logger = get_error_logger("TrackerManager")
         if components is None:
-            self.components = self._components(mode)
+            self.components = self._components(mode, num_display_layers)
         else:
             self.components = components
         self.interval_sec = interval_sec

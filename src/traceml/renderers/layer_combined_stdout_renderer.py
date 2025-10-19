@@ -22,7 +22,7 @@ class LayerCombinedRenderer(BaseRenderer):
     Missing values show as "—".
     """
 
-    def __init__(self, top_n: Optional[int] = 20):
+    def __init__(self, top_n_layers: Optional[int] = 20):
         super().__init__(
             name="Layer Combined Memory",
             layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
@@ -30,7 +30,7 @@ class LayerCombinedRenderer(BaseRenderer):
         self._latest_snapshot: Dict[str, Any] = {}
         self._activation_cache: Dict[str, Dict[str, float]] = {}
         self._gradient_cache: Dict[str, Dict[str, float]] = {}
-        self.top_n = top_n
+        self.top_n = top_n_layers
 
     def _truncate(self, s: str, max_len: int = 40) -> str:
         """Truncate long layer names keeping start and end."""
