@@ -6,6 +6,7 @@ from traceml.renderers.display.notebook_display_manager import (
     NotebookDisplayManager,
 )
 
+from traceml.database.global_database import GlobalDatabase
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.process_sampler import ProcessSampler
@@ -39,7 +40,12 @@ class TrackerManager:
         mode: str,
         num_display_layers: int
     ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
-        system_sampler = SystemSampler()
+
+        global_database = GlobalDatabase()
+
+        sys_table = global_database.create_table("system")
+        system_sampler = SystemSampler(table=sys_table)
+
         process_sampler = ProcessSampler()
         layer_memory_sampler = LayerMemorySampler()
         activation_memory_sampler = ActivationMemorySampler()

@@ -110,17 +110,67 @@ class LayerCombinedRenderer(BaseRenderer):
             "gradient_cache": self._gradient_cache,
         }
 
-    ## CLI rendering in Terminal
-    def get_panel_renderable(self) -> Panel:
+    def _compute_display_data(self) -> Dict[str, Any]:
+        """
+        Compute the aggregated data used by both Rich (CLI) and HTML (Notebook) renderers.
+        Returns:
+            Dict[str, Any]: {
+                "top_items": [(layer, mem), ...],
+                "other": {
+                    "total": float,
+                    "pct": float,
+                    "activation": {"current": float, "global": float},
+                    "gradient": {"current": float, "global": float}
+                },
+                "total_memory": float,
+                "model_index": str,
+                "activation_cache": dict,
+                "gradient_cache": dict,
+            }
+        """
         data = self.get_data()
         layers = data["layers"]
         total_memory = data["total_memory"]
         model_index = data["model_index"]
 
-        # sort + truncate
-        items = sorted(layers.items(), key=lambda kv: float(kv[1]), reverse=True)
-        if self.top_n and self.top_n > 0:
-            items = items[: self.top_n]
+        # sort + top_n split
+        sorted_items = sorted(layers.items(), key=lambda kv: float(kv[1]), reverse=True)
+        top_items = sorted_items[: self.top_n] if self.top_n else sorted_items
+        other_items = sorted_items[self.top_n:] if self.top_n else []
+
+        other_total = sum(float(v) for _, v in other_items)
+        pct_other = (other_total / total_memory * 100.0) if total_memory > 0 else 0.0
+
+        act_cache = data["activation_cache"]
+        grad_cache = data["gradient_cache"]
+
+        def _agg_peaks(cache: Dict[str, Dict[str, float]], names: list[str]):
+            if not names:
+                return {"current": 0.0, "global": 0.0}
+            cur = sum(cache.get(n, {}).get("current", 0.0) for n in names)
+            gbl = sum(cache.get(n, {}).get("global", 0.0) for n in names)
+            return {"current": cur, "global": gbl}
+
+        other_act = _agg_peaks(act_cache, [n for n, _ in other_items])
+        other_grad = _agg_peaks(grad_cache, [n for n, _ in other_items])
+
+        return {
+            "top_items": top_items,
+            "other": {
+                "total": other_total,
+                "pct": pct_other,
+                "activation": other_act,
+                "gradient": other_grad,
+            },
+            "total_memory": total_memory,
+            "model_index": model_index,
+            "activation_cache": act_cache,
+            "gradient_cache": grad_cache,
+        }
+
+    ## CLI rendering in Terminal
+    def get_panel_renderable(self) -> Panel:
+        d = self._compute_display_data()
 
         table = Table(
             show_header=True,
@@ -135,19 +185,29 @@ class LayerCombinedRenderer(BaseRenderer):
         table.add_column("Activation (curr/peak)", justify="right", style="cyan")
         table.add_column("Gradient (curr/peak)", justify="right", style="green")
 
-        if items:
-            for name, memory in items:
-                pct = (
-                    (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
-                )
+        if d["top_items"]:
+            for name, memory in d["top_items"]:
+                pct = (float(memory) / d["total_memory"] * 100.0) if d["total_memory"] > 0 else 0.0
                 table.add_row(
                     self._truncate(name),
                     fmt_mem_new(memory),
                     f"{pct:.1f}%",
-                    self._format_cache_value(data["activation_cache"], name),
-                    self._format_cache_value(data["gradient_cache"], name),
+                    self._format_cache_value(d["activation_cache"], name),
+                    self._format_cache_value(d["gradient_cache"], name),
                 )
-        else:
+
+        # “Other” row
+        if d["other"]["total"] > 0:
+            o = d["other"]
+            table.add_row(
+                "Other Layers",
+                f"{fmt_mem_new(o['total'])}",
+                f"{o['pct']:.1f}%",
+                f"{fmt_mem_new(o['activation']['current'])} / {fmt_mem_new(o['activation']['global'])}",
+                f"{fmt_mem_new(o['gradient']['current'])} / {fmt_mem_new(o['gradient']['global'])}",
+            )
+
+        if not d["top_items"]:
             table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—")
 
         cols, _ = shutil.get_terminal_size()
@@ -155,61 +215,65 @@ class LayerCombinedRenderer(BaseRenderer):
 
         return Panel(
             Group(table),
-            title=f"[bold blue]Model #{model_index}[/bold blue] • Total: [white]{fmt_mem_new(total_memory)}[/white]",
+            title=f"[bold blue]Model #{d['model_index']}[/bold blue] • Total: [white]{fmt_mem_new(d['total_memory'])}[/white]",
             border_style="blue",
             width=panel_width,
         )
 
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
-        data = self.get_data()
-        layers = data["layers"]
-        total_memory = data["total_memory"]
-        model_index = data["model_index"]
+        d = self._compute_display_data()
 
         rows = ""
-        if layers:
-            items = sorted(layers.items(), key=lambda kv: float(kv[1]), reverse=True)
-            if self.top_n and self.top_n > 0:
-                items = items[: self.top_n]
-
-            for name, memory in items:
-                pct = (
-                    (float(memory) / total_memory * 100.0) if total_memory > 0 else 0.0
-                )
+        if d["top_items"]:
+            for name, memory in d["top_items"]:
+                pct = (float(memory) / d["total_memory"] * 100.0) if d["total_memory"] > 0 else 0.0
                 rows += f"""
-                <tr>
-                    <td style="text-align:left;">{self._truncate(name)}</td>
-                    <td style="text-align:right;">{fmt_mem_new(memory)}</td>
-                    <td style="text-align:right;">{pct:.1f}%</td>
-                    <td style="text-align:right;">{self._format_cache_value(data['activation_cache'], name)}</td>
-                    <td style="text-align:right;">{self._format_cache_value(data['gradient_cache'], name)}</td>
-                </tr>
-                """
-        else:
+                   <tr>
+                       <td style="text-align:left;">{self._truncate(name)}</td>
+                       <td style="text-align:right;">{fmt_mem_new(memory)}</td>
+                       <td style="text-align:right;">{pct:.1f}%</td>
+                       <td style="text-align:right;">{self._format_cache_value(d['activation_cache'], name)}</td>
+                       <td style="text-align:right;">{self._format_cache_value(d['gradient_cache'], name)}</td>
+                   </tr>
+                   """
+        # ✅ “Other” row
+        if d["other"]["total"] > 0:
+            o = d["other"]
+            rows += f"""
+               <tr style="color:gray;">
+                   <td>Other Layers</td>
+                   <td style="text-align:right;">{fmt_mem_new(o['total'])}</td>
+                   <td style="text-align:right;">{o['pct']:.1f}%</td>
+                   <td style="text-align:right;">{fmt_mem_new(o['activation']['current'])} / {fmt_mem_new(o['activation']['global'])}</td>
+                   <td style="text-align:right;">{fmt_mem_new(o['gradient']['current'])} / {fmt_mem_new(o['gradient']['global'])}</td>
+               </tr>
+               """
+
+        if not rows.strip():
             rows = """<tr><td colspan="5" style="text-align:center; color:gray;">No layers detected</td></tr>"""
 
         html = f"""
-        <div style="border:2px solid #2196f3; border-radius:8px; padding:10px; margin-top:10px;">
-            <h4 style="color:#2196f3; margin:0;">
-                Model #{model_index} • Total: {fmt_mem_new(total_memory)}
-            </h4>
-            <table style="width:100%; border-collapse:collapse; margin-top:8px;">
-                <thead style="background:#f0f8ff;">
-                    <tr>
-                        <th style="text-align:left;">Layer</th>
-                        <th style="text-align:right;">Memory</th>
-                        <th style="text-align:right;">% of total</th>
-                        <th style="text-align:right;">Activation (curr/peak)</th>
-                        <th style="text-align:right;">Gradient (curr/peak)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows}
-                </tbody>
-            </table>
-        </div>
-        """
+           <div style="border:2px solid #2196f3; border-radius:8px; padding:10px; margin-top:10px;">
+               <h4 style="color:#2196f3; margin:0;">
+                   Model #{d['model_index']} • Total: {fmt_mem_new(d['total_memory'])}
+               </h4>
+               <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+                   <thead style="background:#f0f8ff;">
+                       <tr>
+                           <th style="text-align:left;">Layer</th>
+                           <th style="text-align:right;">Memory</th>
+                           <th style="text-align:right;">% of total</th>
+                           <th style="text-align:right;">Activation (curr/peak)</th>
+                           <th style="text-align:right;">Gradient (curr/peak)</th>
+                       </tr>
+                   </thead>
+                   <tbody>
+                       {rows}
+                   </tbody>
+               </table>
+           </div>
+           """
         return HTML(html)
 
     def _top_n_from_dict(self, d: Dict[str, float], n: int = 3):

@@ -267,7 +267,7 @@ class SystemProcessRenderer(BaseRenderer):
 
     def _proc_gpu_memory(self, t, block: dict) -> None:
         if block.get("is_GPU_available", False):
-            total_gpu = block.get("total_gpu_memory_used", 0)
+            total_gpu = block.get("total_gpu_memory", 0)
 
             t.add_row(
                 "GPU MEMORY AVERAGE",

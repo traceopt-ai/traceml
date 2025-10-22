@@ -1,16 +1,20 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List, Deque
+from collections import deque
 import time
+import threading
 
 
 @dataclass
 class SampleSnapshot:
-    ok: bool
-    message: str
+    """Represents one sampling event stored by the sampler."""
     ts: float = field(default_factory=time.time)
+    ok: bool = True
+    message: str = ""
     source: str = ""
     data: Optional[dict] = None
+
 
 
 class BaseSampler(ABC):
@@ -21,9 +25,28 @@ class BaseSampler(ABC):
     Samplers may be stateful and are typically polled periodically.
     """
 
-    def __init__(self):
+    def __init__(self, max_snapshots: int = 10_000):
         # Optional: Initialize common sampler-level properties or perform global setup
+        self._history: Deque[SampleSnapshot] = deque(maxlen=max_snapshots)
+        self._lock = threading.Lock()
         pass
+
+    def _store_snapshot(
+        self, ok: bool, message: str, source: str, data: Optional[dict] = None):
+        """Create and append a snapshot to history."""
+        snap = SampleSnapshot(ok=ok, message=message, source=source, data=data)
+        with self._lock:
+            self._history.append(snap)
+
+    def get_latest_snapshot(self) -> Optional[SampleSnapshot]:
+        """Return the most recent snapshot."""
+        with self._lock:
+            return self._history[-1] if self._history else None
+
+    def get_snapshot_history(self) -> List[SampleSnapshot]:
+        """Return all stored snapshots."""
+        with self._lock:
+            return list(self._history)
 
     @staticmethod
     def make_snapshot(
