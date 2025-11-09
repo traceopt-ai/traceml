@@ -1,11 +1,7 @@
-from collections import deque
 import psutil
-from typing import Dict, Any, Optional, Deque
-import numpy as np
+from typing import Dict, Any
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import setup_error_logger, get_error_logger
-
-
 from pynvml import (
     nvmlInit,
     nvmlDeviceGetHandleByIndex,
@@ -14,8 +10,6 @@ from pynvml import (
     nvmlDeviceGetCount,
     NVMLError,
 )
-
-
 
 class SystemSampler(BaseSampler):
     """
@@ -31,7 +25,7 @@ class SystemSampler(BaseSampler):
         super().__init__()
         setup_error_logger()
         self.logger = get_error_logger("SystemSampler")
-        self._table = table or []
+        self._table = table if table is not None else []
 
         self._init_cpu()
         self._init_ram()
@@ -116,7 +110,7 @@ class SystemSampler(BaseSampler):
         return gpu_info
 
 
-    def sample(self) -> Dict[str, Any]:
+    def sample(self):
         """
         Take one system snapshot and return backward-compatible dict.
         """
@@ -134,69 +128,5 @@ class SystemSampler(BaseSampler):
                 "gpu_raw": gpu_raw,
             })
 
-            # backward-compatible
-            return self.snapshot_dict(
-                self.make_snapshot(
-                    ok=True,
-                    message="sampled successfully",
-                    source="system",
-                    data={},
-                )
-            )
-
         except Exception as e:
             self.logger.error(f"[TraceML] System sampling error: {e}")
-            return self.snapshot_dict(
-                self.make_snapshot(
-                    ok=False,
-                    message=f"sampling failed: {e}",
-                    source="system",
-                    data=None,
-                )
-            )
-
-    def get_summary(self) -> Dict[str, Any]:
-        """
-        Compute summary statistics from the table list.
-        Each entry in the list is a sample dict.
-        """
-        if not self._table:
-            return {"error": "no data", "total_samples": 0}
-
-        # Extract lists of values
-        cpu_vals = [x.get("cpu_percent", 0.0) for x in self._table]
-        ram_vals = [x.get("ram_used", 0.0) for x in self._table]
-        ram_total = self._table[-1].get("ram_total", 0.0)
-
-        gpu_util_avg = [x.get("gpu_util_avg") for x in self._table if x.get("gpu_util_avg") is not None]
-        gpu_util_max = [x.get("gpu_util_max") for x in self._table if x.get("gpu_util_max") is not None]
-        gpu_mem_sum_used = [x.get("gpu_mem_sum_used") for x in self._table if x.get("gpu_mem_sum_used") is not None]
-        gpu_mem_max_used = [x.get("gpu_mem_max_used") for x in self._table if x.get("gpu_mem_max_used") is not None]
-        gpu_mem_total = [x.get("gpu_mem_total") for x in self._table if x.get("gpu_mem_total") is not None]
-
-        gpu_available = self._table[-1].get("gpu_available", False)
-        gpu_count = self._table[-1].get("gpu_count", 0)
-
-        summary = {
-            "total_samples": len(self._table),
-            "cpu_average_percent": round(float(np.mean(cpu_vals)), 2),
-            "cpu_peak_percent": round(float(np.max(cpu_vals)), 2),
-            "cpu_logical_core_count": self.cpu_logical_core_count,
-            "ram_average_used": round(float(np.mean(ram_vals)), 2),
-            "ram_peak_used": round(float(np.max(ram_vals)), 2),
-            "ram_total": ram_total,
-            "gpu_available": gpu_available,
-            "gpu_total_count": gpu_count,
-        }
-
-        # Temporary backward-compatible GPU summary
-        if gpu_available and gpu_util_avg:
-            summary.update({
-                "gpu_average_util_percent": round(float(np.mean(gpu_util_avg)), 2),
-                "gpu_peak_util_percent": round(float(np.max(gpu_util_max)), 2),
-                "gpu_memory_peak_used": round(float(np.max(gpu_mem_max_used)), 2),
-                "gpu_memory_average_used": round(float(np.mean(gpu_mem_sum_used)), 2),
-                "gpu_memory_total": round(float(np.mean(gpu_mem_total)), 2),
-            })
-
-        return summary

@@ -9,7 +9,8 @@ from traceml.renderers.display.stdout_stderr_capture import StreamCapture
 
 ROOT_LAYOUT_NAME = "root"
 LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
-SYSTEM_PROCESS_LAYOUT_NAME = "system_process_section"
+SYSTEM_LAYOUT_NAME = "system_section"
+PROCESS_LAYOUT_NAME = "process_section"
 LAYER_COMBINED_SUMMARY_LAYOUT_NAME = "layer_combined_summary_section"
 ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME = "activation_gradient_summary_section"
 STEPTIMER_SUMMARY_LAYOUT_NAME = "steptimer_summary_section"
@@ -44,9 +45,13 @@ class CLIDisplayManager:
         )
         dashboard = cls._layout["dashboard"]
         dashboard.split_column(
-            Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, ratio=1),
+            Layout(name="upper_row", ratio=1),
             Layout(name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME, ratio=3),
             Layout(name="bottom_row", ratio=1),
+        )
+        dashboard["upper_row"].split_row(
+            Layout(name=SYSTEM_LAYOUT_NAME, ratio=1),
+            Layout(name=PROCESS_LAYOUT_NAME, ratio=1),
         )
         dashboard["bottom_row"].split_row(
             Layout(name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, ratio=1),
@@ -54,8 +59,11 @@ class CLIDisplayManager:
         )
 
         # Initialize panels with placeholder text
-        dashboard[SYSTEM_PROCESS_LAYOUT_NAME].update(
+        dashboard[SYSTEM_LAYOUT_NAME].update(
             Panel(Text("Waiting for System Metrics...", justify="center"))
+        )
+        dashboard[PROCESS_LAYOUT_NAME].update(
+            Panel(Text("Waiting for Process Metrics...", justify="center"))
         )
         dashboard[LAYER_COMBINED_SUMMARY_LAYOUT_NAME].update(
             Panel(Text("Waiting for Current Model...", justify="center"))

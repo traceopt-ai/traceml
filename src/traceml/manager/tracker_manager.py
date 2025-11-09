@@ -16,7 +16,8 @@ from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 from traceml.samplers.steptimer_sampler import StepTimerSampler
 
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.system_process_renderer import SystemProcessRenderer
+from traceml.renderers.system_renderer import SystemRenderer
+from traceml.renderers.process_renderer import ProcessRenderer
 from traceml.renderers.layer_combined_stdout_renderer import (
     LayerCombinedRenderer,
 )
@@ -45,14 +46,20 @@ class TrackerManager:
 
         sys_table = global_database.create_table("system")
         system_sampler = SystemSampler(table=sys_table)
+        system_renderer = SystemRenderer(table=sys_table)
 
+        proc_table = global_database.create_table("process")
         process_sampler = ProcessSampler()
+        process_renderer = ProcessRenderer()
+
+
         layer_memory_sampler = LayerMemorySampler()
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
         steptimer_sampler = StepTimerSampler()
 
-        system_process_renderer = SystemProcessRenderer()
+
+
         layer_combined_renderer = LayerCombinedRenderer(top_n_layers=num_display_layers)
         activation_gradient_renderer = ActivationGradientRenderer()
         steptimer_renderer = StepTimerRenderer()
@@ -60,7 +67,8 @@ class TrackerManager:
 
         # Collect all trackers
         sampler_logger_pairs = [
-            ([system_sampler, process_sampler], [system_process_renderer]),
+            ([system_sampler], [system_renderer]),
+            ([process_sampler], [process_renderer]),
             (
                 [
                     layer_memory_sampler,

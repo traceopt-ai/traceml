@@ -73,7 +73,6 @@ class BaseSampler(ABC):
         """
         pass
 
-    @abstractmethod
     def get_summary(self) -> Dict[str, Any]:
         """
         Compute and return summary statistics for the collected metrics over the sampling period.
