@@ -9,12 +9,12 @@ import threading
 @dataclass
 class SampleSnapshot:
     """Represents one sampling event stored by the sampler."""
+
     ts: float = field(default_factory=time.time)
     ok: bool = True
     message: str = ""
     source: str = ""
     data: Optional[dict] = None
-
 
 
 class BaseSampler(ABC):
@@ -32,7 +32,8 @@ class BaseSampler(ABC):
         pass
 
     def _store_snapshot(
-        self, ok: bool, message: str, source: str, data: Optional[dict] = None):
+        self, ok: bool, message: str, source: str, data: Optional[dict] = None
+    ):
         """Create and append a snapshot to history."""
         snap = SampleSnapshot(ok=ok, message=message, source=source, data=data)
         with self._lock:

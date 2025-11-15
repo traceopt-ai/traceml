@@ -1,5 +1,5 @@
 import threading
-from typing import List, Tuple, Any, Dict, Optional
+from typing import List, Tuple, Any, Dict
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import (
@@ -38,27 +38,23 @@ class TrackerManager:
 
     @staticmethod
     def _components(
-        mode: str,
-        num_display_layers: int
+        mode: str, num_display_layers: int
     ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
 
         global_database = GlobalDatabase()
 
-        sys_table = global_database.create_table("system")
-        system_sampler = SystemSampler(table=sys_table)
-        system_renderer = SystemRenderer(table=sys_table)
+        system_table = global_database.create_table("system")
+        system_sampler = SystemSampler(table=system_table)
+        system_renderer = SystemRenderer(table=system_table)
 
-        proc_table = global_database.create_table("process")
-        process_sampler = ProcessSampler()
-        process_renderer = ProcessRenderer()
-
+        process_table = global_database.create_table("process")
+        process_sampler = ProcessSampler(table=process_table)
+        process_renderer = ProcessRenderer(table=process_table)
 
         layer_memory_sampler = LayerMemorySampler()
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
         steptimer_sampler = StepTimerSampler()
-
-
 
         layer_combined_renderer = LayerCombinedRenderer(top_n_layers=num_display_layers)
         activation_gradient_renderer = ActivationGradientRenderer()
@@ -88,7 +84,7 @@ class TrackerManager:
         components: List[Tuple[List[BaseSampler], List[BaseRenderer]]] = None,
         interval_sec: float = 1.0,
         mode: str = "cli",  # "cli" or "notebook"
-        num_display_layers: int = 20
+        num_display_layers: int = 20,
     ):
         """
         Args:

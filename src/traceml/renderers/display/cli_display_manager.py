@@ -75,8 +75,11 @@ class CLIDisplayManager:
             Panel(Text("Waiting for Step Timers...", justify="center"))
         )
         cls._layout[STDOUT_STDERR_LAYOUT_NAME].update(
-            Panel(Text("Waiting for stdout/stderr...", justify="center"),
-                  title="Logs", border_style="cyan")
+            Panel(
+                Text("Waiting for stdout/stderr...", justify="center"),
+                title="Logs",
+                border_style="cyan",
+            )
         )
 
     @classmethod

@@ -7,10 +7,14 @@ import traceback
 from typing import Union
 from traceml.manager.tracker_manager import TrackerManager
 
+
 def validate_script_path(script_path: str) -> str:
     """Ensure that the script path exists and is valid."""
     if not script_path or not os.path.exists(script_path):
-        print(f"Error: Script '{script_path}' not found or not specified.", file=sys.stderr)
+        print(
+            f"Error: Script '{script_path}' not found or not specified.",
+            file=sys.stderr,
+        )
         sys.exit(1)
     return os.path.abspath(script_path)
 
@@ -97,7 +101,8 @@ def run_with_tracing(
     print(f"Log directory: {log_dir}")
 
     tracker = TrackerManager(
-        interval_sec=interval, mode="cli", num_display_layers=num_display_layers)
+        interval_sec=interval, mode="cli", num_display_layers=num_display_layers
+    )
 
     # --- Arguments for the target script ---
     original_argv = list(sys.argv)
@@ -153,10 +158,29 @@ def build_parser() -> argparse.ArgumentParser:
         description="Executes a given Python script while automatically tracking its PyTorch memory, CPU, and GPU usage.",
     )
     run_parser.add_argument("script", help="Path to the Python script to run.")
-    run_parser.add_argument("--interval", type=float, default=1.0, help="Sampling interval in seconds (default: 1.0).")
-    run_parser.add_argument("--log-dir", type=str, default=os.path.join(os.getcwd(), ".traceml_runs"), help="Root log directory.")
-    run_parser.add_argument("--num-display-layers", type=int, default=20, help="Number of layers to show in CLI dashboard.")
-    run_parser.add_argument("--args", nargs=argparse.REMAINDER, help="Extra args to pass to the target script.")
+    run_parser.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Sampling interval in seconds (default: 1.0).",
+    )
+    run_parser.add_argument(
+        "--log-dir",
+        type=str,
+        default=os.path.join(os.getcwd(), ".traceml_runs"),
+        help="Root log directory.",
+    )
+    run_parser.add_argument(
+        "--num-display-layers",
+        type=int,
+        default=20,
+        help="Number of layers to show in CLI dashboard.",
+    )
+    run_parser.add_argument(
+        "--args",
+        nargs=argparse.REMAINDER,
+        help="Extra args to pass to the target script.",
+    )
     return parser
 
 

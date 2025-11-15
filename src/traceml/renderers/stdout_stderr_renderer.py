@@ -51,7 +51,7 @@ class StdoutStderrRenderer(BaseRenderer):
 
         # Update rolling cache
         cache += new_lines
-        cache[:] = cache[-self.max_cache_lines:]
+        cache[:] = cache[-self.max_cache_lines :]
 
         # Append only new lines to the log file
         with open(self.log_path, "a", encoding="utf-8") as f:
@@ -60,12 +60,16 @@ class StdoutStderrRenderer(BaseRenderer):
 
     def get_panel_renderable(self) -> Panel:
         # Refresh caches from the global captures
-        self._update_cache_and_log(StreamCapture._stdout_stderr_capture, self.stdout_stderr_cache)
+        self._update_cache_and_log(
+            StreamCapture._stdout_stderr_capture, self.stdout_stderr_cache
+        )
 
         # Prepare visible lines
         visible_lines = self.stdout_stderr_cache[-self.display_lines :]
         if not visible_lines:
-            content = Text("Waiting for stdout/stderr...", style="dim", justify="center")
+            content = Text(
+                "Waiting for stdout/stderr...", style="dim", justify="center"
+            )
         else:
             lines = [Text(ln, style="white") for ln in visible_lines]
             content = Text("\n").join(lines)
@@ -79,7 +83,6 @@ class StdoutStderrRenderer(BaseRenderer):
     def log_summary(self, summary):
         """Persist cached lines at the end of the run."""
         self._update_cache_and_log(
-            StreamCapture._stdout_stderr_capture,
-            self.stdout_stderr_cache
+            StreamCapture._stdout_stderr_capture, self.stdout_stderr_cache
         )
         print(f"[TraceML] Stdout/Stderr logs saved to: {self.log_path}")

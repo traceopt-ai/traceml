@@ -1,5 +1,5 @@
 import psutil
-from typing import Dict, Any
+from typing import Dict
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import setup_error_logger, get_error_logger
 from pynvml import (
@@ -10,6 +10,7 @@ from pynvml import (
     nvmlDeviceGetCount,
     NVMLError,
 )
+
 
 class SystemSampler(BaseSampler):
     """
@@ -81,7 +82,7 @@ class SystemSampler(BaseSampler):
             self.logger.error(
                 f"[TraceML] WARNING: psutil.virtual_memory initial call failed: {e}"
             )
-            return  0.0
+            return 0.0
 
     def _sample_gpu(self):
         """
@@ -109,7 +110,6 @@ class SystemSampler(BaseSampler):
 
         return gpu_info
 
-
     def sample(self):
         """
         Take one system snapshot and return backward-compatible dict.
@@ -119,14 +119,16 @@ class SystemSampler(BaseSampler):
             ram_used = self._sample_ram()
             gpu_raw = self._sample_gpu()
 
-            self._table.append({
-                "cpu_percent": cpu,
-                "ram_used": ram_used,
-                "ram_total": self.ram_total_memory,
-                "gpu_available": self.gpu_available,
-                "gpu_count": self.gpu_count,
-                "gpu_raw": gpu_raw,
-            })
+            self._table.append(
+                {
+                    "cpu_percent": cpu,
+                    "ram_used": ram_used,
+                    "ram_total": self.ram_total_memory,
+                    "gpu_available": self.gpu_available,
+                    "gpu_count": self.gpu_count,
+                    "gpu_raw": gpu_raw,
+                }
+            )
 
         except Exception as e:
             self.logger.error(f"[TraceML] System sampling error: {e}")

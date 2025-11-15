@@ -1,11 +1,10 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 import shutil
 
 from rich.panel import Panel
 from rich.table import Table
 from rich.console import Console
 from IPython.display import HTML
-
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import (
@@ -20,27 +19,42 @@ class ProcessRenderer(BaseRenderer):
     Expects BaseStdoutLogger.log() to receive a dict:
     """
 
-    def __init__(self):
-        super().__init__(
-            name="Process", layout_section_name=PROCESS_LAYOUT_NAME
-        )
-        self._latest_snapshot: Dict[str, Any] = {}
+    def __init__(self, table: List[Dict[str, Any]]):
+        super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT_NAME)
+        self._table = table
 
-    def get_data(self) -> Dict[str, Any]:
-        snaps = self._latest_snapshot or {}
-        procd = (snaps.get("ProcessSampler") or {}).get("data") or {}
+    def compute_snapshot(self) -> Dict[str, Any]:
+        """Compute latest process metrics from the shared table."""
+        if not self._table:
+            return {
+                "cpu": 0.0,
+                "ram": 0.0,
+                "gpu_used": None,
+                "gpu_reserved": None,
+                "gpu_total": None,
+            }
+
+        latest = self._table[-1]
+
+        gpu = latest.get("gpu_process_memory", {}) or {}
+        if gpu:
+            used_sum = sum(v.get("used", 0) for v in gpu.values())
+            reserved_sum = sum(v.get("reserved", 0) for v in gpu.values())
+            total_sum = sum(v.get("total", 0) for v in gpu.values())
+        else:
+            used_sum = reserved_sum = total_sum = None
+
         return {
-            "process": {
-                "cpu": procd.get("process_cpu_percent", 0.0),
-                "ram": procd.get("process_ram", 0.0),
-                "gpu_mem": procd.get("process_gpu_memory", None),
-            },
+            "cpu": latest.get("process_cpu_percent", 0.0),
+            "ram": latest.get("process_ram", 0.0),
+            "gpu_used": used_sum,
+            "gpu_reserved": reserved_sum,
+            "gpu_total": total_sum,
         }
 
     ## CLI rendering in Terminal
     def get_panel_renderable(self) -> Panel:
-        data = self.get_data()
-        proc = data["process"]
+        proc = self.compute_snapshot()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="white")
@@ -53,10 +67,14 @@ class ProcessRenderer(BaseRenderer):
             f"[bold green]CPU[/bold green] {fmt_percent(proc['cpu'])}",
             f"[bold green]RAM[/bold green] {fmt_mem_new(proc['ram'])}",
         ]
-        if proc["gpu_mem"] is not None:
+        if proc["gpu_total"]:
             proc_info.append(
-                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(proc['gpu_mem'])}"
+                f"[bold green]GPU MEM (used/reserved/total)[/bold green] "
+                f"{fmt_mem_new(proc['gpu_used'])}/"
+                f"{fmt_mem_new(proc['gpu_reserved'])}/"
+                f"{fmt_mem_new(proc['gpu_total'])}"
             )
+
         table.add_row("   ".join(proc_info))
 
         cols, _ = shutil.get_terminal_size()
@@ -72,39 +90,95 @@ class ProcessRenderer(BaseRenderer):
 
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
-        data = self.get_data()
-        proc = data["process"]
+        proc = self.compute_snapshot()
 
-        proc_html = f"""
+        gpu_html = ""
+        if proc["gpu_total"]:
+            gpu_html = f"""
+                <p><b>GPU MEM:</b>
+                    {fmt_mem_new(proc['gpu_used'])} /
+                    {fmt_mem_new(proc['gpu_reserved'])} /
+                    {fmt_mem_new(proc['gpu_total'])}
+                </p>
+            """
+
+        html = f"""
         <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
             <h4 style="color:#00bcd4; margin:0;">Process</h4>
             <p><b>CPU:</b> {fmt_percent(proc['cpu'])}</p>
             <p><b>RAM:</b> {fmt_mem_new(proc['ram'])}</p>
+            {gpu_html}
         </div>
         """
+        return HTML(
+            f"<div style='display:flex; gap:20px; margin-top:10px;'>{html}</div>"
+        )
 
-        if proc["gpu_mem"] is not None:
-            proc_html = proc_html.replace(
-                "</div>",
-                f"<p><b>GPU MEM:</b> {fmt_mem_new(proc['gpu_mem'])}</p></div>",
+    def compute_summary(self) -> Dict[str, Any]:
+        """
+        Compute averages + peaks from table.
+        Matches old ProcessSampler.get_summary() keys.
+        """
+
+        if not self._table:
+            return {"total_samples": 0}
+
+        cpu_vals, cpu_logical_cores = [], []
+        ram_vals, ram_total = [], []
+        gpu_used_vals, gpu_reserved_vals, gpu_total_vals = [], [], []
+
+        for row in self._table:
+            cpu_vals.append(row.get("process_cpu_percent", 0.0))
+            ram_vals.append(row.get("process_ram", 0.0))
+            cpu_logical_cores.append(row.get("cpu_logical_core_count", 0.0))
+            ram_total.append(row.get("total_ram", 0.0))
+
+            # GPU
+            g = row.get("gpu_process_memory", {}) or {}
+            if g:
+                used = sum(v.get("used", 0) for v in g.values())
+                reserved = sum(v.get("reserved", 0) for v in g.values())
+                total = sum(v.get("total", 0) for v in g.values())
+                gpu_used_vals.append(used)
+                gpu_reserved_vals.append(reserved)
+                gpu_total_vals.append(total)
+
+        summary = {
+            "total_samples": len(self._table),
+            "cpu_average_percent": float(sum(cpu_vals)) / len(cpu_vals),
+            "cpu_peak_percent": max(cpu_vals),
+            "cpu_logical_core_count": max(
+                cpu_logical_cores
+            ),  # ProcessSampler no longer gives this 'live'
+            "ram_average_used": float(sum(ram_vals)) / len(ram_vals),
+            "ram_peak_used": max(ram_vals),
+            "ram_total": max(ram_total),
+            "is_GPU_available": bool(gpu_used_vals),
+        }
+
+        if gpu_used_vals:
+            summary.update(
+                {
+                    "gpu_average_memory_used": float(sum(gpu_used_vals))
+                    / len(gpu_used_vals),
+                    "gpu_peak_memory_used": max(gpu_used_vals),
+                    "gpu_average_memory_reserved": float(sum(gpu_reserved_vals))
+                    / len(gpu_reserved_vals),
+                    "gpu_peak_memory_reserved": max(gpu_reserved_vals),
+                    "gpu_memory_total": float(max(gpu_total_vals)),
+                }
             )
 
-        combined = f"""
-        <div style="display:flex; gap:20px; margin-top:10px;">
-            {proc_html}
-        </div>
-        """
-
-        return HTML(combined)
+        return summary
 
     def _proc_cpu_summary(self, t: Table, block: dict) -> None:
-        average_cpu_percent = block["average_cpu_percent"]
-        peak_cpu_percent = block["peak_cpu_percent"]
+        average_cpu_percent = block["cpu_average_percent"]
+        peak_cpu_percent = block["cpu_peak_percent"]
         avg_cores_used = round(average_cpu_percent / 100, 2)
         peak_cores_used = round(peak_cpu_percent / 100, 2)
 
         t.add_row(
-            "CPU AVERAGE",
+            "CPU AVG",
             "[magenta]|[/magenta]",
             f"{average_cpu_percent:.1f}% (~{avg_cores_used:.1f} cores of "
             f"{block['cpu_logical_core_count']:.1f} cores)",
@@ -118,12 +192,12 @@ class ProcessRenderer(BaseRenderer):
 
     def _proc_ram_summary(self, t, block: dict) -> None:
         # RAM Summary
-        avg_ram_used = block["average_ram"]
-        peak_ram_used = block["peak_ram"]
-        total_ram = block["total_ram"]
+        avg_ram_used = block["ram_average_used"]
+        peak_ram_used = block["ram_peak_used"]
+        total_ram = block["ram_total"]
 
         t.add_row(
-            "RAM AVERAGE",
+            "RAM AVG",
             "[magenta]|[/magenta]",
             f"{fmt_mem_new(avg_ram_used)} / {fmt_mem_new(total_ram)} "
             f"({(avg_ram_used / total_ram) * 100:.1f}%)",
@@ -137,35 +211,45 @@ class ProcessRenderer(BaseRenderer):
 
     def _proc_gpu_memory(self, t, block: dict) -> None:
         if block.get("is_GPU_available", False):
-            total_gpu = block.get("total_gpu_memory", 0)
+            total_gpu = block.get("gpu_memory_total", 0)
 
             t.add_row(
-                "GPU MEMORY AVERAGE",
+                "GPU MEM AVG (Used/Reserved/Total)",
                 "[magenta]|[/magenta]",
-                f"{fmt_mem_new(block['average_gpu_memory_used'])} / {fmt_mem_new(total_gpu)}",
+                f"{fmt_mem_new(block['gpu_average_memory_used'])} / "
+                f"{fmt_mem_new(block['gpu_average_memory_reserved'])} / "
+                f"{fmt_mem_new(total_gpu)}",
             )
             t.add_row(
-                "GPU MEMORY PEAK",
+                "GPU MEM PEAK (Used/Reserved/Total)",
                 "[magenta]|[/magenta]",
-                f"{fmt_mem_new(block['peak_gpu_memory_used'])} / {fmt_mem_new(total_gpu)}",
+                f"{fmt_mem_new(block['gpu_peak_memory_used'])} /"
+                f"({fmt_mem_new(block['gpu_peak_memory_reserved'])} / "
+                f" {fmt_mem_new(total_gpu)}",
             )
         else:
             t.add_row("GPU", "[magenta]|[/magenta]", "[red]Not available[/red]")
 
-    def _render_process_summary(self, block: Dict[str, Any], console) -> None:
+    def log_summary(self, summary: Dict[str, Any] = None) -> None:
+        """Render the computed process summary to console (same style as before)."""
+        console = Console()
+        summary = self.compute_summary()
+
         t = Table.grid(padding=(0, 1))
         t.add_column(justify="left", style="magenta")
         t.add_column(justify="center", style="dim", no_wrap=True)
         t.add_column(justify="right", style="white")
 
-        # CPU summary
         t.add_row(
-            "TOTAL PROCESS SAMPLES", "[magenta]|[/magenta]", str(block["total_samples"])
+            "TOTAL PROCESS SAMPLES",
+            "[magenta]|[/magenta]",
+            str(summary.get("total_samples", 0)),
         )
-        if block["total_samples"]:
-            self._proc_cpu_summary(t, block)
-            self._proc_ram_summary(t, block)
-            self._proc_gpu_memory(t, block)
+
+        if summary.get("total_samples", 0) > 0:
+            self._proc_cpu_summary(t, summary)
+            self._proc_ram_summary(t, summary)
+            self._proc_gpu_memory(t, summary)
 
         console.print(
             Panel(
@@ -174,9 +258,3 @@ class ProcessRenderer(BaseRenderer):
                 border_style="magenta",
             )
         )
-
-    def log_summary(self, summary: Dict[str, Any]) -> None:
-        console = Console()
-        proc_summary = (summary or {}).get("ProcessSampler") or {}
-        if proc_summary:
-            self._render_process_summary(proc_summary, console)

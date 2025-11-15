@@ -136,7 +136,7 @@ class LayerCombinedRenderer(BaseRenderer):
         # sort + top_n split
         sorted_items = sorted(layers.items(), key=lambda kv: float(kv[1]), reverse=True)
         top_items = sorted_items[: self.top_n] if self.top_n else sorted_items
-        other_items = sorted_items[self.top_n:] if self.top_n else []
+        other_items = sorted_items[self.top_n :] if self.top_n else []
 
         other_total = sum(float(v) for _, v in other_items)
         pct_other = (other_total / total_memory * 100.0) if total_memory > 0 else 0.0
@@ -187,7 +187,11 @@ class LayerCombinedRenderer(BaseRenderer):
 
         if d["top_items"]:
             for name, memory in d["top_items"]:
-                pct = (float(memory) / d["total_memory"] * 100.0) if d["total_memory"] > 0 else 0.0
+                pct = (
+                    (float(memory) / d["total_memory"] * 100.0)
+                    if d["total_memory"] > 0
+                    else 0.0
+                )
                 table.add_row(
                     self._truncate(name),
                     fmt_mem_new(memory),
@@ -227,7 +231,11 @@ class LayerCombinedRenderer(BaseRenderer):
         rows = ""
         if d["top_items"]:
             for name, memory in d["top_items"]:
-                pct = (float(memory) / d["total_memory"] * 100.0) if d["total_memory"] > 0 else 0.0
+                pct = (
+                    (float(memory) / d["total_memory"] * 100.0)
+                    if d["total_memory"] > 0
+                    else 0.0
+                )
                 rows += f"""
                    <tr>
                        <td style="text-align:left;">{self._truncate(name)}</td>

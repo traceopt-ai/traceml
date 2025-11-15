@@ -54,11 +54,31 @@ class SystemRenderer(BaseRenderer):
         ram_vals = [x.get("ram_used", 0.0) for x in self._table]
         ram_total = self._table[-1].get("ram_total", 0.0)
 
-        gpu_util_avg = [x.get("gpu_util_avg") for x in self._table if x.get("gpu_util_avg") is not None]
-        gpu_util_max = [x.get("gpu_util_max") for x in self._table if x.get("gpu_util_max") is not None]
-        gpu_mem_sum_used = [x.get("gpu_mem_sum_used") for x in self._table if x.get("gpu_mem_sum_used") is not None]
-        gpu_mem_max_used = [x.get("gpu_mem_max_used") for x in self._table if x.get("gpu_mem_max_used") is not None]
-        gpu_mem_total = [x.get("gpu_mem_total") for x in self._table if x.get("gpu_mem_total") is not None]
+        gpu_util_avg = [
+            x.get("gpu_util_avg")
+            for x in self._table
+            if x.get("gpu_util_avg") is not None
+        ]
+        gpu_util_max = [
+            x.get("gpu_util_max")
+            for x in self._table
+            if x.get("gpu_util_max") is not None
+        ]
+        gpu_mem_sum_used = [
+            x.get("gpu_mem_sum_used")
+            for x in self._table
+            if x.get("gpu_mem_sum_used") is not None
+        ]
+        gpu_mem_max_used = [
+            x.get("gpu_mem_max_used")
+            for x in self._table
+            if x.get("gpu_mem_max_used") is not None
+        ]
+        gpu_mem_total = [
+            x.get("gpu_mem_total")
+            for x in self._table
+            if x.get("gpu_mem_total") is not None
+        ]
 
         gpu_available = self._table[-1].get("gpu_available", False)
         gpu_count = self._table[-1].get("gpu_count", 0)
@@ -75,16 +95,19 @@ class SystemRenderer(BaseRenderer):
         }
 
         if gpu_available and gpu_util_avg:
-            summary.update({
-                "gpu_average_util_percent": round(float(np.mean(gpu_util_avg)), 2),
-                "gpu_peak_util_percent": round(float(np.max(gpu_util_max)), 2),
-                "gpu_memory_peak_used": round(float(np.max(gpu_mem_max_used)), 2),
-                "gpu_memory_average_used": round(float(np.mean(gpu_mem_sum_used)), 2),
-                "gpu_memory_total": round(float(np.mean(gpu_mem_total)), 2),
-            })
+            summary.update(
+                {
+                    "gpu_average_util_percent": round(float(np.mean(gpu_util_avg)), 2),
+                    "gpu_peak_util_percent": round(float(np.max(gpu_util_max)), 2),
+                    "gpu_memory_peak_used": round(float(np.max(gpu_mem_max_used)), 2),
+                    "gpu_memory_average_used": round(
+                        float(np.mean(gpu_mem_sum_used)), 2
+                    ),
+                    "gpu_memory_total": round(float(np.mean(gpu_mem_total)), 2),
+                }
+            )
 
         return summary
-
 
     def get_panel_renderable(self) -> Panel:
         data = self._compute_snapshot()
@@ -107,7 +130,9 @@ class SystemRenderer(BaseRenderer):
         ]
 
         if data["gpu_available"]:
-            sys_info.append(f"[bold green]GPU[/bold green] {fmt_percent(data['gpu_util_avg'])}")
+            sys_info.append(
+                f"[bold green]GPU[/bold green] {fmt_percent(data['gpu_util_avg'])}"
+            )
             sys_info.append(
                 f"[bold green]GPU MEM[/bold green] {fmt_mem_new(data['gpu_mem_used'])}/{fmt_mem_new(data['gpu_mem_total'])}"
             )
@@ -124,7 +149,6 @@ class SystemRenderer(BaseRenderer):
             border_style="cyan",
             width=panel_width,
         )
-
 
     def get_notebook_renderable(self) -> HTML:
         data = self._compute_snapshot()
@@ -154,10 +178,16 @@ class SystemRenderer(BaseRenderer):
         t.add_column(justify="center", style="dim", no_wrap=True)
         t.add_column(justify="right", style="white")
 
-        t.add_row("TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(summary["total_samples"]))
+        t.add_row(
+            "TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(summary["total_samples"])
+        )
         if summary["total_samples"]:
-            t.add_row("CPU AVG", "[cyan]|[/cyan]", f"{summary['cpu_average_percent']:.1f}%")
-            t.add_row("CPU PEAK", "[cyan]|[/cyan]", f"{summary['cpu_peak_percent']:.1f}%")
+            t.add_row(
+                "CPU AVG", "[cyan]|[/cyan]", f"{summary['cpu_average_percent']:.1f}%"
+            )
+            t.add_row(
+                "CPU PEAK", "[cyan]|[/cyan]", f"{summary['cpu_peak_percent']:.1f}%"
+            )
             t.add_row(
                 "RAM AVG",
                 "[cyan]|[/cyan]",
@@ -170,9 +200,19 @@ class SystemRenderer(BaseRenderer):
             )
 
             if summary["gpu_available"]:
-                t.add_row("GPU COUNT", "[cyan]|[/cyan]", str(summary["gpu_total_count"]))
-                t.add_row("GPU UTIL AVG", "[cyan]|[/cyan]", f"{summary['gpu_average_util_percent']:.1f}%")
-                t.add_row("GPU UTIL PEAK", "[cyan]|[/cyan]", f"{summary['gpu_peak_util_percent']:.1f}%")
+                t.add_row(
+                    "GPU COUNT", "[cyan]|[/cyan]", str(summary["gpu_total_count"])
+                )
+                t.add_row(
+                    "GPU UTIL AVG",
+                    "[cyan]|[/cyan]",
+                    f"{summary['gpu_average_util_percent']:.1f}%",
+                )
+                t.add_row(
+                    "GPU UTIL PEAK",
+                    "[cyan]|[/cyan]",
+                    f"{summary['gpu_peak_util_percent']:.1f}%",
+                )
                 t.add_row(
                     "GPU MEM AVG",
                     "[cyan]|[/cyan]",
@@ -186,4 +226,8 @@ class SystemRenderer(BaseRenderer):
             else:
                 t.add_row("GPU", "[cyan]|[/cyan]", "[red]Not available[/red]")
 
-        console.print(Panel(t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"))
+        console.print(
+            Panel(
+                t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"
+            )
+        )
