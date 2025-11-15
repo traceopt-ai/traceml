@@ -27,8 +27,8 @@ class ProcessRenderer(BaseRenderer):
         """Compute latest process metrics from the shared table."""
         if not self._table:
             return {
-                "cpu": 0.0,
-                "ram": 0.0,
+                "cpu_used": 0.0,
+                "ram_used": 0.0,
                 "gpu_used": None,
                 "gpu_reserved": None,
                 "gpu_total": None,
@@ -45,8 +45,8 @@ class ProcessRenderer(BaseRenderer):
             used_sum = reserved_sum = total_sum = None
 
         return {
-            "cpu": latest.get("process_cpu_percent", 0.0),
-            "ram": latest.get("process_ram", 0.0),
+            "cpu_used": latest.get("process_cpu_percent", 0.0),
+            "ram_used": latest.get("process_ram", 0.0),
             "gpu_used": used_sum,
             "gpu_reserved": reserved_sum,
             "gpu_total": total_sum,
@@ -64,8 +64,8 @@ class ProcessRenderer(BaseRenderer):
         # process row
         proc_info = [
             "[bold cyan]Process[/bold cyan]",
-            f"[bold green]CPU[/bold green] {fmt_percent(proc['cpu'])}",
-            f"[bold green]RAM[/bold green] {fmt_mem_new(proc['ram'])}",
+            f"[bold green]CPU[/bold green] {fmt_percent(proc['cpu_used'])}",
+            f"[bold green]RAM[/bold green] {fmt_mem_new(proc['ram_used'])}",
         ]
         if proc["gpu_total"]:
             proc_info.append(
@@ -82,7 +82,7 @@ class ProcessRenderer(BaseRenderer):
 
         return Panel(
             table,
-            title="[bold cyan]System + Process[/bold cyan]",
+            title="[bold cyan]Process[/bold cyan]",
             title_align="center",
             border_style="cyan",
             width=panel_width,
@@ -105,8 +105,8 @@ class ProcessRenderer(BaseRenderer):
         html = f"""
         <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
             <h4 style="color:#00bcd4; margin:0;">Process</h4>
-            <p><b>CPU:</b> {fmt_percent(proc['cpu'])}</p>
-            <p><b>RAM:</b> {fmt_mem_new(proc['ram'])}</p>
+            <p><b>CPU:</b> {fmt_percent(proc['cpu_used'])}</p>
+            <p><b>RAM:</b> {fmt_mem_new(proc['ram_used'])}</p>
             {gpu_html}
         </div>
         """
