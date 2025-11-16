@@ -59,23 +59,26 @@ class ProcessRenderer(BaseRenderer):
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="white")
         table.add_column(justify="left", style="white")
-        table.add_column(justify="left", style="white")
 
         # process row
-        proc_info = [
-            "[bold cyan]Process[/bold cyan]",
+        proc_info = (
             f"[bold green]CPU[/bold green] {fmt_percent(proc['cpu_used'])}",
             f"[bold green]RAM[/bold green] {fmt_mem_new(proc['ram_used'])}",
-        ]
+        )
+        table.add_row(*proc_info)
+
         if proc["gpu_total"]:
-            proc_info.append(
-                f"[bold green]GPU MEM (used/reserved/total)[/bold green] "
+            gpu_str = [
                 f"{fmt_mem_new(proc['gpu_used'])}/"
                 f"{fmt_mem_new(proc['gpu_reserved'])}/"
                 f"{fmt_mem_new(proc['gpu_total'])}"
-            )
+            ]
+        else:
+            gpu_str = "[red]Not available[/red]"
 
-        table.add_row("   ".join(proc_info))
+        table.add_row(" ")
+        gpu_str = f"[bold green]GPU MEM (used/reserved/total)[/bold green] {gpu_str}"
+        table.add_row(gpu_str)
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 100)
@@ -90,26 +93,34 @@ class ProcessRenderer(BaseRenderer):
 
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
-        proc = self.compute_snapshot()
+        data = self.get_data()
+        p = data["process"]
 
-        gpu_html = ""
-        if proc["gpu_total"]:
+        # GPU formatting
+        if p["gpu_total"]:
             gpu_html = f"""
                 <p><b>GPU MEM:</b>
-                    {fmt_mem_new(proc['gpu_used'])} /
-                    {fmt_mem_new(proc['gpu_reserved'])} /
-                    {fmt_mem_new(proc['gpu_total'])}
+                    {fmt_mem_new(p['gpu_used'])} /
+                    {fmt_mem_new(p['gpu_reserved'])} /
+                    {fmt_mem_new(p['gpu_total'])}
                 </p>
+            """
+        else:
+            gpu_html = """
+                <p><b>GPU MEM:</b> <span style="color:red;">Not available</span></p>
             """
 
         html = f"""
         <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
             <h4 style="color:#00bcd4; margin:0;">Process</h4>
-            <p><b>CPU:</b> {fmt_percent(proc['cpu_used'])}</p>
-            <p><b>RAM:</b> {fmt_mem_new(proc['ram_used'])}</p>
+
+            <p><b>CPU:</b> {fmt_percent(p['cpu'])}</p>
+            <p><b>RAM:</b> {fmt_mem_new(p['ram'])}</p>
+
             {gpu_html}
         </div>
         """
+
         return HTML(
             f"<div style='display:flex; gap:20px; margin-top:10px;'>{html}</div>"
         )
