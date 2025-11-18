@@ -51,12 +51,16 @@ class TrackerManager:
         process_sampler = ProcessSampler(table=process_table)
         process_renderer = ProcessRenderer(table=process_table)
 
-        layer_memory_sampler = LayerMemorySampler()
+        layer_memory_table = global_database.create_table("layer_memory")
+        layer_memory_sampler = LayerMemorySampler(table=layer_memory_table)
+
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
         steptimer_sampler = StepTimerSampler()
 
-        layer_combined_renderer = LayerCombinedRenderer(top_n_layers=num_display_layers)
+        layer_combined_renderer = LayerCombinedRenderer(
+            top_n_layers=num_display_layers, layer_table=layer_memory_table
+        )
         activation_gradient_renderer = ActivationGradientRenderer()
         steptimer_renderer = StepTimerRenderer()
         stdout_stderr_renderer = StdoutStderrRenderer()

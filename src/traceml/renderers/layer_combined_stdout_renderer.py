@@ -2,7 +2,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.console import Group, Console
 from IPython.display import HTML
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import shutil
 
 from traceml.renderers.base_renderer import BaseRenderer
@@ -22,11 +22,14 @@ class LayerCombinedRenderer(BaseRenderer):
     Missing values show as "—".
     """
 
-    def __init__(self, top_n_layers: Optional[int] = 20):
+    def __init__(
+        self, layer_table: List[Dict[str, Any]], top_n_layers: Optional[int] = 20
+    ):
         super().__init__(
             name="Layer Combined Memory",
             layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
         )
+        self._layer_table = layer_table
         self._latest_snapshot: Dict[str, Any] = {}
         self._activation_cache: Dict[str, Dict[str, float]] = {}
         self._gradient_cache: Dict[str, Dict[str, float]] = {}
@@ -85,7 +88,7 @@ class LayerCombinedRenderer(BaseRenderer):
     def get_data(self) -> Dict[str, Any]:
         snaps = self._latest_snapshot or {}
 
-        layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
+        layer_sampler = self._layer_table[-1] if self._layer_table else {}
         activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
             "data"
         ) or {}
@@ -290,6 +293,32 @@ class LayerCombinedRenderer(BaseRenderer):
             return []
         return sorted(d.items(), key=lambda kv: float(kv[1]), reverse=True)[:n]
 
+    def _compute_layer_memory_summary(self) -> Dict[str, Any]:
+        """
+        Compute statistics directly from the layer memory table.
+        """
+        if not self._layer_table:
+            return {
+                "total_samples": 0,
+                "total_models_seen": 0,
+                "average_model_memory": 0.0,
+                "peak_model_memory": 0.0,
+            }
+
+        total_samples = len(self._layer_table)
+        model_signatures = {entry.get("model_signature") for entry in self._layer_table}
+
+        totals = [float(entry.get("total_memory", 0.0)) for entry in self._layer_table]
+        avg_memory = sum(totals) / len(totals) if totals else 0.0
+        peak_memory = max(totals) if totals else 0.0
+
+        return {
+            "total_samples": total_samples,
+            "total_models_seen": len(model_signatures),
+            "average_model_memory": avg_memory,
+            "peak_model_memory": peak_memory,
+        }
+
     def log_summary(self, summary: Dict[str, Any]):
         """
         Pretty-print final cumulative summary.
@@ -299,7 +328,7 @@ class LayerCombinedRenderer(BaseRenderer):
         summary = summary or {}
 
         # Layer memory stats
-        layer_mem = summary.get("LayerMemorySampler") or {}
+        layer_mem = self._compute_layer_memory_summary() or {}
         total_samples = layer_mem.get("total_samples", "—")
         total_models = layer_mem.get("total_models_seen", "—")
         avg_model_mem = fmt_mem_new(layer_mem.get("average_model_memory", 0.0))
