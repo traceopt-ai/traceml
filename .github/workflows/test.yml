@@ -19,9 +19,6 @@ jobs:
           # Ubuntu = x86_64
           - ubuntu-latest
 
-          # macOS Intel CPUs
-          - macos-13
-
           # macOS ARM CPUs (Apple Silicon: M1, M2, M3, M4, M5…)
           - macos-14
 
