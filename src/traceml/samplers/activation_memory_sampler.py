@@ -1,6 +1,4 @@
-from typing import Dict
-
-
+from typing import Dict, Any
 from .base_sampler import BaseSampler
 from traceml.utils.activation_hook import get_activation_queue
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
@@ -42,24 +40,19 @@ class ActivationMemorySampler(BaseSampler):
                 continue
             self._save_event(event)
 
-    def _save_event(self, event) -> None:
+    def _save_event(self, event: Dict[str, Any]) -> None:
         """
         Save one ActivationEvent into per-layer tables.
         """
-        per_layer_dict: Dict[str, Dict[str, float]] = event.per_layer
+        layer_name = getattr(event, "layer_name", None)
+        record = {
+            "timestamp": getattr(event, "timestamp", None),
+            "model_id": getattr(event, "model_id", None),
+            "memory": getattr(event, "memory_per_device", None)
+        }
 
-        for layer_name, mem_dict in per_layer_dict.items():
-            table_name = f"{layer_name}"
-            # create or reuse existing table
-            table = self.db.create_or_get_table(table_name)
-            # append raw row
-            table.append(
-                {
-                    "timestamp": event.timestamp,
-                    "model_id": event.model_id,
-                    "memory": mem_dict,  # raw per-device memory dict
-                }
-            )
+        table = self.db.create_or_get_table(layer_name)
+        table.append(record)
 
     def sample(self):
         """

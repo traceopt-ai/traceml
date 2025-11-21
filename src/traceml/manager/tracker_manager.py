@@ -61,6 +61,7 @@ class TrackerManager:
         layer_combined_renderer = LayerCombinedRenderer(
             layer_table=layer_memory_table,
             activation_db=activation_memory_sampler.db,
+            gradient_db=gradient_memory_sampler.db,
             top_n_layers=num_display_layers,
         )
         activation_gradient_renderer = ActivationGradientRenderer(

@@ -26,6 +26,7 @@ class LayerCombinedRenderer(BaseRenderer):
         self,
         layer_table: List[Dict[str, Any]],
         activation_db,
+        gradient_db,
         top_n_layers: Optional[int] = 20,
     ):
         super().__init__(
@@ -34,6 +35,7 @@ class LayerCombinedRenderer(BaseRenderer):
         )
         self._layer_table = layer_table
         self.activation_db = activation_db
+        self.gradient_db = gradient_db
         self.top_n = top_n_layers
 
         self._latest_snapshot: Dict[str, Any] = {}
@@ -102,17 +104,19 @@ class LayerCombinedRenderer(BaseRenderer):
             }
         return self._layer_table[-1]
 
-    def _compute_activation_snapshot(self) -> Dict[str, Dict[str, float]]:
+    def _compute_snapshot(self, is_forward=True) -> Dict[str, Dict[str, float]]:
         """
-        Return CURRENT and PEAK activation memory per layer.
-        Each layer has its own table:
-            activation::layer_name
+        Return CURRENT and PEAK memory per layer.
         """
 
         layer_peaks = {}
         layer_current = {}
+        if is_forward:
+            db = self.activation_db
+        else:
+            db = self.gradient_db
 
-        for table_name, rows in self.activation_db.all_tables().items():
+        for table_name, rows in db.all_tables().items():
             layer = table_name
             if not rows:
                 continue
@@ -142,17 +146,13 @@ class LayerCombinedRenderer(BaseRenderer):
         return merged
 
     def get_data(self) -> Dict[str, Any]:
-        snaps = self._latest_snapshot or {}
-
         layer_snapshot = self._compute_layer_snapshot()
-        activation_snapshot = self._compute_activation_snapshot()
-
-        gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
-        gradient_layers = gradient_sampler.get("layers", {}) or {}
+        activation_snapshot = self._compute_snapshot(is_forward=True)
+        gradient_snapshot = self._compute_snapshot(is_forward=False)
 
         # update caches
         self._merge_cache(self._activation_cache, activation_snapshot)
-        self._merge_cache(self._gradient_cache, gradient_layers)
+        self._merge_cache(self._gradient_cache, gradient_snapshot)
 
         return {
             "layers": layer_snapshot.get("layer_memory", {}) or {},

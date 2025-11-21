@@ -208,5 +208,6 @@ def attach_all_gradient_hooks(model: nn.Module) -> None:
     Always attaches param hooks (safe).
     Optionally attaches module backward hooks (risky with AMP).
     """
-    attach_param_gradient_hooks(model)
+    ## param gradients are not used to commented
+    ## attach_param_gradient_hooks(model)
     attach_layer_gradient_hooks(model)

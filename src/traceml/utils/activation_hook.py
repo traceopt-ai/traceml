@@ -22,7 +22,8 @@ class ActivationEvent:
 
     model_id: int
     timestamp: float
-    per_layer: Dict[str, Dict[str, float]]
+    layer_name: str
+    memory_per_device: Dict[str, float]
 
 
 def get_activation_queue() -> Queue:
@@ -70,7 +71,8 @@ class ActivationHook:
             event = ActivationEvent(
                 model_id=self.model_id,
                 timestamp=time.time(),
-                per_layer={self.layer_name: layer_acc.copy()},
+                layer_name=self.layer_name,
+                memory_per_device=layer_acc.copy(),
             )
             try:
                 activation_queue.put_nowait(event)
