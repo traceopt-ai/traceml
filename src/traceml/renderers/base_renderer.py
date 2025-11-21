@@ -21,9 +21,6 @@ class BaseRenderer:
         """
         raise NotImplementedError("Subclasses must implement get_data()")
 
-    # -------------------------
-    # CLI (Rich) renderable
-    # -------------------------
     def get_panel_renderable(self) -> Any:  # This will be implemented by subclasses
         """
         Abstract method: Subclasses must implement this to return a Rich Renderable
@@ -33,9 +30,6 @@ class BaseRenderer:
             "Subclasses must implement _get_panel_renderable to provide content for the shared display."
         )
 
-    # -------------------------
-    # Notebook (HTML) renderable
-    # -------------------------
     def get_notebook_renderable(self) -> Any:
         """
         Subclasses implement this to return an HTML representation
