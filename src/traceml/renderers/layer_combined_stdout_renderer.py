@@ -144,20 +144,20 @@ class LayerCombinedRenderer(BaseRenderer):
     def get_data(self) -> Dict[str, Any]:
         snaps = self._latest_snapshot or {}
 
-        layer_sampler = self._compute_layer_snapshot()
-        activation_layers = self._compute_activation_snapshot()
+        layer_snapshot = self._compute_layer_snapshot()
+        activation_snapshot = self._compute_activation_snapshot()
 
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
         gradient_layers = gradient_sampler.get("layers", {}) or {}
 
         # update caches
-        self._merge_cache(self._activation_cache, activation_layers)
+        self._merge_cache(self._activation_cache, activation_snapshot)
         self._merge_cache(self._gradient_cache, gradient_layers)
 
         return {
-            "layers": layer_sampler.get("layer_memory", {}) or {},
-            "total_memory": layer_sampler.get("total_memory", 0.0) or 0.0,
-            "model_index": layer_sampler.get("model_index", "—"),
+            "layers": layer_snapshot.get("layer_memory", {}) or {},
+            "total_memory": layer_snapshot.get("total_memory", 0.0) or 0.0,
+            "model_index": layer_snapshot.get("model_index", "—"),
             "activation_cache": self._activation_cache,
             "gradient_cache": self._gradient_cache,
         }

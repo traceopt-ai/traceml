@@ -1,6 +1,6 @@
 import shutil
 from collections import defaultdict
-from typing import Dict, Any
+from typing import Dict, Any, List
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
@@ -23,15 +23,17 @@ class ActivationGradientRenderer(BaseRenderer):
     even if some layers don’t update every snapshot.
     """
 
-    def __init__(self, top_n: int = 10):
+    def __init__(self, layer_table: List[Dict[str, Any]], activation_db):
         super().__init__(
             name="Activation & Gradient Stats",
             layout_section_name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME,
         )
+        self._layer_table = layer_table
+        self.activation_db = activation_db
+
         self._latest_snapshot: Dict[str, Any] = {}
 
         # Per-layer caches (last seen current values)
-        self._activation_cache: Dict[str, float] = defaultdict(float)
         self._gradient_cache: Dict[str, float] = defaultdict(float)
 
         # Global stats
@@ -40,8 +42,6 @@ class ActivationGradientRenderer(BaseRenderer):
 
         self._gradient_stats = {"count": 0, "sum": 0.0, "avg": 0.0}
         self._gradient_global_max = 0.0
-
-        self.top_n = top_n
 
     def _update_layer_cache(
         self, cache: Dict[str, float], new_data: Dict[str, Dict[str, float]]
@@ -61,13 +61,6 @@ class ActivationGradientRenderer(BaseRenderer):
         stats["avg"] = stats["sum"] / stats["count"]
         return max(global_max, total_now)
 
-    def _process_activation_snapshot(self, snapshot: Dict[str, Any]):
-        layers = snapshot.get("layers", {}) or {}
-        self._update_layer_cache(self._activation_cache, layers)
-        self._activation_global_max = self._update_totals(
-            self._activation_cache, self._activation_stats, self._activation_global_max
-        )
-
     def _process_gradient_snapshot(self, snapshot: Dict[str, Any]):
         layers = snapshot.get("layers", {}) or {}
         self._update_layer_cache(self._gradient_cache, layers)
@@ -75,23 +68,66 @@ class ActivationGradientRenderer(BaseRenderer):
             self._gradient_cache, self._gradient_stats, self._gradient_global_max
         )
 
+    def _get_layer_memory_info(self) -> Dict[str, Any]:
+        """
+        Extract the latest layer memory info from the layer table.
+        Returns: {"total_memory": float, "model_index": str}
+        """
+        if not self._layer_table:
+            return {"total_memory": 0.0, "model_index": "—"}
+
+        latest = self._layer_table[-1]
+        return {
+            "total_memory": float(latest.get("total_memory", 0.0) or 0.0),
+            "model_index": latest.get("model_index", "—"),
+        }
+
+    def _compute_current_activation_total(self) -> float:
+        """
+        Compute the current total activation memory across all layers.
+        """
+        total = 0.0
+
+        for layer_name, table in self.activation_db.all_tables().items():
+            if not table:
+                continue
+
+            last_row = table[-1]  # most recent activation snapshot
+            mem_dict = last_row.get("memory", {}) or {}
+            layer_total = max(float(v) for v in mem_dict.values())
+            total += layer_total
+
+        return total
+
+    def _update_activation_stats(self, current_total: float) -> None:
+        """
+        Update rolling statistics for activation memory.
+        """
+        stats = self._activation_stats
+
+        stats["count"] += 1
+        stats["sum"] += current_total
+        stats["avg"] = stats["sum"] / stats["count"]
+
+        # Update global peak
+        self._activation_global_max = max(self._activation_global_max, current_total)
+
     def get_data(self) -> Dict[str, Any]:
         snaps = self._latest_snapshot or {}
 
         # Extract samplers
-        layer_sampler = (snaps.get("LayerMemorySampler") or {}).get("data") or {}
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
-            "data"
-        ) or {}
+        layer_info = self._get_layer_memory_info()
+        current_activation = self._compute_current_activation_total()
+        self._update_activation_stats(current_activation)
+
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
 
         # Update caches + stats
-        self._process_activation_snapshot(activation_sampler)
         self._process_gradient_snapshot(gradient_sampler)
 
         return {
-            "total_memory": float(layer_sampler.get("total_memory", 0.0) or 0.0),
-            "model_index": layer_sampler.get("model_index", "—"),
+            "total_memory": float(layer_info.get("total_memory", 0.0) or 0.0),
+            "model_index": layer_info.get("model_index", "—"),
             "activation": {
                 "avg": self._activation_stats["avg"],
                 "max": self._activation_global_max,
