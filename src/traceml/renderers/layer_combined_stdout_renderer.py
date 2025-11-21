@@ -23,17 +23,22 @@ class LayerCombinedRenderer(BaseRenderer):
     """
 
     def __init__(
-        self, layer_table: List[Dict[str, Any]], top_n_layers: Optional[int] = 20
+        self,
+        layer_table: List[Dict[str, Any]],
+        activation_db,
+        top_n_layers: Optional[int] = 20,
     ):
         super().__init__(
             name="Layer Combined Memory",
             layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
         )
         self._layer_table = layer_table
+        self.activation_db = activation_db
+        self.top_n = top_n_layers
+
         self._latest_snapshot: Dict[str, Any] = {}
         self._activation_cache: Dict[str, Dict[str, float]] = {}
         self._gradient_cache: Dict[str, Dict[str, float]] = {}
-        self.top_n = top_n_layers
 
     def _truncate(self, s: str, max_len: int = 40) -> str:
         """Truncate long layer names keeping start and end."""
@@ -85,20 +90,64 @@ class LayerCombinedRenderer(BaseRenderer):
             return "—"
         return f"{fmt_mem_new(rec.get('current', 0.0))} / {fmt_mem_new(rec.get('global', 0.0))}"
 
+    def _compute_layer_snapshot(self) -> Dict[str, Any]:
+        """
+        Return last entry from layer_table safely.
+        """
+        if not self._layer_table:
+            return {
+                "layer_memory": {},
+                "total_memory": 0.0,
+                "model_index": "—",
+            }
+        return self._layer_table[-1]
+
+    def _compute_activation_snapshot(self) -> Dict[str, Dict[str, float]]:
+        """
+        Return CURRENT and PEAK activation memory per layer.
+        Each layer has its own table:
+            activation::layer_name
+        """
+
+        layer_peaks = {}
+        layer_current = {}
+
+        for table_name, rows in self.activation_db.all_tables().items():
+            layer = table_name
+            if not rows:
+                continue
+
+            # Last row = CURRENT activation (max across devices)
+            last_row = rows[-1]
+            mem_dict = last_row.get("memory", {}) or {}
+            current_peak = max(float(v) for v in mem_dict.values())
+            layer_current[layer] = current_peak
+
+            # PEAK = max across all rows
+            peak = 0.0
+            for r in rows:
+                m = r.get("memory", {}) or {}
+                peak = max(peak, max(float(v) for v in m.values()))
+
+            layer_peaks[layer] = peak
+
+        merged = {
+            layer: {
+                "current_peak": layer_current.get(layer, 0.0),
+                "global_peak": layer_peaks.get(layer, 0.0),
+            }
+            for layer in set(layer_peaks) | set(layer_current)
+        }
+
+        return merged
+
     def get_data(self) -> Dict[str, Any]:
         snaps = self._latest_snapshot or {}
 
-        layer_sampler = self._layer_table[-1] if self._layer_table else {}
-        activation_sampler = (snaps.get("ActivationMemorySampler") or {}).get(
-            "data"
-        ) or {}
+        layer_sampler = self._compute_layer_snapshot()
+        activation_layers = self._compute_activation_snapshot()
+
         gradient_sampler = (snaps.get("GradientMemorySampler") or {}).get("data") or {}
-
-        layer_data: Dict[str, float] = layer_sampler.get("layer_memory", {}) or {}
-        total_memory = float(layer_sampler.get("total_memory", 0.0) or 0.0)
-        model_index = layer_sampler.get("model_index", "—")
-
-        activation_layers = activation_sampler.get("layers", {}) or {}
         gradient_layers = gradient_sampler.get("layers", {}) or {}
 
         # update caches
@@ -106,9 +155,9 @@ class LayerCombinedRenderer(BaseRenderer):
         self._merge_cache(self._gradient_cache, gradient_layers)
 
         return {
-            "layers": layer_data,
-            "total_memory": total_memory,
-            "model_index": model_index,
+            "layers": layer_sampler.get("layer_memory", {}) or {},
+            "total_memory": layer_sampler.get("total_memory", 0.0) or 0.0,
+            "model_index": layer_sampler.get("model_index", "—"),
             "activation_cache": self._activation_cache,
             "gradient_cache": self._gradient_cache,
         }
@@ -116,20 +165,6 @@ class LayerCombinedRenderer(BaseRenderer):
     def _compute_display_data(self) -> Dict[str, Any]:
         """
         Compute the aggregated data used by both Rich (CLI) and HTML (Notebook) renderers.
-        Returns:
-            Dict[str, Any]: {
-                "top_items": [(layer, mem), ...],
-                "other": {
-                    "total": float,
-                    "pct": float,
-                    "activation": {"current": float, "global": float},
-                    "gradient": {"current": float, "global": float}
-                },
-                "total_memory": float,
-                "model_index": str,
-                "activation_cache": dict,
-                "gradient_cache": dict,
-            }
         """
         data = self.get_data()
         layers = data["layers"]
@@ -248,7 +283,7 @@ class LayerCombinedRenderer(BaseRenderer):
                        <td style="text-align:right;">{self._format_cache_value(d['gradient_cache'], name)}</td>
                    </tr>
                    """
-        # ✅ “Other” row
+
         if d["other"]["total"] > 0:
             o = d["other"]
             rows += f"""
@@ -319,83 +354,88 @@ class LayerCombinedRenderer(BaseRenderer):
             "peak_model_memory": peak_memory,
         }
 
-    def log_summary(self, summary: Dict[str, Any]):
-        """
-        Pretty-print final cumulative summary.
-        Shows top-3 activation and gradient global peaks; falls back to caches if needed.
-        """
-        console = Console()
-        summary = summary or {}
+    def _compute_activation_peaks(self) -> Dict[str, float]:
+        """Compute global activation peak per layer from activation_db."""
+        act_global = {}
+        for layer_name, rows in self.activation_db.all_tables().items():
+            peak = 0.0
+            for r in rows:
+                mem = r.get("memory", {}) or {}
+                peak = max(peak, max(float(v) for v in mem.values()))
+            act_global[layer_name] = peak
+        return act_global
 
-        # Layer memory stats
-        layer_mem = self._compute_layer_memory_summary() or {}
-        total_samples = layer_mem.get("total_samples", "—")
-        total_models = layer_mem.get("total_models_seen", "—")
-        avg_model_mem = fmt_mem_new(layer_mem.get("average_model_memory", 0.0))
-        peak_model_mem = fmt_mem_new(layer_mem.get("peak_model_memory", 0.0))
-
-        # Activation peaks
-        activation_sum = (summary.get("ActivationMemorySampler") or {}).get(
-            "data"
-        ) or {}
-        act_global = activation_sum.get("layer_global_peaks") or {}
-        if not act_global and self._activation_cache:
-            act_global = {
-                k: v.get("global", 0.0) for k, v in self._activation_cache.items()
-            }
-        top_acts = self._top_n_from_dict(act_global, n=3)
-
-        # Gradient peaks
+    def _compute_gradient_peaks(self, summary: Dict[str, Any]) -> Dict[str, float]:
+        """Reuse old gradient cache or snapshot."""
         gradient_sum = (summary.get("GradientMemorySampler") or {}).get("data") or {}
         grad_global = gradient_sum.get("layer_global_peaks") or {}
+
         if not grad_global and self._gradient_cache:
             grad_global = {
                 k: v.get("global", 0.0) for k, v in self._gradient_cache.items()
             }
-        top_grads = self._top_n_from_dict(grad_global, n=3)
+        return grad_global
 
-        # Build summary table
+    def _render_section_layer_stats(self, table, stats):
+        table.add_row(
+            "[blue]TOTAL SAMPLES TAKEN[/blue]",
+            "[dim]|[/dim]",
+            str(stats["total_samples"]),
+        )
+        table.add_row(
+            "[blue]TOTAL MODELS SEEN[/blue]",
+            "[dim]|[/dim]",
+            str(stats["total_models_seen"]),
+        )
+        table.add_row(
+            "[blue]AVERAGE MODEL MEMORY[/blue]",
+            "[dim]|[/dim]",
+            fmt_mem_new(stats["average_model_memory"]),
+        )
+        table.add_row(
+            "[blue]PEAK MODEL MEMORY[/blue]",
+            "[dim]|[/dim]",
+            fmt_mem_new(stats["peak_model_memory"]),
+        )
+
+    def _render_section_topk(self, table, title: str, items: List, color: str):
+        table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
+
+        if items:
+            for layer, value in items:
+                table.add_row(
+                    f"  [{color}]• {layer}[/{color}]",
+                    "",
+                    f"[{color}]{fmt_mem_new(value)}[/{color}]",
+                )
+        else:
+            table.add_row("  • None", "", "—")
+
+    def log_summary(self, summary: Dict[str, Any]):
+        console = Console()
+        summary = summary or {}
+
+        # Compute sections
+        layer_stats = self._compute_layer_memory_summary()
+        act_peaks = self._compute_activation_peaks()
+        grad_peaks = self._compute_gradient_peaks(summary)
+
+        # Top-k
+        top_acts = self._top_n_from_dict(act_peaks, n=3)
+        top_grads = self._top_n_from_dict(grad_peaks, n=3)
+
+        # Render
         table = Table.grid(padding=(0, 1))
         table.add_column(justify="left", style="bold")
         table.add_column(justify="center", style="dim", no_wrap=True)
         table.add_column(justify="right", style="white")
 
-        # Section: Stats
-        table.add_row(
-            "[blue]TOTAL SAMPLES TAKEN[/blue]", "[dim]|[/dim]", str(total_samples)
-        )
-        table.add_row(
-            "[blue]TOTAL MODELS SEEN[/blue]", "[dim]|[/dim]", str(total_models)
-        )
-        table.add_row(
-            "[blue]AVERAGE MODEL MEMORY[/blue]", "[dim]|[/dim]", avg_model_mem
-        )
-        table.add_row("[blue]PEAK MODEL MEMORY[/blue]", "[dim]|[/dim]", peak_model_mem)
+        # Sections
+        self._render_section_layer_stats(table, layer_stats)
+        self._render_section_topk(table, "TOP-3 ACTIVATIONS", top_acts, "cyan")
+        self._render_section_topk(table, "TOP-3 GRADIENTS", top_grads, "green")
 
-        # Section: Activations
-        table.add_row("[cyan]TOP-3 ACTIVATIONS[/cyan]", "[dim]|[/dim]", "")
-        if top_acts:
-            for layer, g_peak in top_acts:
-                table.add_row(
-                    f"  [cyan]• {layer}[/cyan]",
-                    "",
-                    f"[cyan]{fmt_mem_new(g_peak)}[/cyan]",
-                )
-        else:
-            table.add_row("  • None", "", "—")
-
-        # Section: Gradients
-        table.add_row("[green]TOP-3 GRADIENTS[/green]", "[dim]|[/dim]", "")
-        if top_grads:
-            for layer, g_peak in top_grads:
-                table.add_row(
-                    f"  [green]• {layer}[/green]",
-                    "",
-                    f"[green]{fmt_mem_new(g_peak)}[/green]",
-                )
-        else:
-            table.add_row("  • None", "", "—")
-
+        # Output
         panel = Panel(
             table,
             title="[bold blue]Model Layer - Summary[/bold blue]",

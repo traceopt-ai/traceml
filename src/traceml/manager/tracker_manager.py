@@ -59,7 +59,9 @@ class TrackerManager:
         steptimer_sampler = StepTimerSampler()
 
         layer_combined_renderer = LayerCombinedRenderer(
-            top_n_layers=num_display_layers, layer_table=layer_memory_table
+            layer_table=layer_memory_table,
+            activation_db=activation_memory_sampler.db,
+            top_n_layers=num_display_layers,
         )
         activation_gradient_renderer = ActivationGradientRenderer()
         steptimer_renderer = StepTimerRenderer()
@@ -75,7 +77,7 @@ class TrackerManager:
                     activation_memory_sampler,
                     gradient_memory_sampler,
                 ],
-                [layer_combined_renderer, activation_gradient_renderer],
+                [layer_combined_renderer],  # , activation_gradient_renderer],
             ),
             ([steptimer_sampler], [steptimer_renderer]),
         ]

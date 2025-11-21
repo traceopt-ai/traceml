@@ -22,7 +22,6 @@ class ActivationEvent:
 
     model_id: int
     timestamp: float
-    per_device_activation_memory: Dict[str, float]
     per_layer: Dict[str, Dict[str, float]]
 
 
@@ -71,7 +70,6 @@ class ActivationHook:
             event = ActivationEvent(
                 model_id=self.model_id,
                 timestamp=time.time(),
-                per_device_activation_memory=layer_acc.copy(),
                 per_layer={self.layer_name: layer_acc.copy()},
             )
             try:

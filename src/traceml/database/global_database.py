@@ -22,6 +22,15 @@ class GlobalDatabase:
             self._tables[name] = []
             return self._tables[name]
 
+    def create_or_get_table(self, name: str) -> List[Any]:
+        """
+        Create table if missing, otherwise return existing table.
+        """
+        with self._lock:
+            if name not in self._tables:
+                self._tables[name] = []
+            return self._tables[name]
+
     def all_tables(self) -> Dict[str, List[Any]]:
         """Return a dict of all tables."""
         return self._tables
