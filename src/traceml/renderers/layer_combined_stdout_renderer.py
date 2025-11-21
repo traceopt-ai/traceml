@@ -38,7 +38,6 @@ class LayerCombinedRenderer(BaseRenderer):
         self.gradient_db = gradient_db
         self.top_n = top_n_layers
 
-        self._latest_snapshot: Dict[str, Any] = {}
         self._activation_cache: Dict[str, Dict[str, float]] = {}
         self._gradient_cache: Dict[str, Dict[str, float]] = {}
 
@@ -104,14 +103,14 @@ class LayerCombinedRenderer(BaseRenderer):
             }
         return self._layer_table[-1]
 
-    def _compute_snapshot(self, is_forward=True) -> Dict[str, Dict[str, float]]:
+    def _compute_snapshot(self, is_activation=True) -> Dict[str, Dict[str, float]]:
         """
         Return CURRENT and PEAK memory per layer.
         """
 
         layer_peaks = {}
         layer_current = {}
-        if is_forward:
+        if is_activation:
             db = self.activation_db
         else:
             db = self.gradient_db
@@ -147,8 +146,8 @@ class LayerCombinedRenderer(BaseRenderer):
 
     def get_data(self) -> Dict[str, Any]:
         layer_snapshot = self._compute_layer_snapshot()
-        activation_snapshot = self._compute_snapshot(is_forward=True)
-        gradient_snapshot = self._compute_snapshot(is_forward=False)
+        activation_snapshot = self._compute_snapshot(is_activation=True)
+        gradient_snapshot = self._compute_snapshot(is_activation=False)
 
         # update caches
         self._merge_cache(self._activation_cache, activation_snapshot)
@@ -354,27 +353,21 @@ class LayerCombinedRenderer(BaseRenderer):
             "peak_model_memory": peak_memory,
         }
 
-    def _compute_activation_peaks(self) -> Dict[str, float]:
-        """Compute global activation peak per layer from activation_db."""
+    def _compute_peaks(self, is_activation=True) -> Dict[str, float]:
+        """Compute globalpeak per layer from activation/gradient_db."""
+        if is_activation:
+            db = self.activation_db
+        else:
+            db = self.gradient_db
+
         act_global = {}
-        for layer_name, rows in self.activation_db.all_tables().items():
+        for layer_name, rows in db.all_tables().items():
             peak = 0.0
             for r in rows:
                 mem = r.get("memory", {}) or {}
                 peak = max(peak, max(float(v) for v in mem.values()))
             act_global[layer_name] = peak
         return act_global
-
-    def _compute_gradient_peaks(self, summary: Dict[str, Any]) -> Dict[str, float]:
-        """Reuse old gradient cache or snapshot."""
-        gradient_sum = (summary.get("GradientMemorySampler") or {}).get("data") or {}
-        grad_global = gradient_sum.get("layer_global_peaks") or {}
-
-        if not grad_global and self._gradient_cache:
-            grad_global = {
-                k: v.get("global", 0.0) for k, v in self._gradient_cache.items()
-            }
-        return grad_global
 
     def _render_section_layer_stats(self, table, stats):
         table.add_row(
@@ -413,12 +406,11 @@ class LayerCombinedRenderer(BaseRenderer):
 
     def log_summary(self, summary: Dict[str, Any]):
         console = Console()
-        summary = summary or {}
 
         # Compute sections
         layer_stats = self._compute_layer_memory_summary()
-        act_peaks = self._compute_activation_peaks()
-        grad_peaks = self._compute_gradient_peaks(summary)
+        act_peaks = self._compute_peaks()
+        grad_peaks = self._compute_peaks()
 
         # Top-k
         top_acts = self._top_n_from_dict(act_peaks, n=3)

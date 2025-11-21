@@ -48,7 +48,7 @@ class ActivationMemorySampler(BaseSampler):
         record = {
             "timestamp": getattr(event, "timestamp", None),
             "model_id": getattr(event, "model_id", None),
-            "memory": getattr(event, "memory_per_device", None)
+            "memory": getattr(event, "memory_per_device", None),
         }
 
         table = self.db.create_or_get_table(layer_name)

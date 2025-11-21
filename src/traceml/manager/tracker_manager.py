@@ -67,6 +67,7 @@ class TrackerManager:
         activation_gradient_renderer = ActivationGradientRenderer(
             layer_table=layer_memory_table,
             activation_db=activation_memory_sampler.db,
+            gradient_db=gradient_memory_sampler.db,
         )
         steptimer_renderer = StepTimerRenderer()
         stdout_stderr_renderer = StdoutStderrRenderer()

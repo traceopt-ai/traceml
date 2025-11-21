@@ -34,13 +34,13 @@ class GradientMemorySampler(BaseSampler):
         record = {
             "timestamp": getattr(event, "timestamp", None),
             "model_id": getattr(event, "model_id", None),
-            "memory": getattr(event, "per_device_memory", {}) or {},       # raw per-device gradient memory
+            "memory": getattr(event, "per_device_memory", {})
+            or {},  # raw per-device gradient memory
         }
 
         # write into per-layer table
         table = self.db.create_or_get_table(layer_name)
         table.append(record)
-
 
     def _drain_queue(self) -> None:
         """
