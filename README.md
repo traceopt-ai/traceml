@@ -12,6 +12,8 @@
 
 
 
+
+
  A lightweight library to make PyTorch training **memory and timing** visible in real time (in CLI and Notebook).
 
 ## The Problem
@@ -24,13 +26,13 @@ Pinpointing which part of the model is consuming too much memory or slowing thin
 
 `traceml` is designed to give you **real-time, granular observability** for both **memory usage** and **timing** without heavy overhead. It works both in the **terminal (CLI) and inside Jupyter notebooks**, so you can pick the workflow that fits you best:
 
-✅ System + process-level usage (CPU, RAM, GPU)
+ - System + process-level usage (CPU, RAM, GPU)
 
-✅ PyTorch layer-level memory allocation (parameters, activations, gradients)
+ - PyTorch layer-level memory allocation (parameters, activations, gradients)
 
-✅ Step-level timing (forward, backward, optimizer, etc.)  
+ - Step-level timing (forward, backward, optimizer, etc.)  
 
-✅ Lightweight — minimal overhead  
+ - Lightweight — minimal overhead  
 
 No config, no setup, just plug-and-trace.
 
@@ -69,7 +71,7 @@ class TinyNet(nn.Module):
         return self.fc(x)
 ```
 
-✅ Any instance of `TinyNet` will now be automatically traced.
+-  Any instance of `TinyNet` will now be automatically traced.
 
 #### 2. With an explicit model instance
 
@@ -87,7 +89,7 @@ model = nn.Sequential(
 trace_model_instance(model)
 ```
 
-✅ Best when you build models dynamically or don't want to decorate the class.
+Best when you build models dynamically or don't want to decorate the class.
 
 
 Then, choose whichever fits your workflow.
@@ -140,7 +142,7 @@ def optimizer_step(scaler, optimizer, scheduler):
     scheduler.step()
 ```
 Top timing data appears automatically in your live dashboard and notebook summary.
-🟢 Works seamlessly with your activation + gradient dashboards — all visible together in real-time.
+Works seamlessly with your activation + gradient dashboards — all visible together in real-time.
 
 
 ### Terminal/CLI
