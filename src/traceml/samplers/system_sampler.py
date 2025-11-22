@@ -22,11 +22,11 @@ class SystemSampler(BaseSampler):
     average, variance).
     """
 
-    def __init__(self, table=None, max_snapshots: int = 10_000):
+    def __init__(self):
         super().__init__()
         setup_error_logger()
         self.logger = get_error_logger("SystemSampler")
-        self._table = table if table is not None else []
+        self._table = self.db.create_table("system")
 
         self._init_cpu()
         self._init_ram()

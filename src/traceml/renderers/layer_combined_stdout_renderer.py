@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 import shutil
 
 from traceml.renderers.base_renderer import BaseRenderer
+from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
     LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
 )
@@ -24,16 +25,16 @@ class LayerCombinedRenderer(BaseRenderer):
 
     def __init__(
         self,
-        layer_table: List[Dict[str, Any]],
-        activation_db,
-        gradient_db,
+        layer_db: Database,
+        activation_db: Database,
+        gradient_db: Database,
         top_n_layers: Optional[int] = 20,
     ):
         super().__init__(
             name="Layer Combined Memory",
             layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
         )
-        self._layer_table = layer_table
+        self._layer_table = layer_db.create_or_get_table("layer_memory")
         self.activation_db = activation_db
         self.gradient_db = gradient_db
         self.top_n = top_n_layers

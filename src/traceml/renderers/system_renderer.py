@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any
 import shutil
 import numpy as np
 from rich.panel import Panel
@@ -7,6 +7,7 @@ from rich.console import Console
 from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
+from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT_NAME
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
@@ -17,9 +18,9 @@ class SystemRenderer(BaseRenderer):
     and computes live + summary statistics for CPU, RAM, and GPU.
     """
 
-    def __init__(self, table: List[Dict[str, Any]]):
+    def __init__(self, database: Database):
         super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT_NAME)
-        self._table = table
+        self._table = database.create_or_get_table("system")
 
     def _compute_snapshot(self) -> Dict[str, Any]:
         """Return latest system info for live display."""

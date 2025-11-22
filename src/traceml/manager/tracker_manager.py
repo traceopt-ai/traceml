@@ -6,7 +6,6 @@ from traceml.renderers.display.notebook_display_manager import (
     NotebookDisplayManager,
 )
 
-from traceml.database.global_database import GlobalDatabase
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.process_sampler import ProcessSampler
@@ -41,31 +40,26 @@ class TrackerManager:
         mode: str, num_display_layers: int
     ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
 
-        global_database = GlobalDatabase()
+        system_sampler = SystemSampler()
+        system_renderer = SystemRenderer(database=system_sampler.db)
 
-        system_table = global_database.create_table("system")
-        system_sampler = SystemSampler(table=system_table)
-        system_renderer = SystemRenderer(table=system_table)
+        process_sampler = ProcessSampler()
+        process_renderer = ProcessRenderer(database=process_sampler.db)
 
-        process_table = global_database.create_table("process")
-        process_sampler = ProcessSampler(table=process_table)
-        process_renderer = ProcessRenderer(table=process_table)
-
-        layer_memory_table = global_database.create_table("layer_memory")
-        layer_memory_sampler = LayerMemorySampler(table=layer_memory_table)
+        layer_memory_sampler = LayerMemorySampler()
 
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
         steptimer_sampler = StepTimerSampler()
 
         layer_combined_renderer = LayerCombinedRenderer(
-            layer_table=layer_memory_table,
+            layer_db=layer_memory_sampler.db,
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
             top_n_layers=num_display_layers,
         )
         activation_gradient_renderer = ActivationGradientRenderer(
-            layer_table=layer_memory_table,
+            layer_db=layer_memory_sampler.db,
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
         )

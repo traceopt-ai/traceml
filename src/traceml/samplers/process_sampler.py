@@ -15,7 +15,7 @@ class ProcessSampler(BaseSampler):
         super().__init__()
         setup_error_logger()
         self.logger = get_error_logger("ProcessSampler")
-        self._table = table if table is not None else []
+        self._table = self.db.create_table("process")
 
         # Initiate
         self._init_process()

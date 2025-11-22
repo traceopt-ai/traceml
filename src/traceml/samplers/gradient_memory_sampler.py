@@ -3,7 +3,7 @@ from typing import Any, Dict
 from .base_sampler import BaseSampler
 from traceml.utils.gradient_hook import get_gradient_queue
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.database.global_database import GlobalDatabase
+from traceml.database.database import Database
 
 
 class GradientMemorySampler(BaseSampler):
@@ -21,7 +21,7 @@ class GradientMemorySampler(BaseSampler):
         super().__init__()
         setup_error_logger()
         self.logger = get_error_logger("GradientMemorySampler")
-        self.db = GlobalDatabase()
+        self.db = Database()
 
     def _save_event(self, event: Dict[str, Any]) -> None:
         """

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, Optional, List, Deque
 from collections import deque
 import time
-import threading
+from traceml.database.database import Database
 
 
 @dataclass
@@ -28,8 +28,7 @@ class BaseSampler(ABC):
     def __init__(self, max_snapshots: int = 10_000):
         # Optional: Initialize common sampler-level properties or perform global setup
         self._history: Deque[SampleSnapshot] = deque(maxlen=max_snapshots)
-        self._lock = threading.Lock()
-        pass
+        self.db = Database()
 
     def _store_snapshot(
         self, ok: bool, message: str, source: str, data: Optional[dict] = None

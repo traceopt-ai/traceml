@@ -2,7 +2,7 @@ from typing import Dict, Any
 from .base_sampler import BaseSampler
 from traceml.utils.activation_hook import get_activation_queue
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.database.global_database import GlobalDatabase
+from traceml.database.database import Database
 
 
 class ActivationMemorySampler(BaseSampler):
@@ -20,7 +20,7 @@ class ActivationMemorySampler(BaseSampler):
         super().__init__()
         setup_error_logger()
         self.logger = get_error_logger("ActivationMemorySampler")
-        self.db = GlobalDatabase()
+        self.db = Database()
 
     def _drain_queue(self) -> None:
         """

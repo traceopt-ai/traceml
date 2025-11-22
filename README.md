@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 [![GitHub Stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml/stargazers) 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
-[![Python Versions](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://www.python.org/)
+[![Python Versions](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/)
 [![macOS ARM](https://img.shields.io/badge/macOS-ARM%20(M1--M5)-success?logo=apple)](https://www.apple.com/mac/)
 [![Linux](https://img.shields.io/badge/OS-Linux-success?logo=linux)](https://ubuntu.com/)
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
@@ -194,16 +194,15 @@ Because TraceML samples asynchronously, it stays lightweight while providing pra
 
 - Live CPU, RAM, and GPU usage (System + Current Process)
 - PyTorch module-level memory tracking
-- Live activation memory tracking (per layer, plus totals)
-- Live gradient memory tracking (per layer, plus totals)
-- Real-time terminal dashboards via Rich
-- Notebook support 
+- Live activation & gradient memory tracking (per layer, plus totals)
 - Step & operation timers (forward, backward, optimizer)
+- Real-time terminal dashboards via Rich
+- Notebook support
+- Export logs as JSON / CSV
 
 ## Coming Soon
-
-- Export logs as JSON / CSV
-- More visual dashboards
+- Streamlit dashboard
+- Multi-node distributed support
 
 ## 🙌 Contribute & Feedback
 
@@ -215,7 +214,7 @@ TraceML is early-stage and evolving quickly. Contributions, feedback, and ideas 
 
 - Want to contribute? See CONTRIBUTING.md (coming soon).
 
-📧 Contact: traceml.ai@gmail.com
+📧 Contact: abhinavsriva@gmail.com
 
 ## 🧾 License
 

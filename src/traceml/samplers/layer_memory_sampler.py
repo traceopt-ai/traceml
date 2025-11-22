@@ -1,5 +1,5 @@
 import torch
-from typing import Dict, Any, Optional, Set, List
+from typing import Dict, Any, Optional, Set
 import hashlib
 from .base_sampler import BaseSampler
 from traceml.utils.patch import get_model_queue
@@ -11,11 +11,11 @@ class LayerMemorySampler(BaseSampler):
     Sampler that tracks parameter memory usage of PyTorch models at a per-layer level.
     """
 
-    def __init__(self, table=None):
+    def __init__(self):
         super().__init__()
         setup_error_logger()
         self.logger = get_error_logger("LayerMemorySampler")
-        self._table: List[Dict[str, Any]] = table if table is not None else []
+        self._table = self.db.create_or_get_table("layer_memory")
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
 

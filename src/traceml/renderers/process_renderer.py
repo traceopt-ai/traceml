@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any
 import shutil
 
 from rich.panel import Panel
@@ -7,6 +7,7 @@ from rich.console import Console
 from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
+from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
     PROCESS_LAYOUT_NAME,
 )
@@ -19,9 +20,9 @@ class ProcessRenderer(BaseRenderer):
     Expects BaseStdoutLogger.log() to receive a dict:
     """
 
-    def __init__(self, table: List[Dict[str, Any]]):
+    def __init__(self, database: Database):
         super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT_NAME)
-        self._table = table
+        self._table = database.create_or_get_table("process")
 
     def compute_snapshot(self) -> Dict[str, Any]:
         """Compute latest process metrics from the shared table."""
