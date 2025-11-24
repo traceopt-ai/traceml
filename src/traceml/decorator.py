@@ -97,6 +97,10 @@ def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             cpu_start = time.time()
+            if torch.cuda.is_available():
+                device = f"cuda:{torch.cuda.current_device()}"
+            else:
+                device = "cpu"
 
             if use_gpu and torch.cuda.is_available():
                 start_event = torch.cuda.Event(enable_timing=True)
@@ -110,6 +114,7 @@ def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
 
                 evt = StepTimeEvent(
                     name=name,
+                    device=device,
                     cpu_start=cpu_start,
                     cpu_end=cpu_end,
                     gpu_start=start_event,
@@ -118,7 +123,9 @@ def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
             else:
                 result = func(*args, **kwargs)
                 cpu_end = time.time()
-                evt = StepTimeEvent(name=name, cpu_start=cpu_start, cpu_end=cpu_end)
+                evt = StepTimeEvent(
+                    name=name, device=device, cpu_start=cpu_start, cpu_end=cpu_end
+                )
 
             record_step_time_event(evt)
             return result

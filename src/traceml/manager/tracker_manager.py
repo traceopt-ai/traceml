@@ -63,7 +63,7 @@ class TrackerManager:
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
         )
-        steptimer_renderer = StepTimerRenderer()
+        steptimer_renderer = StepTimerRenderer(database=steptimer_sampler.db)
         stdout_stderr_renderer = StdoutStderrRenderer()
 
         # Collect all trackers

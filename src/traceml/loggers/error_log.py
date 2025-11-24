@@ -4,7 +4,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-def setup_error_logger(log_dir: str = None) -> logging.Logger:
+def setup_error_logger(log_dir: str = "./logs") -> logging.Logger:
     """
     Configure a global error logger for TraceML.
     Writes WARN+ to stderr, and ERROR+ to a rotating file.

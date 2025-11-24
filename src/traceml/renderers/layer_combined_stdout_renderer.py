@@ -111,36 +111,36 @@ class LayerCombinedRenderer(BaseRenderer):
 
         layer_peaks = {}
         layer_current = {}
-        if is_activation:
-            db = self.activation_db
-        else:
-            db = self.gradient_db
+        db = self.activation_db if is_activation else self.gradient_db
 
-        for table_name, rows in db.all_tables().items():
-            layer = table_name
+        for layer, rows in db.all_tables().items():
             if not rows:
                 continue
 
-            # Last row = CURRENT activation (max across devices)
-            last_row = rows[-1]
-            mem_dict = last_row.get("memory", {}) or {}
-            current_peak = max(float(v) for v in mem_dict.values())
-            layer_current[layer] = current_peak
+            # Track last value per device
+            latest_per_device = {}
+            # Track global peak
+            global_peak = 0.0
 
-            # PEAK = max across all rows
-            peak = 0.0
             for r in rows:
-                m = r.get("memory", {}) or {}
-                peak = max(peak, max(float(v) for v in m.values()))
+                mem = r.get("memory", {}) or {}
+                for dev, size in mem.items():
+                    size_f = float(size)
+                    latest_per_device[dev] = size_f
+                    global_peak = max(global_peak, size_f)
 
-            layer_peaks[layer] = peak
+            # Current peak = max of last seen values for each device
+            current_peak = max(latest_per_device.values()) if latest_per_device else 0.0
+
+            layer_current[layer] = current_peak
+            layer_peaks[layer] = global_peak
 
         merged = {
             layer: {
                 "current_peak": layer_current.get(layer, 0.0),
                 "global_peak": layer_peaks.get(layer, 0.0),
             }
-            for layer in set(layer_peaks) | set(layer_current)
+            for layer in (set(layer_current) | set(layer_peaks))
         }
 
         return merged
