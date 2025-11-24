@@ -2,9 +2,10 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from traceml.session import get_session_id
 
 
-def setup_error_logger(log_dir: str = "./logs") -> logging.Logger:
+def setup_error_logger(log_root: str = "./logs") -> logging.Logger:
     """
     Configure a global error logger for TraceML.
     Writes WARN+ to stderr, and ERROR+ to a rotating file.
@@ -25,14 +26,12 @@ def setup_error_logger(log_dir: str = "./logs") -> logging.Logger:
     )
     logger.addHandler(sh)
 
-    if log_dir is None:
-        log_dir = Path.cwd()
-    else:
-        log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
+    session_id = get_session_id()
+    errors_dir = Path(log_root) / session_id
+    errors_dir.mkdir(parents=True, exist_ok=True)
 
     fh = RotatingFileHandler(
-        log_dir / "traceml_errors.log",
+        errors_dir / "traceml_errors.log",
         maxBytes=5_000_000,
         backupCount=3,
         encoding="utf-8",

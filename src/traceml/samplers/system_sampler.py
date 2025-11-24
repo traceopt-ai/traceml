@@ -26,7 +26,7 @@ class SystemSampler(BaseSampler):
         super().__init__()
         setup_error_logger()
         self.logger = get_error_logger("SystemSampler")
-        self._table = self.db.create_table("system")
+        self.db.create_table("system")
 
         self._init_cpu()
         self._init_ram()
@@ -119,16 +119,15 @@ class SystemSampler(BaseSampler):
             ram_used = self._sample_ram()
             gpu_raw = self._sample_gpu()
 
-            self._table.append(
-                {
-                    "cpu_percent": cpu,
-                    "ram_used": ram_used,
-                    "ram_total": self.ram_total_memory,
-                    "gpu_available": self.gpu_available,
-                    "gpu_count": self.gpu_count,
-                    "gpu_raw": gpu_raw,
-                }
-            )
+            record = {
+                "cpu_percent": cpu,
+                "ram_used": ram_used,
+                "ram_total": self.ram_total_memory,
+                "gpu_available": self.gpu_available,
+                "gpu_count": self.gpu_count,
+                "gpu_raw": gpu_raw,
+            }
+            self.db.add_record("system", record)
 
         except Exception as e:
             self.logger.error(f"[TraceML] System sampling error: {e}")

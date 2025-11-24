@@ -20,11 +20,14 @@ class SystemRenderer(BaseRenderer):
 
     def __init__(self, database: Database):
         super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT_NAME)
+        self.db = database
         self._table = database.create_or_get_table("system")
 
     def _compute_snapshot(self) -> Dict[str, Any]:
         """Return latest system info for live display."""
-        if not self._table:
+        self.db.writer.flush()
+        latest = self.db.get_record_at_index("system", -1)
+        if not latest:
             return {
                 "cpu": 0.0,
                 "ram_used": 0.0,
@@ -35,7 +38,6 @@ class SystemRenderer(BaseRenderer):
                 "gpu_mem_total": None,
             }
 
-        latest = self._table[-1]
         gpu_raw = latest.get("gpu_raw", {}) or {}
 
         # total util, mem & mem_total across all GPUs
