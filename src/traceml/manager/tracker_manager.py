@@ -1,10 +1,12 @@
 import threading
 from typing import List, Tuple
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.config import config
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import (
     NotebookDisplayManager,
 )
+
 
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
@@ -41,7 +43,8 @@ class TrackerManager:
         interval_sec: float = 1.0,
         mode: str = "cli",  # "cli" or "notebook"
         num_display_layers: int = 20,
-        log_dir: str = "./logs",
+        enable_logging: bool = False,
+        logs_dir: str = "./logs",
     ):
         """
         Args:
@@ -49,10 +52,12 @@ class TrackerManager:
                                          Each sampler's output is sent to all loggers in its list.
             interval_sec (int): Time interval in seconds between samples.
         """
-        setup_error_logger(log_dir)
+        config.enable_logging = enable_logging
+        config.logs_dir = logs_dir
+        setup_error_logger()
         self.logger = get_error_logger("TrackerManager")
         if components is None:
-            self.components = self._components(mode, num_display_layers, log_dir)
+            self.components = self._components(mode, num_display_layers)
         else:
             self.components = components
         self.interval_sec = interval_sec
@@ -70,15 +75,15 @@ class TrackerManager:
 
     @staticmethod
     def _components(
-        mode: str, num_display_layers: int, logs_dir: str
+        mode: str, num_display_layers: int
     ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
 
-        system_sampler = SystemSampler(logs_dir)
-        process_sampler = ProcessSampler(logs_dir)
-        layer_memory_sampler = LayerMemorySampler(logs_dir)
-        activation_memory_sampler = ActivationMemorySampler(logs_dir)
-        gradient_memory_sampler = GradientMemorySampler(logs_dir)
-        step_timer_sampler = StepTimerSampler(logs_dir)
+        system_sampler = SystemSampler()
+        process_sampler = ProcessSampler()
+        layer_memory_sampler = LayerMemorySampler()
+        activation_memory_sampler = ActivationMemorySampler()
+        gradient_memory_sampler = GradientMemorySampler()
+        step_timer_sampler = StepTimerSampler()
 
         system_renderer = SystemRenderer(database=system_sampler.db)
         process_renderer = ProcessRenderer(database=process_sampler.db)

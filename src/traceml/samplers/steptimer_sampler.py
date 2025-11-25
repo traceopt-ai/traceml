@@ -25,7 +25,7 @@ class StepTimerSampler(BaseSampler):
 
     def __init__(self, log_dir: str="./logs") -> None:
         self.sampler_name = "StepTimerSampler"
-        super().__init__(sampler_name=self.sampler_name, log_dir=log_dir)
+        super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
         self.cpu_table = self.db.create_or_get_table("step_timer_cpu")

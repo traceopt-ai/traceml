@@ -72,7 +72,8 @@ def handle_script_exception(e: Exception) -> None:
 def run_with_tracing(
     script_path: str,
     interval: float = 1.0,
-    log_dir: str = None,
+    enable_logging = False,
+    logs_dir: str = None,
     script_args: list = None,
     num_display_layers: int = 20,
 ):
@@ -91,18 +92,18 @@ def run_with_tracing(
     script_path = validate_script_path(script_path)
 
     # Checking if log dir exists or provided by the user
-    log_dir = prepare_log_directory(log_dir)
+    logs_dir = prepare_log_directory(logs_dir)
 
     prepare_environment(script_path)
 
     # Print info for the user
     print(f"Running script '{os.path.basename(script_path)}' with TraceML tracing...")
     print(f"Sampling interval: {interval} seconds")
-    print(f"Log directory: {log_dir}")
+    print(f"Log directory: {logs_dir}")
 
     tracker = TrackerManager(
         interval_sec=interval, mode="cli", num_display_layers=num_display_layers,
-        log_dir=log_dir
+        enable_logging=enable_logging, logs_dir=logs_dir
     )
 
     # --- Arguments for the target script ---
@@ -166,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sampling interval in seconds (default: 1.0).",
     )
     run_parser.add_argument(
+        "--enable-logging",
+        type=bool,
+        default=False,
+        help="Logging samplers to json.",
+    )
+    run_parser.add_argument(
         "--logs-dir",
         type=str,
         default=os.path.join(os.getcwd(), "./logs"),
@@ -193,7 +200,8 @@ def main():
         run_with_tracing(
             script_path=args.script,
             interval=args.interval,
-            log_dir=args.logs_dir,
+            enable_logging=args.enable_logging,
+            logs_dir=args.logs_dir,
             script_args=args.args or [],
             num_display_layers=args.num_display_layers,
         )

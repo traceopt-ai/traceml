@@ -10,8 +10,8 @@ class BaseSampler(ABC):
     Samplers may be stateful and are typically polled periodically.
     """
 
-    def __init__(self, sampler_name, log_dir: str="./logs") -> None:
-        self.db = Database(sampler_name=sampler_name, log_dir=log_dir)
+    def __init__(self, sampler_name) -> None:
+        self.db = Database(sampler_name=sampler_name)
 
     @abstractmethod
     def sample(self):

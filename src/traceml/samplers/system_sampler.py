@@ -22,9 +22,9 @@ class SystemSampler(BaseSampler):
     average, variance).
     """
 
-    def __init__(self, log_dir: str="./logs") -> None:
+    def __init__(self) -> None:
         self.sampler_name = "SystemSampler"
-        super().__init__(sampler_name=self.sampler_name, log_dir=log_dir)
+        super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
         self.db.create_table("system")
 
