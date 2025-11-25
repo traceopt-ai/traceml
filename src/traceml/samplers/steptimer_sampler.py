@@ -3,7 +3,7 @@ from queue import Empty, Full
 
 from traceml.utils.steptimer import StepTimeEvent, get_steptimer_queue
 from .base_sampler import BaseSampler
-from traceml.loggers.error_log import setup_error_logger, get_error_logger
+from traceml.loggers.error_log import get_error_logger
 from traceml.database.database import Database
 
 
@@ -23,12 +23,11 @@ class StepTimerSampler(BaseSampler):
         ...
     """
 
-    def __init__(self):
-        super().__init__()
-        setup_error_logger()
-        self.logger = get_error_logger("StepTimerSampler")
+    def __init__(self, log_dir: str="./logs") -> None:
+        self.sampler_name = "StepTimerSampler"
+        super().__init__(sampler_name=self.sampler_name, log_dir=log_dir)
+        self.logger = get_error_logger(self.sampler_name)
 
-        self.db = Database()
         self.cpu_table = self.db.create_or_get_table("step_timer_cpu")
         self.gpu_tables: Dict[str, list] = {}
 

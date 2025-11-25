@@ -1,6 +1,6 @@
 import json
 import os
-
+from traceml.session import get_session_id
 
 class DatabaseWriter:
     """
@@ -8,9 +8,10 @@ class DatabaseWriter:
     Keeps track of per-table write offsets.
     """
 
-    def __init__(self, db, log_dir: str):
+    def __init__(self, db, sampler_name, log_dir: str="./logs"):
         self.db = db
-        self.log_dir = log_dir
+        session_id = get_session_id()
+        self.log_dir = os.path.join(log_dir, session_id, "data", sampler_name)
         os.makedirs(self.log_dir, exist_ok=True)
         self._last_written = {}  # table_name → index
 

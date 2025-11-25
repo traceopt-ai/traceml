@@ -1,7 +1,7 @@
 import psutil
 from typing import Dict
 from .base_sampler import BaseSampler
-from traceml.loggers.error_log import setup_error_logger, get_error_logger
+from traceml.loggers.error_log import get_error_logger
 from pynvml import (
     nvmlInit,
     nvmlDeviceGetHandleByIndex,
@@ -22,10 +22,10 @@ class SystemSampler(BaseSampler):
     average, variance).
     """
 
-    def __init__(self):
-        super().__init__()
-        setup_error_logger()
-        self.logger = get_error_logger("SystemSampler")
+    def __init__(self, log_dir: str="./logs") -> None:
+        self.sampler_name = "SystemSampler"
+        super().__init__(sampler_name=self.sampler_name, log_dir=log_dir)
+        self.logger = get_error_logger(self.sampler_name)
         self.db.create_table("system")
 
         self._init_cpu()

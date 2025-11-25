@@ -1,6 +1,5 @@
 import os
 from typing import Any, Dict, List
-from traceml.session import get_session_id
 from traceml.database.database_writer import DatabaseWriter
 
 
@@ -9,11 +8,9 @@ class Database:
     Each "table" is a dict. Table names must be unique.
     """
 
-    def __init__(self, log_dir: str = "./logs"):
+    def __init__(self, sampler_name, log_dir: str = "./logs"):
         self._tables: Dict[str, List[Any]] = {}
-        session_id = get_session_id()
-        self.log_dir = os.path.join(log_dir, session_id, "data")
-        self.writer = DatabaseWriter(self, self.log_dir)
+        self.writer = DatabaseWriter(self, sampler_name=sampler_name, log_dir=log_dir)
 
     def create_table(self, name: str) -> List[Any]:
         """

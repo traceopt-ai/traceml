@@ -35,61 +35,13 @@ class TrackerManager:
     This class ensures consistent sampling even if some components fail intermittently.
     """
 
-    @staticmethod
-    def _components(
-        mode: str, num_display_layers: int
-    ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
-
-        system_sampler = SystemSampler()
-        system_renderer = SystemRenderer(database=system_sampler.db)
-
-        process_sampler = ProcessSampler()
-        process_renderer = ProcessRenderer(database=process_sampler.db)
-
-        layer_memory_sampler = LayerMemorySampler()
-
-        activation_memory_sampler = ActivationMemorySampler()
-        gradient_memory_sampler = GradientMemorySampler()
-        steptimer_sampler = StepTimerSampler()
-
-        layer_combined_renderer = LayerCombinedRenderer(
-            layer_db=layer_memory_sampler.db,
-            activation_db=activation_memory_sampler.db,
-            gradient_db=gradient_memory_sampler.db,
-            top_n_layers=num_display_layers,
-        )
-        activation_gradient_renderer = ActivationGradientRenderer(
-            layer_db=layer_memory_sampler.db,
-            activation_db=activation_memory_sampler.db,
-            gradient_db=gradient_memory_sampler.db,
-        )
-        steptimer_renderer = StepTimerRenderer(database=steptimer_sampler.db)
-        stdout_stderr_renderer = StdoutStderrRenderer()
-
-        # Collect all trackers
-        sampler_logger_pairs = [
-            ([system_sampler], [system_renderer]),
-            ([process_sampler], [process_renderer]),
-            (
-                [
-                    layer_memory_sampler,
-                    activation_memory_sampler,
-                    gradient_memory_sampler,
-                ],
-                [layer_combined_renderer, activation_gradient_renderer],
-            ),
-            ([steptimer_sampler], [steptimer_renderer]),
-        ]
-        if mode == "cli":
-            sampler_logger_pairs.append(([], [stdout_stderr_renderer]))
-        return sampler_logger_pairs
-
     def __init__(
         self,
         components: List[Tuple[List[BaseSampler], List[BaseRenderer]]] = None,
         interval_sec: float = 1.0,
         mode: str = "cli",  # "cli" or "notebook"
         num_display_layers: int = 20,
+        log_dir: str = "./logs",
     ):
         """
         Args:
@@ -97,10 +49,10 @@ class TrackerManager:
                                          Each sampler's output is sent to all loggers in its list.
             interval_sec (int): Time interval in seconds between samples.
         """
-        setup_error_logger()
+        setup_error_logger(log_dir)
         self.logger = get_error_logger("TrackerManager")
         if components is None:
-            self.components = self._components(mode, num_display_layers)
+            self.components = self._components(mode, num_display_layers, log_dir)
         else:
             self.components = components
         self.interval_sec = interval_sec
@@ -115,16 +67,61 @@ class TrackerManager:
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
-    def _run_once(self):
-        """Single sampling + logging + display update pass."""
-        for samplers, loggers in self.components:
-            if not isinstance(samplers, (list, tuple)):
-                samplers = [samplers]
 
+    @staticmethod
+    def _components(
+        mode: str, num_display_layers: int, logs_dir: str
+    ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
+
+        system_sampler = SystemSampler(logs_dir)
+        process_sampler = ProcessSampler(logs_dir)
+        layer_memory_sampler = LayerMemorySampler(logs_dir)
+        activation_memory_sampler = ActivationMemorySampler(logs_dir)
+        gradient_memory_sampler = GradientMemorySampler(logs_dir)
+        step_timer_sampler = StepTimerSampler(logs_dir)
+
+        system_renderer = SystemRenderer(database=system_sampler.db)
+        process_renderer = ProcessRenderer(database=process_sampler.db)
+        layer_combined_renderer = LayerCombinedRenderer(
+            layer_db=layer_memory_sampler.db,
+            activation_db=activation_memory_sampler.db,
+            gradient_db=gradient_memory_sampler.db,
+            top_n_layers=num_display_layers,
+        )
+        activation_gradient_renderer = ActivationGradientRenderer(
+            layer_db=layer_memory_sampler.db,
+            activation_db=activation_memory_sampler.db,
+            gradient_db=gradient_memory_sampler.db,
+        )
+        step_timer_renderer = StepTimerRenderer(database=step_timer_sampler.db)
+        stdout_stderr_renderer = StdoutStderrRenderer()
+
+        # Collect all trackers
+        sampler_logger_pairs = [
+            ([system_sampler], [system_renderer]),
+            ([process_sampler], [process_renderer]),
+            (
+                [
+                    layer_memory_sampler,
+                    activation_memory_sampler,
+                    gradient_memory_sampler,
+                ],
+                [layer_combined_renderer, activation_gradient_renderer],
+            ),
+            ([step_timer_sampler], [step_timer_renderer]),
+        ]
+        if mode == "cli":
+            sampler_logger_pairs.append(([], [stdout_stderr_renderer]))
+        return sampler_logger_pairs
+
+    def _run_once(self):
+        """Single sampling + writing to file + logging + display update pass."""
+        for samplers, loggers in self.components:
             snapshots = {}
             for sampler in samplers:
                 try:
                     snapshots[sampler.__class__.__name__] = sampler.sample()
+                    sampler.db.writer.flush()
                 except Exception as e:
                     self.logger.error(
                         f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}"
@@ -203,7 +200,7 @@ class TrackerManager:
         Logs final summaries from each sampler (or group of samplers) after tracking stops.
         """
 
-        for samplers, loggers in self.components:
+        for _, loggers in self.components:
             # pass merged summaries to all loggers for this group
             for logger in loggers:
                 try:

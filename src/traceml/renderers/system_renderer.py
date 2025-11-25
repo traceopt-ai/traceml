@@ -25,7 +25,6 @@ class SystemRenderer(BaseRenderer):
 
     def _compute_snapshot(self) -> Dict[str, Any]:
         """Return latest system info for live display."""
-        self.db.writer.flush()
         latest = self.db.get_record_at_index("system", -1)
         if not latest:
             return {

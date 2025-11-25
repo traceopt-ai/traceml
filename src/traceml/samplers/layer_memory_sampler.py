@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional, Set
 import hashlib
 from .base_sampler import BaseSampler
 from traceml.utils.patch import get_model_queue
-from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.loggers.error_log import get_error_logger
 
 
 class LayerMemorySampler(BaseSampler):
@@ -11,10 +11,10 @@ class LayerMemorySampler(BaseSampler):
     Sampler that tracks parameter memory usage of PyTorch models at a per-layer level.
     """
 
-    def __init__(self):
-        super().__init__()
-        setup_error_logger()
-        self.logger = get_error_logger("LayerMemorySampler")
+    def __init__(self, log_dir: str="./logs") -> None:
+        self.sampler_name = "LayerMemorySampler"
+        super().__init__(sampler_name=self.sampler_name, log_dir=log_dir)
+        self.logger = get_error_logger(self.sampler_name)
         self._table = self.db.create_or_get_table("layer_memory")
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()

@@ -22,11 +22,13 @@ class ProcessRenderer(BaseRenderer):
 
     def __init__(self, database: Database):
         super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT_NAME)
+        self.db = database
         self._table = database.create_or_get_table("process")
 
-    def compute_snapshot(self) -> Dict[str, Any]:
+    def _compute_snapshot(self) -> Dict[str, Any]:
         """Compute latest process metrics from the shared table."""
-        if not self._table:
+        latest = self.db.get_record_at_index("process", -1)
+        if not latest:
             return {
                 "cpu_used": 0.0,
                 "ram_used": 0.0,
@@ -34,8 +36,6 @@ class ProcessRenderer(BaseRenderer):
                 "gpu_reserved": None,
                 "gpu_total": None,
             }
-
-        latest = self._table[-1]
 
         gpu = latest.get("gpu_process_memory", {}) or {}
         if gpu:
@@ -55,7 +55,7 @@ class ProcessRenderer(BaseRenderer):
 
     ## CLI rendering in Terminal
     def get_panel_renderable(self) -> Panel:
-        proc = self.compute_snapshot()
+        proc = self._compute_snapshot()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="white")
@@ -94,16 +94,15 @@ class ProcessRenderer(BaseRenderer):
 
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
-        data = self.get_data()
-        p = data["process"]
+        data = self.compute_snapshot()
 
         # GPU formatting
-        if p["gpu_total"]:
+        if data["gpu_total"]:
             gpu_html = f"""
                 <p><b>GPU MEM:</b>
-                    {fmt_mem_new(p['gpu_used'])} /
-                    {fmt_mem_new(p['gpu_reserved'])} /
-                    {fmt_mem_new(p['gpu_total'])}
+                    {fmt_mem_new(data['gpu_used'])} /
+                    {fmt_mem_new(data['gpu_reserved'])} /
+                    {fmt_mem_new(data['gpu_total'])}
                 </p>
             """
         else:
@@ -115,8 +114,8 @@ class ProcessRenderer(BaseRenderer):
         <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
             <h4 style="color:#00bcd4; margin:0;">Process</h4>
 
-            <p><b>CPU:</b> {fmt_percent(p['cpu'])}</p>
-            <p><b>RAM:</b> {fmt_mem_new(p['ram'])}</p>
+            <p><b>CPU:</b> {fmt_percent(data['cpu'])}</p>
+            <p><b>RAM:</b> {fmt_mem_new(data['ram'])}</p>
 
             {gpu_html}
         </div>

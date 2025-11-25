@@ -101,7 +101,8 @@ def run_with_tracing(
     print(f"Log directory: {log_dir}")
 
     tracker = TrackerManager(
-        interval_sec=interval, mode="cli", num_display_layers=num_display_layers
+        interval_sec=interval, mode="cli", num_display_layers=num_display_layers,
+        log_dir=log_dir
     )
 
     # --- Arguments for the target script ---
@@ -165,9 +166,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sampling interval in seconds (default: 1.0).",
     )
     run_parser.add_argument(
-        "--log-dir",
+        "--logs-dir",
         type=str,
-        default=os.path.join(os.getcwd(), ".traceml_runs"),
+        default=os.path.join(os.getcwd(), "./logs"),
         help="Root log directory.",
     )
     run_parser.add_argument(
@@ -192,7 +193,7 @@ def main():
         run_with_tracing(
             script_path=args.script,
             interval=args.interval,
-            log_dir=args.log_dir,
+            log_dir=args.logs_dir,
             script_args=args.args or [],
             num_display_layers=args.num_display_layers,
         )
