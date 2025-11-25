@@ -1,5 +1,5 @@
 import threading
-from typing import List, Tuple, Any, Dict
+from typing import List, Tuple
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import (
@@ -204,27 +204,10 @@ class TrackerManager:
         """
 
         for samplers, loggers in self.components:
-            if not isinstance(samplers, (list, tuple)):
-                samplers = [samplers]
-
-            # collect summaries from all samplers in this group
-            summaries: Dict[str, Any] = {}
-            for sampler in samplers:
-                try:
-                    summaries[sampler.__class__.__name__] = sampler.get_summary()
-                except Exception as e:
-                    self.logger.error(
-                        f"[TraceML] Error getting summary from sampler '{sampler.__class__.__name__}': {e}"
-                    )
-                    summaries[sampler.__class__.__name__] = {
-                        "error": str(e),
-                        "sampler_name": sampler.__class__.__name__,
-                    }
-
             # pass merged summaries to all loggers for this group
             for logger in loggers:
                 try:
-                    logger.log_summary(summaries)
+                    logger.log_summary()
                 except Exception as e:
                     self.logger.error(
                         f"[TraceML] Error in logger '{logger.__class__.__name__}'.log_summary(): {e}"

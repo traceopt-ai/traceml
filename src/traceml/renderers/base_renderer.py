@@ -47,7 +47,7 @@ class BaseRenderer:
         self._latest_env = snapshots
         self._latest_snapshot = snapshots
 
-    def log_summary(self, summary: Dict[str, Any]):
+    def log_summary(self):
         """
         Abstract method: Subclasses must implement to log a final summary.
         This will typically be called after the main display is stopped.

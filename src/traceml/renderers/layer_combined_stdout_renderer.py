@@ -405,7 +405,7 @@ class LayerCombinedRenderer(BaseRenderer):
         else:
             table.add_row("  • None", "", "—")
 
-    def log_summary(self, summary: Dict[str, Any]):
+    def log_summary(self) -> None:
         console = Console()
 
         # Compute sections

@@ -1,6 +1,6 @@
 import shutil
 from collections import defaultdict
-from typing import Dict, Any, List
+from typing import Dict, List
 import numpy as np
 
 from rich.console import Console, Group
@@ -268,11 +268,9 @@ class StepTimerRenderer(BaseRenderer):
         """
         return HTML(html)
 
-    # ---------- Summary logger ----------
-    def log_summary(self, summary: Dict[str, Any]):
+    def log_summary(self) -> None:
         """
         Print a one-shot summary of current DB stats to the console.
-        Ignores the `summary` argument and recomputes from DB.
         """
         console = Console()
         data = self.get_data()

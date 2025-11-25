@@ -229,7 +229,7 @@ class SystemRenderer(BaseRenderer):
             f"{fmt_mem_new(s['gpu_memory_total'])}",
         )
 
-    def log_summary(self, _summary=None) -> None:
+    def log_summary(self) -> None:
         s = self._compute_summary()
         console = Console()
 

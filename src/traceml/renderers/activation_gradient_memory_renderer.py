@@ -207,7 +207,7 @@ class ActivationGradientRenderer(BaseRenderer):
         """
         return HTML(combined)
 
-    def log_summary(self, summary: Dict[str, Any]):
+    def log_summary(self) -> None:
         console = Console()
 
         act_avg = self._activation_stats["avg"]
