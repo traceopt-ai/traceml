@@ -143,7 +143,6 @@ class TrackerManager:
                     self.display_manager.register_layout_content(
                         logger.layout_section_name, render_fn
                     )
-                    logger.log(snapshots)
                 except Exception as e:
                     self.logger.error(
                         f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"

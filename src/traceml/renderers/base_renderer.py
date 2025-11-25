@@ -12,15 +12,6 @@ class BaseRenderer:
         self.layout_section_name = layout_section_name
         self._latest_data: Dict[str, Any] = {}
 
-    def get_data(self) -> Dict[str, Any]:
-        """
-        Subclasses must implement this to return structured data
-        (dicts, lists, numbers, strings).
-        Example:
-            { "cpu": 20.5, "ram": {"used": 2e9, "total": 8e9} }
-        """
-        raise NotImplementedError("Subclasses must implement get_data()")
-
     def get_panel_renderable(self) -> Any:  # This will be implemented by subclasses
         """
         Abstract method: Subclasses must implement this to return a Rich Renderable
@@ -36,16 +27,7 @@ class BaseRenderer:
         (IPython.display.HTML) based on `get_data()`.
         Used in Jupyter/Notebook display.
         """
-        # raise NotImplementedError("Subclasses must implement get_notebook_renderable()")
-
-    def log(self, snapshots: Dict[str, Any]):
-        """
-        Receives snapshots from one or more samplers.
-        Structure is always:
-            { "SamplerClassName": { "ok": ..., "data": {...}, ... }, ... }
-        """
-        self._latest_env = snapshots
-        self._latest_snapshot = snapshots
+        raise NotImplementedError("Subclasses must implement get_notebook_renderable()")
 
     def log_summary(self):
         """
