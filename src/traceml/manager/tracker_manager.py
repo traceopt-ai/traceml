@@ -3,9 +3,8 @@ from typing import List, Tuple
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.config import config
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
-from traceml.renderers.display.notebook_display_manager import (
-    NotebookDisplayManager,
-)
+from traceml.renderers.display.notebook_display_manager import NotebookDisplayManager
+from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayManager
 
 
 from traceml.samplers.base_sampler import BaseSampler
@@ -69,6 +68,9 @@ class TrackerManager:
         elif mode == "notebook":
             self.display_manager = NotebookDisplayManager
             self._render_attr = "get_notebook_renderable"
+        elif mode == "dashboard":
+            self.display_manager = NiceGUIDisplayManager
+            self._render_attr = "get_dashboard_renderable"
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
@@ -198,6 +200,7 @@ class TrackerManager:
 
         except Exception as e:
             self.logger.error(f"[TraceML] Failed to stop TrackerManager: {e}")
+
 
     def log_summaries(self) -> None:
         """

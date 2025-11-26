@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from traceml.decorator import trace_model_instance
+from traceml.traceml_decorator import trace_model_instance
 
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.system_sampler import SystemSampler

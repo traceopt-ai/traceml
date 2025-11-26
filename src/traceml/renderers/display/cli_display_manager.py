@@ -4,7 +4,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 from typing import Dict, Any, Callable, Optional
-from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.display.stdout_stderr_capture import StreamCapture
 
 ROOT_LAYOUT_NAME = "root"
@@ -31,7 +31,6 @@ class CLIDisplayManager:
     _layout_content_fns: Dict[str, Callable[[], Any]] = {}
     _active_logger_count: int = 0
 
-    setup_error_logger()
     logger = get_error_logger("CLIDisplayManager")
 
     @classmethod

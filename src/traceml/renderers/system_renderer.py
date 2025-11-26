@@ -189,6 +189,16 @@ class SystemRenderer(BaseRenderer):
 
         return HTML(html)
 
+    def get_dashboard_renderable(self):
+        """
+        Return an object suitable for Streamlit's st.write():
+        - str / Markdown
+        - pandas.DataFrame
+        - matplotlib/plotly figure
+        - etc.
+        """
+        return self._compute_snapshot()
+
     def _cpu_summary(self, t, s):
         t.add_row("CPU AVG", "[cyan]|[/cyan]", f"{s['cpu_average_percent']:.1f}%")
         t.add_row("CPU PEAK", "[cyan]|[/cyan]", f"{s['cpu_peak_percent']:.1f}%")

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from traceml.decorator import trace_model
+from traceml.traceml_decorator import trace_model
 
 
 # Define a simple CNN model and decorate the class

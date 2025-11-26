@@ -15,7 +15,7 @@ from transformers import (
 )
 
 # TraceML imports
-from traceml.decorator import trace_model_instance, trace_timestep
+from traceml.traceml_decorator import trace_model_instance, trace_timestep
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"

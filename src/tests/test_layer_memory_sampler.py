@@ -15,7 +15,7 @@ from traceml.renderers.layer_combined_stdout_renderer import (
 )
 from traceml.manager.tracker_manager import TrackerManager
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
-from traceml.decorator import trace_model_instance
+from traceml.traceml_decorator import trace_model_instance
 
 
 def _make_linear(in_f=8, out_f=4):
