@@ -14,7 +14,7 @@ def validate_script_path(script_path: str) -> str:
     return str(p.resolve())
 
 
-def prepare_log_directory(log_dir:str="./logs") -> str:
+def prepare_log_directory(log_dir: str = "./logs") -> str:
     if not log_dir:
         timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
         log_dir = os.path.join(os.getcwd(), f".traceml_runs/{timestamp}")
@@ -29,7 +29,7 @@ def launch_tracer_process(
     enable_logging,
     logs_dir,
     script_args,
-    num_display_layers
+    num_display_layers,
 ):
     """
     Parent launcher: sets env vars, calls tracer.py in child process.
@@ -45,14 +45,9 @@ def launch_tracer_process(
     tracer_path = str(Path(__file__).parent / "tracer.py")
 
     if mode in ["cli", "dashboard"]:
-        cmd = [
-            sys.executable,
-            tracer_path,
-            "--",
-            *script_args
-        ]
+        cmd = [sys.executable, tracer_path, "--", *script_args]
     else:
-       raise ValueError(f"Invalid mode '{mode}'")
+        raise ValueError(f"Invalid mode '{mode}'")
 
     print("Launching TraceML tracer:", " ".join(cmd))
     sys.exit(subprocess.call(cmd, env=env))
@@ -102,8 +97,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
 # import argparse

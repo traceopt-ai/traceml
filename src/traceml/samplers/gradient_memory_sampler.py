@@ -3,7 +3,6 @@ from typing import Any, Dict
 from .base_sampler import BaseSampler
 from traceml.utils.gradient_hook import get_gradient_queue
 from traceml.loggers.error_log import get_error_logger
-from traceml.database.database import Database
 
 
 class GradientMemorySampler(BaseSampler):
@@ -15,7 +14,7 @@ class GradientMemorySampler(BaseSampler):
       - Save it internally in dict.
     """
 
-    def __init__(self, log_dir: str="./logs") -> None:
+    def __init__(self, log_dir: str = "./logs") -> None:
         self.sampler_name = "GradientMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)

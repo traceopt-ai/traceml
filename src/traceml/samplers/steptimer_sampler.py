@@ -4,7 +4,6 @@ from queue import Empty, Full
 from traceml.utils.steptimer import StepTimeEvent, get_steptimer_queue
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.database.database import Database
 
 
 class StepTimerSampler(BaseSampler):
@@ -23,7 +22,7 @@ class StepTimerSampler(BaseSampler):
         ...
     """
 
-    def __init__(self, log_dir: str="./logs") -> None:
+    def __init__(self, log_dir: str = "./logs") -> None:
         self.sampler_name = "StepTimerSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)

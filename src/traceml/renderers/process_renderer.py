@@ -94,7 +94,7 @@ class ProcessRenderer(BaseRenderer):
 
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
-        data = self.compute_snapshot()
+        data = self._compute_snapshot()
 
         # GPU formatting
         if data["gpu_total"]:
@@ -124,6 +124,9 @@ class ProcessRenderer(BaseRenderer):
         return HTML(
             f"<div style='display:flex; gap:20px; margin-top:10px;'>{html}</div>"
         )
+
+    def get_dashboard_renderable(self):
+        return self._compute_snapshot()
 
     def compute_summary(self) -> Dict[str, Any]:
         """

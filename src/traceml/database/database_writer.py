@@ -3,6 +3,7 @@ import os
 from traceml.session import get_session_id
 from traceml.config import config
 
+
 class DatabaseWriter:
     """
     Writes incremental updates from a Database instance to a file.

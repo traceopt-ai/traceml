@@ -5,4 +5,5 @@ class TraceMLConfig:
         self.logs_dir: str = "./logs"
         self.num_display_layers = 10
 
+
 config = TraceMLConfig()

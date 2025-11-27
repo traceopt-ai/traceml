@@ -2,7 +2,6 @@ from typing import Dict, Any
 from .base_sampler import BaseSampler
 from traceml.utils.activation_hook import get_activation_queue
 from traceml.loggers.error_log import get_error_logger
-from traceml.database.database import Database
 
 
 class ActivationMemorySampler(BaseSampler):
@@ -14,7 +13,7 @@ class ActivationMemorySampler(BaseSampler):
       - Save it internally in dict.
     """
 
-    def __init__(self, log_dir: str="./logs") -> None:
+    def __init__(self, log_dir: str = "./logs") -> None:
         self.sampler_name = "ActivationMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)

@@ -74,7 +74,6 @@ class TrackerManager:
         else:
             raise ValueError(f"Unsupported mode: {mode}")
 
-
     @staticmethod
     def _components(
         mode: str, num_display_layers: int
@@ -107,15 +106,15 @@ class TrackerManager:
         sampler_logger_pairs = [
             ([system_sampler], [system_renderer]),
             ([process_sampler], [process_renderer]),
-            (
-                [
-                    layer_memory_sampler,
-                    activation_memory_sampler,
-                    gradient_memory_sampler,
-                ],
-                [layer_combined_renderer, activation_gradient_renderer],
-            ),
-            ([step_timer_sampler], [step_timer_renderer]),
+            # (
+            #     [
+            #         layer_memory_sampler,
+            #         activation_memory_sampler,
+            #         gradient_memory_sampler,
+            #     ],
+            #     [layer_combined_renderer, activation_gradient_renderer],
+            # ),
+            # ([step_timer_sampler], [step_timer_renderer]),
         ]
         if mode == "cli":
             sampler_logger_pairs.append(([], [stdout_stderr_renderer]))
@@ -124,19 +123,14 @@ class TrackerManager:
     def _run_once(self):
         """Single sampling + writing to file + logging + display update pass."""
         for samplers, loggers in self.components:
-            snapshots = {}
             for sampler in samplers:
                 try:
-                    snapshots[sampler.__class__.__name__] = sampler.sample()
+                    sampler.sample()
                     sampler.db.writer.flush()
                 except Exception as e:
                     self.logger.error(
                         f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}"
                     )
-                    snapshots[sampler.__class__.__name__] = {
-                        "error": str(e),
-                        "sampler_name": sampler.__class__.__name__,
-                    }
 
             # Log to all renderers
             for logger in loggers:
@@ -145,10 +139,11 @@ class TrackerManager:
                     self.display_manager.register_layout_content(
                         logger.layout_section_name, render_fn
                     )
-                except Exception as e:
-                    self.logger.error(
-                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
-                    )
+                except Exception:
+                    pass
+                    # self.logger.error(
+                    #     f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
+                    # )
 
         self.display_manager.update_display()
 
@@ -200,7 +195,6 @@ class TrackerManager:
 
         except Exception as e:
             self.logger.error(f"[TraceML] Failed to stop TrackerManager: {e}")
-
 
     def log_summaries(self) -> None:
         """
