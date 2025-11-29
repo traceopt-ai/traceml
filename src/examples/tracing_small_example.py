@@ -85,9 +85,8 @@ def main():
 
     model = MNISTCNN().to(device)
 
-    trace_model_instance(
-        model, trace_activations=True, trace_gradients=True, sample_layer_memory=True
-    )
+    print("I am here")
+    trace_model_instance(model)
 
     opt = optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()

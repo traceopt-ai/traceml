@@ -8,14 +8,14 @@ import torch
 import torch.nn as nn
 
 # Shared queue for activation events
-activation_queue: Queue = Queue(maxsize=2048)
+activation_memory_queue: Queue = Queue(maxsize=2048)
 
 # Registry to prevent multiple hook attachments per model
-_activation_hook_registry: Dict[int, bool] = {}
+_activation_memory_hook_registry: Dict[int, bool] = {}
 
 
 @dataclass
-class ActivationEvent:
+class ActivationMemoryEvent:
     """
     Represents a single forward-pass activation snapshot for a model layer.
     """
@@ -26,9 +26,9 @@ class ActivationEvent:
     memory_per_device: Dict[str, float]
 
 
-def get_activation_queue() -> Queue:
+def get_activation_memory_queue() -> Queue:
     """Return the shared queue of activation events."""
-    return activation_queue
+    return activation_memory_queue
 
 
 def _tensor_size_mb(tensor: torch.Tensor) -> float:
@@ -38,7 +38,7 @@ def _tensor_size_mb(tensor: torch.Tensor) -> float:
     return float(tensor.numel() * tensor.element_size())
 
 
-class ActivationHook:
+class ActivationMemoryHook:
     """
     Callable class used as a forward hook to capture activation sizes for a layer.
     """
@@ -68,24 +68,24 @@ class ActivationHook:
                     accumulate(o)
 
             # Create and enqueue event
-            event = ActivationEvent(
+            event = ActivationMemoryEvent(
                 model_id=self.model_id,
                 timestamp=time.time(),
                 layer_name=self.layer_name,
                 memory_per_device=layer_acc.copy(),
             )
             try:
-                activation_queue.put_nowait(event)
+                activation_memory_queue.put_nowait(event)
             except Full:
                 pass  # drop if queue is full
         except Exception:
             print(
-                f"[TraceML] Error in ActivationHook for layer {self.layer_name}",
+                f"[TraceML] Error in ActivationMemoryHook for layer {self.layer_name}",
                 file=sys.stderr,
             )
 
 
-def attach_activation_hooks(model: nn.Module):
+def attach_activation_memory_hooks(model: nn.Module):
     """
     Attach a class-based forward hook to all leaf modules of `model`.
     Hooks are idempotent: repeated calls do nothing.
@@ -94,7 +94,7 @@ def attach_activation_hooks(model: nn.Module):
         model (nn.Module): PyTorch model to instrument.
     """
     model_id = id(model)
-    if _activation_hook_registry.get(model_id):
+    if _activation_memory_hook_registry.get(model_id):
         # Hooks already attached
         return
 
@@ -102,6 +102,6 @@ def attach_activation_hooks(model: nn.Module):
     for name, module in model.named_modules():
         if any(module.children()):  # skip non-leaf modules
             continue
-        module.register_forward_hook(ActivationHook(model_id, name))
+        module.register_forward_hook(ActivationMemoryHook(model_id, name))
 
-    _activation_hook_registry[model_id] = True
+    _activation_memory_hook_registry[model_id] = True

@@ -5,10 +5,14 @@ from traceml.loggers.error_log import get_error_logger
 from pynvml import (
     nvmlInit,
     nvmlDeviceGetHandleByIndex,
+    nvmlDeviceGetTemperature,
+    nvmlDeviceGetPowerUsage,
+    nvmlDeviceGetPowerManagementLimit,
     nvmlDeviceGetMemoryInfo,
     nvmlDeviceGetUtilizationRates,
     nvmlDeviceGetCount,
     NVMLError,
+    NVML_TEMPERATURE_GPU,
 )
 
 
@@ -98,15 +102,28 @@ class SystemSampler(BaseSampler):
                 handle = nvmlDeviceGetHandleByIndex(i)
                 util = nvmlDeviceGetUtilizationRates(handle)
                 mem = nvmlDeviceGetMemoryInfo(handle)
+                temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
+                power = nvmlDeviceGetPowerUsage(handle) / 1000.0  # mW → W
+                power_limit = nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
                 gpu_info[i] = {
                     "util": float(util.gpu),
                     "mem_used": float(mem.used),
                     "mem_total": float(mem.total),
+                    "temperature": float(temp.temperature),
+                    "power_usage": float(power),
+                    "power_limit": float(power_limit),
                 }
 
             except Exception as e:
                 self.logger.error(f"[TraceML] GPU {i} sampling failed: {e}")
-                gpu_info[i] = {"util": 0.0, "mem_used": 0.0, "mem_total": 0.0}
+                gpu_info[i] = {
+                    "util": 0.0,
+                    "mem_used": 0.0,
+                    "mem_total": 0.0,
+                    "temperature": 0.0,
+                    "power_usage": 0.0,
+                    "power_limit": 0.0,
+                }
 
         return gpu_info
 

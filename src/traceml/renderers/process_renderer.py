@@ -31,7 +31,9 @@ class ProcessRenderer(BaseRenderer):
         if not latest:
             return {
                 "cpu_used": 0.0,
+                "cpu_logical_core_count": 0.0,
                 "ram_used": 0.0,
+                "ram_total": 0.0,
                 "gpu_used": None,
                 "gpu_reserved": None,
                 "gpu_total": None,
@@ -47,7 +49,9 @@ class ProcessRenderer(BaseRenderer):
 
         return {
             "cpu_used": latest.get("process_cpu_percent", 0.0),
+            "cpu_logical_core_count": latest.get("cpu_logical_core_count", 0),
             "ram_used": latest.get("process_ram", 0.0),
+            "ram_total": latest.get("total_ram", 0.0),
             "gpu_used": used_sum,
             "gpu_reserved": reserved_sum,
             "gpu_total": total_sum,

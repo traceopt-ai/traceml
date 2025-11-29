@@ -31,21 +31,26 @@ def update_process_section(panel, data):
 
     panel = dict of NiceGUI label references
     data  = dict: {
-        cpu_used,
-        ram_used,
-        gpu_used,
-        gpu_reserved,
-        gpu_total
+        cpu_used, cpu_logical_core_count,
+        ram_used, ram_total,
+        gpu_used, gpu_reserved, gpu_total
     }
     """
-
     # CPU
     cpu = data["cpu_used"]
-    panel["cpu"].text = f"CPU: {cpu:.1f}%"
+    cores = data["cpu_logical_core_count"]
+    panel["cpu"].text = f"CPU ({cores} cores): {cpu:.1f}% "
 
     # RAM
     ram_used = data["ram_used"]
-    panel["ram"].text = f"RAM: {fmt_mem_new(ram_used)}"
+    ram_total = data["ram_total"]
+    if ram_total:
+        pct = (ram_used * 100.0) / ram_total
+    else:
+        pct = 0.0
+    panel["ram"].text = (
+        f"RAM: {fmt_mem_new(ram_used)} / {fmt_mem_new(ram_total)} ({pct:.1f}%)"
+    )
 
     # GPU
     used = data["gpu_used"]

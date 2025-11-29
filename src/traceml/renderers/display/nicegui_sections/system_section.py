@@ -51,7 +51,7 @@ def update_system_section(panel, data):
         return
 
     panel["gpu"].text = (
-        f"GPU: {data['gpu_util_total']:.1f}% | "
+        f"GPU Utility | Memory: {data['gpu_util_total']:.1f}% | "
         f"{fmt_mem_new(data['gpu_mem_used'])} / "
         f"{fmt_mem_new(data['gpu_mem_total'])}"
     )
