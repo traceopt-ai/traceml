@@ -15,7 +15,7 @@ from transformers import (
 )
 
 # TraceML imports
-from traceml.traceml_decorator import trace_model_instance, trace_timestep
+from traceml.decorators import trace_model_instance, trace_timestep
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
@@ -136,12 +136,7 @@ def main():
     ).to(device)
 
     # Attach TraceML tracing hooks (memory, activation, gradient)
-    trace_model_instance(
-        model,
-        sample_layer_memory=True,
-        trace_activations=True,
-        trace_gradients=True,
-    )
+    trace_model_instance(model)
 
     # Optimizer & scheduler
     optimizer = AdamW(model.parameters(), lr=LR)

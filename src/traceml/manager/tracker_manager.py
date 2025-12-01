@@ -140,10 +140,9 @@ class TrackerManager:
                         logger.layout_section_name, render_fn
                     )
                 except Exception:
-                    pass
-                    # self.logger.error(
-                    #     f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
-                    # )
+                    self.logger.error(
+                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
+                    )
 
         self.display_manager.update_display()
 

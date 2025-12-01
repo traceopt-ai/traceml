@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from traceml.traceml_decorator import trace_model_instance, trace_timestep
+from traceml.decorators import trace_model_instance, trace_timestep
 
 # -------------------------
 # Medium CNN for MNIST

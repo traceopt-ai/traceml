@@ -59,7 +59,7 @@ To capture **memory usage**, you first need to register your model with TraceML.
 
 ```python
 import torch.nn as nn
-from traceml.traceml_decorator import trace_model
+from traceml.decorators import trace_model
 
 
 @trace_model()
@@ -78,7 +78,7 @@ class TinyNet(nn.Module):
 
 ```python
 import torch.nn as nn
-from traceml.traceml_decorator import trace_model_instance
+from traceml.decorators import trace_model_instance
 
 model = nn.Sequential(
     nn.Linear(100, 50),
@@ -125,7 +125,7 @@ TraceML now supports fine-grained step timing, letting you measure CPU/GPU laten
 Simply decorate any function with `@trace_timestep`:
 
 ```python 
-from traceml.traceml_decorator import trace_timestep
+from traceml.decorators import trace_timestep
 
 
 @trace_timestep("forward", use_gpu=True)

@@ -1,68 +1,85 @@
 from nicegui import ui
 from traceml.utils.formatting import fmt_mem_new
+from traceml.renderers.display.nicegui_sections.helper import level_bar_continuous
 
 
 def build_process_section():
-    """
-    Builds a horizontal row card for process metrics:
-    CPU  |  RAM  |  GPU (used/reserved/total)
-    Returns a dict of label references for updating.
-    """
 
-    with ui.card().classes("m-2 p-4 w-full"):
-        ui.label("Process Metrics").classes("text-xl font-bold text-blue-400 mb-2")
+    card = ui.card().classes("m-2 p-4 w-full")
+    card.style("""
+        background: rgba(245, 245, 245, 0.35);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.25);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    """)
 
-        # Horizontal row layout
-        with ui.row().classes("items-center justify-between w-full gap-8"):
-            cpu_label = ui.label("CPU: –").classes("text-lg")
-            ram_label = ui.label("RAM: –").classes("text-lg")
-            gpu_label = ui.label("GPU: –").classes("text-lg")
+    with card:
+
+        ui.label("Process Metrics") \
+            .classes("text-xl font-bold mb-3") \
+            .style("color:#ff9800;")
+
+        # -------- CPU Row --------
+        with ui.row().classes("items-center justify-between w-full"):
+            cpu_text = ui.html("CPU: –", sanitize=False).classes("text-lg").style("color:#333")
+            cpu_bar  = ui.html("", sanitize=False)
+
+        # -------- RAM Row --------
+        with ui.row().classes("items-center justify-between w-full"):
+            ram_text = ui.html("RAM: –", sanitize=False).classes("text-lg").style("color:#333")
+            ram_bar  = ui.html("", sanitize=False)
+
+        # -------- GPU Row --------
+        with ui.row().classes("items-center justify-between w-full"):
+            gpu_text = ui.html("GPU: –", sanitize=False).classes("text-lg").style("color:#333")
+            gpu_bar  = ui.html("", sanitize=False)
 
     return {
-        "cpu": cpu_label,
-        "ram": ram_label,
-        "gpu": gpu_label,
+        "cpu_text": cpu_text, "cpu_bar": cpu_bar,
+        "ram_text": ram_text, "ram_bar": ram_bar,
+        "gpu_text": gpu_text, "gpu_bar": gpu_bar,
     }
 
 
 def update_process_section(panel, data):
-    """
-    Updates the Process Metrics panel with the dict from ProcessRenderer.get_dashboard_renderable().
 
-    panel = dict of NiceGUI label references
-    data  = dict: {
-        cpu_used, cpu_logical_core_count,
-        ram_used, ram_total,
-        gpu_used, gpu_reserved, gpu_total
-    }
-    """
-    # CPU
+    # ---------------- CPU ----------------
     cpu = data["cpu_used"]
     cores = data["cpu_logical_core_count"]
-    panel["cpu"].text = f"CPU ({cores} cores): {cpu:.1f}% "
 
-    # RAM
-    ram_used = data["ram_used"]
-    ram_total = data["ram_total"]
-    if ram_total:
-        pct = (ram_used * 100.0) / ram_total
-    else:
-        pct = 0.0
-    panel["ram"].text = (
-        f"RAM: {fmt_mem_new(ram_used)} / {fmt_mem_new(ram_total)} ({pct:.1f}%)"
+    panel["cpu_text"].content = (
+        f"⚙️ CPU ({cores} cores): {cpu:.1f}%"
     )
+    panel["cpu_bar"].content = level_bar_continuous(cpu)
 
-    # GPU
+    # ---------------- RAM ----------------
+    ru, rt = data["ram_used"], data["ram_total"]
+    if rt:
+        pct = (ru * 100.0) / rt
+        panel["ram_text"].content = (
+            f"💾 RAM: {fmt_mem_new(ru)} / {fmt_mem_new(rt)} ({pct:.1f}%)"
+        )
+        panel["ram_bar"].content = level_bar_continuous(pct)
+    else:
+        panel["ram_text"].content = "💾 RAM: –"
+        panel["ram_bar"].content = ""
+
+    # ---------------- GPU ----------------
     used = data["gpu_used"]
     reserved = data["gpu_reserved"]
     total = data["gpu_total"]
 
     if used is None or total is None:
-        panel["gpu"].text = "GPU: Not available"
+        panel["gpu_text"].content = "🎮 GPU: Not available"
+        panel["gpu_bar"].content = ""
         return
 
-    panel["gpu"].text = (
-        f"GPU: {fmt_mem_new(used)} used / "
+    used_pct = (used * 100.0) / total
+    panel["gpu_text"].content = (
+        f"🎮 GPU: {fmt_mem_new(used)} used / "
         f"{fmt_mem_new(reserved)} reserved / "
         f"{fmt_mem_new(total)} total"
     )
+    panel["gpu_bar"].content = level_bar_continuous(used_pct)

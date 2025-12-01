@@ -2,15 +2,18 @@ from nicegui import ui
 import threading
 import time
 
-from traceml.renderers.display.nicegui_sections.system_section import (
-    build_system_section,
-    update_system_section,
-)
-from traceml.renderers.display.nicegui_sections.process_section import (
-    build_process_section,
-    update_process_section,
-)
+# from traceml.renderers.display.nicegui_sections.system_section import (
+#     build_system_section,
+#     update_system_section,
+# )
+# from traceml.renderers.display.nicegui_sections.process_section import (
+#     build_process_section,
+#     update_process_section,
+# )
 
+from traceml.renderers.display.nicegui_sections.main_page import (
+    define_main_page
+)
 
 class NiceGUIDisplayManager:
     _layout_content_fns = {}
@@ -34,23 +37,7 @@ class NiceGUIDisplayManager:
     @classmethod
     def _start_ui_server(cls):
 
-        @ui.page("/")
-        def main_page():
-
-            ui.label("TraceML Dashboard").classes("text-2xl m-2")
-            with ui.column().classes("m-2"):
-                # PREDEFINE SECTIONS
-                cls.cards["system_section"] = build_system_section()
-                cls.update_funcs["system_section"] = update_system_section
-
-                cls.cards["process_section"] = build_process_section()
-                cls.update_funcs["process_section"] = update_process_section
-                # cls.cards['layer_summary'] = ui.label("layer_summary: waiting...")
-                # cls.cards['activation_gradient'] = ui.label("activation_gradient: waiting...")
-                # cls.cards['steptimer'] = ui.label("steptimer: waiting...")
-            # UI TIMER — runs on UI thread every 0.2 sec
-            ui.timer(0.2, cls._ui_update_loop)
-            cls._ui_ready = True
+        define_main_page(cls)
 
         ui.run(port=8765, reload=False, show=True, title="TraceML Dashboard")
 
