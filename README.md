@@ -12,6 +12,9 @@
 
  A lightweight library to make PyTorch training **memory and timing** visible in real time (in CLI and Notebook).
 
+## 📊 Quick User Survey (2 min)
+Using TraceML? Help shape the roadmap: https://forms.gle/vaDQao8L81oAoAkv9
+
 ## The Problem
 
 Training large machine learning models often feels like a black box. One minute everything's running and the next, you're staring at a cryptic **"CUDA out of memory"** error or wondering *why a single step is so slow*.
