@@ -1,16 +1,6 @@
 from nicegui import ui
 import threading
 import time
-
-# from traceml.renderers.display.nicegui_sections.system_section import (
-#     build_system_section,
-#     update_system_section,
-# )
-# from traceml.renderers.display.nicegui_sections.process_section import (
-#     build_process_section,
-#     update_process_section,
-# )
-
 from traceml.renderers.display.nicegui_sections.main_page import (
     define_main_page
 )
@@ -28,18 +18,15 @@ class NiceGUIDisplayManager:
         if cls._ui_started:
             return
         cls._ui_started = True
-
         threading.Thread(target=cls._start_ui_server, daemon=True).start()
-
         while not cls._ui_ready:
             time.sleep(0.05)
 
     @classmethod
     def _start_ui_server(cls):
-
         define_main_page(cls)
-
         ui.run(port=8765, reload=False, show=True, title="TraceML Dashboard")
+
 
     @classmethod
     def _ui_update_loop(cls):
