@@ -1,4 +1,5 @@
 from nicegui import ui
+import plotly.graph_objects as go
 from traceml.utils.formatting import fmt_mem_new
 from traceml.renderers.display.nicegui_sections.helper import level_bar_continuous
 
@@ -16,31 +17,71 @@ def build_system_section():
     """)
 
     with card:
-
         ui.label("System Metrics") \
             .classes("text-xl font-bold mb-3") \
             .style("color:#ff9800;")
+        graph = _build_graph_section()
+        cpu_text, cpu_bar = _build_cpu_section()
+        ram_text, ram_bar = _build_ram_section()
+        gpu_text, gpu_bar = _build_gpu_section()
 
-        # -------- CPU Row --------
-        with ui.row().classes("items-center justify-between w-full"):
-            cpu_text = ui.html("CPU: –", sanitize=False).classes("text-lg").style("color:#333")
-            cpu_bar  = ui.html("", sanitize=False)
-
-        # -------- RAM Row --------
-        with ui.row().classes("items-center justify-between w-full"):
-            ram_text = ui.html("RAM: –", sanitize=False).classes("text-lg").style("color:#333")
-            ram_bar  = ui.html("", sanitize=False)
-
-        # -------- GPU Row --------
-        with ui.row().classes("items-center justify-between w-full"):
-            gpu_text = ui.html("GPU: –", sanitize=False).classes("text-lg").style("color:#333")
-            gpu_bar  = ui.html("", sanitize=False)
 
     return {
         "cpu_text": cpu_text, "cpu_bar": cpu_bar,
         "ram_text": ram_text, "ram_bar": ram_bar,
         "gpu_text": gpu_text, "gpu_bar": gpu_bar,
+        "graph": graph,
     }
+
+
+def _build_cpu_section():
+    with ui.row().classes("items-center justify-between w-full"):
+        cpu_text = ui.html("CPU: –", sanitize=False).classes("text-lg").style("color:#333")
+        cpu_bar = ui.html("", sanitize=False)
+    return cpu_text, cpu_bar
+
+
+def _build_ram_section():
+    with ui.row().classes("items-center justify-between w-full"):
+        ram_text = ui.html("RAM: –", sanitize=False).classes("text-lg").style("color:#333")
+        ram_bar = ui.html("", sanitize=False)
+    return ram_text, ram_bar
+
+
+def _build_gpu_section():
+    with ui.row().classes("items-center justify-between w-full"):
+        gpu_text = ui.html("GPU: –", sanitize=False).classes("text-lg").style("color:#333")
+        gpu_bar = ui.html("", sanitize=False)
+    return gpu_text, gpu_bar
+
+
+def _build_graph_section():
+    fig = go.Figure()
+    fig.update_layout(
+        height=180,
+        margin=dict(l=20, r=20, t=10, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0.05)",
+
+        xaxis=dict(showgrid=False, visible=False),
+
+        yaxis=dict(
+            range=[0, 100],
+            title=dict(text="CPU (%)", font=dict(color="#4caf50")),
+            tickfont=dict(color="#4caf50"),
+        ),
+
+        yaxis2=dict(
+            range=[0, 100],
+            overlaying="y",
+            side="right",
+            title=dict(text="GPU (%)", font=dict(color="#ff9800")),
+            tickfont=dict(color="#ff9800"),
+        ),
+    )
+
+    graph = ui.plotly(fig).classes("w-full mt-4")
+    return graph
 
 
 def update_system_section(panel, data):
@@ -66,8 +107,105 @@ def update_system_section(panel, data):
     if not data["gpu_available"]:
         panel["gpu_text"].content = "🎮 GPU: Not available"
         panel["gpu_bar"].content = ""
+    else:
+
+        util = data["gpu_util_total"]
+        panel["gpu_text"].content = f"🎮 GPU: {util:.1f}%"
+        panel["gpu_bar"].content = level_bar_continuous(util)
+
+    _update_graph_section(panel, data["table"])
+    return
+
+
+
+def _update_graph_section(panel, system_table):
+    """
+    Updates the Plotly graph in system panel using the historical samples.
+    system_table = list of records from db.tables["system"]
+    """
+
+    if not system_table:
         return
 
-    util = data["gpu_util_total"]
-    panel["gpu_text"].content = f"🎮 GPU: {util:.1f}%"
-    panel["gpu_bar"].content = level_bar_continuous(util)
+    fig = go.Figure()
+    _update_cpu_graph(system_table, fig)
+    _update_gpu_graph(system_table, fig)
+
+    gpu_available = system_table[-1].get("gpu_available", False)
+    _update_graph_layout(gpu_available, fig)
+    panel["graph"].update_figure(fig)
+
+
+def _update_cpu_graph(system_table, fig):
+    cpu_hist = [rec.get("cpu_percent", 0) for rec in system_table][-100:]
+    fig.add_trace(go.Scatter(
+        y=cpu_hist,
+        mode="lines",
+        name="CPU (%)",
+        yaxis="y",
+        line=dict(color="#4caf50"),
+    ))
+
+
+def _update_gpu_graph(system_table, fig):
+    gpu_available = system_table[-1].get("gpu_available", False)
+    if gpu_available:
+        gpu_hist = []
+        for rec in system_table:
+            gpu_raw = rec.get("gpu_raw", {}) or {}
+            if gpu_raw:
+                gpu_hist.append(sum(v.get("util", 0) for v in gpu_raw.values()))
+            else:
+                gpu_hist.append(0)
+        gpu_hist = gpu_hist[-100:]
+    else:
+        gpu_hist = None
+
+    if gpu_available:
+        fig.add_trace(go.Scatter(
+            y=gpu_hist,
+            mode="lines",
+            name="GPU (%)",
+            yaxis="y2",
+            line=dict(color="#ff9800"),
+        ))
+
+
+def _update_graph_layout(gpu_available, fig):
+    if gpu_available:
+        # dual axis
+        fig.update_layout(
+            height=180,
+            margin=dict(l=20, r=20, t=10, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0.05)",
+            xaxis=dict(showgrid=False, visible=False),
+            yaxis=dict(
+                range=[0, 100],
+                title=dict(text="CPU (%)", font=dict(color="#4caf50")),
+                tickfont=dict(color="#4caf50"),
+            ),
+            yaxis2=dict(
+                range=[0, 100],
+                overlaying="y",
+                side="right",
+                title=dict(text="GPU (%)", font=dict(color="#ff9800")),
+                tickfont=dict(color="#ff9800"),
+            ),
+            showlegend=False,
+        )
+    else:
+        # CPU-only graph
+        fig.update_layout(
+            height=180,
+            margin=dict(l=20, r=20, t=10, b=10),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0.05)",
+            xaxis=dict(showgrid=False, visible=False),
+            yaxis=dict(
+                range=[0, 100],
+                title=dict(text="CPU (%)", font=dict(color="#4caf50")),
+                tickfont=dict(color="#4caf50"),
+            ),
+            showlegend=False,
+        )

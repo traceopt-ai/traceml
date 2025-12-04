@@ -52,7 +52,7 @@ def update_process_section(panel, data):
     panel["cpu_text"].content = (
         f"⚙️ CPU ({cores} cores): {cpu:.1f}%"
     )
-    panel["cpu_bar"].content = level_bar_continuous(cpu)
+    panel["cpu_bar"].content = level_bar_continuous(cpu/cores)
 
     # ---------------- RAM ----------------
     ru, rt = data["ram_used"], data["ram_total"]

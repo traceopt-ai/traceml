@@ -282,7 +282,9 @@ class SystemRenderer(BaseRenderer):
         - matplotlib/plotly figure
         - etc.
         """
-        return self._compute_snapshot()
+        data = self._compute_snapshot()
+        data["table"] = self._table
+        return data
 
     def _cpu_summary(self, t, s):
         t.add_row("CPU AVG", "[cyan]|[/cyan]", f"{s['cpu_average_percent']:.1f}%")
