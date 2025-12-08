@@ -1,6 +1,7 @@
 import psutil
 import torch
 import os
+import time
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 
@@ -15,7 +16,7 @@ class ProcessSampler(BaseSampler):
         self.sampler_name = "ProcessSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
-        self._table = self.db.create_table("process")
+        self.db.create_table("process")
 
         # Initiate
         self._init_process()
@@ -127,18 +128,18 @@ class ProcessSampler(BaseSampler):
             ram_rss = self._sample_ram()
             gpu_mem = self._sample_gpu()
 
-            self._table.append(
-                {
-                    "pid": self.pid,
-                    "cpu_logical_core_count": self.cpu_count,
-                    "process_cpu_percent": cpu_pct,
-                    "process_ram": ram_rss,
-                    "total_ram": self.ram_total,
-                    "gpu_available": self.gpu_available,
-                    "gpu_count": self.gpu_count,
-                    "gpu_process_memory": gpu_mem,
-                }
-            )
+            record = {
+                "timestamp": time.time(),
+                "pid": self.pid,
+                "cpu_logical_core_count": self.cpu_count,
+                "cpu_percent": cpu_pct,
+                "ram_used": ram_rss,
+                "ram_total": self.ram_total,
+                "gpu_available": self.gpu_available,
+                "gpu_count": self.gpu_count,
+                "gpu_raw": gpu_mem,
+            }
+            self.db.add_record("process", record)
 
         except Exception as e:
             self.logger.error(f"[TraceML] Process sampling error: {e}")

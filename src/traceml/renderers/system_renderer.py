@@ -38,7 +38,6 @@ class SystemRenderer(BaseRenderer):
                 "gpu_temp_max": None,
                 "gpu_power_usage": None,
                 "gpu_power_limit": None,
-
             }
 
         gpu_raw = latest.get("gpu_raw", {}) or {}

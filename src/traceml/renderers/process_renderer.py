@@ -39,7 +39,7 @@ class ProcessRenderer(BaseRenderer):
                 "gpu_total": None,
             }
 
-        gpu = latest.get("gpu_process_memory", {}) or {}
+        gpu = latest.get("gpu_raw", {}) or {}
         if gpu:
             used_sum = sum(v.get("used", 0) for v in gpu.values())
             reserved_sum = sum(v.get("reserved", 0) for v in gpu.values())
@@ -48,10 +48,10 @@ class ProcessRenderer(BaseRenderer):
             used_sum = reserved_sum = total_sum = None
 
         return {
-            "cpu_used": latest.get("process_cpu_percent", 0.0),
+            "cpu_used": latest.get("cpu_percent", 0.0),
             "cpu_logical_core_count": latest.get("cpu_logical_core_count", 0),
-            "ram_used": latest.get("process_ram", 0.0),
-            "ram_total": latest.get("total_ram", 0.0),
+            "ram_used": latest.get("ram_used", 0.0),
+            "ram_total": latest.get("ram_total", 0.0),
             "gpu_used": used_sum,
             "gpu_reserved": reserved_sum,
             "gpu_total": total_sum,
@@ -130,7 +130,9 @@ class ProcessRenderer(BaseRenderer):
         )
 
     def get_dashboard_renderable(self):
-        return self._compute_snapshot()
+        data = self._compute_snapshot()
+        data["table"] = self._table
+        return data
 
     def compute_summary(self) -> Dict[str, Any]:
         """
@@ -146,13 +148,13 @@ class ProcessRenderer(BaseRenderer):
         gpu_used_vals, gpu_reserved_vals, gpu_total_vals = [], [], []
 
         for row in self._table:
-            cpu_vals.append(row.get("process_cpu_percent", 0.0))
-            ram_vals.append(row.get("process_ram", 0.0))
+            cpu_vals.append(row.get("cpu_percent", 0.0))
+            ram_vals.append(row.get("ram_used", 0.0))
             cpu_logical_cores.append(row.get("cpu_logical_core_count", 0.0))
-            ram_total.append(row.get("total_ram", 0.0))
+            ram_total.append(row.get("ram_total", 0.0))
 
             # GPU
-            g = row.get("gpu_process_memory", {}) or {}
+            g = row.get("gpu_raw", {}) or {}
             if g:
                 used = sum(v.get("used", 0) for v in g.values())
                 reserved = sum(v.get("reserved", 0) for v in g.values())

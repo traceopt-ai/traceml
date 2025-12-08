@@ -1,4 +1,5 @@
 import psutil
+import time
 from typing import Dict
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
@@ -137,6 +138,7 @@ class SystemSampler(BaseSampler):
             gpu_raw = self._sample_gpu()
 
             record = {
+                "timestamp": time.time(),
                 "cpu_percent": cpu,
                 "ram_used": ram_used,
                 "ram_total": self.ram_total_memory,

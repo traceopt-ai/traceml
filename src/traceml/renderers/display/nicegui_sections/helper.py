@@ -1,3 +1,5 @@
+import time
+
 def level_bar_continuous(pct: float) -> str:
     pct = max(0, min(pct, 100))
 
@@ -35,3 +37,8 @@ def choose_color(pct: float) -> str:
     else:
         return "#4CAF50"  # green - good
 
+
+def extract_time_axis(table):
+    t_raw = [rec.get("timestamp") for rec in table][-100:]
+    x_hist = [time.strftime("%H:%M:%S", time.localtime(t)) for t in t_raw]
+    return x_hist

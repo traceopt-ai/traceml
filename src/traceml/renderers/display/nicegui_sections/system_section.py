@@ -1,7 +1,10 @@
 from nicegui import ui
 import plotly.graph_objects as go
 from traceml.utils.formatting import fmt_mem_new
-from traceml.renderers.display.nicegui_sections.helper import level_bar_continuous
+from traceml.renderers.display.nicegui_sections.helper import (
+    level_bar_continuous,
+    extract_time_axis
+)
 
 
 def build_system_section():
@@ -67,7 +70,7 @@ def _build_graph_section():
 
         yaxis=dict(
             range=[0, 100],
-            title=dict(text="CPU (%)", font=dict(color="#4caf50")),
+            title=dict(text="CPU Util (%)", font=dict(color="#4caf50")),
             tickfont=dict(color="#4caf50"),
         ),
 
@@ -75,11 +78,10 @@ def _build_graph_section():
             range=[0, 100],
             overlaying="y",
             side="right",
-            title=dict(text="GPU (%)", font=dict(color="#ff9800")),
+            title=dict(text="GPU Util (%)", font=dict(color="#ff9800")),
             tickfont=dict(color="#ff9800"),
         ),
     )
-
     graph = ui.plotly(fig).classes("w-full mt-4")
     return graph
 
@@ -128,26 +130,30 @@ def _update_graph_section(panel, system_table):
         return
 
     fig = go.Figure()
-    _update_cpu_graph(system_table, fig)
-    _update_gpu_graph(system_table, fig)
+    x_hist = extract_time_axis(system_table)
+    _update_cpu_graph(system_table, fig, x_hist)
+    _update_gpu_graph(system_table, fig, x_hist)
 
     gpu_available = system_table[-1].get("gpu_available", False)
     _update_graph_layout(gpu_available, fig)
     panel["graph"].update_figure(fig)
 
 
-def _update_cpu_graph(system_table, fig):
+
+def _update_cpu_graph(system_table, fig, x_hist):
     cpu_hist = [rec.get("cpu_percent", 0) for rec in system_table][-100:]
     fig.add_trace(go.Scatter(
         y=cpu_hist,
+        x=x_hist,
         mode="lines",
-        name="CPU (%)",
+        name="CPU Util(%)",
         yaxis="y",
         line=dict(color="#4caf50"),
     ))
 
 
-def _update_gpu_graph(system_table, fig):
+
+def _update_gpu_graph(system_table, fig, x_hist):
     gpu_available = system_table[-1].get("gpu_available", False)
     if gpu_available:
         gpu_hist = []
@@ -164,48 +170,53 @@ def _update_gpu_graph(system_table, fig):
     if gpu_available:
         fig.add_trace(go.Scatter(
             y=gpu_hist,
+            x=x_hist,
             mode="lines",
-            name="GPU (%)",
+            name="GPU Util (%)",
             yaxis="y2",
             line=dict(color="#ff9800"),
         ))
 
 
 def _update_graph_layout(gpu_available, fig):
+    common_layout = dict(
+        height=180,
+        margin=dict(l=20, r=20, t=10, b=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0.05)",
+
+        xaxis=dict(
+            showgrid=False,
+            tickangle=-30,
+            tickmode="auto",
+            nticks=10,          # LIMIT LABELS TO 10
+        ),
+
+        showlegend=False,
+    )
+
     if gpu_available:
-        # dual axis
         fig.update_layout(
-            height=180,
-            margin=dict(l=20, r=20, t=10, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0.05)",
-            xaxis=dict(showgrid=False, visible=False),
+            **common_layout,
             yaxis=dict(
                 range=[0, 100],
-                title=dict(text="CPU (%)", font=dict(color="#4caf50")),
+                title=dict(text="CPU Util(%)", font=dict(color="#4caf50")),
                 tickfont=dict(color="#4caf50"),
             ),
             yaxis2=dict(
                 range=[0, 100],
                 overlaying="y",
                 side="right",
-                title=dict(text="GPU (%)", font=dict(color="#ff9800")),
+                title=dict(text="GPU Util(%)", font=dict(color="#ff9800")),
                 tickfont=dict(color="#ff9800"),
             ),
-            showlegend=False,
         )
     else:
-        # CPU-only graph
         fig.update_layout(
-            height=180,
-            margin=dict(l=20, r=20, t=10, b=10),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0.05)",
-            xaxis=dict(showgrid=False, visible=False),
+            **common_layout,
             yaxis=dict(
                 range=[0, 100],
-                title=dict(text="CPU (%)", font=dict(color="#4caf50")),
+                title=dict(text="CPU Util(%)", font=dict(color="#4caf50")),
                 tickfont=dict(color="#4caf50"),
             ),
-            showlegend=False,
         )
