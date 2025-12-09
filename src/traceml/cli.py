@@ -79,7 +79,7 @@ def build_parser():
     run_parser.add_argument("--interval", type=float, default=1.0)
     run_parser.add_argument("--enable-logging", action="store_true")
     run_parser.add_argument("--logs-dir", type=str, default=None)
-    run_parser.add_argument("--num-display-layers", type=int, default=20)
+    run_parser.add_argument("--num-display-layers", type=int, default=10)
     run_parser.add_argument("--args", nargs=argparse.REMAINDER)
 
     return parser

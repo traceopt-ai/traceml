@@ -164,10 +164,7 @@ def _update_gpu_graph(system_table, fig, x_hist):
             else:
                 gpu_hist.append(0)
         gpu_hist = gpu_hist[-100:]
-    else:
-        gpu_hist = None
 
-    if gpu_available:
         fig.add_trace(go.Scatter(
             y=gpu_hist,
             x=x_hist,

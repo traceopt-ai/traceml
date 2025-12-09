@@ -1,5 +1,4 @@
 from nicegui import ui
-import time
 import plotly.graph_objects as go
 from traceml.utils.formatting import fmt_mem_new
 from traceml.renderers.display.nicegui_sections.helper import (
@@ -164,24 +163,19 @@ def _update_ram_graph(process_table, fig, x_hist):
         line=dict(color="#4caf50"),
     ))
 
-<TO DO UPDATE FROM HERE NAMING TO BE CORRECTED>
 def _update_gpu_graph(process_table, fig, x_hist):
     gpu_available = process_table[-1].get("gpu_available", False)
     if gpu_available:
         gpu_hist = []
-        gpu_total = process_table[-1].get("gpu_total", 1)
         for rec in process_table:
-            gpu_raw = rec.get("gpu_process_memory", {}) or {}
+            gpu_raw = rec.get("gpu_raw", {}) or {}
             if gpu_raw:
+                gpu_total = sum(v.get("total", 0) for v in gpu_raw.values()) or 1
                 gpu_hist.append(sum(v.get("used", 0)/gpu_total*100 for v in gpu_raw.values()))
             else:
                 gpu_hist.append(0)
         gpu_hist = gpu_hist[-100:]
-        gpu_hist = gpu_hist/gpu_total
-    else:
-        gpu_hist = None
 
-    if gpu_available:
         fig.add_trace(go.Scatter(
             y=gpu_hist,
             x=x_hist,

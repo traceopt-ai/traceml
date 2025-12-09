@@ -7,6 +7,10 @@ from traceml.renderers.display.nicegui_sections.process_section import (
     build_process_section,
     update_process_section,
 )
+from traceml.renderers.display.nicegui_sections.layer_table_section import (
+    build_layer_table_section,
+    update_layer_table_section,
+)
 
 def define_main_page(cls):
     """Attach the NiceGUI main page to the UI server."""
@@ -33,17 +37,21 @@ def define_main_page(cls):
         # ----- PAGE LAYOUT -----
         ui.label("TraceML").classes("text-2xl m-2")
 
-        with ui.row().classes("m-2 w-full gap-4 flex-nowrap items-start"):
+        with ui.row().classes("m-2 w-[90%] gap-4 flex-nowrap items-center"):
 
             # System (left column)
-            with ui.column().classes("w-1/2"):
+            with ui.column().classes("w-[50%]"):
                 cls.cards["system_section"] = build_system_section()
                 cls.update_funcs["system_section"] = update_system_section
 
             # Process (right column)
-            with ui.column().classes("w-1/2"):
+            with ui.column().classes("w-[50%]"):
                 cls.cards["process_section"] = build_process_section()
                 cls.update_funcs["process_section"] = update_process_section
+
+        with ui.row().classes("m-2 w-[90%] gap-4 flex-nowrap items-center"):
+            cls.cards["layer_combined_summary_section"] = build_layer_table_section()
+            cls.update_funcs["layer_combined_summary_section"] = update_layer_table_section
 
         # background update loop
         ui.timer(0.2, cls._ui_update_loop)

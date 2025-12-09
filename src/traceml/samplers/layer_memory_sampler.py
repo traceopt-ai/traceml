@@ -1,4 +1,5 @@
 import torch
+import time
 from typing import Dict, Any, Optional, Set
 import hashlib
 from .base_sampler import BaseSampler
@@ -23,9 +24,7 @@ class LayerMemorySampler(BaseSampler):
         """
         Generate a unique signature for the model.
         """
-        items = []
-        # high-level model descriptor
-        items.append(model.__class__.__name__)
+        items = [model.__class__.__name__]
         # record each module class name in order
         for name, module in model.named_modules():
             items.append(module.__class__.__name__)
@@ -58,6 +57,7 @@ class LayerMemorySampler(BaseSampler):
             layer_mem = self._compute_layer_memory(model)
 
             sample = {
+                "timestamp": time.time(),
                 "model_index": len(self.seen_signatures) - 1,
                 "total_memory": float(sum(layer_mem.values())),
                 "layer_memory": layer_mem,
@@ -68,6 +68,7 @@ class LayerMemorySampler(BaseSampler):
         except Exception as e:
             self.logger.error(f"[TraceML] Error sampling model: {e}")
             return {
+                "timestamp": time.time(),
                 "error": str(e),
                 "model_index": -1,
                 "total_memory": 0.0,

@@ -18,7 +18,7 @@ from traceml.samplers.steptimer_sampler import StepTimerSampler
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.system_renderer import SystemRenderer
 from traceml.renderers.process_renderer import ProcessRenderer
-from traceml.renderers.layer_combined_stdout_renderer import (
+from traceml.renderers.layer_combined_renderer import (
     LayerCombinedRenderer,
 )
 from traceml.renderers.activation_gradient_memory_renderer import (
@@ -106,14 +106,14 @@ class TrackerManager:
         sampler_logger_pairs = [
             ([system_sampler], [system_renderer]),
             ([process_sampler], [process_renderer]),
-            # (
-            #     [
-            #         layer_memory_sampler,
-            #         activation_memory_sampler,
-            #         gradient_memory_sampler,
-            #     ],
-            #     [layer_combined_renderer, activation_gradient_renderer],
-            # ),
+            (
+                [
+                    layer_memory_sampler,
+                    activation_memory_sampler,
+                    gradient_memory_sampler,
+                ],
+                [layer_combined_renderer]#, activation_gradient_renderer],
+            ),
             # ([step_timer_sampler], [step_timer_renderer]),
         ]
         if mode == "cli":
