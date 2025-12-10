@@ -51,7 +51,7 @@ A tool you can safely keep on in every training loop.
 ## 1. Installation
 
 ```bash
-pip install traceml-ai
+pip install .
 ```
 
 Developer mode:
