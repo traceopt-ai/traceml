@@ -17,26 +17,16 @@ from traceml.renderers.layer_combined.services import (
     LayerCombinedData,
     LayerMemorySummary,
 )
-from traceml.renderers.layer_combined.utils import (
-    truncate_layer_name,
-    format_cache_value,
-)
+from traceml.renderers.layer_combined.utils import truncate_layer_name
 
 
 class LayerCombinedRenderer(BaseRenderer):
     """
-    Combined logger for per-layer:
-      - Memory (allocated params + buffers)
-      - Activation (curr/global)
-      - Gradient  (curr/global)
+    Combined renderer using NEW total_peak_memory logic:
 
-    Responsibilities:
-      - orchestrate data services
-      - build Rich / HTML renderables
-      - print CLI summary
+       total_peak = param + activation_peak + gradient_peak
 
-    All heavy computation and caching lives in `LayerCombinedDataService`
-    and `LayerMemorySummaryService`.
+    Sorting, % calculations, and display use this unified metric.
     """
 
     def __init__(
@@ -64,14 +54,7 @@ class LayerCombinedRenderer(BaseRenderer):
             gradient_db=gradient_db,
         )
 
-    # -------------------------------------------------------------------------
-    # CLI + Notebook renderables
-    # -------------------------------------------------------------------------
-
     def get_panel_renderable(self) -> Panel:
-        """
-        Rich (terminal) representation for top-N layers + "Other Layers".
-        """
         d = self._data_service.compute_display_data()
 
         table = Table(
@@ -81,105 +64,106 @@ class LayerCombinedRenderer(BaseRenderer):
             pad_edge=False,
             padding=(0, 1),
         )
+
         table.add_column("Layer", justify="left", style="magenta")
-        table.add_column("Memory", justify="right", style="white")
-        table.add_column("% of total", justify="right", style="white")
-        table.add_column("Activation (curr/peak)", justify="right", style="cyan")
-        table.add_column("Gradient (curr/peak)", justify="right", style="green")
+        table.add_column("Params", justify="right", style="white")
+        table.add_column("Act (cur/peak)", justify="right", style="cyan")
+        table.add_column("Grad (cur/peak)", justify="right", style="green")
+        table.add_column("Total Curr", justify="right", style="white")
+        table.add_column("% curr", justify="right", style="white")
 
-        # Top-N rows
-        if d["top_items"]:
-            for name, memory in d["top_items"]:
-                pct = (
-                    (float(memory) / d["total_memory"] * 100.0)
-                    if d["total_memory"] > 0.0
-                    else 0.0
-                )
-                table.add_row(
-                    truncate_layer_name(name),
-                    fmt_mem_new(memory),
-                    f"{pct:.1f}%",
-                    format_cache_value(d["activation_cache"], name),
-                    format_cache_value(d["gradient_cache"], name),
-                )
-
-        # “Other Layers” aggregated row
-        if d["other"]["total"] > 0:
-            o = d["other"]
+        for row in d["top_items"]:
             table.add_row(
-                "Other Layers",
-                fmt_mem_new(o["total"]),
-                f"{o['pct']:.1f}%",
-                f"{fmt_mem_new(o['activation']['current'])} / "
-                f"{fmt_mem_new(o['activation']['global'])}",
-                f"{fmt_mem_new(o['gradient']['current'])} / "
-                f"{fmt_mem_new(o['gradient']['global'])}",
+                truncate_layer_name(row["layer"]),
+                fmt_mem_new(row["param_memory"]),
+                f"{fmt_mem_new(row['activation_current'])} / "
+                f"{fmt_mem_new(row['activation_peak'])}",
+                f"{fmt_mem_new(row['gradient_current'])} / "
+                f"{fmt_mem_new(row['gradient_peak'])}",
+                fmt_mem_new(row["total_current_memory"]),
+                f"{row['pct']:.1f}%",
             )
 
-        # Empty case
-        if not d["top_items"] and d["other"]["total"] <= 0:
-            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—")
+        o = d["other"]
+        if o["total_current_memory"] > 0:
+            table.add_row(
+                "Other Layers",
+                fmt_mem_new(o["param_memory"]),
+                f"{fmt_mem_new(o['activation_current'])} / {fmt_mem_new(o['activation_peak'])}",
+                f"{fmt_mem_new(o['gradient_current'])} / {fmt_mem_new(o['gradient_peak'])}",
+                fmt_mem_new(o["total_current_memory"]),
+                f"{o['pct']:.1f}%",
+            )
+
+        if not d["top_items"] and o["total_current_memory"] <= 0:
+            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—", "—")
 
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(100, int(cols * 0.75)), 100)
+        panel_width = min(max(100, int(cols * 0.75)), 120)  # allow wider output
 
         title = (
             f"[bold blue]Model #{d['model_index']}[/bold blue] • "
-            f"Total: [white]{fmt_mem_new(d['total_memory'])}[/white]"
+            f"Total Current: [white]{fmt_mem_new(d['total_current_sum'])}[/white]"
         )
         return Panel(Group(table), title=title, border_style="blue", width=panel_width)
 
     def get_notebook_renderable(self) -> HTML:
-        """
-        HTML (Jupyter) representation for top-N layers + "Other Layers".
-        """
         d = self._data_service.compute_display_data()
 
         rows_html = ""
-        if d["top_items"]:
-            for name, memory in d["top_items"]:
-                pct = (
-                    (float(memory) / d["total_memory"] * 100.0)
-                    if d["total_memory"] > 0.0
-                    else 0.0
-                )
-                rows_html += f"""
-                    <tr>
-                        <td style="text-align:left;">{truncate_layer_name(name)}</td>
-                        <td style="text-align:right;">{fmt_mem_new(memory)}</td>
-                        <td style="text-align:right;">{pct:.1f}%</td>
-                        <td style="text-align:right;">
-                            {format_cache_value(d['activation_cache'], name)}
-                        </td>
-                        <td style="text-align:right;">
-                            {format_cache_value(d['gradient_cache'], name)}
-                        </td>
-                    </tr>
-                """
 
+        for row in d["top_items"]:
+            rows_html += f"""
+                <tr>
+                    <td>{truncate_layer_name(row['layer'])}</td>
+
+                    <td style="text-align:right;">{fmt_mem_new(row['param_memory'])}</td>
+
+                    <td style="text-align:right;">
+                        {fmt_mem_new(row['activation_current'])} /
+                        {fmt_mem_new(row['activation_peak'])}
+                    </td>
+
+                    <td style="text-align:right;">
+                        {fmt_mem_new(row['gradient_current'])} /
+                        {fmt_mem_new(row['gradient_peak'])}
+                    </td>
+
+                    <td style="text-align:right;">{fmt_mem_new(row['total_current_memory'])}</td>
+                    <td style="text-align:right;">{row['pct']:.1f}%</td>
+                </tr>
+            """
+
+        # -------------------------------------------------------
+        # OTHER LAYERS
+        # -------------------------------------------------------
         o = d["other"]
-        if o["total"] > 0:
+        if o["total_current_memory"] > 0:
             rows_html += f"""
                 <tr style="color:gray;">
                     <td>Other Layers</td>
-                    <td style="text-align:right;">{fmt_mem_new(o['total'])}</td>
+
+                    <td style="text-align:right;">{fmt_mem_new(o['param_memory'])}</td>
+
+                    <td style="text-align:right;">
+                        {fmt_mem_new(o['activation_current'])} /
+                        {fmt_mem_new(o['activation_peak'])}
+                    </td>
+
+                    <td style="text-align:right;">
+                        {fmt_mem_new(o['gradient_current'])} /
+                        {fmt_mem_new(o['gradient_peak'])}
+                    </td>
+
+                    <td style="text-align:right;">{fmt_mem_new(o['total_current_memory'])}</td>
                     <td style="text-align:right;">{o['pct']:.1f}%</td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(o['activation']['current'])} /
-                        {fmt_mem_new(o['activation']['global'])}
-                    </td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(o['gradient']['current'])} /
-                        {fmt_mem_new(o['gradient']['global'])}
-                    </td>
                 </tr>
             """
 
         if not rows_html.strip():
             rows_html = """
                 <tr>
-                    <td colspan="5"
-                        style="text-align:center; color:gray;">
+                    <td colspan="6" style="text-align:center; color:gray;">
                         No layers detected
                     </td>
                 </tr>
@@ -189,16 +173,19 @@ class LayerCombinedRenderer(BaseRenderer):
         <div style="border:2px solid #2196f3; border-radius:8px;
                     padding:10px; margin-top:10px;">
             <h4 style="color:#2196f3; margin:0;">
-                Model #{d['model_index']} • Total: {fmt_mem_new(d['total_memory'])}
+                Model #{d['model_index']}
+                • Total Current: {fmt_mem_new(d['total_current_sum'])}
             </h4>
+
             <table style="width:100%; border-collapse:collapse; margin-top:8px;">
                 <thead style="background:#f0f8ff;">
                     <tr>
                         <th style="text-align:left;">Layer</th>
-                        <th style="text-align:right;">Memory</th>
-                        <th style="text-align:right;">% of total</th>
-                        <th style="text-align:right;">Activation (curr/peak)</th>
-                        <th style="text-align:right;">Gradient (curr/peak)</th>
+                        <th style="text-align:right;">Params</th>
+                        <th style="text-align:right;">Activation (cur/peak)</th>
+                        <th style="text-align:right;">Gradient (cur/peak)</th>
+                        <th style="text-align:right;">Total Curr</th>
+                        <th style="text-align:right;">% curr</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -210,19 +197,10 @@ class LayerCombinedRenderer(BaseRenderer):
         return HTML(html)
 
     def get_dashboard_renderable(self) -> Dict[str, Any]:
-        """
-        Dashboard output: top layers sorted by total memory cost.
-        """
-        return self._data_service.compute_dashboard_data()
+        return self._data_service.compute_display_data()
 
 
     def log_summary(self) -> None:
-        """
-        Print a global summary to the terminal:
-          - total samples, models, avg & peak memory
-          - top-3 activation/global peaks
-          - top-3 gradient/global peaks
-        """
         console = Console()
 
         layer_stats = self._summary_service.compute_layer_memory_summary()
@@ -248,41 +226,22 @@ class LayerCombinedRenderer(BaseRenderer):
         )
         console.print(panel)
 
-    # -------------------------------------------------------------------------
-    # Internal helpers for CLI summary formatting
-    # -------------------------------------------------------------------------
-
     def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
         table.add_row(
-            "[blue]TOTAL SAMPLES TAKEN[/blue]",
-            "[dim]|[/dim]",
-            str(stats["total_samples"]),
-        )
+            "[blue]TOTAL SAMPLES TAKEN[/blue]", "[dim]|[/dim]",
+            str(stats["total_samples"]))
         table.add_row(
-            "[blue]TOTAL MODELS SEEN[/blue]",
-            "[dim]|[/dim]",
-            str(stats["total_models_seen"]),
-        )
+            "[blue]TOTAL MODELS SEEN[/blue]", "[dim]|[/dim]",
+            str(stats["total_models_seen"]))
         table.add_row(
-            "[blue]AVERAGE MODEL MEMORY[/blue]",
-            "[dim]|[/dim]",
-            fmt_mem_new(stats["average_model_memory"]),
-        )
+            "[blue]AVERAGE MODEL MEMORY[/blue]", "[dim]|[/dim]",
+            fmt_mem_new(stats["average_model_memory"]))
         table.add_row(
-            "[blue]PEAK MODEL MEMORY[/blue]",
-            "[dim]|[/dim]",
-            fmt_mem_new(stats["peak_model_memory"]),
-        )
+            "[blue]PEAK MODEL MEMORY[/blue]", "[dim]|[/dim]",
+            fmt_mem_new(stats["peak_model_memory"]))
 
-    def _render_section_topk(
-        self,
-        table: Table,
-        title: str,
-        items: List,
-        color: str,
-    ) -> None:
+    def _render_section_topk(self, table: Table, title: str, items: List, color: str) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
-
         if items:
             for layer, value in items:
                 table.add_row(
@@ -292,4 +251,3 @@ class LayerCombinedRenderer(BaseRenderer):
                 )
         else:
             table.add_row("  • None", "", "—")
-

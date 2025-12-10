@@ -1,17 +1,8 @@
 from typing import Dict, Any, Optional
-
 from traceml.database.database import Database
 
 
 class LayerCombinedData:
-    """
-    Computes the data needed by LayerCombinedRenderer for:
-      - top-N layer memory rows
-      - "Other Layers" aggregate row
-      - activation & gradient peak caches
-
-    This is the main “data model” for the combined renderer.
-    """
 
     def __init__(
         self,
@@ -25,121 +16,140 @@ class LayerCombinedData:
         self._gradient_db = gradient_db
         self._top_n = top_n_layers
 
-        # caches: {layer: {"current": float, "global": float}}
+        # caches store cumulative peaks
         self._activation_cache: Dict[str, Dict[str, float]] = {}
         self._gradient_cache: Dict[str, Dict[str, float]] = {}
 
     def compute_display_data(self) -> Dict[str, Any]:
         """
-        Core entry for renderer: returns everything needed
-        to render CLI / HTML tables.
+        Returns ALL per-layer data needed by dashboard, CLI, notebook.
 
-        Structure:
-        {
-            "top_items": [(layer_name, memory_bytes), ...],
-            "other": {
-                "total": float,
-                "pct": float,
-                "activation": {"current": float, "global": float},
-                "gradient": {"current": float, "global": float},
-            },
-            "total_memory": float,
-            "model_index": Any,
-            "activation_cache": {...},
-            "gradient_cache": {...},
-        }
+        Sorting = total_peak_memory (param + activation_peak + grad_peak)
+        Percent (%) = total_current_memory / sum(total_current_memory)
         """
+
+        # ---- Load table snapshot & memory DBs ----
         layer_snapshot = self._compute_layer_snapshot()
         act_snapshot = self._compute_snapshot(is_activation=True)
         grad_snapshot = self._compute_snapshot(is_activation=False)
 
-        # update caches
+        # Update global caches
         self._merge_cache(self._activation_cache, act_snapshot)
         self._merge_cache(self._gradient_cache, grad_snapshot)
 
-        layers = layer_snapshot["layer_memory"]
-        total_memory = layer_snapshot["total_memory"]
+        layers = layer_snapshot["layer_memory"]         # parameter memory
         model_index = layer_snapshot["model_index"]
+        activation_cache = self._activation_cache
+        gradient_cache = self._gradient_cache
+
+        peak_map = {}
+        current_map = {}
+
+        for layer, param_mem in layers.items():
+
+            act_cur  = activation_cache.get(layer, {}).get("current", 0.0)
+            act_peak = activation_cache.get(layer, {}).get("global", 0.0)
+
+            grad_cur  = gradient_cache.get(layer, {}).get("current", 0.0)
+            grad_peak = gradient_cache.get(layer, {}).get("global", 0.0)
+
+            # Peak memory = used for sorting (static layer cost)
+            peak_map[layer] = float(param_mem) + float(act_peak) + float(grad_peak)
+
+            # Current memory = used for percentage display
+            current_map[layer] = float(param_mem) + float(act_cur) + float(grad_cur)
 
         sorted_items = sorted(
-            layers.items(), key=lambda kv: float(kv[1]), reverse=True
+            peak_map.items(), key=lambda kv: float(kv[1]), reverse=True
         )
-        top_items = sorted_items[: self._top_n] if self._top_n else sorted_items
-        other_items = sorted_items[self._top_n :] if self._top_n else []
+        top_items = sorted_items[: self._top_n]
+        other_items = sorted_items[self._top_n:]
 
-        other_total = sum(float(v) for _, v in other_items)
-        pct_other = (other_total / total_memory * 100.0) if total_memory > 0.0 else 0.0
+        total_current_sum = sum(current_map.values()) if current_map else 0.0
 
-        def _agg_peaks(
-            cache: Dict[str, Dict[str, float]], names: list[str]
-        ) -> Dict[str, float]:
-            if not names:
-                return {"current": 0.0, "global": 0.0}
-            cur = sum(cache.get(n, {}).get("current", 0.0) for n in names)
-            gbl = sum(cache.get(n, {}).get("global", 0.0) for n in names)
-            return {"current": cur, "global": gbl}
+        # ---- Build top rows ----
+        rows = []
+        for layer, peak_val in top_items:
 
-        other_act = _agg_peaks(self._activation_cache, [n for n, _ in other_items])
-        other_grad = _agg_peaks(self._gradient_cache, [n for n, _ in other_items])
+            param_mem = layers.get(layer, 0.0)
+            act_cur  = activation_cache.get(layer, {}).get("current", 0.0)
+            act_peak = activation_cache.get(layer, {}).get("global", 0.0)
+            grad_cur  = gradient_cache.get(layer, {}).get("current", 0.0)
+            grad_peak = gradient_cache.get(layer, {}).get("global", 0.0)
+
+            current_total = current_map[layer]
+            pct = (current_total / total_current_sum * 100.0) if total_current_sum else 0.0
+
+            rows.append({
+                "layer": layer,
+
+                "param_memory": param_mem,
+                "activation_current": act_cur,
+                "activation_peak": act_peak,
+                "gradient_current": grad_cur,
+                "gradient_peak": grad_peak,
+
+                "total_peak_memory": peak_val,       # used for sorting
+                "total_current_memory": current_total,  # used for %
+                "pct": pct,
+            })
+
+        other_layers = [layer for layer, _ in other_items]
+
+        other_param_sum = sum(layers.get(l, 0.0) for l in other_layers)
+        other_act_cur = sum(activation_cache.get(l, {}).get("current", 0.0) for l in other_layers)
+        other_act_peak = sum(activation_cache.get(l, {}).get("global", 0.0) for l in other_layers)
+        other_grad_cur = sum(gradient_cache.get(l, {}).get("current", 0.0) for l in other_layers)
+        other_grad_peak = sum(gradient_cache.get(l, {}).get("global", 0.0) for l in other_layers)
+
+        other_current_total = sum(current_map[l] for l in other_layers) if other_layers else 0.0
+        other_pct = (other_current_total / total_current_sum * 100.0) if total_current_sum else 0.0
 
         return {
-            "top_items": top_items,
-            "other": {
-                "total": other_total,
-                "pct": pct_other,
-                "activation": other_act,
-                "gradient": other_grad,
-            },
-            "total_memory": total_memory,
             "model_index": model_index,
-            "activation_cache": self._activation_cache,
-            "gradient_cache": self._gradient_cache,
+
+            # per-layer rows
+            "top_items": rows,
+
+            # aggregated "other" row
+            "other": {
+                "param_memory": other_param_sum,
+                "activation_current": other_act_cur,
+                "activation_peak": other_act_peak,
+                "gradient_current": other_grad_cur,
+                "gradient_peak": other_grad_peak,
+                "total_current_memory": other_current_total,
+                "pct": other_pct,
+            },
+
+            # sums for final footer
+            "total_current_sum": total_current_sum,
+            "total_peak_sum": sum(peak_map.values()),
+
+            "activation_cache": activation_cache,
+            "gradient_cache": gradient_cache,
         }
 
-    # ------------------------------------------------------------------
-    # Internal: layer / activation / gradient snapshots
-    # ------------------------------------------------------------------
-
     def _compute_layer_snapshot(self) -> Dict[str, Any]:
-        """
-        Return last entry from layer_table safely.
-        """
         if not self._layer_table:
-            return {
-                "layer_memory": {},
-                "total_memory": 0.0,
-                "model_index": "—",
-            }
+            return {"layer_memory": {}, "model_index": "—"}
 
         last = self._layer_table[-1]
         return {
             "layer_memory": last.get("layer_memory", {}) or {},
-            "total_memory": last.get("total_memory", 0.0) or 0.0,
             "model_index": last.get("model_index", "—"),
         }
 
     def _compute_snapshot(self, is_activation: bool) -> Dict[str, Dict[str, float]]:
-        """
-        Return CURRENT and PEAK memory per layer for activation/gradient DBs.
-
-        Result:
-        {
-            layer_name: {
-                "current_peak": float,
-                "global_peak": float,
-            },
-            ...
-        }
-        """
         db = self._activation_db if is_activation else self._gradient_db
-        layer_peaks: Dict[str, float] = {}
-        layer_current: Dict[str, float] = {}
+        layer_peaks = {}
+        layer_current = {}
 
         for layer, rows in db.all_tables().items():
             if not rows:
                 continue
 
-            latest_per_device: Dict[str, float] = {}
+            latest_per_device = {}
             global_peak = 0.0
 
             for r in rows:
@@ -149,140 +159,28 @@ class LayerCombinedData:
                     latest_per_device[dev] = size_f
                     global_peak = max(global_peak, size_f)
 
-            current_peak = (
-                max(latest_per_device.values()) if latest_per_device else 0.0
-            )
-            layer_current[layer] = current_peak
+            layer_current[layer] = max(latest_per_device.values()) if latest_per_device else 0.0
             layer_peaks[layer] = global_peak
 
-        merged = {
+        return {
             layer: {
                 "current_peak": layer_current.get(layer, 0.0),
                 "global_peak": layer_peaks.get(layer, 0.0),
             }
             for layer in (set(layer_current) | set(layer_peaks))
         }
-        return merged
 
-    # ------------------------------------------------------------------
-    # Cache merging logic
-    # ------------------------------------------------------------------
-
-    def _merge_cache(
-        self,
-        cache: Dict[str, Dict[str, float]],
-        new_data: Dict[str, Dict[str, float]],
-    ) -> None:
-        """
-        Merge latest snapshot data into a persistent cache.
-
-        new_data: {layer: {"current_peak": float, "global_peak": float}}
-        Only provided fields update; missing fields keep prior values.
-        """
+    def _merge_cache(self, cache, new_data):
         if not new_data:
             return
-
         for layer, entry in new_data.items():
-            if not isinstance(entry, dict):
-                continue
-
-            cur = entry.get("current_peak")
-            gbl = entry.get("global_peak")
-            rec = cache.get(layer)
-
-            if rec is None:
-                if cur is not None or gbl is not None:
-                    cache[layer] = {
-                        "current": float(cur if cur is not None else 0.0),
-                        "global": float(
-                            gbl if gbl is not None else (cur if cur is not None else 0.0)
-                        ),
-                    }
-                continue
-
-            if cur is not None:
-                rec["current"] = float(cur)
-            if gbl is not None:
-                rec["global"] = max(float(gbl), float(rec.get("global", 0.0)))
-
-    def compute_cost_map(
-            self,
-            layers: Dict[str, float],
-            activation_cache: Dict[str, Dict[str, float]],
-            gradient_cache: Dict[str, Dict[str, float]],
-    ) -> Dict[str, float]:
-        """
-        Compute the total memory cost per layer:
-
-            param_memory
-          + activation_global_peak (if any)
-          + gradient_global_peak (if any)
-
-        Missing activation/gradient simply add 0.
-        """
-        cost = {}
-        for layer, param_mem in layers.items():
-            act_peak = activation_cache.get(layer, {}).get("global", 0.0)
-            grad_peak = gradient_cache.get(layer, {}).get("global", 0.0)
-            cost[layer] = float(param_mem) + float(act_peak) + float(grad_peak)
-        return cost
-
-
-    def compute_dashboard_data(self) -> Dict[str, Any]:
-        """
-        Dashboard-specific data using total memory (params+activation+gradient).
-
-        Does NOT affect CLI or Notebook rendering.
-        """
-        # Load core data (param memory + caches)
-        layer_snapshot = self._compute_layer_snapshot()
-        act_snapshot = self._compute_snapshot(is_activation=True)
-        grad_snapshot = self._compute_snapshot(is_activation=False)
-
-        self._merge_cache(self._activation_cache, act_snapshot)
-        self._merge_cache(self._gradient_cache, grad_snapshot)
-
-        layers = layer_snapshot["layer_memory"]
-        activation_cache = self._activation_cache
-        gradient_cache = self._gradient_cache
-
-        # COST-BASED SORTING
-        cost_map = self.compute_cost_map(layers, activation_cache, gradient_cache)
-        sorted_cost_items = sorted(cost_map.items(), key=lambda kv: kv[1], reverse=True)
-
-        top_cost_items = sorted_cost_items[: self._top_n]
-        other_cost_items = sorted_cost_items[self._top_n:]
-
-        total_cost_sum = sum(cost_map.values())
-        other_total_cost = sum(v for _, v in other_cost_items)
-        other_pct = (other_total_cost / total_cost_sum * 100.0) if total_cost_sum else 0.0
-
-        # Build formatted rows for dashboard
-        top_rows = []
-        for layer, cost in top_cost_items:
-            row = {
-                "layer": layer,
-                "total_cost": cost,
-                "param_memory": layers.get(layer, 0.0),
-                "activation_peak": activation_cache.get(layer, {}).get("global", 0.0),
-                "gradient_peak": gradient_cache.get(layer, {}).get("global", 0.0),
-                "pct": (cost / total_cost_sum * 100.0) if total_cost_sum else 0.0,
-            }
-            top_rows.append(row)
-
-        return {
-            "model_index": layer_snapshot["model_index"],
-            "total_cost_sum": total_cost_sum,
-            # top-N sorted by total memory
-            "top_layers": top_rows,
-            # aggregated "Other" layers
-            "other": {
-                "total_cost": other_total_cost,
-                "pct": other_pct,
-            },
-            # optional: full list
-            "all_layers": sorted_cost_items,
-        }
+            cur = entry.get("current_peak", 0.0)
+            gbl = entry.get("global_peak", 0.0)
+            if layer not in cache:
+                cache[layer] = {"current": cur, "global": gbl}
+            else:
+                cache[layer]["current"] = cur
+                cache[layer]["global"] = max(cache[layer]["global"], gbl)
 
 
 class LayerMemorySummary:
