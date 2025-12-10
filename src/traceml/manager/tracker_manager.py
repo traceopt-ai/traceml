@@ -112,9 +112,9 @@ class TrackerManager:
                     activation_memory_sampler,
                     gradient_memory_sampler,
                 ],
-                [layer_combined_renderer]#, activation_gradient_renderer],
+                [layer_combined_renderer, activation_gradient_renderer],
             ),
-            # ([step_timer_sampler], [step_timer_renderer]),
+            ([step_timer_sampler], [step_timer_renderer]),
         ]
         if mode == "cli":
             sampler_logger_pairs.append(([], [stdout_stderr_renderer]))
@@ -139,7 +139,7 @@ class TrackerManager:
                     self.display_manager.register_layout_content(
                         logger.layout_section_name, render_fn
                     )
-                except Exception:
+                except Exception as e:
                     self.logger.error(
                         f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
                     )

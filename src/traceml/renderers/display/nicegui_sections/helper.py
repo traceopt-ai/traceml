@@ -42,3 +42,9 @@ def extract_time_axis(table):
     t_raw = [rec.get("timestamp") for rec in table][-100:]
     x_hist = [time.strftime("%H:%M:%S", time.localtime(t)) for t in t_raw]
     return x_hist
+
+def build_fake_section():
+    return {}
+
+def update_fake_section():
+    return

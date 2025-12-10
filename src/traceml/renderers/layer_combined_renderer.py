@@ -9,7 +9,7 @@ from IPython.display import HTML
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
-    LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
+    LAYER_COMBINED_LAYOUT_NAME,
 )
 from traceml.utils.formatting import fmt_mem_new
 
@@ -38,7 +38,7 @@ class LayerCombinedRenderer(BaseRenderer):
     ):
         super().__init__(
             name="Layer Combined Memory",
-            layout_section_name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME,
+            layout_section_name=LAYER_COMBINED_LAYOUT_NAME,
         )
 
         layer_table = layer_db.create_or_get_table("layer_memory")
