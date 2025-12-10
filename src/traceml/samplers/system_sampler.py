@@ -110,7 +110,7 @@ class SystemSampler(BaseSampler):
                     "util": float(util.gpu),
                     "mem_used": float(mem.used),
                     "mem_total": float(mem.total),
-                    "temperature": float(temp.temperature),
+                    "temperature": float(temp),
                     "power_usage": float(power),
                     "power_limit": float(power_limit),
                 }
