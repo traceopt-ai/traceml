@@ -10,6 +10,7 @@
 
 ---
 
+
 A lightweight, always-on profiler for PyTorch that makes **memory**, **timing**, and **system usage** visible in real time via:
 
 - Terminal dashboards  
@@ -20,6 +21,10 @@ A lightweight, always-on profiler for PyTorch that makes **memory**, **timing**,
 Minimal configuration. Minimal overhead. Plug-and-trace.
 
 ---
+
+## 📊 Quick User Survey (2 min)
+Using TraceML? Help shape the roadmap: https://forms.gle/vaDQao8L81oAoAkv9
+
 
 ## 🚨 The Problem
 
