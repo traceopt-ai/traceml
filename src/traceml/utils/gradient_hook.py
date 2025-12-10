@@ -1,5 +1,4 @@
 import sys
-import time
 from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Any, Dict, Optional
@@ -30,7 +29,6 @@ class GradientEvent:
     """
 
     model_id: int
-    timestamp: float
     layer_name: str  # layer/module name
     param_name: Optional[str]
     per_device_memory: Dict[str, float]
@@ -94,7 +92,6 @@ class LayerGradientHook:
             if device_mb:
                 elem = GradientEvent(
                     model_id=self.model_id,
-                    timestamp=time.time(),
                     layer_name=self.layer_name,
                     param_name=None,
                     per_device_memory=device_mb.copy(),
@@ -129,7 +126,6 @@ class ParamGradientHook:
             if device_mb:
                 elem = GradientEvent(
                     model_id=self.model_id,
-                    timestamp=time.time(),
                     layer_name=self.layer_name,
                     param_name=self.param_name,
                     per_device_memory=device_mb.copy(),

@@ -69,7 +69,7 @@ def run_with_tracing(args):
 
 
 def build_parser():
-    parser = argparse.ArgumentParser("TraceML CLI")
+    parser = argparse.ArgumentParser("traceml")
 
     sub = parser.add_subparsers(dest="command", required=True)
 

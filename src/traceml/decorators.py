@@ -17,7 +17,7 @@ def trace_model(
     sample_layer_memory: bool = True,
     trace_activation_memory: bool = True,
     trace_gradients: bool = True,
-    trace_activation_time: bool = True,
+    trace_activation_time: bool = False,
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -66,7 +66,7 @@ def trace_model_instance(
     sample_layer_memory: bool = True,
     trace_activation_memory: bool = True,
     trace_gradients: bool = True,
-    trace_activation_time: bool = True,
+    trace_activation_time: bool = False,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).

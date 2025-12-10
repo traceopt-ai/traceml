@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any
 from .base_sampler import BaseSampler
 from traceml.utils.activation_time_hooks import get_activation_time_queue
 from traceml.loggers.error_log import get_error_logger

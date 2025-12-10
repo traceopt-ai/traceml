@@ -11,6 +11,7 @@ from traceml.renderers.display.nicegui_sections.layer_table_section import (
     build_layer_table_section,
     update_layer_table_section,
 )
+import pandas
 
 def define_main_page(cls):
     """Attach the NiceGUI main page to the UI server."""
@@ -54,5 +55,5 @@ def define_main_page(cls):
             cls.update_funcs["layer_combined_summary_section"] = update_layer_table_section
 
         # background update loop
-        ui.timer(0.2, cls._ui_update_loop)
+        ui.timer(0.75, cls._ui_update_loop)
         cls._ui_ready = True

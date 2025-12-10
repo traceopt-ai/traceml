@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Dict, Any
 import sys
-import time
 
 import torch
 import torch.nn as nn
@@ -21,7 +20,6 @@ class ActivationMemoryEvent:
     """
 
     model_id: int
-    timestamp: float
     layer_name: str
     memory_per_device: Dict[str, float]
 
@@ -70,7 +68,6 @@ class ActivationMemoryHook:
             # Create and enqueue event
             event = ActivationMemoryEvent(
                 model_id=self.model_id,
-                timestamp=time.time(),
                 layer_name=self.layer_name,
                 memory_per_device=layer_acc.copy(),
             )

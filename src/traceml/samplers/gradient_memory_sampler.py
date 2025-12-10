@@ -1,5 +1,5 @@
 from typing import Any, Dict
-
+import time
 from .base_sampler import BaseSampler
 from traceml.utils.gradient_hook import get_gradient_queue
 from traceml.loggers.error_log import get_error_logger
@@ -28,7 +28,7 @@ class GradientMemorySampler(BaseSampler):
 
         # final dict you will save
         record = {
-            "timestamp": getattr(event, "timestamp", None),
+            "timestamp": time.time(),
             "model_id": getattr(event, "model_id", None),
             "memory": getattr(event, "per_device_memory", {})
             or {},  # raw per-device gradient memory

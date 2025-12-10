@@ -1,4 +1,5 @@
 from typing import Dict, Any
+import time
 from .base_sampler import BaseSampler
 from traceml.utils.activation_memory_hook import get_activation_memory_queue
 from traceml.loggers.error_log import get_error_logger
@@ -42,7 +43,7 @@ class ActivationMemorySampler(BaseSampler):
         """
         layer_name = getattr(event, "layer_name", None)
         record = {
-            "timestamp": getattr(event, "timestamp", None),
+            "timestamp": time.time(),
             "model_id": getattr(event, "model_id", None),
             "memory": getattr(event, "memory_per_device", None),
         }
