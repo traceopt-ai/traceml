@@ -22,7 +22,10 @@ dependencies = [
     "coverage>=7.10.5",
     "pytest-cov>=7.0.0",
     "ipython>=7.0.0",
-    "ipywidgets>=7.5.0"
+    "ipywidgets>=7.5.0",
+    "nicegui",
+    "plotly"
+
 ]
 
 [project.optional-dependencies]
