@@ -1,12 +1,11 @@
 # TraceML
 <sub><em>If you find it useful, consider giving it a ⭐ on GitHub — it helps others discover the project!</em></sub>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)  
-[![GitHub Stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml/stargazers)  
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)  
-[![Python Versions](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/)  
-[![macOS ARM](https://img.shields.io/badge/macOS-ARM%20(M1--M5)-success?logo=apple)](https://www.apple.com/mac/)  
-[![Linux](https://img.shields.io/badge/OS-Linux-success?logo=linux)](https://ubuntu.com/)  
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
+[![GitHub Stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml/stargazers) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb) 
+[![Python Versions](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/) 
+[![macOS ARM](https://img.shields.io/badge/macOS-ARM%20(M1--M5)-success?logo=apple)](https://www.apple.com/mac/) 
+[![Linux](https://img.shields.io/badge/OS-Linux-success?logo=linux)](https://ubuntu.com/) 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 
 ---
@@ -121,6 +120,8 @@ This launches a live terminal dashboard showing:
 - Activation + gradient memory  
 - Step timings  
 
+![TraceML CLI Live](cli_demo_v1.png)
+
 ---
 
 ## ✅ **B. Dashboard Mode (Local Web UI)**
@@ -142,6 +143,8 @@ Includes:
 - Real-time charts  
 - Per-layer memory
 - Peaks and summaries  
+
+![TraceML Dashboard Live](dash_demo_v1.png)
 
 ---
 
