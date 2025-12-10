@@ -50,8 +50,8 @@ def main():
         tracker.log_summaries()
 
     if error:
-        print("\n--- script crashed ---", file=sys.stderr)
-        traceback.print_exc()
+        print("\n--- script crashed here ---", file=sys.stderr)
+        traceback.print_exception(type(error), error, error.__traceback__)
         sys.exit(1)
 
     sys.exit(exit_code)
