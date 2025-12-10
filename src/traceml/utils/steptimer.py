@@ -19,6 +19,7 @@ class StepTimeEvent:
     """
 
     name: str
+    device: str
     cpu_start: float
     cpu_end: float
     gpu_start: Optional[torch.cuda.Event] = None

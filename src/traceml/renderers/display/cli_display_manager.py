@@ -4,17 +4,17 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 from typing import Dict, Any, Callable, Optional
-from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.display.stdout_stderr_capture import StreamCapture
-
-ROOT_LAYOUT_NAME = "root"
-LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
-SYSTEM_PROCESS_LAYOUT_NAME = "system_process_section"
-LAYER_COMBINED_SUMMARY_LAYOUT_NAME = "layer_combined_summary_section"
-ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME = "activation_gradient_summary_section"
-STEPTIMER_SUMMARY_LAYOUT_NAME = "steptimer_summary_section"
-STDOUT_STDERR_LAYOUT_NAME = "stdout_stderr_section"
-
+from traceml.renderers.display.layout import (
+    ROOT_LAYOUT_NAME,
+    SYSTEM_LAYOUT_NAME,
+    PROCESS_LAYOUT_NAME,
+    LAYER_COMBINED_LAYOUT_NAME,
+    ACTIVATION_GRADIENT_LAYOUT_NAME,
+    STEPTIMER_LAYOUT_NAME,
+    STDOUT_STDERR_LAYOUT_NAME
+)
 
 class CLIDisplayManager:
     """
@@ -30,7 +30,6 @@ class CLIDisplayManager:
     _layout_content_fns: Dict[str, Callable[[], Any]] = {}
     _active_logger_count: int = 0
 
-    setup_error_logger()
     logger = get_error_logger("CLIDisplayManager")
 
     @classmethod
@@ -44,31 +43,41 @@ class CLIDisplayManager:
         )
         dashboard = cls._layout["dashboard"]
         dashboard.split_column(
-            Layout(name=SYSTEM_PROCESS_LAYOUT_NAME, ratio=1),
-            Layout(name=LAYER_COMBINED_SUMMARY_LAYOUT_NAME, ratio=3),
+            Layout(name="upper_row", ratio=1),
+            Layout(name=LAYER_COMBINED_LAYOUT_NAME, ratio=3),
             Layout(name="bottom_row", ratio=1),
         )
+        dashboard["upper_row"].split_row(
+            Layout(name=SYSTEM_LAYOUT_NAME, ratio=1),
+            Layout(name=PROCESS_LAYOUT_NAME, ratio=1),
+        )
         dashboard["bottom_row"].split_row(
-            Layout(name=ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME, ratio=1),
-            Layout(name=STEPTIMER_SUMMARY_LAYOUT_NAME, ratio=1),
+            Layout(name=ACTIVATION_GRADIENT_LAYOUT_NAME, ratio=1),
+            Layout(name=STEPTIMER_LAYOUT_NAME, ratio=1),
         )
 
         # Initialize panels with placeholder text
-        dashboard[SYSTEM_PROCESS_LAYOUT_NAME].update(
+        dashboard[SYSTEM_LAYOUT_NAME].update(
             Panel(Text("Waiting for System Metrics...", justify="center"))
         )
-        dashboard[LAYER_COMBINED_SUMMARY_LAYOUT_NAME].update(
+        dashboard[PROCESS_LAYOUT_NAME].update(
+            Panel(Text("Waiting for Process Metrics...", justify="center"))
+        )
+        dashboard[LAYER_COMBINED_LAYOUT_NAME].update(
             Panel(Text("Waiting for Current Model...", justify="center"))
         )
-        dashboard[ACTIVATION_GRADIENT_SUMMARY_LAYOUT_NAME].update(
+        dashboard[ACTIVATION_GRADIENT_LAYOUT_NAME].update(
             Panel(Text("Waiting for Activation + Gradient...", justify="center"))
         )
-        dashboard[STEPTIMER_SUMMARY_LAYOUT_NAME].update(
+        dashboard[STEPTIMER_LAYOUT_NAME].update(
             Panel(Text("Waiting for Step Timers...", justify="center"))
         )
         cls._layout[STDOUT_STDERR_LAYOUT_NAME].update(
-            Panel(Text("Waiting for stdout/stderr...", justify="center"),
-                  title="Logs", border_style="cyan")
+            Panel(
+                Text("Waiting for stdout/stderr...", justify="center"),
+                title="Logs",
+                border_style="cyan",
+            )
         )
 
     @classmethod

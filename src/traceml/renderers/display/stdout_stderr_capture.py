@@ -7,7 +7,8 @@ class StreamCapture(StringIO):
     """
     Simple thread-safe capture utility for stdout/stderr.
     """
-    _stdout_stderr_capture = None ## shared instance
+
+    _stdout_stderr_capture = None  ## shared instance
     _orig_stdout = sys.__stdout__
     _orig_stderr = sys.__stderr__
     _redirected = False

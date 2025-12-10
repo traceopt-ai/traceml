@@ -2,7 +2,7 @@ import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from traceml.decorator import trace_model_instance
+from traceml.decorators import trace_model_instance
 
 
 # A CNN that tolerates variable input sizes via AdaptiveAvgPool2d

@@ -2,7 +2,7 @@ from typing import Dict, Callable, Any
 from IPython.display import display
 import ipywidgets as widgets
 
-from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.loggers.error_log import get_error_logger
 
 
 class NotebookDisplayManager:
@@ -15,7 +15,6 @@ class NotebookDisplayManager:
     _container: widgets.VBox = None
     _active_logger_count: int = 0
 
-    setup_error_logger()
     logger = get_error_logger("NotebookDisplayManager")
 
     @classmethod

@@ -1,146 +1,210 @@
 import shutil
 from collections import defaultdict
-from typing import Dict, Any
+from typing import Dict, List
 import numpy as np
+
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import STEPTIMER_SUMMARY_LAYOUT_NAME
+from traceml.database.database import Database
+from traceml.renderers.display.cli_display_manager import STEPTIMER_LAYOUT_NAME
 
 
 class StepTimerRenderer(BaseRenderer):
     """
-    Logger for timing statistics collected by StepTimeSampler.
+    Renderer for timing statistics collected into the step-timer DB tables.
 
-    Shows top-N timers (default 4) + combines others into "Other".
-    Maintains running averages and global peaks for each timer.
+    For each event_name it computes:
+      - cpu_avg_s, cpu_max_s  (from step_timer_cpu)
+      - gpu_avg_s, gpu_max_s  (from all step_timer_cuda_* tables)
+
+    Displayed "Avg (s)" and "Peak (s)" prefer GPU values if available,
+    otherwise fall back to CPU values.
     """
 
-    def __init__(self, top_n: int = 5):
+    def __init__(self, database: Database, top_n: int = 5):
         super().__init__(
             name="Step Timers",
-            layout_section_name=STEPTIMER_SUMMARY_LAYOUT_NAME,
+            layout_section_name=STEPTIMER_LAYOUT_NAME,
         )
-        self._latest_snapshot: Dict[str, Any] = {}
+        self.db = database
         self.top_n = top_n
 
-        # Per-event caches
-        self._avg_cache: Dict[str, float] = defaultdict(float)
-        self._peak_cache: Dict[str, float] = defaultdict(float)
-
-        # Running stats
-        self._avg_stats: Dict[str, Dict[str, float]] = defaultdict(
-            lambda: {"count": 0, "sum": 0.0, "avg": 0.0}
-        )
-
-        self._last_snapshot_cache: Dict[str, Dict[str, float]] = defaultdict(dict)
-
-    def _update_cache(self, new_data: Dict[str, Dict[str, float]]):
+    def _collect_cpu_times(self) -> Dict[str, List[float]]:
         """
-        Update per-timer caches with latest averages and peaks.
-        new_data: {"forward": {"cpu_avg_s": .., "gpu_avg_s": .., "gpu_max_s": ..}, ...}
+        Read step_timer_cpu table and group durations (ms) by event_name.
         """
-        for name, vals in new_data.items():
-            # Prefer GPU avg if available, otherwise CPU
-            avg_val = vals.get("gpu_avg_s") or vals.get("cpu_avg_s") or 0.0
-            peak_val = vals.get("gpu_max_s") or vals.get("cpu_max_s") or 0.0
+        cpu_table = self.db.create_or_get_table("step_timer_cpu")
+        cpu_times: Dict[str, List[float]] = defaultdict(list)
 
-            # Update running average
-            stats = self._avg_stats[name]
-            stats["count"] += 1
-            stats["sum"] += avg_val
-            stats["avg"] = stats["sum"] / stats["count"]
-            self._avg_cache[name] = stats["avg"]
-            self._peak_cache[name] = max(self._peak_cache[name], peak_val)
+        for row in cpu_table:
+            name = row.get("event_name")
+            if not name:
+                continue
+            dur_ms = float(row.get("duration_ms", 0.0))
+            cpu_times[name].append(dur_ms)
 
-    def _merge_with_last_snapshot(
-        self, snapshot: Dict[str, Dict[str, float]]
-    ) -> Dict[str, Dict[str, float]]:
-        """Merge current snapshot with last known values, keeping missing timers visible."""
-        merged = dict(self._last_snapshot_cache)
-        for name, vals in snapshot.items():
-            merged[name] = vals
-            self._last_snapshot_cache[name] = vals
-        return merged
+        return cpu_times
+
+    def _collect_gpu_times(self) -> Dict[str, List[float]]:
+        """
+        Read all step_timer_cuda_* tables and group durations (ms) by event_name,
+        collapsing across all GPUs.
+        """
+        gpu_times: Dict[str, List[float]] = defaultdict(list)
+
+        for table_name, rows in self.db.all_tables().items():
+            if not table_name.startswith("step_timer_cuda"):
+                continue
+
+            for row in rows:
+                event_name = row.get("event_name")
+                if not event_name:
+                    continue
+                dur_ms = float(row.get("duration_ms", 0.0))
+                gpu_times[event_name].append(dur_ms)
+
+        return gpu_times
+
+    def _compute_event_stats(self) -> Dict[str, Dict[str, float]]:
+        """
+        Compute cpu_avg_s, cpu_max_s, gpu_avg_s, gpu_max_s for each event_name.
+        """
+        cpu_times = self._collect_cpu_times()
+        gpu_times = self._collect_gpu_times()
+
+        all_names = set(cpu_times.keys()) | set(gpu_times.keys())
+        stats: Dict[str, Dict[str, float]] = {}
+
+        for name in all_names:
+            cpu_vals = cpu_times.get(name, [])
+            gpu_vals = gpu_times.get(name, [])
+
+            if cpu_vals:
+                cpu_arr = np.array(cpu_vals, dtype=float)
+                cpu_avg_s = float(cpu_arr.mean() / 1000.0)
+                cpu_max_s = float(cpu_arr.max() / 1000.0)
+            else:
+                cpu_avg_s = 0.0
+                cpu_max_s = 0.0
+
+            if gpu_vals:
+                gpu_arr = np.array(gpu_vals, dtype=float)
+                gpu_avg_s = float(gpu_arr.mean() / 1000.0)
+                gpu_max_s = float(gpu_arr.max() / 1000.0)
+            else:
+                gpu_avg_s = 0.0
+                gpu_max_s = 0.0
+
+            stats[name] = {
+                "cpu_avg_s": cpu_avg_s,
+                "cpu_max_s": cpu_max_s,
+                "gpu_avg_s": gpu_avg_s,
+                "gpu_max_s": gpu_max_s,
+            }
+
+        return stats
+
+    def _pick_display_values(self, vals: Dict[str, float]) -> Dict[str, float]:
+        """
+        For rendering, prefer GPU metrics if any GPU data exists,
+        otherwise fall back to CPU metrics.
+        """
+        gpu_avg = vals.get("gpu_avg_s", 0.0)
+        gpu_max = vals.get("gpu_max_s", 0.0)
+        cpu_avg = vals.get("cpu_avg_s", 0.0)
+        cpu_max = vals.get("cpu_max_s", 0.0)
+
+        if gpu_max > 0.0 or gpu_avg > 0.0:
+            avg = gpu_avg
+            peak = gpu_max
+        else:
+            avg = cpu_avg
+            peak = cpu_max
+
+        return {"avg_s": avg, "peak_s": peak}
 
     def _aggregate_top(
-        self, snapshot: Dict[str, Dict[str, float]]
+        self, stats: Dict[str, Dict[str, float]]
     ) -> Dict[str, Dict[str, float]]:
-        if not snapshot:
+        """
+        Take full stats dict and return only top-N (N-1 + 'Other') for display.
+        Sorting uses the display avg (GPU if present, else CPU).
+        """
+        if not stats:
             return {}
 
-        avg_source = {k: self._avg_cache.get(k, 0.0) for k in snapshot.keys()}
+        # Compute a display avg for sorting
+        def sort_key(item):
+            name, vals = item
+            disp = self._pick_display_values(vals)
+            return disp["avg_s"]
 
-        # Sort by historical average (stable ordering)
-        sorted_items = sorted(
-            snapshot.items(), key=lambda kv: avg_source.get(kv[0], 0.0), reverse=True
-        )
+        sorted_items = sorted(stats.items(), key=sort_key, reverse=True)
 
-        top_n = self.top_n - 1
-        top_items = sorted_items[:top_n]
-        rest_items = sorted_items[top_n:]
+        if self.top_n is None or self.top_n <= 0 or len(sorted_items) <= self.top_n:
+            # No 'Other' row needed
+            return dict(sorted_items)
 
-        top_dict = dict(top_items)
+        # Keep top_n-1 explicit, rest aggregated as "Other"
+        main_n = max(1, self.top_n - 1)
+        top_items = sorted_items[:main_n]
+        rest_items = sorted_items[main_n:]
 
+        top_dict: Dict[str, Dict[str, float]] = dict(top_items)
+
+        # Aggregate "Other" over remaining events
         if rest_items:
-            cpu_avg = (
-                np.mean([v.get("cpu_avg_s", 0.0) for _, v in rest_items])
-                if rest_items
-                else 0.0
-            )
-            gpu_avg = (
-                np.mean([v.get("gpu_avg_s", 0.0) for _, v in rest_items])
-                if rest_items
-                else 0.0
-            )
-            cpu_max = (
-                np.max([v.get("cpu_max_s", 0.0) for _, v in rest_items])
-                if rest_items
-                else 0.0
-            )
-            gpu_max = (
-                np.max([v.get("gpu_max_s", 0.0) for _, v in rest_items])
-                if rest_items
-                else 0.0
-            )
-            top_dict["Other"] = {
-                "cpu_avg_s": cpu_avg,
-                "gpu_avg_s": gpu_avg,
-                "cpu_max_s": cpu_max,
-                "gpu_max_s": gpu_max,
+            cpu_avg_vals = [v["cpu_avg_s"] for _, v in rest_items]
+            cpu_max_vals = [v["cpu_max_s"] for _, v in rest_items]
+            gpu_avg_vals = [v["gpu_avg_s"] for _, v in rest_items]
+            gpu_max_vals = [v["gpu_max_s"] for _, v in rest_items]
+
+            other_stats = {
+                "cpu_avg_s": float(np.mean(cpu_avg_vals)) if cpu_avg_vals else 0.0,
+                "cpu_max_s": float(np.max(cpu_max_vals)) if cpu_max_vals else 0.0,
+                "gpu_avg_s": float(np.mean(gpu_avg_vals)) if gpu_avg_vals else 0.0,
+                "gpu_max_s": float(np.max(gpu_max_vals)) if gpu_max_vals else 0.0,
             }
+            top_dict["Other"] = other_stats
 
         return top_dict
 
-    def get_data(self) -> Dict[str, Any]:
-        raw_snapshot = (self._latest_snapshot or {}).get("StepTimerSampler", {}).get(
-            "data"
-        ) or {}
-        self._update_cache(raw_snapshot)
-        # Merge to keep missing timers visible
-        merged_snapshot = self._merge_with_last_snapshot(raw_snapshot)
-        # Aggregate top based on merged (persistent) snapshot
-        filtered = self._aggregate_top(merged_snapshot)
-        return filtered
+    def get_data(self) -> Dict[str, Dict[str, float]]:
+        """
+        Full pipeline:
+          - read DB tables
+          - compute per-event CPU/GPU averages + peaks
+          - keep only top-N (plus 'Other')
+        """
+        stats = self._compute_event_stats()
+        return self._aggregate_top(stats)
 
+    # ---------- CLI rendering ----------
     def get_panel_renderable(self) -> Panel:
         data = self.get_data()
+
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("Event", justify="left", style="cyan")
         table.add_column("Avg (s)", justify="right", style="white")
         table.add_column("Peak (s)", justify="right", style="magenta")
 
-        for name, vals in data.items():
-            avg_cached = self._avg_cache.get(name, 0.0)
-            peak_cached = self._peak_cache.get(name, 0.0)
-
+        if data:
+            for name, vals in data.items():
+                disp = self._pick_display_values(vals)
+                table.add_row(
+                    f"[bold]{name}[/bold]",
+                    f"{disp['avg_s']:.4f}",
+                    f"{disp['peak_s']:.4f}",
+                )
+        else:
             table.add_row(
-                f"[bold]{name}[/bold]",
-                f"{avg_cached:.4f}",
-                f"{peak_cached:.4f}",
+                "[dim]No step timings recorded[/dim]",
+                "—",
+                "—",
             )
 
         cols, _ = shutil.get_terminal_size()
@@ -153,24 +217,31 @@ class StepTimerRenderer(BaseRenderer):
             width=panel_width,
         )
 
+    # ---------- Notebook rendering ----------
     def get_notebook_renderable(self) -> HTML:
         data = self.get_data()
 
         rows = ""
         if data:
-            items = sorted(data.items(), key=lambda kv: kv[0])
-            for name, vals in items:
-                avg_cached = self._avg_cache.get(name, 0.0)
-                peak_cached = self._peak_cache.get(name, 0.0)
+            # sort alphabetically for stable display
+            for name in sorted(data.keys()):
+                vals = data[name]
+                disp = self._pick_display_values(vals)
                 rows += f"""
                 <tr style="border-bottom:1px solid #2c2c2c;">
                     <td style="text-align:left; color:#e0e0e0;">{name}</td>
-                    <td style="text-align:right; color:#e0e0e0;">{avg_cached:.4f}</td>
-                    <td style="text-align:right; color:#e0e0e0;">{peak_cached:.4f}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{disp['avg_s']:.4f}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{disp['peak_s']:.4f}</td>
                 </tr>
                 """
         else:
-            rows = """<tr><td colspan="3" style="text-align:center; color:gray;">No step timings recorded</td></tr>"""
+            rows = """
+            <tr>
+                <td colspan="3" style="text-align:center; color:gray;">
+                    No step timings recorded
+                </td>
+            </tr>
+            """
 
         html = f"""
         <div style="
@@ -197,16 +268,37 @@ class StepTimerRenderer(BaseRenderer):
         """
         return HTML(html)
 
-    def log_summary(self, summary: Dict[str, Any]):
+    def get_dashboard_renderable(self):
+        data = self.get_data()
+        return data
+
+
+    def log_summary(self) -> None:
+        """
+        Print a one-shot summary of current DB stats to the console.
+        """
         console = Console()
+        data = self.get_data()
+
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("Event", justify="left", style="cyan")
         table.add_column("Avg (s)", justify="right", style="white")
         table.add_column("Peak (s)", justify="right", style="magenta")
 
-        for name, avg in self._avg_cache.items():
-            peak = self._peak_cache.get(name, 0.0)
-            table.add_row(f"[bold]{name}[/bold]", f"{avg:.4f}", f"{peak:.4f}")
+        if data:
+            for name, vals in data.items():
+                disp = self._pick_display_values(vals)
+                table.add_row(
+                    f"[bold]{name}[/bold]",
+                    f"{disp['avg_s']:.4f}",
+                    f"{disp['peak_s']:.4f}",
+                )
+        else:
+            table.add_row(
+                "[dim]No step timings recorded[/dim]",
+                "—",
+                "—",
+            )
 
         panel = Panel(
             table,

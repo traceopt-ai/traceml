@@ -1,0 +1,8 @@
+ROOT_LAYOUT_NAME = "root"
+LIVE_METRICS_LAYOUT_NAME = "live_metrics_section"
+SYSTEM_LAYOUT_NAME = "system_section"
+PROCESS_LAYOUT_NAME = "process_section"
+LAYER_COMBINED_LAYOUT_NAME = "layer_combined_section"
+ACTIVATION_GRADIENT_LAYOUT_NAME = "activation_gradient_section"
+STEPTIMER_LAYOUT_NAME = "steptimer_section"
+STDOUT_STDERR_LAYOUT_NAME = "stdout_stderr_section"
