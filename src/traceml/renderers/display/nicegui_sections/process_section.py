@@ -8,6 +8,10 @@ from traceml.renderers.display.nicegui_sections.helper import (
 
 def build_process_section():
 
+    ui.label("Process Metrics") \
+        .classes("text-base font-bold mb-1 ml-1") \
+        .style("color:#ff9800;")
+
     card = ui.card().classes("m-2 p-2 w-full")
     card.style("""
         background: rgba(245, 245, 245, 0.35);
@@ -18,13 +22,10 @@ def build_process_section():
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
         overflow-y: auto; 
         line-height: 1.1;
+        height: 350px;
     """)
 
     with card:
-
-        ui.label("Process Metrics") \
-            .classes("text-base font-bold mb-1") \
-            .style("color:#ff9800;")
 
         graph = _build_graph_section()
         cpu_text, cpu_bar = _build_cpu_section()
@@ -68,13 +69,13 @@ def update_process_section(panel, data):
     total = data["gpu_total"]
 
     if used is None or total is None:
-        panel["gpu_text"].content = "GPU: Not available"
+        panel["gpu_text"].content = "GPU Mem: Not available"
         panel["gpu_bar"].content = ""
     else:
 
         used_pct = (used * 100.0) / total
         panel["gpu_text"].content = (
-            f"GPU: {fmt_mem_new(used)} used / "
+            f"GPU Mem: {fmt_mem_new(used)} used / "
             f"{fmt_mem_new(reserved)} reserved / "
             f"{fmt_mem_new(total)} total"
         )
@@ -86,8 +87,14 @@ def update_process_section(panel, data):
 def _build_graph_section():
     fig = go.Figure()
     fig.update_layout(
-        height=120,
-        margin=dict(l=10, r=10, t=5, b=5),
+        title=dict(
+            text="<b>Memory Usage</b>",
+            x=0.5,
+            font=dict(size=14, color="#d47a00"),
+            y=1.0,
+        ),
+        height=190,
+        margin=dict(l=10, r=10, t=40, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 
@@ -190,8 +197,14 @@ def _update_gpu_graph(process_table, fig, x_hist):
 
 def _update_graph_layout(gpu_available, fig):
     common_layout = dict(
-        height=120,
-        margin=dict(l=10, r=10, t=5, b=5),
+        title=dict(
+            text="<b>Memory Usage</b>",
+            x=0.5,
+            font=dict(size=14, color="#d47a00"),
+            y=1.0,
+        ),
+        height=190,
+        margin=dict(l=10, r=10, t=40, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 

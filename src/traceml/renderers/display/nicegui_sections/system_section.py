@@ -8,6 +8,9 @@ from traceml.renderers.display.nicegui_sections.helper import (
 
 
 def build_system_section():
+    ui.label("System Metrics") \
+        .classes("text-base font-bold mb-1 ml-1") \
+        .style("color:#ff9800;")
 
     card = ui.card().classes("m-2 p-2 w-full")
     card.style("""
@@ -17,54 +20,55 @@ def build_system_section():
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-        overflow-y: auto; 
+        overflow-y: auto;
         line-height: 1.1;
+        height: 350px;
     """)
 
     with card:
-        ui.label("System Metrics") \
-            .classes("text-base font-bold mb-1") \
-            .style("color:#ff9800;")
         graph = _build_graph_section()
-        cpu_text, cpu_bar = _build_cpu_section()
-        ram_text, ram_bar = _build_ram_section()
-        gpu_text, gpu_bar = _build_gpu_section()
+        with ui.grid(columns=4).classes("w-full gap-x-3 gap-y-2"):
+            # CPU + GPU UTIL ==========
+            cpu_text = ui.html("CPU: –", sanitize=False).classes("text-sm")
+            cpu_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
+            gpu_util_text = ui.html("GPU Util: –", sanitize=False).classes("text-sm")
+            gpu_util_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
 
+            # RAM + GPU MEM
+            ram_text = ui.html("RAM: –", sanitize=False).classes("text-sm")
+            ram_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
+            gpu_mem_text = ui.html("GPU Mem: –", sanitize=False).classes("text-sm")
+            gpu_mem_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
+
+            # TEMP + POWER
+            temp_text = ui.html("Temp: –", sanitize=False).classes("text-sm")
+            empty1    = ui.html("", sanitize=False).classes("h-2")
+            #
+            # power_text = ui.html("Power: –").classes("text-sm")
+            # empty2     = ui.html("").classes("h-2")  # keeps column alignment
 
     return {
         "cpu_text": cpu_text, "cpu_bar": cpu_bar,
+        "gpu_util_text": gpu_util_text, "gpu_util_bar": gpu_util_bar,
         "ram_text": ram_text, "ram_bar": ram_bar,
-        "gpu_text": gpu_text, "gpu_bar": gpu_bar,
+        "gpu_mem_text": gpu_mem_text, "gpu_mem_bar": gpu_mem_bar,
         "graph": graph,
+        "temp_text": temp_text,
+        #"power_text": power_text,
     }
-
-
-def _build_cpu_section():
-    with ui.row().classes("items-center justify-between w-full"):
-        cpu_text = ui.html("CPU: –", sanitize=False).classes("text-sm").style("color:#333")
-        cpu_bar = ui.html("", sanitize=False)
-    return cpu_text, cpu_bar
-
-
-def _build_ram_section():
-    with ui.row().classes("items-center justify-between w-full"):
-        ram_text = ui.html("RAM: –", sanitize=False).classes("text-sm").style("color:#333")
-        ram_bar = ui.html("", sanitize=False)
-    return ram_text, ram_bar
-
-
-def _build_gpu_section():
-    with ui.row().classes("items-center justify-between w-full"):
-        gpu_text = ui.html("GPU: –", sanitize=False).classes("text-sm").style("color:#333")
-        gpu_bar = ui.html("", sanitize=False)
-    return gpu_text, gpu_bar
 
 
 def _build_graph_section():
     fig = go.Figure()
     fig.update_layout(
-        height=120,
-        margin=dict(l=10, r=10, t=5, b=5),
+        title=dict(
+            text="<b>Compute Usage</b>",
+            x=0.5,
+            font=dict(size=14, color="#d47a00"),
+            y=1.0
+        ),
+        height=190,
+        margin=dict(l=10, r=10, t=40, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 
@@ -100,26 +104,47 @@ def update_system_section(panel, data):
     if rt:
         pct = (ru * 100.0) / rt
         panel["ram_text"].content = (
-            f"RAM: {fmt_mem_new(ru)} / {fmt_mem_new(rt)} ({pct:.1f}%)"
+            f"RAM: {fmt_mem_new(ru)}/{fmt_mem_new(rt)} ({pct:.1f}%)"
         )
         panel["ram_bar"].content = level_bar_continuous(pct)
     else:
         panel["ram_text"].content = "RAM: –"
         panel["ram_bar"].content = ""
 
-    # GPU
-    if not data["gpu_available"]:
-        panel["gpu_text"].content = "GPU: Not available"
-        panel["gpu_bar"].content = ""
+    # GPU Util
+    if not data.get("gpu_available", False):
+        panel["gpu_util_text"].content = "GPU Util: Not available"
+        panel["gpu_util_bar"].content = ""
+        panel["gpu_mem_text"].content = "GPU Mem: Not available"
+        panel["gpu_mem_bar"].content = ""
     else:
+        util_avg = _compute_gpu_avg_util(data)
+        panel["gpu_util_text"].content = f"GPU Util: {util_avg:.1f}%"
+        panel["gpu_util_bar"].content = level_bar_continuous(util_avg)
+        gmu = data.get("gpu_mem_used", 0.0) or 0.0
+        gmt = data.get("gpu_mem_total", 1.0)
 
-        util = data["gpu_util_total"]
-        panel["gpu_text"].content = f"GPU: {util:.1f}%"
-        panel["gpu_bar"].content = level_bar_continuous(util)
+        g_pct = (gmu * 100.0) / gmt
+        panel["gpu_mem_text"].content = (
+            f"GPU Mem: {fmt_mem_new(gmu)}/{fmt_mem_new(gmt)} ({g_pct:.1f}%)"
+        )
+        panel["gpu_mem_bar"].content = level_bar_continuous(g_pct)
 
     _update_graph_section(panel, data["table"])
     return
 
+
+
+def _compute_gpu_avg_util(data):
+    """Compute average GPU utilization (0–100)."""
+    if not data.get("gpu_available", False):
+        return None
+
+    util_total = data.get("gpu_util_total", 0.0) or 0.0
+    gpu_count = data.get("gpu_count", 1) or 1
+
+    util_avg = util_total / gpu_count
+    return util_avg
 
 
 def _update_graph_section(panel, system_table):
@@ -179,8 +204,14 @@ def _update_gpu_graph(system_table, fig, x_hist):
 
 def _update_graph_layout(gpu_available, fig):
     common_layout = dict(
-        height=120,
-        margin=dict(l=10, r=10, t=5, b=5),
+        title=dict(
+            text="<b>Compute Usage</b>",
+            x=0.5,
+            font=dict(size=14, color="#d47a00"),
+            y=1.0,
+        ),
+        height=190,
+        margin=dict(l=10, r=10, t=40, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 
