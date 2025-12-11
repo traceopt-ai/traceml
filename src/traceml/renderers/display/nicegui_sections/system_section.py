@@ -44,8 +44,8 @@ def build_system_section():
             temp_text = ui.html("Temp: –", sanitize=False).classes("text-sm")
             empty1    = ui.html("", sanitize=False).classes("h-2")
             #
-            # power_text = ui.html("Power: –").classes("text-sm")
-            # empty2     = ui.html("").classes("h-2")  # keeps column alignment
+            power_text = ui.html("Power: –", sanitize=False).classes("text-sm")
+            empty2 = ui.html("", sanitize=False).classes("h-2")
 
     return {
         "cpu_text": cpu_text, "cpu_bar": cpu_bar,
@@ -54,7 +54,7 @@ def build_system_section():
         "gpu_mem_text": gpu_mem_text, "gpu_mem_bar": gpu_mem_bar,
         "graph": graph,
         "temp_text": temp_text,
-        #"power_text": power_text,
+        "power_text": power_text,
     }
 
 
@@ -117,6 +117,9 @@ def update_system_section(panel, data):
         panel["gpu_util_bar"].content = ""
         panel["gpu_mem_text"].content = "GPU Mem: Not available"
         panel["gpu_mem_bar"].content = ""
+        panel["temp_text"].content = "Temp: Not available"
+        panel["power_text"].content = "Power: Not available"
+
     else:
         util_avg = _compute_gpu_avg_util(data)
         panel["gpu_util_text"].content = f"GPU Util: {util_avg:.1f}%"
@@ -129,6 +132,11 @@ def update_system_section(panel, data):
             f"GPU Mem: {fmt_mem_new(gmu)}/{fmt_mem_new(gmt)} ({g_pct:.1f}%)"
         )
         panel["gpu_mem_bar"].content = level_bar_continuous(g_pct)
+        temp = data.get("gpu_temp_max", 0.0)
+        panel["temp_text"].content = f"Temp: {temp:.0f}°C"
+        p_used = data.get("gpu_power_usage", None)
+        p_lim = data.get("gpu_power_limit", None)
+        panel["power_text"].content = f"Power: {p_used:.0f}W/{p_lim:.0f}W"
 
     _update_graph_section(panel, data["table"])
     return
