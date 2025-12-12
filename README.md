@@ -20,6 +20,8 @@ A lightweight, always-on profiler for PyTorch that makes **memory**, **timing**,
 
 Minimal configuration. Minimal overhead. Plug-and-trace.
 
+### Note: TraceML currently supports single-GPU training. DDP multi-GPU support is coming soon.
+
 ---
 
 ## 📊 Quick User Survey (2 min)
