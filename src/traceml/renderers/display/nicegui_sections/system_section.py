@@ -9,7 +9,7 @@ from traceml.renderers.display.nicegui_sections.helper import (
 
 def build_system_section():
     ui.label("System Metrics") \
-        .classes("text-xl font-bold mb-1 ml-1") \
+        .classes("text-xl font-bold mb-1 ml-1 break-words whitespace-normal") \
         .style("color:#ff9800;")
 
     card = ui.card().classes("m-2 p-2 w-full")
@@ -22,7 +22,7 @@ def build_system_section():
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
         overflow-y: auto;
         line-height: 1.1;
-        height: 350px;
+        max-height: 350px;
     """)
 
     with card:
@@ -30,15 +30,15 @@ def build_system_section():
         with ui.grid(columns=4).classes("w-full gap-x-3 gap-y-2"):
             # CPU + GPU UTIL ==========
             cpu_text = ui.html("CPU: –", sanitize=False).classes("text-sm")
-            cpu_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
+            cpu_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
             gpu_util_text = ui.html("GPU Util: –", sanitize=False).classes("text-sm")
-            gpu_util_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
+            gpu_util_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
 
             # RAM + GPU MEM
             ram_text = ui.html("RAM: –", sanitize=False).classes("text-sm")
-            ram_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
+            ram_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
             gpu_mem_text = ui.html("GPU Mem: –", sanitize=False).classes("text-sm")
-            gpu_mem_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-grow")
+            gpu_mem_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
 
             # TEMP + POWER
             temp_text = ui.html("Temp: –", sanitize=False).classes("text-sm")

@@ -12,9 +12,9 @@ def build_layer_table_section():
     """)
 
     with card:
-        ui.label("Memory Leaderboard").classes("text-lg font-bold mb-2").style("color:#ff9800;")
+        ui.label("Per Layer Stats").classes("text-lg font-bold mb-2").style("color:#ff9800;")
         container = ui.html("", sanitize=False).style(
-            "max-height: 260px; overflow-y: auto; width: 100%;"
+             "max-height: 350px; overflow-y: auto; width: 100%;"
         )
 
     return {"table": container}

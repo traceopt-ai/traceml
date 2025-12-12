@@ -9,7 +9,7 @@ from traceml.renderers.display.nicegui_sections.helper import (
 def build_process_section():
 
     ui.label("Process Metrics") \
-        .classes("text-base font-bold mb-1 ml-1") \
+        .classes("text-xl font-bold mb-1 ml-1") \
         .style("color:#ff9800;")
 
     card = ui.card().classes("m-2 p-2 w-full")
@@ -22,7 +22,7 @@ def build_process_section():
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
         overflow-y: auto; 
         line-height: 1.1;
-        height: 350px;
+        max-height: 350px;
     """)
 
     with card:
@@ -134,7 +134,7 @@ def _build_ram_section():
 
 def _build_gpu_section():
     with ui.row().classes("items-center justify-between w-full"):
-        gpu_text = ui.html("GPU: –", sanitize=False).classes("text-sm").style("color:#333")
+        gpu_text = ui.html("GPU Mem: –", sanitize=False).classes("text-sm").style("color:#333")
         gpu_bar = ui.html("", sanitize=False)
     return gpu_text, gpu_bar
 

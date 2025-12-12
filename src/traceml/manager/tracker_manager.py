@@ -106,9 +106,9 @@ class TrackerManager:
     def get_process_components(is_ddp: bool, local_rank: int):
         if is_ddp and local_rank != 0:
             return []
-        
         process_sampler = ProcessSampler()
         process_renderer = ProcessRenderer(database=process_sampler.db)
+
         return [([process_sampler], [process_renderer])]
 
     @staticmethod
