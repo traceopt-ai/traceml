@@ -8,9 +8,6 @@ from traceml.renderers.display.nicegui_sections.helper import (
 
 
 def build_system_section():
-    ui.label("System Metrics") \
-        .classes("text-xl font-bold mb-1 ml-1 break-words whitespace-normal") \
-        .style("color:#ff9800;")
 
     card = ui.card().classes("m-2 p-2 w-full")
     card.style("""
@@ -22,10 +19,13 @@ def build_system_section():
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
         overflow-y: auto;
         line-height: 1.1;
-        max-height: 350px;
+        height: 350px;
     """)
 
     with card:
+        ui.label("System Metrics") \
+            .classes("text-xl font-bold mb-1 ml-1 break-words whitespace-normal") \
+            .style("color:#d47a00;")
         graph = _build_graph_section()
         with ui.grid(columns=4).classes("w-full gap-x-3 gap-y-2"):
             # CPU + GPU UTIL ==========
@@ -61,14 +61,8 @@ def build_system_section():
 def _build_graph_section():
     fig = go.Figure()
     fig.update_layout(
-        title=dict(
-            text="<b>Compute Usage</b>",
-            x=0.5,
-            font=dict(size=14, color="#d47a00"),
-            y=1.0
-        ),
-        height=190,
-        margin=dict(l=10, r=10, t=40, b=35),
+        height=175,
+        margin=dict(l=10, r=10, t=10, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 
@@ -212,14 +206,8 @@ def _update_gpu_graph(system_table, fig, x_hist):
 
 def _update_graph_layout(gpu_available, fig):
     common_layout = dict(
-        title=dict(
-            text="<b>Compute Usage</b>",
-            x=0.5,
-            font=dict(size=14, color="#d47a00"),
-            y=1.0,
-        ),
-        height=190,
-        margin=dict(l=10, r=10, t=40, b=35),
+        height=175,
+        margin=dict(l=10, r=10, t=10, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 

@@ -7,11 +7,6 @@ from traceml.renderers.display.nicegui_sections.helper import (
 )
 
 def build_process_section():
-
-    ui.label("Process Metrics") \
-        .classes("text-xl font-bold mb-1 ml-1") \
-        .style("color:#ff9800;")
-
     card = ui.card().classes("m-2 p-2 w-full")
     card.style("""
         background: rgba(245, 245, 245, 0.35);
@@ -22,10 +17,13 @@ def build_process_section():
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
         overflow-y: auto; 
         line-height: 1.1;
-        max-height: 350px;
+        height: 350px;
     """)
 
     with card:
+        ui.label("Process Metrics") \
+            .classes("text-xl font-bold mb-1 ml-1") \
+            .style("color:#d47a00;")
 
         graph = _build_graph_section()
         cpu_text, cpu_bar = _build_cpu_section()
@@ -87,14 +85,8 @@ def update_process_section(panel, data):
 def _build_graph_section():
     fig = go.Figure()
     fig.update_layout(
-        title=dict(
-            text="<b>Memory Usage</b>",
-            x=0.5,
-            font=dict(size=14, color="#d47a00"),
-            y=1.0,
-        ),
-        height=190,
-        margin=dict(l=10, r=10, t=40, b=35),
+        height=175,
+        margin=dict(l=10, r=10, t=10, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 
@@ -197,14 +189,8 @@ def _update_gpu_graph(process_table, fig, x_hist):
 
 def _update_graph_layout(gpu_available, fig):
     common_layout = dict(
-        title=dict(
-            text="<b>Memory Usage</b>",
-            x=0.5,
-            font=dict(size=14, color="#d47a00"),
-            y=1.0,
-        ),
-        height=190,
-        margin=dict(l=10, r=10, t=40, b=35),
+        height=175,
+        margin=dict(l=10, r=10, t=10, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
 

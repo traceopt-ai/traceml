@@ -47,17 +47,19 @@ def define_main_page(cls):
         """)
 
         # ----- PAGE LAYOUT -----
-        ui.label("TraceML").classes("text-2xl m-2")
+        ui.label("TraceML") \
+            .classes("text-4xl font-extrabold m-4 w-full text-center") \
+            .style("color:#ff9800;")
 
         with ui.row().classes("m-2 w-[99%] gap-4 flex-wrap items-center"):
 
             # System (left column)
-            with ui.column().classes("w-[45%]"):
+            with ui.column().classes("w-[49%]"):
                 cls.cards[SYSTEM_LAYOUT_NAME] = build_system_section()
                 cls.update_funcs[SYSTEM_LAYOUT_NAME] = update_system_section
 
             # Process (middle column)
-            with ui.column().classes("w-[45%]"):
+            with ui.column().classes("w-[49%]"):
                 cls.cards[PROCESS_LAYOUT_NAME] = build_process_section()
                 cls.update_funcs[PROCESS_LAYOUT_NAME] = update_process_section
 

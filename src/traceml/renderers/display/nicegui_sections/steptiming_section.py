@@ -12,7 +12,7 @@ def build_step_timing_table_section():
     """)
 
     with card:
-        ui.label("Step Timings").classes("text-lg font-bold mb-2").style("color:#ff9800;")
+        ui.label("Step Timings").classes("text-lg font-bold mb-2").style("color:#d47a00;")
         container = ui.html("", sanitize=False).style(
             "max-height: 350px; overflow-y: auto; width: 100%;"
         )
