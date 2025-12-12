@@ -9,7 +9,7 @@ from traceml.renderers.display.nicegui_sections.helper import (
 
 def build_system_section():
     ui.label("System Metrics") \
-        .classes("text-base font-bold mb-1 ml-1") \
+        .classes("text-xl font-bold mb-1 ml-1") \
         .style("color:#ff9800;")
 
     card = ui.card().classes("m-2 p-2 w-full")
