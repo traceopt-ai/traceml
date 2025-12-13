@@ -252,7 +252,7 @@ This keeps overhead extremely low.
 - Open issues for improvements or bugs  
 - Contributions welcome  
 
-📧 Contact: **abhinavsriva@gmail.com**
+📧 Contact: **abhinav@traceopt.ai**
 
 ---
 
@@ -263,7 +263,7 @@ TraceML uses **MIT License + Commons Clause**:
 - Free for personal, research, academic, and internal use  
 - Not allowed for resale, SaaS, or commercial redistribution  
 
-For commercial licensing, contact **abhinavsriva@gmail.com**.
+For commercial licensing, contact **abhinav@traceopt.ai**.
 
 ---
 
