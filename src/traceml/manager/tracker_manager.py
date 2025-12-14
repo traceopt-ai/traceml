@@ -6,7 +6,7 @@ from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import NotebookDisplayManager
 from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayManager
 
-
+from traceml.utils.distributed import get_ddp_info
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.process_sampler import ProcessSampler
@@ -79,33 +79,58 @@ class TrackerManager:
         mode: str, num_display_layers: int
     ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
 
+        is_ddp, local_rank, world_size = get_ddp_info()
+
+        components = []
+        components += TrackerManager.get_system_components(is_ddp, local_rank)
+        components += TrackerManager.get_process_components(is_ddp, local_rank)
+        components += TrackerManager.get_memory_components(num_display_layers)
+        components += TrackerManager.get_step_timer_components()
+
+        if mode == "cli":
+            components += TrackerManager.get_stdout_components()
+
+        return components
+
+    @staticmethod
+    def get_system_components(is_ddp: bool, local_rank: int):
+        if is_ddp and local_rank != 0:
+            return []  # disable on non-zero ranks
+
         system_sampler = SystemSampler()
+        system_renderer = SystemRenderer(database=system_sampler.db)
+        return [([system_sampler], [system_renderer])]
+
+
+    @staticmethod
+    def get_process_components(is_ddp: bool, local_rank: int):
+        if is_ddp and local_rank != 0:
+            return []
         process_sampler = ProcessSampler()
+        process_renderer = ProcessRenderer(database=process_sampler.db)
+
+        return [([process_sampler], [process_renderer])]
+
+    @staticmethod
+    def get_memory_components(num_display_layers: int):
         layer_memory_sampler = LayerMemorySampler()
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
-        step_timer_sampler = StepTimerSampler()
 
-        system_renderer = SystemRenderer(database=system_sampler.db)
-        process_renderer = ProcessRenderer(database=process_sampler.db)
         layer_combined_renderer = LayerCombinedRenderer(
             layer_db=layer_memory_sampler.db,
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
             top_n_layers=num_display_layers,
         )
+
         activation_gradient_renderer = ActivationGradientRenderer(
             layer_db=layer_memory_sampler.db,
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
         )
-        step_timer_renderer = StepTimerRenderer(database=step_timer_sampler.db)
-        stdout_stderr_renderer = StdoutStderrRenderer()
 
-        # Collect all trackers
-        sampler_logger_pairs = [
-            ([system_sampler], [system_renderer]),
-            ([process_sampler], [process_renderer]),
+        return [
             (
                 [
                     layer_memory_sampler,
@@ -113,12 +138,20 @@ class TrackerManager:
                     gradient_memory_sampler,
                 ],
                 [layer_combined_renderer, activation_gradient_renderer],
-            ),
-            ([step_timer_sampler], [step_timer_renderer]),
+            )
         ]
-        if mode == "cli":
-            sampler_logger_pairs.append(([], [stdout_stderr_renderer]))
-        return sampler_logger_pairs
+
+    @staticmethod
+    def get_step_timer_components():
+        step_timer_sampler = StepTimerSampler()
+        step_timer_renderer = StepTimerRenderer(database=step_timer_sampler.db)
+        return [([step_timer_sampler], [step_timer_renderer])]
+
+    @staticmethod
+    def get_stdout_components():
+        stdout_renderer = StdoutStderrRenderer()
+        return [([], [stdout_renderer])]
+
 
     def _run_once(self):
         """Single sampling + writing to file + logging + display update pass."""

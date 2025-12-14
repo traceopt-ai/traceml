@@ -38,6 +38,7 @@ class SystemRenderer(BaseRenderer):
                 "gpu_temp_max": None,
                 "gpu_power_usage": None,
                 "gpu_power_limit": None,
+                "gpu_count": 0,
             }
 
         gpu_raw = latest.get("gpu_raw", {}) or {}
@@ -68,7 +69,7 @@ class SystemRenderer(BaseRenderer):
             "gpu_temp_max": temp_max,
             "gpu_power_usage": power_total,
             "gpu_power_limit": power_limit_total,
-
+            "gpu_count": latest.get("gpu_count", 0),
         }
 
     def _compute_summary(self) -> Dict[str, Any]:

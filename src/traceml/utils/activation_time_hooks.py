@@ -11,8 +11,6 @@ _activation_time_registry: Dict[int, bool] = {}
 
 # Temporary buffer to match pre <-> post events
 _temp_time_buffer: Dict[int, Dict[str, List[float]]] = {}
-# structure:
-# _temp_time_buffer[model_id][layer_name] = [list of start_times]
 
 
 @dataclass

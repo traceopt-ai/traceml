@@ -73,11 +73,11 @@ class ProcessRenderer(BaseRenderer):
         table.add_row(*proc_info)
 
         if proc["gpu_total"]:
-            gpu_str = [
+            gpu_str = (
                 f"{fmt_mem_new(proc['gpu_used'])}/"
                 f"{fmt_mem_new(proc['gpu_reserved'])}/"
                 f"{fmt_mem_new(proc['gpu_total'])}"
-            ]
+            )
         else:
             gpu_str = "[red]Not available[/red]"
 
