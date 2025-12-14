@@ -29,7 +29,7 @@ def get_activation_memory_queue() -> Queue:
     return activation_memory_queue
 
 
-def _tensor_size_mb(tensor: torch.Tensor) -> float:
+def _tensor_size(tensor: torch.Tensor) -> float:
     """
     Compute the memory footprint of a tensor in megabytes.
     """
@@ -52,7 +52,7 @@ class ActivationMemoryHook:
             def accumulate(t):
                 if isinstance(t, torch.Tensor):
                     device_str = str(t.device)
-                    size_mb = _tensor_size_mb(t)
+                    size_mb = _tensor_size(t)
                     layer_acc[device_str] = layer_acc.get(device_str, 0.0) + size_mb
 
             # Handle tensor or collection of tensors
