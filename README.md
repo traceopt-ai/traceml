@@ -145,12 +145,6 @@ Opens a live dashboard at:
 http://localhost:8765
 ```
 
-Includes:
-
-- Real-time charts  
-- Per-layer memory
-- Peaks and summaries  
-
 ![TraceML Dashboard Live](dash_demo_v1.png)
 
 ---
