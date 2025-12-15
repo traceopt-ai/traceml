@@ -5,6 +5,8 @@ from traceml.config import config
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import NotebookDisplayManager
 from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayManager
+from traceml.samplers.activation_time_sampler import ActivationTimeSampler
+
 
 from traceml.utils.distributed import get_ddp_info
 from traceml.samplers.base_sampler import BaseSampler
@@ -26,6 +28,8 @@ from traceml.renderers.activation_gradient_memory_renderer import (
 )
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
 from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
+
+from traceml.renderers.combined_timing_renderer import CombinedTimingRenderer
 
 
 class TrackerManager:
@@ -86,6 +90,7 @@ class TrackerManager:
         components += TrackerManager.get_process_components(is_ddp, local_rank)
         components += TrackerManager.get_memory_components(num_display_layers)
         components += TrackerManager.get_step_timer_components()
+        components += TrackerManager.get_timing_components()
 
         if mode == "cli":
             components += TrackerManager.get_stdout_components()
@@ -150,6 +155,13 @@ class TrackerManager:
     def get_stdout_components():
         stdout_renderer = StdoutStderrRenderer()
         return [([], [stdout_renderer])]
+
+    @staticmethod
+    def get_timing_components():
+        activation_timing_sampler = ActivationTimeSampler()
+        combined_timing_rendered = CombinedTimingRenderer(
+            timing_db=activation_timing_sampler.db)
+        return [([activation_timing_sampler], [combined_timing_rendered])]
 
 
     def _run_once(self):

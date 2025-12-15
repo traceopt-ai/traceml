@@ -14,7 +14,7 @@ from traceml.renderers.layer_combined_timing.services import LayerTimingData
 from traceml.renderers.utils import fmt_time_ms, truncate_layer_name
 
 
-class LayerTimingRenderer(BaseRenderer):
+class CombinedTimingRenderer(BaseRenderer):
     """
     Layer-wise activation timing renderer.
     """
