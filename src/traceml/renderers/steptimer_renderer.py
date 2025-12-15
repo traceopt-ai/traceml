@@ -10,7 +10,7 @@ from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
-from traceml.renderers.display.cli_display_manager import STEPTIMER_LAYOUT_NAME
+from traceml.renderers.display.cli_display_manager import STEPTIMER_LAYOUT
 
 
 class StepTimerRenderer(BaseRenderer):
@@ -28,7 +28,7 @@ class StepTimerRenderer(BaseRenderer):
     def __init__(self, database: Database, top_n: int = 5):
         super().__init__(
             name="Step Timers",
-            layout_section_name=STEPTIMER_LAYOUT_NAME,
+            layout_section_name=STEPTIMER_LAYOUT,
         )
         self.db = database
         self.top_n = top_n

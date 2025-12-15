@@ -10,7 +10,7 @@ from traceml.samplers.gradient_memory_sampler import (
     GradientMemorySampler,
     GradientSnapshot,
 )
-from traceml.renderers.layer_combined_renderer import (
+from traceml.renderers.layer_combined_memory_renderer import (
     LayerCombinedRenderer,
 )
 from traceml.renderers.activation_gradient_memory_renderer import (

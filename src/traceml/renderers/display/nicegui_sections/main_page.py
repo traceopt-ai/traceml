@@ -1,12 +1,12 @@
 from nicegui import ui
 
 from traceml.renderers.display.layout import (
-    SYSTEM_LAYOUT_NAME,
-    PROCESS_LAYOUT_NAME,
-    LAYER_COMBINED_LAYOUT_NAME,
-    ACTIVATION_GRADIENT_LAYOUT_NAME,
-    STEPTIMER_LAYOUT_NAME,
-    STDOUT_STDERR_LAYOUT_NAME
+    SYSTEM_LAYOUT,
+    PROCESS_LAYOUT,
+    COMBINED_MEMORY_LAYOUT,
+    ACTIVATION_GRADIENT_LAYOUT,
+    STEPTIMER_LAYOUT,
+    STDOUT_STDERR_LAYOUT
 )
 
 from .system_section import (
@@ -55,27 +55,27 @@ def define_main_page(cls):
 
             # System (left column)
             with ui.column().classes("w-[49%]"):
-                cls.cards[SYSTEM_LAYOUT_NAME] = build_system_section()
-                cls.update_funcs[SYSTEM_LAYOUT_NAME] = update_system_section
+                cls.cards[SYSTEM_LAYOUT] = build_system_section()
+                cls.update_funcs[SYSTEM_LAYOUT] = update_system_section
 
             # Process (middle column)
             with ui.column().classes("w-[49%]"):
-                cls.cards[PROCESS_LAYOUT_NAME] = build_process_section()
-                cls.update_funcs[PROCESS_LAYOUT_NAME] = update_process_section
+                cls.cards[PROCESS_LAYOUT] = build_process_section()
+                cls.update_funcs[PROCESS_LAYOUT] = update_process_section
 
         with ui.row().classes("m-2 w-[90%] gap-4 flex-nowrap items-center"):
 
             with ui.column().classes("w-[60%]"):
-                cls.cards[LAYER_COMBINED_LAYOUT_NAME] = build_layer_table_section()
-                cls.update_funcs[LAYER_COMBINED_LAYOUT_NAME] = update_layer_table_section
+                cls.cards[COMBINED_MEMORY_LAYOUT] = build_layer_table_section()
+                cls.update_funcs[COMBINED_MEMORY_LAYOUT] = update_layer_table_section
 
             with ui.column().classes("w-[30%]"):
-                cls.cards[STEPTIMER_LAYOUT_NAME] = build_step_timing_table_section()
-                cls.update_funcs[STEPTIMER_LAYOUT_NAME] = update_step_timing_table_section
+                cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
+                cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
 
         for l in [
-            ACTIVATION_GRADIENT_LAYOUT_NAME,
-            STDOUT_STDERR_LAYOUT_NAME
+            ACTIVATION_GRADIENT_LAYOUT,
+            STDOUT_STDERR_LAYOUT
         ]:
             cls.cards[l] = build_fake_section()
             cls.update_funcs[l] = update_fake_section

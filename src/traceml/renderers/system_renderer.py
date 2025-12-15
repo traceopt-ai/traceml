@@ -8,7 +8,7 @@ from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
-from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT_NAME
+from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
 
@@ -19,7 +19,7 @@ class SystemRenderer(BaseRenderer):
     """
 
     def __init__(self, database: Database):
-        super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT_NAME)
+        super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT)
         self.db = database
         self._table = database.create_or_get_table("system")
 

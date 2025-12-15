@@ -8,7 +8,7 @@ from IPython.display import HTML
 from traceml.database.database import Database
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import (
-    ACTIVATION_GRADIENT_LAYOUT_NAME,
+    ACTIVATION_GRADIENT_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new
 
@@ -31,7 +31,7 @@ class ActivationGradientRenderer(BaseRenderer):
     ):
         super().__init__(
             name="Activation & Gradient Stats",
-            layout_section_name=ACTIVATION_GRADIENT_LAYOUT_NAME,
+            layout_section_name=ACTIVATION_GRADIENT_LAYOUT,
         )
         self._layer_table = layer_db.create_or_get_table("layer_memory")
         self.activation_db = activation_db

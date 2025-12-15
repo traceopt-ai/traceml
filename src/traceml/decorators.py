@@ -46,12 +46,16 @@ def trace_model(
             try:
                 if sample_layer_memory:
                     model_queue.put(self)
+
                 if trace_activation_memory:
                     attach_activation_memory_hooks(self)
+
                 if trace_gradients:
                     attach_all_gradient_hooks(self)
+
                 if trace_activation_time:
                     attach_activation_time_hooks(self)
+
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
 
@@ -83,12 +87,16 @@ def trace_model_instance(
             raise TypeError("trace_model_instance expects an nn.Module.")
         if sample_layer_memory:
             model_queue.put(model)
+
         if trace_activation_memory:
             attach_activation_memory_hooks(model)
+
         if trace_gradients:
             attach_all_gradient_hooks(model)
+
         if trace_activation_time:
             attach_activation_time_hooks(model)
+
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)
 

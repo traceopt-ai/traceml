@@ -9,18 +9,18 @@ from IPython.display import HTML
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
-    LAYER_COMBINED_LAYOUT_NAME,
+    COMBINED_MEMORY_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new
 
-from traceml.renderers.layer_combined.services import (
+from traceml.renderers.layer_combined_memory.services import (
     LayerCombinedData,
     LayerMemorySummary,
 )
-from traceml.renderers.layer_combined.utils import truncate_layer_name
+from traceml.renderers.utils import truncate_layer_name
 
 
-class LayerCombinedRenderer(BaseRenderer):
+class LayerCombinedMemoryRenderer(BaseRenderer):
     """
     Combined renderer using NEW total_peak_memory logic:
 
@@ -38,7 +38,7 @@ class LayerCombinedRenderer(BaseRenderer):
     ):
         super().__init__(
             name="Layer Combined Memory",
-            layout_section_name=LAYER_COMBINED_LAYOUT_NAME,
+            layout_section_name=COMBINED_MEMORY_LAYOUT,
         )
 
         layer_table = layer_db.create_or_get_table("layer_memory")

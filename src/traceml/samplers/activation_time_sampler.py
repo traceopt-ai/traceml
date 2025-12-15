@@ -1,8 +1,12 @@
-from typing import Any
-from .base_sampler import BaseSampler
-from traceml.utils.activation_time_hooks import get_activation_time_queue
-from traceml.loggers.error_log import get_error_logger
+from typing import List
+from queue import Empty, Full
 
+from .base_sampler import BaseSampler
+from traceml.loggers.error_log import get_error_logger
+from traceml.utils.activation_time_hooks import (
+    ActivationTimeEvent,
+    get_activation_time_queue
+)
 
 class ActivationTimeSampler(BaseSampler):
     """
@@ -18,51 +22,56 @@ class ActivationTimeSampler(BaseSampler):
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
-    def _drain_queue(self) -> None:
-        """
-        Drain entire activation-time queue and save every event.
-        """
-        queue = get_activation_time_queue()
-        if queue.empty():
-            return
+    def _drain_queue(self) -> List[ActivationTimeEvent]:
+        q = get_activation_time_queue()
+        events = []
 
-        while not queue.empty():
+        while True:
             try:
-                event = queue.get_nowait()
-            except Exception:
+                evt = q.get_nowait()
+            except Empty:
                 break
 
-            if event is None:
-                continue
+            if evt.try_resolve():
+                events.append(evt)
+            else:
+                # FIFO guarantee: later events cannot resolve earlier
+                try:
+                    q.put_nowait(evt)
+                except Full:
+                    self.logger.warning(
+                        "[TraceML] ActivationTime queue full on requeue"
+                    )
+                break
+        return events
 
-            self._save_event(event)
 
-    def _save_event(self, event: Any) -> None:
+    def _save_events(self, events: List[ActivationTimeEvent]) -> None:
         """
-        Save one ActivationTimeEvent into per-layer tables.
-        Expected event fields:
-          - model_id
-          - layer_name
-          - start_time
-          - end_time
-          - duration_ms
+        Save raw activation timing events into per-layer tables.
         """
-        layer_name = getattr(event, "layer_name", None)
-        record = {
-            "model_id": getattr(event, "model_id", None),
-            "start_time": getattr(event, "start_time", None),
-            "end_time": getattr(event, "end_time", None),
-            "duration_ms": getattr(event, "duration_ms", None),
-        }
+        for evt in events:
+            table_name = f"{evt.layer_name}"
+            table = self.db.create_or_get_table(table_name)
 
-        table = self.db.create_or_get_table(layer_name)
-        table.append(record)
+            record = {
+                "timestamp": evt.cpu_end,
+                "model_id": evt.model_id,
+                "layer_name": evt.layer_name,
+                "on_gpu": evt.on_gpu,
+                "cpu_duration_ms": evt.cpu_duration_ms,
+                "gpu_duration_ms": evt.gpu_duration_ms,
+            }
+            table.append(record)
 
     def sample(self):
         """
-        Drain queue → save events → no computation.
+        Drain → resolve → save raw events
         """
         try:
-            self._drain_queue()
+            events = self._drain_queue()
+            self._save_events(events)
         except Exception as e:
-            self.logger.error(f"[TraceML] ActivationTimeSampler error: {e}")
+            self.logger.error(
+                f"[TraceML] ActivationTimeSampler error: {e}"
+            )

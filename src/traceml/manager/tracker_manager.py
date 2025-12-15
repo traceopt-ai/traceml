@@ -18,8 +18,8 @@ from traceml.samplers.steptimer_sampler import StepTimerSampler
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.system_renderer import SystemRenderer
 from traceml.renderers.process_renderer import ProcessRenderer
-from traceml.renderers.layer_combined_renderer import (
-    LayerCombinedRenderer,
+from traceml.renderers.layer_combined_memory_renderer import (
+    LayerCombinedMemoryRenderer,
 )
 from traceml.renderers.activation_gradient_memory_renderer import (
     ActivationGradientRenderer,
@@ -117,7 +117,7 @@ class TrackerManager:
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
 
-        layer_combined_renderer = LayerCombinedRenderer(
+        layer_combined_renderer = LayerCombinedMemoryRenderer(
             layer_db=layer_memory_sampler.db,
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
@@ -129,7 +129,6 @@ class TrackerManager:
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
         )
-
         return [
             (
                 [

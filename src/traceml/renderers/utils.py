@@ -25,3 +25,11 @@ def format_cache_value(
     if not rec:
         return "—"
     return f"{fmt_mem_new(rec.get('current', 0.0))} / {fmt_mem_new(rec.get('global', 0.0))}"
+
+
+def fmt_time_ms(v: float) -> str:
+    if v <= 0:
+        return "—"
+    if v < 1.0:
+        return f"{v * 1000:.1f} µs"
+    return f"{v:.2f} ms"
