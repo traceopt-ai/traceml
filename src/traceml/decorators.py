@@ -10,14 +10,16 @@ from traceml.utils.patch import model_queue
 from traceml.utils.activation_memory_hook import attach_activation_memory_hooks
 from traceml.utils.gradient_hook import attach_all_gradient_hooks
 from traceml.utils.activation_time_hooks import attach_activation_time_hooks
+from traceml.utils.gradient_time_hooks import attach_gradient_time_hooks
 from traceml.utils.steptimer import StepTimeEvent, record_step_time_event
 
 
 def trace_model(
     sample_layer_memory: bool = True,
     trace_activation_memory: bool = True,
-    trace_gradients: bool = True,
+    trace_gradient_memory: bool = True,
     trace_activation_time: bool = True,
+    trace_gradient_time: bool = True,
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -27,9 +29,10 @@ def trace_model(
     Args:
         sample_layer_memory: enqueue model for memory sampling.
         trace_activation_memory: attach activation hooks to capture activations.
-        trace_gradients: attach gradient hooks to capture grad sizes (module + param).
+        trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
         trace_activation_time:attach activation *time* hooks (pre + post)
             (only CPU time so wwaiting time + execution time).
+        trace_gradient_time:attach gradient *time* hooks (pre + post).
     """
 
     def decorator(cls):
@@ -37,7 +40,6 @@ def trace_model(
             raise TypeError(
                 "@trace_model can only be applied to nn.Module subclasses for now."
             )
-
         original_init = cls.__init__
 
         @functools.wraps(original_init)
@@ -50,11 +52,14 @@ def trace_model(
                 if trace_activation_memory:
                     attach_activation_memory_hooks(self)
 
-                if trace_gradients:
+                if trace_gradient_memory:
                     attach_all_gradient_hooks(self)
 
                 if trace_activation_time:
                     attach_activation_time_hooks(self)
+
+                if trace_gradient_time:
+                    attach_gradient_time_hooks(self)
 
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
@@ -69,8 +74,9 @@ def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
     trace_activation_memory: bool = True,
-    trace_gradients: bool = True,
+    trace_gradient_memory: bool = True,
     trace_activation_time: bool = True,
+    trace_gradient_time: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -79,8 +85,9 @@ def trace_model_instance(
         model (nn.Module): The model instance to trace.
         sample_layer_memory: enqueue model for memory sampling.
         trace_activation_memory: attach activation hooks to capture activations.
-        trace_gradients: attach gradient hooks to capture grad sizes (module + param).
+        trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
         trace_activation_time:attach activation *time* hooks (pre + post).
+        trace_gradient_time:attach gradient *time* hooks (pre + post).
     """
     try:
         if not isinstance(model, nn.Module):
@@ -91,11 +98,14 @@ def trace_model_instance(
         if trace_activation_memory:
             attach_activation_memory_hooks(model)
 
-        if trace_gradients:
+        if trace_gradient_memory:
             attach_all_gradient_hooks(model)
 
         if trace_activation_time:
             attach_activation_time_hooks(model)
+
+        if trace_gradient_time:
+            attach_gradient_time_hooks(model)
 
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)

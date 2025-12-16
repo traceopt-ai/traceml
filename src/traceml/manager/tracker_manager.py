@@ -5,8 +5,6 @@ from traceml.config import config
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.renderers.display.notebook_display_manager import NotebookDisplayManager
 from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayManager
-from traceml.samplers.activation_time_sampler import ActivationTimeSampler
-
 
 from traceml.utils.distributed import get_ddp_info
 from traceml.samplers.base_sampler import BaseSampler
@@ -16,6 +14,8 @@ from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
 from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 from traceml.samplers.steptimer_sampler import StepTimerSampler
+from traceml.samplers.activation_time_sampler import ActivationTimeSampler
+from traceml.samplers.gradient_time_sampler import GradientTimeSampler
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.system_renderer import SystemRenderer
@@ -159,13 +159,13 @@ class TrackerManager:
     @staticmethod
     def get_timing_components(num_display_layers: int):
         activation_timing_sampler = ActivationTimeSampler()
-        activation_timing_sampler2 = ActivationTimeSampler()
+        gradient_timing_sampler = GradientTimeSampler()
         combined_timing_rendered = LayerCombinedTimerRenderer(
             activation_db=activation_timing_sampler.db,
-            gradient_db=activation_timing_sampler2.db,
+            gradient_db=gradient_timing_sampler.db,
             top_n_layers=num_display_layers
         )
-        return [([activation_timing_sampler], [combined_timing_rendered])]
+        return [([activation_timing_sampler, gradient_timing_sampler], [combined_timing_rendered])]
 
 
     def _run_once(self):

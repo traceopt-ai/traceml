@@ -6,6 +6,7 @@ import sys
 
 import torch
 import torch.nn as nn
+from traceml.utils.shared_utils import model_is_on_cuda
 
 activation_time_queue: Queue = Queue(maxsize=2048)
 _activation_time_registry: Dict[int, bool] = {}
@@ -61,14 +62,6 @@ def get_activation_time_queue() -> Queue:
     return activation_time_queue
 
 
-def _model_is_on_cuda(model: nn.Module) -> bool:
-    for p in model.parameters():
-        return p.is_cuda
-    for b in model.buffers():
-        return b.is_cuda
-    return False
-
-
 class ActivationTimePreHook:
     def __init__(self, model_id: int, layer_name: str, on_gpu:bool):
         self.model_id = model_id
@@ -121,8 +114,8 @@ class ActivationTimePostHook:
             gpu_start = start_record["gpu_start"]
             gpu_end = None
             if self.on_gpu:
-                gpu_start = torch.cuda.Event(enable_timing=True)
-                gpu_start.record()
+                gpu_end = torch.cuda.Event(enable_timing=True)
+                gpu_end.record()
 
             event = ActivationTimeEvent(
                 model_id=self.model_id,
@@ -156,7 +149,7 @@ def attach_activation_time_hooks(model: nn.Module):
     if _activation_time_registry.get(model_id):
         return
 
-    on_gpu = _model_is_on_cuda(model)
+    on_gpu = model_is_on_cuda(model)
     for name, module in model.named_modules():
         if any(module.children()):
             continue
