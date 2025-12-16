@@ -37,3 +37,12 @@ def fmt_mem_new(num_bytes: Any) -> str:
         return f"{v:.1f} {units[idx]}"
     else:
         return f"{v:.2f} {units[idx]}"
+
+
+
+def fmt_time_ms(v: float) -> str:
+    if v <= 0:
+        return "—"
+    if v < 1.0:
+        return f"{v * 1000:.1f} µs"
+    return f"{v:.2f} ms"

@@ -16,7 +16,8 @@ from traceml.renderers.combined_timing.services import (
     LayerCombinedTimerData,
     LayerCombinedTimerSummary
 )
-from traceml.renderers.utils import fmt_time_ms, truncate_layer_name
+from traceml.renderers.utils import truncate_layer_name
+from traceml.utils.formatting import fmt_time_ms
 
 
 class LayerCombinedTimerRenderer(BaseRenderer):

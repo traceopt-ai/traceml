@@ -1,7 +1,7 @@
 from nicegui import ui
 from traceml.utils.formatting import fmt_mem_new
 
-def build_layer_table_section():
+def build_layer_memory_table_section():
     card = ui.card().classes("m-2 p-4 w-full")
     card.style("""
         background: rgba(245, 245, 245, 0.35);
@@ -12,7 +12,7 @@ def build_layer_table_section():
     """)
 
     with card:
-        ui.label("Per Layer Stats").classes("text-lg font-bold mb-2").style("color:#d47a00;")
+        ui.label("Per Layer Memory Stats").classes("text-lg font-bold mb-2").style("color:#d47a00;")
         container = ui.html("", sanitize=False).style(
              "max-height: 350px; overflow-y: auto; width: 100%;"
         )
@@ -20,7 +20,7 @@ def build_layer_table_section():
     return {"table": container}
 
 
-def update_layer_table_section(panel, dashboard_data):
+def update_layer_memory_table_section(panel, dashboard_data):
     rows = dashboard_data["top_items"]      # NEW: matches service
     other = dashboard_data["other"]
 

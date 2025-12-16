@@ -6,7 +6,7 @@ from traceml.renderers.display.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
     ACTIVATION_GRADIENT_LAYOUT,
     STEPTIMER_LAYOUT,
-    STDOUT_STDERR_LAYOUT
+    LAYER_COMBINED_TIMER_LAYOUT
 )
 
 from .system_section import (
@@ -17,8 +17,18 @@ from .process_section import (
     build_process_section,
     update_process_section,
 )
-from .layer_table_section import build_layer_table_section, update_layer_table_section
-from .steptiming_section import build_step_timing_table_section, update_step_timing_table_section
+from .layer_memory_table_section import (
+    build_layer_memory_table_section,
+    update_layer_memory_table_section
+)
+from .layer_timer_table_section import (
+    build_layer_timer_table_section,
+    update_layer_timer_table_section
+)
+from .steptiming_section import (
+    build_step_timing_table_section,
+    update_step_timing_table_section
+)
 
 
 from .helper import build_fake_section, update_fake_section
@@ -47,7 +57,7 @@ def define_main_page(cls):
         """)
 
         # ----- PAGE LAYOUT -----
-        ui.label("TraceML") \
+        ui.label("TraceML Live Dashboard") \
             .classes("text-4xl font-extrabold m-4 w-full text-center") \
             .style("color:#ff9800;")
 
@@ -66,16 +76,20 @@ def define_main_page(cls):
         with ui.row().classes("m-2 w-[90%] gap-4 flex-nowrap items-center"):
 
             with ui.column().classes("w-[60%]"):
-                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = build_layer_table_section()
-                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = update_layer_table_section
+                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = build_layer_memory_table_section()
+                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = update_layer_memory_table_section
 
-            with ui.column().classes("w-[30%]"):
+            with ui.column().classes("w-[39%]"):
+                cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = build_layer_timer_table_section()
+                cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = update_layer_timer_table_section
+
+        with ui.row().classes("m-2 w-[99%] gap-4 flex-nowrap items-start"):
+            with ui.column().classes("w-full"):
                 cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
                 cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
 
         for l in [
-            ACTIVATION_GRADIENT_LAYOUT,
-            STDOUT_STDERR_LAYOUT
+            ACTIVATION_GRADIENT_LAYOUT
         ]:
             cls.cards[l] = build_fake_section()
             cls.update_funcs[l] = update_fake_section
