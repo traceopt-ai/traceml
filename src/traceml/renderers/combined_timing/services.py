@@ -187,7 +187,7 @@ class LayerCombinedTimerSummary:
         act = self._compute_db_summary(self._activation_db)
         grad = self._compute_db_summary(self._gradient_db)
 
-        total_samples = max(act["total_samples"] + grad["total_samples"])
+        total_samples = max(act["total_samples"], grad["total_samples"])
         total_layers_seen = len(set(act["layers_seen"]) | set(grad["layers_seen"]))
 
         return {

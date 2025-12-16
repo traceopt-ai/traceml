@@ -64,7 +64,6 @@ class GradientTimeSampler(BaseSampler):
                 "cpu_duration_ms": evt.cpu_duration_ms,
                 "gpu_duration_ms": evt.gpu_duration_ms,
             }
-            print(record)
             table.append(record)
 
     def sample(self):

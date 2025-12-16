@@ -226,7 +226,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
     def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
         table.add_row(
             "[blue]MODEL MEMORY[/blue]", "[dim]|[/dim]",
-            fmt_mem_new(stats["_model_memory"]))
+            fmt_mem_new(stats["model_memory"]))
 
     def _render_section_topk(self, table: Table, title: str, items: List, color: str) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
