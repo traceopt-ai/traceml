@@ -8,9 +8,9 @@ from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.display.stdout_stderr_capture import StreamCapture
 from traceml.renderers.display.layout import (
     ROOT_LAYOUT, SYSTEM_LAYOUT, PROCESS_LAYOUT,
-    COMBINED_MEMORY_LAYOUT, ACTIVATION_GRADIENT_LAYOUT,
+    LAYER_COMBINED_MEMORY_LAYOUT, ACTIVATION_GRADIENT_LAYOUT,
     STEPTIMER_LAYOUT, STDOUT_STDERR_LAYOUT,
-    COMBINED_TIMING_LAYOUT
+    LAYER_COMBINED_TIMER_LAYOUT
 )
 
 class CLIDisplayManager:
@@ -49,8 +49,8 @@ class CLIDisplayManager:
             Layout(name=PROCESS_LAYOUT, ratio=1),
         )
         dashboard["model_row"].split_row(
-            Layout(name=COMBINED_MEMORY_LAYOUT, ratio=1),
-            Layout(name=COMBINED_TIMING_LAYOUT, ratio=1),
+            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=5),
+            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=4),
         )
         dashboard["bottom_row"].split_row(
             Layout(name=ACTIVATION_GRADIENT_LAYOUT, ratio=1),
@@ -64,10 +64,10 @@ class CLIDisplayManager:
         dashboard[PROCESS_LAYOUT].update(
             Panel(Text("Waiting for Process Metrics...", justify="center"))
         )
-        dashboard[COMBINED_MEMORY_LAYOUT].update(
+        dashboard[LAYER_COMBINED_MEMORY_LAYOUT].update(
             Panel(Text("Waiting for Layer Memory...", justify="center"))
         )
-        dashboard[COMBINED_TIMING_LAYOUT].update(
+        dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
             Panel(Text("Waiting for Layer Timing...", justify="center"))
         )
         dashboard[ACTIVATION_GRADIENT_LAYOUT].update(

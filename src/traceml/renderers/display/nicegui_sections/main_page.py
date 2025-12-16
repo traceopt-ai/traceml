@@ -3,7 +3,7 @@ from nicegui import ui
 from traceml.renderers.display.layout import (
     SYSTEM_LAYOUT,
     PROCESS_LAYOUT,
-    COMBINED_MEMORY_LAYOUT,
+    LAYER_COMBINED_MEMORY_LAYOUT,
     ACTIVATION_GRADIENT_LAYOUT,
     STEPTIMER_LAYOUT,
     STDOUT_STDERR_LAYOUT
@@ -66,8 +66,8 @@ def define_main_page(cls):
         with ui.row().classes("m-2 w-[90%] gap-4 flex-nowrap items-center"):
 
             with ui.column().classes("w-[60%]"):
-                cls.cards[COMBINED_MEMORY_LAYOUT] = build_layer_table_section()
-                cls.update_funcs[COMBINED_MEMORY_LAYOUT] = update_layer_table_section
+                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = build_layer_table_section()
+                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = update_layer_table_section
 
             with ui.column().classes("w-[30%]"):
                 cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()

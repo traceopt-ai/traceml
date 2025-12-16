@@ -9,13 +9,13 @@ from IPython.display import HTML
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
-    COMBINED_MEMORY_LAYOUT,
+    LAYER_COMBINED_MEMORY_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new
 
-from traceml.renderers.layer_combined_memory.services import (
-    LayerCombinedData,
-    LayerMemorySummary,
+from traceml.renderers.combined_memory.services import (
+    LayerCombinedMemoryData,
+    LayerCombinedMemorySummary,
 )
 from traceml.renderers.utils import truncate_layer_name
 
@@ -37,18 +37,18 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         top_n_layers: Optional[int] = 20,
     ):
         super().__init__(
-            name="Layer Combined Memory",
-            layout_section_name=COMBINED_MEMORY_LAYOUT,
+            name="Layer-wise Combined Memory",
+            layout_section_name=LAYER_COMBINED_MEMORY_LAYOUT,
         )
 
         layer_table = layer_db.create_or_get_table("layer_memory")
-        self._data_service = LayerCombinedData(
+        self._data_service = LayerCombinedMemoryData(
             layer_table=layer_table,
             activation_db=activation_db,
             gradient_db=gradient_db,
             top_n_layers=top_n_layers,
         )
-        self._summary_service = LayerMemorySummary(
+        self._summary_service = LayerCombinedMemorySummary(
             layer_table=layer_table,
             activation_db=activation_db,
             gradient_db=gradient_db,
@@ -69,7 +69,6 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         table.add_column("Params", justify="right", style="white")
         table.add_column("Act (cur/peak)", justify="right", style="cyan")
         table.add_column("Grad (cur/peak)", justify="right", style="green")
-        table.add_column("Total Curr", justify="right", style="white")
         table.add_column("% curr", justify="right", style="white")
 
         for row in d["top_items"]:
@@ -80,7 +79,6 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                 f"{fmt_mem_new(row['activation_peak'])}",
                 f"{fmt_mem_new(row['gradient_current'])} / "
                 f"{fmt_mem_new(row['gradient_peak'])}",
-                fmt_mem_new(row["total_current_memory"]),
                 f"{row['pct']:.1f}%",
             )
 
@@ -91,12 +89,11 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                 fmt_mem_new(o["param_memory"]),
                 f"{fmt_mem_new(o['activation_current'])} / {fmt_mem_new(o['activation_peak'])}",
                 f"{fmt_mem_new(o['gradient_current'])} / {fmt_mem_new(o['gradient_peak'])}",
-                fmt_mem_new(o["total_current_memory"]),
                 f"{o['pct']:.1f}%",
             )
 
         if not d["top_items"] and o["total_current_memory"] <= 0:
-            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—", "—")
+            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—",  "—")
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 120)  # allow wider output
@@ -228,17 +225,8 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
     def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
         table.add_row(
-            "[blue]TOTAL SAMPLES TAKEN[/blue]", "[dim]|[/dim]",
-            str(stats["total_samples"]))
-        table.add_row(
-            "[blue]TOTAL MODELS SEEN[/blue]", "[dim]|[/dim]",
-            str(stats["total_models_seen"]))
-        table.add_row(
-            "[blue]AVERAGE MODEL MEMORY[/blue]", "[dim]|[/dim]",
-            fmt_mem_new(stats["average_model_memory"]))
-        table.add_row(
-            "[blue]PEAK MODEL MEMORY[/blue]", "[dim]|[/dim]",
-            fmt_mem_new(stats["peak_model_memory"]))
+            "[blue]MODEL MEMORY[/blue]", "[dim]|[/dim]",
+            fmt_mem_new(stats["_model_memory"]))
 
     def _render_section_topk(self, table: Table, title: str, items: List, color: str) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")

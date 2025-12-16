@@ -2,14 +2,14 @@ from typing import Dict, Any, Optional
 from traceml.database.database import Database
 
 
-class LayerCombinedData:
+class LayerCombinedMemoryData:
 
     def __init__(
         self,
         layer_table,
         activation_db: Database,
         gradient_db: Database,
-        top_n_layers: Optional[int] = 10,
+        top_n_layers: Optional[int] = 20,
     ):
         self._layer_table = layer_table
         self._activation_db = activation_db
@@ -183,7 +183,7 @@ class LayerCombinedData:
                 cache[layer]["global"] = max(cache[layer]["global"], gbl)
 
 
-class LayerMemorySummary:
+class LayerCombinedMemorySummary:
     """
     Computes global statistics for log_summary():
       - total samples
@@ -205,10 +205,8 @@ class LayerMemorySummary:
     def compute_layer_memory_summary(self) -> Dict[str, Any]:
         if not self._layer_table:
             return {
-                "total_samples": 0,
                 "total_models_seen": 0,
-                "average_model_memory": 0.0,
-                "peak_model_memory": 0.0,
+                "model_memory": 0.0,
             }
 
         total_samples = len(self._layer_table)
@@ -220,13 +218,10 @@ class LayerMemorySummary:
             float(entry.get("total_memory", 0.0)) for entry in self._layer_table
         ]
         avg_memory = sum(totals) / len(totals) if totals else 0.0
-        peak_memory = max(totals) if totals else 0.0
 
         return {
-            "total_samples": total_samples,
             "total_models_seen": len(model_signatures),
-            "average_model_memory": avg_memory,
-            "peak_model_memory": peak_memory,
+            "model_memory": avg_memory,
         }
 
     # ------------------------------------------------------------------

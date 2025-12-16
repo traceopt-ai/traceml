@@ -29,7 +29,7 @@ from traceml.renderers.activation_gradient_memory_renderer import (
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
 from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 
-from traceml.renderers.combined_timing_renderer import CombinedTimingRenderer
+from traceml.renderers.layer_combined_timing_renderer import LayerCombinedTimerRenderer
 
 
 class TrackerManager:
@@ -90,7 +90,7 @@ class TrackerManager:
         components += TrackerManager.get_process_components(is_ddp, local_rank)
         components += TrackerManager.get_memory_components(num_display_layers)
         components += TrackerManager.get_step_timer_components()
-        components += TrackerManager.get_timing_components()
+        components += TrackerManager.get_timing_components(num_display_layers)
 
         if mode == "cli":
             components += TrackerManager.get_stdout_components()
@@ -157,10 +157,14 @@ class TrackerManager:
         return [([], [stdout_renderer])]
 
     @staticmethod
-    def get_timing_components():
+    def get_timing_components(num_display_layers: int):
         activation_timing_sampler = ActivationTimeSampler()
-        combined_timing_rendered = CombinedTimingRenderer(
-            timing_db=activation_timing_sampler.db)
+        activation_timing_sampler2 = ActivationTimeSampler()
+        combined_timing_rendered = LayerCombinedTimerRenderer(
+            activation_db=activation_timing_sampler.db,
+            gradient_db=activation_timing_sampler2.db,
+            top_n_layers=num_display_layers
+        )
         return [([activation_timing_sampler], [combined_timing_rendered])]
 
 

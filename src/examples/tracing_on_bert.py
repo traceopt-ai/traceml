@@ -21,10 +21,10 @@ SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 10000
-MAX_VAL_EXAMPLES   = 1000
+MAX_TRAIN_EXAMPLES = 1000
+MAX_VAL_EXAMPLES   = 500
 BATCH_SIZE         = 32
-EPOCHS             = 3
+EPOCHS             = 1
 LR = 2e-5
 WARMUP_RATIO = 0.06
 
