@@ -126,7 +126,7 @@ def run_validation(model, val_loader, dtype, device):
     return val_loss / max(1, n_batches), val_acc / max(1, n_batches)
 
 
-# --- MAIN TRAINING LOOP --------------------------------------------------------
+# MAIN TRAINING LOOP
 
 def main():
     set_seed()
@@ -156,7 +156,7 @@ def main():
     model.train()
     global_step = 0
 
-    # -------- TRAINING LOOP (safe version, no StopIteration) -------------------
+    #  TRAINING LOOP
     for epoch in range(EPOCHS):
         running_loss = 0.0
         running_acc  = 0.0

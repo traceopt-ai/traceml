@@ -11,6 +11,7 @@ from IPython.display import HTML
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import STEPTIMER_LAYOUT
+from traceml.renderers.utils import fmt_time_run
 
 
 class StepTimerRenderer(BaseRenderer):
@@ -85,16 +86,16 @@ class StepTimerRenderer(BaseRenderer):
 
             if cpu_vals:
                 cpu_arr = np.array(cpu_vals, dtype=float)
-                cpu_avg_s = float(cpu_arr.mean() / 1000.0)
-                cpu_max_s = float(cpu_arr.max() / 1000.0)
+                cpu_avg_s = float(cpu_arr.mean())
+                cpu_max_s = float(cpu_arr.max())
             else:
                 cpu_avg_s = 0.0
                 cpu_max_s = 0.0
 
             if gpu_vals:
                 gpu_arr = np.array(gpu_vals, dtype=float)
-                gpu_avg_s = float(gpu_arr.mean() / 1000.0)
-                gpu_max_s = float(gpu_arr.max() / 1000.0)
+                gpu_avg_s = float(gpu_arr.mean())
+                gpu_max_s = float(gpu_arr.max())
             else:
                 gpu_avg_s = 0.0
                 gpu_max_s = 0.0
@@ -183,7 +184,7 @@ class StepTimerRenderer(BaseRenderer):
         stats = self._compute_event_stats()
         return self._aggregate_top(stats)
 
-    # ---------- CLI rendering ----------
+    # CLI rendering
     def get_panel_renderable(self) -> Panel:
         data = self.get_data()
 
@@ -197,8 +198,8 @@ class StepTimerRenderer(BaseRenderer):
                 disp = self._pick_display_values(vals)
                 table.add_row(
                     f"[bold]{name}[/bold]",
-                    f"{disp['avg_s']:.4f}",
-                    f"{disp['peak_s']:.4f}",
+                    fmt_time_run(disp['avg_s']),
+                    fmt_time_run(disp['peak_s']),
                 )
         else:
             table.add_row(
@@ -230,8 +231,8 @@ class StepTimerRenderer(BaseRenderer):
                 rows += f"""
                 <tr style="border-bottom:1px solid #2c2c2c;">
                     <td style="text-align:left; color:#e0e0e0;">{name}</td>
-                    <td style="text-align:right; color:#e0e0e0;">{disp['avg_s']:.4f}</td>
-                    <td style="text-align:right; color:#e0e0e0;">{disp['peak_s']:.4f}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(disp['avg_s'])}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(disp['peak_s'])}</td>
                 </tr>
                 """
         else:
@@ -290,8 +291,8 @@ class StepTimerRenderer(BaseRenderer):
                 disp = self._pick_display_values(vals)
                 table.add_row(
                     f"[bold]{name}[/bold]",
-                    f"{disp['avg_s']:.4f}",
-                    f"{disp['peak_s']:.4f}",
+                    fmt_time_run(disp['avg_s']),
+                    fmt_time_run(disp['peak_s']),
                 )
         else:
             table.add_row(
