@@ -9,7 +9,7 @@ from traceml.renderers.display.nicegui_sections.helper import (
 def build_process_section():
     card = ui.card().classes("m-2 p-2 w-full")
     card.style("""
-        background: rgba(245, 245, 245, 0.35);
+        background: ffffff;
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border-radius: 14px;

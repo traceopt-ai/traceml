@@ -50,16 +50,16 @@ def define_main_page(cls):
                 margin: 0 !important;
             }
             body {
-                background-color: #e5e5e5 !important;
+                background-color: #fff7f0 !important;
                 background-image: none !important;
             }
         </style>
         """)
 
         # ----- PAGE LAYOUT -----
-        ui.label("TraceML Live Dashboard") \
-            .classes("text-4xl font-extrabold m-4 w-full text-center") \
-            .style("color:#ff9800;")
+        ui.label("TraceML Dashboard") \
+            .classes("text-4xl font-extrabold m-4 w-full text-left") \
+            .style("color:#d47a00;")
 
         with ui.row().classes("m-2 w-[99%] gap-4 flex-wrap items-center"):
 
@@ -69,24 +69,24 @@ def define_main_page(cls):
                 cls.update_funcs[SYSTEM_LAYOUT] = update_system_section
 
             # Process (middle column)
-            with ui.column().classes("w-[49%]"):
+            with ui.column().classes("w-[30%]"):
                 cls.cards[PROCESS_LAYOUT] = build_process_section()
                 cls.update_funcs[PROCESS_LAYOUT] = update_process_section
 
-        with ui.row().classes("m-2 w-[90%] gap-4 flex-nowrap items-center"):
+            with ui.column().classes("w-[19]"):
+                cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
+                cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
 
-            with ui.column().classes("w-[60%]"):
+        with ui.row().classes("m-2 w-[99%] gap-4 flex-nowrap items-center"):
+
+            with ui.column().classes("w-[54%]"):
                 cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = build_layer_memory_table_section()
                 cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = update_layer_memory_table_section
 
-            with ui.column().classes("w-[39%]"):
+            with ui.column().classes("w-[44%]"):
                 cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = build_layer_timer_table_section()
                 cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = update_layer_timer_table_section
 
-        with ui.row().classes("m-2 w-[99%] gap-4 flex-nowrap items-start"):
-            with ui.column().classes("w-full"):
-                cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
-                cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
 
         for l in [
             ACTIVATION_GRADIENT_LAYOUT

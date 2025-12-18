@@ -4,7 +4,7 @@ from nicegui import ui
 def build_step_timing_table_section():
     card = ui.card().classes("m-2 p-4 w-full")
     card.style("""
-        background: rgba(245, 245, 245, 0.35);
+        background: ffffff;
         backdrop-filter: blur(12px);
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
