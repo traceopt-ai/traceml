@@ -57,9 +57,9 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         )
 
         table.add_column("Layer", justify="left", style="magenta")
-        table.add_column("Activation (cur/peak)", justify="right", style="white")
-        table.add_column("Gradient (cur/peak)", justify="right", style="cyan")
-        table.add_column("%", justify="right", style="white")
+        table.add_column("Act (current/peak)", justify="right", style="white")
+        table.add_column("Grad (current/peak)", justify="right", style="cyan")
+        table.add_column("% ", justify="right", style="white")
 
         if d.get("top_items"):
             for r in d["top_items"]:

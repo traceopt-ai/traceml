@@ -21,13 +21,11 @@ def build_layer_memory_table_section():
 
 
 def update_layer_memory_table_section(panel, dashboard_data):
-    rows = dashboard_data["top_items"]      # NEW: matches service
-    other = dashboard_data["other"]
+    rows = dashboard_data.get("all_items", [])
 
-    # Build HTML table
     html = """
     <table style="width:100%; border-collapse: collapse; font-size:14px;">
-        <thead style="position: sticky; top: 0; background: #f0f0f0;">
+        <thead style="position: sticky; top: 0; background: #f0f0f0; z-index:1;">
             <tr>
                 <th style="text-align:left;">Layer</th>
                 <th style="text-align:right;">Params</th>
@@ -39,35 +37,42 @@ def update_layer_memory_table_section(panel, dashboard_data):
         </thead>
         <tbody>
     """
-    for r in rows:
-        html += f"""
-        <tr>
-            <td>{r['layer']}</td>
-            <td style="text-align:right;">{fmt_mem_new(r['param_memory'])}</td>
-            <td style="text-align:right;">{fmt_mem_new(r['activation_current'])} 
-            / {fmt_mem_new(r['activation_peak'])}</td>
-            <td style="text-align:right;">{fmt_mem_new(r['gradient_current'])} 
-            / {fmt_mem_new(r['gradient_peak'])}</td>
-            <td style="text-align:right;">{fmt_mem_new(r['total_current_memory'])}</td>
-            <td style="text-align:right;">{r['pct']:.1f}%</td>
-        </tr>
-        """
 
-    if other["total_current_memory"] > 0:
-        html += f"""
-        <tr style="color:gray;">
-            <td>Other Layers</td>
-            <td style="text-align:right;">{fmt_mem_new(other['param_memory'])}</td>
-            <td style="text-align:right;">{fmt_mem_new(other['activation_current'])} 
-            / {fmt_mem_new(other['activation_peak'])}</td>
-            <td style="text-align:right;">{fmt_mem_new(other['gradient_current'])} 
-            / {fmt_mem_new(other['gradient_peak'])}</td>
-            <td style="text-align:right;">{fmt_mem_new(other['total_current_memory'])}</td>
-            <td style="text-align:right;">{other['pct']:.1f}%</td>
+    if rows:
+        for r in rows:
+            html += f"""
+            <tr>
+                <td>{r['layer']}</td>
+                <td style="text-align:right;">{fmt_mem_new(r['param_memory'])}</td>
+                <td style="text-align:right;">
+                    {fmt_mem_new(r['activation_current'])}/
+                    {fmt_mem_new(r['activation_peak'])}
+                </td>
+                <td style="text-align:right;">
+                    {fmt_mem_new(r['gradient_current'])}/
+                    {fmt_mem_new(r['gradient_peak'])}
+                </td>
+                <td style="text-align:right;">
+                    {fmt_mem_new(r['total_current_memory'])}
+                </td>
+                <td style="text-align:right;">
+                    {r['pct']:.1f}%
+                </td>
+            </tr>
+            """
+    else:
+        html += """
+        <tr>
+            <td colspan="6"
+                style="text-align:center; padding:16px; color:#888; font-style:italic;">
+                No per-layer memory data detected.<br/>
+                Ensure hooks are attached and at least one forward pass has completed.
+            </td>
         </tr>
         """
 
     html += "</tbody></table>"
     panel["table"].content = html
+
 
 

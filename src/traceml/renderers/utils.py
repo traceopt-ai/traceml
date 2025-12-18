@@ -2,16 +2,30 @@ from typing import Dict
 from traceml.utils.formatting import fmt_mem_new
 
 
-def truncate_layer_name(s: str, max_len: int = 40) -> str:
+
+def truncate_layer_name(s: str, max_len: int = 20) -> str:
     """
-    Truncate long layer names keeping start and end.
+    Truncate layer name by keeping the last max_len characters.
+    Optimized for transformer-style layer names where the suffix is most informative.
     """
     if not isinstance(s, str):
         s = str(s)
+
     if len(s) <= max_len:
         return s
-    half = (max_len - 1) // 2
-    return s[:half] + "…" + s[-half:]
+
+    return "…" + s[-(max_len - 1):]
+
+#def truncate_layer_name(s: str, max_len: int = 40) -> str:
+#     """
+#     Truncate long layer names keeping start and end.
+#     """
+#     if not isinstance(s, str):
+#         s = str(s)
+#     if len(s) <= max_len:
+#         return s
+#     half = (max_len - 1) // 2
+#     return s[:half] + "…" + s[-half:]
 
 
 def format_cache_value(

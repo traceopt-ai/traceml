@@ -28,7 +28,7 @@ class LayerCombinedMemoryData:
         Percent (%) = total_current_memory / sum(total_current_memory)
         """
 
-        # ---- Load table snapshot & memory DBs ----
+        # Load table snapshot
         layer_snapshot = self._compute_layer_snapshot()
         act_snapshot = self._compute_snapshot(is_activation=True)
         grad_snapshot = self._compute_snapshot(is_activation=False)
@@ -37,97 +37,105 @@ class LayerCombinedMemoryData:
         self._merge_cache(self._activation_cache, act_snapshot)
         self._merge_cache(self._gradient_cache, grad_snapshot)
 
-        layers = layer_snapshot["layer_memory"]         # parameter memory
-        model_index = layer_snapshot["model_index"]
-        activation_cache = self._activation_cache
-        gradient_cache = self._gradient_cache
+        layers = layer_snapshot.get("layer_memory", {})  # param memory per layer
+        model_index = layer_snapshot.get("model_index")
 
         peak_map = {}
         current_map = {}
 
+        # Compute peak & current totals (single pass)
         for layer, param_mem in layers.items():
+            act_cur = self._activation_cache.get(layer, {}).get("current", 0.0)
+            act_peak = self._activation_cache.get(layer, {}).get("global", 0.0)
 
-            act_cur  = activation_cache.get(layer, {}).get("current", 0.0)
-            act_peak = activation_cache.get(layer, {}).get("global", 0.0)
+            grad_cur = self._gradient_cache.get(layer, {}).get("current", 0.0)
+            grad_peak = self._gradient_cache.get(layer, {}).get("global", 0.0)
 
-            grad_cur  = gradient_cache.get(layer, {}).get("current", 0.0)
-            grad_peak = gradient_cache.get(layer, {}).get("global", 0.0)
-
-            # Peak memory = used for sorting (static layer cost)
             peak_map[layer] = float(param_mem) + float(act_peak) + float(grad_peak)
-
-            # Current memory = used for percentage display
             current_map[layer] = float(param_mem) + float(act_cur) + float(grad_cur)
-
-        sorted_items = sorted(
-            peak_map.items(), key=lambda kv: float(kv[1]), reverse=True
-        )
-        top_items = sorted_items[: self._top_n]
-        other_items = sorted_items[self._top_n:]
 
         total_current_sum = sum(current_map.values()) if current_map else 0.0
 
-        # ---- Build top rows ----
-        rows = []
-        for layer, peak_val in top_items:
+        all_rows = [
+            self._build_layer_row(
+                layer=layer,
+                param_mem=layers.get(layer, 0.0),
+                current_map=current_map,
+                peak_map=peak_map,
+                total_current_sum=total_current_sum,
+            )
+            for layer in layers.keys()
+        ]
 
-            param_mem = layers.get(layer, 0.0)
-            act_cur  = activation_cache.get(layer, {}).get("current", 0.0)
-            act_peak = activation_cache.get(layer, {}).get("global", 0.0)
-            grad_cur  = gradient_cache.get(layer, {}).get("current", 0.0)
-            grad_peak = gradient_cache.get(layer, {}).get("global", 0.0)
+        # Sort by total peak memory
+        all_rows_sorted = sorted(
+            all_rows,
+            key=lambda r: r["total_peak_memory"],
+            reverse=True,
+        )
 
-            current_total = current_map[layer]
-            pct = (current_total / total_current_sum * 100.0) if total_current_sum else 0.0
+        #  Split top / other
+        top_items = all_rows_sorted[: self._top_n]
+        other_items = all_rows_sorted[self._top_n:]
 
-            rows.append({
-                "layer": layer,
+        #  Aggregate "other"
+        other_current_total = sum(
+            r["total_current_memory"] for r in other_items
+        ) if other_items else 0.0
 
-                "param_memory": param_mem,
-                "activation_current": act_cur,
-                "activation_peak": act_peak,
-                "gradient_current": grad_cur,
-                "gradient_peak": grad_peak,
-
-                "total_peak_memory": peak_val,       # used for sorting
-                "total_current_memory": current_total,  # used for %
-                "pct": pct,
-            })
-
-        other_layers = [layer for layer, _ in other_items]
-
-        other_param_sum = sum(layers.get(l, 0.0) for l in other_layers)
-        other_act_cur = sum(activation_cache.get(l, {}).get("current", 0.0) for l in other_layers)
-        other_act_peak = sum(activation_cache.get(l, {}).get("global", 0.0) for l in other_layers)
-        other_grad_cur = sum(gradient_cache.get(l, {}).get("current", 0.0) for l in other_layers)
-        other_grad_peak = sum(gradient_cache.get(l, {}).get("global", 0.0) for l in other_layers)
-
-        other_current_total = sum(current_map[l] for l in other_layers) if other_layers else 0.0
-        other_pct = (other_current_total / total_current_sum * 100.0) if total_current_sum else 0.0
+        other = {
+            "param_memory": sum(r["param_memory"] for r in other_items),
+            "activation_current": sum(r["activation_current"] for r in other_items),
+            "activation_peak": sum(r["activation_peak"] for r in other_items),
+            "gradient_current": sum(r["gradient_current"] for r in other_items),
+            "gradient_peak": sum(r["gradient_peak"] for r in other_items),
+            "total_current_memory": other_current_total,
+            "pct": (
+                other_current_total / total_current_sum * 100.0
+                if total_current_sum else 0.0
+            ),
+        }
 
         return {
             "model_index": model_index,
 
-            # per-layer rows
-            "top_items": rows,
+            "top_items": top_items,
+            "other": other,
+            "all_items": all_rows_sorted,
 
-            # aggregated "other" row
-            "other": {
-                "param_memory": other_param_sum,
-                "activation_current": other_act_cur,
-                "activation_peak": other_act_peak,
-                "gradient_current": other_grad_cur,
-                "gradient_peak": other_grad_peak,
-                "total_current_memory": other_current_total,
-                "pct": other_pct,
-            },
-
-            # sums for final footer
             "total_current_sum": total_current_sum,
             "total_peak_sum": sum(peak_map.values()),
+        }
 
-            "activation_cache": activation_cache,
-            "gradient_cache": gradient_cache,
+    def _build_layer_row(
+            self,
+            layer: str,
+            param_mem: float,
+            current_map: Dict[str, float],
+            peak_map: Dict[str, float],
+            total_current_sum: float,
+    ) -> Dict[str, Any]:
+
+        act_cur = self._activation_cache.get(layer, {}).get("current", 0.0)
+        act_peak = self._activation_cache.get(layer, {}).get("global", 0.0)
+        grad_cur = self._gradient_cache.get(layer, {}).get("current", 0.0)
+        grad_peak = self._gradient_cache.get(layer, {}).get("global", 0.0)
+
+        current_total = current_map[layer]
+        pct = (current_total / total_current_sum * 100.0) if total_current_sum else 0.0
+
+        return {
+            "layer": layer,
+
+            "param_memory": float(param_mem),
+            "activation_current": float(act_cur),
+            "activation_peak": float(act_peak),
+            "gradient_current": float(grad_cur),
+            "gradient_peak": float(grad_peak),
+
+            "total_peak_memory": float(peak_map[layer]),
+            "total_current_memory": float(current_total),
+            "pct": pct,
         }
 
     def _compute_layer_snapshot(self) -> Dict[str, Any]:

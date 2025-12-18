@@ -49,8 +49,8 @@ class CLIDisplayManager:
             Layout(name=PROCESS_LAYOUT, ratio=1),
         )
         dashboard["model_row"].split_row(
-            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=5),
-            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=4),
+            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=15),
+            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=14),
         )
         dashboard["bottom_row"].split_row(
             Layout(name=ACTIVATION_GRADIENT_LAYOUT, ratio=1),

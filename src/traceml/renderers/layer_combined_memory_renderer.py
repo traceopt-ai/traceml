@@ -67,8 +67,8 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
         table.add_column("Layer", justify="left", style="magenta")
         table.add_column("Params", justify="right", style="white")
-        table.add_column("Act (cur/peak)", justify="right", style="cyan")
-        table.add_column("Grad (cur/peak)", justify="right", style="green")
+        table.add_column("Act (current/peak)", justify="right", style="cyan")
+        table.add_column("Grad (current/peak)", justify="right", style="green")
         table.add_column("% curr", justify="right", style="white")
 
         for row in d["top_items"]:
