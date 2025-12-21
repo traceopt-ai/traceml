@@ -219,7 +219,7 @@ class SystemRenderer(BaseRenderer):
             except Exception:
                 pass
 
-        cpu_ram_html = self._get_notebook_cpu_row()
+        cpu_ram_html = self._get_notebook_cpu_row(data)
 
         # --- GPU ---
         if data["gpu_available"]:
