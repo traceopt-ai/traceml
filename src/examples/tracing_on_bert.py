@@ -18,13 +18,13 @@ from transformers import (
 from traceml.decorators import trace_model_instance, trace_timestep
 
 SEED = 42
-MODEL_NAME = "distilbert-base-uncased"
+MODEL_NAME = "bert-base-uncased"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 1000
+MAX_TRAIN_EXAMPLES = 5000
 MAX_VAL_EXAMPLES   = 200
 BATCH_SIZE         = 32
-EPOCHS             = 1
+EPOCHS             = 2
 LR = 2e-5
 WARMUP_RATIO = 0.06
 
@@ -86,7 +86,7 @@ def load_batch_to_device(batch, device):
 
 @trace_timestep("forward", use_gpu=True)
 def forward_pass(model, batch, dtype):
-    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+    with torch.cuda.amp.autocast(enabled=False, dtype=dtype):
         return model(**batch)
 
 
