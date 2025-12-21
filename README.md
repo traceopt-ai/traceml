@@ -120,7 +120,7 @@ traceml run train.py --mode=dashboard
 
 Opens `http://localhost:8765` with interactive charts and real-time updates.
 
-<img src="web_demo.png" width="600" alt="TraceML CLI Demo">
+<img src="web_demo.png" width="1200" alt="TraceML CLI Demo">
 
 Best for: Local development, detailed analysis, sharing results with teammates.
 
