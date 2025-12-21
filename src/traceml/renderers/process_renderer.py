@@ -118,8 +118,8 @@ class ProcessRenderer(BaseRenderer):
         <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
             <h4 style="color:#00bcd4; margin:0;">Process</h4>
 
-            <p><b>CPU:</b> {fmt_percent(data['cpu'])}</p>
-            <p><b>RAM:</b> {fmt_mem_new(data['ram'])}</p>
+            <p><b>CPU:</b> {fmt_percent(data['cpu_used'])}</p>
+            <p><b>RAM:</b> {fmt_mem_new(data['ram_used'])}</p>
 
             {gpu_html}
         </div>

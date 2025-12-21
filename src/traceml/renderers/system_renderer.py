@@ -190,7 +190,7 @@ class SystemRenderer(BaseRenderer):
             width=panel_width,
         )
 
-    def _get_notebook_cpu_row(self, table, data):
+    def _get_notebook_cpu_row(self, data):
         ram_pct = ""
         if data["ram_total"]:
             try:
