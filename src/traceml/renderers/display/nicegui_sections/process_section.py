@@ -172,7 +172,7 @@ def _update_gpu_graph(process_table, fig, x_hist):
             gpu_raw = rec.get("gpu_raw", {}) or {}
             if gpu_raw:
                 gpu_total = sum(v.get("total", 0) for v in gpu_raw.values()) or 1
-                gpu_hist.append(sum(v.get("used", 0)/gpu_total*100 for v in gpu_raw.values()))
+                gpu_hist.append(sum(v.get("reserved", 0)/gpu_total*100 for v in gpu_raw.values()))
             else:
                 gpu_hist.append(0)
         gpu_hist = gpu_hist[-100:]
