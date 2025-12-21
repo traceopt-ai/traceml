@@ -1,264 +1,298 @@
 # TraceML
-<sub><em>If you find it useful, consider giving it a ⭐ on GitHub — it helps others discover the project!</em></sub>
+
+**Real-time profiling for PyTorch training — lightweight, always-on, and actionable.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
-[![GitHub Stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml/stargazers) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb) 
-[![Python Versions](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/) 
-[![macOS ARM](https://img.shields.io/badge/macOS-ARM%20(M1--M5)-success?logo=apple)](https://www.apple.com/mac/) 
-[![Linux](https://img.shields.io/badge/OS-Linux-success?logo=linux)](https://ubuntu.com/) 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
+[![Python 3.9-3.13](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/) 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
 
 ---
 
+## The Problem TraceML Solves
 
-A lightweight, always-on profiler for PyTorch that makes **memory**, **timing**, and **system usage** visible in real time via:
+Training deep learning models shouldn't feel like debugging a black box. Yet we constantly face:
 
-- Terminal dashboards  
-- Jupyter notebooks  
-- A **lightweight local web dashboard/server**  
-- JSON logging for offline analysis  
+- **💥 CUDA OOM errors** with no insight into which layer caused the memory spike
+- **🐌 Slow training** without knowing if the bottleneck is data loading, forward pass, backward pass, or optimizer
+- **🔍 Layer-level mysteries** — which layers consume the most memory? Which are slowest?
+- **📊 Heavy profilers** that are impractical to keep running during actual training
 
-Minimal configuration. Minimal overhead. Plug-and-trace.
-
-### Note: TraceML currently supports single-GPU training. DDP multi-GPU support is coming soon.
-
----
-
-## 📊 Quick User Survey (2 min)
-Using TraceML? Help shape the roadmap: https://forms.gle/vaDQao8L81oAoAkv9
-
-
-## 🚨 The Problem
-
-Training deep learning models often feels like debugging a black box:
-
-- CUDA OOM errors appear without warning  
-- Step times are slow with no visibility  
-- Existing profilers are heavy, complicated, or lack activation/gradient memory details  
-
-TraceML provides **continuous, lightweight observability** without slowing down training.
+**TraceML changes this.** It provides continuous, low-overhead visibility into your training process while it's running — no restarts, no heavy tooling, no guesswork.
 
 ---
 
-## 💡 Why TraceML?
+## What TraceML Does
 
-TraceML is designed to stay **lightweight, always-on, and practical**:
+TraceML answers the questions you actually need answered:
 
-- Module-level memory tracking (params, activations, gradients)  
-- Step timing (forward, backward, optimizer, dataloader)  
-- Terminal + Notebook + Local Web Dashboard (port 8765)  
-- Minimal overhead (sampling-based — NOT full graph tracing)  
+| Question | TraceML Answer |
+|----------|----------------|
+| Which layer is eating my GPU memory? | Per-layer memory breakdown (params + activations + gradients) |
+| Where did that memory spike happen? | Real-time memory tracking during forward/backward passes |
+| Which layer is slow? | Per-layer compute time (forward + backward) |
+| What's slowing down my training step? | Step-level timing: dataloader → forward → backward → optimizer |
 
-A tool you can safely keep on in every training loop.
+**Three ways to view your data:**
+- 🖥️ **Terminal dashboard** — live updates in your console
+- 📓 **Jupyter notebooks** — inline visualizations
+- 🌐 **Web dashboard** — local browser UI at `localhost:8765`
 
 ---
 
-# ⭐ Quick Start
-
-## 1. Installation
+## Installation
 
 ```bash
-pip install .
+pip install traceml-ai
 ```
 
-Developer mode:
+For development:
 
 ```bash
-pip install '.[dev]'
+git clone https://github.com/traceopt-ai/traceml.git
+cd traceml
+pip install -e '.[dev]'
 ```
+
+**Requirements:** Python 3.9-3.13, PyTorch 1.12+
+
+**Platform support:** macOS (Intel/ARM), Linux. Single-GPU training (DDP support coming soon).
 
 ---
 
-# 🔧 2. Model Registration (Required)
+## Quick Start
 
-TraceML needs to attach hooks to your model. Two ways:
+### Step 1: Add One Decorator to Your Model
 
-### **A. Decorator (recommended)**
+TraceML works by attaching lightweight hooks to your PyTorch model. Choose your preferred method:
+
+**Option A: Class decorator** (recommended)
 
 ```python
 from traceml.decorators import trace_model
 import torch.nn as nn
 
 @trace_model()
-class TinyNet(nn.Module):
+class MyModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fc = nn.Linear(100, 10)
-
+        self.encoder = nn.TransformerEncoder(...)
+        self.decoder = nn.Linear(512, 1000)
+    
     def forward(self, x):
-        return self.fc(x)
+        x = self.encoder(x)
+        return self.decoder(x)
 ```
 
-### **B. Register a model instance**
+**Option B: Instance registration**
 
 ```python
 from traceml.decorators import trace_model_instance
-import torch.nn as nn
 
-model = nn.Sequential(
-    nn.Linear(100, 50),
-    nn.ReLU(),
-    nn.Linear(50, 10)
-)
-
+model = torchvision.models.resnet50()
 trace_model_instance(model)
 ```
 
-This is all you need to enable memory + timing tracing across all workflows.
+That's it. No other code changes needed.
 
----
-
-# 🚀 3. Running TraceML
-
-You can run TraceML in **three modes**:
-
----
-
-## ✅ **A. CLI Mode (Terminal Dashboard — default)**
-
-```
-traceml run your_script.py
-```
-
-This launches a live terminal dashboard showing:
-
-- System metrics (CPU, RAM, GPU)  
-- Layer memory  
-- Activation + gradient memory  
-- Step timings  
-
-![TraceML CLI Live](cli_demo_v1.png)
-
----
-
-## ✅ **B. Dashboard Mode (Local Web UI)**
-
-Run your training script with:
+### Step 2: Run Your Training Script
 
 ```bash
-traceml run your_script.py --mode=dashboard
+traceml run train.py
 ```
 
-Opens a live dashboard at:
+You'll immediately see a live terminal dashboard tracking:
+- System resources (CPU, RAM, GPU)
+- Per-layer memory usage and compute time
+- Training step breakdowns
 
-```
-http://localhost:8765
-```
-
-![TraceML Dashboard Live](dash_demo_v1.png)
+![TraceML CLI Demo](cli_demo_v1.png)
 
 ---
 
-## ✅ **C. Notebook Mode**
+## Usage Modes
+
+### 🖥️ Terminal Dashboard (Default)
+
+```bash
+traceml run train.py
+```
+
+Best for: Training on remote servers, quick debugging, CI/CD environments.
+
+### 🌐 Web Dashboard
+
+```bash
+traceml run train.py --mode=dashboard
+```
+
+Opens `http://localhost:8765` with interactive charts and real-time updates.
+
+![TraceML Dashboard](dash_demo_v1.png)
+
+Best for: Local development, detailed analysis, sharing results with teammates.
+
+### 📓 Jupyter Notebooks
 
 ```python
 from traceml.decorators import trace_model_instance
 from traceml.manager.tracker_manager import TrackerManager
 
+# Register your model
 trace_model_instance(model)
 
+# Start tracking
 tracker = TrackerManager(interval_sec=1.0, mode="notebook")
 tracker.start()
 
-train(model)
+# Run your training
+for epoch in range(num_epochs):
+    train_one_epoch(model, dataloader)
 
+# Stop and view results
 tracker.stop()
 tracker.log_summaries()
 ```
 
-Notebook UI updates automatically.
+Best for: Experimentation, teaching, sharing results in notebooks.
 
 ---
 
-# ⏱ Step Timing Example
+## Advanced: Step Timing
+
+Track specific operations in your training loop:
 
 ```python
 from traceml.decorators import trace_timestep
 
+@trace_timestep("dataloader", use_gpu=True)
+def load_batch(dataloader):
+    return next(iter(dataloader))
+
 @trace_timestep("forward", use_gpu=True)
 def forward_pass(model, batch):
-    return model(**batch)
+    return model(batch)
 
 @trace_timestep("backward", use_gpu=True)
-def backward_pass(loss, scaler):
-    scaler.scale(loss).backward()
+def backward_pass(loss, optimizer):
+    loss.backward()
+    optimizer.step()
 ```
 
-Timings automatically appear in CLI, dashboard, and notebook summaries.
+Timings automatically appear in all dashboards and logs, helping you identify bottlenecks at a glance.
 
 ---
 
-# 📤 Exporting Logs as JSON
+## Exporting Data
 
-Enable JSON logging:
+Enable JSON logging for offline analysis:
 
 ```bash
-traceml run your_script.py --enable-logging
+traceml run train.py --enable-logging
 ```
 
-Logs are stored in:
+Logs are saved to `./logs/` with timestamps, ready for plotting or integration with your own monitoring tools.
 
+---
+
+## Current Features
+
+✅ Real-time system monitoring (CPU, RAM, GPU)  
+✅ Per-layer memory tracking (parameters, activations, gradients)  
+✅ Per-layer compute time (forward + backward)  
+✅ Training step timing (dataloader, forward, backward, optimizer)  
+✅ Terminal UI with live updates  
+✅ Jupyter notebook integration  
+✅ Local web dashboard  
+✅ JSON export for offline analysis  
+✅ Minimal overhead 
+✅ Zero code changes (beyond registration)  
+
+---
+
+## Roadmap
+
+🔜 Multi-GPU distributed training (DDP, FSDP)  
+🔜 PyTorch Lightning integration  
+🔜 Hugging Face Accelerate support  
+🔜 Memory leak detection  
+🔜 Automatic optimization suggestions  
+🔜 Cloud dashboard (optional)  
+
+---
+
+## Examples
+
+Explore complete examples in the repository:
+
+- [BERT fine-tuning with TraceML](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
+- [ResNet training walkthrough](./examples/resnet_training.py)
+- [Custom timing decorators](./examples/custom_timing.py)
+
+
+## Contributing
+
+We welcome contributions! Here's how to help:
+
+1. ⭐ **Star the repo** to show support
+2. 🐛 **Report bugs** via [GitHub Issues](https://github.com/traceopt-ai/traceml/issues)
+3. 💡 **Request features** we should prioritize
+4. 🔧 **Submit PRs** for improvements
+
+**Development setup:**
+
+```bash
+git clone https://github.com/traceopt-ai/traceml.git
+cd traceml
+pip install -e '.[dev]'
+pytest tests/
 ```
-./logs/
+
+---
+
+## Community & Support
+
+- 📧 Email: abhinav@traceopt.ai
+- 🐙 GitHub: [traceopt-ai/traceml](https://github.com/traceopt-ai/traceml)
+- 📋 User Survey: [Help shape the roadmap](https://forms.gle/vaDQao8L81oAoAkv9) (2 minutes)
+
+---
+
+## License
+
+TraceML is released under the **MIT License with Commons Clause**.
+
+**What this means:**
+- ✅ Free for personal use
+- ✅ Free for research and academic use
+- ✅ Free for internal company use
+- ❌ Not allowed for resale or SaaS products
+
+For commercial licensing inquiries, contact abhinav@traceopt.ai.
+
+See [LICENSE](./LICENSE) for full details.
+
+---
+
+## Citation
+
+If TraceML helps your research, please cite:
+
+```bibtex
+@software{traceml2024,
+  author = {TraceOpt AI},
+  title = {TraceML: Real-time Profiling for PyTorch Training},
+  year = {2024},
+  url = {https://github.com/traceopt-ai/traceml}
+}
 ```
 
-Useful for plotting, analytics, or offline dashboards.
-
 ---
 
-# 📊 How TraceML Works (Lightweight Samplers)
+<div align="center">
 
-TraceML uses asynchronous samplers (NOT full tracing):
+**TraceML — Stop guessing. Start profiling.**
 
-- **SystemSampler** — CPU, RAM, GPU  
-- **LayerMemorySampler** — Params  
-- **ActivationMemorySampler** — Forward activations  
-- **GradientMemorySampler** — Backward gradients  
-- **StepTimeSampler** — Forward/backward/optimizer timings  
+Made with ❤️ by [TraceOpt AI](https://traceopt.ai)
 
-This keeps overhead extremely low.
-
----
-
-# 📦 Current Features
-
-- Live system usage (CPU, RAM, GPU)  
-- Per-layer memory tracking  
-- Activation & gradient memory  
-- Step timing  
-- Terminal UI  
-- Notebook display  
-- Local web dashboard  
-- JSON logging  
-
----
-
-# 🛠 Coming Soon
-
-- Multi-node distributed tracing  
-- PyTorch Lightning / Accelerate integration  
-
----
-
-# 🤝 Contribute
-
-- ⭐ the repo to support development  
-- Open issues for improvements or bugs  
-- Contributions welcome  
-
-📧 Contact: **abhinav@traceopt.ai**
-
----
-
-# 🧾 License
-
-TraceML uses **MIT License + Commons Clause**:
-
-- Free for personal, research, academic, and internal use  
-- Not allowed for resale, SaaS, or commercial redistribution  
-
-For commercial licensing, contact **abhinav@traceopt.ai**.
-
----
-
-*TraceML — Lightweight, real-time visibility for PyTorch training.*
+</div>
