@@ -218,8 +218,7 @@ Logs are saved to `./logs/` with timestamps, ready for plotting or integration w
 Explore complete examples in the repository:
 
 - [BERT fine-tuning with TraceML](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
-- [ResNet training walkthrough](./examples/resnet_training.py)
-- [Custom timing decorators](./examples/custom_timing.py)
+
 
 
 ## Contributing
