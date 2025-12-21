@@ -152,7 +152,7 @@ class SystemRenderer(BaseRenderer):
                 f"[bold green]GPU MEM[/bold green] {fmt_mem_new(data['gpu_mem_used'])}/{fmt_mem_new(data['gpu_mem_total'])}",
             )
             # second GPU row: temperature + power
-            temp = data.get("gpu_temp_total")
+            temp = data.get("gpu_temp_max")
             pu = data.get("gpu_power_usage")
             pl = data.get("gpu_power_limit")
             temp_str = (
@@ -177,7 +177,6 @@ class SystemRenderer(BaseRenderer):
         table.add_column(justify="left", style="white")
 
         self._get_panel_cpu_row(table, data)
-        table.add_row("")
         self._get_panel_gpu_row(table, data)
 
         cols, _ = shutil.get_terminal_size()
@@ -227,7 +226,7 @@ class SystemRenderer(BaseRenderer):
             gpu_util_html = f"{fmt_percent(data['gpu_util_total'])}"
             gpu_mem_html = f"{fmt_mem_new(data['gpu_mem_used'])} / {fmt_mem_new(data['gpu_mem_total'])}"
 
-            temp = data.get("gpu_temp_total")
+            temp = data.get("gpu_temp_max")
             pu = data.get("gpu_power_usage")
             pl = data.get("gpu_power_limit")
 
