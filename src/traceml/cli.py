@@ -76,7 +76,7 @@ def build_parser():
     run_parser = sub.add_parser("run")
     run_parser.add_argument("script")
     run_parser.add_argument("--mode", type=str, default="cli")
-    run_parser.add_argument("--interval", type=float, default=1.0)
+    run_parser.add_argument("--interval", type=float, default=2.0)
     run_parser.add_argument("--enable-logging", action="store_true")
     run_parser.add_argument("--logs-dir", type=str, default="./logs")
     run_parser.add_argument("--num-display-layers", type=int, default=10)

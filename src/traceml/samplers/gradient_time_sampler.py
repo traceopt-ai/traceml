@@ -3,28 +3,30 @@ from queue import Empty, Full
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.utils.activation_time_hooks import (
-    ActivationTimeEvent,
-    get_activation_time_queue
+from traceml.utils.gradient_time_hooks import (
+    GradientTimeEvent,
+    get_gradient_time_queue,
 )
 
-class ActivationTimeSampler(BaseSampler):
+
+class GradientTimeSampler(BaseSampler):
     """
-    Drain-all activation-time event sampler.
+    Drain-all gradient-time event sampler.
 
     Each call to `sample()`:
-      - Drains the activation time queue.
+      - Drains the gradient time queue.
+      - Resolves GPU events non-blocking via try_resolve()
       - Stores each event in a per-layer table inside the local DB.
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "ActivationTimeSampler"
+        self.sampler_name = "GradientTimeSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
-    def _drain_queue(self) -> List[ActivationTimeEvent]:
-        q = get_activation_time_queue()
-        events = []
+    def _drain_queue(self) -> List[GradientTimeEvent]:
+        q = get_gradient_time_queue()
+        events: List[GradientTimeEvent] = []
 
         while True:
             try:
@@ -40,15 +42,15 @@ class ActivationTimeSampler(BaseSampler):
                     q.put_nowait(evt)
                 except Full:
                     self.logger.warning(
-                        "[TraceML] ActivationTime queue full on requeue"
+                        "[TraceML] GradientTime queue full on requeue"
                     )
                 break
+
         return events
 
-
-    def _save_events(self, events: List[ActivationTimeEvent]) -> None:
+    def _save_events(self, events: List[GradientTimeEvent]) -> None:
         """
-        Save raw activation timing events into per-layer tables.
+        Save raw gradient timing events into per-layer tables.
         """
         for evt in events:
             table_name = f"{evt.layer_name}"
@@ -73,5 +75,5 @@ class ActivationTimeSampler(BaseSampler):
             self._save_events(events)
         except Exception as e:
             self.logger.error(
-                f"[TraceML] ActivationTimeSampler error: {e}"
+                f"[TraceML] GradientTimeSampler error: {e}"
             )

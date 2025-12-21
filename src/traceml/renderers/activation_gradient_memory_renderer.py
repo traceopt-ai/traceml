@@ -8,7 +8,7 @@ from IPython.display import HTML
 from traceml.database.database import Database
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import (
-    ACTIVATION_GRADIENT_LAYOUT_NAME,
+    ACTIVATION_GRADIENT_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new
 
@@ -31,7 +31,7 @@ class ActivationGradientRenderer(BaseRenderer):
     ):
         super().__init__(
             name="Activation & Gradient Stats",
-            layout_section_name=ACTIVATION_GRADIENT_LAYOUT_NAME,
+            layout_section_name=ACTIVATION_GRADIENT_LAYOUT,
         )
         self._layer_table = layer_db.create_or_get_table("layer_memory")
         self.activation_db = activation_db
@@ -152,12 +152,12 @@ class ActivationGradientRenderer(BaseRenderer):
         table.add_column("Value", justify="right", style="white")
 
         # Activation stats
-        table.add_row("[cyan]Approx Activation Avg[/cyan]", fmt_mem_new(act["avg"]))
-        table.add_row("[cyan]Approx Activation Max[/cyan]", fmt_mem_new(act["max"]))
+        table.add_row("[cyan]~ Activation Footprint Avg[/cyan]", fmt_mem_new(act["avg"]))
+        table.add_row("[cyan]~ Activation Footprint Max[/cyan]", fmt_mem_new(act["max"]))
 
         # Gradient stats
-        table.add_row("[green]Approx Gradient Avg[/green]", fmt_mem_new(grad["avg"]))
-        table.add_row("[green]Approx Gradient Max[/green]", fmt_mem_new(grad["max"]))
+        table.add_row("[green]~ Gradient Footprint Avg[/green]", fmt_mem_new(grad["avg"]))
+        table.add_row("[green]~ Gradient Footprint Max[/green]", fmt_mem_new(grad["max"]))
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(80, int(cols * 0.6)), 120)
@@ -180,7 +180,7 @@ class ActivationGradientRenderer(BaseRenderer):
         act_html = f"""
         <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
             <h4 style="color:#00bcd4; margin:0;">
-                Activation (Model #{data['model_index']})
+                Activation Footprint (Model #{data['model_index']})
             </h4>
             <p><b>Avg:</b> {fmt_mem_new(act['avg'])}</p>
             <p><b>Max:</b> {fmt_mem_new(act['max'])}</p>
@@ -191,7 +191,7 @@ class ActivationGradientRenderer(BaseRenderer):
         grad_html = f"""
         <div style="flex:1; border:2px solid #4caf50; border-radius:8px; padding:10px;">
             <h4 style="color:#4caf50; margin:0;">
-                Gradient (Model #{data['model_index']})
+                Gradient Footprint (Model #{data['model_index']})
             </h4>
             <p><b>Avg:</b> {fmt_mem_new(grad['avg'])}</p>
             <p><b>Max:</b> {fmt_mem_new(grad['max'])}</p>
@@ -223,25 +223,25 @@ class ActivationGradientRenderer(BaseRenderer):
         table.add_column(justify="right", style="white")
 
         table.add_row(
-            "[cyan]Approx ACTIVATION AVG[/cyan]", "[dim]|[/dim]", fmt_mem_new(act_avg)
+            "[cyan]~ ACTIVATION FOOTPRINT AVG[/cyan]", "[dim]|[/dim]", fmt_mem_new(act_avg)
         )
         table.add_row(
-            "[cyan]Approx ACTIVATION MAX[/cyan]",
+            "[cyan]~ ACTIVATION FOOTPRINT MAX[/cyan]",
             "[dim]|[/dim]",
             fmt_mem_new(self._activation_global_max),
         )
         table.add_row(
-            "[green]Approx GRADIENT AVG[/green]", "[dim]|[/dim]", fmt_mem_new(grad_avg)
+            "[green]~ GRADIENT FOOTPRINT AVG[/green]", "[dim]|[/dim]", fmt_mem_new(grad_avg)
         )
         table.add_row(
-            "[green]Approx GRADIENT MAX[/green]",
+            "[green]~ GRADIENT FOOTPRINT MAX[/green]",
             "[dim]|[/dim]",
             fmt_mem_new(self._gradient_global_max),
         )
 
         panel = Panel(
             table,
-            title="[bold blue]Activation & Gradient - Summary[/bold blue]",
+            title="[bold blue]Activation & Gradient Footprint - Summary[/bold blue]",
             border_style="blue",
         )
         console.print(panel)

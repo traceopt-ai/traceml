@@ -1,7 +1,7 @@
 from rich.panel import Panel
 from rich.text import Text
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import STDOUT_STDERR_LAYOUT_NAME
+from traceml.renderers.display.cli_display_manager import STDOUT_STDERR_LAYOUT
 from traceml.renderers.display.stdout_stderr_capture import StreamCapture
 import os
 
@@ -21,7 +21,7 @@ class StdoutStderrRenderer(BaseRenderer):
     ):
         super().__init__(
             name="Stdout/Stderr",
-            layout_section_name=STDOUT_STDERR_LAYOUT_NAME,
+            layout_section_name=STDOUT_STDERR_LAYOUT,
         )
         self.max_cache_lines = max_cache_lines
         self.display_lines = display_lines

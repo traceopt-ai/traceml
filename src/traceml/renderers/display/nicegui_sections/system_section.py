@@ -11,7 +11,7 @@ def build_system_section():
 
     card = ui.card().classes("m-2 p-2 w-full")
     card.style("""
-        background: rgba(245, 245, 245, 0.35);
+        background: ffffff;
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
         border-radius: 14px;
@@ -29,23 +29,23 @@ def build_system_section():
         graph = _build_graph_section()
         with ui.grid(columns=4).classes("w-full gap-x-3 gap-y-2"):
             # CPU + GPU UTIL ==========
-            cpu_text = ui.html("CPU: –", sanitize=False).classes("text-sm")
-            cpu_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
+            cpu_text = ui.html("CPU: –", sanitize=False).classes("text-sm").style("color:#333")
+            cpu_bar  = ui.html("", sanitize=False)
             gpu_util_text = ui.html("GPU Util: –", sanitize=False).classes("text-sm")
-            gpu_util_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
+            gpu_util_bar  = ui.html("", sanitize=False)
 
             # RAM + GPU MEM
-            ram_text = ui.html("RAM: –", sanitize=False).classes("text-sm")
-            ram_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
+            ram_text = ui.html("RAM: –", sanitize=False).classes("text-sm").style("color:#333")
+            ram_bar  = ui.html("", sanitize=False)
             gpu_mem_text = ui.html("GPU Mem: –", sanitize=False).classes("text-sm")
-            gpu_mem_bar  = ui.html("", sanitize=False).classes("h-2 w-full bg-gray-200 rounded flex-wrap")
+            gpu_mem_bar  = ui.html("", sanitize=False)
 
             # TEMP + POWER
-            temp_text = ui.html("Temp: –", sanitize=False).classes("text-sm")
-            empty1    = ui.html("", sanitize=False).classes("h-2")
+            temp_text = ui.html("Temp: –", sanitize=False).classes("text-sm").style("color:#333")
+            empty1    = ui.html("", sanitize=False)
             #
-            power_text = ui.html("Power: –", sanitize=False).classes("text-sm")
-            empty2 = ui.html("", sanitize=False).classes("h-2")
+            power_text = ui.html("Power: –", sanitize=False).classes("text-sm").style("color:#333")
+            empty2 = ui.html("", sanitize=False)
 
     return {
         "cpu_text": cpu_text, "cpu_bar": cpu_bar,

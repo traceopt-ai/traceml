@@ -9,7 +9,7 @@ from IPython.display import HTML
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
-    PROCESS_LAYOUT_NAME,
+    PROCESS_LAYOUT,
 )
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
@@ -21,7 +21,7 @@ class ProcessRenderer(BaseRenderer):
     """
 
     def __init__(self, database: Database):
-        super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT_NAME)
+        super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT)
         self.db = database
         self._table = database.create_or_get_table("process")
 
@@ -118,8 +118,8 @@ class ProcessRenderer(BaseRenderer):
         <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
             <h4 style="color:#00bcd4; margin:0;">Process</h4>
 
-            <p><b>CPU:</b> {fmt_percent(data['cpu'])}</p>
-            <p><b>RAM:</b> {fmt_mem_new(data['ram'])}</p>
+            <p><b>CPU:</b> {fmt_percent(data['cpu_used'])}</p>
+            <p><b>RAM:</b> {fmt_mem_new(data['ram_used'])}</p>
 
             {gpu_html}
         </div>

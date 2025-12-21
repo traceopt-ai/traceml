@@ -2,10 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 from queue import Queue, Full
 import sys
-import time
-
 import torch
-import torch.nn as nn
 
 # Shared queue for timing events
 step_time_queue: Queue = Queue(maxsize=2048)

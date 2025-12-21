@@ -8,7 +8,7 @@ from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
-from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT_NAME
+from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 
 
@@ -19,7 +19,7 @@ class SystemRenderer(BaseRenderer):
     """
 
     def __init__(self, database: Database):
-        super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT_NAME)
+        super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT)
         self.db = database
         self._table = database.create_or_get_table("system")
 
@@ -152,7 +152,7 @@ class SystemRenderer(BaseRenderer):
                 f"[bold green]GPU MEM[/bold green] {fmt_mem_new(data['gpu_mem_used'])}/{fmt_mem_new(data['gpu_mem_total'])}",
             )
             # second GPU row: temperature + power
-            temp = data.get("gpu_temp_total")
+            temp = data.get("gpu_temp_max")
             pu = data.get("gpu_power_usage")
             pl = data.get("gpu_power_limit")
             temp_str = (
@@ -177,7 +177,6 @@ class SystemRenderer(BaseRenderer):
         table.add_column(justify="left", style="white")
 
         self._get_panel_cpu_row(table, data)
-        table.add_row("")
         self._get_panel_gpu_row(table, data)
 
         cols, _ = shutil.get_terminal_size()
@@ -191,7 +190,7 @@ class SystemRenderer(BaseRenderer):
             width=panel_width,
         )
 
-    def _get_notebook_cpu_row(self, table, data):
+    def _get_notebook_cpu_row(self, data):
         ram_pct = ""
         if data["ram_total"]:
             try:
@@ -220,14 +219,14 @@ class SystemRenderer(BaseRenderer):
             except Exception:
                 pass
 
-        cpu_ram_html = self._get_notebook_cpu_row()
+        cpu_ram_html = self._get_notebook_cpu_row(data)
 
         # --- GPU ---
         if data["gpu_available"]:
             gpu_util_html = f"{fmt_percent(data['gpu_util_total'])}"
             gpu_mem_html = f"{fmt_mem_new(data['gpu_mem_used'])} / {fmt_mem_new(data['gpu_mem_total'])}"
 
-            temp = data.get("gpu_temp_total")
+            temp = data.get("gpu_temp_max")
             pu = data.get("gpu_power_usage")
             pl = data.get("gpu_power_limit")
 

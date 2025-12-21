@@ -14,18 +14,22 @@ from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
 from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
 from traceml.samplers.steptimer_sampler import StepTimerSampler
+from traceml.samplers.activation_time_sampler import ActivationTimeSampler
+from traceml.samplers.gradient_time_sampler import GradientTimeSampler
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.system_renderer import SystemRenderer
 from traceml.renderers.process_renderer import ProcessRenderer
-from traceml.renderers.layer_combined_renderer import (
-    LayerCombinedRenderer,
+from traceml.renderers.layer_combined_memory_renderer import (
+    LayerCombinedMemoryRenderer,
 )
 from traceml.renderers.activation_gradient_memory_renderer import (
     ActivationGradientRenderer,
 )
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
 from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
+
+from traceml.renderers.layer_combined_timing_renderer import LayerCombinedTimerRenderer
 
 
 class TrackerManager:
@@ -86,6 +90,7 @@ class TrackerManager:
         components += TrackerManager.get_process_components(is_ddp, local_rank)
         components += TrackerManager.get_memory_components(num_display_layers)
         components += TrackerManager.get_step_timer_components()
+        components += TrackerManager.get_timing_components(num_display_layers)
 
         if mode == "cli":
             components += TrackerManager.get_stdout_components()
@@ -117,7 +122,7 @@ class TrackerManager:
         activation_memory_sampler = ActivationMemorySampler()
         gradient_memory_sampler = GradientMemorySampler()
 
-        layer_combined_renderer = LayerCombinedRenderer(
+        layer_combined_renderer = LayerCombinedMemoryRenderer(
             layer_db=layer_memory_sampler.db,
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
@@ -129,7 +134,6 @@ class TrackerManager:
             activation_db=activation_memory_sampler.db,
             gradient_db=gradient_memory_sampler.db,
         )
-
         return [
             (
                 [
@@ -151,6 +155,17 @@ class TrackerManager:
     def get_stdout_components():
         stdout_renderer = StdoutStderrRenderer()
         return [([], [stdout_renderer])]
+
+    @staticmethod
+    def get_timing_components(num_display_layers: int):
+        activation_timing_sampler = ActivationTimeSampler()
+        gradient_timing_sampler = GradientTimeSampler()
+        combined_timing_rendered = LayerCombinedTimerRenderer(
+            activation_db=activation_timing_sampler.db,
+            gradient_db=gradient_timing_sampler.db,
+            top_n_layers=num_display_layers
+        )
+        return [([activation_timing_sampler, gradient_timing_sampler], [combined_timing_rendered])]
 
 
     def _run_once(self):
