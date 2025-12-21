@@ -64,7 +64,7 @@ def define_main_page(cls):
         with ui.row().classes("m-2 w-[99%] gap-4 flex-wrap items-center"):
 
             # System (left column)
-            with ui.column().classes("w-[47%]"):
+            with ui.column().classes("w-[42%]"):
                 cls.cards[SYSTEM_LAYOUT] = build_system_section()
                 cls.update_funcs[SYSTEM_LAYOUT] = update_system_section
 
@@ -73,7 +73,7 @@ def define_main_page(cls):
                 cls.cards[PROCESS_LAYOUT] = build_process_section()
                 cls.update_funcs[PROCESS_LAYOUT] = update_process_section
 
-            with ui.column().classes("w-[21]"):
+            with ui.column().classes("w-[26]"):
                 cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
                 cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
 

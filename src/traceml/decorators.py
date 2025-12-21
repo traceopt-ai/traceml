@@ -19,7 +19,7 @@ def trace_model(
     trace_activation_memory: bool = True,
     trace_gradient_memory: bool = True,
     trace_activation_time: bool = True,
-    trace_gradient_time: bool = True,
+    trace_gradient_time: bool = True
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
