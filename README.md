@@ -106,7 +106,7 @@ You'll immediately see a live terminal dashboard tracking:
 - Per-layer memory usage and compute time
 - Training step breakdowns
 
-![TraceML CLI Demo](cli_demo_v1.png)
+![TraceML CLI Demo](demo_gc.png)
 
 ---
 
@@ -128,7 +128,7 @@ traceml run train.py --mode=dashboard
 
 Opens `http://localhost:8765` with interactive charts and real-time updates.
 
-![TraceML Dashboard](dash_demo_v1.png)
+![TraceML Dashboard](web_demo.png)
 
 Best for: Local development, detailed analysis, sharing results with teammates.
 
