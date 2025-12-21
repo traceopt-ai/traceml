@@ -110,14 +110,6 @@ You'll immediately see a live terminal dashboard tracking:
 
 ---
 
-## Usage Modes
-
-### 🖥️ Terminal Dashboard (Default)
-
-```bash
-traceml run train.py
-```
-
 Best for: Training on remote servers, quick debugging, CI/CD environments.
 
 ### 🌐 Web Dashboard
@@ -128,7 +120,7 @@ traceml run train.py --mode=dashboard
 
 Opens `http://localhost:8765` with interactive charts and real-time updates.
 
-![TraceML Dashboard](web_demo.png)
+<img src="web_demo.png" width="600" alt="TraceML CLI Demo">
 
 Best for: Local development, detailed analysis, sharing results with teammates.
 
