@@ -12,6 +12,8 @@ from traceml.utils.gradient_hook import attach_all_gradient_hooks
 from traceml.utils.activation_time_hooks import attach_activation_time_hooks
 from traceml.utils.gradient_time_hooks import attach_gradient_time_hooks
 from traceml.utils.steptimer import StepTimeEvent, record_step_time_event
+from traceml.utils.entry_hook import attach_execution_entry_hooks
+
 
 
 def trace_model(
@@ -19,7 +21,8 @@ def trace_model(
     trace_activation_memory: bool = True,
     trace_gradient_memory: bool = True,
     trace_activation_time: bool = True,
-    trace_gradient_time: bool = True
+    trace_gradient_time: bool = True,
+    trace_execution: bool = True,
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -33,6 +36,7 @@ def trace_model(
         trace_activation_time:attach activation *time* hooks (pre + post)
             (only CPU time so wwaiting time + execution time).
         trace_gradient_time:attach gradient *time* hooks (pre + post).
+        trace_execution: attach execution hooks.
     """
 
     def decorator(cls):
@@ -61,6 +65,9 @@ def trace_model(
                 if trace_gradient_time:
                     attach_gradient_time_hooks(self)
 
+                if trace_execution:
+                    attach_execution_entry_hooks(self)
+
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
 
@@ -77,6 +84,7 @@ def trace_model_instance(
     trace_gradient_memory: bool = True,
     trace_activation_time: bool = True,
     trace_gradient_time: bool = True,
+    trace_execution: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -88,6 +96,7 @@ def trace_model_instance(
         trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
         trace_activation_time:attach activation *time* hooks (pre + post).
         trace_gradient_time:attach gradient *time* hooks (pre + post).
+        trace_execution: attach execution hooks.
     """
     try:
         if not isinstance(model, nn.Module):
@@ -106,6 +115,9 @@ def trace_model_instance(
 
         if trace_gradient_time:
             attach_gradient_time_hooks(model)
+
+        if trace_execution:
+            attach_execution_entry_hooks(model)
 
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)
