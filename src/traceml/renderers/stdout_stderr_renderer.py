@@ -80,7 +80,7 @@ class StdoutStderrRenderer(BaseRenderer):
             border_style="cyan",
         )
 
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         """Persist cached lines at the end of the run."""
         self._update_cache_and_log(
             StreamCapture._stdout_stderr_capture, self.stdout_stderr_cache

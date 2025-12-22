@@ -4,7 +4,7 @@ import runpy
 import traceback
 
 from traceml.manager.tracker_manager import TrackerManager
-from traceml.utils.shared_utils import CURRENT_EXECUTION_LAYER
+from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
 def main():
@@ -48,13 +48,13 @@ def main():
         exit_code = 1
     finally:
         tracker.stop()
-        tracker.log_summaries()
+        tracker.log_summaries(log_file_path="traceml_system_summary.txt")
 
     if error:
         print("\n--- script crashed here ---", file=sys.stderr)
-        if CURRENT_EXECUTION_LAYER is not None:
+        if EXECUTION_LAYER.current is not None:
             print(
-                f"[TraceML] Last execution point: {CURRENT_EXECUTION_LAYER}",
+                f"[TraceML] Last execution point: {EXECUTION_LAYER.current}",
                 file=sys.stderr,
             )
         traceback.print_exception(type(error), error, error.__traceback__)

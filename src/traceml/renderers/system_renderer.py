@@ -10,6 +10,7 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
+from .utils import append_text
 
 
 class SystemRenderer(BaseRenderer):
@@ -337,9 +338,9 @@ class SystemRenderer(BaseRenderer):
             "GPU POWER LIMIT", "[cyan]|[/cyan]", f"{s['gpu_power_limit']:.1f}W",
         )
 
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         s = self._compute_summary()
-        console = Console()
+        console = Console(record=True)
 
         t = Table.grid(padding=(0, 1))
         t.add_column(style="cyan")
@@ -358,3 +359,5 @@ class SystemRenderer(BaseRenderer):
                 t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"
             )
         )
+        text = console.export_text(clear=False)
+        append_text(path,  "\n" + text + "\n")

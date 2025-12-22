@@ -211,7 +211,7 @@ class ActivationGradientRenderer(BaseRenderer):
         data = self.get_data()
         return data
 
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         console = Console()
 
         act_avg = self._activation_stats["avg"]

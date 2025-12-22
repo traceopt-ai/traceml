@@ -151,7 +151,7 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         return self._service.compute_display_data()
 
 
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         console = Console()
 
         layer_stats = self._summary_service.compute_layer_timing_summary()

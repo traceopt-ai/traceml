@@ -1,5 +1,6 @@
 from typing import Dict
 from traceml.utils.formatting import fmt_mem_new
+from pathlib import Path
 
 
 def truncate_layer_name(s: str, max_len: int = 20) -> str:
@@ -47,3 +48,9 @@ def fmt_time_run(ms: float) -> str:
 
     hours = minutes / 60.0
     return f"{hours:.2f} h"
+
+
+def append_text(path: str, text: str) -> None:
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(text)

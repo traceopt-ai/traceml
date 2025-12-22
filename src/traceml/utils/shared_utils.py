@@ -1,9 +1,11 @@
 import torch.nn as nn
 from typing import Optional
+import threading
 
 subtree_param_cache: dict[nn.Module, int] = {}
 
-CURRENT_EXECUTION_LAYER: Optional[str] = None
+EXECUTION_LAYER = threading.local()
+
 
 
 def subtree_param_bytes(module: nn.Module) -> int:

@@ -274,7 +274,7 @@ class StepTimerRenderer(BaseRenderer):
         return data
 
 
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         """
         Print a one-shot summary of current DB stats to the console.
         """

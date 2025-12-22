@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from traceml.utils.shared_utils import CURRENT_EXECUTION_LAYER
+from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
 _execution_entry_hook_registry = {}
@@ -10,8 +10,7 @@ class ForwardEntryHook:
         self.layer_name = layer_name
 
     def __call__(self, module: nn.Module, inputs):
-        global CURRENT_EXECUTION_LAYER
-        CURRENT_EXECUTION_LAYER = f"forward_{self.layer_name}"
+        EXECUTION_LAYER.current = f"forward_{self.layer_name}"
 
 
 class BackwardEntryHook:
@@ -19,19 +18,9 @@ class BackwardEntryHook:
         self.layer_name = layer_name
 
     def __call__(self, grad):
-        global CURRENT_EXECUTION_LAYER
-        CURRENT_EXECUTION_LAYER = f"backward_{self.layer_name}"
+        EXECUTION_LAYER.current = f"backward_{self.layer_name}"
         return grad
 
-
-def attach_backward_entry_hook(output, layer_name: str):
-    if (
-        isinstance(output, torch.Tensor)
-        and output.requires_grad
-        and not hasattr(output, "_traceml_backward_entry_hook")
-    ):
-        output._traceml_backward_entry_hook = True
-        output.register_hook(BackwardEntryHook(layer_name))
 
 
 def attach_execution_entry_hooks(model: nn.Module):
@@ -48,9 +37,9 @@ def attach_execution_entry_hooks(model: nn.Module):
             ForwardEntryHook(name)
         )
 
-        # backward (registered during forward)
-        module.register_forward_hook(
-            lambda m, i, o, name=name: attach_backward_entry_hook(o, name)
+        # backward
+        module.register_full_backward_pre_hook(
+            BackwardEntryHook(name)
         )
 
     _execution_entry_hook_registry[model_id] = True

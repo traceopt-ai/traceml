@@ -250,7 +250,7 @@ class ProcessRenderer(BaseRenderer):
         else:
             t.add_row("GPU", "[magenta]|[/magenta]", "[red]Not available[/red]")
 
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         """Render the computed process summary to console (same style as before)."""
         console = Console()
         summary = self.compute_summary()

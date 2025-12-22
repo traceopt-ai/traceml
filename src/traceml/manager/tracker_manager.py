@@ -243,7 +243,7 @@ class TrackerManager:
         except Exception as e:
             self.logger.error(f"[TraceML] Failed to stop TrackerManager: {e}")
 
-    def log_summaries(self) -> None:
+    def log_summaries(self, path="traceml_system_summary.txt") -> None:
         """
         Logs final summaries from each sampler (or group of samplers) after tracking stops.
         """
@@ -252,7 +252,7 @@ class TrackerManager:
             # pass merged summaries to all loggers for this group
             for logger in loggers:
                 try:
-                    logger.log_summary()
+                    logger.log_summary(path)
                 except Exception as e:
                     self.logger.error(
                         f"[TraceML] Error in logger '{logger.__class__.__name__}'.log_summary(): {e}"
