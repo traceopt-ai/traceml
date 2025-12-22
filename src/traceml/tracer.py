@@ -48,7 +48,7 @@ def main():
         exit_code = 1
     finally:
         tracker.stop()
-        tracker.log_summaries(log_file_path="traceml_system_summary.txt")
+        tracker.log_summaries(path="traceml_system_summary.txt")
 
     if error:
         print("\n--- script crashed here ---", file=sys.stderr)
