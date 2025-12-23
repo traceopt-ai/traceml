@@ -22,7 +22,7 @@ MODEL_NAME = "bert-base-uncased"
 
 # Increase these to generate a LOT of profiling data
 MAX_TRAIN_EXAMPLES = 5000
-MAX_VAL_EXAMPLES   = 200
+MAX_VAL_EXAMPLES   = 0
 BATCH_SIZE         = 32
 EPOCHS             = 2
 LR = 2e-5
@@ -74,9 +74,8 @@ def prepare_data():
 # --- TraceML Wrappers ---------------------------------------------------------
 
 @trace_timestep("dataloader_fetch", use_gpu=False)
-def fetch_batch(batch):
-    """Count wait time — simple wrapper for TraceML."""
-    return batch
+def next_batch(it):
+    return next(it)
 
 
 @trace_timestep("data_loading", use_gpu=False)
@@ -161,9 +160,13 @@ def main():
         running_loss = 0.0
         running_acc  = 0.0
 
-        for step, batch in enumerate(train_loader):
-            # Wrap batch fetch for TraceML timing
-            batch = fetch_batch(batch)
+        train_iter = iter(train_loader)
+        for step in range(len(train_loader)):
+            
+            try:
+                batch = next_batch(train_iter)
+            except StopIteration:
+                break
 
             batch = load_batch_to_device(batch, device)
 
