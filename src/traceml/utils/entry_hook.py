@@ -22,6 +22,15 @@ class BackwardEntryHook:
         return grad
 
 
+def attach_backward_entry_hook(output, layer_name: str):
+    if (
+        isinstance(output, torch.Tensor)
+        and output.requires_grad
+        and not hasattr(output, "_traceml_exec_hook")
+    ):
+        output._traceml_exec_hook = True
+        output.register_hook(BackwardEntryHook(layer_name))
+
 
 def attach_execution_entry_hooks(model: nn.Module):
     model_id = id(model)
@@ -32,14 +41,9 @@ def attach_execution_entry_hooks(model: nn.Module):
         if any(module.children()):
             continue
 
-        # forward
-        module.register_forward_pre_hook(
-            ForwardEntryHook(name)
-        )
-
-        # backward
-        module.register_full_backward_pre_hook(
-            BackwardEntryHook(name)
+        module.register_forward_pre_hook(ForwardEntryHook(name))
+        module.register_forward_hook(
+            lambda m, i, o, name=name: attach_backward_entry_hook(o, name)
         )
 
     _execution_entry_hook_registry[model_id] = True
