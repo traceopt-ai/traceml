@@ -52,7 +52,7 @@ def main():
 
     if error:
         print("\n--- script crashed here ---", file=sys.stderr)
-        if EXECUTION_LAYER.current is not None:
+        if getattr(EXECUTION_LAYER, "current", None) is not None:
             print(
                 f"[TraceML] Last execution point: {EXECUTION_LAYER.current}",
                 file=sys.stderr,
