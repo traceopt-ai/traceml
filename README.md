@@ -28,6 +28,7 @@ TraceML answers the questions you actually need answered:
 
 | Question | TraceML Answer |
 |----------|----------------|
+| Which **layer caused OOM** ? | Automatic OOM detection with exact layer identification |
 | Which layer is eating my GPU memory? | Per-layer memory breakdown (params + activations + gradients) |
 | Where did that memory spike happen? | Real-time memory tracking during forward/backward passes |
 | Which layer is slow? | Per-layer compute time (forward + backward) |
@@ -189,6 +190,7 @@ Logs are saved to `./logs/` with timestamps, ready for plotting or integration w
 
 ## Current Features
 
+✅ Automatic OOM layer detection (identifies exact layer that caused crash)
 ✅ Real-time system monitoring (CPU, RAM, GPU)  
 ✅ Per-layer memory tracking (parameters, activations, gradients)  
 ✅ Per-layer compute time (forward + backward)  
