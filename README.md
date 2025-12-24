@@ -1,6 +1,6 @@
 # TraceML
 
-**Real-time profiling for PyTorch training — lightweight, always-on, and actionable.**
+**Real-time training observability and failure attribution tool for PyTorch — lightweight, always-on, and actionable.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
