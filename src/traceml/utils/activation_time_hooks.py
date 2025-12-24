@@ -7,6 +7,8 @@ import sys
 import torch
 import torch.nn as nn
 from traceml.utils.shared_utils import model_is_on_cuda
+from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+
 
 activation_time_queue: Queue = Queue(maxsize=2048)
 _activation_time_registry: Dict[int, bool] = {}
@@ -51,6 +53,9 @@ class ActivationTimeEvent:
         if self.gpu_end.query():
             self.gpu_duration_ms = self.gpu_start.elapsed_time(self.gpu_end)
 
+            return_cuda_event(self.gpu_start)
+            return_cuda_event(self.gpu_end)
+
             # Release CUDA event handles
             self.gpu_start = None
             self.gpu_end = None
@@ -74,7 +79,7 @@ class ActivationTimePreHook:
             gpu_start = None
 
             if self.on_gpu:
-                gpu_start = torch.cuda.Event(enable_timing=True)
+                gpu_start = get_cuda_event()
                 gpu_start.record()
 
             buf = _temp_time_buffer.setdefault(self.model_id, {})
@@ -114,7 +119,7 @@ class ActivationTimePostHook:
             gpu_start = start_record["gpu_start"]
             gpu_end = None
             if self.on_gpu:
-                gpu_end = torch.cuda.Event(enable_timing=True)
+                gpu_end = get_cuda_event()
                 gpu_end.record()
 
             event = ActivationTimeEvent(
