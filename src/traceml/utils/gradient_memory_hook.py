@@ -1,9 +1,7 @@
 import sys
 from dataclasses import dataclass
 from queue import Queue, Full
-from typing import Any, Dict, Optional
-
-from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from typing import Any, Dict, Optional, List
 
 import torch
 import torch.nn as nn
@@ -15,9 +13,13 @@ gradient_queue: Queue = Queue(maxsize=2048)
 _grad_layer_registry: Dict[int, bool] = {}
 _grad_param_registry: Dict[int, bool] = {}
 
+# In-memory buffer:
+# model_id -> List[(layer_name, param_name, per_device_memory)]
+_gradient_buffer: Dict[int, List] = {}
+
 
 @dataclass
-class GradientEvent:
+class GradientMemoryEvent:
     """
     Represents gradient memory for a single layer / param batch during backprop.
 
@@ -73,7 +75,7 @@ def _accumulate_tensor_sizes_mb(obj: Any, out: Dict[str, float]) -> None:
         return
 
 
-class LayerGradientHook:
+class GradientModuleHook:
     """
     Full backward hook capturing gradient sizes from grad_output for a layer.
     """
@@ -81,8 +83,6 @@ class LayerGradientHook:
     def __init__(self, model_id: int, layer_name: str):
         self.model_id = model_id
         self.layer_name = layer_name
-        setup_error_logger()
-        self.logger = get_error_logger("LayerGradientHook")
 
     def __call__(self, module: nn.Module, grad_input: Any, grad_output: Any):
         try:
@@ -90,19 +90,13 @@ class LayerGradientHook:
             _accumulate_tensor_sizes_mb(grad_output, device_mb)
 
             if device_mb:
-                elem = GradientEvent(
-                    model_id=self.model_id,
-                    layer_name=self.layer_name,
-                    param_name=None,
-                    per_device_memory=device_mb.copy(),
+                _gradient_buffer.setdefault(self.model_id, []).append(
+                    (self.layer_name, None, device_mb)
                 )
-                try:
-                    gradient_queue.put_nowait(elem)
-                except Full:
-                    pass
         except Exception:
-            self.logger.error(
-                f"[TraceML] Error in ModuleGradientHook for layer {self.layer_name}"
+            print(
+                f"[TraceML] Error in LayerGradientHook for layer {self.layer_name}",
+                file=sys.stderr,
             )
 
 
@@ -115,8 +109,6 @@ class ParamGradientHook:
         self.model_id = model_id
         self.layer_name = layer_name
         self.param_name = param_name
-        setup_error_logger()
-        self.logger = get_error_logger("ParamGradientHook")
 
     def __call__(self, grad: torch.Tensor):
         try:
@@ -124,23 +116,18 @@ class ParamGradientHook:
             _accumulate_tensor_sizes_mb(grad, device_mb)
 
             if device_mb:
-                elem = GradientEvent(
-                    model_id=self.model_id,
-                    layer_name=self.layer_name,
-                    param_name=self.param_name,
-                    per_device_memory=device_mb.copy(),
-                )
-                try:
-                    gradient_queue.put_nowait(elem)
-                except Full:
-                    pass
+                if device_mb:
+                    _gradient_buffer.setdefault(self.model_id, []).append(
+                        (self.layer_name, self.param_name, device_mb)
+                    )
         except Exception:
-            self.logger.error(
-                f"[TraceML] Error in ParamGradientHook for param {self.param_name}"
+            print(
+                f"[TraceML] Error in ParamGradientHook for param {self.param_name}",
+                file=sys.stderr,
             )
 
 
-def attach_layer_gradient_hooks(model: nn.Module) -> None:
+def attach_module_gradient_hooks(model: nn.Module) -> None:
     """
     Attach `register_full_backward_hook` to all leaf modules to capture grad_output sizes.
     Idempotent per model object.
@@ -155,7 +142,7 @@ def attach_layer_gradient_hooks(model: nn.Module) -> None:
             if any(module.children()):
                 continue
             # full backward hook works on module outputs
-            module.register_full_backward_hook(LayerGradientHook(model_id, name))
+            module.register_full_backward_hook(GradientModuleHook(model_id, name))
         _grad_layer_registry[model_id] = True
     except Exception as e:
         print(f"[TraceML] Failed to attach module gradient hooks: {e}", file=sys.stderr)
@@ -197,6 +184,30 @@ def attach_param_gradient_hooks(model: nn.Module) -> None:
     except Exception as e:
         print(f"[TraceML] Failed to attach param gradient hooks: {e}", file=sys.stderr)
 
+def flush_gradient_memory_buffers(model: nn.Module) -> None:
+    """
+    Convert buffered gradient memory into GradientEvent objects and enqueue them.
+    Intended to be called before optimizer.step().
+    """
+    model_id = id(model)
+    buf = _gradient_buffer.get(model_id)
+
+    if not buf:
+        return
+
+    for layer_name, param_name, device_mb in buf:
+        event = GradientMemoryEvent(
+            model_id=model_id,
+            layer_name=layer_name,
+            param_name=param_name,
+            per_device_memory=device_mb,
+        )
+        try:
+            gradient_queue.put_nowait(event)
+        except Full:
+            break
+
+    buf.clear()
 
 def attach_all_gradient_hooks(model: nn.Module) -> None:
     """
@@ -206,4 +217,4 @@ def attach_all_gradient_hooks(model: nn.Module) -> None:
     """
     ## param gradients are not used to commented
     ## attach_param_gradient_hooks(model)
-    attach_layer_gradient_hooks(model)
+    attach_module_gradient_hooks(model)

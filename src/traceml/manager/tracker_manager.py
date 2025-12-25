@@ -65,7 +65,6 @@ class TrackerManager:
             self.components = components
         self.interval_sec = interval_sec
         self._stop_event = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
         if mode == "cli":
             self.display_manager = CLIDisplayManager
             self._render_attr = "get_panel_renderable"
@@ -77,6 +76,8 @@ class TrackerManager:
             self._render_attr = "get_dashboard_renderable"
         else:
             raise ValueError(f"Unsupported mode: {mode}")
+
+        self._thread = threading.Thread(target=self._run, daemon=True)
 
     @staticmethod
     def _components(
@@ -232,8 +233,6 @@ class TrackerManager:
             for _, loggers in self.components:
                 for logger in loggers:
                     try:
-                        if hasattr(logger, "shutdown"):
-                            logger.shutdown()
                         self.display_manager.release_display()
                     except Exception as e:
                         self.logger.error(

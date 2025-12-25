@@ -117,8 +117,6 @@ class CLIDisplayManager:
             finally:
                 cls._live_display = None
                 cls._layout_content_fns.clear()
-                # Re-initialize layout to reset state for next run
-                cls._layout = Layout(name=ROOT_LAYOUT_NAME)
 
     @classmethod
     def release_display(cls):

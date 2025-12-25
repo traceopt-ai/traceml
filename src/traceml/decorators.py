@@ -1,19 +1,44 @@
 import functools
 import sys
-from typing import Callable
+from typing import Callable, Optional
 import torch.nn as nn
 import time
 import torch
-
+import types
 
 from traceml.utils.patch import model_queue
 from traceml.utils.activation_memory_hook import attach_activation_memory_hooks
-from traceml.utils.gradient_hook import attach_all_gradient_hooks
+from traceml.utils.gradient_memory_hook import attach_all_gradient_hooks
 from traceml.utils.activation_time_hooks import attach_activation_time_hooks
 from traceml.utils.gradient_time_hooks import attach_gradient_time_hooks
 from traceml.utils.steptimer import StepTimeEvent, record_step_time_event
 from traceml.utils.entry_hook import attach_execution_entry_hooks
+from traceml.utils.flush_buffers import flush_traceml_buffers
 
+
+
+def wrap_optimizer_step_with_flush(optimizer: torch.optim.Optimizer, model: nn.Module):
+    """
+    Wrap optimizer.step() to flush TraceML buffers before each step.
+    """
+    if optimizer is None:
+        return
+
+    # Avoid double-wrapping
+    if getattr(optimizer, "_traceml_step_wrapped", False):
+        return
+
+    orig_step_fn = optimizer.step.__func__
+
+    @functools.wraps(orig_step_fn)
+    def step_with_flush(self, *args, **kwargs):
+        attached = getattr(model, "_traceml_attached", {})
+        if attached:
+            flush_traceml_buffers(attached, model)
+        return orig_step_fn(self, *args, **kwargs)
+
+    optimizer.step = types.MethodType(step_with_flush, optimizer)
+    optimizer._traceml_step_wrapped = True
 
 
 def trace_model(
@@ -49,24 +74,39 @@ def trace_model(
         @functools.wraps(original_init)
         def wrapped_init(self, *args, **kwargs):
             original_init(self, *args, **kwargs)
+
+            attached = {
+                "activation_memory": False,
+                "gradient_memory": False,
+                "activation_time": False,
+                "gradient_time": False,
+                "execution": False,
+            }
             try:
                 if sample_layer_memory:
                     model_queue.put(self)
 
                 if trace_activation_memory:
                     attach_activation_memory_hooks(self)
+                    attached["activation_memory"] = True
 
                 if trace_gradient_memory:
                     attach_all_gradient_hooks(self)
+                    attached["gradient_memory"] = True
 
                 if trace_activation_time:
                     attach_activation_time_hooks(self)
+                    attached["activation_time"] = True
 
                 if trace_gradient_time:
                     attach_gradient_time_hooks(self)
+                    attached["gradient_time"] = True
 
                 if trace_execution:
                     attach_execution_entry_hooks(self)
+                    attached["execution"] = True
+
+                self._traceml_attached = attached
 
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
@@ -79,6 +119,7 @@ def trace_model(
 
 def trace_model_instance(
     model: nn.Module,
+    optimizer: Optional[torch.optim.Optimizer],
     sample_layer_memory: bool = True,
     trace_activation_memory: bool = True,
     trace_gradient_memory: bool = True,
@@ -91,6 +132,7 @@ def trace_model_instance(
 
     Args:
         model (nn.Module): The model instance to trace.
+        optimizer: optional torch optimizer; its .step() will be wrapped to flush TraceML buffers.
         sample_layer_memory: enqueue model for memory sampling.
         trace_activation_memory: attach activation hooks to capture activations.
         trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
@@ -98,6 +140,13 @@ def trace_model_instance(
         trace_gradient_time:attach gradient *time* hooks (pre + post).
         trace_execution: attach execution hooks.
     """
+    attached = {
+        "activation_memory": False,
+        "gradient_memory": False,
+        "activation_time": False,
+        "gradient_time": False,
+        "execution": False,
+    }
     try:
         if not isinstance(model, nn.Module):
             raise TypeError("trace_model_instance expects an nn.Module.")
@@ -106,18 +155,29 @@ def trace_model_instance(
 
         if trace_activation_memory:
             attach_activation_memory_hooks(model)
+            attached["activation_memory"] = True
+
 
         if trace_gradient_memory:
             attach_all_gradient_hooks(model)
+            attached["gradient_memory"] = True
 
         if trace_activation_time:
             attach_activation_time_hooks(model)
+            attached["activation_time"] = True
 
         if trace_gradient_time:
             attach_gradient_time_hooks(model)
+            attached["gradient_time"] = True
 
         if trace_execution:
             attach_execution_entry_hooks(model)
+            attached["execution"] = True
+
+        model._traceml_attached = attached
+
+        if optimizer is not None:
+             wrap_optimizer_step_with_flush(optimizer, model)
 
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)
@@ -173,3 +233,5 @@ def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
         return wrapper
 
     return decorator
+
+

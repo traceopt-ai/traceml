@@ -1,16 +1,20 @@
 from dataclasses import dataclass
 from queue import Queue, Full
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 import sys
 
 import torch
 import torch.nn as nn
 
 # Shared queue for activation events
-activation_memory_queue: Queue = Queue(maxsize=2048)
+activation_memory_queue: Queue = Queue(maxsize=4096)
 
 # Registry to prevent multiple hook attachments per model
 _activation_memory_hook_registry: Dict[int, bool] = {}
+
+# In-memory buffer: model_id -> List[(layer_name, memory_per_device)
+_activation_memory_buffer: Dict[int, List[Tuple[str, Dict[str, float]]]] = {}
+
 
 
 @dataclass
@@ -65,21 +69,41 @@ class ActivationMemoryHook:
                 for o in output.values():
                     accumulate(o)
 
-            # Create and enqueue event
-            event = ActivationMemoryEvent(
-                model_id=self.model_id,
-                layer_name=self.layer_name,
-                memory_per_device=layer_acc.copy(),
+            _activation_memory_buffer.setdefault(self.model_id, []).append(
+                (self.layer_name, layer_acc)
             )
-            try:
-                activation_memory_queue.put_nowait(event)
-            except Full:
-                pass  # drop if queue is full
+
         except Exception:
             print(
                 f"[TraceML] Error in ActivationMemoryHook for layer {self.layer_name}",
                 file=sys.stderr,
             )
+
+
+def flush_activation_memory_buffers(model: nn.Module):
+    """
+    Convert buffered activation memory into events and enqueue them.
+    Called before optimizer.step().
+    """
+    model_id = id(model)
+    buf = _activation_memory_buffer.get(model_id)
+
+    if not buf:
+        return
+
+    for layer_name, layer_acc in buf:
+        event = ActivationMemoryEvent(
+            model_id=model_id,
+            layer_name=layer_name,
+            memory_per_device=layer_acc,
+        )
+        try:
+            activation_memory_queue.put_nowait(event)
+        except Full:
+            break
+
+    buf.clear()
+
 
 
 def attach_activation_memory_hooks(model: nn.Module):

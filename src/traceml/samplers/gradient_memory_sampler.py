@@ -1,7 +1,7 @@
 from typing import Any, Dict
 import time
 from .base_sampler import BaseSampler
-from traceml.utils.gradient_hook import get_gradient_queue
+from traceml.utils.gradient_memory_hook import get_gradient_queue
 from traceml.loggers.error_log import get_error_logger
 
 

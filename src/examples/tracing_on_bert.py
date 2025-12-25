@@ -21,10 +21,10 @@ SEED = 42
 MODEL_NAME = "bert-base-uncased"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 5000
+MAX_TRAIN_EXAMPLES = 1000
 MAX_VAL_EXAMPLES   = 0
 BATCH_SIZE         = 32
-EPOCHS             = 2
+EPOCHS             = 1
 LR = 2e-5
 WARMUP_RATIO = 0.06
 
@@ -138,12 +138,20 @@ def main():
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME, num_labels=4
     ).to(device)
-
-    # Attach TraceML model-level hooks:
-    trace_model_instance(model)
-
     optimizer = AdamW(model.parameters(), lr=LR)
 
+    # IMPORTANT:
+    # Attach TraceML BEFORE any optimizer-level wrappers.
+    # This includes:
+    #   - LR schedulers (torch / HuggingFace)
+    #   - AMP / GradScaler
+    #   - Distributed wrappers (FSDP, DDP optimizer hooks)
+    #   - Any custom optimizer.step() wrappers
+    #
+    # Rule: TraceML must wrap optimizer.step FIRST.
+    trace_model_instance(model, optimizer)
+
+    # Attach TraceML model-level hooks
     total_steps = EPOCHS * math.ceil(len(train_loader))
     warmup_steps = int(WARMUP_RATIO * total_steps)
     scheduler = get_linear_schedule_with_warmup(
