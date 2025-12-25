@@ -1,7 +1,7 @@
 import sys
 from dataclasses import dataclass
 from queue import Queue, Full
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Tuple, List
 
 import torch
 import torch.nn as nn
@@ -15,25 +15,20 @@ _grad_param_registry: Dict[int, bool] = {}
 
 # In-memory buffer:
 # model_id -> List[(layer_name, param_name, per_device_memory)]
-_gradient_buffer: Dict[int, List] = {}
+_gradient_buffer: Dict[int, List[Tuple[str, Dict[str, float]]]] = {}
 
 
 @dataclass
-class GradientMemoryEvent:
+class GradientMemoryEvents:
     """
     Represents gradient memory for a single layer / param batch during backprop.
 
     For module hooks:
       - per_device_memory sizes over grad_output tensors of that layer.
-
-    For parameter hooks:
-      - layer_name is the parameter's qualified name.
     """
 
     model_id: int
-    layer_name: str  # layer/module name
-    param_name: Optional[str]
-    per_device_memory: Dict[str, float]
+    layers: List[Tuple[str, Dict[str, float]]]
 
 
 def get_gradient_queue() -> Queue:
@@ -91,38 +86,11 @@ class GradientModuleHook:
 
             if device_mb:
                 _gradient_buffer.setdefault(self.model_id, []).append(
-                    (self.layer_name, None, device_mb)
+                    (self.layer_name, device_mb)
                 )
         except Exception:
             print(
                 f"[TraceML] Error in LayerGradientHook for layer {self.layer_name}",
-                file=sys.stderr,
-            )
-
-
-class ParamGradientHook:
-    """
-    Per-parameter grad hook (registered on Tensor) to capture grad sizes for that param.
-    """
-
-    def __init__(self, model_id: int, layer_name: str, param_name: str):
-        self.model_id = model_id
-        self.layer_name = layer_name
-        self.param_name = param_name
-
-    def __call__(self, grad: torch.Tensor):
-        try:
-            device_mb: Dict[str, float] = {}
-            _accumulate_tensor_sizes_mb(grad, device_mb)
-
-            if device_mb:
-                if device_mb:
-                    _gradient_buffer.setdefault(self.model_id, []).append(
-                        (self.layer_name, self.param_name, device_mb)
-                    )
-        except Exception:
-            print(
-                f"[TraceML] Error in ParamGradientHook for param {self.param_name}",
                 file=sys.stderr,
             )
 
@@ -148,66 +116,25 @@ def attach_module_gradient_hooks(model: nn.Module) -> None:
         print(f"[TraceML] Failed to attach module gradient hooks: {e}", file=sys.stderr)
 
 
-def _build_param_to_module_map(model: nn.Module) -> Dict[str, str]:
-    mapping = {}
-    for module_name, module in model.named_modules():
-        for pname, _ in module.named_parameters(recurse=False):
-            full_name = f"{module_name}.{pname}" if module_name else pname
-            mapping[full_name] = module_name or "<root>"
-    return mapping
-
-
-def attach_param_gradient_hooks(model: nn.Module) -> None:
-    """
-    Attach per-parameter grad hooks to capture grad tensor sizes of parameters.
-    Idempotent per model object.
-    """
-    model_id = id(model)
-    if _grad_param_registry.get(model_id):
-        return
-
-    try:
-        param_to_module = _build_param_to_module_map(model)
-
-        for name, p in model.named_parameters(recurse=True):
-            if p.requires_grad:
-                # register_hook attaches to the Tensor that will receive .grad
-                layer_name = param_to_module.get(name, "<unknown>")
-                p.register_hook(
-                    ParamGradientHook(
-                        model_id,
-                        layer_name,
-                        name,
-                    )
-                )
-        _grad_param_registry[model_id] = True
-    except Exception as e:
-        print(f"[TraceML] Failed to attach param gradient hooks: {e}", file=sys.stderr)
-
 def flush_gradient_memory_buffers(model: nn.Module) -> None:
     """
     Convert buffered gradient memory into GradientEvent objects and enqueue them.
     Intended to be called before optimizer.step().
     """
     model_id = id(model)
-    buf = _gradient_buffer.get(model_id)
+    buf = _gradient_buffer.pop(model_id, None)
 
     if not buf:
         return
 
-    for layer_name, param_name, device_mb in buf:
-        event = GradientMemoryEvent(
-            model_id=model_id,
-            layer_name=layer_name,
-            param_name=param_name,
-            per_device_memory=device_mb,
-        )
-        try:
-            gradient_queue.put_nowait(event)
-        except Full:
-            break
-
-    buf.clear()
+    event = GradientMemoryEvents(
+        model_id=model_id,
+        layers=buf,
+    )
+    try:
+        gradient_queue.put_nowait(event)
+    except Full:
+        pass
 
 def attach_all_gradient_hooks(model: nn.Module) -> None:
     """
@@ -216,5 +143,4 @@ def attach_all_gradient_hooks(model: nn.Module) -> None:
     Optionally attaches module backward hooks (risky with AMP).
     """
     ## param gradients are not used to commented
-    ## attach_param_gradient_hooks(model)
     attach_module_gradient_hooks(model)

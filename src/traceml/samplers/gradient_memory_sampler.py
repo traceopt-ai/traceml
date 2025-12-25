@@ -20,23 +20,22 @@ class GradientMemorySampler(BaseSampler):
         self.logger = get_error_logger(self.sampler_name)
 
     def _save_event(self, event: Dict[str, Any]) -> None:
-        """
-        Save one GradientEvent into per-layer tables.
-        Same structure as ActivationMemorySampler.
-        """
-        layer_name = getattr(event, "layer_name", "unknown")
+        timestamp = time.time()
+        model_id = getattr(event, "model_id", None)
 
-        # final dict you will save
-        record = {
-            "timestamp": time.time(),
-            "model_id": getattr(event, "model_id", None),
-            "memory": getattr(event, "per_device_memory", {})
-            or {},  # raw per-device gradient memory
-        }
+        layers = getattr(event, "layers", None)
+        if not layers:
+            return
 
-        # write into per-layer table
-        table = self.db.create_or_get_table(layer_name)
-        table.append(record)
+        for layer_name, memory_per_device in layers:
+            record = {
+                "timestamp": timestamp,
+                "model_id": model_id,
+                "memory": memory_per_device,
+            }
+
+            table = self.db.create_or_get_table(layer_name)
+            table.append(record)
 
     def _drain_queue(self) -> None:
         """

@@ -18,14 +18,12 @@ _activation_memory_buffer: Dict[int, List[Tuple[str, Dict[str, float]]]] = {}
 
 
 @dataclass
-class ActivationMemoryEvent:
+class ActivationMemoryEvents:
     """
     Represents a single forward-pass activation snapshot for a model layer.
     """
-
     model_id: int
-    layer_name: str
-    memory_per_device: Dict[str, float]
+    layers: List[Tuple[str, Dict[str, float]]]
 
 
 def get_activation_memory_queue() -> Queue:
@@ -86,24 +84,19 @@ def flush_activation_memory_buffers(model: nn.Module):
     Called before optimizer.step().
     """
     model_id = id(model)
-    buf = _activation_memory_buffer.get(model_id)
+    buf = _activation_memory_buffer.pop(model_id, None)
 
     if not buf:
         return
 
-    for layer_name, layer_acc in buf:
-        event = ActivationMemoryEvent(
-            model_id=model_id,
-            layer_name=layer_name,
-            memory_per_device=layer_acc,
-        )
-        try:
-            activation_memory_queue.put_nowait(event)
-        except Full:
-            break
-
-    buf.clear()
-
+    event = ActivationMemoryEvents(
+        model_id=model_id,
+        layers=buf,
+    )
+    try:
+        activation_memory_queue.put_nowait(event)
+    except Full:
+        pass
 
 
 def attach_activation_memory_hooks(model: nn.Module):

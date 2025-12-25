@@ -37,19 +37,25 @@ class ActivationMemorySampler(BaseSampler):
                 continue
             self._save_event(event)
 
-    def _save_event(self, event: Dict[str, Any]) -> None:
-        """
-        Save one ActivationEvent into per-layer tables.
-        """
-        layer_name = getattr(event, "layer_name", None)
-        record = {
-            "timestamp": time.time(),
-            "model_id": getattr(event, "model_id", None),
-            "memory": getattr(event, "memory_per_device", None),
-        }
 
-        table = self.db.create_or_get_table(layer_name)
-        table.append(record)
+    def _save_event(self, event: Dict[str, Any]) -> None:
+        timestamp = time.time()
+        model_id = getattr(event, "model_id", None)
+
+        layers = getattr(event, "layers", None)
+        if not layers:
+            return
+
+        for layer_name, memory_per_device in layers:
+            record = {
+                "timestamp": timestamp,
+                "model_id": model_id,
+                "memory": memory_per_device,
+            }
+
+            table = self.db.create_or_get_table(layer_name)
+            table.append(record)
+
 
     def sample(self):
         """
