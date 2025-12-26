@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from collections import deque
 from queue import Queue, Full
 from typing import Dict, List, Optional
 import time
@@ -9,12 +10,17 @@ import torch.nn as nn
 from traceml.utils.shared_utils import model_is_on_cuda
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
+# Shared queue (consumer-facing)
+activation_time_queue: Queue = Queue(maxsize=4096)
 
-activation_time_queue: Queue = Queue(maxsize=2048)
-_activation_time_registry: Dict[int, bool] = {}
+# Prevent double hook attachment
+_activation_time_hook_registry: Dict[int, bool] = {}
 
-# Temporary buffer to match pre <-> post events
-_temp_time_buffer: Dict[int, Dict[str, List[dict]]] = {}
+# Temporary pre-hook buffer: model_id -> layer -> FIFO start records
+_activation_time_start_buffer: Dict[int, Dict[str, deque]] = {}
+
+# Main FIFO event buffer: model_id -> deque[ActivationTimeEvent]
+_activation_time_event_buffer: Dict[int, deque] = {}
 
 
 @dataclass
@@ -82,10 +88,12 @@ class ActivationTimePreHook:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            buf = _temp_time_buffer.setdefault(self.model_id, {})
-            buf.setdefault(self.layer_name, []).append({
+            model_buf = _activation_time_start_buffer.setdefault(self.model_id, {})
+            layer_q = model_buf.setdefault(self.layer_name, deque())
+            layer_q.append(
+                {
                     "cpu_start": cpu_start,
-                    "gpu_start": gpu_start
+                    "gpu_start": gpu_start,
                 }
             )
         except Exception:
@@ -105,14 +113,15 @@ class ActivationTimePostHook:
         try:
             cpu_end = time.perf_counter()
 
-            start_list = _temp_time_buffer.get(self.model_id, {}).get(
-                self.layer_name, []
+            layer_q = (
+                _activation_time_start_buffer
+                .get(self.model_id, {})
+                .get(self.layer_name)
             )
-
-            if not start_list:
+            if not layer_q:
                 return  # No start recorded
 
-            start_record = start_list.pop(0)  # FIFO match
+            start_record = layer_q.popleft()  # FIFO match
             cpu_start = start_record["cpu_start"]
             cpu_duration_ms = (cpu_end - cpu_start)*1000
 
@@ -133,10 +142,7 @@ class ActivationTimePostHook:
                 gpu_end=gpu_end,
             )
 
-            try:
-                activation_time_queue.put_nowait(event)
-            except Full:
-                pass
+            _activation_time_event_buffer.setdefault(self.model_id, deque()).append(event)
 
         except Exception:
             print(
@@ -145,13 +151,41 @@ class ActivationTimePostHook:
             )
 
 
+def flush_activation_time_buffers(model: nn.Module) -> None:
+    """
+    Drain the activation-time buffer for `model` and enqueue it as a NEW deque.
+
+    - Preserves order
+    - Producer buffer is fully emptied
+    - Consumer receives independent ownership
+    - No GPU resolve here
+    """
+    model_id = id(model)
+    src = _activation_time_event_buffer.get(model_id)
+    if not src:
+        return
+
+    # Create a new deque for the consumer
+    dst = deque()
+    while src:
+        dst.append(src.popleft())
+
+    # Remove empty buffer entry
+    _activation_time_event_buffer.pop(model_id, None)
+
+    try:
+        activation_time_queue.put_nowait(dst)
+    except Full:
+        pass
+
+
 def attach_activation_time_hooks(model: nn.Module):
     """
     Attach pre and post hooks for timing.
     """
 
     model_id = id(model)
-    if _activation_time_registry.get(model_id):
+    if _activation_time_hook_registry.get(model_id):
         return
 
     on_gpu = model_is_on_cuda(model)
@@ -164,4 +198,4 @@ def attach_activation_time_hooks(model: nn.Module):
         module.register_forward_hook(
             ActivationTimePostHook(model_id, name, on_gpu=on_gpu))
 
-    _activation_time_registry[model_id] = True
+    _activation_time_hook_registry[model_id] = True
