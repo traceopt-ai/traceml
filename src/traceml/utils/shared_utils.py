@@ -6,8 +6,6 @@ subtree_param_cache: dict[nn.Module, int] = {}
 
 EXECUTION_LAYER = threading.local()
 
-
-
 def subtree_param_bytes(module: nn.Module) -> int:
     """Total parameter memory of this module INCLUDING descendants."""
     if module in subtree_param_cache:

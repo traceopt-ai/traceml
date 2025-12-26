@@ -9,8 +9,8 @@ from traceml.decorators import trace_model_instance
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
-from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
-from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
+from traceml.samplers.layer_forward_memory_sampler import ActivationMemorySampler
+from traceml.samplers.layer_backward_memory_sampler import GradientMemorySampler
 
 from traceml.manager.tracker_manager import TrackerManager
 

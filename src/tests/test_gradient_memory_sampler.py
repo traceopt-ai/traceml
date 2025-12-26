@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
-from traceml.samplers.gradient_memory_sampler import (
+from traceml.samplers.layer_backward_memory_sampler import (
     GradientMemorySampler,
     GradientSnapshot,
 )

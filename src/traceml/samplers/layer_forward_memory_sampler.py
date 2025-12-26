@@ -1,29 +1,29 @@
 from typing import Dict, Any
 import time
 from .base_sampler import BaseSampler
-from traceml.utils.layerwise_forward_memory_hook import get_layerwise_forward_memory_queue
+from traceml.utils.layer_forward_memory_hook import get_layer_forward_memory_queue
 from traceml.loggers.error_log import get_error_logger
 
 
-class ActivationMemorySampler(BaseSampler):
+class LayerForwardMemorySampler(BaseSampler):
     """
-    Drain-all activation-event sampler.
+    Drain-all layer forward-event sampler.
 
     Each call to `sample()`:
-      - Drains the activation queue.
+      - Drains the forward queue.
       - Save it internally in dict.
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "ActivationMemorySampler"
+        self.sampler_name = "LayerForwardMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
     def _drain_queue(self) -> None:
         """
-        Drain entire activation queue and save every event.
+        Drain entire forward queue and save every event.
         """
-        queue = get_layerwise_forward_memory_queue()
+        queue = get_layer_forward_memory_queue()
         if queue.empty():
             return
 
@@ -64,4 +64,4 @@ class ActivationMemorySampler(BaseSampler):
         try:
             self._drain_queue()
         except Exception as e:
-            self.logger.error(f"[TraceML] ActivationMemorySampler error: {e}")
+            self.logger.error(f"[TraceML] LayerForwardMemorySampler error: {e}")

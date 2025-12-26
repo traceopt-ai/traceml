@@ -13,12 +13,12 @@ from traceml.renderers.display.cli_display_manager import (
 from traceml.utils.formatting import fmt_mem_new
 
 
-class ActivationGradientRenderer(BaseRenderer):
+class LayerForwardBackwardRenderer(BaseRenderer):
     """
     Combined logger for:
       - Per-layer memory
-      - Activation totals (avg + max across all layers)
-      - Gradient totals (avg + max across all layers)
+      - Forward totals (avg + max across all layers)
+      - Backward totals (avg + max across all layers)
     Keeps a cache of last-seen per-layer values so totals are consistent
     even if some layers don’t update every snapshot.
     """
@@ -26,23 +26,23 @@ class ActivationGradientRenderer(BaseRenderer):
     def __init__(
         self,
         layer_db: Database,
-        activation_db: Database,
-        gradient_db: Database,
+        layer_forward_db: Database,
+        layer_backward_db: Database,
     ):
         super().__init__(
-            name="Activation & Gradient Stats",
+            name="Forward & Backward Stats",
             layout_section_name=ACTIVATION_GRADIENT_LAYOUT,
         )
         self._layer_table = layer_db.create_or_get_table("layer_memory")
-        self.activation_db = activation_db
-        self.gradient_db = gradient_db
+        self.layer_forward_db = layer_forward_db
+        self.layer_backward_db = layer_backward_db
 
         # Global stats
-        self._activation_stats = {"count": 0, "sum": 0.0, "avg": 0.0}
-        self._activation_global_max = 0.0
+        self._forward_stats = {"count": 0, "sum": 0.0, "avg": 0.0}
+        self._forward_global_max = 0.0
 
-        self._gradient_stats = {"count": 0, "sum": 0.0, "avg": 0.0}
-        self._gradient_global_max = 0.0
+        self._backward_stats = {"count": 0, "sum": 0.0, "avg": 0.0}
+        self._backward_global_max = 0.0
 
     def _update_layer_cache(
         self, cache: Dict[str, float], new_data: Dict[str, Dict[str, float]]
@@ -76,15 +76,12 @@ class ActivationGradientRenderer(BaseRenderer):
             "model_index": latest.get("model_index", "—"),
         }
 
-    def _compute_current_total(self, is_activation=True) -> float:
+    def _compute_current_total(self, is_forward=True) -> float:
         """
         Compute the current total activation memory across all layers.
         """
         total = 0.0
-        if is_activation:
-            db = self.activation_db
-        else:
-            db = self.gradient_db
+        db = self.layer_forward_db if is_forward else self.layer_backward_db
 
         for layer_name, table in db.all_tables().items():
             if not table:
@@ -97,67 +94,64 @@ class ActivationGradientRenderer(BaseRenderer):
 
         return total
 
-    def _update_stats(self, current_total: float, is_activation=True) -> None:
+    def _update_stats(self, current_total: float, is_forward=True) -> None:
         """
         Update rolling statistics for activation memory.
         """
-        if is_activation:
-            stats = self._activation_stats
-        else:
-            stats = self._gradient_stats
+        stats = self._forward_stats if is_forward else self._backward_stats
 
         stats["count"] += 1
         stats["sum"] += current_total
         stats["avg"] = stats["sum"] / stats["count"]
 
         # Update global peak
-        if is_activation:
-            self._activation_global_max = max(
-                self._activation_global_max, current_total
+        if is_forward:
+            self._forward_global_max = max(
+                self._forward_global_max, current_total
             )
         else:
-            self._gradient_global_max = max(self._gradient_global_max, current_total)
+            self._backward_global_max = max(self._backward_global_max, current_total)
 
     def get_data(self) -> Dict[str, Any]:
 
         layer_info = self._get_layer_memory_info()
 
-        current_activation = self._compute_current_total(is_activation=True)
-        self._update_stats(current_activation, is_activation=True)
+        current_forward = self._compute_current_total(is_forward=True)
+        self._update_stats(current_forward, is_forward=True)
 
-        current_gradient = self._compute_current_total(is_activation=False)
-        self._update_stats(current_gradient, is_activation=False)
+        current_backward = self._compute_current_total(is_forward=False)
+        self._update_stats(current_backward, is_forward=False)
 
         return {
             "total_memory": float(layer_info.get("total_memory", 0.0) or 0.0),
             "model_index": layer_info.get("model_index", "—"),
-            "activation": {
-                "avg": self._activation_stats["avg"],
-                "max": self._activation_global_max,
+            "forward": {
+                "avg": self._forward_stats["avg"],
+                "max": self._forward_global_max,
             },
-            "gradient": {
-                "avg": self._gradient_stats["avg"],
-                "max": self._gradient_global_max,
+            "backward": {
+                "avg": self._backward_stats["avg"],
+                "max": self._backward_global_max,
             },
         }
 
     # CLI rendering
     def get_panel_renderable(self) -> Panel:
         data = self.get_data()
-        act = data["activation"]
-        grad = data["gradient"]
+        fwd = data["forward"]
+        bwd = data["backward"]
 
         table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1))
         table.add_column("Metric", justify="left", style="bold")
         table.add_column("Value", justify="right", style="white")
 
         # Activation stats
-        table.add_row("[cyan]~ Activation Footprint Avg[/cyan]", fmt_mem_new(act["avg"]))
-        table.add_row("[cyan]~ Activation Footprint Max[/cyan]", fmt_mem_new(act["max"]))
+        table.add_row("[cyan]~ Forward Footprint Avg[/cyan]", fmt_mem_new(fwd["avg"]))
+        table.add_row("[cyan]~ Forward Footprint Max[/cyan]", fmt_mem_new(fwd["max"]))
 
         # Gradient stats
-        table.add_row("[green]~ Gradient Footprint Avg[/green]", fmt_mem_new(grad["avg"]))
-        table.add_row("[green]~ Gradient Footprint Max[/green]", fmt_mem_new(grad["max"]))
+        table.add_row("[green]~ Backward Footprint Avg[/green]", fmt_mem_new(bwd["avg"]))
+        table.add_row("[green]~ Backward Footprint Max[/green]", fmt_mem_new(bwd["max"]))
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(80, int(cols * 0.6)), 120)
@@ -173,8 +167,8 @@ class ActivationGradientRenderer(BaseRenderer):
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
         data = self.get_data()
-        act = data["activation"]
-        grad = data["gradient"]
+        fwd = data["forward"]
+        bwd = data["backward"]
 
         # Activation panel
         act_html = f"""
@@ -182,8 +176,8 @@ class ActivationGradientRenderer(BaseRenderer):
             <h4 style="color:#00bcd4; margin:0;">
                 Activation Footprint (Model #{data['model_index']})
             </h4>
-            <p><b>Avg:</b> {fmt_mem_new(act['avg'])}</p>
-            <p><b>Max:</b> {fmt_mem_new(act['max'])}</p>
+            <p><b>Avg:</b> {fmt_mem_new(fwd['avg'])}</p>
+            <p><b>Max:</b> {fmt_mem_new(fwd['max'])}</p>
         </div>
         """
 
@@ -193,8 +187,8 @@ class ActivationGradientRenderer(BaseRenderer):
             <h4 style="color:#4caf50; margin:0;">
                 Gradient Footprint (Model #{data['model_index']})
             </h4>
-            <p><b>Avg:</b> {fmt_mem_new(grad['avg'])}</p>
-            <p><b>Max:</b> {fmt_mem_new(grad['max'])}</p>
+            <p><b>Avg:</b> {fmt_mem_new(bwd['avg'])}</p>
+            <p><b>Max:</b> {fmt_mem_new(bwd['max'])}</p>
         </div>
         """
 
@@ -214,8 +208,8 @@ class ActivationGradientRenderer(BaseRenderer):
     def log_summary(self, path) -> None:
         console = Console()
 
-        act_avg = self._activation_stats["avg"]
-        grad_avg = self._gradient_stats["avg"]
+        fwd_avg = self._forward_stats["avg"]
+        bwd_avg = self._backward_stats["avg"]
 
         table = Table.grid(padding=(0, 1))
         table.add_column(justify="left", style="bold")
@@ -223,20 +217,20 @@ class ActivationGradientRenderer(BaseRenderer):
         table.add_column(justify="right", style="white")
 
         table.add_row(
-            "[cyan]~ ACTIVATION FOOTPRINT AVG[/cyan]", "[dim]|[/dim]", fmt_mem_new(act_avg)
+            "[cyan]~ FORWARD FOOTPRINT AVG[/cyan]", "[dim]|[/dim]", fmt_mem_new(fwd_avg)
         )
         table.add_row(
-            "[cyan]~ ACTIVATION FOOTPRINT MAX[/cyan]",
+            "[cyan]~ FORWARD FOOTPRINT MAX[/cyan]",
             "[dim]|[/dim]",
-            fmt_mem_new(self._activation_global_max),
+            fmt_mem_new(self._forward_global_max),
         )
         table.add_row(
-            "[green]~ GRADIENT FOOTPRINT AVG[/green]", "[dim]|[/dim]", fmt_mem_new(grad_avg)
+            "[green]~ BACKWARD FOOTPRINT AVG[/green]", "[dim]|[/dim]", fmt_mem_new(bwd_avg)
         )
         table.add_row(
-            "[green]~ GRADIENT FOOTPRINT MAX[/green]",
+            "[green]~ BACKWARD FOOTPRINT MAX[/green]",
             "[dim]|[/dim]",
-            fmt_mem_new(self._gradient_global_max),
+            fmt_mem_new(self._backward_global_max),
         )
 
         panel = Panel(

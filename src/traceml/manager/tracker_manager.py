@@ -11,8 +11,8 @@ from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
-from traceml.samplers.activation_memory_sampler import ActivationMemorySampler
-from traceml.samplers.gradient_memory_sampler import GradientMemorySampler
+from traceml.samplers.layer_forward_memory_sampler import LayerForwardMemorySampler
+from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySampler
 from traceml.samplers.steptimer_sampler import StepTimerSampler
 from traceml.samplers.activation_time_sampler import ActivationTimeSampler
 from traceml.samplers.gradient_time_sampler import GradientTimeSampler
@@ -24,7 +24,7 @@ from traceml.renderers.layer_combined_memory_renderer import (
     LayerCombinedMemoryRenderer,
 )
 from traceml.renderers.activation_gradient_memory_renderer import (
-    ActivationGradientRenderer,
+    LayerForwardBackwardRenderer,
 )
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
 from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
@@ -120,27 +120,27 @@ class TrackerManager:
     @staticmethod
     def get_memory_components(num_display_layers: int):
         layer_memory_sampler = LayerMemorySampler()
-        activation_memory_sampler = ActivationMemorySampler()
-        gradient_memory_sampler = GradientMemorySampler()
+        layer_forward_memory_sampler = LayerForwardMemorySampler()
+        layer_backward_memory_sampler = LayerBackwardMemorySampler()
 
         layer_combined_renderer = LayerCombinedMemoryRenderer(
             layer_db=layer_memory_sampler.db,
-            activation_db=activation_memory_sampler.db,
-            gradient_db=gradient_memory_sampler.db,
+            layer_forward_db=layer_forward_memory_sampler.db,
+            layer_backward_db=layer_backward_memory_sampler.db,
             top_n_layers=num_display_layers,
         )
 
-        activation_gradient_renderer = ActivationGradientRenderer(
+        activation_gradient_renderer = LayerForwardBackwardRenderer(
             layer_db=layer_memory_sampler.db,
-            activation_db=activation_memory_sampler.db,
-            gradient_db=gradient_memory_sampler.db,
+            layer_forward_db=layer_forward_memory_sampler.db,
+            layer_backward_db=layer_backward_memory_sampler.db,
         )
         return [
             (
                 [
                     layer_memory_sampler,
-                    activation_memory_sampler,
-                    gradient_memory_sampler,
+                    layer_forward_memory_sampler,
+                    layer_backward_memory_sampler,
                 ],
                 [layer_combined_renderer, activation_gradient_renderer],
             )

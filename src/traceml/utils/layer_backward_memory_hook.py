@@ -7,19 +7,18 @@ import torch
 import torch.nn as nn
 
 # Shared queue for gradient events
-gradient_queue: Queue = Queue(maxsize=2048)
+layer_backward_memory_queue: Queue = Queue(maxsize=2048)
 
 # Registries to prevent multiple hook attachments per model
-_grad_layer_registry: Dict[int, bool] = {}
-_grad_param_registry: Dict[int, bool] = {}
+_layer_backward_hook_registry: Dict[int, bool] = {}
 
 # In-memory buffer:
 # model_id -> List[(layer_name, param_name, per_device_memory)]
-_gradient_buffer: Dict[int, List[Tuple[str, Dict[str, float]]]] = {}
+_layer_backward_memory_buffer: Dict[int, List[Tuple[str, Dict[str, float]]]] = {}
 
 
 @dataclass
-class GradientMemoryEvents:
+class LayerBackwardMemoryEvents:
     """
     Represents gradient memory for a single layer / param batch during backprop.
 
@@ -31,9 +30,9 @@ class GradientMemoryEvents:
     layers: List[Tuple[str, Dict[str, float]]]
 
 
-def get_gradient_queue() -> Queue:
+def get_layer_backward_queue() -> Queue:
     """Return the shared queue of gradient events."""
-    return gradient_queue
+    return layer_backward_memory_queue
 
 
 def _tensor_size_mb(t: torch.Tensor) -> float:
@@ -70,7 +69,7 @@ def _accumulate_tensor_sizes_mb(obj: Any, out: Dict[str, float]) -> None:
         return
 
 
-class GradientModuleHook:
+class LayerBackwardModuleHook:
     """
     Full backward hook capturing gradient sizes from grad_output for a layer.
     """
@@ -85,23 +84,44 @@ class GradientModuleHook:
             _accumulate_tensor_sizes_mb(grad_output, device_mb)
 
             if device_mb:
-                _gradient_buffer.setdefault(self.model_id, []).append(
+                _layer_backward_memory_buffer.setdefault(self.model_id, []).append(
                     (self.layer_name, device_mb)
                 )
         except Exception:
             print(
-                f"[TraceML] Error in LayerGradientHook for layer {self.layer_name}",
+                f"[TraceML] Error in LayerBackwardHook for layer {self.layer_name}",
                 file=sys.stderr,
             )
 
 
-def attach_module_gradient_hooks(model: nn.Module) -> None:
+def flush_layer_backward_memory_buffers(model: nn.Module) -> None:
+    """
+    Convert buffered backward memory into GradientEvent objects and enqueue them.
+    Intended to be called before optimizer.step().
+    """
+    model_id = id(model)
+    buf = _layer_backward_memory_buffer.pop(model_id, None)
+
+    if not buf:
+        return
+
+    event = LayerBackwardMemoryEvents(
+        model_id=model_id,
+        layers=buf,
+    )
+    try:
+        layer_backward_memory_queue.put_nowait(event)
+    except Full:
+        pass
+
+
+def attach_layer_backward_memory_hooks(model: nn.Module) -> None:
     """
     Attach `register_full_backward_hook` to all leaf modules to capture grad_output sizes.
     Idempotent per model object.
     """
     model_id = id(model)
-    if _grad_layer_registry.get(model_id):
+    if _layer_backward_hook_registry.get(model_id):
         return
 
     try:
@@ -110,37 +130,7 @@ def attach_module_gradient_hooks(model: nn.Module) -> None:
             if any(module.children()):
                 continue
             # full backward hook works on module outputs
-            module.register_full_backward_hook(GradientModuleHook(model_id, name))
-        _grad_layer_registry[model_id] = True
+            module.register_full_backward_hook(LayerBackwardModuleHook(model_id, name))
+        _layer_backward_hook_registry[model_id] = True
     except Exception as e:
-        print(f"[TraceML] Failed to attach module gradient hooks: {e}", file=sys.stderr)
-
-
-def flush_gradient_memory_buffers(model: nn.Module) -> None:
-    """
-    Convert buffered gradient memory into GradientEvent objects and enqueue them.
-    Intended to be called before optimizer.step().
-    """
-    model_id = id(model)
-    buf = _gradient_buffer.pop(model_id, None)
-
-    if not buf:
-        return
-
-    event = GradientMemoryEvents(
-        model_id=model_id,
-        layers=buf,
-    )
-    try:
-        gradient_queue.put_nowait(event)
-    except Full:
-        pass
-
-def attach_all_gradient_hooks(model: nn.Module) -> None:
-    """
-    Attach gradient hooks to a model.
-    Always attaches param hooks (safe).
-    Optionally attaches module backward hooks (risky with AMP).
-    """
-    ## param gradients are not used to commented
-    attach_module_gradient_hooks(model)
+        print(f"[TraceML] Failed to attach layer backward hooks: {e}", file=sys.stderr)

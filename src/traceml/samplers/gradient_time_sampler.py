@@ -4,7 +4,7 @@ from collections import deque
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.utils.gradient_time_hooks import (
+from traceml.utils.layer_backward_time_hooks import (
     GradientTimeEvent,
     get_gradient_time_queue,
 )

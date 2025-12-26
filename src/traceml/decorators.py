@@ -7,16 +7,17 @@ import torch
 from contextlib import contextmanager
 
 from traceml.utils.patch import model_queue
-from traceml.utils.layerwise_forward_memory_hook import attach_layerwise_forward_memory_hooks
-from traceml.utils.gradient_memory_hook import attach_all_gradient_hooks
-from traceml.utils.activation_time_hooks import attach_activation_time_hooks
-from traceml.utils.gradient_time_hooks import attach_gradient_time_hooks
+
+from traceml.utils.layer_forward_memory_hook import attach_layer_forward_memory_hooks
+from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memory_hooks
+
+from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
+from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
+
 from traceml.utils.steptimer import StepTimeEvent, record_step_time_event
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
 
-
-_TRACE_STEP_ACTIVE = False
 
 
 @contextmanager
@@ -39,10 +40,10 @@ def trace_step(model: nn.Module):
 
 def trace_model(
     sample_layer_memory: bool = True,
-    trace_layerwise_forward__memory: bool = True,
-    trace_gradient_memory: bool = True,
-    trace_activation_time: bool = True,
-    trace_gradient_time: bool = True,
+    trace_layer_forward__memory: bool = True,
+    trace_layer_backward_memory: bool = True,
+    trace_layer_forward_time: bool = True,
+    trace_layer_backward_time: bool = True,
     trace_execution: bool = True,
 ) -> Callable:
     """
@@ -52,11 +53,11 @@ def trace_model(
 
     Args:
         sample_layer_memory: enqueue model for memory sampling.
-        trace_layerwise_forward__memory: attach activation hooks to capture activations.
-        trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
-        trace_activation_time:attach activation *time* hooks (pre + post)
-            (only CPU time so wwaiting time + execution time).
-        trace_gradient_time:attach gradient *time* hooks (pre + post).
+        trace_layer_forward__memory: attach forward hooks to capture forward pass.
+        trace_layer_backward_memory: attach backward hooks to capture grad sizes (module + param).
+        trace_layer_forward_time:attach forward *time* hooks (pre + post)
+            (only CPU time so waiting time + execution time).
+        trace_layer_backward_time:attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
     """
 
@@ -72,31 +73,31 @@ def trace_model(
             original_init(self, *args, **kwargs)
 
             attached = {
-                "activation_memory": False,
-                "gradient_memory": False,
-                "activation_time": False,
-                "gradient_time": False,
+                "layer_forward_memory": False,
+                "layer_backward_memory": False,
+                "trace_layer_forward_time": False,
+                "trace_layer_backward_time": False,
                 "execution": False,
             }
             try:
                 if sample_layer_memory:
                     model_queue.put(self)
 
-                if trace_layerwise_forward__memory:
-                    attach_layerwise_forward_memory_hooks(self)
-                    attached["activation_memory"] = True
+                if trace_layer_forward__memory:
+                    attach_layer_forward_memory_hooks(self)
+                    attached["layer_forward_memory"] = True
 
-                if trace_gradient_memory:
-                    attach_all_gradient_hooks(self)
-                    attached["gradient_memory"] = True
+                if trace_layer_backward_memory:
+                    attach_layer_backward_memory_hooks(self)
+                    attached["trace_layer_backward_memory"] = True
 
-                if trace_activation_time:
-                    attach_activation_time_hooks(self)
-                    attached["activation_time"] = True
+                if trace_layer_forward_time:
+                    attach_layer_forward_time_hooks(self)
+                    attached["trace_layer_forward_time"] = True
 
-                if trace_gradient_time:
-                    attach_gradient_time_hooks(self)
-                    attached["gradient_time"] = True
+                if trace_layer_backward_time:
+                    attach_layer_backward_time_hooks(self)
+                    attached["trace_layer_backward_time"] = True
 
                 if trace_execution:
                     attach_execution_entry_hooks(self)
@@ -116,10 +117,10 @@ def trace_model(
 def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
-    trace_layerwise_forward__memory: bool = True,
-    trace_gradient_memory: bool = True,
-    trace_activation_time: bool = True,
-    trace_gradient_time: bool = True,
+    trace_layer_forward__memory: bool = True,
+    trace_layer_backward_memory: bool = True,
+    trace_layer_forward_time: bool = True,
+    trace_layer_backward_time: bool = True,
     trace_execution: bool = True,
 ):
     """
@@ -128,17 +129,17 @@ def trace_model_instance(
     Args:
         model (nn.Module): The model instance to trace.
         sample_layer_memory: enqueue model for memory sampling.
-        trace_layerwise_forward__memory: attach activation hooks to capture activations.
-        trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
-        trace_activation_time:attach activation *time* hooks (pre + post).
-        trace_gradient_time:attach gradient *time* hooks (pre + post).
+        trace_layer_forward__memory: attach activation hooks to capture activations.
+        trace_layer_backward_memory: attach gradient hooks to capture grad sizes (module + param).
+        trace_layer_forward_time: attach forward *time* hooks (pre + post).
+        trace_layer_backward_time: attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
     """
     attached = {
-        "activation_memory": False,
-        "gradient_memory": False,
-        "activation_time": False,
-        "gradient_time": False,
+        "layer_forward_memory": False,
+        "layer_backward_memory": False,
+        "layer_forward_time": False,
+        "layer_backward_time": False,
         "execution": False,
     }
     try:
@@ -147,21 +148,21 @@ def trace_model_instance(
         if sample_layer_memory:
             model_queue.put(model)
 
-        if trace_layerwise_forward__memory:
-            attach_layerwise_forward_memory_hooks(model)
-            attached["activation_memory"] = True
+        if trace_layer_forward__memory:
+            attach_layer_forward_memory_hooks(model)
+            attached["layer_forward_memory"] = True
 
-        if trace_gradient_memory:
-            attach_all_gradient_hooks(model)
-            attached["gradient_memory"] = True
+        if trace_layer_backward_memory:
+            attach_layer_backward_memory_hooks(model)
+            attached["layer_backward_memory"] = True
 
-        if trace_activation_time:
-            attach_activation_time_hooks(model)
-            attached["activation_time"] = True
+        if trace_layer_forward_time:
+            attach_layer_forward_time_hooks(model)
+            attached["layer_forward_time"] = True
 
-        if trace_gradient_time:
-            attach_gradient_time_hooks(model)
-            attached["gradient_time"] = True
+        if trace_layer_backward_time:
+            attach_layer_backward_time_hooks(model)
+            attached["layer_backward_time"] = True
 
         if trace_execution:
             attach_execution_entry_hooks(model)

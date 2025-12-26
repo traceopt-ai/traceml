@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from collections import deque
 from queue import Queue, Full
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 import time
 import sys
 
@@ -11,20 +11,20 @@ from traceml.utils.shared_utils import model_is_on_cuda
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 # Shared queue (consumer-facing)
-activation_time_queue: Queue = Queue(maxsize=4096)
+layer_forward_time_queue: Queue = Queue(maxsize=4096)
 
 # Prevent double hook attachment
-_activation_time_hook_registry: Dict[int, bool] = {}
+_layer_forward_time_hook_registry: Dict[int, bool] = {}
 
 # Temporary pre-hook buffer: model_id -> layer -> FIFO start records
-_activation_time_start_buffer: Dict[int, Dict[str, deque]] = {}
+_layer_forward_time_start_buffer: Dict[int, Dict[str, deque]] = {}
 
-# Main FIFO event buffer: model_id -> deque[ActivationTimeEvent]
-_activation_time_event_buffer: Dict[int, deque] = {}
+# Main FIFO event buffer: model_id -> deque[]
+_layer_forward_time_event_buffer: Dict[int, deque] = {}
 
 
 @dataclass
-class ActivationTimeEvent:
+class LayerForwardTimeEvent:
     """
     Time event for a single forward pass of a layer.
     """
@@ -69,11 +69,11 @@ class ActivationTimeEvent:
         return self.resolved
 
 
-def get_activation_time_queue() -> Queue:
-    return activation_time_queue
+def get_layer_forward_time_queue() -> Queue:
+    return layer_forward_time_queue
 
 
-class ActivationTimePreHook:
+class LayerForwardTimePreHook:
     def __init__(self, model_id: int, layer_name: str, on_gpu:bool):
         self.model_id = model_id
         self.layer_name = layer_name
@@ -88,7 +88,7 @@ class ActivationTimePreHook:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            model_buf = _activation_time_start_buffer.setdefault(self.model_id, {})
+            model_buf = _layer_forward_time_start_buffer.setdefault(self.model_id, {})
             layer_q = model_buf.setdefault(self.layer_name, deque())
             layer_q.append(
                 {
@@ -98,12 +98,12 @@ class ActivationTimePreHook:
             )
         except Exception:
             print(
-                f"[TraceML] Error in ActivationTimePreHook for layer {self.layer_name}",
+                f"[TraceML] Error in LayerForwardTimePreHook for layer {self.layer_name}",
                 file=sys.stderr,
             )
 
 
-class ActivationTimePostHook:
+class LayerForwardTimePostHook:
     def __init__(self, model_id: int, layer_name: str, on_gpu:bool):
         self.model_id = model_id
         self.layer_name = layer_name
@@ -114,7 +114,7 @@ class ActivationTimePostHook:
             cpu_end = time.perf_counter()
 
             layer_q = (
-                _activation_time_start_buffer
+                _layer_forward_time_start_buffer
                 .get(self.model_id, {})
                 .get(self.layer_name)
             )
@@ -131,7 +131,7 @@ class ActivationTimePostHook:
                 gpu_end = get_cuda_event()
                 gpu_end.record()
 
-            event = ActivationTimeEvent(
+            event = LayerForwardTimeEvent(
                 model_id=self.model_id,
                 layer_name=self.layer_name,
                 on_gpu=self.on_gpu,
@@ -142,7 +142,7 @@ class ActivationTimePostHook:
                 gpu_end=gpu_end,
             )
 
-            _activation_time_event_buffer.setdefault(self.model_id, deque()).append(event)
+            _layer_forward_time_event_buffer.setdefault(self.model_id, deque()).append(event)
 
         except Exception:
             print(
@@ -151,9 +151,9 @@ class ActivationTimePostHook:
             )
 
 
-def flush_activation_time_buffers(model: nn.Module) -> None:
+def flush_layer_forward_time_buffers(model: nn.Module) -> None:
     """
-    Drain the activation-time buffer for `model` and enqueue it as a NEW deque.
+    Drain the forward-time buffer for `model` and enqueue it as a NEW deque.
 
     - Preserves order
     - Producer buffer is fully emptied
@@ -161,7 +161,7 @@ def flush_activation_time_buffers(model: nn.Module) -> None:
     - No GPU resolve here
     """
     model_id = id(model)
-    src = _activation_time_event_buffer.get(model_id)
+    src = _layer_forward_time_event_buffer.get(model_id)
     if not src:
         return
 
@@ -171,21 +171,21 @@ def flush_activation_time_buffers(model: nn.Module) -> None:
         dst.append(src.popleft())
 
     # Remove empty buffer entry
-    _activation_time_event_buffer.pop(model_id, None)
+    _layer_forward_time_event_buffer.pop(model_id, None)
 
     try:
-        activation_time_queue.put_nowait(dst)
+        layer_forward_time_queue.put_nowait(dst)
     except Full:
         pass
 
 
-def attach_activation_time_hooks(model: nn.Module):
+def attach_layer_forward_time_hooks(model: nn.Module):
     """
     Attach pre and post hooks for timing.
     """
 
     model_id = id(model)
-    if _activation_time_hook_registry.get(model_id):
+    if _layer_forward_time_hook_registry.get(model_id):
         return
 
     on_gpu = model_is_on_cuda(model)
@@ -194,8 +194,8 @@ def attach_activation_time_hooks(model: nn.Module):
             continue
 
         module.register_forward_pre_hook(
-            ActivationTimePreHook(model_id, name, on_gpu=on_gpu))
+            LayerForwardTimePreHook(model_id, name, on_gpu=on_gpu))
         module.register_forward_hook(
-            ActivationTimePostHook(model_id, name, on_gpu=on_gpu))
+            LayerForwardTimePostHook(model_id, name, on_gpu=on_gpu))
 
-    _activation_time_hook_registry[model_id] = True
+    _layer_forward_time_hook_registry[model_id] = True

@@ -4,9 +4,9 @@ from collections import deque
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.utils.activation_time_hooks import (
-    ActivationTimeEvent,
-    get_activation_time_queue
+from traceml.utils.layer_forward_time_hooks import (
+    LayerForwardTimeEvent,
+    get_layer_forward_time_queue
 )
 
 class ActivationTimeSampler(BaseSampler):
@@ -24,14 +24,14 @@ class ActivationTimeSampler(BaseSampler):
         self.logger = get_error_logger(self.sampler_name)
 
         # Local FIFO buffer owned by the sampler
-        self._local_buffer: Deque[ActivationTimeEvent] = deque()
+        self._local_buffer: Deque[LayerForwardTimeEvent] = deque()
 
     def _ingest_queue(self) -> None:
         """
         Drain shared activation-time queue and append all events
         into the local FIFO buffer (order preserved).
         """
-        q = get_activation_time_queue()
+        q = get_layer_forward_time_queue()
 
         while True:
             try:
@@ -43,13 +43,13 @@ class ActivationTimeSampler(BaseSampler):
             self._local_buffer.extend(batch)
 
 
-    def _resolve_ready_events(self) -> List[ActivationTimeEvent]:
+    def _resolve_ready_events(self) -> List[LayerForwardTimeEvent]:
         """
         Resolve events from the head of the local buffer.
 
         Stops at first unresolved event to preserve FIFO semantics.
         """
-        resolved: List[ActivationTimeEvent] = []
+        resolved: List[LayerForwardTimeEvent] = []
         while self._local_buffer:
             evt = self._local_buffer[0]
             if not evt.try_resolve():
@@ -60,7 +60,7 @@ class ActivationTimeSampler(BaseSampler):
 
 
 
-    def _save_events(self, events: List[ActivationTimeEvent]) -> None:
+    def _save_events(self, events: List[LayerForwardTimeEvent]) -> None:
         """
         Save resolved activation timing events into per-layer tables.
         """

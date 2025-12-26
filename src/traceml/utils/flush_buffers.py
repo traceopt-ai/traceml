@@ -1,21 +1,15 @@
 import torch.nn as nn
-from .layerwise_forward_memory_hook import flush_activation_memory_buffers
-from .gradient_memory_hook import flush_gradient_memory_buffers
-from .activation_time_hooks import flush_activation_time_buffers
-from .gradient_time_hooks import flush_gradient_time_buffers
+from .layer_forward_memory_hook import flush_layer_forward_memory_buffers
+from .layer_backward_memory_hook import flush_layer_backward_memory_buffers
+from .layer_forward_time_hooks import flush_layer_forward_time_buffers
+from .layer_backward_time_hooks import flush_layer_backward_time_buffers
 
 def flush_traceml_buffers(attached: dict, model: nn.Module) -> None:
-    if attached.get("activation_memory"):
-        flush_activation_memory_buffers(model)
-    if attached.get("gradient_memory"):
-        flush_gradient_memory_buffers(model)
-    if attached.get("activation_time"):
-        flush_activation_time_buffers(model)
-    if attached.get("gradient_time"):
-        flush_gradient_time_buffers(model)
-    if attached.get("execution"):
-        flush_execution_buffers(model)          # TODO
-
-
-def flush_execution_buffers(model: nn.Module):
-    pass
+    if attached.get("layer_forward_memory"):
+        flush_layer_forward_memory_buffers(model)
+    if attached.get("layer_backward_memory"):
+        flush_layer_backward_memory_buffers(model)
+    if attached.get("layer_forward_time"):
+        flush_layer_forward_time_buffers(model)
+    if attached.get("layer_backward_time"):
+        flush_layer_backward_time_buffers(model)

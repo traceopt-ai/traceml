@@ -1,21 +1,21 @@
 from typing import Any, Dict
 import time
 from .base_sampler import BaseSampler
-from traceml.utils.gradient_memory_hook import get_gradient_queue
+from traceml.utils.layer_backward_memory_hook import get_layer_backward_queue
 from traceml.loggers.error_log import get_error_logger
 
 
-class GradientMemorySampler(BaseSampler):
+class LayerBackwardMemorySampler(BaseSampler):
     """
-    Drain-all gradient-event sampler.
+    Drain-all backward-event sampler.
 
     Each call to `sample()`:
-      - Drains the gradient queue.
+      - Drains the backward queue.
       - Save it internally in dict.
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "GradientMemorySampler"
+        self.sampler_name = "LayerBackwardMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
@@ -39,9 +39,9 @@ class GradientMemorySampler(BaseSampler):
 
     def _drain_queue(self) -> None:
         """
-        Drain entire activation queue and save every event.
+        Drain entire backward queue and save every event.
         """
-        queue = get_gradient_queue()
+        queue = get_layer_backward_queue()
         if queue.empty():
             return
 
@@ -62,4 +62,4 @@ class GradientMemorySampler(BaseSampler):
         try:
             self._drain_queue()
         except Exception as e:
-            self.logger.error(f"[TraceML] GradientMemorySampler error: {e}")
+            self.logger.error(f"[TraceML] LayerBackwardMemorySampler error: {e}")
