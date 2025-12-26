@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from queue import Queue, Full
-from typing import Dict, List, Optional
+from typing import Dict, Deque, Optional
+from collections import deque
 import time
 import sys
 import torch
@@ -11,10 +12,23 @@ from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 # Shared queue for gradient timing events
 gradient_time_queue: Queue = Queue(maxsize=2048)
-_gradient_time_registry: Dict[int, bool] = {}
 
-# Temporary buffer to match backward pre <-> backward post events
-_temp_grad_time_buffer: Dict[int, Dict[str, List[dict]]] = {}
+# Prevent double hook attachment
+_gradient_time_hook_registry: Dict[int, bool] = {}
+
+# Temporary buffer to match backward pre <-> post
+# model_id -> layer_name -> deque[{cpu_start, gpu_start}]
+_gradient_time_start_buffer: Dict[int, Dict[str, Deque[dict]]] = {}
+
+# Main in-memory FIFO buffer
+# model_id -> deque[GradientTimeEvent]
+_gradient_time_buffer: Dict[int, Deque["GradientTimeEvent"]] = {}
+
+
+
+def get_gradient_time_queue() -> Queue:
+    return gradient_time_queue
+
 
 
 @dataclass
@@ -59,8 +73,6 @@ class GradientTimeEvent:
         return self.resolved
 
 
-def get_gradient_time_queue() -> Queue:
-    return gradient_time_queue
 
 
 class GradientTimePreHook:
@@ -82,9 +94,12 @@ class GradientTimePreHook:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            buf = _temp_grad_time_buffer.setdefault(self.model_id, {})
-            buf.setdefault(self.layer_name, []).append(
-                {"cpu_start": cpu_start, "gpu_start": gpu_start}
+            model_buf = _gradient_time_start_buffer.setdefault(self.model_id, {})
+            model_buf.setdefault(self.layer_name, deque()).append(
+                {
+                    "cpu_start": cpu_start,
+                    "gpu_start": gpu_start,
+                }
             )
         except Exception:
             print(
@@ -107,20 +122,24 @@ class GradientTimePostHook:
         try:
             cpu_end = time.perf_counter()
 
-            start_list = _temp_grad_time_buffer.get(self.model_id, {}).get(self.layer_name, [])
-            if not start_list:
+            layer_q = (
+                _gradient_time_start_buffer
+                .get(self.model_id, {})
+                .get(self.layer_name)
+            )
+            if not layer_q:
                 return
 
-            start_record = start_list.pop(0)  # FIFO
-            cpu_start = start_record["cpu_start"]
+            start_rec = layer_q.popleft()  # FIFO match
+            cpu_start = start_rec["cpu_start"]
             cpu_duration_ms = (cpu_end - cpu_start) * 1000.0
 
-            gpu_start = start_record.get("gpu_start")
+            gpu_start = start_rec["gpu_start"]
             gpu_end = None
 
             if self.on_gpu:
                 gpu_end = get_cuda_event()
-                gpu_end.record()  # stream-ordered end marker
+                gpu_end.record()
 
             event = GradientTimeEvent(
                 model_id=self.model_id,
@@ -132,16 +151,41 @@ class GradientTimePostHook:
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
             )
-            try:
-                gradient_time_queue.put_nowait(event)
-            except Full:
-                pass
+
+            _gradient_time_buffer.setdefault(self.model_id, deque()).append(event)
 
         except Exception:
             print(
                 f"[TraceML] Error in GradientTimePostHook for layer {self.layer_name}",
                 file=sys.stderr,
             )
+
+
+
+
+def flush_gradient_time_buffers(model: nn.Module) -> None:
+    """
+    Drain the gradient-time buffer for `model` and enqueue as a NEW deque.
+    - Preserves FIFO order
+    - Producer buffer is fully emptied
+    - Consumer gets independent ownership
+    """
+    model_id = id(model)
+    src = _gradient_time_buffer.get(model_id)
+    if not src:
+        return
+
+    dst: Deque[GradientTimeEvent] = deque()
+
+    while src:
+        dst.append(src.popleft())
+
+    _gradient_time_buffer.pop(model_id, None)
+
+    try:
+        gradient_time_queue.put_nowait(dst)
+    except Full:
+        pass
 
 
 def attach_gradient_time_hooks(model: nn.Module):
@@ -154,7 +198,7 @@ def attach_gradient_time_hooks(model: nn.Module):
       - Uses full backward hooks (recommended).
     """
     model_id = id(model)
-    if _gradient_time_registry.get(model_id):
+    if _gradient_time_hook_registry.get(model_id):
         return
 
     on_gpu = model_is_on_cuda(model)
@@ -170,4 +214,4 @@ def attach_gradient_time_hooks(model: nn.Module):
             GradientTimePostHook(model_id, name, on_gpu=on_gpu)
         )
 
-    _gradient_time_registry[model_id] = True
+    _gradient_time_hook_registry[model_id] = True

@@ -8,6 +8,7 @@ to avoid the overhead of creating new events on every hook call.
 from collections import deque
 from typing import Optional
 import torch
+import threading
 
 
 class CUDAEventPool:
@@ -18,25 +19,32 @@ class CUDAEventPool:
     def __init__(self, max_size: int = 100):
         self._pool = deque(maxlen=max_size)
         self.max_size = max_size
+        self._lock = threading.Lock()
 
     def acquire(self) -> torch.cuda.Event:
         """
         Get a CUDA event from the pool, or create a new one if pool is empty.
         """
-        if self._pool:
-            return self._pool.pop()
+        with self._lock:
+            if self._pool:
+                return self._pool.pop()
         return torch.cuda.Event(enable_timing=True)
 
     def release(self, event: Optional[torch.cuda.Event]) -> None:
         """
         Return a CUDA event to the pool for reuse.
         """
-        if event is not None and len(self._pool) < self.max_size:
-            self._pool.append(event)
+        if event is None:
+            return
+
+        with self._lock:
+            if event is not None and len(self._pool) < self.max_size:
+              self._pool.append(event)
 
     def clear(self) -> None:
         """Clear all events from the pool."""
-        self._pool.clear()
+        with self._lock:
+            self._pool.clear()
 
 
 # Global event pool instance

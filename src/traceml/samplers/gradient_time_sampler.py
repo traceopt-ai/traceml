@@ -1,5 +1,6 @@
-from typing import List
-from queue import Empty, Full
+from typing import List, Deque
+from queue import Empty
+from collections import deque
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
@@ -23,34 +24,47 @@ class GradientTimeSampler(BaseSampler):
         self.sampler_name = "GradientTimeSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
+        # Local FIFO buffer owned by the sampler
+        self._local_buffer: Deque[GradientTimeEvent] = deque()
 
-    def _drain_queue(self) -> List[GradientTimeEvent]:
+
+    def _ingest_queue(self) -> None:
+        """
+        Drain shared gradient-time queue and append all batches
+        into the local FIFO buffer (order preserved).
+        """
         q = get_gradient_time_queue()
-        events: List[GradientTimeEvent] = []
-
         while True:
             try:
-                evt = q.get_nowait()
+                batch = q.get_nowait()  # Deque[GradientTimeEvent]
             except Empty:
                 break
+            # Preserve order across batches
+            self._local_buffer.extend(batch)
 
-            if evt.try_resolve():
-                events.append(evt)
-            else:
-                # FIFO guarantee: later events cannot resolve earlier
-                try:
-                    q.put_nowait(evt)
-                except Full:
-                    self.logger.warning(
-                        "[TraceML] GradientTime queue full on requeue"
-                    )
+
+    def _resolve_ready_events(self) -> List[GradientTimeEvent]:
+        """
+        Resolve events from the head of the local buffer.
+
+        FIFO invariant:
+          If the first event is not resolved, no later event can be resolved.
+        """
+        resolved: List[GradientTimeEvent] = []
+
+        while self._local_buffer:
+            evt = self._local_buffer[0]  # peek head
+            if not evt.try_resolve():
                 break
+            resolved.append(evt)
+            self._local_buffer.popleft()
 
-        return events
+        return resolved
+
 
     def _save_events(self, events: List[GradientTimeEvent]) -> None:
         """
-        Save raw gradient timing events into per-layer tables.
+        Save resolved gradient timing events into per-layer tables.
         """
         for evt in events:
             table_name = f"{evt.layer_name}"
@@ -66,13 +80,15 @@ class GradientTimeSampler(BaseSampler):
             }
             table.append(record)
 
-    def sample(self):
+
+    def sample(self) -> None:
         """
-        Drain → resolve → save raw events
+        Ingest → resolve (FIFO) → persist
         """
         try:
-            events = self._drain_queue()
-            self._save_events(events)
+            self._ingest_queue()
+            ready_events = self._resolve_ready_events()
+            self._save_events(ready_events)
         except Exception as e:
             self.logger.error(
                 f"[TraceML] GradientTimeSampler error: {e}"
