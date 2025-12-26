@@ -5,6 +5,7 @@ import torch.nn as nn
 import time
 import torch
 import types
+from contextlib import contextmanager
 
 from traceml.utils.patch import model_queue
 from traceml.utils.activation_memory_hook import attach_activation_memory_hooks
@@ -16,29 +17,25 @@ from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
 
 
+_TRACE_STEP_ACTIVE = False
 
-def wrap_optimizer_step_with_flush(optimizer: torch.optim.Optimizer, model: nn.Module):
+
+@contextmanager
+def trace_step(model: nn.Module):
     """
-    Wrap optimizer.step() to flush TraceML buffers before each step.
+    Defines a TraceML step boundary.
+    Currently:
+        - flushes TraceML buffers at step end
+        - resets peak CUDA memory stats at step start (if available)
+
+    Timing and metadata may be added later.
     """
-    if optimizer is None:
-        return
-
-    # Avoid double-wrapping
-    if getattr(optimizer, "_traceml_step_wrapped", False):
-        return
-
-    orig_step_fn = optimizer.step.__func__
-
-    @functools.wraps(orig_step_fn)
-    def step_with_flush(self, *args, **kwargs):
-        attached = getattr(model, "_traceml_attached", {})
+    try:
+        yield
+    finally:
+        attached = getattr(model, "_trace_attached")
         if attached:
             flush_traceml_buffers(attached, model)
-        return orig_step_fn(self, *args, **kwargs)
-
-    optimizer.step = types.MethodType(step_with_flush, optimizer)
-    optimizer._traceml_step_wrapped = True
 
 
 def trace_model(
@@ -106,7 +103,7 @@ def trace_model(
                     attach_execution_entry_hooks(self)
                     attached["execution"] = True
 
-                self._traceml_attached = attached
+                self._trace_attached = attached
 
             except Exception as e:
                 print(f"[TraceML] Failed to trace model: {e}", file=sys.stderr)
@@ -119,7 +116,6 @@ def trace_model(
 
 def trace_model_instance(
     model: nn.Module,
-    optimizer: Optional[torch.optim.Optimizer],
     sample_layer_memory: bool = True,
     trace_activation_memory: bool = True,
     trace_gradient_memory: bool = True,
@@ -174,10 +170,7 @@ def trace_model_instance(
             attach_execution_entry_hooks(model)
             attached["execution"] = True
 
-        model._traceml_attached = attached
-
-        if optimizer is not None:
-             wrap_optimizer_step_with_flush(optimizer, model)
+        model._trace_attached = attached
 
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)

@@ -15,7 +15,7 @@ from transformers import (
 )
 
 # TraceML imports
-from traceml.decorators import trace_model_instance, trace_timestep
+from traceml.decorators import trace_model_instance, trace_step, trace_timestep
 
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
@@ -138,18 +138,12 @@ def main():
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME, num_labels=4
     ).to(device)
+
+    #Attach trace_model_instance to the model
+    trace_model_instance(model)
+
     optimizer = AdamW(model.parameters(), lr=LR)
 
-    # IMPORTANT:
-    # Attach TraceML BEFORE any optimizer-level wrappers.
-    # This includes:
-    #   - LR schedulers (torch / HuggingFace)
-    #   - AMP / GradScaler
-    #   - Distributed wrappers (FSDP, DDP optimizer hooks)
-    #   - Any custom optimizer.step() wrappers
-    #
-    # Rule: TraceML must wrap optimizer.step FIRST.
-    trace_model_instance(model, optimizer)
 
     # Attach TraceML model-level hooks
     total_steps = EPOCHS * math.ceil(len(train_loader))
@@ -167,42 +161,43 @@ def main():
     for epoch in range(EPOCHS):
         running_loss = 0.0
         running_acc  = 0.0
-
         train_iter = iter(train_loader)
+
         for step in range(len(train_loader)):
-            
-            try:
-                batch = next_batch(train_iter)
-            except StopIteration:
-                break
 
-            batch = load_batch_to_device(batch, device)
+            with trace_step(model):
+                try:
+                    batch = next_batch(train_iter)
+                except StopIteration:
+                    break
 
-            optimizer.zero_grad(set_to_none=True)
+                batch = load_batch_to_device(batch, device)
 
-            out = forward_pass(model, batch, dtype)
-            loss = out.loss
-            logits = out.logits
+                optimizer.zero_grad(set_to_none=True)
 
-            backward_pass(loss, scaler)
-            optimizer_step(scaler, optimizer, scheduler)
+                out = forward_pass(model, batch, dtype)
+                loss = out.loss
+                logits = out.logits
 
-            acc = accuracy_from_logits(logits.detach(), batch["labels"])
-            running_loss += loss.item()
-            running_acc  += acc
-            global_step  += 1
+                backward_pass(loss, scaler)
+                optimizer_step(scaler, optimizer, scheduler)
 
-            if global_step % 50 == 0:
-                print(
-                    f"[Train] epoch {epoch+1} step {global_step} "
-                    f"| loss {running_loss/50:.4f} | acc {running_acc/50:.4f}"
-                )
-                running_loss = 0.0
-                running_acc  = 0.0
+                acc = accuracy_from_logits(logits.detach(), batch["labels"])
+                running_loss += loss.item()
+                running_acc  += acc
+                global_step  += 1
+
+                if global_step % 50 == 0:
+                    print(
+                        f"[Train] epoch {epoch+1} step {global_step} "
+                        f"| loss {running_loss/50:.4f} | acc {running_acc/50:.4f}"
+                    )
+                    running_loss = 0.0
+                    running_acc  = 0.0
 
         # ---- VALIDATION ----
-        val_loss, val_acc = run_validation(model, val_loader, dtype, device)
-        print(f"[Val] epoch {epoch+1} | loss={val_loss:.4f} | acc={val_acc:.4f}")
+        # val_loss, val_acc = run_validation(model, val_loader, dtype, device)
+        # print(f"[Val] epoch {epoch+1} | loss={val_loss:.4f} | acc={val_acc:.4f}")
 
     # Save model
     save_dir = "./distilbert_agnews_full"
