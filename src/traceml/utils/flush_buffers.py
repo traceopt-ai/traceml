@@ -1,5 +1,5 @@
 import torch.nn as nn
-from .activation_memory_hook import flush_activation_memory_buffers
+from .layerwise_forward_memory_hook import flush_activation_memory_buffers
 from .gradient_memory_hook import flush_gradient_memory_buffers
 from .activation_time_hooks import flush_activation_time_buffers
 from .gradient_time_hooks import flush_gradient_time_buffers

@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 
 # Shared queue for activation events
-activation_memory_queue: Queue = Queue(maxsize=4096)
+layerwise_forward_memory_queue: Queue = Queue(maxsize=4096)
 
 # Registry to prevent multiple hook attachments per model
 _activation_memory_hook_registry: Dict[int, bool] = {}
@@ -26,9 +26,9 @@ class ActivationMemoryEvents:
     layers: List[Tuple[str, Dict[str, float]]]
 
 
-def get_activation_memory_queue() -> Queue:
+def get_layerwise_forward_memory_queue() -> Queue:
     """Return the shared queue of activation events."""
-    return activation_memory_queue
+    return layerwise_forward_memory_queue
 
 
 def _tensor_size(tensor: torch.Tensor) -> float:
@@ -94,12 +94,12 @@ def flush_activation_memory_buffers(model: nn.Module):
         layers=buf,
     )
     try:
-        activation_memory_queue.put_nowait(event)
+        layerwise_forward_memory_queue.put_nowait(event)
     except Full:
         pass
 
 
-def attach_activation_memory_hooks(model: nn.Module):
+def attach_layerwise_forward_memory_hooks(model: nn.Module):
     """
     Attach a class-based forward hook to all leaf modules of `model`.
     Hooks are idempotent: repeated calls do nothing.

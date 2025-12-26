@@ -7,7 +7,7 @@ import torch
 from contextlib import contextmanager
 
 from traceml.utils.patch import model_queue
-from traceml.utils.activation_memory_hook import attach_activation_memory_hooks
+from traceml.utils.layerwise_forward_memory_hook import attach_layerwise_forward_memory_hooks
 from traceml.utils.gradient_memory_hook import attach_all_gradient_hooks
 from traceml.utils.activation_time_hooks import attach_activation_time_hooks
 from traceml.utils.gradient_time_hooks import attach_gradient_time_hooks
@@ -39,7 +39,7 @@ def trace_step(model: nn.Module):
 
 def trace_model(
     sample_layer_memory: bool = True,
-    trace_activation_memory: bool = True,
+    trace_layerwise_forward__memory: bool = True,
     trace_gradient_memory: bool = True,
     trace_activation_time: bool = True,
     trace_gradient_time: bool = True,
@@ -52,7 +52,7 @@ def trace_model(
 
     Args:
         sample_layer_memory: enqueue model for memory sampling.
-        trace_activation_memory: attach activation hooks to capture activations.
+        trace_layerwise_forward__memory: attach activation hooks to capture activations.
         trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
         trace_activation_time:attach activation *time* hooks (pre + post)
             (only CPU time so wwaiting time + execution time).
@@ -82,8 +82,8 @@ def trace_model(
                 if sample_layer_memory:
                     model_queue.put(self)
 
-                if trace_activation_memory:
-                    attach_activation_memory_hooks(self)
+                if trace_layerwise_forward__memory:
+                    attach_layerwise_forward_memory_hooks(self)
                     attached["activation_memory"] = True
 
                 if trace_gradient_memory:
@@ -116,7 +116,7 @@ def trace_model(
 def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
-    trace_activation_memory: bool = True,
+    trace_layerwise_forward__memory: bool = True,
     trace_gradient_memory: bool = True,
     trace_activation_time: bool = True,
     trace_gradient_time: bool = True,
@@ -127,9 +127,8 @@ def trace_model_instance(
 
     Args:
         model (nn.Module): The model instance to trace.
-        optimizer: optional torch optimizer; its .step() will be wrapped to flush TraceML buffers.
         sample_layer_memory: enqueue model for memory sampling.
-        trace_activation_memory: attach activation hooks to capture activations.
+        trace_layerwise_forward__memory: attach activation hooks to capture activations.
         trace_gradient_memory: attach gradient hooks to capture grad sizes (module + param).
         trace_activation_time:attach activation *time* hooks (pre + post).
         trace_gradient_time:attach gradient *time* hooks (pre + post).
@@ -148,10 +147,9 @@ def trace_model_instance(
         if sample_layer_memory:
             model_queue.put(model)
 
-        if trace_activation_memory:
-            attach_activation_memory_hooks(model)
+        if trace_layerwise_forward__memory:
+            attach_layerwise_forward_memory_hooks(model)
             attached["activation_memory"] = True
-
 
         if trace_gradient_memory:
             attach_all_gradient_hooks(model)

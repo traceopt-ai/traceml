@@ -1,7 +1,7 @@
 from typing import Dict, Any
 import time
 from .base_sampler import BaseSampler
-from traceml.utils.activation_memory_hook import get_activation_memory_queue
+from traceml.utils.layerwise_forward_memory_hook import get_layerwise_forward_memory_queue
 from traceml.loggers.error_log import get_error_logger
 
 
@@ -23,7 +23,7 @@ class ActivationMemorySampler(BaseSampler):
         """
         Drain entire activation queue and save every event.
         """
-        queue = get_activation_memory_queue()
+        queue = get_layerwise_forward_memory_queue()
         if queue.empty():
             return
 
