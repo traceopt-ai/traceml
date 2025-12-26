@@ -4,7 +4,6 @@ from typing import Callable, Optional
 import torch.nn as nn
 import time
 import torch
-import types
 from contextlib import contextmanager
 
 from traceml.utils.patch import model_queue

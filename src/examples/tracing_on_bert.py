@@ -14,8 +14,19 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
+
+# =========================
 # TraceML imports
+# =========================
+# trace_model_instance:
+#   Attaches model-level hooks (activation memory, gradient memory, timings, etc.)
+# trace_step:
+#   Defines a training-step boundary (flushes TraceML buffers at step end)
+# trace_timestep:
+#   Optional fine-grained timers for user-defined code sections
 from traceml.decorators import trace_model_instance, trace_step, trace_timestep
+
+
 
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
@@ -71,7 +82,11 @@ def prepare_data():
     return tokenizer, train_loader, val_loader
 
 
-# --- TraceML Wrappers ---------------------------------------------------------
+# ============================================================
+# TraceML: Optional fine-grained user-defined timers
+# ============================================================
+# These are NOT required for TraceML to work.
+# They add extra visibility into specific code regions.
 
 @trace_timestep("dataloader_fetch", use_gpu=False)
 def next_batch(it):
@@ -125,7 +140,9 @@ def run_validation(model, val_loader, dtype, device):
     return val_loss / max(1, n_batches), val_acc / max(1, n_batches)
 
 
+# ============================================================
 # MAIN TRAINING LOOP
+# ============================================================
 
 def main():
     set_seed()
@@ -139,13 +156,18 @@ def main():
         MODEL_NAME, num_labels=4
     ).to(device)
 
-    #Attach trace_model_instance to the model
+    # ========================================================
+    # TraceML: Attach model-level instrumentation
+    # ========================================================
+    # This attaches hooks for:
+    #  - activation memory
+    #  - gradient memory
+    #  - execution context
+    #  - activation / gradient timing
+    # No changes to training loop required.
     trace_model_instance(model)
 
     optimizer = AdamW(model.parameters(), lr=LR)
-
-
-    # Attach TraceML model-level hooks
     total_steps = EPOCHS * math.ceil(len(train_loader))
     warmup_steps = int(WARMUP_RATIO * total_steps)
     scheduler = get_linear_schedule_with_warmup(
@@ -165,6 +187,13 @@ def main():
 
         for step in range(len(train_loader)):
 
+            # ====================================================
+            # TraceML: Step boundary
+            # ====================================================
+            # Defines ONE training step for TraceML.
+            # Guarantees:
+            #  - per-step flushing of buffers
+            #  - crash-safe observability
             with trace_step(model):
                 try:
                     batch = next_batch(train_iter)
