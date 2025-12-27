@@ -4,7 +4,7 @@ from traceml.database.database import Database
 
 class LayerCombinedTimerData:
     """
-    Computes per-layer timing stats from ActivationTime DB.
+    Computes per-layer timing stats from Time DB.
 
     Cache format per layer:
         {
@@ -16,34 +16,34 @@ class LayerCombinedTimerData:
 
     def __init__(
         self,
-        activation_db: Optional[Database],
-        gradient_db: Optional[Database],
+        forward_db: Optional[Database],
+        backward_db: Optional[Database],
         top_n_layers: Optional[int] = 20,
     ):
-        self._activation_db = activation_db
-        self._gradient_db = gradient_db
+        self._forward_db = forward_db
+        self._backward_db = backward_db
         self._top_n = top_n_layers
 
-        self._activation_cache: Dict[str, Dict[str, Any]] = {}
-        self._gradient_cache: Dict[str, Dict[str, Any]] = {}
+        self._forward_cache: Dict[str, Dict[str, Any]] = {}
+        self._backward_cache: Dict[str, Dict[str, Any]] = {}
 
     def compute_display_data(self) -> Dict[str, Any]:
-        act_snapshot = self._compute_snapshot(is_activation=True)
-        grad_snapshot = self._compute_snapshot(is_activation=False)
+        act_snapshot = self._compute_snapshot(is_forward=True)
+        grad_snapshot = self._compute_snapshot(is_forward=False)
 
-        self._merge_cache(self._activation_cache, act_snapshot)
-        self._merge_cache(self._gradient_cache, grad_snapshot)
+        self._merge_cache(self._forward_cache, act_snapshot)
+        self._merge_cache(self._backward_cache, grad_snapshot)
 
-        layers = set(self._activation_cache.keys()) | set(self._gradient_cache.keys())
+        layers = set(self._forward_cache.keys()) | set(self._backward_cache.keys())
         if not layers:
             return {
                 "top_items": [],
                 "all_items": [],
                 "other": {
-                    "activation_current_sum_ms": 0.0,
-                    "activation_peak_max_ms": 0.0,
-                    "gradient_current_sum_ms": 0.0,
-                    "gradient_peak_max_ms": 0.0,
+                    "total_forward_current": 0.0,
+                    "total_forward_peak": 0.0,
+                    "total_backward_current": 0.0,
+                    "total_backward_peak": 0.0,
                     "pct": 0.0,
                 },
             }
@@ -51,8 +51,8 @@ class LayerCombinedTimerData:
         # Build rows (NO summing of activation + gradient per layer)
         rows = []
         for layer in layers:
-            act = self._activation_cache.get(layer, {})
-            grad = self._gradient_cache.get(layer, {})
+            act = self._forward_cache.get(layer, {})
+            grad = self._backward_cache.get(layer, {})
 
             act_cur = float(act.get("current", 0.0))
             act_peak = float(act.get("global", 0.0))
@@ -72,36 +72,36 @@ class LayerCombinedTimerData:
 
             rows.append({
                 "layer": layer,
-                "activation_current_ms": act_cur,
-                "activation_peak_ms": act_peak,
-                "gradient_current_ms": grad_cur,
-                "gradient_peak_ms": grad_peak,
+                "forward_current": act_cur,
+                "forward_peak": act_peak,
+                "backward_current": grad_cur,
+                "backward_peak": grad_peak,
                 "on_gpu": on_gpu,
             })
 
         total_current_sum_ms = sum(
-            (r["activation_current_ms"] + r["gradient_current_ms"]) for r in rows
+            (r["forward_current"] + r["backward_current"]) for r in rows
         )
         for r in rows:
-            layer_total = r["activation_current_ms"] + r["gradient_current_ms"]
+            layer_total = r["forward_current"] + r["backward_current"]
             r["pct"] = (layer_total / total_current_sum_ms * 100.0) if total_current_sum_ms > 0 else 0.0
 
         ## Sorting based on sum of activation and gradient peak (layer takes most memory)
         def sort_key(r: Dict[str, Any]) -> float:
-            return max(float(r["activation_peak_ms"]), float(r["gradient_peak_ms"]))
+            return max(float(r["forward_peak"]), float(r["backward_peak"]))
 
         rows_sorted = sorted(rows, key=sort_key, reverse=True)
         top_items = rows_sorted[: self._top_n]
         other_items = rows_sorted[self._top_n :]
 
-        other_act_cur_sum = sum(r["activation_current_ms"] for r in other_items)
-        other_grad_cur_sum = sum(r["gradient_current_ms"] for r in other_items)
+        other_act_cur_sum = sum(r["forward_current"] for r in other_items)
+        other_grad_cur_sum = sum(r["backward_current"] for r in other_items)
 
         other = {
-            "activation_current_sum_ms": other_act_cur_sum,
-            "activation_peak_max_ms": sum(r["activation_peak_ms"] for r in other_items),
-            "gradient_current_sum_ms": other_grad_cur_sum,
-            "gradient_peak_max_ms": sum(r["gradient_peak_ms"] for r in other_items),
+            "total_forward_current": other_act_cur_sum,
+            "total_forward_peak": sum(r["forward_peak"] for r in other_items),
+            "total_backward_current": other_grad_cur_sum,
+            "total_backward_peak": sum(r["backward_peak"] for r in other_items),
             "pct": (
                 ((other_act_cur_sum + other_grad_cur_sum) / total_current_sum_ms) * 100.0
                 if total_current_sum_ms > 0 else 0.0
@@ -111,18 +111,18 @@ class LayerCombinedTimerData:
             "top_items": top_items,
             "all_items": rows_sorted,
             "other": other,
-            "activation_cache": self._activation_cache,
-            "gradient_cache": self._gradient_cache,
+            "activation_cache": self._forward_cache,
+            "gradient_cache": self._backward_cache,
         }
 
 
     def _compute_snapshot(
-        self, is_activation:bool=True
+        self, is_forward:bool=True
     ) -> Dict[str, Dict[str, Any]]:
         """
         Reads DB tables and produces a one-pass snapshot.
         """
-        db = self._activation_db if is_activation else self._gradient_db
+        db = self._forward_db if is_forward else self._backward_db
         snapshot = {}
 
         for layer, rows in db.all_tables().items():
@@ -176,16 +176,16 @@ class LayerCombinedTimerSummary:
 
     def __init__(
         self,
-        activation_db: Optional[Database],
-        gradient_db: Optional[Database] = None,
+        forward_db: Optional[Database],
+        backward_db: Optional[Database] = None,
     ):
-        self._activation_db = activation_db
-        self._gradient_db = gradient_db
+        self._forward_db = forward_db
+        self._backward_db = backward_db
 
 
     def compute_layer_timing_summary(self) -> Dict[str, Any]:
-        act = self._compute_db_summary(self._activation_db)
-        grad = self._compute_db_summary(self._gradient_db)
+        act = self._compute_db_summary(self._forward_db)
+        grad = self._compute_db_summary(self._forward_db)
 
         total_samples = max(act["total_samples"], grad["total_samples"])
         total_layers_seen = len(set(act["layers_seen"]) | set(grad["layers_seen"]))
@@ -194,11 +194,11 @@ class LayerCombinedTimerSummary:
             "total_samples": total_samples,
             "total_layers_seen": total_layers_seen,
 
-            "average_activation_time_ms": act["average_ms"],
-            "peak_activation_time_ms": act["peak_ms"],
+            "average_forward_time": act["average"],
+            "peak_forward_time": act["peak"],
 
-            "average_gradient_time_ms": grad["average_ms"],
-            "peak_gradient_time_ms": grad["peak_ms"],
+            "average_backward_time": grad["average"],
+            "peak_backward_time": grad["peak"],
         }
 
     def _compute_db_summary(self, db: Optional[Database]) -> Dict[str, Any]:
@@ -229,8 +229,8 @@ class LayerCombinedTimerSummary:
         return {
             "total_samples": total_samples,
             "layers_seen": layers_seen,
-            "average_ms": average_ms,
-            "peak_ms": peak_ms,
+            "average": average_ms,
+            "peak": peak_ms,
         }
 
     @staticmethod
@@ -246,8 +246,8 @@ class LayerCombinedTimerSummary:
         return float(d)
 
 
-    def compute_global_peaks(self, is_activation: bool) -> Dict[str, float]:
-        db = self._activation_db if is_activation else self._gradient_db
+    def compute_global_peaks(self, is_forward: bool) -> Dict[str, float]:
+        db = self._forward_db if is_forward else self._backward_db
         peaks: Dict[str, float] = {}
 
         if db is None:

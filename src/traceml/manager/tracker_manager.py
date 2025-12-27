@@ -14,8 +14,8 @@ from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.layer_forward_memory_sampler import LayerForwardMemorySampler
 from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySampler
 from traceml.samplers.steptimer_sampler import StepTimerSampler
-from traceml.samplers.activation_time_sampler import ActivationTimeSampler
-from traceml.samplers.gradient_time_sampler import GradientTimeSampler
+from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
+from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.system_renderer import SystemRenderer
@@ -159,14 +159,14 @@ class TrackerManager:
 
     @staticmethod
     def get_timing_components(num_display_layers: int):
-        activation_timing_sampler = ActivationTimeSampler()
-        gradient_timing_sampler = GradientTimeSampler()
+        forward_timing_sampler = LayerForwardTimeSampler()
+        backward_timing_sampler = LayerBackwardTimeSampler()
         combined_timing_rendered = LayerCombinedTimerRenderer(
-            activation_db=activation_timing_sampler.db,
-            gradient_db=gradient_timing_sampler.db,
+            forward_db=forward_timing_sampler.db,
+            backward_db=backward_timing_sampler.db,
             top_n_layers=num_display_layers
         )
-        return [([activation_timing_sampler, gradient_timing_sampler], [combined_timing_rendered])]
+        return [([forward_timing_sampler, backward_timing_sampler], [combined_timing_rendered])]
 
 
     def _run_once(self):

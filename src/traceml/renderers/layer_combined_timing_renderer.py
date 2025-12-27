@@ -27,22 +27,22 @@ class LayerCombinedTimerRenderer(BaseRenderer):
 
     def __init__(
         self,
-        activation_db: Database = None,
-        gradient_db: Database = None,
+        forward_db: Database = None,
+        backward_db: Database = None,
         top_n_layers: int = 20):
         super().__init__(
             name="Layer-wise Combined Timings",
             layout_section_name=LAYER_COMBINED_TIMER_LAYOUT,
         )
         self._service = LayerCombinedTimerData(
-            activation_db=activation_db,
-            gradient_db=gradient_db,
+            forward_db=forward_db,
+            backward_db=backward_db,
             top_n_layers=top_n_layers,
         )
 
         self._summary_service = LayerCombinedTimerSummary(
-            activation_db=activation_db,
-            gradient_db=gradient_db,
+            forward_db=backward_db,
+            backward_db=backward_db,
         )
 
     def get_panel_renderable(self) -> Panel:
@@ -57,18 +57,18 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         )
 
         table.add_column("Layer", justify="left", style="magenta")
-        table.add_column("Act (current/peak)", justify="right", style="white")
-        table.add_column("Grad (current/peak)", justify="right", style="cyan")
+        table.add_column("Forward (curr/peak)", justify="right", style="white")
+        table.add_column("Backward (curr/peak)", justify="right", style="cyan")
         table.add_column("% ", justify="right", style="white")
 
         if d.get("top_items"):
             for r in d["top_items"]:
                 table.add_row(
                     truncate_layer_name(r["layer"]),
-                    f"{fmt_time_ms(r.get('activation_current_ms', 0.0))} / "
-                    f"{fmt_time_ms(r.get('activation_peak_ms', 0.0))}",
-                    f"{fmt_time_ms(r.get('gradient_current_ms', 0.0))} / "
-                    f"{fmt_time_ms(r.get('gradient_peak_ms', 0.0))}",
+                    f"{fmt_time_ms(r.get('forward_current', 0.0))} / "
+                    f"{fmt_time_ms(r.get('forward_peak', 0.0))}",
+                    f"{fmt_time_ms(r.get('backward_current', 0.0))} / "
+                    f"{fmt_time_ms(r.get('backward_peak', 0.0))}",
                     f"{float(r.get('pct', 0.0)):.1f}%",
                 )
         else:
@@ -76,13 +76,13 @@ class LayerCombinedTimerRenderer(BaseRenderer):
 
         o = d.get("other") or {}
         # show Other only if it contributes something
-        if (o.get("activation_current_sum_ms", 0.0) + o.get("gradient_current_sum_ms", 0.0)) > 0:
+        if (o.get("total_forward_current", 0.0) + o.get("total_backward_current", 0.0)) > 0:
             table.add_row(
                 "Other Layers",
-                f"{fmt_time_ms(o.get('activation_current_sum_ms', 0.0))} / "
-                f"{fmt_time_ms(o.get('activation_peak_max_ms', 0.0))}",
-                f"{fmt_time_ms(o.get('gradient_current_sum_ms', 0.0))} / "
-                f"{fmt_time_ms(o.get('gradient_peak_max_ms', 0.0))}",
+                f"{fmt_time_ms(o.get('total_forward_current', 0.0))} / "
+                f"{fmt_time_ms(o.get('total_forward_peak', 0.0))}",
+                f"{fmt_time_ms(o.get('total_backward_current', 0.0))} / "
+                f"{fmt_time_ms(o.get('total_backward_peak', 0.0))}",
                 f"{float(o.get('pct', 0.0)):.1f}%",
             )
 
@@ -91,7 +91,7 @@ class LayerCombinedTimerRenderer(BaseRenderer):
 
         return Panel(
             Group(table),
-            title="[bold blue]Layer Timing (Activation + Gradient)[/bold blue]",
+            title="[bold blue]Layer Timing (Forward + Backward)[/bold blue]",
             border_style="blue",
             width=width,
         )
@@ -107,12 +107,12 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             <tr>
                 <td>{truncate_layer_name(r["layer"])}</td>
                 <td style="text-align:right;">
-                    {fmt_time_ms(r.get('activation_current_ms', 0.0))} /
-                    {fmt_time_ms(r.get('activation_peak_ms', 0.0))}
+                    {fmt_time_ms(r.get('forward_current', 0.0))} /
+                    {fmt_time_ms(r.get('forward_peak', 0.0))}
                 </td>
                 <td style="text-align:right;">
-                    {fmt_time_ms(r.get('gradient_current_ms', 0.0))} /
-                    {fmt_time_ms(r.get('gradient_peak_ms', 0.0))}
+                    {fmt_time_ms(r.get('backward_current', 0.0))} /
+                    {fmt_time_ms(r.get('backward_peak', 0.0))}
                 </td>
                 <td style="text-align:right;">{float(r.get('pct', 0.0)):.1f}%</td>
             </tr>
@@ -134,8 +134,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
                 <thead>
                     <tr>
                         <th style="text-align:left;">Layer</th>
-                        <th style="text-align:right;">Activation (cur/peak)</th>
-                        <th style="text-align:right;">Gradient (cur/peak)</th>
+                        <th style="text-align:right;">Forward (curr/peak)</th>
+                        <th style="text-align:right;">Backward (curr/peak)</th>
                         <th style="text-align:right;">%</th>
                     </tr>
                 </thead>
@@ -145,7 +145,6 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         """
         return HTML(html)
 
-    # ---------------- Dashboard ----------------
 
     def get_dashboard_renderable(self) -> Dict[str, Any]:
         return self._service.compute_display_data()
@@ -155,8 +154,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         console = Console()
 
         layer_stats = self._summary_service.compute_layer_timing_summary()
-        act_peaks = self._summary_service.compute_global_peaks(is_activation=True)
-        grad_peaks = self._summary_service.compute_global_peaks(is_activation=False)
+        act_peaks = self._summary_service.compute_global_peaks(is_forward=True)
+        grad_peaks = self._summary_service.compute_global_peaks(is_forward=False)
 
         top_acts = self._summary_service.top_n_from_dict(act_peaks, n=3)
         top_grads = self._summary_service.top_n_from_dict(grad_peaks, n=3)
@@ -167,8 +166,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         table.add_column(justify="right", style="white")
 
         self._render_section_layer_stats(table, layer_stats)
-        self._render_section_topk(table, "TOP-3 ACTIVATION PEAKS", top_acts, "cyan")
-        self._render_section_topk(table, "TOP-3 GRADIENT PEAKS", top_grads, "green")
+        self._render_section_topk(table, "TOP-3 FORWARD PEAKS", top_acts, "cyan")
+        self._render_section_topk(table, "TOP-3 BACKWARD PEAKS", top_grads, "green")
 
         panel = Panel(
             table,
