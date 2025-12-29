@@ -34,6 +34,9 @@ class StepTimerRenderer(BaseRenderer):
         self.db = database
         self.top_n = top_n
 
+    def _is_internal(self, name: str) -> bool:
+        return name.startswith("_traceml_internal:")
+
     def _collect_cpu_times(self) -> Dict[str, List[float]]:
         """
         Read step_timer_cpu table and group durations (ms) by event_name.
@@ -77,7 +80,10 @@ class StepTimerRenderer(BaseRenderer):
         cpu_times = self._collect_cpu_times()
         gpu_times = self._collect_gpu_times()
 
-        all_names = set(cpu_times.keys()) | set(gpu_times.keys())
+        all_names = {
+            n for n in (set(cpu_times.keys()) | set(gpu_times.keys()))
+            if not self._is_internal(n)
+        }
         stats: Dict[str, Dict[str, float]] = {}
 
         for name in all_names:
@@ -209,7 +215,7 @@ class StepTimerRenderer(BaseRenderer):
             )
 
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(80, int(cols * 0.6)), 120)
+        panel_width = min(max(100, int(cols * 0.75)), 100)
 
         return Panel(
             Group(table),

@@ -7,17 +7,29 @@ import torch
 from contextlib import contextmanager
 
 from traceml.utils.patch import model_queue
-
+from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.layer_forward_memory_hook import attach_layer_forward_memory_hooks
 from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memory_hooks
 
 from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
 from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
 
-from traceml.utils.steptimer import StepTimeEvent, record_step_time_event
+from traceml.utils.model_forward_memory_hook import attach_model_forward_memory_hooks
+
+from traceml.utils.steptimer import StepTimeEvent, record_step_time_event, timed_region
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
 
+from traceml.utils.dataloader_patch import patch_dataloader
+
+# NOTE:
+# We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
+# This is a lightweight, observational patch used only to infer batch metadata.
+# It is idempotent and safe to import multiple times.
+patch_dataloader()
+
+class TraceState:
+    step = 0
 
 
 @contextmanager
@@ -30,12 +42,14 @@ def trace_step(model: nn.Module):
 
     Timing and metadata may be added later.
     """
+    TraceState.step += 1
     try:
-        yield
+        with timed_region("_traceml_internal:step_time", use_gpu=True):
+            yield
     finally:
         attached = getattr(model, "_trace_attached")
         if attached:
-            flush_traceml_buffers(attached, model)
+            flush_traceml_buffers(attached, model, TraceState.step)
 
 
 def trace_model(
@@ -45,6 +59,7 @@ def trace_model(
     trace_layer_forward_time: bool = True,
     trace_layer_backward_time: bool = True,
     trace_execution: bool = True,
+    # trace_model_forward_memory: bool = True,
 ) -> Callable:
     """
     Class decorator to automatically trace a PyTorch nn.Module.
@@ -59,6 +74,8 @@ def trace_model(
             (only CPU time so waiting time + execution time).
         trace_layer_backward_time:attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
+        trace_model_forward_memory: attach model level (top level) hook to capture max memory
+            during forward pass (low overhead, can be always on)
     """
 
     def decorator(cls):
@@ -66,6 +83,7 @@ def trace_model(
             raise TypeError(
                 "@trace_model can only be applied to nn.Module subclasses for now."
             )
+
         original_init = cls.__init__
 
         @functools.wraps(original_init)
@@ -77,7 +95,7 @@ def trace_model(
                 "layer_backward_memory": False,
                 "trace_layer_forward_time": False,
                 "trace_layer_backward_time": False,
-                "execution": False,
+                # "model_forward_memory": True
             }
             try:
                 if sample_layer_memory:
@@ -99,9 +117,12 @@ def trace_model(
                     attach_layer_backward_time_hooks(self)
                     attached["trace_layer_backward_time"] = True
 
+                # if trace_model_forward_memory:
+                #     attach_model_forward_memory_hooks(self)
+                #     attached["model_forward_memory"] = True
+
                 if trace_execution:
                     attach_execution_entry_hooks(self)
-                    attached["execution"] = True
 
                 self._trace_attached = attached
 
@@ -122,6 +143,7 @@ def trace_model_instance(
     trace_layer_forward_time: bool = True,
     trace_layer_backward_time: bool = True,
     trace_execution: bool = True,
+    # trace_model_forward_memory: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -134,13 +156,16 @@ def trace_model_instance(
         trace_layer_forward_time: attach forward *time* hooks (pre + post).
         trace_layer_backward_time: attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
+        trace_model_forward_memory: attach model level (top level) hook to capture max memory
+            during forward pass (low overhead, can be always on)
     """
+
     attached = {
         "layer_forward_memory": False,
         "layer_backward_memory": False,
         "layer_forward_time": False,
         "layer_backward_time": False,
-        "execution": False,
+        "model_forward_memory": True
     }
     try:
         if not isinstance(model, nn.Module):
@@ -164,9 +189,13 @@ def trace_model_instance(
             attach_layer_backward_time_hooks(model)
             attached["layer_backward_time"] = True
 
+        # if trace_model_forward_memory:
+        #     attach_model_forward_memory_hooks(model)
+        #     attached["model_forward_memory"] = True
+
         if trace_execution:
             attach_execution_entry_hooks(model)
-            attached["execution"] = True
+
 
         model._trace_attached = attached
 

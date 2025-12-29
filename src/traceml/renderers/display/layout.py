@@ -8,3 +8,4 @@ STEPTIMER_LAYOUT = "steptimer_section"
 STDOUT_STDERR_LAYOUT = "stdout_stderr_section"
 
 LAYER_COMBINED_TIMER_LAYOUT = "layer_timing_section"
+MODEL_COMBINED_LAYOUT = "model_combined_section"

@@ -20,20 +20,19 @@ class LayerBackwardMemorySampler(BaseSampler):
         self.logger = get_error_logger(self.sampler_name)
 
     def _save_event(self, event: Dict[str, Any]) -> None:
-        timestamp = time.time()
         model_id = getattr(event, "model_id", None)
-
         layers = getattr(event, "layers", None)
+        step = getattr(event, "step", None)
+
         if not layers:
             return
 
         for layer_name, memory_per_device in layers:
             record = {
-                "timestamp": timestamp,
                 "model_id": model_id,
                 "memory": memory_per_device,
+                "step": step,
             }
-
             table = self.db.create_or_get_table(layer_name)
             table.append(record)
 

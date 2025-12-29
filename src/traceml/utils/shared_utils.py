@@ -53,3 +53,5 @@ def model_is_on_cuda(model: nn.Module) -> bool:
     for b in model.buffers():
         return b.is_cuda
     return False
+
+

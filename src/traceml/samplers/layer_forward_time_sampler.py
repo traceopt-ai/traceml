@@ -75,6 +75,7 @@ class LayerForwardTimeSampler(BaseSampler):
                 "on_gpu": evt.on_gpu,
                 "cpu_duration_ms": evt.cpu_duration_ms,
                 "gpu_duration_ms": evt.gpu_duration_ms,
+                "step": evt.step,
             }
             table.append(record)
 

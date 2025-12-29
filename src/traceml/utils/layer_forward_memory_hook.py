@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Dict, Any, List, Tuple
 import sys
+import time
 
 import torch
 import torch.nn as nn
+
 
 # Shared queue for forward events
 layer_forward_memory_queue: Queue = Queue(maxsize=4096)
@@ -12,8 +14,8 @@ layer_forward_memory_queue: Queue = Queue(maxsize=4096)
 # Registry to prevent multiple hook attachments per model
 _layer_forward_memory_hook_registry: Dict[int, bool] = {}
 
-# In-memory buffer: model_id -> List[(layer_name, memory_per_device)
-_layer_forward_memory_buffer: Dict[int, List[Tuple[str, Dict[str, float]]]] = {}
+# In-memory buffer: model_id -> List[(layer_name, memory_per_device, timestamp)
+_layer_forward_memory_buffer: Dict[int, List]  = {}
 
 
 
@@ -24,6 +26,7 @@ class LayerForwardMemoryEvents:
     """
     model_id: int
     layers: List[Tuple[str, Dict[str, float]]]
+    step: int
 
 
 def get_layer_forward_memory_queue() -> Queue:
@@ -78,7 +81,7 @@ class LayerForwardMemoryHook:
             )
 
 
-def flush_layer_forward_memory_buffers(model: nn.Module):
+def flush_layer_forward_memory_buffers(model: nn.Module, step: int):
     """
     Convert buffered activation memory into events and enqueue them.
     Called before optimizer.step().
@@ -92,6 +95,7 @@ def flush_layer_forward_memory_buffers(model: nn.Module):
     event = LayerForwardMemoryEvents(
         model_id=model_id,
         layers=buf,
+        step=step,
     )
     try:
         layer_forward_memory_queue.put_nowait(event)

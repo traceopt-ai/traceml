@@ -10,7 +10,8 @@ from traceml.renderers.display.layout import (
     ROOT_LAYOUT, SYSTEM_LAYOUT, PROCESS_LAYOUT,
     LAYER_COMBINED_MEMORY_LAYOUT, ACTIVATION_GRADIENT_LAYOUT,
     STEPTIMER_LAYOUT, STDOUT_STDERR_LAYOUT,
-    LAYER_COMBINED_TIMER_LAYOUT
+    LAYER_COMBINED_TIMER_LAYOUT,
+    MODEL_COMBINED_LAYOUT
 )
 
 class CLIDisplayManager:
@@ -30,32 +31,37 @@ class CLIDisplayManager:
     logger = get_error_logger("CLIDisplayManager")
 
     @classmethod
-    def _create_initial_layout(cls):
-        """
-        Defines the improved structure of the Rich Layout with flexible ratios.
-        """
+    def _create_layout(cls):
         cls._layout.split_column(
-            Layout(name="dashboard", ratio=4),
+            Layout(name="dashboard", ratio=3),
             Layout(name=STDOUT_STDERR_LAYOUT, ratio=1),
         )
         dashboard = cls._layout["dashboard"]
         dashboard.split_column(
             Layout(name="upper_row", ratio=1),
-            Layout(name="model_row", ratio=4),
-            Layout(name="bottom_row", ratio=1),
+            Layout(name="middle_row", ratio=1),
+            Layout(name="layer_row", ratio=3),
         )
         dashboard["upper_row"].split_row(
-            Layout(name=SYSTEM_LAYOUT, ratio=1),
-            Layout(name=PROCESS_LAYOUT, ratio=1),
+            Layout(name=SYSTEM_LAYOUT, ratio=4),
+            Layout(name=PROCESS_LAYOUT, ratio=5),
         )
-        dashboard["model_row"].split_row(
-            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=15),
-            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=14),
+        dashboard["layer_row"].split_row(
+            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=8),
+            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
         )
-        dashboard["bottom_row"].split_row(
-            Layout(name=ACTIVATION_GRADIENT_LAYOUT, ratio=1),
-            Layout(name=STEPTIMER_LAYOUT, ratio=1),
+        dashboard["middle_row"].split_row(
+            Layout(name=MODEL_COMBINED_LAYOUT, ratio=2),
+            Layout(name=STEPTIMER_LAYOUT, ratio=3),
         )
+        return dashboard
+
+    @classmethod
+    def _create_initial_layout(cls):
+        """
+        Defines the improved structure of the Rich Layout with flexible ratios.
+        """
+        dashboard = cls._create_layout()
 
         # Initialize panels with placeholder text
         dashboard[SYSTEM_LAYOUT].update(
@@ -70,15 +76,12 @@ class CLIDisplayManager:
         dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
             Panel(Text("Waiting for Layer Timing...", justify="center"))
         )
-        dashboard[ACTIVATION_GRADIENT_LAYOUT].update(
-            Panel(Text("Waiting for Activation + Gradient...", justify="center"))
-        )
         dashboard[STEPTIMER_LAYOUT].update(
             Panel(Text("Waiting for Step Timers...", justify="center"))
         )
         cls._layout[STDOUT_STDERR_LAYOUT].update(
             Panel(
-                Text("Waiting for stdout/stderr...", justify="center"),
+                Text("Waiting for Stdout/Stderr...", justify="center"),
                 title="Logs",
                 border_style="cyan",
             )

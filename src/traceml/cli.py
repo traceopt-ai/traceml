@@ -45,7 +45,7 @@ def launch_tracer_process(
     tracer_path = str(Path(__file__).parent / "tracer.py")
 
     if mode in ["cli", "dashboard"]:
-        cmd = [sys.executable, tracer_path, "--", *script_args]
+        cmd = ["torchrun", "--nproc_per_node=1", tracer_path, "--", *script_args]
     else:
         raise ValueError(f"Invalid mode '{mode}'")
 

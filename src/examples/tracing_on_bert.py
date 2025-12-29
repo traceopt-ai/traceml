@@ -46,10 +46,11 @@ def set_seed(seed: int = SEED):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> float:
+def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     preds = torch.argmax(logits, dim=-1)
-    correct = (preds == labels).sum().item()
-    return correct / max(1, labels.size(0))
+    correct = (preds == labels).sum()
+    total = labels.size(0)
+    return correct / max(1, total)
 
 
 def prepare_data():
@@ -88,12 +89,7 @@ def prepare_data():
 # These are NOT required for TraceML to work.
 # They add extra visibility into specific code regions.
 
-@trace_timestep("dataloader_fetch", use_gpu=False)
-def next_batch(it):
-    return next(it)
-
-
-@trace_timestep("data_loading", use_gpu=False)
+@trace_timestep("data_transfer", use_gpu=False)
 def load_batch_to_device(batch, device):
     return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
@@ -183,10 +179,8 @@ def main():
     for epoch in range(EPOCHS):
         running_loss = 0.0
         running_acc  = 0.0
-        train_iter = iter(train_loader)
 
-        for step in range(len(train_loader)):
-
+        for batch in train_loader:
             # ====================================================
             # TraceML: Step boundary
             # ====================================================
@@ -195,11 +189,8 @@ def main():
             #  - per-step flushing of buffers
             #  - crash-safe observability
             with trace_step(model):
-                try:
-                    batch = next_batch(train_iter)
-                except StopIteration:
-                    break
 
+                ## Load batch
                 batch = load_batch_to_device(batch, device)
 
                 optimizer.zero_grad(set_to_none=True)
@@ -212,17 +203,21 @@ def main():
                 optimizer_step(scaler, optimizer, scheduler)
 
                 acc = accuracy_from_logits(logits.detach(), batch["labels"])
-                running_loss += loss.item()
-                running_acc  += acc
-                global_step  += 1
+                running_loss += loss.detach()
+                running_acc += acc.detach()
+                global_step += 1
 
                 if global_step % 50 == 0:
+                    avg_loss = (running_loss / 50).item()  # ONE sync
+                    avg_acc = (running_acc / 50).item()
+
                     print(
-                        f"[Train] epoch {epoch+1} step {global_step} "
-                        f"| loss {running_loss/50:.4f} | acc {running_acc/50:.4f}"
+                        f"[Train] epoch {epoch + 1} step {global_step} "
+                        f"| loss {avg_loss:.4f} | acc {avg_acc:.4f}"
                     )
-                    running_loss = 0.0
-                    running_acc  = 0.0
+
+                    running_loss.zero_()
+                    running_acc.zero_()
 
         # ---- VALIDATION ----
         # val_loss, val_acc = run_validation(model, val_loader, dtype, device)

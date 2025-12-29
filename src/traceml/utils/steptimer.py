@@ -3,6 +3,8 @@ from typing import Dict, List, Optional
 from queue import Queue, Full
 import sys
 import torch
+import time
+from contextlib import contextmanager
 
 # Shared queue for timing events
 step_time_queue: Queue = Queue(maxsize=2048)
@@ -64,3 +66,40 @@ def record_step_time_event(evt: StepTimeEvent):
             f"[TraceML:StepTimer] Queue full, dropping event {evt.name}",
             file=sys.stderr,
         )
+
+
+
+@contextmanager
+def timed_region(name: str, use_gpu: bool = True):
+    cpu_start = time.time()
+
+    if use_gpu and torch.cuda.is_available():
+        device = f"cuda:{torch.cuda.current_device()}"
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+
+        start_event.record()
+        yield
+        end_event.record()
+
+        cpu_end = time.time()
+        evt = StepTimeEvent(
+            name=name,
+            device=device,
+            cpu_start=cpu_start,
+            cpu_end=cpu_end,
+            gpu_start=start_event,
+            gpu_end=end_event,
+        )
+    else:
+        device = "cpu"
+        yield
+        cpu_end = time.time()
+        evt = StepTimeEvent(
+            name=name,
+            device=device,
+            cpu_start=cpu_start,
+            cpu_end=cpu_end,
+        )
+
+    record_step_time_event(evt)

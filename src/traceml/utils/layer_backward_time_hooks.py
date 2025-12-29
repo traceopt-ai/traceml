@@ -36,6 +36,7 @@ class LayerBackwardTimeEvent:
     """
     Time event for a single backward pass of a layer.
     """
+    step: int
     model_id: int
     layer_name: str
     on_gpu: bool
@@ -150,6 +151,7 @@ class LayerBackwardTimePostHook:
                 cpu_duration_ms=cpu_duration_ms,
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
+                step=-1
             )
 
             _backward_time_buffer.setdefault(self.model_id, deque()).append(event)
@@ -163,7 +165,7 @@ class LayerBackwardTimePostHook:
 
 
 
-def flush_layer_backward_time_buffers(model: nn.Module) -> None:
+def flush_layer_backward_time_buffers(model: nn.Module, step: int) -> None:
     """
     Drain the backward-time buffer for `model` and enqueue as a NEW deque.
     - Preserves FIFO order
@@ -178,7 +180,9 @@ def flush_layer_backward_time_buffers(model: nn.Module) -> None:
     dst: Deque = deque()
 
     while src:
-        dst.append(src.popleft())
+        event = src.popleft()
+        event.step = step       ## step is updated during flush
+        dst.append(event)
 
     _backward_time_buffer.pop(model_id, None)
 
@@ -200,7 +204,7 @@ def attach_layer_backward_time_hooks(model: nn.Module):
 
     for name, module in model.named_modules():
         if any(module.children()):
-            continue  # leaf-only like your activation timers
+            continue  # leaf-only
 
         module.register_full_backward_pre_hook(
             LayerBackwardTimePreHook(model_id, name, on_gpu=on_gpu)

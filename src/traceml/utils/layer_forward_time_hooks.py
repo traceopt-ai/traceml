@@ -28,6 +28,7 @@ class LayerForwardTimeEvent:
     """
     Time event for a single forward pass of a layer.
     """
+    step: int
     model_id: int
     layer_name: str
     on_gpu: bool
@@ -140,8 +141,8 @@ class LayerForwardTimePostHook:
                 cpu_duration_ms=cpu_duration_ms,
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
+                step=-1,
             )
-
             _layer_forward_time_event_buffer.setdefault(self.model_id, deque()).append(event)
 
         except Exception:
@@ -151,7 +152,7 @@ class LayerForwardTimePostHook:
             )
 
 
-def flush_layer_forward_time_buffers(model: nn.Module) -> None:
+def flush_layer_forward_time_buffers(model: nn.Module, step: int) -> None:
     """
     Drain the forward-time buffer for `model` and enqueue it as a NEW deque.
 
@@ -168,7 +169,9 @@ def flush_layer_forward_time_buffers(model: nn.Module) -> None:
     # Create a new deque for the consumer
     dst = deque()
     while src:
-        dst.append(src.popleft())
+        event = src.popleft()
+        event.step = step       ## Step is updated to correct value here
+        dst.append(event)
 
     # Remove empty buffer entry
     _layer_forward_time_event_buffer.pop(model_id, None)

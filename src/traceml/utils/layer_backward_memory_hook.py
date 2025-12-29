@@ -28,6 +28,7 @@ class LayerBackwardMemoryEvents:
 
     model_id: int
     layers: List[Tuple[str, Dict[str, float]]]
+    step: int
 
 
 def get_layer_backward_queue() -> Queue:
@@ -94,7 +95,7 @@ class LayerBackwardModuleHook:
             )
 
 
-def flush_layer_backward_memory_buffers(model: nn.Module) -> None:
+def flush_layer_backward_memory_buffers(model: nn.Module, step: int) -> None:
     """
     Convert buffered backward memory into GradientEvent objects and enqueue them.
     Intended to be called before optimizer.step().
@@ -108,6 +109,7 @@ def flush_layer_backward_memory_buffers(model: nn.Module) -> None:
     event = LayerBackwardMemoryEvents(
         model_id=model_id,
         layers=buf,
+        step=step,
     )
     try:
         layer_backward_memory_queue.put_nowait(event)

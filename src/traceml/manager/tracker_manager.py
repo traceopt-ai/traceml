@@ -1,5 +1,6 @@
 import threading
-from typing import List, Tuple
+from dataclasses import dataclass
+from typing import List, Optional
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.config import config
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
@@ -16,6 +17,8 @@ from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySa
 from traceml.samplers.steptimer_sampler import StepTimerSampler
 from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
 from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
+from traceml.samplers.model_forward_memory_sampler import ModelForwardMemorySampler
+
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.system_renderer import SystemRenderer
@@ -23,236 +26,158 @@ from traceml.renderers.process_renderer import ProcessRenderer
 from traceml.renderers.layer_combined_memory_renderer import (
     LayerCombinedMemoryRenderer,
 )
-from traceml.renderers.activation_gradient_memory_renderer import (
-    LayerForwardBackwardRenderer,
-)
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
+from traceml.renderers.model_combined_renderer import ModelCombinedRenderer
 from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
-
 from traceml.renderers.layer_combined_timing_renderer import LayerCombinedTimerRenderer
 
 
-class TrackerManager:
-    """
-    Manages periodic sampling and logging of system metrics (CPU, memory, tensors, etc.)
-    using a background thread. Each component defines a sampler and a list of associated loggers.
 
-    This class ensures consistent sampling even if some components fail intermittently.
-    """
+
+class TrackerManager:
+    _DISPLAY = {
+        "cli": (CLIDisplayManager, "get_panel_renderable"),
+        "notebook": (NotebookDisplayManager, "get_notebook_renderable"),
+        "dashboard": (NiceGUIDisplayManager, "get_dashboard_renderable"),
+    }
 
     def __init__(
         self,
-        components: List[Tuple[List[BaseSampler], List[BaseRenderer]]] = None,
+        samplers: Optional[List[BaseSampler]] = None,
+        renderers: Optional[List[BaseRenderer]] = None,
         interval_sec: float = 1.0,
-        mode: str = "cli",  # "cli" or "notebook"
+        mode: str = "cli",
         num_display_layers: int = 20,
         enable_logging: bool = False,
         logs_dir: str = "./logs",
     ):
-        """
-        Args:
-            components (list of tuples): List of (sampler, list of loggers) pairs.
-                                         Each sampler's output is sent to all loggers in its list.
-            interval_sec (int): Time interval in seconds between samples.
-        """
         config.enable_logging = enable_logging
         config.logs_dir = logs_dir
+
         setup_error_logger()
         self.logger = get_error_logger("TrackerManager")
-        if components is None:
-            self.components = self._components(mode, num_display_layers)
+
+        try:
+            self.display_manager, self._render_attr = self._DISPLAY[mode]
+        except KeyError:
+            raise ValueError(f"Unsupported mode: {mode}. Choose from {list(self._DISPLAY)}")
+
+        if samplers is None or renderers is None:
+            self.samplers, self.renderers = self._build_components(
+                mode=mode,
+                num_display_layers=num_display_layers,
+            )
         else:
-            self.components = components
+            self.samplers = samplers
+            self.renderers = renderers
+
         self.interval_sec = interval_sec
         self._stop_event = threading.Event()
-        if mode == "cli":
-            self.display_manager = CLIDisplayManager
-            self._render_attr = "get_panel_renderable"
-        elif mode == "notebook":
-            self.display_manager = NotebookDisplayManager
-            self._render_attr = "get_notebook_renderable"
-        elif mode == "dashboard":
-            self.display_manager = NiceGUIDisplayManager
-            self._render_attr = "get_dashboard_renderable"
-        else:
-            raise ValueError(f"Unsupported mode: {mode}")
-
         self._thread = threading.Thread(target=self._run, daemon=True)
 
-    @staticmethod
-    def _components(
-        mode: str, num_display_layers: int
-    ) -> List[Tuple[List[BaseSampler], List[BaseRenderer]]]:
-
-        is_ddp, local_rank, world_size = get_ddp_info()
-
-        components = []
-        components += TrackerManager.get_system_components(is_ddp, local_rank)
-        components += TrackerManager.get_process_components(is_ddp, local_rank)
-        components += TrackerManager.get_memory_components(num_display_layers)
-        components += TrackerManager.get_step_timer_components()
-        components += TrackerManager.get_timing_components(num_display_layers)
-
-        if mode == "cli":
-            components += TrackerManager.get_stdout_components()
-
-        return components
+    def _safe(self, label: str, fn):
+        try:
+            return fn()
+        except Exception as e:
+            self.logger.error(f"[TraceML] {label}: {e}")
+            return None
 
     @staticmethod
-    def get_system_components(is_ddp: bool, local_rank: int):
-        if is_ddp and local_rank != 0:
-            return []  # disable on non-zero ranks
+    def _build_components(mode: str, num_display_layers: int):
+        is_ddp, local_rank, _world = get_ddp_info()
 
-        system_sampler = SystemSampler()
-        system_renderer = SystemRenderer(database=system_sampler.db)
-        return [([system_sampler], [system_renderer])]
+        samplers: List[BaseSampler] = []
+        renderers: List[BaseRenderer] = []
 
+        # System / process (rank 0 only)
+        if not (is_ddp and local_rank != 0):
+            sys_s = SystemSampler()
+            proc_s = ProcessSampler()
+            samplers += [sys_s, proc_s]
+            renderers += [
+                SystemRenderer(database=sys_s.db),
+                ProcessRenderer(database=proc_s.db),
+            ]
 
-    @staticmethod
-    def get_process_components(is_ddp: bool, local_rank: int):
-        if is_ddp and local_rank != 0:
-            return []
-        process_sampler = ProcessSampler()
-        process_renderer = ProcessRenderer(database=process_sampler.db)
-
-        return [([process_sampler], [process_renderer])]
-
-    @staticmethod
-    def get_memory_components(num_display_layers: int):
-        layer_memory_sampler = LayerMemorySampler()
-        layer_forward_memory_sampler = LayerForwardMemorySampler()
-        layer_backward_memory_sampler = LayerBackwardMemorySampler()
-
-        layer_combined_renderer = LayerCombinedMemoryRenderer(
-            layer_db=layer_memory_sampler.db,
-            layer_forward_db=layer_forward_memory_sampler.db,
-            layer_backward_db=layer_backward_memory_sampler.db,
-            top_n_layers=num_display_layers,
-        )
-
-        activation_gradient_renderer = LayerForwardBackwardRenderer(
-            layer_db=layer_memory_sampler.db,
-            layer_forward_db=layer_forward_memory_sampler.db,
-            layer_backward_db=layer_backward_memory_sampler.db,
-        )
-        return [
-            (
-                [
-                    layer_memory_sampler,
-                    layer_forward_memory_sampler,
-                    layer_backward_memory_sampler,
-                ],
-                [layer_combined_renderer, activation_gradient_renderer],
+        # Layer memory (3 samplers -> 1 combined renderer)
+        layer_s = LayerMemorySampler()
+        fwd_mem_s = LayerForwardMemorySampler()
+        bwd_mem_s = LayerBackwardMemorySampler()
+        samplers += [layer_s, fwd_mem_s, bwd_mem_s]
+        renderers += [
+            LayerCombinedMemoryRenderer(
+                layer_db=layer_s.db,
+                layer_forward_db=fwd_mem_s.db,
+                layer_backward_db=bwd_mem_s.db,
+                top_n_layers=num_display_layers,
             )
         ]
 
-    @staticmethod
-    def get_step_timer_components():
-        step_timer_sampler = StepTimerSampler()
-        step_timer_renderer = StepTimerRenderer(database=step_timer_sampler.db)
-        return [([step_timer_sampler], [step_timer_renderer])]
+        # Step timer
+        step_s = StepTimerSampler()
+        samplers += [step_s]
+        renderers += [StepTimerRenderer(database=step_s.db)]
+        renderers += [ModelCombinedRenderer(database=step_s.db)]
 
-    @staticmethod
-    def get_stdout_components():
-        stdout_renderer = StdoutStderrRenderer()
-        return [([], [stdout_renderer])]
+        # Timing (2 samplers -> 1 combined renderer)
+        fwd_time_s = LayerForwardTimeSampler()
+        bwd_time_s = LayerBackwardTimeSampler()
+        samplers += [fwd_time_s, bwd_time_s]
+        renderers += [
+            LayerCombinedTimerRenderer(
+                forward_db=fwd_time_s.db,
+                backward_db=bwd_time_s.db,
+                top_n_layers=num_display_layers,
+            )
+        ]
 
-    @staticmethod
-    def get_timing_components(num_display_layers: int):
-        forward_timing_sampler = LayerForwardTimeSampler()
-        backward_timing_sampler = LayerBackwardTimeSampler()
-        combined_timing_rendered = LayerCombinedTimerRenderer(
-            forward_db=forward_timing_sampler.db,
-            backward_db=backward_timing_sampler.db,
-            top_n_layers=num_display_layers
-        )
-        return [([forward_timing_sampler, backward_timing_sampler], [combined_timing_rendered])]
+        # CLI-only stdout/stderr renderer
+        if mode == "cli":
+            renderers += [StdoutStderrRenderer()]
 
+        return samplers, renderers
+
+    def _run_samplers(self):
+        for s in self.samplers:
+            self._safe(f"Sampler {s.__class__.__name__}.sample() failed", s.sample)
+            if getattr(s, "db", None) is not None:
+                self._safe(
+                    f"Sampler {s.__class__.__name__}.db.writer.flush() failed",
+                    s.db.writer.flush,
+                )
+
+    def _run_renderers(self):
+        for r in self.renderers:
+            def register():
+                render_fn = getattr(r, self._render_attr)
+                self.display_manager.register_layout_content(r.layout_section_name, render_fn)
+            self._safe(f"Renderer {r.__class__.__name__} register failed", register)
 
     def _run_once(self):
-        """Single sampling + writing to file + logging + display update pass."""
-        for samplers, loggers in self.components:
-            for sampler in samplers:
-                try:
-                    sampler.sample()
-                    sampler.db.writer.flush()
-                except Exception as e:
-                    self.logger.error(
-                        f"[TraceML] Error in sampler '{sampler.__class__.__name__}'.sample(): {e}"
-                    )
-
-            # Log to all renderers
-            for logger in loggers:
-                try:
-                    render_fn = getattr(logger, self._render_attr)
-                    self.display_manager.register_layout_content(
-                        logger.layout_section_name, render_fn
-                    )
-                except Exception as e:
-                    self.logger.error(
-                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log(): {e}"
-                    )
-
-        self.display_manager.update_display()
+        self._run_samplers()
+        self._run_renderers()
+        self._safe("Display update failed", self.display_manager.update_display)
 
     def _run(self):
-        """
-        Background thread loop that continuously samples and logs live snapshots.
-        """
-        self.display_manager.start_display()
-
+        self._safe("Display start failed", self.display_manager.start_display)
         while not self._stop_event.is_set():
             self._run_once()
             self._stop_event.wait(self.interval_sec)
-        self._run_once()  # Final pass on stop
+        self._run_once()
 
     def start(self) -> None:
-        """
-        Starts the background tracking thread.
-        """
-        try:
-            self._thread.start()
-        except Exception as e:
-            self.logger.error(f"[TraceML] Failed to start TrackerManager: {e}")
+        self._safe("Failed to start TrackerManager thread", self._thread.start)
 
     def stop(self) -> None:
-        """
-        Signals the background thread to stop and waits for it to terminate.
-        """
-        try:
-            self._stop_event.set()
-            self._thread.join(timeout=self.interval_sec * 5)
-
-            if self._thread.is_alive():
-                self.logger.error(
-                    "[TraceML] WARNING: Tracker thread did not terminate within timeout."
-                )
-
-            # Logger shutdown is now handled more broadly by the main execution context
-            # calling CLIDisplayManager.stop_display() and individual log_summaries.
-            for _, loggers in self.components:
-                for logger in loggers:
-                    try:
-                        self.display_manager.release_display()
-                    except Exception as e:
-                        self.logger.error(
-                            f"[TraceML] Logger '{logger.__class__.__name__}' shutdown error: {e}"
-                        )
-
-        except Exception as e:
-            self.logger.error(f"[TraceML] Failed to stop TrackerManager: {e}")
+        self._stop_event.set()
+        self._thread.join(timeout=self.interval_sec * 5)
+        if self._thread.is_alive():
+            self.logger.error("[TraceML] WARNING: Tracker thread did not terminate within timeout.")
+        self._safe("Display release failed", self.display_manager.release_display)
 
     def log_summaries(self, path="traceml_system_summary.txt") -> None:
-        """
-        Logs final summaries from each sampler (or group of samplers) after tracking stops.
-        """
-
-        for _, loggers in self.components:
-            # pass merged summaries to all loggers for this group
-            for logger in loggers:
-                try:
-                    logger.log_summary(path)
-                except Exception as e:
-                    self.logger.error(
-                        f"[TraceML] Error in logger '{logger.__class__.__name__}'.log_summary(): {e}"
-                    )
+        for r in self.renderers:
+            self._safe(
+                f"Renderer {r.__class__.__name__}.log_summary failed",
+                lambda rr=r: rr.log_summary(path),
+            )
