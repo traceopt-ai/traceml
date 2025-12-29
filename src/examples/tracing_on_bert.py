@@ -63,7 +63,7 @@ def prepare_data():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
     def tok(examples):
-        return tokenizer(examples["text"], truncation=True)
+        return tokenizer(examples["text"], truncation=True, max_length=128)
 
     train_ds = train_raw.map(tok, batched=True, remove_columns=["text"])
     val_ds   = val_raw.map(tok, batched=True, remove_columns=["text"])
@@ -72,7 +72,7 @@ def prepare_data():
     val_ds   = val_ds.rename_column("label", "labels")
 
     collator = DataCollatorWithPadding(
-        tokenizer=tokenizer,padding="max_length", max_length=128)
+        tokenizer=tokenizer, padding="max_length", max_length=128)
 
     train_loader = DataLoader(
         train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator
