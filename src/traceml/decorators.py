@@ -21,7 +21,7 @@ from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
 
 from traceml.utils.dataloader_patch import patch_dataloader
-from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+from traceml.utils.cuda_event_pool import get_cuda_event
 
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
