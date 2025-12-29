@@ -102,13 +102,14 @@ def forward_pass(model, batch, dtype):
 
 @trace_timestep("backward", use_gpu=True)
 def backward_pass(loss, scaler):
-    scaler.scale(loss).backward()
+    # scaler.scale(loss).backward()
+    loss.backward()
 
 
 @trace_timestep("optimizer_step", use_gpu=True)
 def optimizer_step(scaler, optimizer, scheduler):
-    scaler.step(optimizer)
-    scaler.update()
+    # scaler.step(optimizer)
+    # scaler.update()
     scheduler.step()
 
 
@@ -170,7 +171,7 @@ def main():
         optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
     )
 
-    scaler = torch.amp.GradScaler(device="cuda", enabled=torch.cuda.is_available())
+    scaler = torch.amp.GradScaler(device="cuda", enabled=False)
 
     model.train()
     global_step = 0

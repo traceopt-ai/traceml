@@ -1,6 +1,7 @@
 import numpy as np
 from rich.panel import Panel
 from rich.table import Table
+import shutil
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
@@ -15,8 +16,8 @@ class ModelCombinedRenderer(BaseRenderer):
     """
 
     FRIENDLY_NAMES = {
-        "_traceml_internal:dataloader_next": "(~) DataLoader fetch time",
-        "_traceml_internal:step_time": "(~) Step time",
+        "_traceml_internal:dataloader_next": "~DataLoader fetch time",
+        "_traceml_internal:step_time": "~Step time",
     }
 
     def __init__(self, database: Database, window: int = 100):
@@ -111,8 +112,12 @@ class ModelCombinedRenderer(BaseRenderer):
                 device,
             )
 
+        cols, _ = shutil.get_terminal_size()
+        panel_width = min(max(100, int(cols * 0.75)), 100)
+
         return Panel(
             table,
-            title="[bold blue]Runtime Summary[/bold blue]",
+            title="[bold blue]Model Summary[/bold blue]",
             border_style="blue",
+            width=panel_width,
         )

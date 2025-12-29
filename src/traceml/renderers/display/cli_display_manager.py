@@ -51,8 +51,8 @@ class CLIDisplayManager:
             Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
         )
         dashboard["middle_row"].split_row(
-            Layout(name=MODEL_COMBINED_LAYOUT, ratio=2),
-            Layout(name=STEPTIMER_LAYOUT, ratio=3),
+            Layout(name=MODEL_COMBINED_LAYOUT, ratio=1),
+            Layout(name=STEPTIMER_LAYOUT, ratio=1),
         )
         return dashboard
 
