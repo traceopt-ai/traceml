@@ -21,6 +21,7 @@ from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
 
 from traceml.utils.dataloader_patch import patch_dataloader
+from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
@@ -223,8 +224,8 @@ def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
                 device = "cpu"
 
             if use_gpu and torch.cuda.is_available():
-                start_event = torch.cuda.Event(enable_timing=True)
-                end_event = torch.cuda.Event(enable_timing=True)
+                start_event = get_cuda_event()
+                end_event = get_cuda_event()
 
                 start_event.record()  # queued in current CUDA stream
                 result = func(*args, **kwargs)

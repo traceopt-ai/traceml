@@ -9,6 +9,8 @@ from contextlib import contextmanager
 # Shared queue for timing events
 step_time_queue: Queue = Queue(maxsize=2048)
 
+from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+
 
 @dataclass
 class StepTimeEvent:
@@ -42,6 +44,10 @@ class StepTimeEvent:
                 # GPU finished then safe to measure
                 self.gpu_time_ms = self.gpu_start.elapsed_time(self.gpu_end)
                 # Free CUDA event references to release GPU memory
+
+                return_cuda_event(self.gpu_start)
+                return_cuda_event(self.gpu_end)
+
                 self.gpu_start = None
                 self.gpu_end = None
                 self.resolved = True
@@ -75,8 +81,8 @@ def timed_region(name: str, use_gpu: bool = True):
 
     if use_gpu and torch.cuda.is_available():
         device = f"cuda:{torch.cuda.current_device()}"
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
+        start_event = get_cuda_event()
+        end_event = get_cuda_event()
 
         start_event.record()
         yield

@@ -16,7 +16,7 @@ class CUDAEventPool:
     Thread-safe pool of reusable CUDA events.
     """
 
-    def __init__(self, max_size: int = 100):
+    def __init__(self, max_size: int = 200):
         self._pool = deque(maxlen=max_size)
         self.max_size = max_size
         self._lock = threading.Lock()
