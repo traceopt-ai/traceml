@@ -110,6 +110,7 @@ def backward_pass(loss, scaler):
 def optimizer_step(scaler, optimizer, scheduler):
     # scaler.step(optimizer)
     # scaler.update()
+    optimizer.step()
     scheduler.step()
 
 
