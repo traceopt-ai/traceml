@@ -372,5 +372,6 @@ class SystemRenderer(BaseRenderer):
                 t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"
             )
         )
-        text = console.export_text(clear=False)
-        append_text(path, "\n" + text + "\n")
+        if path:
+            text = console.export_text(clear=False)
+            append_text(path, "\n" + text + "\n")

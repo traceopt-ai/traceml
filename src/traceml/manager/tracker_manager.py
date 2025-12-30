@@ -184,7 +184,7 @@ class TrackerManager:
             )
         self._safe("Display release failed", self.display_manager.release_display)
 
-    def log_summaries(self, path="traceml_system_summary.txt") -> None:
+    def log_summaries(self, path=None) -> None:
         for r in self.renderers:
             self._safe(
                 f"Renderer {r.__class__.__name__}.log_summary failed",
