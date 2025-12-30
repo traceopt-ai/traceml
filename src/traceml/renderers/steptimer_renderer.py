@@ -1,6 +1,6 @@
 import shutil
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 import numpy as np
 
 from rich.console import Console, Group
@@ -16,14 +16,15 @@ from traceml.renderers.utils import fmt_time_run
 
 class StepTimerRenderer(BaseRenderer):
     """
-    Renderer for timing statistics collected into the step-timer DB tables.
+    Renderer for user-defined step timers.
 
-    For each event_name it computes:
-      - cpu_avg_s, cpu_max_s  (from step_timer_cpu)
-      - gpu_avg_s, gpu_max_s  (from all step_timer_cuda_* tables)
-
-    Displayed "Avg (s)" and "Peak (s)" prefer GPU values if available,
-    otherwise fall back to CPU values.
+    Keeps top-N events (plus aggregated 'Other') and shows rolling statistics:
+      - Last
+      - p50(100)
+      - p95(100)
+      - Avg(100)
+      - Trend (sign of Avg(100) vs Avg(200))
+      - Device (GPU preferred if available, else CPU)
     """
 
     def __init__(self, database: Database, top_n: int = 5):
@@ -37,185 +38,209 @@ class StepTimerRenderer(BaseRenderer):
     def _is_internal(self, name: str) -> bool:
         return name.startswith("_traceml_internal:")
 
-    def _collect_cpu_times(self) -> Dict[str, List[float]]:
-        """
-        Read step_timer_cpu table and group durations (ms) by event_name.
-        """
-        cpu_table = self.db.create_or_get_table("step_timer_cpu")
-        cpu_times: Dict[str, List[float]] = defaultdict(list)
+    def _collect_cpu_series(self) -> Dict[str, List[float]]:
+        """step_timer_cpu: event_name -> [duration_ms,...]"""
+        table = self.db.create_or_get_table("step_timer_cpu")
+        out: Dict[str, List[float]] = defaultdict(list)
 
-        for row in cpu_table:
+        for row in table:
             name = row.get("event_name")
             if not name:
                 continue
-            dur_ms = float(row.get("duration_ms", 0.0))
-            cpu_times[name].append(dur_ms)
+            out[name].append(float(row.get("duration_ms", 0.0)))
 
-        return cpu_times
+        return out
 
-    def _collect_gpu_times(self) -> Dict[str, List[float]]:
-        """
-        Read all step_timer_cuda_* tables and group durations (ms) by event_name,
-        collapsing across all GPUs.
-        """
-        gpu_times: Dict[str, List[float]] = defaultdict(list)
+    def _collect_gpu_series(self) -> Dict[str, List[float]]:
+        """All step_timer_cuda_* tables collapsed: event_name -> [duration_ms,...]"""
+        out: Dict[str, List[float]] = defaultdict(list)
 
         for table_name, rows in self.db.all_tables().items():
             if not table_name.startswith("step_timer_cuda"):
                 continue
 
             for row in rows:
-                event_name = row.get("event_name")
-                if not event_name:
+                name = row.get("event_name")
+                if not name:
                     continue
-                dur_ms = float(row.get("duration_ms", 0.0))
-                gpu_times[event_name].append(dur_ms)
+                out[name].append(float(row.get("duration_ms", 0.0)))
 
-        return gpu_times
+        return out
 
-    def _compute_event_stats(self) -> Dict[str, Dict[str, float]]:
+    def _collect_series(self) -> Dict[str, Dict[str, List[float]]]:
         """
-        Compute cpu_avg_s, cpu_max_s, gpu_avg_s, gpu_max_s for each event_name.
+        event_name -> {"cpu": [...], "gpu": [...]}
+        (Does not filter internal names; add filtering here if needed.)
         """
-        cpu_times = self._collect_cpu_times()
-        gpu_times = self._collect_gpu_times()
+        cpu = self._collect_cpu_series()
+        gpu = self._collect_gpu_series()
 
-        all_names = {
-            n for n in (set(cpu_times.keys()) | set(gpu_times.keys()))
-            if not self._is_internal(n)
-        }
-        stats: Dict[str, Dict[str, float]] = {}
+        series: Dict[str, Dict[str, List[float]]] = {}
+        for name in set(cpu) | set(gpu):
+            if self._is_internal(name):
+                continue
+            series[name] = {"cpu": cpu.get(name, []), "gpu": gpu.get(name, [])}
+        return series
 
-        for name in all_names:
-            cpu_vals = cpu_times.get(name, [])
-            gpu_vals = gpu_times.get(name, [])
 
-            if cpu_vals:
-                cpu_arr = np.array(cpu_vals, dtype=float)
-                cpu_avg_s = float(cpu_arr.mean())
-                cpu_max_s = float(cpu_arr.max())
-            else:
-                cpu_avg_s = 0.0
-                cpu_max_s = 0.0
-
-            if gpu_vals:
-                gpu_arr = np.array(gpu_vals, dtype=float)
-                gpu_avg_s = float(gpu_arr.mean())
-                gpu_max_s = float(gpu_arr.max())
-            else:
-                gpu_avg_s = 0.0
-                gpu_max_s = 0.0
-
-            stats[name] = {
-                "cpu_avg_s": cpu_avg_s,
-                "cpu_max_s": cpu_max_s,
-                "gpu_avg_s": gpu_avg_s,
-                "gpu_max_s": gpu_max_s,
-            }
-
-        return stats
-
-    def _pick_display_values(self, vals: Dict[str, float]) -> Dict[str, float]:
+    def _aggregate_top_series(
+        self, series: Dict[str, Dict[str, List[float]]]
+    ) -> Dict[str, Dict[str, List[float]]]:
         """
-        For rendering, prefer GPU metrics if any GPU data exists,
-        otherwise fall back to CPU metrics.
+        Sort events by display mean (GPU if present else CPU), keep top_n-1,
+        aggregate remainder into "Other" by summing per-step durations.
         """
-        gpu_avg = vals.get("gpu_avg_s", 0.0)
-        gpu_max = vals.get("gpu_max_s", 0.0)
-        cpu_avg = vals.get("cpu_avg_s", 0.0)
-        cpu_max = vals.get("cpu_max_s", 0.0)
-
-        if gpu_max > 0.0 or gpu_avg > 0.0:
-            avg = gpu_avg
-            peak = gpu_max
-        else:
-            avg = cpu_avg
-            peak = cpu_max
-
-        return {"avg_s": avg, "peak_s": peak}
-
-    def _aggregate_top(
-        self, stats: Dict[str, Dict[str, float]]
-    ) -> Dict[str, Dict[str, float]]:
-        """
-        Take full stats dict and return only top-N (N-1 + 'Other') for display.
-        Sorting uses the display avg (GPU if present, else CPU).
-        """
-        if not stats:
+        if not series:
             return {}
 
-        # Compute a display avg for sorting
         def sort_key(item):
-            name, vals = item
-            disp = self._pick_display_values(vals)
-            return disp["avg_s"]
+            _, vals = item
+            arr = vals["gpu"] if vals["gpu"] else vals["cpu"]
+            return float(np.mean(arr)) if arr else 0.0
 
-        sorted_items = sorted(stats.items(), key=sort_key, reverse=True)
+        items = sorted(series.items(), key=sort_key, reverse=True)
 
-        if self.top_n is None or self.top_n <= 0 or len(sorted_items) <= self.top_n:
-            # No 'Other' row needed
-            return dict(sorted_items)
+        if self.top_n is None or self.top_n <= 0 or len(items) <= self.top_n:
+            return dict(items)
 
-        # Keep top_n-1 explicit, rest aggregated as "Other"
         main_n = max(1, self.top_n - 1)
-        top_items = sorted_items[:main_n]
-        rest_items = sorted_items[main_n:]
+        top_items = items[:main_n]
+        rest_items = items[main_n:]
 
-        top_dict: Dict[str, Dict[str, float]] = dict(top_items)
+        out: Dict[str, Dict[str, List[float]]] = dict(top_items)
 
-        # Aggregate "Other" over remaining events
-        if rest_items:
-            cpu_avg_vals = [v["cpu_avg_s"] for _, v in rest_items]
-            cpu_max_vals = [v["cpu_max_s"] for _, v in rest_items]
-            gpu_avg_vals = [v["gpu_avg_s"] for _, v in rest_items]
-            gpu_max_vals = [v["gpu_max_s"] for _, v in rest_items]
+        # ---- SAFE aggregation for "Other": sum per step index ----
+        other_cpu: List[float] = []
+        other_gpu: List[float] = []
 
-            other_stats = {
-                "cpu_avg_s": float(np.mean(cpu_avg_vals)) if cpu_avg_vals else 0.0,
-                "cpu_max_s": float(np.max(cpu_max_vals)) if cpu_max_vals else 0.0,
-                "gpu_avg_s": float(np.mean(gpu_avg_vals)) if gpu_avg_vals else 0.0,
-                "gpu_max_s": float(np.max(gpu_max_vals)) if gpu_max_vals else 0.0,
+        max_len = max(
+            max((len(v["cpu"]) for _, v in rest_items), default=0),
+            max((len(v["gpu"]) for _, v in rest_items), default=0),
+        )
+
+        for i in range(max_len):
+            cpu_sum = 0.0
+            gpu_sum = 0.0
+            for _, v in rest_items:
+                if i < len(v["cpu"]):
+                    cpu_sum += v["cpu"][i]
+                if i < len(v["gpu"]):
+                    gpu_sum += v["gpu"][i]
+            if cpu_sum > 0:
+                other_cpu.append(cpu_sum)
+            if gpu_sum > 0:
+                other_gpu.append(gpu_sum)
+
+        out["Other"] = {"cpu": other_cpu, "gpu": other_gpu}
+        return out
+
+
+    @staticmethod
+    def _safe_percentile(x: np.ndarray, q: float) -> float:
+        if x.size == 0:
+            return 0.0
+        return float(np.percentile(x, q))
+
+    def _compute_row_stats(self, cpu_vals: List[float], gpu_vals: List[float]) -> Dict[str, object]:
+        """
+        Compute display stats for one event:
+          - choose GPU series if present else CPU
+          - rolling window 100 for p50/p95/avg
+          - rolling window 200 for trend
+          - trend: '+' if Avg(100) > Avg(200), '-' otherwise (only if >=200)
+        Returns a dict suitable for all renderers.
+        """
+        if gpu_vals:
+            arr = np.asarray(gpu_vals, dtype=np.float64)
+            device = "GPU"
+        else:
+            arr = np.asarray(cpu_vals, dtype=np.float64)
+            device = "CPU"
+
+        if arr.size == 0:
+            return {
+                "last": 0.0,
+                "p50_100": 0.0,
+                "p95_100": 0.0,
+                "avg_100": 0.0,
+                "trend": "",
+                "device": device,
             }
-            top_dict["Other"] = other_stats
 
-        return top_dict
+        last = float(arr[-1])
 
-    def get_data(self) -> Dict[str, Dict[str, float]]:
+        win100 = arr[-min(100, arr.size):]
+        p50 = self._safe_percentile(win100, 50)
+        p95 = self._safe_percentile(win100, 95)
+        avg100 = float(win100.mean())
+
+        trend = ""
+        if arr.size >= 200:
+            win200 = arr[-200:]
+            avg200 = float(win200.mean())
+            # Sign only, as requested
+            trend = "+" if avg100 > avg200 else "-"
+
+        return {
+            "last": last,
+            "p50_100": p50,
+            "p95_100": p95,
+            "avg_100": avg100,
+            "trend": trend,
+            "device": device,
+        }
+
+    def get_data(self) -> Dict[str, Dict[str, object]]:
         """
-        Full pipeline:
-          - read DB tables
-          - compute per-event CPU/GPU averages + peaks
-          - keep only top-N (plus 'Other')
+        Returns:
+          event_name -> {
+            "last", "p50_100", "p95_100", "avg_100", "trend", "device"
+          }
+        (Top-N + Other already applied.)
         """
-        stats = self._compute_event_stats()
-        return self._aggregate_top(stats)
+        series = self._aggregate_top_series(self._collect_series())
+        out: Dict[str, Dict[str, object]] = {}
 
-    # CLI rendering
+        for name, vals in series.items():
+            out[name] = self._compute_row_stats(vals.get("cpu", []), vals.get("gpu", []))
+
+        return out
+
+
     def get_panel_renderable(self) -> Panel:
         data = self.get_data()
 
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("Event", justify="left", style="cyan")
-        table.add_column("Avg", justify="right", style="white")
-        table.add_column("Peak", justify="right", style="magenta")
+        table.add_column("Last", justify="right")
+        table.add_column("p50(100)", justify="right")
+        table.add_column("p95(100)", justify="right")
+        table.add_column("Avg(100)", justify="right")
+        table.add_column("Trend", justify="center")
+        table.add_column("Device", justify="center", style="magenta")
 
-        if data:
-            for name, vals in data.items():
-                disp = self._pick_display_values(vals)
+        if not data:
+            table.add_row("[dim]No step timers recorded[/dim]", "—", "—", "—", "—", "", "—")
+        else:
+            # Stable display order: by Avg(100) descending, "Other" last if present
+            items = list(data.items())
+            items.sort(key=lambda kv: float(kv[1].get("avg_100", 0.0)), reverse=True)
+            if any(name == "Other" for name, _ in items):
+                items = [kv for kv in items if kv[0] != "Other"] + [kv for kv in items if kv[0] == "Other"]
+
+            for name, s in items:
                 table.add_row(
                     f"[bold]{name}[/bold]",
-                    fmt_time_run(disp['avg_s']),
-                    fmt_time_run(disp['peak_s']),
+                    fmt_time_run(float(s["last"])),
+                    fmt_time_run(float(s["p50_100"])),
+                    fmt_time_run(float(s["p95_100"])),
+                    fmt_time_run(float(s["avg_100"])),
+                    str(s["trend"]),
+                    str(s["device"]),
                 )
-        else:
-            table.add_row(
-                "[dim]No step timings recorded[/dim]",
-                "—",
-                "—",
-            )
 
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(100, int(cols * 0.75)), 100)
+        panel_width = min(max(100, int(cols * 0.75)), 110)
 
         return Panel(
             Group(table),
@@ -224,31 +249,36 @@ class StepTimerRenderer(BaseRenderer):
             width=panel_width,
         )
 
-    # ---------- Notebook rendering ----------
     def get_notebook_renderable(self) -> HTML:
         data = self.get_data()
 
-        rows = ""
-        if data:
-            # sort alphabetically for stable display
-            for name in sorted(data.keys()):
-                vals = data[name]
-                disp = self._pick_display_values(vals)
-                rows += f"""
-                <tr style="border-bottom:1px solid #2c2c2c;">
-                    <td style="text-align:left; color:#e0e0e0;">{name}</td>
-                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(disp['avg_s'])}</td>
-                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(disp['peak_s'])}</td>
-                </tr>
-                """
-        else:
+        if not data:
             rows = """
             <tr>
-                <td colspan="3" style="text-align:center; color:gray;">
-                    No step timings recorded
+                <td colspan="7" style="text-align:center; color:gray;">
+                    No step timers recorded
                 </td>
             </tr>
             """
+        else:
+            items = list(data.items())
+            items.sort(key=lambda kv: float(kv[1].get("avg_100", 0.0)), reverse=True)
+            if any(name == "Other" for name, _ in items):
+                items = [kv for kv in items if kv[0] != "Other"] + [kv for kv in items if kv[0] == "Other"]
+
+            rows = ""
+            for name, s in items:
+                rows += f"""
+                <tr style="border-bottom:1px solid #2c2c2c;">
+                    <td style="text-align:left; color:#e0e0e0;">{name}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(float(s["last"]))}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(float(s["p50_100"]))}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(float(s["p95_100"]))}</td>
+                    <td style="text-align:right; color:#e0e0e0;">{fmt_time_run(float(s["avg_100"]))}</td>
+                    <td style="text-align:center; color:#e0e0e0;">{s["trend"]}</td>
+                    <td style="text-align:center; color:#e0e0e0;">{s["device"]}</td>
+                </tr>
+                """
 
         html = f"""
         <div style="
@@ -263,8 +293,12 @@ class StepTimerRenderer(BaseRenderer):
                 <thead style="background-color:#1e1e1e;">
                     <tr style="border-bottom:2px solid #00bcd4;">
                         <th style="text-align:left; color:#00bcd4;">Event</th>
-                        <th style="text-align:right; color:#00bcd4;">Avg (s)</th>
-                        <th style="text-align:right; color:#00bcd4;">Peak (s)</th>
+                        <th style="text-align:right; color:#00bcd4;">Last</th>
+                        <th style="text-align:right; color:#00bcd4;">p50(100)</th>
+                        <th style="text-align:right; color:#00bcd4;">p95(100)</th>
+                        <th style="text-align:right; color:#00bcd4;">Avg(100)</th>
+                        <th style="text-align:center; color:#00bcd4;">Trend</th>
+                        <th style="text-align:center; color:#00bcd4;">Device</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -276,40 +310,17 @@ class StepTimerRenderer(BaseRenderer):
         return HTML(html)
 
     def get_dashboard_renderable(self):
-        data = self.get_data()
-        return data
-
-
-    def log_summary(self, path) -> None:
         """
-        Print a one-shot summary of current DB stats to the console.
+        For dashboards / JSON output. Returns the same structure as get_data(),
+        already top-N filtered and with 'Other' included if applicable.
+        """
+        return self.get_data()
+
+
+    def log_summary(self, path: Optional[str] = None) -> None:
+        """
+        Print a one-shot summary of current stats to the console.
         """
         console = Console()
-        data = self.get_data()
-
-        table = Table(show_header=True, header_style="bold blue", box=None)
-        table.add_column("Event", justify="left", style="cyan")
-        table.add_column("Avg (s)", justify="right", style="white")
-        table.add_column("Peak (s)", justify="right", style="magenta")
-
-        if data:
-            for name, vals in data.items():
-                disp = self._pick_display_values(vals)
-                table.add_row(
-                    f"[bold]{name}[/bold]",
-                    fmt_time_run(disp['avg_s']),
-                    fmt_time_run(disp['peak_s']),
-                )
-        else:
-            table.add_row(
-                "[dim]No step timings recorded[/dim]",
-                "—",
-                "—",
-            )
-
-        panel = Panel(
-            table,
-            title="[bold blue]Step Timer Summary[/bold blue]",
-            border_style="blue",
-        )
+        panel = self.get_panel_renderable()
         console.print(panel)
