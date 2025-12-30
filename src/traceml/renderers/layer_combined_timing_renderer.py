@@ -1,5 +1,5 @@
 import shutil
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 
 from rich.panel import Panel
 from rich.table import Table
@@ -14,7 +14,7 @@ from traceml.renderers.display.cli_display_manager import (
 )
 from traceml.renderers.combined_timing.services import (
     LayerCombinedTimerData,
-    LayerCombinedTimerSummary
+    LayerCombinedTimerSummary,
 )
 from traceml.renderers.utils import truncate_layer_name
 from traceml.utils.formatting import fmt_time_ms
@@ -29,7 +29,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         self,
         forward_db: Database = None,
         backward_db: Database = None,
-        top_n_layers: int = 20):
+        top_n_layers: int = 20,
+    ):
         super().__init__(
             name="Layer-wise Combined Timings",
             layout_section_name=LAYER_COMBINED_TIMER_LAYOUT,
@@ -76,7 +77,9 @@ class LayerCombinedTimerRenderer(BaseRenderer):
 
         o = d.get("other") or {}
         # show Other only if it contributes something
-        if (o.get("total_forward_current", 0.0) + o.get("total_backward_current", 0.0)) > 0:
+        if (
+            o.get("total_forward_current", 0.0) + o.get("total_backward_current", 0.0)
+        ) > 0:
             table.add_row(
                 "Other Layers",
                 f"{fmt_time_ms(o.get('total_forward_current', 0.0))} / "
@@ -145,10 +148,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         """
         return HTML(html)
 
-
     def get_dashboard_renderable(self) -> Dict[str, Any]:
         return self._service.compute_display_data()
-
 
     def log_summary(self, path) -> None:
         console = Console()
@@ -178,11 +179,14 @@ class LayerCombinedTimerRenderer(BaseRenderer):
 
     def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
         table.add_row(
-            "[blue]TOTAL LAYERS SEEN[/blue]", "[dim]|[/dim]",
-            str(stats["total_layers_seen"])
+            "[blue]TOTAL LAYERS SEEN[/blue]",
+            "[dim]|[/dim]",
+            str(stats["total_layers_seen"]),
         )
 
-    def _render_section_topk(self, table: Table, title: str, items: List, color: str) -> None:
+    def _render_section_topk(
+        self, table: Table, title: str, items: List, color: str
+    ) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
         if items:
             for layer, value in items:

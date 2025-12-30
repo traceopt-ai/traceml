@@ -1,13 +1,14 @@
 from typing import List, Deque
-from queue import Empty, Full
+from queue import Empty
 from collections import deque
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 from traceml.utils.layer_forward_time_hooks import (
     LayerForwardTimeEvent,
-    get_layer_forward_time_queue
+    get_layer_forward_time_queue,
 )
+
 
 class LayerForwardTimeSampler(BaseSampler):
     """
@@ -42,7 +43,6 @@ class LayerForwardTimeSampler(BaseSampler):
             # Extend local FIFO with the batch (order preserved)
             self._local_buffer.extend(batch)
 
-
     def _resolve_ready_events(self) -> List:
         """
         Resolve events from the head of the local buffer.
@@ -57,8 +57,6 @@ class LayerForwardTimeSampler(BaseSampler):
             resolved.append(evt)
             self._local_buffer.popleft()
         return resolved
-
-
 
     def _save_events(self, events: List[LayerForwardTimeEvent]) -> None:
         """
@@ -89,6 +87,4 @@ class LayerForwardTimeSampler(BaseSampler):
             self._save_events(ready_events)
 
         except Exception as e:
-            self.logger.error(
-                f"[TraceML] LayerForwardTimeSampler error: {e}"
-            )
+            self.logger.error(f"[TraceML] LayerForwardTimeSampler error: {e}")

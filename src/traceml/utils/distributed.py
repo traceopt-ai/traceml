@@ -1,6 +1,7 @@
 import os
 import torch
 
+
 def get_ddp_info():
     """
     Detect whether we are running under DistributedDataParallel (DDP).
@@ -18,10 +19,11 @@ def get_ddp_info():
     rank = int(os.environ.get("RANK", "-1"))
 
     is_ddp = (
-        world_size > 1 or
-        local_rank != -1 or
-        rank != -1 or
-        torch.distributed.is_available() and torch.distributed.is_initialized()
+        world_size > 1
+        or local_rank != -1
+        or rank != -1
+        or torch.distributed.is_available()
+        and torch.distributed.is_initialized()
     )
 
     # local_rank assignment if missing but DDP detected

@@ -25,6 +25,7 @@ class ModelForwardMemoryEvent:
     """
     Peak GPU memory during model forward pass.
     """
+
     step: int
     model_id: int
     device: str

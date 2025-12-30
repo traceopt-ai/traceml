@@ -1,5 +1,4 @@
 from typing import Dict, Any
-import time
 from .base_sampler import BaseSampler
 from traceml.utils.layer_forward_memory_hook import get_layer_forward_memory_queue
 from traceml.loggers.error_log import get_error_logger
@@ -37,7 +36,6 @@ class LayerForwardMemorySampler(BaseSampler):
                 continue
             self._save_event(event)
 
-
     def _save_event(self, event: Dict[str, Any]) -> None:
         model_id = getattr(event, "model_id", None)
         layers = getattr(event, "layers", None)
@@ -53,7 +51,6 @@ class LayerForwardMemorySampler(BaseSampler):
             }
             table = self.db.create_or_get_table(layer_name)
             table.append(record)
-
 
     def sample(self):
         """

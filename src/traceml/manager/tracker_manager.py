@@ -1,5 +1,4 @@
 import threading
-from dataclasses import dataclass
 from typing import List, Optional
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.config import config
@@ -17,7 +16,6 @@ from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySa
 from traceml.samplers.steptimer_sampler import StepTimerSampler
 from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
 from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
-from traceml.samplers.model_forward_memory_sampler import ModelForwardMemorySampler
 
 
 from traceml.renderers.base_renderer import BaseRenderer
@@ -30,8 +28,6 @@ from traceml.renderers.steptimer_renderer import StepTimerRenderer
 from traceml.renderers.model_combined_renderer import ModelCombinedRenderer
 from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 from traceml.renderers.layer_combined_timing_renderer import LayerCombinedTimerRenderer
-
-
 
 
 class TrackerManager:
@@ -60,7 +56,9 @@ class TrackerManager:
         try:
             self.display_manager, self._render_attr = self._DISPLAY[mode]
         except KeyError:
-            raise ValueError(f"Unsupported mode: {mode}. Choose from {list(self._DISPLAY)}")
+            raise ValueError(
+                f"Unsupported mode: {mode}. Choose from {list(self._DISPLAY)}"
+            )
 
         if samplers is None or renderers is None:
             self.samplers, self.renderers = self._build_components(
@@ -148,9 +146,13 @@ class TrackerManager:
 
     def _run_renderers(self):
         for r in self.renderers:
+
             def register():
                 render_fn = getattr(r, self._render_attr)
-                self.display_manager.register_layout_content(r.layout_section_name, render_fn)
+                self.display_manager.register_layout_content(
+                    r.layout_section_name, render_fn
+                )
+
             self._safe(f"Renderer {r.__class__.__name__} register failed", register)
 
     def _run_once(self):
@@ -172,7 +174,9 @@ class TrackerManager:
         self._stop_event.set()
         self._thread.join(timeout=self.interval_sec * 5)
         if self._thread.is_alive():
-            self.logger.error("[TraceML] WARNING: Tracker thread did not terminate within timeout.")
+            self.logger.error(
+                "[TraceML] WARNING: Tracker thread did not terminate within timeout."
+            )
         self._safe("Display release failed", self.display_manager.release_display)
 
     def log_summaries(self, path="traceml_system_summary.txt") -> None:

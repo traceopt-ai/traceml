@@ -76,12 +76,12 @@ class LayerCombinedMemoryData:
 
         #  Split top / other
         top_items = all_rows_sorted[: self._top_n]
-        other_items = all_rows_sorted[self._top_n:]
+        other_items = all_rows_sorted[self._top_n :]
 
         #  Aggregate "other"
-        other_current_total = sum(
-            r["total_current_memory"] for r in other_items
-        ) if other_items else 0.0
+        other_current_total = (
+            sum(r["total_current_memory"] for r in other_items) if other_items else 0.0
+        )
 
         other = {
             "param_memory": sum(r["param_memory"] for r in other_items),
@@ -92,28 +92,27 @@ class LayerCombinedMemoryData:
             "total_current_memory": other_current_total,
             "pct": (
                 other_current_total / total_current_sum * 100.0
-                if total_current_sum else 0.0
+                if total_current_sum
+                else 0.0
             ),
         }
 
         return {
             "model_index": model_index,
-
             "top_items": top_items,
             "other": other,
             "all_items": all_rows_sorted,
-
             "total_current_sum": total_current_sum,
             "total_peak_sum": sum(peak_map.values()),
         }
 
     def _build_layer_row(
-            self,
-            layer: str,
-            param_mem: float,
-            current_map: Dict[str, float],
-            peak_map: Dict[str, float],
-            total_current_sum: float,
+        self,
+        layer: str,
+        param_mem: float,
+        current_map: Dict[str, float],
+        peak_map: Dict[str, float],
+        total_current_sum: float,
     ) -> Dict[str, Any]:
 
         fwd_cur = self._forward_cache.get(layer, {}).get("current", 0.0)
@@ -126,13 +125,11 @@ class LayerCombinedMemoryData:
 
         return {
             "layer": layer,
-
             "param_memory": float(param_mem),
             "forward_current": float(fwd_cur),
             "forward_peak": float(fwd_peak),
             "backward_current": float(bwd_cur),
             "backward_peak": float(bwd_peak),
-
             "total_peak_memory": float(peak_map[layer]),
             "total_current_memory": float(current_total),
             "pct": pct,
@@ -167,7 +164,9 @@ class LayerCombinedMemoryData:
                     latest_per_device[dev] = size_f
                     global_peak = max(global_peak, size_f)
 
-            layer_current[layer] = max(latest_per_device.values()) if latest_per_device else 0.0
+            layer_current[layer] = (
+                max(latest_per_device.values()) if latest_per_device else 0.0
+            )
             layer_peaks[layer] = global_peak
 
         return {
@@ -218,13 +217,9 @@ class LayerCombinedMemorySummary:
             }
 
         total_samples = len(self._layer_table)
-        model_signatures = {
-            entry.get("model_signature") for entry in self._layer_table
-        }
+        model_signatures = {entry.get("model_signature") for entry in self._layer_table}
 
-        totals = [
-            float(entry.get("total_memory", 0.0)) for entry in self._layer_table
-        ]
+        totals = [float(entry.get("total_memory", 0.0)) for entry in self._layer_table]
         avg_memory = sum(totals) / len(totals) if totals else 0.0
 
         return {

@@ -82,7 +82,6 @@ class StepTimerRenderer(BaseRenderer):
             series[name] = {"cpu": cpu.get(name, []), "gpu": gpu.get(name, [])}
         return series
 
-
     def _aggregate_top_series(
         self, series: Dict[str, Dict[str, List[float]]]
     ) -> Dict[str, Dict[str, List[float]]]:
@@ -133,14 +132,15 @@ class StepTimerRenderer(BaseRenderer):
         out["Other"] = {"cpu": other_cpu, "gpu": other_gpu}
         return out
 
-
     @staticmethod
     def _safe_percentile(x: np.ndarray, q: float) -> float:
         if x.size == 0:
             return 0.0
         return float(np.percentile(x, q))
 
-    def _compute_row_stats(self, cpu_vals: List[float], gpu_vals: List[float]) -> Dict[str, object]:
+    def _compute_row_stats(
+        self, cpu_vals: List[float], gpu_vals: List[float]
+    ) -> Dict[str, object]:
         """
         Compute display stats for one event:
           - choose GPU series if present else CPU
@@ -168,7 +168,7 @@ class StepTimerRenderer(BaseRenderer):
 
         last = float(arr[-1])
 
-        win100 = arr[-min(100, arr.size):]
+        win100 = arr[-min(100, arr.size) :]
         p50 = self._safe_percentile(win100, 50)
         p95 = self._safe_percentile(win100, 95)
         avg100 = float(win100.mean())
@@ -201,10 +201,11 @@ class StepTimerRenderer(BaseRenderer):
         out: Dict[str, Dict[str, object]] = {}
 
         for name, vals in series.items():
-            out[name] = self._compute_row_stats(vals.get("cpu", []), vals.get("gpu", []))
+            out[name] = self._compute_row_stats(
+                vals.get("cpu", []), vals.get("gpu", [])
+            )
 
         return out
-
 
     def get_panel_renderable(self) -> Panel:
         data = self.get_data()
@@ -219,13 +220,17 @@ class StepTimerRenderer(BaseRenderer):
         table.add_column("Device", justify="center", style="magenta")
 
         if not data:
-            table.add_row("[dim]No step timers recorded[/dim]", "—", "—", "—", "—", "", "—")
+            table.add_row(
+                "[dim]No step timers recorded[/dim]", "—", "—", "—", "—", "", "—"
+            )
         else:
             # Stable display order: by Avg(100) descending, "Other" last if present
             items = list(data.items())
             items.sort(key=lambda kv: float(kv[1].get("avg_100", 0.0)), reverse=True)
             if any(name == "Other" for name, _ in items):
-                items = [kv for kv in items if kv[0] != "Other"] + [kv for kv in items if kv[0] == "Other"]
+                items = [kv for kv in items if kv[0] != "Other"] + [
+                    kv for kv in items if kv[0] == "Other"
+                ]
 
             for name, s in items:
                 table.add_row(
@@ -263,7 +268,9 @@ class StepTimerRenderer(BaseRenderer):
             items = list(data.items())
             items.sort(key=lambda kv: float(kv[1].get("avg_100", 0.0)), reverse=True)
             if any(name == "Other" for name, _ in items):
-                items = [kv for kv in items if kv[0] != "Other"] + [kv for kv in items if kv[0] == "Other"]
+                items = [kv for kv in items if kv[0] != "Other"] + [
+                    kv for kv in items if kv[0] == "Other"
+                ]
 
             rows = ""
             for name, s in items:
@@ -314,7 +321,6 @@ class StepTimerRenderer(BaseRenderer):
         already top-N filtered and with 'Other' included if applicable.
         """
         return self.get_data()
-
 
     def log_summary(self, path: Optional[str] = None) -> None:
         """

@@ -13,7 +13,8 @@ def truncate_layer_name(s: str, max_len: int = 20) -> str:
     if len(s) <= max_len:
         return s
 
-    return "…" + s[-(max_len - 1):]
+    return "…" + s[-(max_len - 1) :]
+
 
 def format_cache_value(
     cache: Dict[str, Dict[str, float]],

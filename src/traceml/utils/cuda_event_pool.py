@@ -39,7 +39,7 @@ class CUDAEventPool:
 
         with self._lock:
             if event is not None and len(self._pool) < self.max_size:
-              self._pool.append(event)
+                self._pool.append(event)
 
     def clear(self) -> None:
         """Clear all events from the pool."""

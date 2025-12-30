@@ -46,10 +46,10 @@ class StepMemorySampler(BaseSampler):
         timestamp = time.time()
 
         model_id = getattr(event, "model_id", None)
-        device   = getattr(event, "device", None)
+        device = getattr(event, "device", None)
 
         peak_alloc = getattr(event, "peak_allocated_mb", None)
-        peak_resv  = getattr(event, "peak_reserved_mb", None)
+        peak_resv = getattr(event, "peak_reserved_mb", None)
 
         if peak_alloc is None and peak_resv is None:
             return
@@ -71,6 +71,4 @@ class StepMemorySampler(BaseSampler):
         try:
             self._drain_queue()
         except Exception as e:
-            self.logger.error(
-                f"[TraceML] StepMemorySampler error: {e}"
-            )
+            self.logger.error(f"[TraceML] StepMemorySampler error: {e}")

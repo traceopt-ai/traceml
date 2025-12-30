@@ -1,5 +1,4 @@
 from typing import Any, Dict
-import time
 from .base_sampler import BaseSampler
 from traceml.utils.layer_backward_memory_hook import get_layer_backward_queue
 from traceml.loggers.error_log import get_error_logger

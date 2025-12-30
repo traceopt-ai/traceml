@@ -54,7 +54,9 @@ class SystemRenderer(BaseRenderer):
         )
 
         temp_max = max(v["temperature"] for v in gpu_raw.values()) if gpu_raw else None
-        power_total = sum(v["power_usage"] for v in gpu_raw.values()) if gpu_raw else None
+        power_total = (
+            sum(v["power_usage"] for v in gpu_raw.values()) if gpu_raw else None
+        )
         power_limit_total = (
             sum(v["power_limit"] for v in gpu_raw.values()) if gpu_raw else None
         )
@@ -123,10 +125,8 @@ class SystemRenderer(BaseRenderer):
                     ),
                     "gpu_memory_peak_used": round(float(np.max(mem_used_totals)), 2),
                     "gpu_memory_total": round(float(np.mean(mem_total_totals)), 2),
-
                     "gpu_temp_average": round(float(np.mean(temp_vals)), 2),
                     "gpu_temp_peak": round(float(np.max(temp_vals)), 2),
-
                     "gpu_power_average": round(float(np.mean(power_usage_vals)), 2),
                     "gpu_power_peak": round(float(np.max(power_usage_vals)), 2),
                     "gpu_power_limit": round(float(np.mean(power_limit_vals)), 2),
@@ -137,13 +137,12 @@ class SystemRenderer(BaseRenderer):
     def _get_panel_cpu_row(self, table, data):
         ram_pct_str = ""
         if data["ram_total"]:
-            ram_pct = data['ram_used'] * 100.0 / data['ram_total']
+            ram_pct = data["ram_used"] * 100.0 / data["ram_total"]
             ram_pct_str = f" ({ram_pct:.1f}%)"
         table.add_row(
             f"[bold green]CPU[/bold green] {fmt_percent(data['cpu'])}",
             f"[bold green]RAM[/bold green] {fmt_mem_new(data['ram_used'])}/{fmt_mem_new(data['ram_total'])}{ram_pct_str}",
         )
-
 
     def _get_panel_gpu_row(self, table, data):
         if data["gpu_available"]:
@@ -158,13 +157,13 @@ class SystemRenderer(BaseRenderer):
             pl = data.get("gpu_power_limit")
             temp_str = (
                 f"[bold green]GPU TEMP[/bold green] {temp:.1f}°C"
-                if temp is not None else
-                "[bold green]GPU TEMP[/bold green] N/A"
+                if temp is not None
+                else "[bold green]GPU TEMP[/bold green] N/A"
             )
             power_str = (
                 f"[bold green]GPU POWER[/bold green] {pu:.1f}W / {pl:.1f}W"
-                if pu is not None and pl is not None else
-                "[bold green]GPU POWER[/bold green] N/A"
+                if pu is not None and pl is not None
+                else "[bold green]GPU POWER[/bold green] N/A"
             )
             table.add_row(temp_str, power_str)
         else:
@@ -232,7 +231,9 @@ class SystemRenderer(BaseRenderer):
             pl = data.get("gpu_power_limit")
 
             temp_html = f"{temp:.1f}°C" if temp is not None else "N/A"
-            power_html = f"{pu:.1f}W / {pl:.1f}W" if pu is not None and pl is not None else "N/A"
+            power_html = (
+                f"{pu:.1f}W / {pl:.1f}W" if pu is not None and pl is not None else "N/A"
+            )
 
             gpu_section = f"""
                 <div style="
@@ -313,29 +314,41 @@ class SystemRenderer(BaseRenderer):
         )
         t.add_row("GPU UTIL PEAK", "[cyan]|[/cyan]", f"{s['gpu_peak_util_total']:.1f}%")
         t.add_row(
-            "GPU MEM AVG", "[cyan]|[/cyan]",
+            "GPU MEM AVG",
+            "[cyan]|[/cyan]",
             f"{fmt_mem_new(s['gpu_memory_average_used'])} / "
             f"{fmt_mem_new(s['gpu_memory_total'])}",
         )
         t.add_row(
-            "GPU MEM PEAK", "[cyan]|[/cyan]",
+            "GPU MEM PEAK",
+            "[cyan]|[/cyan]",
             f"{fmt_mem_new(s['gpu_memory_peak_used'])} / "
             f"{fmt_mem_new(s['gpu_memory_total'])}",
         )
         t.add_row(
-            "GPU TEMP AVG", "[cyan]|[/cyan]", f"{s['gpu_temp_average']:.1f}°C",
+            "GPU TEMP AVG",
+            "[cyan]|[/cyan]",
+            f"{s['gpu_temp_average']:.1f}°C",
         )
         t.add_row(
-            "GPU TEMP PEAK", "[cyan]|[/cyan]", f"{s['gpu_temp_peak']:.1f}°C",
+            "GPU TEMP PEAK",
+            "[cyan]|[/cyan]",
+            f"{s['gpu_temp_peak']:.1f}°C",
         )
         t.add_row(
-            "GPU POWER AVG", "[cyan]|[/cyan]", f"{s['gpu_power_average']:.1f}W",
+            "GPU POWER AVG",
+            "[cyan]|[/cyan]",
+            f"{s['gpu_power_average']:.1f}W",
         )
         t.add_row(
-            "GPU POWER PEAK", "[cyan]|[/cyan]", f"{s['gpu_power_peak']:.1f}W",
+            "GPU POWER PEAK",
+            "[cyan]|[/cyan]",
+            f"{s['gpu_power_peak']:.1f}W",
         )
         t.add_row(
-            "GPU POWER LIMIT", "[cyan]|[/cyan]", f"{s['gpu_power_limit']:.1f}W",
+            "GPU POWER LIMIT",
+            "[cyan]|[/cyan]",
+            f"{s['gpu_power_limit']:.1f}W",
         )
 
     def log_summary(self, path) -> None:
@@ -360,4 +373,4 @@ class SystemRenderer(BaseRenderer):
             )
         )
         text = console.export_text(clear=False)
-        append_text(path,  "\n" + text + "\n")
+        append_text(path, "\n" + text + "\n")

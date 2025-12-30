@@ -96,8 +96,8 @@ class ModelCombinedRenderer(BaseRenderer):
             else:
                 last = float(arr[-1])
 
-                win100 = arr[-min(100, arr.size):]
-                win200 = arr[-min(200, arr.size):]
+                win100 = arr[-min(100, arr.size) :]
+                win200 = arr[-min(200, arr.size) :]
 
                 p50 = self._safe_percentile(win100, 50)
                 p95 = self._safe_percentile(win100, 95)

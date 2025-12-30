@@ -6,7 +6,7 @@ from traceml.renderers.display.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
     ACTIVATION_GRADIENT_LAYOUT,
     STEPTIMER_LAYOUT,
-    LAYER_COMBINED_TIMER_LAYOUT
+    LAYER_COMBINED_TIMER_LAYOUT,
 )
 
 from .system_section import (
@@ -19,20 +19,20 @@ from .process_section import (
 )
 from .layer_memory_table_section import (
     build_layer_memory_table_section,
-    update_layer_memory_table_section
+    update_layer_memory_table_section,
 )
 from .layer_timer_table_section import (
     build_layer_timer_table_section,
-    update_layer_timer_table_section
+    update_layer_timer_table_section,
 )
 from .steptiming_section import (
     build_step_timing_table_section,
-    update_step_timing_table_section
+    update_step_timing_table_section,
 )
 
 
 from .helper import build_fake_section, update_fake_section
-import pandas
+
 
 def define_main_page(cls):
     """Attach the NiceGUI main page to the UI server."""
@@ -41,7 +41,8 @@ def define_main_page(cls):
     def main_page():
 
         # ----- GLOBAL PAGE STYLES -----
-        ui.add_head_html("""
+        ui.add_head_html(
+            """
         <style>
             body, .nicegui-content {
                 width: 100% !important;
@@ -54,12 +55,13 @@ def define_main_page(cls):
                 background-image: none !important;
             }
         </style>
-        """)
+        """
+        )
 
         # ----- PAGE LAYOUT -----
-        ui.label("TraceML Dashboard") \
-            .classes("text-4xl font-extrabold m-4 w-full text-left") \
-            .style("color:#d47a00;")
+        ui.label("TraceML Dashboard").classes(
+            "text-4xl font-extrabold m-4 w-full text-left"
+        ).style("color:#d47a00;")
 
         with ui.row().classes("m-2 w-[99%] gap-4 flex-wrap items-center"):
 
@@ -80,17 +82,22 @@ def define_main_page(cls):
         with ui.row().classes("m-2 w-[99%] gap-4 flex-nowrap items-center"):
 
             with ui.column().classes("w-[54%]"):
-                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = build_layer_memory_table_section()
-                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = update_layer_memory_table_section
+                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
+                    build_layer_memory_table_section()
+                )
+                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = (
+                    update_layer_memory_table_section
+                )
 
             with ui.column().classes("w-[44%]"):
-                cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = build_layer_timer_table_section()
-                cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = update_layer_timer_table_section
+                cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = (
+                    build_layer_timer_table_section()
+                )
+                cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = (
+                    update_layer_timer_table_section
+                )
 
-
-        for l in [
-            ACTIVATION_GRADIENT_LAYOUT
-        ]:
+        for l in [ACTIVATION_GRADIENT_LAYOUT]:
             cls.cards[l] = build_fake_section()
             cls.update_funcs[l] = update_fake_section
 

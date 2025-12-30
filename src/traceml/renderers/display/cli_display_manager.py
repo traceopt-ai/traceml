@@ -7,12 +7,16 @@ from typing import Dict, Any, Callable, Optional
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.display.stdout_stderr_capture import StreamCapture
 from traceml.renderers.display.layout import (
-    ROOT_LAYOUT, SYSTEM_LAYOUT, PROCESS_LAYOUT,
-    LAYER_COMBINED_MEMORY_LAYOUT, ACTIVATION_GRADIENT_LAYOUT,
-    STEPTIMER_LAYOUT, STDOUT_STDERR_LAYOUT,
+    ROOT_LAYOUT,
+    SYSTEM_LAYOUT,
+    PROCESS_LAYOUT,
+    LAYER_COMBINED_MEMORY_LAYOUT,
+    STEPTIMER_LAYOUT,
+    STDOUT_STDERR_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
-    MODEL_COMBINED_LAYOUT
+    MODEL_COMBINED_LAYOUT,
 )
+
 
 class CLIDisplayManager:
     """

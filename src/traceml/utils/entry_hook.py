@@ -5,6 +5,7 @@ from traceml.utils.shared_utils import EXECUTION_LAYER
 
 _execution_entry_hook_registry = {}
 
+
 class ForwardEntryHook:
     def __init__(self, layer_name: str):
         self.layer_name = layer_name

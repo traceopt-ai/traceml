@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Dict, Any, List, Tuple
 import sys
-import time
 
 import torch
 import torch.nn as nn
@@ -15,8 +14,7 @@ layer_forward_memory_queue: Queue = Queue(maxsize=4096)
 _layer_forward_memory_hook_registry: Dict[int, bool] = {}
 
 # In-memory buffer: model_id -> List[(layer_name, memory_per_device, timestamp)
-_layer_forward_memory_buffer: Dict[int, List]  = {}
-
+_layer_forward_memory_buffer: Dict[int, List] = {}
 
 
 @dataclass
@@ -24,6 +22,7 @@ class LayerForwardMemoryEvents:
     """
     Represents a single forward-pass snapshot for a model layer.
     """
+
     model_id: int
     layers: List[Tuple[str, Dict[str, float]]]
     step: int

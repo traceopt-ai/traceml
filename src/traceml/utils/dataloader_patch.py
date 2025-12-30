@@ -1,6 +1,5 @@
-import time
 from dataclasses import dataclass
-from queue import Queue, Full
+from queue import Queue
 from typing import Any, Optional
 
 import torch
@@ -12,6 +11,7 @@ from .steptimer import timed_region
 # Batch event queue
 _batch_event_queue: Queue = Queue(maxsize=1024)
 
+
 def get_batch_event_queue() -> Queue:
     return _batch_event_queue
 
@@ -21,6 +21,7 @@ class BatchEvent(BaseTraceEvent):
     """
     Represents a yielded batch from a DataLoader.
     """
+
     batch_size: Optional[int]
 
 

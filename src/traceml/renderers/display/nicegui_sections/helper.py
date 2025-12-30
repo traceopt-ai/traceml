@@ -1,10 +1,11 @@
 import time
 
+
 def level_bar_continuous(pct: float) -> str:
     pct = max(0, min(pct, 100))
 
     # Color rule
-    color=choose_color(pct)    # green
+    color = choose_color(pct)  # green
 
     return f"""
     <div style="
@@ -43,8 +44,10 @@ def extract_time_axis(table):
     x_hist = [time.strftime("%H:%M:%S", time.localtime(t)) for t in t_raw]
     return x_hist
 
+
 def build_fake_section():
     return {}
+
 
 def update_fake_section():
     return

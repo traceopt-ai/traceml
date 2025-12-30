@@ -27,15 +27,14 @@ from transformers import (
 from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 
-
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
 
 # Increase these to generate a LOT of profiling data
 MAX_TRAIN_EXAMPLES = 1000
-MAX_VAL_EXAMPLES   = 0
-BATCH_SIZE         = 32
-EPOCHS             = 1
+MAX_VAL_EXAMPLES = 0
+BATCH_SIZE = 32
+EPOCHS = 1
 LR = 2e-5
 WARMUP_RATIO = 0.06
 
@@ -58,7 +57,7 @@ def prepare_data():
     raw = load_dataset("ag_news")
 
     train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
-    val_raw   = raw["test"].select(range(min(MAX_VAL_EXAMPLES,   len(raw["test"]))))
+    val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
@@ -66,18 +65,19 @@ def prepare_data():
         return tokenizer(examples["text"], truncation=True, max_length=128)
 
     train_ds = train_raw.map(tok, batched=True, remove_columns=["text"])
-    val_ds   = val_raw.map(tok, batched=True, remove_columns=["text"])
+    val_ds = val_raw.map(tok, batched=True, remove_columns=["text"])
 
     train_ds = train_ds.rename_column("label", "labels")
-    val_ds   = val_ds.rename_column("label", "labels")
+    val_ds = val_ds.rename_column("label", "labels")
 
     collator = DataCollatorWithPadding(
-        tokenizer=tokenizer, padding="max_length", max_length=128)
+        tokenizer=tokenizer, padding="max_length", max_length=128
+    )
 
     train_loader = DataLoader(
         train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator
     )
-    val_loader   = DataLoader(
+    val_loader = DataLoader(
         val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collator
     )
 
@@ -89,6 +89,7 @@ def prepare_data():
 # ============================================================
 # These are NOT required for TraceML to work.
 # They add extra visibility into specific code regions.
+
 
 @trace_time("data_transfer", use_gpu=False)
 def load_batch_to_device(batch, device):
@@ -119,7 +120,7 @@ def optimizer_step(scaler, optimizer, scheduler):
 def run_validation(model, val_loader, dtype, device):
     model.eval()
     val_loss = 0.0
-    val_acc  = 0.0
+    val_acc = 0.0
     n_batches = 0
 
     with torch.no_grad():
@@ -132,7 +133,7 @@ def run_validation(model, val_loader, dtype, device):
                 loss = out.loss
                 logits = out.logits
             val_loss += loss.item()
-            val_acc  += accuracy_from_logits(logits, batch["labels"])
+            val_acc += accuracy_from_logits(logits, batch["labels"])
             n_batches += 1
 
     model.train()
@@ -143,11 +144,12 @@ def run_validation(model, val_loader, dtype, device):
 # MAIN TRAINING LOOP
 # ============================================================
 
+
 def main():
     set_seed()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dtype  = torch.float16 if torch.cuda.is_available() else torch.float32
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
 
     tokenizer, train_loader, val_loader = prepare_data()
 
@@ -169,7 +171,7 @@ def main():
         sample_layer_memory=False,
         trace_layer_forward__memory=False,
         trace_layer_backward_memory=False,
-        trace_execution=False
+        trace_execution=False,
     )
 
     optimizer = AdamW(model.parameters(), lr=LR)
@@ -187,7 +189,7 @@ def main():
     #  TRAINING LOOP
     for epoch in range(EPOCHS):
         running_loss = 0.0
-        running_acc  = 0.0
+        running_acc = 0.0
 
         for batch in train_loader:
             # ====================================================

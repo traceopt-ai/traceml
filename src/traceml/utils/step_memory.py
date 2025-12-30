@@ -18,6 +18,7 @@ class StepMemoryEvent:
     """
     Peak GPU memory during a TraceML step.
     """
+
     model_id: int
     device: str
     peak_allocated_mb: float
@@ -36,9 +37,7 @@ class StepMemoryTracker:
         try:
             self.device = next(model.parameters()).device
         except StopIteration:
-            self.device = torch.device(
-                "cuda" if torch.cuda.is_available() else "cpu"
-            )
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def reset(self):
         """
@@ -64,4 +63,3 @@ class StepMemoryTracker:
             step_memory_queue.put_nowait(evt)
         except Full:
             print("[TraceML] Error in StepMemoryTracker", file=sys.stderr)
-

@@ -37,6 +37,7 @@ class MNISTCNN(nn.Module):
 # TraceML wrappers
 # -------------------------
 
+
 @trace_time("forward")
 def forward_step(model, x):
     return model(x)
@@ -84,8 +85,11 @@ def main():
     # Can add overhead in long training runs.
     # Recommended for short runs, diagnosis, or one-off investigations.
     trace_model_instance(
-        model, trace_layer_forward__memory=True, trace_layer_backward_memory=True,
-        trace_layer_forward_time=True, trace_layer_backward_time=True
+        model,
+        trace_layer_forward__memory=True,
+        trace_layer_backward_memory=True,
+        trace_layer_forward_time=True,
+        trace_layer_backward_time=True,
     )
 
     opt = optim.Adam(model.parameters(), lr=1e-3)
@@ -114,4 +118,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

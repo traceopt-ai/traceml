@@ -1,6 +1,6 @@
 import functools
 import sys
-from typing import Callable, Optional
+from typing import Callable
 import torch.nn as nn
 import time
 import torch
@@ -14,7 +14,6 @@ from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memor
 from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
 from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
 
-from traceml.utils.model_forward_memory_hook import attach_model_forward_memory_hooks
 
 from traceml.utils.steptimer import StepTimeEvent, record_step_time_event, timed_region
 from traceml.utils.entry_hook import attach_execution_entry_hooks
@@ -25,9 +24,11 @@ from traceml.utils.cuda_event_pool import get_cuda_event
 
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
-# This is a lightweight, observational patch used only to infer batch metadata.
-# It is idempotent and safe to import multiple times.
+# This is a lightweight, observational patch used to infer batch metadata and,
+# dataloader fetch time.It is idempotent and safe to import multiple times.
+
 patch_dataloader()
+
 
 class TraceState:
     step = 0
@@ -36,7 +37,7 @@ class TraceState:
 @contextmanager
 def trace_step(model: nn.Module):
     """
-    Defines a TraceML step boundary.
+    Defines a step boundary.
     Currently:
         - flushes TraceML buffers at step end
         - resets peak CUDA memory stats at step start (if available)
@@ -44,10 +45,15 @@ def trace_step(model: nn.Module):
     Timing and metadata may be added later.
     """
     TraceState.step += 1
+
+    mem_tracker = StepMemoryTracker(model)
+    mem_tracker.reset()  # reset peak stats at step start
+
     try:
         with timed_region("_traceml_internal:step_time", use_gpu=True):
             yield
     finally:
+        mem_tracker.record()  # record peak stats at step end
         flush_traceml_buffers(model, TraceState.step)
 
 
@@ -195,7 +201,6 @@ def trace_model_instance(
         if trace_execution:
             attach_execution_entry_hooks(model)
 
-
         model._trace_attached = attached
 
     except Exception as e:
@@ -252,5 +257,3 @@ def trace_time(name: str, use_gpu: bool = True) -> Callable:
         return wrapper
 
     return decorator
-
-

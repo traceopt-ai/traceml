@@ -27,7 +27,6 @@ class LayerBackwardTimeSampler(BaseSampler):
         # Local FIFO buffer owned by the sampler
         self._local_buffer: Deque[LayerBackwardTimeEvent] = deque()
 
-
     def _ingest_queue(self) -> None:
         """
         Drain shared gradient-time queue and append all batches
@@ -41,7 +40,6 @@ class LayerBackwardTimeSampler(BaseSampler):
                 break
             # Preserve order across batches
             self._local_buffer.extend(batch)
-
 
     def _resolve_ready_events(self) -> List[LayerBackwardTimeEvent]:
         """
@@ -60,7 +58,6 @@ class LayerBackwardTimeSampler(BaseSampler):
             self._local_buffer.popleft()
 
         return resolved
-
 
     def _save_events(self, events: List) -> None:
         """
@@ -81,7 +78,6 @@ class LayerBackwardTimeSampler(BaseSampler):
             }
             table.append(record)
 
-
     def sample(self) -> None:
         """
         Ingest → resolve (FIFO) → persist
@@ -91,6 +87,4 @@ class LayerBackwardTimeSampler(BaseSampler):
             ready_events = self._resolve_ready_events()
             self._save_events(ready_events)
         except Exception as e:
-            self.logger.error(
-                f"[TraceML] LayerBackwardTimeSampler error: {e}"
-            )
+            self.logger.error(f"[TraceML] LayerBackwardTimeSampler error: {e}")

@@ -39,7 +39,6 @@ def fmt_mem_new(num_bytes: Any) -> str:
         return f"{v:.2f} {units[idx]}"
 
 
-
 def fmt_time_ms(v: float) -> str:
     """
     Format a time duration given in milliseconds.

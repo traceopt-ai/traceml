@@ -93,7 +93,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
             )
 
         if not d["top_items"] and o["total_current_memory"] <= 0:
-            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—",  "—")
+            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—")
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 120)  # allow wider output
@@ -196,7 +196,6 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
     def get_dashboard_renderable(self) -> Dict[str, Any]:
         return self._data_service.compute_display_data()
 
-
     def log_summary(self, path) -> None:
         console = Console()
 
@@ -225,10 +224,14 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
     def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
         table.add_row(
-            "[blue]MODEL MEMORY[/blue]", "[dim]|[/dim]",
-            fmt_mem_new(stats["model_memory"]))
+            "[blue]MODEL MEMORY[/blue]",
+            "[dim]|[/dim]",
+            fmt_mem_new(stats["model_memory"]),
+        )
 
-    def _render_section_topk(self, table: Table, title: str, items: List, color: str) -> None:
+    def _render_section_topk(
+        self, table: Table, title: str, items: List, color: str
+    ) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
         if items:
             for layer, value in items:

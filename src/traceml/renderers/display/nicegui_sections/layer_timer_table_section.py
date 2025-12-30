@@ -4,7 +4,8 @@ from traceml.utils.formatting import fmt_time_ms
 
 def build_layer_timer_table_section():
     card = ui.card().classes("m-2 p-4 w-full")
-    card.style("""
+    card.style(
+        """
         height: 350px;
         display: flex;
         flex-direction: column;
@@ -14,12 +15,13 @@ def build_layer_timer_table_section():
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-    """)
+    """
+    )
 
     with card:
-        ui.label("Per Layer Timing Stats").classes(
-            "text-lg font-bold mb-2"
-        ).style("color:#d47a00;")
+        ui.label("Per Layer Timing Stats").classes("text-lg font-bold mb-2").style(
+            "color:#d47a00;"
+        )
 
         container = ui.html("", sanitize=False).style(
             "flex: 1; overflow-y: auto; width: 100%; padding-right: 12px;"
@@ -86,4 +88,3 @@ def update_layer_timer_table_section(panel, dashboard_data):
     """
 
     panel["table"].content = html
-

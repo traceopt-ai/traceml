@@ -25,10 +25,8 @@ _backward_time_start_buffer: Dict[int, Dict[str, Deque[dict]]] = {}
 _backward_time_buffer: Dict[int, Deque] = {}
 
 
-
 def get_layer_backward_time_queue() -> Queue:
     return layer_backward_time_queue
-
 
 
 @dataclass
@@ -36,6 +34,7 @@ class LayerBackwardTimeEvent:
     """
     Time event for a single backward pass of a layer.
     """
+
     step: int
     model_id: int
     layer_name: str
@@ -74,13 +73,12 @@ class LayerBackwardTimeEvent:
         return self.resolved
 
 
-
-
 class LayerBackwardTimePreHook:
     """
     Full backward *pre* hook: record start markers.
     Signature: (module, grad_output) -> None
     """
+
     def __init__(self, model_id: int, layer_name: str, on_gpu: bool):
         self.model_id = model_id
         self.layer_name = layer_name
@@ -114,6 +112,7 @@ class LayerBackwardTimePostHook:
     Full backward hook: record end markers and enqueue event.
     Signature: (module, grad_input, grad_output) -> None
     """
+
     def __init__(self, model_id: int, layer_name: str, on_gpu: bool):
         self.model_id = model_id
         self.layer_name = layer_name
@@ -123,10 +122,8 @@ class LayerBackwardTimePostHook:
         try:
             cpu_end = time.perf_counter()
 
-            layer_q = (
-                _backward_time_start_buffer
-                .get(self.model_id, {})
-                .get(self.layer_name)
+            layer_q = _backward_time_start_buffer.get(self.model_id, {}).get(
+                self.layer_name
             )
             if not layer_q:
                 return
@@ -151,7 +148,7 @@ class LayerBackwardTimePostHook:
                 cpu_duration_ms=cpu_duration_ms,
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
-                step=-1
+                step=-1,
             )
 
             _backward_time_buffer.setdefault(self.model_id, deque()).append(event)
@@ -161,8 +158,6 @@ class LayerBackwardTimePostHook:
                 f"[TraceML] Error in GradientTimePostHook for layer {self.layer_name}",
                 file=sys.stderr,
             )
-
-
 
 
 def flush_layer_backward_time_buffers(model: nn.Module, step: int) -> None:
@@ -181,7 +176,7 @@ def flush_layer_backward_time_buffers(model: nn.Module, step: int) -> None:
 
     while src:
         event = src.popleft()
-        event.step = step       ## step is updated during flush
+        event.step = step  ## step is updated during flush
         dst.append(event)
 
     _backward_time_buffer.pop(model_id, None)

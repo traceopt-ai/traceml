@@ -28,6 +28,7 @@ class LayerForwardTimeEvent:
     """
     Time event for a single forward pass of a layer.
     """
+
     step: int
     model_id: int
     layer_name: str
@@ -75,7 +76,7 @@ def get_layer_forward_time_queue() -> Queue:
 
 
 class LayerForwardTimePreHook:
-    def __init__(self, model_id: int, layer_name: str, on_gpu:bool):
+    def __init__(self, model_id: int, layer_name: str, on_gpu: bool):
         self.model_id = model_id
         self.layer_name = layer_name
         self.on_gpu = on_gpu
@@ -105,7 +106,7 @@ class LayerForwardTimePreHook:
 
 
 class LayerForwardTimePostHook:
-    def __init__(self, model_id: int, layer_name: str, on_gpu:bool):
+    def __init__(self, model_id: int, layer_name: str, on_gpu: bool):
         self.model_id = model_id
         self.layer_name = layer_name
         self.on_gpu = on_gpu
@@ -114,17 +115,15 @@ class LayerForwardTimePostHook:
         try:
             cpu_end = time.perf_counter()
 
-            layer_q = (
-                _layer_forward_time_start_buffer
-                .get(self.model_id, {})
-                .get(self.layer_name)
+            layer_q = _layer_forward_time_start_buffer.get(self.model_id, {}).get(
+                self.layer_name
             )
             if not layer_q:
                 return  # No start recorded
 
             start_record = layer_q.popleft()  # FIFO match
             cpu_start = start_record["cpu_start"]
-            cpu_duration_ms = (cpu_end - cpu_start)*1000
+            cpu_duration_ms = (cpu_end - cpu_start) * 1000
 
             gpu_start = start_record["gpu_start"]
             gpu_end = None
@@ -143,7 +142,9 @@ class LayerForwardTimePostHook:
                 gpu_end=gpu_end,
                 step=-1,
             )
-            _layer_forward_time_event_buffer.setdefault(self.model_id, deque()).append(event)
+            _layer_forward_time_event_buffer.setdefault(self.model_id, deque()).append(
+                event
+            )
 
         except Exception:
             print(
@@ -170,7 +171,7 @@ def flush_layer_forward_time_buffers(model: nn.Module, step: int) -> None:
     dst = deque()
     while src:
         event = src.popleft()
-        event.step = step       ## Step is updated to correct value here
+        event.step = step  ## Step is updated to correct value here
         dst.append(event)
 
     # Remove empty buffer entry
@@ -197,8 +198,10 @@ def attach_layer_forward_time_hooks(model: nn.Module):
             continue
 
         module.register_forward_pre_hook(
-            LayerForwardTimePreHook(model_id, name, on_gpu=on_gpu))
+            LayerForwardTimePreHook(model_id, name, on_gpu=on_gpu)
+        )
         module.register_forward_hook(
-            LayerForwardTimePostHook(model_id, name, on_gpu=on_gpu))
+            LayerForwardTimePostHook(model_id, name, on_gpu=on_gpu)
+        )
 
     _layer_forward_time_hook_registry[model_id] = True

@@ -1,15 +1,16 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Optional
 from queue import Queue, Full
+from collections import deque
 import sys
 import torch
 import time
 from contextlib import contextmanager
+from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+
 
 # Shared queue for timing events
 step_time_queue: Queue = Queue(maxsize=2048)
-
-from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 
 @dataclass
@@ -72,7 +73,6 @@ def record_step_time_event(evt: StepTimeEvent):
             f"[TraceML:StepTimer] Queue full, dropping event {evt.name}",
             file=sys.stderr,
         )
-
 
 
 @contextmanager

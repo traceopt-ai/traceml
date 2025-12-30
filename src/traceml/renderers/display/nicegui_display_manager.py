@@ -1,9 +1,8 @@
 from nicegui import ui
 import threading
 import time
-from traceml.renderers.display.nicegui_sections.main_page import (
-    define_main_page
-)
+from traceml.renderers.display.nicegui_sections.main_page import define_main_page
+
 
 class NiceGUIDisplayManager:
     _layout_content_fns = {}
@@ -42,11 +41,9 @@ class NiceGUIDisplayManager:
                     for label in cls.cards[section].values():
                         label.text = "⚠️ Could not update"
 
-
     @classmethod
     def register_layout_content(cls, layout_section: str, content_fn):
         cls._layout_content_fns[layout_section] = content_fn
-
 
     @classmethod
     def update_display(cls):
