@@ -173,7 +173,7 @@ def flush_layer_backward_time_buffers(model: nn.Module, step: int) -> None:
     - Consumer gets independent ownership
     """
     model_id = id(model)
-    src = _backward_time_buffer.get(model_id)
+    src = _backward_time_buffer.get(model_id, None)
     if not src:
         return
 

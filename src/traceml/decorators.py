@@ -48,9 +48,7 @@ def trace_step(model: nn.Module):
         with timed_region("_traceml_internal:step_time", use_gpu=True):
             yield
     finally:
-        attached = getattr(model, "_trace_attached")
-        if attached:
-            flush_traceml_buffers(attached, model, TraceState.step)
+        flush_traceml_buffers(model, TraceState.step)
 
 
 def trace_model(

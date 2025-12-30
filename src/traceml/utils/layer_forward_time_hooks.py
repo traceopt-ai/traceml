@@ -162,7 +162,7 @@ def flush_layer_forward_time_buffers(model: nn.Module, step: int) -> None:
     - No GPU resolve here
     """
     model_id = id(model)
-    src = _layer_forward_time_event_buffer.get(model_id)
+    src = _layer_forward_time_event_buffer.get(model_id, None)
     if not src:
         return
 
