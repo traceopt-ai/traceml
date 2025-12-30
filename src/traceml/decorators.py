@@ -53,10 +53,10 @@ def trace_step(model: nn.Module):
 
 def trace_model(
     sample_layer_memory: bool = True,
-    trace_layer_forward__memory: bool = True,
-    trace_layer_backward_memory: bool = True,
-    trace_layer_forward_time: bool = True,
-    trace_layer_backward_time: bool = True,
+    trace_layer_forward__memory: bool = False,
+    trace_layer_backward_memory: bool = False,
+    trace_layer_forward_time: bool = False,
+    trace_layer_backward_time: bool = False,
     trace_execution: bool = True,
     # trace_model_forward_memory: bool = True,
 ) -> Callable:
@@ -137,10 +137,10 @@ def trace_model(
 def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
-    trace_layer_forward__memory: bool = True,
-    trace_layer_backward_memory: bool = True,
-    trace_layer_forward_time: bool = True,
-    trace_layer_backward_time: bool = True,
+    trace_layer_forward__memory: bool = False,
+    trace_layer_backward_memory: bool = False,
+    trace_layer_forward_time: bool = False,
+    trace_layer_backward_time: bool = False,
     trace_execution: bool = True,
     # trace_model_forward_memory: bool = True,
 ):
@@ -164,7 +164,7 @@ def trace_model_instance(
         "layer_backward_memory": False,
         "layer_forward_time": False,
         "layer_backward_time": False,
-        "model_forward_memory": True
+        # "model_forward_memory": False,
     }
     try:
         if not isinstance(model, nn.Module):
@@ -202,7 +202,7 @@ def trace_model_instance(
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)
 
 
-def trace_timestep(name: str, use_gpu: bool = True) -> Callable:
+def trace_time(name: str, use_gpu: bool = True) -> Callable:
     """
     Decorator to measure execution time of a function.
 

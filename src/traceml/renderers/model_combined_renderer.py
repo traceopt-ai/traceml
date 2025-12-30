@@ -16,13 +16,13 @@ class ModelCombinedRenderer(BaseRenderer):
     """
 
     FRIENDLY_NAMES = {
-        "_traceml_internal:dataloader_next": "~DataLoader fetch time",
-        "_traceml_internal:step_time": "~Step time",
+        "_traceml_internal:dataloader_next": "dataLoader_fetch_time",
+        "_traceml_internal:step_time": "step_time",
     }
 
     def __init__(self, database: Database, window: int = 100):
         super().__init__(
-            name="Runtime Summary",
+            name="Model Summary",
             layout_section_name=MODEL_COMBINED_LAYOUT,
         )
         self.db = database
@@ -72,16 +72,14 @@ class ModelCombinedRenderer(BaseRenderer):
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("Metric", justify="left", style="cyan")
         table.add_column("Last", justify="right")
-        table.add_column(f"p50({self.window})", justify="right")
-        table.add_column(f"p95({self.window})", justify="right")
-        table.add_column("Avg", justify="right")
-        table.add_column("Max", justify="right")
+        table.add_column("p50(100)", justify="right")
+        table.add_column("p95(100)", justify="right")
+        table.add_column("Avg(100)", justify="right")
+        table.add_column("Trend", justify="center")
         table.add_column("Device", justify="center", style="magenta")
 
-        # stable order (as declared)
         for key in self.FRIENDLY_NAMES.keys():
             vals = data.get(key, {"cpu": [], "gpu": []})
-
             gpu_vals = vals["gpu"]
             cpu_vals = vals["cpu"]
 
@@ -93,27 +91,41 @@ class ModelCombinedRenderer(BaseRenderer):
                 device = "CPU"
 
             if arr.size == 0:
-                last = p50 = p95 = avg = mx = 0.0
+                last = p50 = p95 = avg100 = 0.0
+                trend = ""
             else:
                 last = float(arr[-1])
-                win = arr[-min(self.window, arr.size):]
-                p50 = self._safe_percentile(win, 50)
-                p95 = self._safe_percentile(win, 95)
-                avg = float(arr.mean())
-                mx = float(arr.max())
+
+                win100 = arr[-min(100, arr.size):]
+                win200 = arr[-min(200, arr.size):]
+
+                p50 = self._safe_percentile(win100, 50)
+                p95 = self._safe_percentile(win100, 95)
+                avg100 = float(win100.mean())
+
+                # Trend: sign only, shown only if enough data
+                if arr.size >= 200:
+                    avg200 = float(win200.mean())
+                    if avg200 > 0:
+                        delta = (avg100 - avg200) / avg200
+                        trend = "+" if delta > 0 else "-"
+                    else:
+                        trend = ""
+                else:
+                    trend = ""
 
             table.add_row(
                 self.FRIENDLY_NAMES[key],
                 fmt_time_run(last),
                 fmt_time_run(p50),
                 fmt_time_run(p95),
-                fmt_time_run(avg),
-                fmt_time_run(mx),
+                fmt_time_run(avg100),
+                trend,
                 device,
             )
 
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(100, int(cols * 0.75)), 100)
+        panel_width = min(max(90, int(cols * 0.65)), 100)
 
         return Panel(
             table,

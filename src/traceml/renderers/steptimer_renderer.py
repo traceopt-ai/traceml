@@ -196,8 +196,8 @@ class StepTimerRenderer(BaseRenderer):
 
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("Event", justify="left", style="cyan")
-        table.add_column("Avg (s)", justify="right", style="white")
-        table.add_column("Peak (s)", justify="right", style="magenta")
+        table.add_column("Avg", justify="right", style="white")
+        table.add_column("Peak", justify="right", style="magenta")
 
         if data:
             for name, vals in data.items():
@@ -219,7 +219,7 @@ class StepTimerRenderer(BaseRenderer):
 
         return Panel(
             Group(table),
-            title="[bold blue]Step Timers[/bold blue]",
+            title="[bold blue]Trace Timers[/bold blue]",
             border_style="blue",
             width=panel_width,
         )

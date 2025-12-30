@@ -24,7 +24,7 @@ from transformers import (
 #   Defines a training-step boundary (flushes TraceML buffers at step end)
 # trace_timestep:
 #   Optional fine-grained timers for user-defined code sections
-from traceml.decorators import trace_model_instance, trace_step, trace_timestep
+from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 
 
@@ -90,24 +90,24 @@ def prepare_data():
 # These are NOT required for TraceML to work.
 # They add extra visibility into specific code regions.
 
-@trace_timestep("data_transfer", use_gpu=False)
+@trace_time("data_transfer", use_gpu=False)
 def load_batch_to_device(batch, device):
     return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
 
-@trace_timestep("forward", use_gpu=True)
+@trace_time("forward", use_gpu=True)
 def forward_pass(model, batch, dtype):
     with torch.cuda.amp.autocast(enabled=False, dtype=dtype):
         return model(**batch)
 
 
-@trace_timestep("backward", use_gpu=True)
+@trace_time("backward", use_gpu=True)
 def backward_pass(loss, scaler):
     # scaler.scale(loss).backward()
     loss.backward()
 
 
-@trace_timestep("optimizer_step", use_gpu=True)
+@trace_time("optimizer_step", use_gpu=True)
 def optimizer_step(scaler, optimizer, scheduler):
     # scaler.step(optimizer)
     # scaler.update()
@@ -115,7 +115,7 @@ def optimizer_step(scaler, optimizer, scheduler):
     scheduler.step()
 
 
-@trace_timestep("validation", use_gpu=True)
+@trace_time("validation", use_gpu=True)
 def run_validation(model, val_loader, dtype, device):
     model.eval()
     val_loss = 0.0
