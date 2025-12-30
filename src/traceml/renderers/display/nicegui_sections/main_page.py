@@ -4,7 +4,6 @@ from traceml.renderers.display.layout import (
     SYSTEM_LAYOUT,
     PROCESS_LAYOUT,
     LAYER_COMBINED_MEMORY_LAYOUT,
-    ACTIVATION_GRADIENT_LAYOUT,
     STEPTIMER_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
 )
@@ -66,7 +65,7 @@ def define_main_page(cls):
         with ui.row().classes("m-2 w-[99%] gap-4 flex-wrap items-center"):
 
             # System (left column)
-            with ui.column().classes("w-[42%]"):
+            with ui.column().classes("w-[36%]"):
                 cls.cards[SYSTEM_LAYOUT] = build_system_section()
                 cls.update_funcs[SYSTEM_LAYOUT] = update_system_section
 
@@ -75,31 +74,27 @@ def define_main_page(cls):
                 cls.cards[PROCESS_LAYOUT] = build_process_section()
                 cls.update_funcs[PROCESS_LAYOUT] = update_process_section
 
-            with ui.column().classes("w-[26]"):
+            with ui.column().classes("w-[33]"):
                 cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
                 cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
 
-        with ui.row().classes("m-2 w-[99%] gap-4 flex-nowrap items-center"):
-
-            with ui.column().classes("w-[54%]"):
-                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
-                    build_layer_memory_table_section()
-                )
-                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = (
-                    update_layer_memory_table_section
-                )
-
-            with ui.column().classes("w-[44%]"):
-                cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = (
-                    build_layer_timer_table_section()
-                )
-                cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = (
-                    update_layer_timer_table_section
-                )
-
-        for l in [ACTIVATION_GRADIENT_LAYOUT]:
-            cls.cards[l] = build_fake_section()
-            cls.update_funcs[l] = update_fake_section
+        # with ui.row().classes("m-2 w-[99%] gap-4 flex-nowrap items-center"):
+        #
+        #     with ui.column().classes("w-[54%]"):
+        #         cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
+        #             build_layer_memory_table_section()
+        #         )
+        #         cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = (
+        #             update_layer_memory_table_section
+        #         )
+        #
+        #     with ui.column().classes("w-[44%]"):
+        #         cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = (
+        #             build_layer_timer_table_section()
+        #         )
+        #         cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = (
+        #             update_layer_timer_table_section
+        #         )
 
         # background update loop
         ui.timer(0.75, cls._ui_update_loop)

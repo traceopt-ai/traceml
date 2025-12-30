@@ -65,7 +65,6 @@ def trace_model_instance(
     trace_layer_forward_time: bool = False,
     trace_layer_backward_time: bool = False,
     trace_execution: bool = True,
-    # trace_model_forward_memory: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -81,14 +80,6 @@ def trace_model_instance(
         trace_model_forward_memory: attach model level (top level) hook to capture max memory
             during forward pass (low overhead, can be always on)
     """
-
-    attached = {
-        "layer_forward_memory": False,
-        "layer_backward_memory": False,
-        "layer_forward_time": False,
-        "layer_backward_time": False,
-        # "model_forward_memory": False,
-    }
     try:
         if not isinstance(model, nn.Module):
             raise TypeError("trace_model_instance expects an nn.Module.")
@@ -97,28 +88,18 @@ def trace_model_instance(
 
         if trace_layer_forward__memory:
             attach_layer_forward_memory_hooks(model)
-            attached["layer_forward_memory"] = True
 
         if trace_layer_backward_memory:
             attach_layer_backward_memory_hooks(model)
-            attached["layer_backward_memory"] = True
 
         if trace_layer_forward_time:
             attach_layer_forward_time_hooks(model)
-            attached["layer_forward_time"] = True
 
         if trace_layer_backward_time:
             attach_layer_backward_time_hooks(model)
-            attached["layer_backward_time"] = True
-
-        # if trace_model_forward_memory:
-        #     attach_model_forward_memory_hooks(model)
-        #     attached["model_forward_memory"] = True
 
         if trace_execution:
             attach_execution_entry_hooks(model)
-
-        model._trace_attached = attached
 
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)

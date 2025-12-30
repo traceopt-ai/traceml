@@ -7,6 +7,11 @@ from pathlib import Path
 
 
 def validate_script_path(script_path: str) -> str:
+    """
+    Validate that the target training script exists.
+    We resolve the absolute path so downstream subprocesses
+    always receive a stable, unambiguous path.
+    """
     p = Path(script_path)
     if not p.exists():
         print(f"Error: Script '{script_path}' not found.", file=sys.stderr)
@@ -14,10 +19,15 @@ def validate_script_path(script_path: str) -> str:
     return str(p.resolve())
 
 
-def prepare_log_directory(log_dir: str = "./logs") -> str:
+def prepare_log_directory(log_dir: str = None) -> str:
+    """
+       Prepare the directory where TraceML will store logs and artifacts.
+
+       If no directory is provided, we create a timestamped folder under:
+           .traceml_runs/YYYY-MM-DD_HH-MM-SS
+       """
     if not log_dir:
-        timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
-        log_dir = os.path.join(os.getcwd(), f".traceml_runs/{timestamp}")
+        log_dir = os.path.join(os.getcwd(), f".logs/")
     os.makedirs(log_dir, exist_ok=True)
     return str(Path(log_dir).resolve())
 
@@ -30,9 +40,20 @@ def launch_tracer_process(
     logs_dir,
     script_args,
     num_display_layers,
+    nproc_per_node,
 ):
     """
-    Parent launcher: sets env vars, calls tracer.py in child process.
+    Parent launcher.
+
+    This function:
+    1. Sets TraceML configuration via environment variables
+    2. Launches a *child Python process* via torchrun
+    3. Hands off execution to tracer.py, which then runs the user script
+
+    We intentionally isolate tracing in a subprocess so:
+    - user code remains untouched
+    - crashes do not corrupt the launcher
+    - tracing can be fully disabled by not using this entrypoint
     """
     env = os.environ.copy()
     env["TRACEML_SCRIPT_PATH"] = script_path
@@ -44,6 +65,16 @@ def launch_tracer_process(
 
     tracer_path = str(Path(__file__).parent / "tracer.py")
 
+    if nproc_per_node > 1:
+        print(
+            "\n[TraceML WARNING]\n"
+            f"Requested --nproc-per-node={nproc_per_node}, but distributed "
+            "training (DDP / multi-GPU) tracing is NOT supported yet.\n"
+            "Tracing will run, but results may be incomplete or incorrect.\n"
+            "For now, please use --nproc-per-node=1.\n",
+            file=sys.stderr,
+        )
+
     if mode in ["cli", "dashboard"]:
         cmd = ["torchrun", "--nproc_per_node=1", tracer_path, "--", *script_args]
     else:
@@ -54,6 +85,9 @@ def launch_tracer_process(
 
 
 def run_with_tracing(args):
+    """
+    Entry point for `traceml run ...`
+    """
     script_path = validate_script_path(args.script)
     logs_dir = prepare_log_directory(args.logs_dir)
 
@@ -65,6 +99,7 @@ def run_with_tracing(args):
         logs_dir=logs_dir,
         script_args=args.args or [],
         num_display_layers=args.num_display_layers,
+        nproc_per_node=args.nproc_per_node,
     )
 
 
@@ -73,13 +108,23 @@ def build_parser():
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = sub.add_parser("run")
+    run_parser = sub.add_parser("run", help="Run a script with TraceML enabled")
     run_parser.add_argument("script")
     run_parser.add_argument("--mode", type=str, default="cli")
     run_parser.add_argument("--interval", type=float, default=2.0)
     run_parser.add_argument("--enable-logging", action="store_true")
     run_parser.add_argument("--logs-dir", type=str, default="./logs")
     run_parser.add_argument("--num-display-layers", type=int, default=10)
+
+    run_parser.add_argument(
+        "--nproc-per-node",
+        type=int,
+        default=1,
+        help=(
+            "Number of processes to launch via torchrun. "
+            "Default is 1. Distributed tracing is not supported yet."
+        ),
+    )
     run_parser.add_argument("--args", nargs=argparse.REMAINDER)
 
     return parser

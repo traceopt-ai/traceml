@@ -7,57 +7,136 @@ from traceml.manager.tracker_manager import TrackerManager
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
-def main():
-    # Environment from CLI
-    script_path = os.environ["TRACEML_SCRIPT_PATH"]
-    mode = os.environ.get("TRACEML_MODE", "cli")
-    interval = float(os.environ.get("TRACEML_INTERVAL", "1.0"))
-    enable_logging = os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1"
-    logs_dir = os.environ.get("TRACEML_LOGS_DIR", "./logs")
-    num_display_layers = int(os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20"))
+def read_traceml_env():
+    """
+    Read TraceML configuration injected by the CLI launcher.
 
-    # Start tracker in *child process*
-    tracker = TrackerManager(
-        interval_sec=interval,
-        mode=mode,
-        num_display_layers=num_display_layers,
-        enable_logging=enable_logging,
-        logs_dir=logs_dir,
-    )
-    print("starting tracker")
-    tracker.start()
+    All configuration is passed via environment variables so that:
+    - user scripts remain untouched
+    - tracer can run in a clean child process
+    """
+    return {
+        "script_path": os.environ["TRACEML_SCRIPT_PATH"],
+        "mode": os.environ.get("TRACEML_MODE", "cli"),
+        "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
+        "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
+        "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
+        "num_display_layers": int(
+            os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
+        ),
+    }
 
-    # Extract script args after "--"
+def extract_script_args():
+    """
+    Extract arguments intended for the user script.
+
+    Convention:
+        traceml run train.py -- --epochs 10 --lr 1e-3
+
+    Everything after '--' is forwarded to the target script.
+    """
     try:
         sep = sys.argv.index("--")
-        script_args = sys.argv[sep + 1 :]
+        return sys.argv[sep + 1 :]
     except ValueError:
-        script_args = []
+        return []
 
+
+def start_tracker(cfg):
+    """
+    Initialize and start the TraceML tracker.
+
+    This must happen *before* user code executes so we can:
+    - attach hooks
+    - start background samplers
+    - capture early allocations
+    """
+    tracker = TrackerManager(
+        interval_sec=cfg["interval"],
+        mode=cfg["mode"],
+        num_display_layers=cfg["num_display_layers"],
+        enable_logging=cfg["enable_logging"],
+        logs_dir=cfg["logs_dir"],
+    )
+    print("[TraceML] Starting tracker")
+    tracker.start()
+    return tracker
+
+
+def stop_tracker(tracker):
+    """
+    Stop the tracker and flush all collected data.
+
+    This is always called, even if the user script crashes.
+    """
+    tracker.stop()
+    tracker.log_summaries(path=None)
+
+
+def run_user_script(script_path, script_args):
+    """
+    Execute the user script in-process using runpy.
+
+    We intentionally do NOT spawn another subprocess here so that:
+    - hooks attach to the real Python objects
+    - stacktraces remain meaningful
+    """
     sys.argv = [script_path, *script_args]
+    runpy.run_path(script_path, run_name="__main__")
+
+
+def report_crash(error):
+    """
+    Print a TraceML-enhanced crash report.
+
+    If available, we also show the last known execution layer
+    (forward / backward / optimizer / etc.).
+    """
+    print("\n--- script crashed here ---", file=sys.stderr)
+
+    if getattr(EXECUTION_LAYER, "current", None) is not None:
+        print(
+            f"[TraceML] Last execution point: {EXECUTION_LAYER.current}",
+            file=sys.stderr,
+        )
+
+    traceback.print_exception(type(error), error, error.__traceback__)
+
+
+def main():
+    """
+    TraceML child process entrypoint.
+
+    Execution flow:
+        1. Read configuration from environment
+        2. Start tracker
+        3. Execute user script
+        4. Stop tracker and flush data
+        5. Report crash context if needed
+    """
+    cfg = read_traceml_env()
+    script_args = extract_script_args()
+
+    tracker = start_tracker(cfg)
 
     exit_code = 0
     error = None
 
     try:
-        runpy.run_path(script_path, run_name="__main__")
+        run_user_script(cfg["script_path"], script_args)
+
     except SystemExit as e:
         exit_code = e.code
+
     except Exception as e:
         error = e
         exit_code = 1
+
     finally:
-        tracker.stop()
-        tracker.log_summaries(path=None)
+        stop_tracker(tracker)
 
     if error:
-        print("\n--- script crashed here ---", file=sys.stderr)
-        if getattr(EXECUTION_LAYER, "current", None) is not None:
-            print(
-                f"[TraceML] Last execution point: {EXECUTION_LAYER.current}",
-                file=sys.stderr,
-            )
-        traceback.print_exception(type(error), error, error.__traceback__)
+        report_crash(error)
         sys.exit(1)
 
     sys.exit(exit_code)

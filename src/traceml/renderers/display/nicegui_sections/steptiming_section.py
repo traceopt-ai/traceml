@@ -1,5 +1,4 @@
 from nicegui import ui
-
 from traceml.renderers.utils import fmt_time_run
 
 
@@ -17,7 +16,7 @@ def build_step_timing_table_section():
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-    """
+        """
     )
 
     with card:
@@ -31,17 +30,43 @@ def build_step_timing_table_section():
             overflow-y: auto;
             width: 100%;
             padding-right: 12px;
-        """
+            """
         )
 
     return {"table": container}
 
 
-def update_step_timing_table_section(panel, dashboard_data):
+def _prepare_step_timing_rows(dashboard_data):
+    """
+    Normalize dashboard input to a stable, sorted list of rows.
+    """
     if not dashboard_data:
-        panel[
-            "table"
-        ].content = """
+        return []
+
+    rows = [
+        {
+            "step": r["name"],
+            "last": r["last"],
+            "p50": r["p50_100"],
+            "avg": r["avg_100"],
+            "p95": r["p95_100"],
+            "trend": r["trend"],
+            "device": r["device"],
+        }
+        for r in dashboard_data
+    ]
+    rows.sort(key=lambda r: float(r["p95"]), reverse=True)
+    return rows
+
+
+def update_step_timing_table_section(panel, dashboard_data):
+    """
+    Update the Step Timing table using the new StepTimerRenderer output.
+    """
+    rows = _prepare_step_timing_rows(dashboard_data)
+
+    if not rows:
+        panel["table"].content = """
         <div style="
             text-align:center;
             padding:16px;
@@ -54,38 +79,17 @@ def update_step_timing_table_section(panel, dashboard_data):
         """
         return
 
-    rows = []
-    for name, vals in dashboard_data.items():
-        gpu_avg = vals.get("gpu_avg_s", 0.0)
-        gpu_peak = vals.get("gpu_max_s", 0.0)
-        cpu_avg = vals.get("cpu_avg_s", 0.0)
-        cpu_peak = vals.get("cpu_max_s", 0.0)
-
-        if gpu_peak > 0 or gpu_avg > 0:
-            avg, peak, device = gpu_avg, gpu_peak, "GPU"
-        else:
-            avg, peak, device = cpu_avg, cpu_peak, "CPU"
-
-        rows.append(
-            {
-                "step": name,
-                "avg": avg,
-                "peak": peak,
-                "device": device,
-            }
-        )
-
-    # same behavior as other tables: sorted, stable
-    rows.sort(key=lambda r: r["peak"], reverse=True)
-
     html = """
     <table style="width:100%; border-collapse: collapse; font-size:14px;">
         <thead style="position: sticky; top: 0; background: #f0f0f0; z-index:1;">
             <tr>
-                <th style="text-align:left; padding:4px 8px;">Step</th>
-                <th style="text-align:right; padding:4px 8px;">Avg</th>
-                <th style="text-align:right; padding:4px 12px;">Peak</th>
-                <th style="text-align:right; padding:4px 12px;">Device</th>
+            <th style="text-align:left; padding:4px 8px;">Step</th>
+            <th style="text-align:right; padding:4px 8px;">Last</th>
+            <th style="text-align:right; padding:4px 8px;">p50(100)</th>
+            <th style="text-align:right; padding:4px 8px;">Avg(100)</th>
+            <th style="text-align:right; padding:4px 12px;">p95(100)</th>
+            <th style="text-align:center; padding:4px 12px;">Trend</th>
+            <th style="text-align:center; padding:4px 12px;">Device</th>
             </tr>
         </thead>
         <tbody>
@@ -94,16 +98,23 @@ def update_step_timing_table_section(panel, dashboard_data):
     for r in rows:
         html += f"""
         <tr>
-            <td style="padding:4px 8px;">
-                {r["step"]}
+            <td style="padding:4px 8px;">{r["step"]}</td>
+            <td style="text-align:right; padding:4px 8px;">
+                {fmt_time_run(r["last"])}
+            </td>
+            <td style="text-align:right; padding:4px 8px;">
+                {fmt_time_run(r["p50"])}
             </td>
             <td style="text-align:right; padding:4px 8px;">
                 {fmt_time_run(r["avg"])}
             </td>
             <td style="text-align:right; padding:4px 12px;">
-                {fmt_time_run(r["peak"])}
+                {fmt_time_run(r["p95"])}
             </td>
-            <td style="text-align:right; padding:4px 12px;">
+            <td style="text-align:center; padding:4px 12px;">
+                {r["trend"]}
+            </td>
+            <td style="text-align:center; padding:4px 12px;">
                 {r["device"]}
             </td>
         </tr>
