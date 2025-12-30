@@ -109,7 +109,6 @@ class StepTimerRenderer(BaseRenderer):
 
         out: Dict[str, Dict[str, List[float]]] = dict(top_items)
 
-        # ---- SAFE aggregation for "Other": sum per step index ----
         other_cpu: List[float] = []
         other_gpu: List[float] = []
 

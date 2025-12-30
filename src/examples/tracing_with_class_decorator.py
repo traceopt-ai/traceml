@@ -1,30 +1,38 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from traceml.decorators import trace_model
+from traceml.decorators import trace_model, trace_step
 
 
-# Define a simple CNN model and decorate the class
-@trace_model()
+# ⚠️ Deep instrumentation (use only for detailed debugging / profiling)
+# Attaches per-layer forward/backward memory + timing hooks.
+# Can add significant overhead (up to ~20% in long training runs).
+# Recommended for short runs or one-off investigations.
+@trace_model(
+    trace_layer_forward__memory=True,
+    trace_layer_backward_memory=True,
+    trace_layer_forward_time=True,
+    trace_layer_backward_time=True,
+)
 class SimpleCNN(nn.Module):
     def __init__(self):
         super(SimpleCNN, self).__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=3, padding=1)
         self.relu1 = nn.ReLU()
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)  # Output 16x16
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.conv2 = nn.Conv2d(16, 32, kernel_size=3, padding=1)
         self.relu2 = nn.ReLU()
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)  # Output 8x8
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.fc1 = nn.Linear(32 * 8 * 8, 128)
         self.relu3 = nn.ReLU()
-        self.fc2 = nn.Linear(128, 10)  # 10 output classes
+        self.fc2 = nn.Linear(128, 10)
 
     def forward(self, x):
         x = self.pool1(self.relu1(self.conv1(x)))
         x = self.pool2(self.relu2(self.conv2(x)))
-        x = x.view(-1, 32 * 8 * 8)  # Flatten for FC layer
+        x = x.view(-1, 32 * 8 * 8)
         x = self.relu3(self.fc1(x))
         x = self.fc2(x)
         return x
@@ -38,29 +46,28 @@ def main():
     input_size = 32
     channels = 3
 
-    # Instantiate model (decorator will trace it automatically)
     model = SimpleCNN().to(device)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    # Simulate dummy data loader
     dummy_input_shape = (batch_size, channels, input_size, input_size)
     dummy_target_shape = (batch_size,)
 
     for epoch in range(epochs):
         for i in range(100):
-            inputs = torch.randn(dummy_input_shape).to(device)
-            labels = torch.randint(0, 10, dummy_target_shape).to(device)
+            with trace_step(model):
+                inputs = torch.randn(dummy_input_shape, device=device)
+                labels = torch.randint(0, 10, dummy_target_shape, device=device)
 
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
 
     with torch.no_grad():
-        test_input = torch.randn(1, channels, input_size, input_size).to(device)
+        test_input = torch.randn(1, channels, input_size, input_size, device=device)
         _ = model(test_input)
 
 
