@@ -10,6 +10,7 @@ from traceml.utils.distributed import get_ddp_info
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.process_sampler import ProcessSampler
+from traceml.samplers.step_memory_sampler import StepMemorySampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.layer_forward_memory_sampler import LayerForwardMemorySampler
 from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySampler
@@ -111,11 +112,14 @@ class TrackerManager:
             )
         ]
 
+        step_mem_sampler = StepMemorySampler()
+        samplers += [step_mem_sampler]
+
         # Step timer
         step_s = StepTimerSampler()
         samplers += [step_s]
         renderers += [StepTimerRenderer(database=step_s.db)]
-        renderers += [ModelCombinedRenderer(database=step_s.db)]
+        renderers += [ModelCombinedRenderer(time_db=step_s.db, memory_db=step_mem_sampler.db)]
 
         # Timing (2 samplers -> 1 combined renderer)
         fwd_time_s = LayerForwardTimeSampler()
@@ -128,6 +132,7 @@ class TrackerManager:
                 top_n_layers=num_display_layers,
             )
         ]
+
 
         # CLI-only stdout/stderr renderer
         if mode == "cli":

@@ -6,13 +6,14 @@ import shutil
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import MODEL_COMBINED_LAYOUT
-from traceml.renderers.utils import fmt_time_run
+from traceml.renderers.utils import fmt_time_run, fmt_mem_new
 
 
 class ModelCombinedRenderer(BaseRenderer):
     """
-    Renderer for TraceML internal step timers.
-    Shows approximate timings for core runtime signals.
+    Renderer for TraceML step-level summary:
+      - internal step timers
+      - step-level peak GPU memory
     """
 
     FRIENDLY_NAMES = {
@@ -20,55 +21,94 @@ class ModelCombinedRenderer(BaseRenderer):
         "_traceml_internal:step_time": "step_time",
     }
 
-    def __init__(self, database: Database, window: int = 100):
+    def __init__(
+        self,
+        time_db: Database,
+        memory_db: Database,
+        window: int = 100,
+    ):
         super().__init__(
             name="Model Summary",
             layout_section_name=MODEL_COMBINED_LAYOUT,
         )
-        self.db = database
+        self.time_db = time_db
+        self.memory_db = memory_db
         self.window = int(window)
 
-    def get_data(self):
-        cpu_table = self.db.create_or_get_table("step_timer_cpu")
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _safe_percentile(x: np.ndarray, q: float) -> float:
+        if x.size == 0:
+            return 0.0
+        return float(np.percentile(x, q))
+
+    def _compute_stats(self, arr: np.ndarray):
+        if arr.size == 0:
+            return 0.0, 0.0, 0.0, 0.0, ""
+
+        last = float(arr[-1])
+        win100 = arr[-min(100, arr.size):]
+        win200 = arr[-min(200, arr.size):]
+
+        p50 = self._safe_percentile(win100, 50)
+        p95 = self._safe_percentile(win100, 95)
+        avg100 = float(win100.mean())
+
+        trend = ""
+        if arr.size >= 200:
+            avg200 = float(win200.mean())
+            trend = "+" if avg100 > avg200 else "-"
+
+        return last, p50, p95, avg100, trend
+
+    # ------------------------------------------------------------------
+    # Data collection
+    # ------------------------------------------------------------------
+
+    def _get_step_time_data(self):
+        cpu_table = self.time_db.create_or_get_table("step_timer_cpu")
         gpu_tables = {
             name: rows
-            for name, rows in self.db.all_tables().items()
+            for name, rows in self.time_db.all_tables().items()
             if name.startswith("step_timer_cuda")
         }
 
         data = {}
 
-        # CPU
         for row in cpu_table:
             name = row.get("event_name")
             if name not in self.FRIENDLY_NAMES:
                 continue
-            dur = float(row.get("duration_ms", 0.0))
             data.setdefault(name, {"cpu": [], "gpu": []})
-            data[name]["cpu"].append(dur)
+            data[name]["cpu"].append(float(row.get("duration_ms", 0.0)))
 
-        # GPU
         for rows in gpu_tables.values():
             for row in rows:
                 name = row.get("event_name")
                 if name not in self.FRIENDLY_NAMES:
                     continue
-                dur = float(row.get("duration_ms", 0.0))
                 data.setdefault(name, {"cpu": [], "gpu": []})
-                data[name]["gpu"].append(dur)
+                data[name]["gpu"].append(float(row.get("duration_ms", 0.0)))
 
         return data
 
-    @staticmethod
-    def _safe_percentile(x: np.ndarray, q: float) -> float:
-        # np.percentile throws on empty arrays
-        if x.size == 0:
-            return 0.0
-        return float(np.percentile(x, q))
+    def _get_step_memory_data(self):
+        table = self.memory_db.create_or_get_table("step_memory")
+        gpu_vals = []
+
+        for row in table:
+            gpu_vals.append(float(row.get("peak_allocated_mb", 0.0)))
+
+        return np.asarray(gpu_vals, dtype=np.float64)
+
+    # ------------------------------------------------------------------
+    # Rendering
+    # ------------------------------------------------------------------
 
     def get_panel_renderable(self) -> Panel:
-        data = self.get_data()
-
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("Metric", justify="left", style="cyan")
         table.add_column("Last", justify="right")
@@ -78,41 +118,19 @@ class ModelCombinedRenderer(BaseRenderer):
         table.add_column("Trend", justify="center")
         table.add_column("Device", justify="center", style="magenta")
 
+        # ---- Step timers ----
+        time_data = self._get_step_time_data()
+
         for key in self.FRIENDLY_NAMES.keys():
-            vals = data.get(key, {"cpu": [], "gpu": []})
-            gpu_vals = vals["gpu"]
-            cpu_vals = vals["cpu"]
+            vals = time_data.get(key, {"cpu": [], "gpu": []})
+            arr = (
+                np.asarray(vals["gpu"], dtype=np.float64)
+                if vals["gpu"]
+                else np.asarray(vals["cpu"], dtype=np.float64)
+            )
+            device = "GPU" if vals["gpu"] else "CPU"
 
-            if gpu_vals:
-                arr = np.asarray(gpu_vals, dtype=np.float64)
-                device = "GPU"
-            else:
-                arr = np.asarray(cpu_vals, dtype=np.float64)
-                device = "CPU"
-
-            if arr.size == 0:
-                last = p50 = p95 = avg100 = 0.0
-                trend = ""
-            else:
-                last = float(arr[-1])
-
-                win100 = arr[-min(100, arr.size) :]
-                win200 = arr[-min(200, arr.size) :]
-
-                p50 = self._safe_percentile(win100, 50)
-                p95 = self._safe_percentile(win100, 95)
-                avg100 = float(win100.mean())
-
-                # Trend: sign only, shown only if enough data
-                if arr.size >= 200:
-                    avg200 = float(win200.mean())
-                    if avg200 > 0:
-                        delta = (avg100 - avg200) / avg200
-                        trend = "+" if delta > 0 else "-"
-                    else:
-                        trend = ""
-                else:
-                    trend = ""
+            last, p50, p95, avg100, trend = self._compute_stats(arr)
 
             table.add_row(
                 self.FRIENDLY_NAMES[key],
@@ -123,6 +141,21 @@ class ModelCombinedRenderer(BaseRenderer):
                 trend,
                 device,
             )
+
+        table.add_row("")
+        # ---- Step memory ----
+        mem_arr = self._get_step_memory_data()
+        last, p50, p95, avg100, trend = self._compute_stats(mem_arr)
+
+        table.add_row(
+            "step_memory",
+            fmt_mem_new(last),
+            fmt_mem_new(p50),
+            fmt_mem_new(p95),
+            fmt_mem_new(avg100),
+            trend,
+            "GPU",
+        )
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(90, int(cols * 0.65)), 100)
