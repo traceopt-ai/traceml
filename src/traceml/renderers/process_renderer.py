@@ -100,34 +100,41 @@ class ProcessRenderer(BaseRenderer):
     def get_notebook_renderable(self) -> HTML:
         data = self._compute_snapshot()
 
-        # GPU formatting
+        # --- GPU ---
         if data["gpu_total"]:
             gpu_html = f"""
-                <p><b>GPU MEM:</b>
+                <div>
+                    <b>GPU MEM:</b>
                     {fmt_mem_new(data['gpu_used'])} /
                     {fmt_mem_new(data['gpu_reserved'])} /
                     {fmt_mem_new(data['gpu_total'])}
-                </p>
+                </div>
             """
         else:
             gpu_html = """
-                <p><b>GPU MEM:</b> <span style="color:red;">Not available</span></p>
+                <div><b>GPU MEM:</b>
+                    <span style="color:red;">Not available</span>
+                </div>
             """
 
         html = f"""
-        <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
-            <h4 style="color:#00bcd4; margin:0;">Process</h4>
+        <div style="
+            border:2px solid #00bcd4;
+            border-radius:10px;
+            padding:14px;
+            max-width:380px;
+            font-family:Arial, sans-serif;
+        ">
+            <h4 style="color:#00bcd4; margin-top:0;">Process</h4>
 
-            <p><b>CPU:</b> {fmt_percent(data['cpu_used'])}</p>
-            <p><b>RAM:</b> {fmt_mem_new(data['ram_used'])}</p>
+            <div><b>CPU:</b> {fmt_percent(data['cpu_used'])}</div>
+            <div><b>RAM:</b> {fmt_mem_new(data['ram_used'])}</div>
 
             {gpu_html}
         </div>
         """
 
-        return HTML(
-            f"<div style='display:flex; gap:20px; margin-top:10px;'>{html}</div>"
-        )
+        return HTML(html)
 
     def get_dashboard_renderable(self):
         data = self._compute_snapshot()
