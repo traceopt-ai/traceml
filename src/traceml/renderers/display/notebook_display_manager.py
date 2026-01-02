@@ -1,4 +1,4 @@
-from typing import Dict, Callable, Any
+from typing import Dict, Callable, Any, Optional
 from IPython.display import display
 import ipywidgets as widgets
 
@@ -16,7 +16,7 @@ class NotebookDisplayManager:
     """
 
     _content_fns: Dict[str, Callable[[], Any]] = {}
-    _page: widgets.HTML | None = None
+    _page: Optional[widgets.HTML] = None
     _active_logger_count: int = 0
 
     logger = get_error_logger("NotebookDisplayManager")

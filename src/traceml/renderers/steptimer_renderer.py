@@ -215,9 +215,11 @@ class StepTimerRenderer(BaseRenderer):
 
         if not rows:
             body = """
-            <tr><td colspan="7" style="text-align:center;color:gray;">
-                No step timers recorded
-            </td></tr>
+            <tr>
+                <td colspan="7" style="text-align:center;color:gray;">
+                    No step timers recorded
+                </td>
+            </tr>
             """
         else:
             body = "".join(
@@ -235,7 +237,41 @@ class StepTimerRenderer(BaseRenderer):
                 for r in rows
             )
 
-        return HTML(f"<table>{body}</table>")
+        table_html = f"""
+        <table style="
+            width:100%;
+            border-collapse:collapse;
+            font-size:13px;
+        ">
+            <thead>
+                <tr style="border-bottom:1px solid #e0e0e0;">
+                    <th align="left">Step</th>
+                    <th align="right">Last</th>
+                    <th align="right">p50(100)</th>
+                    <th align="right">p95(100)</th>
+                    <th align="right">Avg(100)</th>
+                    <th align="center">Trend</th>
+                    <th align="center">Device</th>
+                </tr>
+            </thead>
+            <tbody>
+                {body}
+            </tbody>
+        </table>
+        """
+
+        return HTML(f"""
+        <div style="{CARD_STYLE}">
+            <h4 style="
+                color:#d47a00;
+                margin:0 0 10px 0;
+            ">
+                Step Timings
+            </h4>
+
+            {table_html}
+        </div>
+        """)
 
     def get_dashboard_renderable(self):
         return [r.__dict__ for r in self._build_rows()]
