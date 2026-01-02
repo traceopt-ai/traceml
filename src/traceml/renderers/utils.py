@@ -7,7 +7,7 @@ CARD_STYLE = """
     border:2px solid #00bcd4;
     border-radius:10px;
     padding:14px;
-    width:100%;
+    width:33%;
     min-height:190px;
     display:flex;
     flex-direction:column;

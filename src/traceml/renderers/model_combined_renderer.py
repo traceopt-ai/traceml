@@ -9,7 +9,7 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import MODEL_COMBINED_LAYOUT
 from traceml.renderers.utils import fmt_time_run, fmt_mem_new
-
+from .utils import CARD_STYLE
 
 class ModelCombinedRenderer(BaseRenderer):
     """
@@ -324,13 +324,7 @@ class ModelCombinedRenderer(BaseRenderer):
         )
 
         html = f"""
-        <div style="
-            border:2px solid #00bcd4;
-            border-radius:10px;
-            padding:14px;
-            max-width:420px;
-            font-family:Arial, sans-serif;
-        ">
+        <div style="{CARD_STYLE}">
             <h4 style="color:#00bcd4; margin-top:0;">
                 Model Summary
             </h4>
