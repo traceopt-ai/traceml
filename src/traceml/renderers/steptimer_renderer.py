@@ -224,13 +224,17 @@ class StepTimerRenderer(BaseRenderer):
             """
         else:
             body = ""
-            for r in rows
+            for r in rows:
                 if r.trend == "+":
                     trend_symbol = "↑"
                     trend_color = "#d32f2f"  # red
                 elif r.trend == "-":
                     trend_symbol = "↓"
                     trend_color = "#2e7d32"  # green
+                else:
+                    trend_symbol = "—"
+                    trend_color = "#666"
+                    
                 body += f"""
                     <tr>
                         <td>{r.name}</td>
