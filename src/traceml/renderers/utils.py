@@ -3,6 +3,18 @@ from traceml.utils.formatting import fmt_mem_new
 from pathlib import Path
 
 
+CARD_STYLE = """
+    border:2px solid #00bcd4;
+    border-radius:10px;
+    padding:14px;
+    width:100%;
+    min-height:190px;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    font-family:Arial, sans-serif;
+"""
+
 def truncate_layer_name(s: str, max_len: int = 20) -> str:
     """
     Truncate layer name by keeping the last max_len characters.
