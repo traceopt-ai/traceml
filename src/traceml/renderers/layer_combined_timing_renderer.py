@@ -58,8 +58,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         )
 
         table.add_column("Layer", justify="left", style="magenta")
-        table.add_column("Forward (curr/peak)", justify="right", style="white")
-        table.add_column("Backward (curr/peak)", justify="right", style="cyan")
+        table.add_column("Forward (curr/avg)", justify="right", style="white")
+        table.add_column("Backward (curr/avg)", justify="right", style="cyan")
         table.add_column("% ", justify="right", style="white")
 
         if d.get("top_items"):
@@ -67,9 +67,9 @@ class LayerCombinedTimerRenderer(BaseRenderer):
                 table.add_row(
                     truncate_layer_name(r["layer"]),
                     f"{fmt_time_ms(r.get('forward_current', 0.0))} / "
-                    f"{fmt_time_ms(r.get('forward_peak', 0.0))}",
+                    f"{fmt_time_ms(r.get('forward_avg', 0.0))}",
                     f"{fmt_time_ms(r.get('backward_current', 0.0))} / "
-                    f"{fmt_time_ms(r.get('backward_peak', 0.0))}",
+                    f"{fmt_time_ms(r.get('backward_avg', 0.0))}",
                     f"{float(r.get('pct', 0.0)):.1f}%",
                 )
         else:
@@ -83,9 +83,9 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             table.add_row(
                 "Other Layers",
                 f"{fmt_time_ms(o.get('total_forward_current', 0.0))} / "
-                f"{fmt_time_ms(o.get('total_forward_peak', 0.0))}",
+                f"{fmt_time_ms(o.get('total_forward_avg', 0.0))}",
                 f"{fmt_time_ms(o.get('total_backward_current', 0.0))} / "
-                f"{fmt_time_ms(o.get('total_backward_peak', 0.0))}",
+                f"{fmt_time_ms(o.get('total_backward_avg', 0.0))}",
                 f"{float(o.get('pct', 0.0)):.1f}%",
             )
 
@@ -137,9 +137,9 @@ class LayerCombinedTimerRenderer(BaseRenderer):
                 <thead>
                     <tr>
                         <th style="text-align:left;">Layer</th>
-                        <th style="text-align:right;">Forward (curr/peak)</th>
-                        <th style="text-align:right;">Backward (curr/peak)</th>
-                        <th style="text-align:right;">%</th>
+                        <th style="text-align:right;">Forward (curr/avg)</th>
+                        <th style="text-align:right;">Backward (curr/avg)</th>
+                        <th style="text-align:right;">Share(%)</th>
                     </tr>
                 </thead>
                 <tbody>{rows}</tbody>
@@ -155,8 +155,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         console = Console()
 
         layer_stats = self._summary_service.compute_layer_timing_summary()
-        act_peaks = self._summary_service.compute_global_peaks(is_forward=True)
-        grad_peaks = self._summary_service.compute_global_peaks(is_forward=False)
+        act_peaks = self._summary_service.compute_global_averages(is_forward=True)
+        grad_peaks = self._summary_service.compute_global_averages(is_forward=False)
 
         top_acts = self._summary_service.top_n_from_dict(act_peaks, n=3)
         top_grads = self._summary_service.top_n_from_dict(grad_peaks, n=3)
@@ -167,12 +167,12 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         table.add_column(justify="right", style="white")
 
         self._render_section_layer_stats(table, layer_stats)
-        self._render_section_topk(table, "TOP-3 FORWARD PEAKS", top_acts, "cyan")
-        self._render_section_topk(table, "TOP-3 BACKWARD PEAKS", top_grads, "green")
+        self._render_section_topk(table, "Top 3 Forward Layers (Avg)", top_acts, "cyan")
+        self._render_section_topk(table, "TOP-3 Backward Layers (Avg)", top_grads, "green")
 
         panel = Panel(
             table,
-            title="[bold blue]Layer Timing - Summary[/bold blue]",
+            title="[bold blue]Layerwise Timing - Summary[/bold blue]",
             border_style="blue",
         )
         console.print(panel)

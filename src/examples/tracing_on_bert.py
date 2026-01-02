@@ -104,15 +104,13 @@ def forward_pass(model, batch, dtype):
 
 @trace_time("backward", use_gpu=True)
 def backward_pass(loss, scaler):
-    # scaler.scale(loss).backward()
-    loss.backward()
+    scaler.scale(loss).backward()
 
 
 @trace_time("optimizer_step", use_gpu=True)
 def optimizer_step(scaler, optimizer, scheduler):
-    # scaler.step(optimizer)
-    # scaler.update()
-    optimizer.step()
+    scaler.step(optimizer)
+    scaler.update()
     scheduler.step()
 
 
@@ -161,18 +159,18 @@ def main():
     # TraceML: Attach model-level instrumentation
     # ========================================================
     # This attaches hooks for:
-    #  - activation memory
-    #  - gradient memory
+    #  - forward pass memory
+    #  - backward pass memory
     #  - execution context
-    #  - activation / gradient timing
+    #  - forward pass / backward timing
     # No changes to training loop required.
-    # trace_model_instance(
-    #     model,
-    #     # sample_layer_memory=False,
-    #     # trace_layer_forward__memory=False,
-    #     # trace_layer_backward_memory=False,
-    #     # trace_execution=False,
-    # )
+    trace_model_instance(
+        model,
+        # sample_layer_memory=False,
+        # trace_layer_forward__memory=False,
+        # trace_layer_backward_memory=False,
+        # trace_execution=False,
+    )
 
     optimizer = AdamW(model.parameters(), lr=LR)
     total_steps = EPOCHS * math.ceil(len(train_loader))

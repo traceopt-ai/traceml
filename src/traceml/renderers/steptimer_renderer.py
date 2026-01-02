@@ -279,7 +279,7 @@ class StepTimerRenderer(BaseRenderer):
                 </tr>
                 """
 
-                
+
         table_html = f"""
         <table style="
             width:100%;

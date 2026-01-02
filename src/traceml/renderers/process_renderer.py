@@ -91,7 +91,7 @@ class ProcessRenderer(BaseRenderer):
 
         return Panel(
             table,
-            title="[bold cyan]Process[/bold cyan]",
+            title="[bold cyan]Process Metrics[/bold cyan]",
             title_align="center",
             border_style="cyan",
             width=panel_width,

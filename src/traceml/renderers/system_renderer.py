@@ -184,7 +184,7 @@ class SystemRenderer(BaseRenderer):
 
         return Panel(
             table,
-            title="[bold cyan]System[/bold cyan]",
+            title="[bold cyan]System Metrics[/bold cyan]",
             title_align="center",
             border_style="cyan",
             width=panel_width,

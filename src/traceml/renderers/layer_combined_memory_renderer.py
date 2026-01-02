@@ -179,10 +179,10 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                     <tr>
                         <th style="text-align:left;">Layer</th>
                         <th style="text-align:right;">Params</th>
-                        <th style="text-align:right;">Forward (curr/peak)</th>
-                        <th style="text-align:right;">Backward (curr/peak)</th>
-                        <th style="text-align:right;">Total Curr</th>
-                        <th style="text-align:right;">% curr</th>
+                        <th style="text-align:right;">Forward(curr/peak)</th>
+                        <th style="text-align:right;">Backward(curr/peak)</th>
+                        <th style="text-align:right;">Current Total</th>
+                        <th style="text-align:right;">Total Share (%)</th>
                     </tr>
                 </thead>
                 <tbody>
