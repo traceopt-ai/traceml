@@ -223,20 +223,25 @@ class StepTimerRenderer(BaseRenderer):
             </tr>
             """
         else:
-            body = "".join(
-                f"""
-                <tr>
-                    <td>{r.name}</td>
-                    <td>{fmt_time_run(r.last)}</td>
-                    <td>{fmt_time_run(r.p50_100)}</td>
-                    <td>{fmt_time_run(r.p95_100)}</td>
-                    <td>{fmt_time_run(r.avg_100)}</td>
-                    <td>{r.trend}</td>
-                    <td>{r.device}</td>
-                </tr>
-                """
-                for r in rows
-            )
+            body = ""
+            for r in rows
+                if r.trend == "+":
+                    trend_symbol = "↑"
+                    trend_color = "#d32f2f"  # red
+                elif r.trend == "-":
+                    trend_symbol = "↓"
+                    trend_color = "#2e7d32"  # green
+                body += f"""
+                    <tr>
+                        <td>{r.name}</td>
+                        <td>{fmt_time_run(r.last)}</td>
+                        <td>{fmt_time_run(r.p50_100)}</td>
+                        <td>{fmt_time_run(r.p95_100)}</td>
+                        <td>{fmt_time_run(r.avg_100)}</td>
+                        <td> color:{trend_color};">{trend_symbol}</td>
+                        <td>{r.device}</td>
+                    </tr>
+                    """
 
         table_html = f"""
         <table style="
