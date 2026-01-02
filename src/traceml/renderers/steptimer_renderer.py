@@ -13,6 +13,7 @@ from traceml.database.database import Database
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import STEPTIMER_LAYOUT
 from traceml.renderers.utils import fmt_time_run
+from .utils import CARD_STYLE
 
 
 @dataclass

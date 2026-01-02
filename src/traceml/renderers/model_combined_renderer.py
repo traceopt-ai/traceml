@@ -266,7 +266,6 @@ class ModelCombinedRenderer(BaseRenderer):
         data = self.build_live_telemetry_payload()
         return data
 
-
     def get_notebook_renderable(self) -> HTML:
         telemetry = self.build_live_telemetry_payload()
 
@@ -283,53 +282,74 @@ class ModelCombinedRenderer(BaseRenderer):
                 trend_color = "#2e7d32"  # green
 
             return f"""
-            <div style="margin-bottom:10px;">
-                <b>{title}</b><br>
-                Last: {fmt(stats["last"])}<br>
-                p50(100): {fmt(stats["p50"])}<br>
-                p95(100): {fmt(stats["p95"])}<br>
-                Avg(100): {fmt(stats["avg100"])}
-                <span style="font-weight:700; color:{trend_color};">
-                    {trend_symbol}
-                </span>
+            <div style="
+                flex:1;
+                border:1px solid #eee;
+                border-radius:8px;
+                padding:10px;
+                font-size:13px;
+            ">
+                <div style="font-weight:700; margin-bottom:6px;">
+                    {title}
+                </div>
+
+                <table style="width:100%; border-collapse:collapse;">
+                    <thead>
+                        <tr style="border-bottom:1px solid #ddd;">
+                            <th align="left">Last</th>
+                            <th align="right">p50</th>
+                            <th align="right">p95</th>
+                            <th align="right">Avg</th>
+                            <th align="center">Trend</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>{fmt(stats["last"])}</td>
+                            <td align="right">{fmt(stats["p50"])}</td>
+                            <td align="right">{fmt(stats["p95"])}</td>
+                            <td align="right">{fmt(stats["avg100"])}</td>
+                            <td align="center"
+                                style="font-weight:700; color:{trend_color};">
+                                {trend_symbol}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
             """
 
-        html_blocks = []
-
-        # --- Step timers ---
-        html_blocks.append(
+        blocks = [
             metric_block(
                 "Dataloader Fetch Time",
                 telemetry["dataLoader_fetch"]["stats"],
                 fmt_time_run,
-            )
-        )
-
-        html_blocks.append(
+            ),
             metric_block(
                 "Training Step Time",
                 telemetry["step_time"]["stats"],
                 fmt_time_run,
-            )
-        )
-
-        # --- Step memory ---
-        html_blocks.append(
+            ),
             metric_block(
                 "GPU Step Memory",
                 telemetry["step_gpu_memory"]["stats"],
                 fmt_mem_new,
-            )
-        )
+            ),
+        ]
 
         html = f"""
-        <div style="{CARD_STYLE}">
-            <h4 style="color:#00bcd4; margin-top:0;">
+        <div style="{CARD_STYLE}; width:100%;">
+            <h4 style="color:#00bcd4; margin:0 0 12px 0;">
                 Model Summary
             </h4>
 
-            {''.join(html_blocks)}
+            <div style="
+                display:flex;
+                gap:12px;
+                align-items:stretch;
+            ">
+                {''.join(blocks)}
+            </div>
         </div>
         """
 
