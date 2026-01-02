@@ -166,13 +166,13 @@ def main():
     #  - execution context
     #  - activation / gradient timing
     # No changes to training loop required.
-    trace_model_instance(
-        model,
-        sample_layer_memory=False,
-        trace_layer_forward__memory=False,
-        trace_layer_backward_memory=False,
-        trace_execution=False,
-    )
+    # trace_model_instance(
+    #     model,
+    #     # sample_layer_memory=False,
+    #     # trace_layer_forward__memory=False,
+    #     # trace_layer_backward_memory=False,
+    #     # trace_execution=False,
+    # )
 
     optimizer = AdamW(model.parameters(), lr=LR)
     total_steps = EPOCHS * math.ceil(len(train_loader))

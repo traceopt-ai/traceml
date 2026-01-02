@@ -1,16 +1,14 @@
 from dataclasses import dataclass
-from queue import Queue, Full
-import sys
 import torch
+from typing import Dict
+import sys
 import torch.nn as nn
+from queue import Full, Queue
 
 
-# Shared queue for step-level memory events
-step_memory_queue: Queue = Queue(maxsize=128)
+step_memory_queue: Queue = Queue(maxsize=2048)
 
-
-def get_step_memory_queue() -> Queue:
-    return step_memory_queue
+_temp_step_memory_buffer: Dict = {}
 
 
 @dataclass
@@ -19,6 +17,7 @@ class StepMemoryEvent:
     Peak GPU memory during a TraceML step.
     """
 
+    step: int
     model_id: int
     device: str
     peak_allocated_mb: float
@@ -58,8 +57,23 @@ class StepMemoryTracker:
             device=str(self.device),
             peak_allocated_mb=torch.cuda.max_memory_allocated(self.device),
             peak_reserved_mb=torch.cuda.max_memory_reserved(self.device),
+            step=-1,
         )
-        try:
-            step_memory_queue.put_nowait(evt)
-        except Full:
-            print("[TraceML] Error in StepMemoryTracker", file=sys.stderr)
+        _temp_step_memory_buffer[self.model_id] = evt
+
+
+def flush_step_memory_buffer(model: nn.Module, step: int) -> None:
+    model_id = id(model)
+
+    evt = _temp_step_memory_buffer.pop(model_id, None)
+    if evt is None:
+        return
+
+    evt.step = step
+    try:
+        step_memory_queue.put_nowait(evt)
+    except Full:
+        print(
+            f"[TraceML:StepMemory] Queue full, dropping event for model {evt.model_id}",
+            file=sys.stderr,
+        )

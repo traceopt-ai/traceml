@@ -99,7 +99,6 @@ class TrackerManager:
             daemon=True,
         )
 
-
     def _safe(self, label: str, fn):
         """
         Execute a callable and swallow any exception.
@@ -111,7 +110,6 @@ class TrackerManager:
         except Exception as e:
             self.logger.error(f"[TraceML] {label}: {e}")
             return None
-
 
     @staticmethod
     def _build_components(
@@ -128,9 +126,7 @@ class TrackerManager:
         samplers: List[BaseSampler] = []
         renderers: List[BaseRenderer] = []
 
-        # --------------------------------------------------------------
         # System / process metrics (rank 0 only in DDP)
-        # --------------------------------------------------------------
         if not (is_ddp and local_rank != 0):
             sys_sampler = SystemSampler()
             proc_sampler = ProcessSampler()
@@ -141,68 +137,54 @@ class TrackerManager:
                 ProcessRenderer(database=proc_sampler.db),
             ]
 
-        # --------------------------------------------------------------
         # Layer memory (forward + backward combined)
-        # --------------------------------------------------------------
-        # layer_mem = LayerMemorySampler()
-        # fwd_mem = LayerForwardMemorySampler()
-        # bwd_mem = LayerBackwardMemorySampler()
-        #
-        # samplers += [layer_mem, fwd_mem, bwd_mem]
-        # renderers += [
-        #     LayerCombinedMemoryRenderer(
-        #         layer_db=layer_mem.db,
-        #         layer_forward_db=fwd_mem.db,
-        #         layer_backward_db=bwd_mem.db,
-        #         top_n_layers=num_display_layers,
-        #     )
-        # ]
+        layer_mem = LayerMemorySampler()
+        fwd_mem = LayerForwardMemorySampler()
+        bwd_mem = LayerBackwardMemorySampler()
 
-        # --------------------------------------------------------------
+        samplers += [layer_mem, fwd_mem, bwd_mem]
+        renderers += [
+            LayerCombinedMemoryRenderer(
+                layer_db=layer_mem.db,
+                layer_forward_db=fwd_mem.db,
+                layer_backward_db=bwd_mem.db,
+                top_n_layers=num_display_layers,
+            )
+        ]
+
         # Step-level memory
-        # --------------------------------------------------------------
-        # step_mem = StepMemorySampler()
-        # samplers += [step_mem]
+        step_mem = StepMemorySampler()
+        samplers += [step_mem]
 
-        # --------------------------------------------------------------
         # Step timing (model + per-step)
-        # --------------------------------------------------------------
         step_timer = StepTimerSampler()
         samplers += [step_timer]
         renderers += [
             StepTimerRenderer(database=step_timer.db),
-            # ModelCombinedRenderer(
-            #     time_db=step_timer.db,
-            #     memory_db=step_mem.db,
-            # ),
+            ModelCombinedRenderer(
+                time_db=step_timer.db,
+                memory_db=step_mem.db,
+            ),
         ]
 
-        # --------------------------------------------------------------
         # Layer timing (forward + backward combined)
-        # --------------------------------------------------------------
-        # fwd_time = LayerForwardTimeSampler()
-        # bwd_time = LayerBackwardTimeSampler()
-        #
-        # samplers += [fwd_time, bwd_time]
-        # renderers += [
-        #     LayerCombinedTimerRenderer(
-        #         forward_db=fwd_time.db,
-        #         backward_db=bwd_time.db,
-        #         top_n_layers=num_display_layers,
-        #     )
-        # ]
+        fwd_time = LayerForwardTimeSampler()
+        bwd_time = LayerBackwardTimeSampler()
 
-        # --------------------------------------------------------------
+        samplers += [fwd_time, bwd_time]
+        renderers += [
+            LayerCombinedTimerRenderer(
+                forward_db=fwd_time.db,
+                backward_db=bwd_time.db,
+                top_n_layers=num_display_layers,
+            )
+        ]
+
         # CLI-only stdout / stderr capture
-        # --------------------------------------------------------------
         if mode == "cli":
             renderers.append(StdoutStderrRenderer())
 
         return samplers, renderers
-
-    # ------------------------------------------------------------------
-    # Runtime execution
-    # ------------------------------------------------------------------
 
     def _run_samplers(self):
         """

@@ -21,10 +21,9 @@ def read_traceml_env():
         "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
-        "num_display_layers": int(
-            os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
-        ),
+        "num_display_layers": int(os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")),
     }
+
 
 def extract_script_args():
     """

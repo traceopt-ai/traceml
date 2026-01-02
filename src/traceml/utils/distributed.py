@@ -33,7 +33,7 @@ def get_ddp_info():
             # mp.spawn often sets RANK
             try:
                 local_rank = int(os.environ["RANK"]) % torch.cuda.device_count()
-            except:
+            except Exception:
                 local_rank = 0
 
     return is_ddp, local_rank, world_size

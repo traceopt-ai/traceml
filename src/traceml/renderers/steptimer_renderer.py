@@ -26,7 +26,6 @@ class StepTimerRow:
     device: str
 
 
-
 class StepTimerRenderer(BaseRenderer):
     """
     Renderer for user-defined step timers.
@@ -39,7 +38,6 @@ class StepTimerRenderer(BaseRenderer):
         super().__init__(name="Step Timers", layout_section_name=STEPTIMER_LAYOUT)
         self.db = database
         self.top_n = top_n
-
 
     def _is_internal(self, name: str) -> bool:
         return name.startswith("_traceml_internal:")
@@ -114,7 +112,6 @@ class StepTimerRenderer(BaseRenderer):
         }
         return out
 
-
     def _safe_percentile(self, arr: np.ndarray, q: float) -> float:
         return float(np.percentile(arr, q)) if arr.size else 0.0
 
@@ -188,7 +185,9 @@ class StepTimerRenderer(BaseRenderer):
         table.add_column("Device", justify="center", style="magenta")
 
         if not rows:
-            table.add_row("[dim]No step timers recorded[/dim]", "—", "—", "—", "—", "", "—")
+            table.add_row(
+                "[dim]No step timers recorded[/dim]", "—", "—", "—", "—", "", "—"
+            )
         else:
             for r in rows:
                 table.add_row(
@@ -243,4 +242,3 @@ class StepTimerRenderer(BaseRenderer):
 
     def log_summary(self, path: Optional[str] = None) -> None:
         Console().print(self.get_panel_renderable())
-

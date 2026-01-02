@@ -7,10 +7,9 @@ def build_step_timing_table_section():
     card.style(
         """
         height: 350px;
-        min-height: 350px;
-        max-height: 350px;
         display: flex;
         flex-direction: column;
+
         background: #ffffff;
         backdrop-filter: blur(12px);
         border-radius: 14px;
@@ -20,13 +19,13 @@ def build_step_timing_table_section():
     )
 
     with card:
-        ui.label("Step Timings").classes("text-lg font-bold mb-2").style(
+        ui.label("Step Timings").classes("text-l font-bold mb-2").style(
             "color:#d47a00;"
         )
 
         container = ui.html("", sanitize=False).style(
             """
-            height: 260px;
+            height: 350px;
             overflow-y: auto;
             width: 100%;
             padding-right: 12px;
@@ -66,7 +65,9 @@ def update_step_timing_table_section(panel, dashboard_data):
     rows = _prepare_step_timing_rows(dashboard_data)
 
     if not rows:
-        panel["table"].content = """
+        panel[
+            "table"
+        ].content = """
         <div style="
             text-align:center;
             padding:16px;

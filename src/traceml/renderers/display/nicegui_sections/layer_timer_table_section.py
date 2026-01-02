@@ -2,6 +2,10 @@ from nicegui import ui
 from traceml.utils.formatting import fmt_time_ms
 
 
+METRIC_TEXT = "text-sm leading-normal text-gray-700"
+METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
+
+
 def build_layer_timer_table_section():
     card = ui.card().classes("m-2 p-4 w-full")
     card.style(
@@ -19,9 +23,7 @@ def build_layer_timer_table_section():
     )
 
     with card:
-        ui.label("Per Layer Timing Stats").classes("text-lg font-bold mb-2").style(
-            "color:#d47a00;"
-        )
+        ui.label("Per Layer Timing Stats").classes(METRIC_TITLE).style("color:#d47a00;")
 
         container = ui.html("", sanitize=False).style(
             "flex: 1; overflow-y: auto; width: 100%; padding-right: 12px;"
@@ -54,12 +56,12 @@ def update_layer_timer_table_section(panel, dashboard_data):
                     {r.get("layer", "—")}
                 </td>
                 <td style="text-align:right; padding:4px 8px;">
-                    {fmt_time_ms(r.get("activation_current_ms", 0.0))} /
-                    {fmt_time_ms(r.get("activation_peak_ms", 0.0))}
+                    {fmt_time_ms(r.get("forward_current", 0.0))} /
+                    {fmt_time_ms(r.get("forward_peak", 0.0))}
                 </td>
                 <td style="text-align:right; padding:4px 12px;">
-                    {fmt_time_ms(r.get("gradient_current_ms", 0.0))} /
-                    {fmt_time_ms(r.get("gradient_peak_ms", 0.0))}
+                    {fmt_time_ms(r.get("backward_current", 0.0))} /
+                    {fmt_time_ms(r.get("backward_peak", 0.0))}
                 </td>
                 <td style="text-align:right; padding:4px 12px;">
                     {float(r.get("pct", 0.0)):.1f}%

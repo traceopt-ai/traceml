@@ -1,7 +1,6 @@
 import argparse
 import os
 import sys
-import time
 import subprocess
 from pathlib import Path
 
@@ -21,13 +20,13 @@ def validate_script_path(script_path: str) -> str:
 
 def prepare_log_directory(log_dir: str = None) -> str:
     """
-       Prepare the directory where TraceML will store logs and artifacts.
+    Prepare the directory where TraceML will store logs and artifacts.
 
-       If no directory is provided, we create a timestamped folder under:
-           .traceml_runs/YYYY-MM-DD_HH-MM-SS
-       """
+    If no directory is provided, we create a timestamped folder under:
+        .traceml_runs/YYYY-MM-DD_HH-MM-SS
+    """
     if not log_dir:
-        log_dir = os.path.join(os.getcwd(), f".logs/")
+        log_dir = os.path.join(os.getcwd(), ".logs/")
     os.makedirs(log_dir, exist_ok=True)
     return str(Path(log_dir).resolve())
 

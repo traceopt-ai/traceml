@@ -2,6 +2,7 @@ import numpy as np
 from rich.panel import Panel
 from rich.table import Table
 import shutil
+from typing import Optional
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
@@ -17,7 +18,7 @@ class ModelCombinedRenderer(BaseRenderer):
     """
 
     FRIENDLY_NAMES = {
-        "_traceml_internal:dataloader_next": "dataLoader_fetch_time",
+        "_traceml_internal:dataloader_next": "dataLoader_fetch",
         "_traceml_internal:step_time": "step_time",
     }
 
@@ -34,10 +35,17 @@ class ModelCombinedRenderer(BaseRenderer):
         self.time_db = time_db
         self.memory_db = memory_db
         self.window = int(window)
+        self.current_step: Optional[int] = None
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _get_current_step(self) -> Optional[int]:
+        table = self.memory_db.create_or_get_table("step_memory")
+        if not table:
+            return None
+        return int(table[-1].get("step"))
 
     @staticmethod
     def _safe_percentile(x: np.ndarray, q: float) -> float:
@@ -50,8 +58,8 @@ class ModelCombinedRenderer(BaseRenderer):
             return 0.0, 0.0, 0.0, 0.0, ""
 
         last = float(arr[-1])
-        win100 = arr[-min(100, arr.size):]
-        win200 = arr[-min(200, arr.size):]
+        win100 = arr[-min(100, arr.size) :]
+        win200 = arr[-min(200, arr.size) :]
 
         p50 = self._safe_percentile(win100, 50)
         p95 = self._safe_percentile(win100, 95)
@@ -82,8 +90,11 @@ class ModelCombinedRenderer(BaseRenderer):
             name = row.get("event_name")
             if name not in self.FRIENDLY_NAMES:
                 continue
+
             data.setdefault(name, {"cpu": [], "gpu": []})
-            data[name]["cpu"].append(float(row.get("duration_ms", 0.0)))
+            data[name]["cpu"].append(
+                (int(row.get("step")), float(row.get("duration_ms", 0.0)))
+            )
 
         for rows in gpu_tables.values():
             for row in rows:
@@ -91,22 +102,97 @@ class ModelCombinedRenderer(BaseRenderer):
                 if name not in self.FRIENDLY_NAMES:
                     continue
                 data.setdefault(name, {"cpu": [], "gpu": []})
-                data[name]["gpu"].append(float(row.get("duration_ms", 0.0)))
+                data[name]["gpu"].append(
+                    (int(row.get("step")), float(row.get("duration_ms", 0.0)))
+                )
 
         return data
+
+    def build_live_telemetry_payload(self, last_n: int = 200):
+        """
+        Build UI-ready telemetry payload for the WebUI.
+        No DB objects are exposed.
+        """
+
+        payload = {}
+
+        # -------- Step timers --------
+        time_data = self._get_step_time_data()
+
+        for key in self.FRIENDLY_NAMES.keys():
+            vals = time_data.get(key, {"cpu": [], "gpu": []})
+            pairs = vals["gpu"] if vals["gpu"] else vals["cpu"]
+            pairs = pairs[-last_n:]
+
+            if pairs:
+                steps, values = zip(*pairs)
+                x = np.asarray(steps, dtype=np.int64)
+                y = np.asarray(values, dtype=np.float64)
+            else:
+                x = np.asarray([])
+                y = np.asarray([])
+
+            stats = self._compute_stats(y)
+
+            payload[self.FRIENDLY_NAMES[key]] = {
+                "x": x,
+                "y": y,
+                "stats": {
+                    "last": stats[0],
+                    "p50": stats[1],
+                    "p95": stats[2],
+                    "avg100": stats[3],
+                    "trend": stats[4],
+                },
+            }
+
+        # -------- Step memory --------
+        pairs = self._get_step_memory_data()
+        pairs = pairs[-last_n:]
+
+        if pairs:
+            steps, values = zip(*pairs)
+            x = np.asarray(steps, dtype=np.int64)
+            y = np.asarray(values, dtype=np.float64)
+        else:
+            x = np.asarray([])
+            y = np.asarray([])
+
+        stats = self._compute_stats(y)
+
+        payload["step_gpu_memory"] = {
+            "x": x,
+            "y": y,
+            "stats": {
+                "last": stats[0],
+                "p50": stats[1],
+                "p95": stats[2],
+                "avg100": stats[3],
+                "trend": stats[4],
+            },
+        }
+
+        return payload
 
     def _get_step_memory_data(self):
         table = self.memory_db.create_or_get_table("step_memory")
         gpu_vals = []
 
         for row in table:
-            gpu_vals.append(float(row.get("peak_allocated_mb", 0.0)))
+            gpu_vals.append(
+                (int(row.get("step")), float(row.get("peak_allocated_mb", 0.0)))
+            )
 
         return np.asarray(gpu_vals, dtype=np.float64)
 
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
+
+    def _extract_values(self, pairs):
+        if not pairs:
+            return np.asarray([], dtype=np.float64)
+        return np.asarray([v for _, v in pairs], dtype=np.float64)
 
     def get_panel_renderable(self) -> Panel:
         table = Table(show_header=True, header_style="bold blue", box=None)
@@ -120,14 +206,12 @@ class ModelCombinedRenderer(BaseRenderer):
 
         # ---- Step timers ----
         time_data = self._get_step_time_data()
+        current_step = self._get_current_step()
 
         for key in self.FRIENDLY_NAMES.keys():
             vals = time_data.get(key, {"cpu": [], "gpu": []})
-            arr = (
-                np.asarray(vals["gpu"], dtype=np.float64)
-                if vals["gpu"]
-                else np.asarray(vals["cpu"], dtype=np.float64)
-            )
+            pairs = vals["gpu"] if vals["gpu"] else vals["cpu"]
+            arr = self._extract_values(pairs)
             device = "GPU" if vals["gpu"] else "CPU"
 
             last, p50, p95, avg100, trend = self._compute_stats(arr)
@@ -148,7 +232,7 @@ class ModelCombinedRenderer(BaseRenderer):
         last, p50, p95, avg100, trend = self._compute_stats(mem_arr)
 
         table.add_row(
-            "step_memory",
+            "step_gpu_memory",
             fmt_mem_new(last),
             fmt_mem_new(p50),
             fmt_mem_new(p95),
@@ -160,9 +244,23 @@ class ModelCombinedRenderer(BaseRenderer):
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(90, int(cols * 0.65)), 100)
 
+        title = "[bold blue]Model Summary[/bold blue]"
+        if current_step is not None:
+            title += f" (Step {current_step})"
         return Panel(
             table,
-            title="[bold blue]Model Summary[/bold blue]",
+            title=title,
             border_style="blue",
             width=panel_width,
         )
+
+    def get_dashboard_renderable(self):
+        """
+        Return an object suitable for Streamlit's st.write():
+        - str / Markdown
+        - pandas.DataFrame
+        - matplotlib/plotly figure
+        - etc.
+        """
+        data = self.build_live_telemetry_payload()
+        return data

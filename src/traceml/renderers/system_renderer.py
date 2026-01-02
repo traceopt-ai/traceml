@@ -211,14 +211,6 @@ class SystemRenderer(BaseRenderer):
         data = self._compute_snapshot()
 
         # --- CPU + RAM ---
-        ram_pct = ""
-        if data["ram_total"]:
-            try:
-                rp = data["ram_used"] * 100.0 / data["ram_total"]
-                ram_pct = f" ({rp:.1f}%)"
-            except Exception:
-                pass
-
         cpu_ram_html = self._get_notebook_cpu_row(data)
 
         # --- GPU ---

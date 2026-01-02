@@ -7,6 +7,10 @@ from traceml.renderers.display.nicegui_sections.helper import (
 )
 
 
+METRIC_TEXT = "text-sm leading-normal text-gray-700"
+METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
+
+
 def build_system_section():
 
     card = ui.card().classes("m-2 p-2 w-full")
@@ -18,48 +22,46 @@ def build_system_section():
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-        overflow-y: auto;
-        line-height: 1.1;
         height: 350px;
     """
     )
 
     with card:
-        ui.label("System Metrics").classes(
-            "text-xl font-bold mb-1 ml-1 break-words whitespace-normal"
-        ).style("color:#d47a00;")
+        ui.label("System Metrics").classes(METRIC_TITLE).style("color:#d47a00;")
         graph = _build_graph_section()
-        with ui.grid(columns=4).classes("w-full gap-x-3 gap-y-2"):
+        with ui.grid(columns=4).classes("w-full gap-x-3 gap-y-3"):
             # CPU + GPU UTIL ==========
             cpu_text = (
-                ui.html("CPU: –", sanitize=False).classes("text-sm").style("color:#333")
+                ui.html("CPU: –", sanitize=False)
+                .classes(METRIC_TEXT)
+                .style("color:#333")
             )
             cpu_bar = ui.html("", sanitize=False)
-            gpu_util_text = ui.html("GPU Util: –", sanitize=False).classes("text-sm")
+            gpu_util_text = ui.html("GPU Util: –", sanitize=False).classes(METRIC_TEXT)
             gpu_util_bar = ui.html("", sanitize=False)
 
             # RAM + GPU MEM
             ram_text = (
-                ui.html("RAM: –", sanitize=False).classes("text-sm").style("color:#333")
+                ui.html("RAM: –", sanitize=False)
+                .classes(METRIC_TEXT)
+                .style("color:#333 ")
             )
             ram_bar = ui.html("", sanitize=False)
-            gpu_mem_text = ui.html("GPU Mem: –", sanitize=False).classes("text-sm")
+            gpu_mem_text = ui.html("GPU Mem: –", sanitize=False).classes(METRIC_TEXT)
             gpu_mem_bar = ui.html("", sanitize=False)
 
             # TEMP + POWER
             temp_text = (
                 ui.html("Temp: –", sanitize=False)
-                .classes("text-sm")
+                .classes(METRIC_TEXT)
                 .style("color:#333")
             )
-            empty1 = ui.html("", sanitize=False)
             #
             power_text = (
                 ui.html("Power: –", sanitize=False)
-                .classes("text-sm")
+                .classes(METRIC_TEXT)
                 .style("color:#333")
             )
-            empty2 = ui.html("", sanitize=False)
 
     return {
         "cpu_text": cpu_text,
@@ -79,8 +81,8 @@ def build_system_section():
 def _build_graph_section():
     fig = go.Figure()
     fig.update_layout(
-        height=175,
-        margin=dict(l=10, r=10, t=10, b=35),
+        height=160,
+        margin=dict(l=10, r=10, t=4, b=28),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
         xaxis=dict(showgrid=False, visible=False),
@@ -222,8 +224,8 @@ def _update_gpu_graph(system_table, fig, x_hist):
 
 def _update_graph_layout(gpu_available, fig):
     common_layout = dict(
-        height=175,
-        margin=dict(l=10, r=10, t=10, b=35),
+        height=160,
+        margin=dict(l=10, r=10, t=4, b=28),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
         xaxis=dict(

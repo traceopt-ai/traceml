@@ -14,7 +14,6 @@ from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memor
 from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
 from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
 
-
 from traceml.utils.steptimer import StepTimeEvent, record_step_time_event, timed_region
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
@@ -45,25 +44,35 @@ def trace_step(model: nn.Module):
     Timing and metadata may be added later.
     """
     TraceState.step += 1
-
     mem_tracker = StepMemoryTracker(model)
-    mem_tracker.reset()  # reset peak stats at step start
-
     try:
-        with timed_region("_traceml_internal:step_time", use_gpu=True):
-            yield
+        mem_tracker.reset()
+        try:
+            with timed_region("_traceml_internal:step_time", use_gpu=True):
+                yield
+        except Exception as e:
+            print(f"[TraceML] timed_region failed: {e}", file=sys.stderr)
+            yield  # ← IMPORTANT: still run training
+
     finally:
-        mem_tracker.record()  # record peak stats at step end
-        flush_traceml_buffers(model, TraceState.step)
+        try:
+            mem_tracker.record()
+        except Exception as e:
+            print(f"[TraceML] StepMemoryTracker.record failed: {e}", file=sys.stderr)
+
+        try:
+            flush_traceml_buffers(model, TraceState.step)
+        except Exception as e:
+            print(f"[TraceML] flush_traceml_buffers failed: {e}", file=sys.stderr)
 
 
 def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
-    trace_layer_forward__memory: bool = False,
-    trace_layer_backward_memory: bool = False,
-    trace_layer_forward_time: bool = False,
-    trace_layer_backward_time: bool = False,
+    trace_layer_forward__memory: bool = True,
+    trace_layer_backward_memory: bool = True,
+    trace_layer_forward_time: bool = True,
+    trace_layer_backward_time: bool = True,
     trace_execution: bool = True,
 ):
     """
@@ -77,8 +86,6 @@ def trace_model_instance(
         trace_layer_forward_time: attach forward *time* hooks (pre + post).
         trace_layer_backward_time: attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
-        trace_model_forward_memory: attach model level (top level) hook to capture max memory
-            during forward pass (low overhead, can be always on)
     """
     try:
         if not isinstance(model, nn.Module):

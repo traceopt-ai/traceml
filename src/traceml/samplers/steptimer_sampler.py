@@ -74,6 +74,7 @@ class StepTimerSampler(BaseSampler):
             self.cpu_table.append(
                 {
                     "timestamp": evt.cpu_end,
+                    "step": evt.step,
                     "event_name": evt.name,
                     "device": evt.device,
                     "duration_ms": float(cpu_ms),
@@ -86,6 +87,7 @@ class StepTimerSampler(BaseSampler):
                 gpu_table.append(
                     {
                         "timestamp": evt.cpu_end,
+                        "step": evt.step,
                         "event_name": evt.name,
                         "device": evt.device,
                         "duration_ms": float(evt.gpu_time_ms),

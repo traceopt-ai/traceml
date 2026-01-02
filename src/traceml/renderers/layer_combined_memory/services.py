@@ -216,7 +216,6 @@ class LayerCombinedMemorySummary:
                 "model_memory": 0.0,
             }
 
-        total_samples = len(self._layer_table)
         model_signatures = {entry.get("model_signature") for entry in self._layer_table}
 
         totals = [float(entry.get("total_memory", 0.0)) for entry in self._layer_table]

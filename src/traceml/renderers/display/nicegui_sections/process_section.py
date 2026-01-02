@@ -7,6 +7,10 @@ from traceml.renderers.display.nicegui_sections.helper import (
 )
 
 
+METRIC_TEXT = "text-sm leading-normal text-gray-700"
+METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
+
+
 def build_process_section():
     card = ui.card().classes("m-2 p-2 w-full")
     card.style(
@@ -24,9 +28,7 @@ def build_process_section():
     )
 
     with card:
-        ui.label("Process Metrics").classes("text-xl font-bold mb-1 ml-1").style(
-            "color:#d47a00;"
-        )
+        ui.label("Process Metrics").classes(METRIC_TEXT).style("color:#d47a00;")
 
         graph = _build_graph_section()
         cpu_text, cpu_bar = _build_cpu_section()
@@ -114,7 +116,7 @@ def _build_graph_section():
 def _build_cpu_section():
     with ui.row().classes("items-center justify-between w-full"):
         cpu_text = (
-            ui.html("CPU: –", sanitize=False).classes("text-sm").style("color:#333")
+            ui.html("CPU: –", sanitize=False).classes(METRIC_TEXT).style("color:#333")
         )
         cpu_bar = ui.html("", sanitize=False)
     return cpu_text, cpu_bar
@@ -123,7 +125,7 @@ def _build_cpu_section():
 def _build_ram_section():
     with ui.row().classes("items-center justify-between w-full"):
         ram_text = (
-            ui.html("RAM: –", sanitize=False).classes("text-sm").style("color:#333")
+            ui.html("RAM: –", sanitize=False).classes(METRIC_TEXT).style("color:#333")
         )
         ram_bar = ui.html("", sanitize=False)
     return ram_text, ram_bar
@@ -132,7 +134,9 @@ def _build_ram_section():
 def _build_gpu_section():
     with ui.row().classes("items-center justify-between w-full"):
         gpu_text = (
-            ui.html("GPU Mem: –", sanitize=False).classes("text-sm").style("color:#333")
+            ui.html("GPU Mem: –", sanitize=False)
+            .classes(METRIC_TEXT)
+            .style("color:#333")
         )
         gpu_bar = ui.html("", sanitize=False)
     return gpu_text, gpu_bar

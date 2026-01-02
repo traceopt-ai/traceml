@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 
+_temp_step_time_buffer: deque = deque()
+
 # Shared queue for timing events
 step_time_queue: Queue = Queue(maxsize=2048)
 
@@ -30,6 +32,7 @@ class StepTimeEvent:
     gpu_end: Optional[torch.cuda.Event] = None
     gpu_time_ms: Optional[float] = None
     resolved: bool = False
+    step: int = -1
 
     def try_resolve(self) -> bool:
         """
@@ -64,15 +67,18 @@ def get_steptimer_queue() -> Queue:
     return step_time_queue
 
 
-def record_step_time_event(evt: StepTimeEvent):
+def record_step_time_event(evt: StepTimeEvent, on_queue=False):
     """Try to enqueue a timing event without blocking."""
-    try:
-        step_time_queue.put_nowait(evt)
-    except Full:
-        print(
-            f"[TraceML:StepTimer] Queue full, dropping event {evt.name}",
-            file=sys.stderr,
-        )
+    if on_queue:
+        try:
+            step_time_queue.put_nowait(evt)
+        except Full:
+            print(
+                f"[TraceML:StepTimer] Queue full, dropping event {evt.name}",
+                file=sys.stderr,
+            )
+    else:
+        _temp_step_time_buffer.append(evt)
 
 
 @contextmanager
@@ -109,3 +115,17 @@ def timed_region(name: str, use_gpu: bool = True):
         )
 
     record_step_time_event(evt)
+
+
+def flush_step_time_buffer(step: int) -> None:
+    """Flush the temporary step time buffer to the shared queue."""
+    while _temp_step_time_buffer:
+        evt = _temp_step_time_buffer.popleft()
+        evt.step = step
+        try:
+            step_time_queue.put_nowait(evt)
+        except Full:
+            print(
+                f"[TraceML:StepTimer] Queue full, dropping event {evt.name}",
+                file=sys.stderr,
+            )

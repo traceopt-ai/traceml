@@ -18,7 +18,7 @@ Training deep learning models shouldn't feel like debugging a black box. Yet we 
 - **🔍 Layer-level mysteries** — which layers consume the most memory? Which are slowest?
 - **📊 Heavy profilers** that are impractical to keep running during actual training
 
-**TraceML changes this.** It provides continuous, low-overhead visibility into your training process while it's running — no restarts, no heavy tooling, no guesswork.
+TraceML changes this with continuous, low-overhead visibility while your training runs. 
 
 ---
 
@@ -26,18 +26,55 @@ Training deep learning models shouldn't feel like debugging a black box. Yet we 
 
 TraceML answers the questions you actually need answered:
 
-| Question | TraceML Answer |
-|----------|----------------|
-| Which **layer caused OOM** ? | Automatic OOM detection with exact layer identification |
-| Which layer is eating my GPU memory? | Per-layer memory breakdown (params + activations + gradients) |
-| Where did that memory spike happen? | Real-time memory tracking during forward/backward passes |
-| Which layer is slow? | Per-layer compute time (forward + backward) |
+| Question                              | TraceML Answer                                                 |
+|---------------------------------------|----------------------------------------------------------------|
+| Which **layer caused OOM** ?          | Automatic detection of the failing layer during forward or backward pass        |
 | What's slowing down my training step? | Step-level timing: dataloader → forward → backward → optimizer |
+| Where did that memory spike happen?   | Step-level (batch-level) memory tracking with peak attribution     |
+| Which layer is eating my GPU memory?  | Per-layer memory breakdown (params + forward + backward)       |
+| Which layer is slow?                  | Per-layer compute time (forward + backward)                    |
 
-**Three ways to view your data:**
-- 🖥️ **Terminal dashboard** — live updates in your console
+**Three ways to view the results:**
+- 🖥️ **Terminal** — live updates in your console
+- 🌐 **Web UI** — local browser at `localhost:8765`
 - 📓 **Jupyter notebooks** — inline visualizations
-- 🌐 **Web dashboard** — local browser UI at `localhost:8765`
+
+---
+
+## Tracking Profiles (New)
+
+TraceML supports two tracking profiles so you can choose the right trade-off between insight and overhead.
+
+### ESSENTIAL mode (lightweight, always-on)
+
+Best for day-to-day training and long runs.
+
+Tracks:
+- Dataloader fetch time
+- Training step time (GPU-aware)
+- Step GPU memory (allocated + peak)
+- System stats (CPU, RAM, GPU)
+
+### DEEP-DIVE mode (diagnostic)
+
+Best for debugging OOMs and performance pathologies.
+
+Tracks everything in **Essential**, plus:
+- Per-layer memory (parameters, activations, gradients)
+- Per-layer forward and backward time
+
+
+### Timed Regions (optional, very low overhead)
+
+**Optional instrumentation for specific code blocks.**  
+Executed **once per step per decorated function**.
+
+Tracks:
+- Custom timing blocks (e.g. dataloader, forward, backward, optimizer)
+- CPU or GPU time (via CUDA events)
+- Low (one timing measurement per step)
+
+
 
 ---
 
@@ -61,57 +98,82 @@ pip install -e '.[dev]'
 
 ---
 
-## Quick Start
+## Quick Start (Important)
 
-### Step 1: Add One Decorator to Your Model
-
-TraceML works by attaching lightweight hooks to your PyTorch model. Choose your preferred method:
-
-**Option A: Class decorator** (recommended)
+### Step-level tracking (required for all modes)
 
 ```python
-from traceml.decorators import trace_model
-import torch.nn as nn
+from traceml.decorators import trace_step
 
-@trace_model()
-class MyModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.encoder = nn.TransformerEncoder(...)
-        self.decoder = nn.Linear(512, 1000)
-    
-    def forward(self, x):
-        x = self.encoder(x)
-        return self.decoder(x)
+for batch in dataloader:
+    with trace_step():
+        outputs = model(batch["x"])
+        loss = criterion(outputs, batch["y"])
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad(set_to_none=True)
 ```
 
-**Option B: Instance registration**
+Without `trace_step(...)`:
+- Step timing is not computed
+- Step memory is not recorded
+- Live dashboards will not update
+
+
+
+### Optional: Timing Specific Code Regions
+
+Use `@trace_time` to time specific functions.
+This works in **all modes** and has **low overhead**.
+
+```python
+from traceml.decorators import trace_time
+
+@trace_time("backward", use_gpu=True)
+def backward_pass(loss, scaler=None):
+    loss.backward()
+```
+
+Notes:
+- `use_gpu=True` uses CUDA events (correct for async GPU work)
+- `use_gpu=False` uses CPU wall-clock time
+
+#### Deprecation (⚠️ **Breaking change**)
+
+- `@trace_timestep` is deprecated, use `@trace_time` instead
+
+
+### Deep-Dive: Model Registration
+
+Required **only for Deep-Dive mode**.
 
 ```python
 from traceml.decorators import trace_model_instance
 
-model = torchvision.models.resnet50()
 trace_model_instance(model)
 ```
 
-That's it. No other code changes needed.
+Notes:
+- Enables forward/backward hooks
+- Required for per-layer memory and timing
+- Required for OOM layer attribution
 
-### Step 2: Run Your Training Script
+---
 
-```bash
-traceml run train.py
+### Running TraceML
+
+```python
+traceml run train.py 
 ```
 
 You'll immediately see a live terminal dashboard tracking:
 - System resources (CPU, RAM, GPU)
-- Per-layer memory usage and compute time
-- Training step breakdowns
+- Dataloader fetch time, training step time and training step GPU memory
+- (Deep-Dive only) Per-layer memory and compute time
 
 ![TraceML CLI Demo](demo_gc.png)
 
 ---
-
-Best for: Training on remote servers, quick debugging, CI/CD environments.
 
 ### 🌐 Web Dashboard
 
@@ -123,103 +185,33 @@ Opens `http://localhost:8765` with interactive charts and real-time updates.
 
 <img src="web_demo.png" width="1200" alt="TraceML CLI Demo">
 
-Best for: Local development, detailed analysis, sharing results with teammates.
 
 ### 📓 Jupyter Notebooks
 
-```python
-from traceml.decorators import trace_model_instance
-from traceml.manager.tracker_manager import TrackerManager
+Please see the [notebook example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb) for inline visualizations.
 
-# Register your model
-trace_model_instance(model)
-
-# Start tracking
-tracker = TrackerManager(interval_sec=1.0, mode="notebook")
-tracker.start()
-
-# Run your training
-for epoch in range(num_epochs):
-    train_one_epoch(model, dataloader)
-
-# Stop and view results
-tracker.stop()
-tracker.log_summaries()
-```
-
-Best for: Experimentation, teaching, sharing results in notebooks.
-
----
-
-## Advanced: Step Timing
-
-Track specific operations in your training loop:
-
-```python
-from traceml.decorators import trace_timestep
-
-@trace_timestep("dataloader", use_gpu=True)
-def load_batch(dataloader):
-    return next(iter(dataloader))
-
-@trace_timestep("forward", use_gpu=True)
-def forward_pass(model, batch):
-    return model(batch)
-
-@trace_timestep("backward", use_gpu=True)
-def backward_pass(loss, optimizer):
-    loss.backward()
-    optimizer.step()
-```
-
-Timings automatically appear in all dashboards and logs, helping you identify bottlenecks at a glance.
-
----
-
-## Exporting Data
-
-Enable JSON logging for offline analysis:
-
-```bash
-traceml run train.py --enable-logging
-```
-
-Logs are saved to `./logs/` with timestamps, ready for plotting or integration with your own monitoring tools.
-
----
-
-## Current Features
-
-✅ Automatic OOM layer detection (identifies exact layer that caused crash)
-✅ Real-time system monitoring (CPU, RAM, GPU)  
-✅ Per-layer memory tracking (parameters, activations, gradients)  
-✅ Per-layer compute time (forward + backward)  
-✅ Training step timing (dataloader, forward, backward, optimizer)  
-✅ Terminal UI with live updates  
-✅ Jupyter notebook integration  
-✅ Local web dashboard  
-✅ JSON export for offline analysis  
-✅ Minimal overhead 
-✅ Zero code changes (beyond registration)  
 
 ---
 
 ## Roadmap
 
-🔜 Multi-GPU distributed training (DDP, FSDP)  
-🔜 PyTorch Lightning integration  
-🔜 Hugging Face Accelerate support  
-🔜 Memory leak detection  
-🔜 Automatic optimization suggestions  
-🔜 Cloud dashboard (optional)  
+
+- ***Performance & Stability Improvements***: 
+Continuous reduction of tracing overhead, improved robustness for long-running training jobs, and better defaults for production-scale workloads.
+
+- ***Distributed Training Support***:
+Support for multi-GPU training (DDP / FSDP) and, over time, multi-node distributed setups with clear failure and performance attribution.
+
+- ***Framework Integrations***:
+Native integrations with popular training frameworks such as PyTorch Lightning and Hugging Face Accelerate.
+
+- ***Advanced Diagnostics***:
+Memory leak detection, clearer attribution of performance regressions, and richer debugging signals for complex training runs.
+
+- ***Actionable Insights & Automation***:
+Smarter summaries and recommendations to help users identify bottlenecks and optimize training configurations.
 
 ---
-
-## Examples
-
-Explore complete examples in the repository:
-
-- [BERT fine-tuning with TraceML](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
 
 
 
@@ -232,21 +224,11 @@ We welcome contributions! Here's how to help:
 3. 💡 **Request features** we should prioritize
 4. 🔧 **Submit PRs** for improvements
 
-**Development setup:**
-
-```bash
-git clone https://github.com/traceopt-ai/traceml.git
-cd traceml
-pip install -e '.[dev]'
-pytest tests/
-```
-
----
 
 ## Community & Support
 
 - 📧 Email: abhinav@traceopt.ai
-- 🐙 GitHub: [traceopt-ai/traceml](https://github.com/traceopt-ai/traceml)
+- 🐙 LinkedIn: [Abhinav Srivastav](https://www.linkedin.com/in/abhinavsriva/)
 - 📋 User Survey: [Help shape the roadmap](https://forms.gle/vaDQao8L81oAoAkv9) (2 minutes)
 
 ---
@@ -274,7 +256,7 @@ If TraceML helps your research, please cite:
 ```bibtex
 @software{traceml2024,
   author = {TraceOpt AI},
-  title = {TraceML: Real-time Profiling for PyTorch Training},
+  title = {TraceML: Real-time Training Observability for PyTorch},
   year = {2024},
   url = {https://github.com/traceopt-ai/traceml}
 }

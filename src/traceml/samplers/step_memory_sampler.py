@@ -1,7 +1,7 @@
 import time
 
 from .base_sampler import BaseSampler
-from traceml.utils.step_memory import get_step_memory_queue
+from traceml.utils.step_memory import step_memory_queue
 from traceml.loggers.error_log import get_error_logger
 
 
@@ -24,7 +24,7 @@ class StepMemorySampler(BaseSampler):
         """
         Drain entire step memory queue.
         """
-        queue = get_step_memory_queue()
+        queue = step_memory_queue
         if queue.empty():
             return
 
@@ -47,7 +47,7 @@ class StepMemorySampler(BaseSampler):
 
         model_id = getattr(event, "model_id", None)
         device = getattr(event, "device", None)
-
+        step = getattr(event, "step", None)
         peak_alloc = getattr(event, "peak_allocated_mb", None)
         peak_resv = getattr(event, "peak_reserved_mb", None)
 
@@ -58,6 +58,7 @@ class StepMemorySampler(BaseSampler):
             "timestamp": timestamp,
             "model_id": model_id,
             "device": device,
+            "step": step,
             "peak_allocated_mb": peak_alloc,
             "peak_reserved_mb": peak_resv,
         }
