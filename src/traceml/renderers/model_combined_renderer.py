@@ -67,9 +67,21 @@ class ModelCombinedRenderer(BaseRenderer):
         avg100 = float(win100.mean())
 
         trend = ""
+        trend_pct = 0.0
+
         if arr.size >= 200:
             avg200 = float(win200.mean())
-            trend = "+" if avg100 > avg200 else "-"
+
+            # Guard against divide-by-zero / near-zero noise
+            if avg200 > 1e-9:
+                trend_pct = (avg100 - avg200) / avg200 * 100.0
+
+                # Ignore tiny fluctuations (< 1%)
+                if abs(trend_pct) >= 1.0:
+                    sign = "+" if trend_pct > 0 else ""
+                    trend = f"{sign}{trend_pct:.1f}%"
+                else:
+                    trend = "≈0%"
 
         return last, p50, p95, avg100, trend
 
@@ -271,15 +283,21 @@ class ModelCombinedRenderer(BaseRenderer):
 
         def metric_block(title, stats, fmt):
             trend = stats.get("trend", "")
-            trend_symbol = "—"
+
+            # Defaults
+            trend_text = "—"
             trend_color = "#666"
 
-            if trend == "+":
-                trend_symbol = "↑"
-                trend_color = "#d32f2f"  # red
-            elif trend == "-":
-                trend_symbol = "↓"
-                trend_color = "#2e7d32"  # green
+            if isinstance(trend, str) and trend:
+                if trend.startswith("+"):
+                    trend_text = f"↑ {trend}"
+                    trend_color = "#d32f2f"  # red (regression)
+                elif trend.startswith("-"):
+                    trend_text = f"↓ {trend}"
+                    trend_color = "#2e7d32"  # green (improvement)
+                elif "≈" in trend:
+                    trend_text = trend
+                    trend_color = "#666"
 
             return f"""
             <div style="
@@ -311,7 +329,7 @@ class ModelCombinedRenderer(BaseRenderer):
                             <td align="right">{fmt(stats["avg100"])}</td>
                             <td align="center"
                                 style="font-weight:700; color:{trend_color};">
-                                {trend_symbol}
+                                {trend_text}
                             </td>
                         </tr>
                     </tbody>

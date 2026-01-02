@@ -131,17 +131,34 @@ class StepTimerRenderer(BaseRenderer):
 
         trend = ""
         n = arr.size
+
+        # Early instability
         if n >= 50:
             early_p95 = np.percentile(arr[:50], 95)
             later_avg = arr[50:].mean() if n > 50 else arr.mean()
 
-            if early_p95 > 2.0 * later_avg:
-                trend = "!"
+            if later_avg > 1e-9 and early_p95 > 2.0 * later_avg:
+                pct = (early_p95 - later_avg) / later_avg * 100.0
 
+                if abs(pct) >= 5.0:
+                    sign = "+" if pct > 0 else ""
+                    trend = f"! {sign}{pct:.1f}%"
+                else:
+                    trend = "!"
+
+        # Recent vs previous trend (percentage)
         if trend == "" and n >= 200:
             recent_avg = arr[-100:].mean()
             prev_avg = arr[-200:-100].mean()
-            trend = "+" if recent_avg > prev_avg else "-"
+
+            if prev_avg > 1e-9:
+                pct_change = (recent_avg - prev_avg) / prev_avg * 100.0
+
+                if abs(pct_change) < 1.0:
+                    trend = "≈0%"
+                else:
+                    sign = "+" if pct_change > 0 else ""
+                    trend = f"{sign}{pct_change:.1f}%"
 
         return StepTimerRow(
             name=name,
@@ -224,31 +241,45 @@ class StepTimerRenderer(BaseRenderer):
             """
         else:
             body = ""
+
             for r in rows:
-                if r.trend == "+":
-                    trend_symbol = "↑"
-                    trend_color = "#d32f2f"  # red
-                elif r.trend == "-":
-                    trend_symbol = "↓"
-                    trend_color = "#2e7d32"  # green
-                else:
-                    trend_symbol = "—"
-                    trend_color = "#666"
+                trend_text = "—"
+                trend_color = "#666"
+
+                if isinstance(r.trend, str) and r.trend:
+                    if r.trend.startswith("!"):
+                        # Instability
+                        trend_text = r.trend
+                        trend_color = "#f57c00"  # orange
+                    elif r.trend.startswith("+"):
+                        trend_text = f"↑ {r.trend}"
+                        trend_color = "#d32f2f"  # red (regression)
+                    elif r.trend.startswith("-"):
+                        trend_text = f"↓ {r.trend}"
+                        trend_color = "#2e7d32"  # green (improvement)
+                    elif "≈" in r.trend:
+                        trend_text = r.trend
+                        trend_color = "#666"
 
                 body += f"""
-                    <tr>
-                        <td>{r.name}</td>
-                        <td>{fmt_time_run(r.last)}</td>
-                        <td>{fmt_time_run(r.p50_100)}</td>
-                        <td>{fmt_time_run(r.p95_100)}</td>
-                        <td>{fmt_time_run(r.avg_100)}</td>
-                        <td style="color:{trend_color}; font-weight:700; text-align:center;">
-                            {trend_symbol}
-                        </td>
-                        <td>{r.device}</td>
-                    </tr>
-                    """
+                <tr>
+                    <td>{r.name}</td>
+                    <td>{fmt_time_run(r.last)}</td>
+                    <td>{fmt_time_run(r.p50_100)}</td>
+                    <td>{fmt_time_run(r.p95_100)}</td>
+                    <td>{fmt_time_run(r.avg_100)}</td>
+                    <td style="
+                        color:{trend_color};
+                        font-weight:700;
+                        text-align:center;
+                    ">
+                        {trend_text}
+                    </td>
+                    <td>{r.device}</td>
+                </tr>
+                """
 
+                
         table_html = f"""
         <table style="
             width:100%;
