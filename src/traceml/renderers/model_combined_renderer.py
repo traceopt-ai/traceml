@@ -125,7 +125,7 @@ class ModelCombinedRenderer(BaseRenderer):
             pairs = vals["gpu"] if vals["gpu"] else vals["cpu"]
             pairs = pairs[-last_n:]
 
-            if pairs:
+            if pairs.size > 0:
                 steps, values = zip(*pairs)
                 x = np.asarray(steps, dtype=np.int64)
                 y = np.asarray(values, dtype=np.float64)
@@ -151,7 +151,7 @@ class ModelCombinedRenderer(BaseRenderer):
         pairs = self._get_step_memory_data()
         pairs = pairs[-last_n:]
 
-        if pairs:
+        if pairs.size > 0:
             steps, values = zip(*pairs)
             x = np.asarray(steps, dtype=np.int64)
             y = np.asarray(values, dtype=np.float64)
