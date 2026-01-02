@@ -200,9 +200,19 @@ class SystemRenderer(BaseRenderer):
                 pass
 
         cpu_ram_html = f"""
-                    <div style="margin-bottom:12px;">
-                        <b>CPU:</b> {fmt_percent(data['cpu'])}<br>
-                        <b>RAM:</b> {fmt_mem_new(data['ram_used'])} / {fmt_mem_new(data['ram_total'])}{ram_pct}
+                    <div style="
+                        display:flex;
+                        justify-content:space-between;
+                        align-items:center;
+                        margin-bottom:12px;
+                    ">
+                        <div>
+                            <b>CPU:</b> {fmt_percent(data['cpu'])}
+                        </div>
+                        <div>
+                            <b>RAM:</b>
+                            {fmt_mem_new(data['ram_used'])} / {fmt_mem_new(data['ram_total'])}{ram_pct}
+                        </div>
                     </div>
                 """
         return cpu_ram_html
