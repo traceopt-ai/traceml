@@ -251,7 +251,7 @@ class SystemRenderer(BaseRenderer):
         # --- Final card ---
         html = f"""
         <div style="{CARD_STYLE}">
-            <h4 style="color:#d47a00;"; margin-top:0;">System</h4>
+            <h4 style="color:#d47a00;"; margin-top:0;">System Metrics</h4>
 
             {cpu_ram_html}
 

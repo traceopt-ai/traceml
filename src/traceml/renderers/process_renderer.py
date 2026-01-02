@@ -12,6 +12,7 @@ from traceml.renderers.display.cli_display_manager import (
     PROCESS_LAYOUT,
 )
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
+from .utils import CARD_STYLE
 
 
 class ProcessRenderer(BaseRenderer):
@@ -118,14 +119,8 @@ class ProcessRenderer(BaseRenderer):
             """
 
         html = f"""
-        <div style="
-            border:2px solid #00bcd4;
-            border-radius:10px;
-            padding:14px;
-            max-width:380px;
-            font-family:Arial, sans-serif;
-        ">
-            <h4 style="color:#00bcd4; margin-top:0;">Process</h4>
+        <div style="{CARD_STYLE} ">
+            <h4 style="color:#d47a00; margin-top:0;">Process Metrics</h4>
 
             <div><b>CPU:</b> {fmt_percent(data['cpu_used'])}</div>
             <div><b>RAM:</b> {fmt_mem_new(data['ram_used'])}</div>
