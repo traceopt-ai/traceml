@@ -3,6 +3,7 @@ from rich.panel import Panel
 from rich.table import Table
 import shutil
 from typing import Optional
+from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
@@ -264,3 +265,78 @@ class ModelCombinedRenderer(BaseRenderer):
         """
         data = self.build_live_telemetry_payload()
         return data
+
+
+    def get_notebook_renderable(self) -> HTML:
+        telemetry = self.build_live_telemetry_payload()
+
+        def metric_block(title, stats, fmt):
+            trend = stats.get("trend", "")
+            trend_symbol = "—"
+            trend_color = "#666"
+
+            if trend == "+":
+                trend_symbol = "↑"
+                trend_color = "#d32f2f"  # red
+            elif trend == "-":
+                trend_symbol = "↓"
+                trend_color = "#2e7d32"  # green
+
+            return f"""
+            <div style="margin-bottom:10px;">
+                <b>{title}</b><br>
+                Last: {fmt(stats["last"])}<br>
+                p50(100): {fmt(stats["p50"])}<br>
+                p95(100): {fmt(stats["p95"])}<br>
+                Avg(100): {fmt(stats["avg100"])}
+                <span style="font-weight:700; color:{trend_color};">
+                    {trend_symbol}
+                </span>
+            </div>
+            """
+
+        html_blocks = []
+
+        # --- Step timers ---
+        html_blocks.append(
+            metric_block(
+                "Dataloader Fetch Time",
+                telemetry["dataLoader_fetch"]["stats"],
+                fmt_time_run,
+            )
+        )
+
+        html_blocks.append(
+            metric_block(
+                "Training Step Time",
+                telemetry["step_time"]["stats"],
+                fmt_time_run,
+            )
+        )
+
+        # --- Step memory ---
+        html_blocks.append(
+            metric_block(
+                "GPU Step Memory",
+                telemetry["step_gpu_memory"]["stats"],
+                fmt_mem_new,
+            )
+        )
+
+        html = f"""
+        <div style="
+            border:2px solid #00bcd4;
+            border-radius:10px;
+            padding:14px;
+            max-width:420px;
+            font-family:Arial, sans-serif;
+        ">
+            <h4 style="color:#00bcd4; margin-top:0;">
+                Model Summary
+            </h4>
+
+            {''.join(html_blocks)}
+        </div>
+        """
+
+        return HTML(html)
