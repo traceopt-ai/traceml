@@ -339,7 +339,7 @@ class ModelCombinedRenderer(BaseRenderer):
 
         html = f"""
         <div style="{CARD_STYLE}; width:100%;">
-            <h4 style="color:#00bcd4; margin:0 0 12px 0;">
+            <h4 style="color:#d47a00; margin:0 0 12px 0;">
                 Model Summary
             </h4>
 

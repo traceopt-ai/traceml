@@ -234,7 +234,7 @@ class StepTimerRenderer(BaseRenderer):
                 else:
                     trend_symbol = "—"
                     trend_color = "#666"
-                    
+
                 body += f"""
                     <tr>
                         <td>{r.name}</td>
@@ -242,7 +242,9 @@ class StepTimerRenderer(BaseRenderer):
                         <td>{fmt_time_run(r.p50_100)}</td>
                         <td>{fmt_time_run(r.p95_100)}</td>
                         <td>{fmt_time_run(r.avg_100)}</td>
-                        <td> color:{trend_color};">{trend_symbol}</td>
+                        <td style="color:{trend_color}; font-weight:700; text-align:center;">
+                            {trend_symbol}
+                        </td>
                         <td>{r.device}</td>
                     </tr>
                     """
