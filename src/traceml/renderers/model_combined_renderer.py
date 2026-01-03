@@ -70,6 +70,19 @@ class ModelCombinedRenderer(BaseRenderer):
         trend = ""
         trend_pct = 0.0
 
+        if arr.size >= 50 and arr.size <= 200:
+            early_p95 = np.percentile(arr[:50], 95)
+            later_avg = arr[50:].mean() if arr.size > 50 else arr.mean()
+
+            if later_avg > 1e-9 and early_p95 > 2.0 * later_avg:
+                pct = (early_p95 - later_avg) / later_avg * 100.0
+
+                if abs(pct) >= 5.0:
+                    sign = "+" if pct > 0 else ""
+                    trend = f"! {sign}{pct:.1f}%"
+                else:
+                    trend = "!"
+
         if arr.size >= 200:
             avg200 = float(win200.mean())
 

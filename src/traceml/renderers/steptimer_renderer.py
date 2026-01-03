@@ -133,7 +133,7 @@ class StepTimerRenderer(BaseRenderer):
         n = arr.size
 
         # Early instability
-        if n >= 50:
+        if n >= 50 and n <= 200:
             early_p95 = np.percentile(arr[:50], 95)
             later_avg = arr[50:].mean() if n > 50 else arr.mean()
 
@@ -147,7 +147,7 @@ class StepTimerRenderer(BaseRenderer):
                     trend = "!"
 
         # Recent vs previous trend (percentage)
-        if trend == "" and n >= 200:
+        if n >= 200:
             recent_avg = arr[-100:].mean()
             prev_avg = arr[-200:-100].mean()
 
