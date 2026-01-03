@@ -197,7 +197,7 @@ class ModelCombinedRenderer(BaseRenderer):
                 (int(row.get("step")), float(row.get("peak_allocated_mb", 0.0)))
             )
 
-        return np.asarray(gpu_vals, dtype=np.float64)
+        return gpu_vals
 
     # ------------------------------------------------------------------
     # Rendering
@@ -242,8 +242,8 @@ class ModelCombinedRenderer(BaseRenderer):
 
         table.add_row("")
         # ---- Step memory ----
-        mem_arr = self._extract_values(self._get_step_memory_data())
-        last, p50, p95, avg100, trend = self._compute_stats(mem_arr)
+        mem_arr = self._get_step_memory_data()
+        last, p50, p95, avg100, trend = self._compute_stats(np.array(mem_arr))
 
         table.add_row(
             "step_gpu_memory",
