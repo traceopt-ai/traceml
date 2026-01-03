@@ -1,6 +1,7 @@
 import numpy as np
 from rich.panel import Panel
 from rich.table import Table
+from rich.console import Console
 import shutil
 from typing import Optional
 from IPython.display import HTML
@@ -260,6 +261,7 @@ class ModelCombinedRenderer(BaseRenderer):
         title = "[bold blue]Model Summary[/bold blue]"
         if current_step is not None:
             title += f" (Step {current_step})"
+
         return Panel(
             table,
             title=title,
@@ -372,3 +374,7 @@ class ModelCombinedRenderer(BaseRenderer):
         """
 
         return HTML(html)
+
+
+    def log_summary(self, path: Optional[str] = None) -> None:
+        Console().print(self.get_panel_renderable())

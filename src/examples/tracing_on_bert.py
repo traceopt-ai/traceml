@@ -22,7 +22,7 @@ from transformers import (
 #   Attaches model-level hooks (activation memory, gradient memory, timings, etc.)
 # trace_step:
 #   Defines a training-step boundary (flushes TraceML buffers at step end)
-# trace_timestep:
+# trace_timestep:a
 #   Optional fine-grained timers for user-defined code sections
 from traceml.decorators import trace_model_instance, trace_step, trace_time
 
@@ -62,7 +62,7 @@ def prepare_data():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
     def tok(examples):
-        return tokenizer(examples["text"], truncation=True, max_length=128)
+        return tokenizer(examples["text"], truncation=True)
 
     train_ds = train_raw.map(tok, batched=True, remove_columns=["text"])
     val_ds = val_raw.map(tok, batched=True, remove_columns=["text"])
@@ -71,7 +71,7 @@ def prepare_data():
     val_ds = val_ds.rename_column("label", "labels")
 
     collator = DataCollatorWithPadding(
-        tokenizer=tokenizer, padding="max_length", max_length=128
+        tokenizer=tokenizer, padding=True
     )
 
     train_loader = DataLoader(
@@ -98,7 +98,7 @@ def load_batch_to_device(batch, device):
 
 @trace_time("forward", use_gpu=True)
 def forward_pass(model, batch, dtype):
-    with torch.cuda.amp.autocast(enabled=False, dtype=dtype):
+    with torch.cuda.amp.autocast(enabled=True, dtype=dtype):
         return model(**batch)
 
 
@@ -179,7 +179,7 @@ def main():
         optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
     )
 
-    scaler = torch.amp.GradScaler(device="cuda", enabled=False)
+    scaler = torch.amp.GradScaler(device="cuda", enabled=True)
 
     model.train()
     global_step = 0

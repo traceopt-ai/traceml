@@ -40,6 +40,7 @@ def launch_tracer_process(
     script_args,
     num_display_layers,
     nproc_per_node,
+    session_name
 ):
     """
     Parent launcher.
@@ -61,6 +62,7 @@ def launch_tracer_process(
     env["TRACEML_ENABLE_LOGGING"] = "1" if enable_logging else "0"
     env["TRACEML_LOGS_DIR"] = logs_dir
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(num_display_layers)
+    env["TRACEML_SESSION_NAME"] = session_name if session_name else ""
 
     tracer_path = str(Path(__file__).parent / "tracer.py")
 
@@ -99,6 +101,7 @@ def run_with_tracing(args):
         script_args=args.args or [],
         num_display_layers=args.num_display_layers,
         nproc_per_node=args.nproc_per_node,
+        session_name=args.session_name,
     )
 
 
@@ -114,6 +117,7 @@ def build_parser():
     run_parser.add_argument("--enable-logging", action="store_true")
     run_parser.add_argument("--logs-dir", type=str, default="./logs")
     run_parser.add_argument("--num-display-layers", type=int, default=10)
+    run_parser.add_argument("--session-name", type=str, default="")
 
     run_parser.add_argument(
         "--nproc-per-node",

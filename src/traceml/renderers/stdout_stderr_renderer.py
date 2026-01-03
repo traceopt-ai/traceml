@@ -3,6 +3,7 @@ from rich.text import Text
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import STDOUT_STDERR_LAYOUT
 from traceml.renderers.display.stdout_stderr_capture import StreamCapture
+from traceml.session import get_session_id
 import os
 
 
@@ -28,6 +29,8 @@ class StdoutStderrRenderer(BaseRenderer):
         self.stdout_stderr_cache = []
 
         # file log path setup
+        session_id = get_session_id()
+        log_dir = os.path.join(log_dir, session_id)
         os.makedirs(log_dir, exist_ok=True)
         self.log_path = os.path.join(log_dir, log_filename)
 
