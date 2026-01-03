@@ -40,8 +40,8 @@ def update_layer_timer_table_section(panel, dashboard_data):
         <thead style="position: sticky; top: 0; background: #f0f0f0; z-index: 1;">
             <tr>
                 <th style="text-align:left; padding:4px 8px;">Layer</th>
-                <th style="text-align:right; padding:4px 8px;">Activation (curr / peak)</th>
-                <th style="text-align:right; padding:4px 12px;">Gradient (curr / peak)</th>
+                <th style="text-align:right; padding:4px 8px;">Activation (curr / avg)</th>
+                <th style="text-align:right; padding:4px 12px;">Gradient (curr / avg)</th>
                 <th style="text-align:right; padding:4px 12px;">%</th>
             </tr>
         </thead>
@@ -57,11 +57,11 @@ def update_layer_timer_table_section(panel, dashboard_data):
                 </td>
                 <td style="text-align:right; padding:4px 8px;">
                     {fmt_time_ms(r.get("forward_current", 0.0))} /
-                    {fmt_time_ms(r.get("forward_peak", 0.0))}
+                    {fmt_time_ms(r.get("forward_avg", 0.0))}
                 </td>
                 <td style="text-align:right; padding:4px 12px;">
                     {fmt_time_ms(r.get("backward_current", 0.0))} /
-                    {fmt_time_ms(r.get("backward_peak", 0.0))}
+                    {fmt_time_ms(r.get("backward_avg", 0.0))}
                 </td>
                 <td style="text-align:right; padding:4px 12px;">
                     {float(r.get("pct", 0.0)):.1f}%
