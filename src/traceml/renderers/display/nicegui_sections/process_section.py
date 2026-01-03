@@ -3,12 +3,18 @@ import plotly.graph_objects as go
 from traceml.utils.formatting import fmt_mem_new
 from traceml.renderers.display.nicegui_sections.helper import (
     level_bar_continuous,
-    extract_time_axis
+    extract_time_axis,
 )
+
+
+METRIC_TEXT = "text-sm leading-normal text-gray-700"
+METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
+
 
 def build_process_section():
     card = ui.card().classes("m-2 p-2 w-full")
-    card.style("""
+    card.style(
+        """
         background: ffffff;
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
@@ -18,12 +24,11 @@ def build_process_section():
         overflow-y: auto; 
         line-height: 1.1;
         height: 350px;
-    """)
+    """
+    )
 
     with card:
-        ui.label("Process Metrics") \
-            .classes("text-xl font-bold mb-1 ml-1") \
-            .style("color:#d47a00;")
+        ui.label("Process Metrics").classes(METRIC_TEXT).style("color:#d47a00;")
 
         graph = _build_graph_section()
         cpu_text, cpu_bar = _build_cpu_section()
@@ -31,9 +36,12 @@ def build_process_section():
         gpu_text, gpu_bar = _build_gpu_section()
 
     return {
-        "cpu_text": cpu_text, "cpu_bar": cpu_bar,
-        "ram_text": ram_text, "ram_bar": ram_bar,
-        "gpu_text": gpu_text, "gpu_bar": gpu_bar,
+        "cpu_text": cpu_text,
+        "cpu_bar": cpu_bar,
+        "ram_text": ram_text,
+        "ram_bar": ram_bar,
+        "gpu_text": gpu_text,
+        "gpu_bar": gpu_bar,
         "graph": graph,
     }
 
@@ -44,10 +52,8 @@ def update_process_section(panel, data):
     cpu = data["cpu_used"]
     cores = data["cpu_logical_core_count"]
 
-    panel["cpu_text"].content = (
-        f"CPU ({cores} cores): {cpu:.1f}%"
-    )
-    panel["cpu_bar"].content = level_bar_continuous(cpu/cores)
+    panel["cpu_text"].content = f"CPU ({cores} cores): {cpu:.1f}%"
+    panel["cpu_bar"].content = level_bar_continuous(cpu / cores)
 
     # RAM
     ru, rt = data["ram_used"], data["ram_total"]
@@ -89,15 +95,12 @@ def _build_graph_section():
         margin=dict(l=10, r=10, t=10, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
-
         xaxis=dict(showgrid=False, visible=False),
-
         yaxis=dict(
             range=[0, 100],
             title=dict(text="RAM (%)", font=dict(color="#4caf50")),
             tickfont=dict(color="#4caf50"),
         ),
-
         yaxis2=dict(
             range=[0, 100],
             overlaying="y",
@@ -112,21 +115,29 @@ def _build_graph_section():
 
 def _build_cpu_section():
     with ui.row().classes("items-center justify-between w-full"):
-        cpu_text = ui.html("CPU: –", sanitize=False).classes("text-sm").style("color:#333")
+        cpu_text = (
+            ui.html("CPU: –", sanitize=False).classes(METRIC_TEXT).style("color:#333")
+        )
         cpu_bar = ui.html("", sanitize=False)
     return cpu_text, cpu_bar
 
 
 def _build_ram_section():
     with ui.row().classes("items-center justify-between w-full"):
-        ram_text = ui.html("RAM: –", sanitize=False).classes("text-sm").style("color:#333")
+        ram_text = (
+            ui.html("RAM: –", sanitize=False).classes(METRIC_TEXT).style("color:#333")
+        )
         ram_bar = ui.html("", sanitize=False)
     return ram_text, ram_bar
 
 
 def _build_gpu_section():
     with ui.row().classes("items-center justify-between w-full"):
-        gpu_text = ui.html("GPU Mem: –", sanitize=False).classes("text-sm").style("color:#333")
+        gpu_text = (
+            ui.html("GPU Mem: –", sanitize=False)
+            .classes(METRIC_TEXT)
+            .style("color:#333")
+        )
         gpu_bar = ui.html("", sanitize=False)
     return gpu_text, gpu_bar
 
@@ -152,17 +163,20 @@ def _update_graph_section(panel, process_table):
 
 def _update_ram_graph(process_table, fig, x_hist):
     ram_total = process_table[-1].get("ram_total", 1)
-    ram_hist = [
-        round(rec.get("ram_used", 0)/ram_total, 2) for rec in process_table
-    ][-100:]
-    fig.add_trace(go.Scatter(
-        y=ram_hist,
-        x=x_hist,
-        mode="lines",
-        name="RAM (%)",
-        yaxis="y",
-        line=dict(color="#4caf50"),
-    ))
+    ram_hist = [round(rec.get("ram_used", 0) / ram_total, 2) for rec in process_table][
+        -100:
+    ]
+    fig.add_trace(
+        go.Scatter(
+            y=ram_hist,
+            x=x_hist,
+            mode="lines",
+            name="RAM (%)",
+            yaxis="y",
+            line=dict(color="#4caf50"),
+        )
+    )
+
 
 def _update_gpu_graph(process_table, fig, x_hist):
     gpu_available = process_table[-1].get("gpu_available", False)
@@ -172,19 +186,25 @@ def _update_gpu_graph(process_table, fig, x_hist):
             gpu_raw = rec.get("gpu_raw", {}) or {}
             if gpu_raw:
                 gpu_total = sum(v.get("total", 0) for v in gpu_raw.values()) or 1
-                gpu_hist.append(sum(v.get("reserved", 0)/gpu_total*100 for v in gpu_raw.values()))
+                gpu_hist.append(
+                    sum(
+                        v.get("reserved", 0) / gpu_total * 100 for v in gpu_raw.values()
+                    )
+                )
             else:
                 gpu_hist.append(0)
         gpu_hist = gpu_hist[-100:]
 
-        fig.add_trace(go.Scatter(
-            y=gpu_hist,
-            x=x_hist,
-            mode="lines",
-            name="GPU Mem (%)",
-            yaxis="y2",
-            line=dict(color="#ff9800"),
-        ))
+        fig.add_trace(
+            go.Scatter(
+                y=gpu_hist,
+                x=x_hist,
+                mode="lines",
+                name="GPU Mem (%)",
+                yaxis="y2",
+                line=dict(color="#ff9800"),
+            )
+        )
 
 
 def _update_graph_layout(gpu_available, fig):
@@ -193,14 +213,12 @@ def _update_graph_layout(gpu_available, fig):
         margin=dict(l=10, r=10, t=10, b=35),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
-
         xaxis=dict(
             showgrid=False,
             tickangle=-30,
             tickmode="auto",
-            nticks=10,          # LIMIT LABELS TO 10
+            nticks=10,  # LIMIT LABELS TO 10
         ),
-
         showlegend=False,
     )
 

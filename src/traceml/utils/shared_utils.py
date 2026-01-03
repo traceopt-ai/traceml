@@ -1,6 +1,9 @@
 import torch.nn as nn
+import threading
 
 subtree_param_cache: dict[nn.Module, int] = {}
+
+EXECUTION_LAYER = threading.local()
 
 
 def subtree_param_bytes(module: nn.Module) -> int:
@@ -8,10 +11,7 @@ def subtree_param_bytes(module: nn.Module) -> int:
     if module in subtree_param_cache:
         return subtree_param_cache[module]
 
-    size = sum(
-        p.numel() * p.element_size()
-        for p in module.parameters(recurse=True)
-    )
+    size = sum(p.numel() * p.element_size() for p in module.parameters(recurse=True))
     subtree_param_cache[module] = size
     return size
 

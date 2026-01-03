@@ -13,7 +13,7 @@ from traceml.renderers.display.cli_display_manager import (
 )
 from traceml.utils.formatting import fmt_mem_new
 
-from traceml.renderers.combined_memory.services import (
+from traceml.renderers.layer_combined_memory.services import (
     LayerCombinedMemoryData,
     LayerCombinedMemorySummary,
 )
@@ -24,7 +24,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
     """
     Combined renderer using NEW total_peak_memory logic:
 
-       total_peak = param + activation_peak + gradient_peak
+       total_peak = param + forward_peak + backward_peak
 
     Sorting, % calculations, and display use this unified metric.
     """
@@ -32,8 +32,8 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
     def __init__(
         self,
         layer_db: Database,
-        activation_db: Database,
-        gradient_db: Database,
+        layer_forward_db: Database,
+        layer_backward_db: Database,
         top_n_layers: Optional[int] = 20,
     ):
         super().__init__(
@@ -44,14 +44,14 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         layer_table = layer_db.create_or_get_table("layer_memory")
         self._data_service = LayerCombinedMemoryData(
             layer_table=layer_table,
-            activation_db=activation_db,
-            gradient_db=gradient_db,
+            layer_forward_db=layer_forward_db,
+            layer_backward_db=layer_backward_db,
             top_n_layers=top_n_layers,
         )
         self._summary_service = LayerCombinedMemorySummary(
             layer_table=layer_table,
-            activation_db=activation_db,
-            gradient_db=gradient_db,
+            layer_forward_db=layer_forward_db,
+            layer_backward_db=layer_backward_db,
         )
 
     def get_panel_renderable(self) -> Panel:
@@ -67,18 +67,18 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
         table.add_column("Layer", justify="left", style="magenta")
         table.add_column("Params", justify="right", style="white")
-        table.add_column("Act (current/peak)", justify="right", style="cyan")
-        table.add_column("Grad (current/peak)", justify="right", style="green")
+        table.add_column("Forward (curr/peak)", justify="right", style="cyan")
+        table.add_column("Backward (curr/peak)", justify="right", style="green")
         table.add_column("% curr", justify="right", style="white")
 
         for row in d["top_items"]:
             table.add_row(
                 truncate_layer_name(row["layer"]),
                 fmt_mem_new(row["param_memory"]),
-                f"{fmt_mem_new(row['activation_current'])} / "
-                f"{fmt_mem_new(row['activation_peak'])}",
-                f"{fmt_mem_new(row['gradient_current'])} / "
-                f"{fmt_mem_new(row['gradient_peak'])}",
+                f"{fmt_mem_new(row['forward_current'])} / "
+                f"{fmt_mem_new(row['forward_peak'])}",
+                f"{fmt_mem_new(row['backward_current'])} / "
+                f"{fmt_mem_new(row['backward_peak'])}",
                 f"{row['pct']:.1f}%",
             )
 
@@ -87,13 +87,13 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
             table.add_row(
                 "Other Layers",
                 fmt_mem_new(o["param_memory"]),
-                f"{fmt_mem_new(o['activation_current'])} / {fmt_mem_new(o['activation_peak'])}",
-                f"{fmt_mem_new(o['gradient_current'])} / {fmt_mem_new(o['gradient_peak'])}",
+                f"{fmt_mem_new(o['forward_current'])}/{fmt_mem_new(o['forward_peak'])}",
+                f"{fmt_mem_new(o['backward_current'])}/{fmt_mem_new(o['backward_peak'])}",
                 f"{o['pct']:.1f}%",
             )
 
         if not d["top_items"] and o["total_current_memory"] <= 0:
-            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—",  "—")
+            table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—")
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 120)  # allow wider output
@@ -117,13 +117,13 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                     <td style="text-align:right;">{fmt_mem_new(row['param_memory'])}</td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(row['activation_current'])} /
-                        {fmt_mem_new(row['activation_peak'])}
+                        {fmt_mem_new(row['forward_current'])} /
+                        {fmt_mem_new(row['forward_peak'])}
                     </td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(row['gradient_current'])} /
-                        {fmt_mem_new(row['gradient_peak'])}
+                        {fmt_mem_new(row['backward_current'])} /
+                        {fmt_mem_new(row['backward_peak'])}
                     </td>
 
                     <td style="text-align:right;">{fmt_mem_new(row['total_current_memory'])}</td>
@@ -143,13 +143,13 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                     <td style="text-align:right;">{fmt_mem_new(o['param_memory'])}</td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(o['activation_current'])} /
-                        {fmt_mem_new(o['activation_peak'])}
+                        {fmt_mem_new(o['forward_current'])} /
+                        {fmt_mem_new(o['forward_peak'])}
                     </td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(o['gradient_current'])} /
-                        {fmt_mem_new(o['gradient_peak'])}
+                        {fmt_mem_new(o['backward_current'])} /
+                        {fmt_mem_new(o['backward_peak'])}
                     </td>
 
                     <td style="text-align:right;">{fmt_mem_new(o['total_current_memory'])}</td>
@@ -179,10 +179,10 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                     <tr>
                         <th style="text-align:left;">Layer</th>
                         <th style="text-align:right;">Params</th>
-                        <th style="text-align:right;">Activation (cur/peak)</th>
-                        <th style="text-align:right;">Gradient (cur/peak)</th>
-                        <th style="text-align:right;">Total Curr</th>
-                        <th style="text-align:right;">% curr</th>
+                        <th style="text-align:right;">Forward(curr/peak)</th>
+                        <th style="text-align:right;">Backward(curr/peak)</th>
+                        <th style="text-align:right;">Current Total</th>
+                        <th style="text-align:right;">Total Share (%)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -196,16 +196,15 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
     def get_dashboard_renderable(self) -> Dict[str, Any]:
         return self._data_service.compute_display_data()
 
-
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         console = Console()
 
         layer_stats = self._summary_service.compute_layer_memory_summary()
-        act_peaks = self._summary_service.compute_global_peaks(is_activation=True)
-        grad_peaks = self._summary_service.compute_global_peaks(is_activation=False)
+        fwd_peaks = self._summary_service.compute_global_peaks(is_forward=True)
+        bwd_peaks = self._summary_service.compute_global_peaks(is_forward=False)
 
-        top_acts = self._summary_service.top_n_from_dict(act_peaks, n=3)
-        top_grads = self._summary_service.top_n_from_dict(grad_peaks, n=3)
+        top_fwds = self._summary_service.top_n_from_dict(fwd_peaks, n=3)
+        top_bwds = self._summary_service.top_n_from_dict(bwd_peaks, n=3)
 
         table = Table.grid(padding=(0, 1))
         table.add_column(justify="left", style="bold")
@@ -213,8 +212,8 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         table.add_column(justify="right", style="white")
 
         self._render_section_layer_stats(table, layer_stats)
-        self._render_section_topk(table, "TOP-3 ACTIVATIONS", top_acts, "cyan")
-        self._render_section_topk(table, "TOP-3 GRADIENTS", top_grads, "green")
+        self._render_section_topk(table, "TOP-3 FORWARD", top_fwds, "cyan")
+        self._render_section_topk(table, "TOP-3 BACKWARD", top_bwds, "green")
 
         panel = Panel(
             table,
@@ -225,10 +224,14 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
     def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
         table.add_row(
-            "[blue]MODEL MEMORY[/blue]", "[dim]|[/dim]",
-            fmt_mem_new(stats["model_memory"]))
+            "[blue]MODEL MEMORY[/blue]",
+            "[dim]|[/dim]",
+            fmt_mem_new(stats["model_memory"]),
+        )
 
-    def _render_section_topk(self, table: Table, title: str, items: List, color: str) -> None:
+    def _render_section_topk(
+        self, table: Table, title: str, items: List, color: str
+    ) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
         if items:
             for layer, value in items:

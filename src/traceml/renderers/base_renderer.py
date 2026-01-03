@@ -29,7 +29,7 @@ class BaseRenderer:
         """
         raise NotImplementedError("Subclasses must implement get_notebook_renderable()")
 
-    def log_summary(self):
+    def log_summary(self, path):
         """
         Abstract method: Subclasses must implement to log a final summary.
         This will typically be called after the main display is stopped.

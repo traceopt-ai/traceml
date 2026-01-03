@@ -12,6 +12,7 @@ from traceml.renderers.display.cli_display_manager import (
     PROCESS_LAYOUT,
 )
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
+from .utils import CARD_STYLE
 
 
 class ProcessRenderer(BaseRenderer):
@@ -90,7 +91,7 @@ class ProcessRenderer(BaseRenderer):
 
         return Panel(
             table,
-            title="[bold cyan]Process[/bold cyan]",
+            title="[bold cyan]Process Metrics[/bold cyan]",
             title_align="center",
             border_style="cyan",
             width=panel_width,
@@ -100,34 +101,35 @@ class ProcessRenderer(BaseRenderer):
     def get_notebook_renderable(self) -> HTML:
         data = self._compute_snapshot()
 
-        # GPU formatting
+        # --- GPU ---
         if data["gpu_total"]:
             gpu_html = f"""
-                <p><b>GPU MEM:</b>
+                <div>
+                    <b>GPU MEM:</b>
                     {fmt_mem_new(data['gpu_used'])} /
                     {fmt_mem_new(data['gpu_reserved'])} /
                     {fmt_mem_new(data['gpu_total'])}
-                </p>
+                </div>
             """
         else:
             gpu_html = """
-                <p><b>GPU MEM:</b> <span style="color:red;">Not available</span></p>
+                <div><b>GPU MEM:</b>
+                    <span style="color:red;">Not available</span>
+                </div>
             """
 
         html = f"""
-        <div style="flex:1; border:2px solid #00bcd4; border-radius:8px; padding:10px;">
-            <h4 style="color:#00bcd4; margin:0;">Process</h4>
+        <div style="{CARD_STYLE} ">
+            <h4 style="color:#d47a00; margin-top:0;">Process Metrics</h4>
 
-            <p><b>CPU:</b> {fmt_percent(data['cpu_used'])}</p>
-            <p><b>RAM:</b> {fmt_mem_new(data['ram_used'])}</p>
+            <div><b>CPU:</b> {fmt_percent(data['cpu_used'])}</div>
+            <div><b>RAM:</b> {fmt_mem_new(data['ram_used'])}</div>
 
             {gpu_html}
         </div>
         """
 
-        return HTML(
-            f"<div style='display:flex; gap:20px; margin-top:10px;'>{html}</div>"
-        )
+        return HTML(html)
 
     def get_dashboard_renderable(self):
         data = self._compute_snapshot()
@@ -250,7 +252,7 @@ class ProcessRenderer(BaseRenderer):
         else:
             t.add_row("GPU", "[magenta]|[/magenta]", "[red]Not available[/red]")
 
-    def log_summary(self) -> None:
+    def log_summary(self, path) -> None:
         """Render the computed process summary to console (same style as before)."""
         console = Console()
         summary = self.compute_summary()

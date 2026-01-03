@@ -1,0 +1,79 @@
+from dataclasses import dataclass
+import torch
+from typing import Dict
+import sys
+import torch.nn as nn
+from queue import Full, Queue
+
+
+step_memory_queue: Queue = Queue(maxsize=2048)
+
+_temp_step_memory_buffer: Dict = {}
+
+
+@dataclass
+class StepMemoryEvent:
+    """
+    Peak GPU memory during a TraceML step.
+    """
+
+    step: int
+    model_id: int
+    device: str
+    peak_allocated_mb: float
+    peak_reserved_mb: float
+
+
+class StepMemoryTracker:
+    """
+    Tracks peak CUDA memory across a train step.
+    """
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+        self.model_id = id(model)
+
+        try:
+            self.device = next(model.parameters()).device
+        except StopIteration:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def reset(self):
+        """
+        Reset CUDA peak memory counters at step start.
+        """
+        if self.device.type == "cuda":
+            torch.cuda.reset_peak_memory_stats(self.device)
+
+    def record(self):
+        """
+        Record peak memory at step end.
+        """
+        if self.device.type != "cuda":
+            return
+
+        evt = StepMemoryEvent(
+            model_id=self.model_id,
+            device=str(self.device),
+            peak_allocated_mb=torch.cuda.max_memory_allocated(self.device),
+            peak_reserved_mb=torch.cuda.max_memory_reserved(self.device),
+            step=-1,
+        )
+        _temp_step_memory_buffer[self.model_id] = evt
+
+
+def flush_step_memory_buffer(model: nn.Module, step: int) -> None:
+    model_id = id(model)
+
+    evt = _temp_step_memory_buffer.pop(model_id, None)
+    if evt is None:
+        return
+
+    evt.step = step
+    try:
+        step_memory_queue.put_nowait(evt)
+    except Full:
+        print(
+            f"[TraceML:StepMemory] Queue full, dropping event for model {evt.model_id}",
+            file=sys.stderr,
+        )

@@ -5,7 +5,7 @@ from unittest.mock import patch
 import torch
 import torch.nn as nn
 
-from traceml.samplers.activation_memory_sampler import (
+from traceml.samplers.layer_forward_memory_sampler import (
     ActivationMemorySampler,
     ActivationSnapshot,
 )

@@ -2,7 +2,8 @@ import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from traceml.decorators import trace_model_instance
+
+from traceml.decorators import trace_model_instance, trace_step
 
 
 # A CNN that tolerates variable input sizes via AdaptiveAvgPool2d
@@ -45,7 +46,7 @@ def main():
 
     model = SimpleCNN().to(device)
 
-    # Attach activation hooks so your sampler sees events
+    # Attach model-level hooks (lightweight by default)
     trace_model_instance(model)
 
     criterion = nn.CrossEntropyLoss()
@@ -60,11 +61,13 @@ def main():
             inputs = torch.randn(bs, 3, H, W, device=device)
             labels = torch.randint(0, 10, (bs,), device=device)
 
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
+            # ---- TraceML step boundary ----
+            with trace_step(model):
+                optimizer.zero_grad(set_to_none=True)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
 
     model.eval()
     with torch.no_grad():

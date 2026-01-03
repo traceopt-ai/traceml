@@ -1,32 +1,36 @@
 from dataclasses import dataclass
 from queue import Queue, Full
-from typing import Dict, Any
+from typing import Dict, Any, List, Tuple
 import sys
 
 import torch
 import torch.nn as nn
 
-# Shared queue for activation events
-activation_memory_queue: Queue = Queue(maxsize=2048)
+
+# Shared queue for forward events
+layer_forward_memory_queue: Queue = Queue(maxsize=4096)
 
 # Registry to prevent multiple hook attachments per model
-_activation_memory_hook_registry: Dict[int, bool] = {}
+_layer_forward_memory_hook_registry: Dict[int, bool] = {}
+
+# In-memory buffer: model_id -> List[(layer_name, memory_per_device, timestamp)
+_layer_forward_memory_buffer: Dict[int, List] = {}
 
 
 @dataclass
-class ActivationMemoryEvent:
+class LayerForwardMemoryEvents:
     """
-    Represents a single forward-pass activation snapshot for a model layer.
+    Represents a single forward-pass snapshot for a model layer.
     """
 
     model_id: int
-    layer_name: str
-    memory_per_device: Dict[str, float]
+    layers: List[Tuple[str, Dict[str, float]]]
+    step: int
 
 
-def get_activation_memory_queue() -> Queue:
+def get_layer_forward_memory_queue() -> Queue:
     """Return the shared queue of activation events."""
-    return activation_memory_queue
+    return layer_forward_memory_queue
 
 
 def _tensor_size(tensor: torch.Tensor) -> float:
@@ -36,9 +40,9 @@ def _tensor_size(tensor: torch.Tensor) -> float:
     return float(tensor.numel() * tensor.element_size())
 
 
-class ActivationMemoryHook:
+class LayerForwardMemoryHook:
     """
-    Callable class used as a forward hook to capture activation sizes for a layer.
+    Callable class used as a forward hook to capture forward tensor sizes for a layer.
     """
 
     def __init__(self, model_id: int, layer_name: str):
@@ -65,24 +69,40 @@ class ActivationMemoryHook:
                 for o in output.values():
                     accumulate(o)
 
-            # Create and enqueue event
-            event = ActivationMemoryEvent(
-                model_id=self.model_id,
-                layer_name=self.layer_name,
-                memory_per_device=layer_acc.copy(),
+            _layer_forward_memory_buffer.setdefault(self.model_id, []).append(
+                (self.layer_name, layer_acc)
             )
-            try:
-                activation_memory_queue.put_nowait(event)
-            except Full:
-                pass  # drop if queue is full
+
         except Exception:
             print(
-                f"[TraceML] Error in ActivationMemoryHook for layer {self.layer_name}",
+                f"[TraceML] Error in LayerForwardMemoryHook for layer {self.layer_name}",
                 file=sys.stderr,
             )
 
 
-def attach_activation_memory_hooks(model: nn.Module):
+def flush_layer_forward_memory_buffers(model: nn.Module, step: int):
+    """
+    Convert buffered activation memory into events and enqueue them.
+    Called before optimizer.step().
+    """
+    model_id = id(model)
+    buf = _layer_forward_memory_buffer.pop(model_id, None)
+
+    if not buf:
+        return
+
+    event = LayerForwardMemoryEvents(
+        model_id=model_id,
+        layers=buf,
+        step=step,
+    )
+    try:
+        layer_forward_memory_queue.put_nowait(event)
+    except Full:
+        pass
+
+
+def attach_layer_forward_memory_hooks(model: nn.Module):
     """
     Attach a class-based forward hook to all leaf modules of `model`.
     Hooks are idempotent: repeated calls do nothing.
@@ -91,7 +111,7 @@ def attach_activation_memory_hooks(model: nn.Module):
         model (nn.Module): PyTorch model to instrument.
     """
     model_id = id(model)
-    if _activation_memory_hook_registry.get(model_id):
+    if _layer_forward_memory_hook_registry.get(model_id):
         # Hooks already attached
         return
 
@@ -99,6 +119,6 @@ def attach_activation_memory_hooks(model: nn.Module):
     for name, module in model.named_modules():
         if any(module.children()):  # skip non-leaf modules
             continue
-        module.register_forward_hook(ActivationMemoryHook(model_id, name))
+        module.register_forward_hook(LayerForwardMemoryHook(model_id, name))
 
-    _activation_memory_hook_registry[model_id] = True
+    _layer_forward_memory_hook_registry[model_id] = True

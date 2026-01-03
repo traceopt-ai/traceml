@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from traceml.decorators import trace_model_instance, trace_timestep
+from traceml.decorators import trace_model_instance, trace_time, trace_step
 
 # -------------------------
 # Medium CNN for MNIST
@@ -38,22 +38,17 @@ class MNISTCNN(nn.Module):
 # -------------------------
 
 
-@trace_timestep("dataloader")
-def get_next_batch(it):
-    return next(it)
-
-
-@trace_timestep("forward")
+@trace_time("forward")
 def forward_step(model, x):
     return model(x)
 
 
-@trace_timestep("backward")
+@trace_time("backward")
 def backward_step(loss):
     loss.backward()
 
 
-@trace_timestep("optimizer_step")
+@trace_time("optimizer_step")
 def optimizer_step(opt):
     opt.step()
 
@@ -85,31 +80,39 @@ def main():
 
     model = MNISTCNN().to(device)
 
-    print("I am here")
-    trace_model_instance(model)
+    # ⚠️ Deep instrumentation (use only for detailed debugging / profiling)
+    # Enables per-layer memory + timing hooks.
+    # Can add overhead in long training runs.
+    # Recommended for short runs, diagnosis, or one-off investigations.
+    trace_model_instance(
+        model,
+        trace_layer_forward__memory=True,
+        trace_layer_backward_memory=True,
+        trace_layer_forward_time=True,
+        trace_layer_backward_time=True,
+    )
 
     opt = optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
 
-    loader_iter = iter(loader)
-
     print("Starting training...")
-    for i in range(len(loader)):
-        # for i in range(500):
-        xb, yb = get_next_batch(loader_iter)
-        xb, yb = xb.to(device), yb.to(device)
+    for step, (xb, yb) in enumerate(loader):
 
-        opt.zero_grad()
-        out = forward_step(model, xb)
-        loss = loss_fn(out, yb)
+        with trace_step(model):
+            xb, yb = xb.to(device), yb.to(device)
 
-        backward_step(loss)
-        optimizer_step(opt)
+            opt.zero_grad(set_to_none=True)
 
-        if i % 50 == 0:
-            print(f"Step {i}, loss={loss.item():.4f}")
+            out = forward_step(model, xb)
+            loss = loss_fn(out, yb)
 
-        if i == 500:  # ~2–4 minutes depending on GPU
+            backward_step(loss)
+            optimizer_step(opt)
+
+        if step % 50 == 0:
+            print(f"Step {step}, loss={loss.item():.4f}")
+
+        if step == 500:
             break
 
 

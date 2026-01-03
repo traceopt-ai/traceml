@@ -1,6 +1,6 @@
 import uuid
 import datetime
-
+import os
 _SESSION_ID = None
 
 
@@ -12,8 +12,11 @@ def generate_session_id():
 
 def get_session_id():
     global _SESSION_ID
-    if _SESSION_ID is None:
+    session_name = os.environ["TRACEML_SESSION_NAME"]
+    if session_name == "":
         _SESSION_ID = generate_session_id()
+    else:
+        _SESSION_ID = session_name
     return _SESSION_ID
 
 
