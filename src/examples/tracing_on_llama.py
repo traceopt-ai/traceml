@@ -26,11 +26,11 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 # =========================
 SEED = 42
 
-MODEL_NAME = "EleutherAI/pythia-2.8b"
+MODEL_NAME = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
 DATASET_NAME = "tatsu-lab/alpaca"
 
 # Training + demo knobs
-MAX_LENGTH = 512
+MAX_LENGTH = 1024
 MAX_TRAIN_EXAMPLES = 20000     # raise for longer runs; keep smaller for quick demo
 BATCH_SIZE = 1                 # QLoRA-friendly on T4
 GRAD_ACCUM_STEPS = 8
