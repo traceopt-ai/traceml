@@ -26,7 +26,7 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 # =========================
 SEED = 42
 
-MODEL_NAME = "meta-llama/Llama-2-3b-hf"
+MODEL_NAME = "EleutherAI/pythia-2.8b"
 DATASET_NAME = "tatsu-lab/alpaca"
 
 # Training + demo knobs
