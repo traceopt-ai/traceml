@@ -86,7 +86,7 @@ def main():
     # Recommended for short runs, diagnosis, or one-off investigations.
     trace_model_instance(
         model,
-        trace_layer_forward__memory=True,
+        trace_layer_forward_memory=True,
         trace_layer_backward_memory=True,
         trace_layer_forward_time=True,
         trace_layer_backward_time=True,
