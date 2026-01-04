@@ -69,7 +69,7 @@ def trace_step(model: nn.Module):
 def trace_model_instance(
     model: nn.Module,
     sample_layer_memory: bool = True,
-    trace_layer_forward__memory: bool = True,
+    trace_layer_forward_memory: bool = True,
     trace_layer_backward_memory: bool = True,
     trace_layer_forward_time: bool = True,
     trace_layer_backward_time: bool = True,
@@ -93,7 +93,7 @@ def trace_model_instance(
         if sample_layer_memory:
             model_queue.put(model)
 
-        if trace_layer_forward__memory:
+        if trace_layer_forward_memory:
             attach_layer_forward_memory_hooks(model)
 
         if trace_layer_backward_memory:
