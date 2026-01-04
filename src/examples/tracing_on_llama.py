@@ -26,7 +26,7 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 # =========================
 SEED = 42
 
-MODEL_NAME = "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T"
+MODEL_NAME = "meta-llama/Llama-2-3b-hf"
 DATASET_NAME = "tatsu-lab/alpaca"
 
 # Training + demo knobs
