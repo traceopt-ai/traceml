@@ -19,7 +19,7 @@ def build_step_timing_table_section():
     )
 
     with card:
-        ui.label("Step Timings").classes("text-l font-bold mb-2").style(
+        ui.label("Trace Timers").classes("text-l font-bold mb-2").style(
             "color:#d47a00;"
         )
 
