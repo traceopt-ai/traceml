@@ -13,6 +13,7 @@ from traceml.renderers.display.cli_display_manager import (
 )
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from .utils import CARD_STYLE
+import numpy as np
 
 
 class ProcessRenderer(BaseRenderer):
@@ -146,111 +147,111 @@ class ProcessRenderer(BaseRenderer):
             return {"total_samples": 0}
 
         cpu_vals, cpu_logical_cores = [], []
-        ram_vals, ram_total = [], []
+        ram_vals, ram_total_vals = [], []
         gpu_used_vals, gpu_reserved_vals, gpu_total_vals = [], [], []
+        gpu_single_used_peak_vals = []
 
         for row in self._table:
+
             cpu_vals.append(row.get("cpu_percent", 0.0))
-            ram_vals.append(row.get("ram_used", 0.0))
             cpu_logical_cores.append(row.get("cpu_logical_core_count", 0.0))
-            ram_total.append(row.get("ram_total", 0.0))
+
+            ram_vals.append(row.get("ram_used", 0.0))
+            ram_total_vals.append(row.get("ram_total", 0.0))
 
             # GPU
             g = row.get("gpu_raw", {}) or {}
             if g:
-                used = sum(v.get("used", 0) for v in g.values())
-                reserved = sum(v.get("reserved", 0) for v in g.values())
-                total = sum(v.get("total", 0) for v in g.values())
-                gpu_used_vals.append(used)
-                gpu_reserved_vals.append(reserved)
-                gpu_total_vals.append(total)
+                used = [v.get("used", 0) for v in g.values()]
+                reserved = [v.get("reserved", 0) for v in g.values()]
+                total = [v.get("total", 0) for v in g.values()]
+                gpu_used_vals.append(sum(used))
+                gpu_reserved_vals.append(sum(reserved))
+                gpu_total_vals.append(sum(total))
 
+                # failure-critical: single-device max
+                gpu_single_used_peak_vals.append(max(used))
+
+        cpu_vals = [v / 100.0 for v in cpu_vals]
         summary = {
             "total_samples": len(self._table),
-            "cpu_average_percent": float(sum(cpu_vals)) / len(cpu_vals),
-            "cpu_peak_percent": max(cpu_vals),
-            "cpu_logical_core_count": max(
-                cpu_logical_cores
-            ),  # ProcessSampler no longer gives this 'live'
-            "ram_average_used": float(sum(ram_vals)) / len(ram_vals),
-            "ram_peak_used": max(ram_vals),
-            "ram_total": max(ram_total),
+
+            "cpu_cores_p50": round(float(np.median(cpu_vals)), 2),
+            "cpu_cores_p95": round(float(np.percentile(cpu_vals, 95)), 2),
+            "cpu_logical_core_count": float(np.max(cpu_logical_cores)),
+
+            "ram_used_p95": round(float(np.percentile(ram_vals, 95)), 2),
+            "ram_used_peak": round(float(np.max(ram_vals)), 2),
+            "ram_total": float(np.max(ram_total_vals)),
+
             "is_GPU_available": bool(gpu_used_vals),
         }
 
         if gpu_used_vals:
             summary.update(
                 {
-                    "gpu_average_memory_used": float(sum(gpu_used_vals))
-                    / len(gpu_used_vals),
-                    "gpu_peak_memory_used": max(gpu_used_vals),
-                    "gpu_average_memory_reserved": float(sum(gpu_reserved_vals))
-                    / len(gpu_reserved_vals),
-                    "gpu_peak_memory_reserved": max(gpu_reserved_vals),
-                    "gpu_memory_total": float(max(gpu_total_vals)),
+                    # GPU memory used: sustained pressure + absolute risk
+                    "gpu_mem_used_p95_total": round(float(np.percentile(gpu_used_vals, 95)), 2),
+                    "gpu_mem_used_peak_total": round(float(np.max(gpu_used_vals)), 2),
+
+                    # OOM risk (single device)
+                    "gpu_mem_used_peak_single": round(float(np.max(gpu_single_used_peak_vals)), 2),
+
+                    # GPU memory reserved
+                    "gpu_mem_reserved_peak_total": round(float(np.max(gpu_reserved_vals)), 2),
+                    "gpu_mem_total_capacity": float(np.max(gpu_total_vals)),
+
                 }
             )
 
         return summary
 
     def _proc_cpu_summary(self, t: Table, block: dict) -> None:
-        average_cpu_percent = block["cpu_average_percent"]
-        peak_cpu_percent = block["cpu_peak_percent"]
-        avg_cores_used = round(average_cpu_percent / 100, 2)
-        peak_cores_used = round(peak_cpu_percent / 100, 2)
+        p50 = block.get("cpu_cores_p50", 0.0)
+        p95 = block.get("cpu_cores_p95", 0.0)
+        cores = block.get("cpu_logical_core_count", 0.0)
 
         t.add_row(
-            "CPU AVG",
+            f"CPU (p50 / p95)",
             "[magenta]|[/magenta]",
-            f"{average_cpu_percent:.1f}% (~{avg_cores_used:.1f} cores of "
-            f"{block['cpu_logical_core_count']:.1f} cores)",
-        )
-        t.add_row(
-            "CPU PEAK",
-            "[magenta]|[/magenta]",
-            f"{peak_cpu_percent:.1f}% (~{peak_cores_used:.1f} cores of "
-            f"{block['cpu_logical_core_count']:.1f} cores)",
+            f"{p50:.2f} / {p95:.2f} cores (of {cores:.0f})",
         )
 
-    def _proc_ram_summary(self, t, block: dict) -> None:
-        # RAM Summary
-        avg_ram_used = block["ram_average_used"]
-        peak_ram_used = block["ram_peak_used"]
-        total_ram = block["ram_total"]
+    def _proc_ram_summary(self, t: Table, block: dict) -> None:
+        p95 = block.get("ram_used_p95", 0.0)
+        peak = block.get("ram_used_peak", 0.0)
+        total = block.get("ram_total", 0.0)
+
+        pct_p95 = (p95 / total * 100.0) if total else 0.0
+        pct_peak = (peak / total * 100.0) if total else 0.0
 
         t.add_row(
-            "RAM AVG",
+            "RAM (p95 / peak)",
             "[magenta]|[/magenta]",
-            f"{fmt_mem_new(avg_ram_used)} / {fmt_mem_new(total_ram)} "
-            f"({(avg_ram_used / total_ram) * 100:.1f}%)",
-        )
-        t.add_row(
-            "RAM PEAK",
-            "[magenta]|[/magenta]",
-            f"{fmt_mem_new(peak_ram_used)} / {fmt_mem_new(total_ram)} "
-            f"({(peak_ram_used / total_ram) * 100:.1f}%)",
+            f"{fmt_mem_new(p95)} ({pct_p95:.0f}%) / {fmt_mem_new(peak)} ({pct_peak:.0f}%) "
+            f"(total {fmt_mem_new(total)})",
         )
 
-    def _proc_gpu_memory(self, t, block: dict) -> None:
-        if block.get("is_GPU_available", False):
-            total_gpu = block.get("gpu_memory_total", 0)
-
-            t.add_row(
-                "GPU MEM AVG (Used/Reserved/Total)",
-                "[magenta]|[/magenta]",
-                f"{fmt_mem_new(block['gpu_average_memory_used'])} / "
-                f"{fmt_mem_new(block['gpu_average_memory_reserved'])} / "
-                f"{fmt_mem_new(total_gpu)}",
-            )
-            t.add_row(
-                "GPU MEM PEAK (Used/Reserved/Total)",
-                "[magenta]|[/magenta]",
-                f"{fmt_mem_new(block['gpu_peak_memory_used'])} /"
-                f"({fmt_mem_new(block['gpu_peak_memory_reserved'])} / "
-                f" {fmt_mem_new(total_gpu)}",
-            )
-        else:
+    def _proc_gpu_memory(self, t: Table, block: dict) -> None:
+        if not block.get("is_GPU_available", False):
             t.add_row("GPU", "[magenta]|[/magenta]", "[red]Not available[/red]")
+            return
+
+        total = block.get("gpu_mem_total_capacity", 0.0)
+
+        used_p95_total = block.get("gpu_mem_used_p95_total", 0.0)
+        used_peak_total = block.get("gpu_mem_used_peak_total", 0.0)
+        used_peak_single = block.get("gpu_mem_used_peak_single", 0.0)
+        reserved_peak_total = block.get("gpu_mem_reserved_peak_total", 0.0)
+
+        # One compact row: totals + single-device risk + reserved
+        t.add_row(
+            "GPU MEM (p95 / peak)",
+            "[magenta]|[/magenta]",
+            f"total {fmt_mem_new(used_p95_total)} / {fmt_mem_new(used_peak_total)} "
+            f"(cap {fmt_mem_new(total)}) | max device {fmt_mem_new(used_peak_single)} "
+            f"| reserved peak {fmt_mem_new(reserved_peak_total)}",
+        )
 
     def log_summary(self, path) -> None:
         """Render the computed process summary to console (same style as before)."""
