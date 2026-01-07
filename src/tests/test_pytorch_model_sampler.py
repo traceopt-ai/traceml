@@ -12,7 +12,7 @@ from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.layer_forward_memory_sampler import ActivationMemorySampler
 from traceml.samplers.layer_backward_memory_sampler import GradientMemorySampler
 
-from traceml.manager.tracker_manager import TrackerManager
+from traceml.runtime import TrackerManager
 
 from traceml.renderers.system_process_renderer import SystemProcessRenderer
 from traceml.renderers.layer_combined_memory_renderer import (

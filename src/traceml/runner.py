@@ -1,9 +1,27 @@
+"""
+TraceML runner.
+
+This module is the execution wrapper used by TraceML to run user scripts
+in a controlled environment.
+
+Responsibilities:
+- Read TraceML configuration from environment variables
+- Start and stop the TrackerManager lifecycle
+- Execute the user script in-process via runpy
+- Capture crashes and enrich error reporting
+
+This module intentionally runs in the same Python process as the user
+script to ensure hooks, stack traces, and execution context are accurate.
+"""
+
+
+
 import os
 import sys
 import runpy
 import traceback
 
-from traceml.manager.tracker_manager import TrackerManager
+from traceml.runtime import TrackerManager
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 

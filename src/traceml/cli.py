@@ -48,7 +48,7 @@ def launch_tracer_process(
     This function:
     1. Sets TraceML configuration via environment variables
     2. Launches a *child Python process* via torchrun
-    3. Hands off execution to tracer.py, which then runs the user script
+    3. Hands off execution to runner.py, which then runs the user script
 
     We intentionally isolate tracing in a subprocess so:
     - user code remains untouched
@@ -64,7 +64,7 @@ def launch_tracer_process(
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(num_display_layers)
     env["TRACEML_SESSION_NAME"] = session_name if session_name else ""
 
-    tracer_path = str(Path(__file__).parent / "tracer.py")
+    runner_path = str(Path(__file__).parent / "runner.py")
 
     if nproc_per_node > 1:
         print(
@@ -77,7 +77,7 @@ def launch_tracer_process(
         )
 
     if mode in ["cli", "dashboard"]:
-        cmd = ["torchrun", "--nproc_per_node=1", tracer_path, "--", *script_args]
+        cmd = ["torchrun", "--nproc_per_node=1", runner_path, "--", *script_args]
     else:
         raise ValueError(f"Invalid mode '{mode}'")
 

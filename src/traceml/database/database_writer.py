@@ -64,7 +64,7 @@ class DatabaseWriter:
             new_rows = rows[last:]
             if not new_rows:
                 continue
-                
+
             with open(path, "a") as f:
                 for r in new_rows:
                     f.write(json.dumps(r) + "\n")

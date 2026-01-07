@@ -13,7 +13,7 @@ from traceml.samplers.layer_memory_sampler import (
 from traceml.renderers.layer_combined_memory_renderer import (
     LayerCombinedRenderer,
 )
-from traceml.manager.tracker_manager import TrackerManager
+from traceml.runtime import TrackerManager
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 from traceml.decorators import trace_model_instance
 
