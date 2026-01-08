@@ -21,7 +21,7 @@ import sys
 import runpy
 import traceback
 
-from traceml.runtime import TrackerManager
+from traceml.runtime import TraceMLRuntime
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
@@ -68,7 +68,7 @@ def start_tracker(cfg):
     - start background samplers
     - capture early allocations
     """
-    tracker = TrackerManager(
+    tracker = TraceMLRuntime(
         interval_sec=cfg["interval"],
         mode=cfg["mode"],
         num_display_layers=cfg["num_display_layers"],

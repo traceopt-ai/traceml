@@ -12,6 +12,10 @@ def generate_session_id():
 
 def get_session_id():
     global _SESSION_ID
+
+    if _SESSION_ID is not None:
+        return _SESSION_ID
+
     session_name = os.environ["TRACEML_SESSION_NAME"]
     if session_name == "":
         _SESSION_ID = generate_session_id()

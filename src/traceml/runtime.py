@@ -41,7 +41,7 @@ _DISPLAY_BACKENDS = {
 }
 
 
-class TrackerManager:
+class TraceMLRuntime:
     """
     Central coordinator for TraceML runtime components.
 
@@ -68,7 +68,7 @@ class TrackerManager:
 
         # Centralized error logging
         setup_error_logger()
-        self.logger = get_error_logger("TrackerManager")
+        self.logger = get_error_logger("TraceMLRuntime")
 
         # Resolve display backend
         try:
@@ -95,7 +95,7 @@ class TrackerManager:
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
-            name="TraceMLTrackerThread",
+            name="TraceMLRuntimeThread",
             daemon=True,
         )
 
@@ -201,6 +201,8 @@ class TrackerManager:
                     f"Sampler {sampler.__class__.__name__}.db.flush() failed",
                     sampler.db.writer.flush,
                 )
+            else:
+                print(f"DB IS MISSING {sampler.__class__.__name__}")
 
     def _run_renderers(self):
         """
@@ -259,7 +261,7 @@ class TrackerManager:
         Start background tracking.
         """
         self._safe(
-            "Failed to start TrackerManager thread",
+            "Failed to start TraceMLRuntime thread",
             self._thread.start,
         )
 
