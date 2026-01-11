@@ -4,7 +4,7 @@ import numpy as np
 from unittest.mock import patch
 
 from traceml.samplers.system_sampler import SystemSampler
-from traceml.runtime import TrackerManager
+from traceml.runtime_bck import TrackerManager
 from traceml.renderers.system_process_renderer import SystemProcessRenderer
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
 

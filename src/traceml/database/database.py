@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from traceml.database.database_writer import DatabaseWriter
 
 
@@ -7,9 +7,12 @@ class Database:
     Each "table" is a dict. Table names must be unique.
     """
 
-    def __init__(self, sampler_name):
+    def __init__(self, sampler_name, max_rows: Optional[int] = None):
         self._tables: Dict[str, List[Any]] = {}
         self.writer = DatabaseWriter(self, sampler_name=sampler_name)
+        self.sender = None
+
+        self.max_rows = max_rows
 
     def create_table(self, name: str) -> List[Any]:
         """
@@ -36,7 +39,15 @@ class Database:
         """
         if table not in self._tables:
             raise ValueError(f"Table '{table}' does not exist.")
-        self._tables[table].append(record)
+
+        rows = self._tables[table]
+        rows.append(record)
+
+        # Enforce bounded size if configured
+        if self.max_rows is not None and len(rows) > self.max_rows:
+            # Drop oldest rows
+            excess = len(rows) - self.max_rows
+            del rows[:excess]
 
     def get_record_at_index(self, table: str, index: int) -> Any:
         """

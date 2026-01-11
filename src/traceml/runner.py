@@ -14,8 +14,6 @@ This module intentionally runs in the same Python process as the user
 script to ensure hooks, stack traces, and execution context are accurate.
 """
 
-
-
 import os
 import sys
 import runpy
@@ -40,6 +38,12 @@ def read_traceml_env():
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
         "num_display_layers": int(os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")),
+
+        "enable_ddp_telemetry": os.environ.get("TRACEML_DDP_TELEMETRY", "1") == "1",
+        "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
+        "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
+        "remote_max_rows": int(os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")),
+        "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
     }
 
 
@@ -59,7 +63,7 @@ def extract_script_args():
         return []
 
 
-def start_tracker(cfg):
+def start_runtime(cfg):
     """
     Initialize and start the TraceML tracker.
 
@@ -68,26 +72,31 @@ def start_tracker(cfg):
     - start background samplers
     - capture early allocations
     """
-    tracker = TraceMLRuntime(
+    runtime = TraceMLRuntime(
         interval_sec=cfg["interval"],
         mode=cfg["mode"],
         num_display_layers=cfg["num_display_layers"],
         enable_logging=cfg["enable_logging"],
         logs_dir=cfg["logs_dir"],
+        enable_ddp_telemetry=cfg["enable_ddp_telemetry"],
+        tcp_host=cfg["tcp_host"],
+        tcp_port=cfg["tcp_port"],
+        remote_max_rows=cfg["remote_max_rows"],
+        session_id=cfg["session_id"],
     )
     print("[TraceML] Starting tracker")
-    tracker.start()
-    return tracker
+    runtime.start()
+    return runtime
 
 
-def stop_tracker(tracker):
+def stop_runtime(runtime):
     """
     Stop the tracker and flush all collected data.
 
     This is always called, even if the user script crashes.
     """
-    tracker.stop()
-    tracker.log_summaries(path=None)
+    runtime.stop()
+    runtime.log_summaries(path=None)
 
 
 def run_user_script(script_path, script_args):
@@ -134,7 +143,7 @@ def main():
     cfg = read_traceml_env()
     script_args = extract_script_args()
 
-    tracker = start_tracker(cfg)
+    runtime = start_runtime(cfg)
 
     exit_code = 0
     error = None
@@ -150,7 +159,7 @@ def main():
         exit_code = 1
 
     finally:
-        stop_tracker(tracker)
+        stop_runtime(runtime)
 
     if error:
         report_crash(error)

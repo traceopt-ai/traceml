@@ -2,8 +2,8 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from traceml.session import get_session_id
 from traceml.config import config
+from traceml.distributed import get_ddp_info
 
 
 def setup_error_logger() -> logging.Logger:
@@ -27,8 +27,9 @@ def setup_error_logger() -> logging.Logger:
     )
     logger.addHandler(sh)
 
-    session_id = get_session_id()
-    errors_dir = Path(config.logs_dir) / session_id
+    _, local_rank, _ = get_ddp_info()
+    session_id = config.session_id
+    errors_dir = Path(config.logs_dir) / session_id / str(local_rank)
     errors_dir.mkdir(parents=True, exist_ok=True)
 
     fh = RotatingFileHandler(
