@@ -19,6 +19,7 @@ from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySa
 from traceml.samplers.steptimer_sampler import StepTimerSampler
 from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
 from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
+from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
 
 # Renderers
 from traceml.renderers.system_renderer import SystemRenderer
@@ -38,6 +39,10 @@ from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayMana
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.database.database_sender import DBIncrementalSender
 from traceml.tcp_transport import TCPServer, TCPClient, TCPConfig
+
+from traceml.stdout_stderr_capture import StreamCapture
+
+
 
 
 _DISPLAY_BACKENDS = {
@@ -75,6 +80,7 @@ class TraceMLRuntime:
             tcp_port: int = 29765,
             session_id: str = "",
     ):
+        # Update global config
         config.enable_logging = enable_logging
         config.logs_dir = logs_dir
         if session_id:
@@ -155,7 +161,7 @@ class TraceMLRuntime:
             sender = DBIncrementalSender(
                 db=db,
                 sampler_name=sampler.sampler_name,
-                client=self._tcp_client,
+                sender=self._tcp_client,
                 rank=self.local_rank,
             )
             db.sender = sender
@@ -218,8 +224,10 @@ class TraceMLRuntime:
             )
         ]
 
+        std_sampler = StdoutStderrSampler()
+        samplers += [std_sampler]
         if mode == "cli" and local_rank < 1:
-            renderers.append(StdoutStderrRenderer())
+            renderers += [StdoutStderrRenderer(database=std_sampler.db)]
 
         return samplers, renderers
 
@@ -284,6 +292,11 @@ class TraceMLRuntime:
 
 
     def start(self):
+        # Enable stdout/stderr capture for the whole process
+        self._safe(
+            "Stdout/stderr capture enable failed",
+            StreamCapture.redirect_to_capture,
+        )
         self._safe("Failed to start TraceMLRuntime", self._thread.start)
 
     def stop(self):
@@ -301,6 +314,11 @@ class TraceMLRuntime:
 
         if self._tcp_client:
             self._safe("TCPClient.close failed", self._tcp_client.close)
+
+        self._safe(
+            "Stdout/stderr restore failed",
+            StreamCapture.redirect_to_original,
+        )
 
 
 

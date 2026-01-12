@@ -54,6 +54,7 @@ class RemoteDBStore:
         tables = message.get("tables", {})
 
         print(message)
+        asdas()
 
         self._last_seen[rank] = time.time()
 

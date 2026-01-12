@@ -105,7 +105,8 @@ def build_parser():
     run_parser.add_argument("--session-id", type=str, default="")
     run_parser.add_argument(
         "--disable-ddp-telemetry",
-        action="store_false",
+        type=bool,
+        default=False,
         help="Disable cross-rank TraceML telemetry (TCP-based)",
     )
     run_parser.add_argument(

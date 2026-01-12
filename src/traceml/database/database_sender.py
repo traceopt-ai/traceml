@@ -41,12 +41,6 @@ class DBIncrementalSender:
         if not tables_payload:
             return
 
-        print({
-            "rank": self.rank,
-            "sampler": self.sampler_name,
-            "timestamp": time.time(),
-            "tables": tables_payload,
-        })
         self.sender.send({
             "rank": self.rank,
             "sampler": self.sampler_name,

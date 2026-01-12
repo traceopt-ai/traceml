@@ -272,10 +272,7 @@ def main():
                 logits = out.logits
 
                 # Backward + optimizer
-                print(f"[rank {local_rank}] entering backward", flush=True)
-
                 backward_pass(loss, scaler)
-                print(f"[rank {local_rank}] entering backward", flush=True)
 
                 optimizer_step(scaler, optimizer, scheduler)
 
