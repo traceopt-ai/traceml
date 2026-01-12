@@ -23,6 +23,12 @@ from traceml.runtime import TraceMLRuntime
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
+class NoOpRuntime:
+    def start(self): pass
+    def stop(self): pass
+    def log_summaries(self, path=None): pass
+
+
 def read_traceml_env():
     """
     Read TraceML configuration injected by the CLI launcher.
@@ -72,31 +78,43 @@ def start_runtime(cfg):
     - start background samplers
     - capture early allocations
     """
-    runtime = TraceMLRuntime(
-        interval_sec=cfg["interval"],
-        mode=cfg["mode"],
-        num_display_layers=cfg["num_display_layers"],
-        enable_logging=cfg["enable_logging"],
-        logs_dir=cfg["logs_dir"],
-        enable_ddp_telemetry=cfg["enable_ddp_telemetry"],
-        tcp_host=cfg["tcp_host"],
-        tcp_port=cfg["tcp_port"],
-        remote_max_rows=cfg["remote_max_rows"],
-        session_id=cfg["session_id"],
-    )
-    print("[TraceML] Starting tracker")
-    runtime.start()
-    return runtime
+    try:
+        runtime = TraceMLRuntime(
+            interval_sec=cfg["interval"],
+            mode=cfg["mode"],
+            num_display_layers=cfg["num_display_layers"],
+            enable_logging=cfg["enable_logging"],
+            logs_dir=cfg["logs_dir"],
+            enable_ddp_telemetry=cfg["enable_ddp_telemetry"],
+            tcp_host=cfg["tcp_host"],
+            tcp_port=cfg["tcp_port"],
+            remote_max_rows=cfg["remote_max_rows"],
+            session_id=cfg["session_id"],
+        )
+        print("[TraceML] Starting tracker")
+        runtime.start()
+        return runtime
+    except Exception as e:
+        print(f"[TraceML] Failed to start TraceMLRuntime: {e}", file=sys.stderr)
+        traceback.print_exception(type(e), e, e.__traceback__)
+        return NoOpRuntime()
+
 
 
 def stop_runtime(runtime):
     """
-    Stop the tracker and flush all collected data.
-
-    This is always called, even if the user script crashes.
+    Best-effort shutdown.
+    Never raise.
     """
-    runtime.stop()
-    runtime.log_summaries(path=None)
+    try:
+        runtime.stop()
+        runtime.log_summaries(path=None)
+    except Exception as e:
+        print(
+            "[TraceML] Error during shutdown (ignored)",
+            file=sys.stderr,
+        )
+        traceback.print_exception(type(e), e, e.__traceback__)
 
 
 def run_user_script(script_path, script_args):
