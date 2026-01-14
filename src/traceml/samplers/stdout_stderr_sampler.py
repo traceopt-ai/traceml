@@ -19,6 +19,7 @@ class StdoutStderrSampler(BaseSampler):
         log_filename: str = "stdout_stderr.log",
     ):
         super().__init__(sampler_name=self.sampler_name)
+        self.enable_ddp_send = False  # per-rank logs only
 
         self.max_cache_lines = max_cache_lines
 

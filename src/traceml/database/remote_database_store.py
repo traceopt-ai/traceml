@@ -53,9 +53,6 @@ class RemoteDBStore:
         sampler_name = message.get("sampler")
         tables = message.get("tables", {})
 
-        print(message)
-        asdas()
-
         self._last_seen[rank] = time.time()
 
         if not tables:

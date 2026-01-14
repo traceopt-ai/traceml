@@ -82,37 +82,65 @@ class TCPServer:
             except Exception:
                 continue
 
-    def _handle_client(self, conn):
-        buffer = b""
-        expected = None
+    def _drain_frames(
+        self,
+        buffer: bytes,
+        expected: Optional[int],
+    ) -> tuple[list[bytes], bytes, Optional[int]]:
+        frames: list[bytes] = []
 
-        while not self._stop_event.is_set():
-            data = conn.recv(self.cfg.recv_buf)
-            if not data:
-                break
-            buffer += data
-
-            while True:
-                if expected is None:
-                    if len(buffer) < 4:
-                        break
-                    expected = struct.unpack("!I", buffer[:4])[0]
-                    buffer = buffer[4:]
-
-                if len(buffer) < expected:
+        while True:
+            if expected is None:
+                if len(buffer) < 4:
                     break
+                expected = struct.unpack("!I", buffer[:4])[0]
+                buffer = buffer[4:]
 
-                payload = buffer[:expected]
-                buffer = buffer[expected:]
-                expected = None
+            if len(buffer) < expected:
+                break
 
-                msg = pickle.loads(payload)
-                self._queue.put(msg)
+            frames.append(buffer[:expected])
+            buffer = buffer[expected:]
+            expected = None
+
+        return frames, buffer, expected
+
+    def _handle_client(self, conn: socket.socket) -> None:
+        buffer = b""
+        expected: Optional[int] = None
+
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    data = conn.recv(self.cfg.recv_buf)
+                    if not data:
+                        break  # peer closed
+                except socket.timeout:
+                    continue  # idle
+                except OSError:
+                    break  # socket error
+
+                buffer += data
+                frames, buffer, expected = self._drain_frames(buffer, expected)
+                for payload in frames:
+                    try:
+                        msg = pickle.loads(payload)
+                    except Exception:
+                        continue  # corrupted frame
+
+                    try:
+                        self._queue.put_nowait(msg)
+                    except queue.Full:
+                        pass  # drop on overflow
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
 
 
 # TCP Client (worker ranks)
-
-
 class TCPClient:
     """
     Best-effort TCP client for TraceML telemetry.

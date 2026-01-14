@@ -154,6 +154,9 @@ class TraceMLRuntime:
         self._tcp_client = TCPClient(cfg)
 
         for sampler in self.samplers:
+            if not getattr(sampler, "enable_ddp_send", False):
+                continue
+
             db = getattr(sampler, "db", None)
             if db is None:
                 continue
@@ -165,6 +168,8 @@ class TraceMLRuntime:
                 rank=self.local_rank,
             )
             db.sender = sender
+
+
 
     @staticmethod
     def _build_components(

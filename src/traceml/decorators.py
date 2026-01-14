@@ -35,35 +35,41 @@ class TraceState:
 
 @contextmanager
 def trace_step(model: nn.Module):
-    """
-    Defines a step boundary.
-    Currently:
-        - flushes TraceML buffers at step end
-        - resets peak CUDA memory stats at step start (if available)
-
-    Timing and metadata may be added later.
-    """
-    TraceState.step += 1
     mem_tracker = StepMemoryTracker(model)
+
     try:
         mem_tracker.reset()
-        try:
-            with timed_region("_traceml_internal:step_time", use_gpu=True):
-                yield
-        except Exception as e:
-            print(f"[TraceML] timed_region failed: {e}", file=sys.stderr)
-            yield  # ← IMPORTANT: still run training
+    except Exception as e:
+        print(f"[TraceML] reset failed: {e}", file=sys.stderr)
 
+    start_timed = False
+    step_completed = False
+
+    try:    ## User code block
+        try: ## timed_region
+            with timed_region("_traceml_internal:step_time", use_gpu=True):
+                start_timed = True
+                yield
+                step_completed = True
+        except Exception:
+            if not start_timed:
+                yield  # timed_region failed to enter
+                step_completed = True
+            else:
+                raise  # user code failed → propagate
     finally:
+        if step_completed:
+            TraceState.step += 1
         try:
             mem_tracker.record()
         except Exception as e:
-            print(f"[TraceML] StepMemoryTracker.record failed: {e}", file=sys.stderr)
+            print(f"[TraceML] record failed: {e}", file=sys.stderr)
 
         try:
             flush_traceml_buffers(model, TraceState.step)
         except Exception as e:
-            print(f"[TraceML] flush_traceml_buffers failed: {e}", file=sys.stderr)
+            print(f"[TraceML] flush failed: {e}", file=sys.stderr)
+
 
 
 def trace_model_instance(
