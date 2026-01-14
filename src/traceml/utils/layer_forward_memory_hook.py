@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Dict, Any, List, Tuple
 import sys
-
+from traceml.utils.shared_utils import get_hookable_modules
 import torch
 import torch.nn as nn
 
@@ -102,13 +102,21 @@ def flush_layer_forward_memory_buffers(model: nn.Module, step: int):
         pass
 
 
-def attach_layer_forward_memory_hooks(model: nn.Module):
+def attach_layer_forward_memory_hooks(
+    model: nn.Module,
+    include_names=None, 
+    exclude_names=None, 
+    leaf_only=True
+    ):
     """
-    Attach a class-based forward hook to all leaf modules of `model`.
-    Hooks are idempotent: repeated calls do nothing.
+    Attach forward hooks to specific modules of `model` based on filtering criteria.
+    Hooks are idempotent: repeated calls for the same model instance do nothing.
 
     Args:
         model (nn.Module): PyTorch model to instrument.
+        include_names (list, optional): Only hook modules containing these strings in their name.
+        exclude_names (list, optional): Skip modules containing these strings.
+        leaf_only (bool): If True, only considers leaf modules (default behavior).
     """
     model_id = id(model)
     if _layer_forward_memory_hook_registry.get(model_id):
@@ -116,9 +124,7 @@ def attach_layer_forward_memory_hooks(model: nn.Module):
         return
 
     # Register ActivationHook on all leaf modules
-    for name, module in model.named_modules():
-        if any(module.children()):  # skip non-leaf modules
-            continue
+    for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
         module.register_forward_hook(LayerForwardMemoryHook(model_id, name))
 
     _layer_forward_memory_hook_registry[model_id] = True
