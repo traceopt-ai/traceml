@@ -1,5 +1,6 @@
 from typing import Dict, List
 from queue import Empty, Full
+from collections import deque
 
 from traceml.utils.steptimer import StepTimeEvent, get_steptimer_queue
 from .base_sampler import BaseSampler
@@ -30,6 +31,11 @@ class StepTimerSampler(BaseSampler):
         self.cpu_table = self.db.create_or_get_table("step_timer_cpu")
         self.gpu_tables: Dict[str, list] = {}
 
+        # Local FIFO queue for unresolved GPU events.
+        # Keeps ordering and avoids GPU events blocking CPU events in the shared queue.
+        self._local_gpu_q = deque()
+
+
     def _get_gpu_table(self, device: str):
         """Create GPU table like 'step_timer_cuda:0' on demand."""
         if device not in self.gpu_tables:
@@ -37,9 +43,15 @@ class StepTimerSampler(BaseSampler):
             self.gpu_tables[device] = self.db.create_or_get_table(table_name)
         return self.gpu_tables[device]
 
-    def _drain_queue(self) -> List[StepTimeEvent]:
+
+    def _drain_global_queue(self) -> List[StepTimeEvent]:
+        """
+        Drain the shared queue completely.
+        - CPU-only events are appended to `ready` (they resolve immediately).
+        - GPU events are moved to the local GPU deque (no resolving here).
+        """
         q = get_steptimer_queue()
-        events = []
+        ready: List[StepTimeEvent] = []
 
         while True:
             try:
@@ -47,18 +59,34 @@ class StepTimerSampler(BaseSampler):
             except Empty:
                 break
 
-            # Resolve GPU event non-blocking
-            if evt.try_resolve():
-                events.append(evt)
+            # CPU-only events: no CUDA events attached -> resolve immediately.
+            if evt.gpu_start is None or evt.gpu_end is None:
+                evt.try_resolve()  # marks resolved
+                ready.append(evt)
             else:
-                # Put back unresolved event
-                try:
-                    q.put_nowait(evt)
-                except Full:
-                    self.logger.warning("[TraceML] StepTimer queue full on requeue")
+                # GPU events: keep FIFO in local queue; resolve later in order.
+                self._local_gpu_q.append(evt)
+
+        return ready
+
+
+    def _drain_local_gpu_queue(self) -> List[StepTimeEvent]:
+        """
+        Resolve GPU events in strict FIFO order.
+        We only attempt to resolve the *front*; if it isn't ready, stop.
+        """
+        ready: List[StepTimeEvent] = []
+
+        while self._local_gpu_q:
+            evt = self._local_gpu_q[0]  # peek front (preserves FIFO)
+            if evt.try_resolve():
+                self._local_gpu_q.popleft()
+                ready.append(evt)
+            else:
                 break
 
-        return events
+        return ready
+
 
     def _save_events(self, events: List[StepTimeEvent]) -> None:
         """
@@ -66,10 +94,8 @@ class StepTimerSampler(BaseSampler):
         CPU → step_timer_cpu
         GPU → step_timer_cuda_X
         """
-
         for evt in events:
-
-            # Always save CPU time
+            # Always save CPU wall time
             cpu_ms = (evt.cpu_end - evt.cpu_start) * 1000.0
             self.cpu_table.append(
                 {
@@ -81,7 +107,7 @@ class StepTimerSampler(BaseSampler):
                 }
             )
 
-            # Save GPU time only if available
+            # Save GPU time only if available/resolved
             if evt.gpu_time_ms is not None:
                 gpu_table = self._get_gpu_table(evt.device)
                 gpu_table.append(
@@ -95,9 +121,14 @@ class StepTimerSampler(BaseSampler):
                 )
 
     def sample(self):
-        """Drain → save raw events"""
+        """
+        1) Drain global queue fully (CPU events saved immediately; GPU events staged locally)
+        2) Resolve local GPU queue from front until first unresolved
+        3) Save all ready events
+        """
         try:
-            events = self._drain_queue()
-            self._save_events(events)
+            ready_cpu = self._drain_global_queue()
+            ready_gpu = self._drain_local_gpu_queue()
+            self._save_events(ready_cpu + ready_gpu)
         except Exception as e:
             self.logger.error(f"[TraceML] StepTimerSampler error: {e}")

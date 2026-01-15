@@ -132,12 +132,9 @@ def trace_time(name: str, use_gpu: bool = True) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             cpu_start = time.time()
-            if torch.cuda.is_available():
-                device = f"cuda:{torch.cuda.current_device()}"
-            else:
-                device = "cpu"
 
             if use_gpu and torch.cuda.is_available():
+                device = f"cuda:{torch.cuda.current_device()}"
                 start_event = get_cuda_event()
                 end_event = get_cuda_event()
 
@@ -156,6 +153,7 @@ def trace_time(name: str, use_gpu: bool = True) -> Callable:
                     gpu_end=end_event,
                 )
             else:
+                device = "cpu"
                 result = func(*args, **kwargs)
                 cpu_end = time.time()
                 evt = StepTimeEvent(
