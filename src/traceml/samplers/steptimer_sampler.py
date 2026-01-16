@@ -1,5 +1,5 @@
 from typing import Dict, List
-from queue import Empty, Full
+from queue import Empty
 from collections import deque
 
 from traceml.utils.steptimer import StepTimeEvent, get_steptimer_queue
@@ -9,27 +9,25 @@ from traceml.loggers.error_log import get_error_logger
 
 class StepTimerSampler(BaseSampler):
     """
-    Drain-all step-timer sampler.
+    Design:
+    - One DB table per event_name: event_name
+    - CPU events are resolved immediately
+    - GPU events are staged in a local FIFO queue
+    - GPU events are resolved strictly in order (front-only)
 
-    Each sample():
-        - drains the step_time_queue
-        - resolves CPU + GPU timings via try_resolve()
-        - saves raw timing to CPU or per-GPU tables
-
-    Tables created:
-        step_timer_cpu
-        step_timer_cuda:0
-        step_timer_cuda:1
-        ...
+    Table name: event_name
+    Each row contains:
+      - step
+      - timestamp
+      - device
+      - is_gpu
+      - duration_ms
     """
 
     def __init__(self) -> None:
         self.sampler_name = "StepTimerSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
-
-        self.cpu_table = self.db.create_or_get_table("step_timer_cpu")
-        self.gpu_tables: Dict[str, list] = {}
 
         # Local FIFO queue for unresolved GPU events.
         # Keeps ordering and avoids GPU events blocking CPU events in the shared queue.
