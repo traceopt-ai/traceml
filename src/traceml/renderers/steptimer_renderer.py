@@ -43,39 +43,30 @@ class StepTimerRenderer(BaseRenderer):
     def _is_internal(self, name: str) -> bool:
         return name.startswith("_traceml_internal:")
 
-    def _collect_cpu_series(self) -> Dict[str, List[float]]:
-        table = self.db.create_or_get_table("step_timer_cpu")
-        out: Dict[str, List[float]] = defaultdict(list)
-
-        for row in table:
-            name = row.get("event_name")
-            if name:
-                out[name].append(float(row.get("duration_ms", 0.0)))
-
-        return out
-
-    def _collect_gpu_series(self) -> Dict[str, List[float]]:
-        out: Dict[str, List[float]] = defaultdict(list)
+    def _collect_series(self) -> Dict[str, Dict[str, List[float]]]:
+        """
+        Each table corresponds to exactly one event.
+        Event is either CPU or GPU (never mixed).
+        """
+        out: Dict[str, Dict[str, List[float]]] = {}
 
         for table_name, rows in self.db.all_tables().items():
-            if not table_name.startswith("step_timer_cuda"):
+            if self._is_internal(table_name):
                 continue
-            for row in rows:
-                name = row.get("event_name")
-                if name:
-                    out[name].append(float(row.get("duration_ms", 0.0)))
+
+            if not rows:
+                continue
+
+            vals = [float(r.get("duration_ms", 0.0)) for r in rows]
+            is_gpu = bool(rows[-1].get("is_gpu"))
+
+            out[table_name] = {
+                "cpu": [] if is_gpu else vals,
+                "gpu": vals if is_gpu else [],
+            }
 
         return out
 
-    def _collect_series(self) -> Dict[str, Dict[str, List[float]]]:
-        cpu = self._collect_cpu_series()
-        gpu = self._collect_gpu_series()
-
-        return {
-            name: {"cpu": cpu.get(name, []), "gpu": gpu.get(name, [])}
-            for name in set(cpu) | set(gpu)
-            if not self._is_internal(name)
-        }
 
     def _mean_for_display(self, vals: Dict[str, List[float]]) -> float:
         arr = vals["gpu"] if vals["gpu"] else vals["cpu"]

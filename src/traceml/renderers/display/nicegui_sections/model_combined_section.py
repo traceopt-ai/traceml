@@ -12,7 +12,6 @@ def _build_graph(title: str):
     fig.update_layout(
         height=160,
         margin=dict(l=10, r=10, t=4, b=18),
-        # title=dict(text=title, font=dict(size=12)),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
         showlegend=False,

@@ -34,14 +34,6 @@ class StepTimerSampler(BaseSampler):
         self._local_gpu_q = deque()
 
 
-    def _get_gpu_table(self, device: str):
-        """Create GPU table like 'step_timer_cuda:0' on demand."""
-        if device not in self.gpu_tables:
-            table_name = f"step_timer_{device.replace(':', '_')}"
-            self.gpu_tables[device] = self.db.create_or_get_table(table_name)
-        return self.gpu_tables[device]
-
-
     def _drain_global_queue(self) -> List[StepTimeEvent]:
         """
         Drain the shared queue completely.
@@ -57,7 +49,7 @@ class StepTimerSampler(BaseSampler):
             except Empty:
                 break
 
-            # CPU-only events: no CUDA events attached -> resolve immediately.
+            # CPU-only events, resolve immediately.
             if evt.gpu_start is None or evt.gpu_end is None:
                 evt.try_resolve()  # marks resolved
                 ready.append(evt)
@@ -88,35 +80,24 @@ class StepTimerSampler(BaseSampler):
 
     def _save_events(self, events: List[StepTimeEvent]) -> None:
         """
-        Saves raw per-device timing into DB tables.
-        CPU → step_timer_cpu
-        GPU → step_timer_cuda_X
+        Save resolved events into per-event tables.
         """
         for evt in events:
-            # Always save CPU wall time
+            table =  self.db.create_or_get_table(evt.name)
+
             cpu_ms = (evt.cpu_end - evt.cpu_start) * 1000.0
-            self.cpu_table.append(
+            is_gpu = evt.gpu_time_ms is not None
+
+            table.append(
                 {
-                    "timestamp": evt.cpu_end,
-                    "step": evt.step,
+                    "timestamp": float(evt.cpu_end),
+                    "step": int(evt.step),
                     "event_name": evt.name,
-                    "device": evt.device,
-                    "duration_ms": float(cpu_ms),
+                    "device": evt.device,  # 'cpu' or 'cuda:0'
+                    "is_gpu": is_gpu,
+                    "duration_ms": float(evt.gpu_time_ms if is_gpu else cpu_ms),
                 }
             )
-
-            # Save GPU time only if available/resolved
-            if evt.gpu_time_ms is not None:
-                gpu_table = self._get_gpu_table(evt.device)
-                gpu_table.append(
-                    {
-                        "timestamp": evt.cpu_end,
-                        "step": evt.step,
-                        "event_name": evt.name,
-                        "device": evt.device,
-                        "duration_ms": float(evt.gpu_time_ms),
-                    }
-                )
 
     def sample(self):
         """
@@ -130,3 +111,37 @@ class StepTimerSampler(BaseSampler):
             self._save_events(ready_cpu + ready_gpu)
         except Exception as e:
             self.logger.error(f"[TraceML] StepTimerSampler error: {e}")
+
+
+
+    # def _save_events(self, events: List[StepTimeEvent]) -> None:
+    #     """
+    #     Saves raw per-device timing into DB tables.
+    #     CPU → step_timer_cpu
+    #     GPU → step_timer_cuda_X
+    #     """
+    #     for evt in events:
+    #         # Always save CPU wall time
+    #         cpu_ms = (evt.cpu_end - evt.cpu_start) * 1000.0
+    #         self.cpu_table.append(
+    #             {
+    #                 "timestamp": evt.cpu_end,
+    #                 "step": evt.step,
+    #                 "event_name": evt.name,
+    #                 "device": evt.device,
+    #                 "duration_ms": float(cpu_ms),
+    #             }
+    #         )
+    #
+    #         # Save GPU time only if available/resolved
+    #         if evt.gpu_time_ms is not None:
+    #             gpu_table = self._get_gpu_table(evt.device)
+    #             gpu_table.append(
+    #                 {
+    #                     "timestamp": evt.cpu_end,
+    #                     "step": evt.step,
+    #                     "event_name": evt.name,
+    #                     "device": evt.device,
+    #                     "duration_ms": float(evt.gpu_time_ms),
+    #                 }
+    #             )

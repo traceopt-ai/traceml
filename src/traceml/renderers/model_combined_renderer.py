@@ -104,36 +104,37 @@ class ModelCombinedRenderer(BaseRenderer):
     # ------------------------------------------------------------------
 
     def _get_step_time_data(self):
-        cpu_table = self.time_db.create_or_get_table("step_timer_cpu")
-        gpu_tables = {
-            name: rows
-            for name, rows in self.time_db.all_tables().items()
-            if name.startswith("step_timer_cuda")
-        }
+        """
+        Collect step timer data from per-event tables.
 
+        Assumption:
+        - One table per event
+        - Event runs either on CPU or GPU (never mixed)
+        """
         data = {}
 
-        for row in cpu_table:
-            name = row.get("event_name")
-            if name not in self.FRIENDLY_NAMES:
+        for event_name in self.FRIENDLY_NAMES.keys():
+            table = self.time_db.create_or_get_table(event_name)
+            if not table:
                 continue
 
-            data.setdefault(name, {"cpu": [], "gpu": []})
-            data[name]["cpu"].append(
-                (int(row.get("step")), float(row.get("duration_ms", 0.0)))
-            )
+            pairs = [
+                (int(r.get("step")), float(r.get("duration_ms", 0.0)))
+                for r in table
+            ]
 
-        for rows in gpu_tables.values():
-            for row in rows:
-                name = row.get("event_name")
-                if name not in self.FRIENDLY_NAMES:
-                    continue
-                data.setdefault(name, {"cpu": [], "gpu": []})
-                data[name]["gpu"].append(
-                    (int(row.get("step")), float(row.get("duration_ms", 0.0)))
-                )
+            if not pairs:
+                continue
+
+            is_gpu = bool(table[-1].get("is_gpu"))
+
+            data[event_name] = {
+                "pairs": pairs,
+                "device": "GPU" if is_gpu else "CPU",
+            }
 
         return data
+
 
     def build_live_telemetry_payload(self, last_n: int = 200):
         """
@@ -147,8 +148,8 @@ class ModelCombinedRenderer(BaseRenderer):
         time_data = self._get_step_time_data()
 
         for key in self.FRIENDLY_NAMES.keys():
-            vals = time_data.get(key, {"cpu": [], "gpu": []})
-            pairs = vals["gpu"] if vals["gpu"] else vals["cpu"]
+            entry = time_data.get(key)
+            pairs = entry["pairs"] if entry else []
             pairs = pairs[-last_n:]
 
             if len(pairs) > 0:
@@ -236,10 +237,10 @@ class ModelCombinedRenderer(BaseRenderer):
         current_step = self._get_current_step()
 
         for key in self.FRIENDLY_NAMES.keys():
-            vals = time_data.get(key, {"cpu": [], "gpu": []})
-            pairs = vals["gpu"] if vals["gpu"] else vals["cpu"]
+            entry = time_data.get(key)
+            pairs = entry["pairs"] if entry else []
             arr = self._extract_values(pairs)
-            device = "GPU" if vals["gpu"] else "CPU"
+            device = entry["device"] if entry else "—"
 
             last, p50, p95, avg100, trend = self._compute_stats(arr)
 
