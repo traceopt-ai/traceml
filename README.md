@@ -10,6 +10,10 @@
 
 ---
 
+Demo Video:  https://www.loom.com/share/492ce49cc4e24c5885572e2e7e14ed64
+
+--- 
+
 ## The Problem TraceML Solves
 
 Training deep learning models shouldn't feel like debugging a black box. Yet we constantly face:
