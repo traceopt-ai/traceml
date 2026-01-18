@@ -5,7 +5,7 @@ import hashlib
 from .base_sampler import BaseSampler
 from traceml.utils.patch import get_model_queue
 from traceml.loggers.error_log import get_error_logger
-
+from traceml.utils.shared_utils import get_hookable_modules
 
 class LayerMemorySampler(BaseSampler):
     """
@@ -33,10 +33,11 @@ class LayerMemorySampler(BaseSampler):
 
     def _compute_layer_memory(self, model: torch.nn.Module) -> Dict[str, float]:
         """Compute per-layer parameter memory."""
+        include_names = getattr(model, "_traceml_include_names", None)
+        exclude_names = getattr(model, "_traceml_exclude_names", None)
+        leaf_only = getattr(model, "_traceml_leaf_only", True)
         layer_mem = {}
-        for name, module in model.named_modules():
-            if any(module.children()):  # skip containers
-                continue
+        for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
 
             total = 0.0
             for p in module.parameters(recurse=False):

@@ -166,6 +166,8 @@ def main():
     # No changes to training loop required.
     trace_model_instance(
         model,
+        include_names=["embeddings", "attention"], 
+        leaf_only=False
         # sample_layer_memory=False,
         # trace_layer_forward__memory=False,
         # trace_layer_backward_memory=False,
