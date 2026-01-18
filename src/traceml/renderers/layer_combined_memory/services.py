@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List, Tuple, Iterable
+from typing import Dict, Any, Optional, List, Tuple, Iterable, Deque
 from traceml.database.database import Database
 from traceml.distributed import get_ddp_info
 from traceml.database.remote_database_store import RemoteDBStore
@@ -387,14 +387,13 @@ class LayerCombinedMemoryData:
 
     @staticmethod
     def _db_last_step(db: Database) -> Optional[int]:
-        """
-        Get last step seen in DB using only tail rows (cheap).
-        """
         last_step: Optional[int] = None
-        for _, rows in db.all_tables().items():
-            if not rows:
+
+        for table_name in db.all_tables().keys():
+            last = db.get_last_record(table_name)
+            if last is None:
                 continue
-            s = rows[-1].get("step", None)
+            s = last.get("step", None)
             if s is None:
                 continue
             try:
@@ -402,11 +401,12 @@ class LayerCombinedMemoryData:
             except Exception:
                 continue
             last_step = s_i if last_step is None else max(last_step, s_i)
+
         return last_step
 
 
     @staticmethod
-    def _row_at_step(rows: list, step: int) -> Optional[dict]:
+    def _row_at_step(rows: Deque, step: int) -> Optional[dict]:
         """
         Find the row with row['step'] == step by scanning from the end.
         Assumes rows are usually appended in increasing step order.
@@ -440,7 +440,7 @@ class LayerCombinedMemoryData:
 
 
     @staticmethod
-    def _peak_upto_step(rows: list, step: int) -> float:
+    def _peak_upto_step(rows: Deque, step: int) -> float:
         peak = 0.0
         for r in rows:
             s = r.get("step", None)

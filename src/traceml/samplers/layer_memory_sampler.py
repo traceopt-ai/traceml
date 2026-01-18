@@ -16,7 +16,6 @@ class LayerMemorySampler(BaseSampler):
         self.sampler_name = "LayerMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
-        self._table = self.db.create_or_get_table("layer_memory")
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
 
@@ -99,6 +98,6 @@ class LayerMemorySampler(BaseSampler):
         try:
             sample = self._sample_from_queue()
             if sample is not None:
-                self._table.append(sample)
+                self.db.add_record("layer_memory", sample)
         except Exception as e:
             self.logger.error(f"[TraceML] Layer memory sampling error: {e}")

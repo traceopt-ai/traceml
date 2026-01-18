@@ -83,21 +83,18 @@ class StepTimerSampler(BaseSampler):
         Save resolved events into per-event tables.
         """
         for evt in events:
-            table =  self.db.create_or_get_table(evt.name)
-
             cpu_ms = (evt.cpu_end - evt.cpu_start) * 1000.0
             is_gpu = evt.gpu_time_ms is not None
 
-            table.append(
-                {
-                    "timestamp": float(evt.cpu_end),
-                    "step": int(evt.step),
-                    "event_name": evt.name,
-                    "device": evt.device,  # 'cpu' or 'cuda:0'
-                    "is_gpu": is_gpu,
-                    "duration_ms": float(evt.gpu_time_ms if is_gpu else cpu_ms),
-                }
-            )
+            record = {
+                "timestamp": float(evt.cpu_end),
+                "step": int(evt.step),
+                "event_name": evt.name,
+                "device": evt.device,  # 'cpu' or 'cuda:0'
+                "is_gpu": is_gpu,
+                "duration_ms": float(evt.gpu_time_ms if is_gpu else cpu_ms),
+             }
+            self.db.add_record(evt.name, record)
 
     def sample(self):
         """
@@ -111,37 +108,3 @@ class StepTimerSampler(BaseSampler):
             self._save_events(ready_cpu + ready_gpu)
         except Exception as e:
             self.logger.error(f"[TraceML] StepTimerSampler error: {e}")
-
-
-
-    # def _save_events(self, events: List[StepTimeEvent]) -> None:
-    #     """
-    #     Saves raw per-device timing into DB tables.
-    #     CPU → step_timer_cpu
-    #     GPU → step_timer_cuda_X
-    #     """
-    #     for evt in events:
-    #         # Always save CPU wall time
-    #         cpu_ms = (evt.cpu_end - evt.cpu_start) * 1000.0
-    #         self.cpu_table.append(
-    #             {
-    #                 "timestamp": evt.cpu_end,
-    #                 "step": evt.step,
-    #                 "event_name": evt.name,
-    #                 "device": evt.device,
-    #                 "duration_ms": float(cpu_ms),
-    #             }
-    #         )
-    #
-    #         # Save GPU time only if available/resolved
-    #         if evt.gpu_time_ms is not None:
-    #             gpu_table = self._get_gpu_table(evt.device)
-    #             gpu_table.append(
-    #                 {
-    #                     "timestamp": evt.cpu_end,
-    #                     "step": evt.step,
-    #                     "event_name": evt.name,
-    #                     "device": evt.device,
-    #                     "duration_ms": float(evt.gpu_time_ms),
-    #                 }
-    #             )

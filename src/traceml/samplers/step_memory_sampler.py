@@ -18,7 +18,6 @@ class StepMemorySampler(BaseSampler):
         self.sampler_name = "StepMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
-        self.db.create_table("step_memory")
 
     def _drain_queue(self) -> None:
         """
@@ -62,7 +61,6 @@ class StepMemorySampler(BaseSampler):
             "peak_allocated_mb": peak_alloc,
             "peak_reserved_mb": peak_resv,
         }
-
         self.db.add_record("step_memory", record)
 
     def sample(self):

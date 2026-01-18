@@ -31,7 +31,6 @@ class SystemSampler(BaseSampler):
         self.sampler_name = "SystemSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
-        self.db.create_table("system")
 
         self._init_cpu()
         self._init_ram()

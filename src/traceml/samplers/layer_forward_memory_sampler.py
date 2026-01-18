@@ -49,8 +49,7 @@ class LayerForwardMemorySampler(BaseSampler):
                 "memory": memory_per_device,
                 "step": step,
             }
-            table = self.db.create_or_get_table(layer_name)
-            table.append(record)
+            self.db.add_record(layer_name, record)
 
     def sample(self):
         """

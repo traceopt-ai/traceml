@@ -1,22 +1,31 @@
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Mapping, Any, List
 from traceml.loggers.error_log import get_error_logger
-
 from .database import Database
+
 
 class RemoteDBStore:
     """
-    Rank-0 only: bounded in-memory databases for remote workers.
+    Rank-0 only: bounded in-memory databases for remote worker telemetry.
 
-    Structure:
-        self._dbs[rank][sampler_name] = Database(max_rows=N)
+    Layout:
+        self._dbs[rank][sampler_name] -> Database(max_rows=self.max_rows)
+
+    Design goals:
+      - Simple: same Database type as local samplers.
+      - Bounded: each per-(rank,sampler) database enforces max_rows.
+
+    Concurrency:
+      - In typical usage, ingestion happens on the rank-0 runtime thread.
 
     Notes:
-      - Uses the same Database class as local runs
-      - Enforces bounded size via Database(max_rows)
+      - Remote DBs are created lazily on first ingestion.
+      - `last_seen(rank)` tracks last message arrival time (epoch seconds).
     """
 
     def __init__(self, max_rows: int = 2000):
+        if max_rows <= 0:
+            raise ValueError(f"max_rows must be > 0, got {max_rows}")
         self.max_rows = int(max_rows)
         self._dbs: Dict[int, Dict[str, Database]] = {}
         self._last_seen: Dict[int, float] = {}
@@ -45,8 +54,12 @@ class RemoteDBStore:
         """
         Ingest incremental DB rows from a remote worker.
 
-        Args:
-            message (dict): payload from DBIncrementalSender.flush()
+        The payload is expected to look like:
+            {
+              "rank": int,
+              "sampler": str,
+              "tables": { "table_name": [ {row...}, ... ], ... }
+            }
         """
         if message is None:
             return

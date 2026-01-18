@@ -20,35 +20,27 @@ class StdoutStderrSampler(BaseSampler):
     ):
         super().__init__(sampler_name=self.sampler_name)
         self.enable_ddp_send = False  # per-rank logs only
-
         self.max_cache_lines = max_cache_lines
-
-        # DB schema: one line per record
-        self.db.create_table("stdout_stderr")
-
         # per-rank log file (unchanged semantics)
         session_id = config.session_id
         _, local_rank, _ = get_ddp_info()
 
         logs_dir = Path(config.logs_dir) / session_id / str(local_rank)
         logs_dir.mkdir(parents=True, exist_ok=True)
-
         self.log_path = logs_dir / log_filename
         self.log_path.write_text("[TraceML] New run started\n\n", encoding="utf-8")
+
 
     def sample(self):
         capture = StreamCapture._stdout_stderr_capture
         if capture is None:
             return
-
         text = capture.read_buffer() if capture else ""
         if not text:
             return
-
         lines = [ln for ln in text.splitlines() if ln.strip()]
         if not lines:
             return
-
         # append to DB
         for ln in lines:
             self.db.add_record(

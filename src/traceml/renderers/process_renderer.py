@@ -29,7 +29,7 @@ class ProcessRenderer(BaseRenderer):
 
     def _compute_snapshot(self) -> Dict[str, Any]:
         """Compute latest process metrics from the shared table."""
-        latest = self.db.get_record_at_index("process", -1)
+        latest = self.db.get_last_record("process")
         if not latest:
             return {
                 "cpu_used": 0.0,
