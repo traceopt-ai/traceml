@@ -11,7 +11,7 @@ class Database:
         self._tables: Dict[str, List[Any]] = {}
         self.writer = DatabaseWriter(self, sampler_name=sampler_name)
         self.sender = None
-
+        self.sampler_name = sampler_name
         self.max_rows = max_rows
 
     def create_table(self, name: str) -> List[Any]:

@@ -28,7 +28,9 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 
 SEED = 42
-MODEL_NAME = "bert-base-uncased"
+# MODEL_NAME = "bert-base-uncased"
+MODEL_NAME = "prajjwal1/bert-mini"
+
 
 # Increase these to generate a LOT of profiling data
 MAX_TRAIN_EXAMPLES = 1000

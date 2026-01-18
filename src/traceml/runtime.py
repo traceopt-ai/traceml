@@ -44,6 +44,7 @@ from traceml.stdout_stderr_capture import StreamCapture
 
 
 
+import sys
 
 _DISPLAY_BACKENDS = {
     "cli": (CLIDisplayManager, "get_panel_renderable"),
@@ -98,6 +99,12 @@ class TraceMLRuntime:
         self.interval_sec = float(interval_sec)
         self.mode = mode
 
+        self.enable_ddp_telemetry = bool(enable_ddp_telemetry and self.is_ddp)
+        if self.enable_ddp_telemetry and self.is_rank0:
+            self.remote_store = RemoteDBStore(max_rows=remote_max_rows)
+        else:
+            self.remote_store = None
+
         self.display_manager_cls, self._render_attr = _DISPLAY_BACKENDS[mode]
         self.display_manager = self.display_manager_cls() if self.is_rank0 else None
 
@@ -105,6 +112,7 @@ class TraceMLRuntime:
             built_samplers, built_renderers = self._build_components(
                 mode=mode,
                 num_display_layers=num_display_layers,
+                remote_store=self.remote_store,
             )
             self.samplers = built_samplers
             self.renderers = built_renderers if self.is_rank0 else []
@@ -112,17 +120,16 @@ class TraceMLRuntime:
             self.samplers = samplers
             self.renderers = renderers if self.is_rank0 else []
 
-        self.enable_ddp_telemetry = bool(enable_ddp_telemetry and self.is_ddp)
-        self.remote_store: Optional[RemoteDBStore] = None
         self._tcp_server: Optional[TCPServer] = None
         self._tcp_client: Optional[TCPClient] = None
 
         if self.enable_ddp_telemetry:
-            self._init_ddp_transport(
+            self._init_ddp_transport_runtime(
                 host=tcp_host,
                 port=tcp_port,
                 remote_max_rows=remote_max_rows,
             )
+
 
         # Runtime thread
         self._stop_event = threading.Event()
@@ -141,11 +148,10 @@ class TraceMLRuntime:
             return None
 
 
-    def _init_ddp_transport(self, host: str, port: int, remote_max_rows: int):
+    def _init_ddp_transport_runtime(self, host: str, port: int, remote_max_rows: int):
         cfg = TCPConfig(host=host, port=port)
 
         if self.is_rank0:
-            self.remote_store = RemoteDBStore(max_rows=remote_max_rows)
             self._tcp_server = TCPServer(cfg)
             self._safe("TCPServer.start failed", self._tcp_server.start)
             return
@@ -169,12 +175,11 @@ class TraceMLRuntime:
             )
             db.sender = sender
 
-
-
     @staticmethod
     def _build_components(
             mode: str,
             num_display_layers: int,
+            remote_store: Optional[RemoteDBStore] = None,
     ) -> Tuple[List[BaseSampler], List[BaseRenderer]]:
         is_ddp, local_rank, _ = get_ddp_info()
 
@@ -202,6 +207,7 @@ class TraceMLRuntime:
                 layer_forward_db=fwd_mem.db,
                 layer_backward_db=bwd_mem.db,
                 top_n_layers=num_display_layers,
+                remote_store=remote_store,
             )
         ]
 
@@ -250,6 +256,9 @@ class TraceMLRuntime:
             if self.is_worker and self.enable_ddp_telemetry and db.sender is not None:
                 self._safe(f"{sampler.sampler_name}.sender.flush failed", db.sender.flush)
 
+        if self.is_rank0 and self.display_manager:
+            self._safe("Display update failed", self.display_manager.update_display)
+
 
     def _drain_remote(self):
         if not (self.is_rank0 and self.enable_ddp_telemetry and self._tcp_server):
@@ -276,7 +285,7 @@ class TraceMLRuntime:
 
             self._safe(f"{renderer.__class__.__name__}.register failed", register)
 
-        self._safe("Display update failed", self.display_manager.update_display)
+        # self._safe("Display update failed", self.display_manager.update_display)
 
 
     def _run_once(self):

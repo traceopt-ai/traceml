@@ -35,6 +35,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         layer_forward_db: Database,
         layer_backward_db: Database,
         top_n_layers: Optional[int] = 20,
+        remote_store: Optional[Any] = None,
     ):
         super().__init__(
             name="Layer-wise Combined Memory",
@@ -47,6 +48,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
             layer_forward_db=layer_forward_db,
             layer_backward_db=layer_backward_db,
             top_n_layers=top_n_layers,
+            remote_store=remote_store,
         )
         self._summary_service = LayerCombinedMemorySummary(
             layer_table=layer_table,

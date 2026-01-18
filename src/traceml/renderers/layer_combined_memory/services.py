@@ -1,8 +1,60 @@
-from typing import Dict, Any, Optional
+from dataclasses import dataclass
+from typing import Dict, Any, Optional, List, Tuple, Iterable
 from traceml.database.database import Database
+from traceml.distributed import get_ddp_info
+from traceml.database.remote_database_store import RemoteDBStore
+from traceml.loggers.error_log import get_error_logger
+
+@dataclass
+class RankStepStatus:
+    """Per-rank step visibility for a given sampler."""
+    last_step_seen: int = -1           # last step observed in DB (best-effort)
+    has_step: bool = False             # whether the rank DB contains the chosen safe step
+
+
+@dataclass
+class DDPJoinStatus:
+    """
+    Metadata for DDP join / stall reporting.
+
+    - safe_step: step at which we computed "current" across ranks (best-effort).
+    - incomplete: True if not all ranks had data for safe_step.
+    - missing_ranks: ranks that did not have data for safe_step.
+    - world_size: inferred world size (best-effort).
+    """
+    safe_step: Optional[int]
+    incomplete: bool
+    missing_ranks: List[int]
+    world_size: int
 
 
 class LayerCombinedMemoryData:
+    """
+    Layer-wise combined memory service: params + forward (act) + backward (act).
+
+    Supports both single GPU and DDP (rank-0 aggregation) with a RemoteDBStore.
+
+    What we compute per layer:
+      - param_memory: from LayerMemorySampler (rank-0 / local)
+      - forward_current: "current" activation memory at a chosen safe step S
+      - forward_peak: max activation memory over steps <= S (per rank), joined across ranks (max)
+      - backward_current: same as forward_current but backward
+      - backward_peak: same as forward_peak but backward
+      - total_current_memory: param + forward_current + backward_current
+      - total_peak_memory: param + forward_peak + backward_peak
+
+    Step alignment and correctness:
+      - RemoteDBStore is bounded, and remote ingest is asynchronous.
+      - We align on a "safe step" S:
+          S = min( min_r last_step_seen_fwd[r], min_r last_step_seen_bwd[r] )
+        then we additionally verify that each rank actually contains step S
+        in its bounded DB. If not, we do NOT advance; we keep rendering the
+        last safe step that was successfully computed.
+
+    Stall reporting:
+      - We return join metadata (safe_step/incomplete/missing_ranks) so UI/CLI
+        can show "waiting for ranks" instead of silently masking lag.
+    """
 
     def __init__(
         self,
@@ -10,15 +62,37 @@ class LayerCombinedMemoryData:
         layer_forward_db: Database,
         layer_backward_db: Database,
         top_n_layers: Optional[int] = 20,
+        remote_store: Optional[RemoteDBStore] = None,
     ):
         self._layer_table = layer_table
         self._layer_forward_db = layer_forward_db
         self._layer_backward_db = layer_backward_db
-        self._top_n = top_n_layers
+        self._top_n = top_n_layers if top_n_layers is not None else 20
+        self._remote_store = remote_store
 
-        # caches store cumulative peaks
+        # Cache: per-layer {current, global_peak}
+        # - current: overwritten every refresh using safe-step snapshot
+        # - global: monotonic max across safe-step snapshots (i.e., peak up to safe-step)
         self._forward_cache: Dict[str, Dict[str, float]] = {}
         self._backward_cache: Dict[str, Dict[str, float]] = {}
+
+        # Service-local step caches
+        self._rank_last_step_fwd: Dict[int, int] = {}
+        self._rank_last_step_bwd: Dict[int, int] = {}
+        self._last_safe_step: int = -1
+
+        # Join status from the last compute()
+        self._join_status: Optional[DDPJoinStatus] = None
+        self.logger = get_error_logger("LayerCombinedMemoryData")
+
+
+    def _infer_world_size(self) -> int:
+        try:
+            _, _, world_size = get_ddp_info()
+            return max(int(world_size), 1)
+        except Exception:
+            return 1
+
 
     def compute_display_data(self) -> Dict[str, Any]:
         """
@@ -30,15 +104,69 @@ class LayerCombinedMemoryData:
 
         # Load table snapshot
         layer_snapshot = self._compute_layer_snapshot()
-        fwd_snapshot = self._compute_snapshot(is_forward=True)
-        bwd_snapshot = self._compute_snapshot(is_forward=False)
+        layers = layer_snapshot.get("layer_memory", {}) or {}
+        model_index = layer_snapshot.get("model_index", "—")
+
+        # Compute the best next safe step and attempt to build safe-step snapshots.
+        safe_step_candidate = self._compute_candidate_safe_step()
+
+        fwd_snapshot, fwd_ok, fwd_missing = self._compute_step_aligned_snapshot(
+            local_db=self._layer_forward_db,
+            is_forward=True,
+            step=safe_step_candidate,
+        )
+        bwd_snapshot, bwd_ok, bwd_missing = self._compute_step_aligned_snapshot(
+            local_db=self._layer_backward_db,
+            is_forward=False,
+            step=safe_step_candidate,
+        )
+
+
+        # If candidate safe step is not fully available (bounded DB / ingest lag),
+        # fall back to last known safe step.
+        if safe_step_candidate >= 0 and fwd_ok and bwd_ok:
+            self._last_safe_step = safe_step_candidate
+            missing_ranks = sorted(set(fwd_missing) | set(bwd_missing))
+            incomplete = len(missing_ranks) > 0
+            self._join_status = DDPJoinStatus(
+                safe_step=self._last_safe_step,
+                incomplete=incomplete,
+                missing_ranks=missing_ranks,
+                world_size=self._infer_world_size(),
+            )
+        else:
+            # fall back (render stable)
+            if self._last_safe_step >= 0:
+                fwd_snapshot, _, fwd_missing = self._compute_step_aligned_snapshot(
+                    local_db=self._layer_forward_db,
+                    is_forward=True,
+                    step=self._last_safe_step,
+                )
+                bwd_snapshot, _, bwd_missing = self._compute_step_aligned_snapshot(
+                    local_db=self._layer_backward_db,
+                    is_forward=False,
+                    step=self._last_safe_step,
+                )
+                missing_ranks = sorted(set(fwd_missing) | set(bwd_missing))
+                incomplete = len(missing_ranks) > 0
+                self._join_status = DDPJoinStatus(
+                    safe_step=self._last_safe_step,
+                    incomplete=incomplete,
+                    missing_ranks=missing_ranks,
+                    world_size=self._infer_world_size(),
+                )
+            else:
+                # no data yet
+                self._join_status = DDPJoinStatus(
+                    safe_step=None,
+                    incomplete=False,
+                    missing_ranks=[],
+                    world_size=self._infer_world_size(),
+                )
 
         # Update global caches
         self._merge_cache(self._forward_cache, fwd_snapshot)
         self._merge_cache(self._backward_cache, bwd_snapshot)
-
-        layers = layer_snapshot.get("layer_memory", {})  # param memory per layer
-        model_index = layer_snapshot.get("model_index")
 
         peak_map = {}
         current_map = {}
@@ -97,6 +225,10 @@ class LayerCombinedMemoryData:
             ),
         }
 
+        join = self._join_status or DDPJoinStatus(
+            safe_step=None, incomplete=False, missing_ranks=[], world_size=1
+        )
+
         return {
             "model_index": model_index,
             "top_items": top_items,
@@ -104,7 +236,249 @@ class LayerCombinedMemoryData:
             "all_items": all_rows_sorted,
             "total_current_sum": total_current_sum,
             "total_peak_sum": sum(peak_map.values()),
+            "safe_step": join.safe_step,
+            "incomplete": join.incomplete,
+            "missing_ranks": join.missing_ranks,
+            "world_size": join.world_size,
         }
+
+    # Snapshot sources
+    def _compute_layer_snapshot(self) -> Dict[str, Any]:
+        if not self._layer_table:
+            return {"layer_memory": {}, "model_index": "—"}
+
+        last = self._layer_table[-1]
+        return {
+            "layer_memory": last.get("layer_memory", {}) or {},
+            "model_index": last.get("model_index", "—"),
+        }
+
+
+    def _compute_candidate_safe_step(self) -> int:
+        """
+        Candidate safe step:
+          S = min( min_r last_step_seen_fwd[r], min_r last_step_seen_bwd[r] )
+
+        This step is only a *candidate*. We still verify that step S exists in each
+        rank DB (bounded buffers might have dropped it).
+        """
+        self._update_rank_last_step_cache(is_forward=True)
+        self._update_rank_last_step_cache(is_forward=False)
+
+        ws = self._infer_world_size()
+
+        # Single GPU
+        if ws <= 1:
+            return min(self._rank_last_step_fwd.get(0, -1), self._rank_last_step_bwd.get(0, -1))
+
+        f_min = min(self._rank_last_step_fwd.get(r, -1) for r in range(ws))
+        b_min = min(self._rank_last_step_bwd.get(r, -1) for r in range(ws))
+
+        if f_min < 0 or b_min < 0:
+            return -1
+
+        return min(f_min, b_min)
+
+
+    def _update_rank_last_step_cache(self, is_forward: bool) -> None:
+        """
+        Update last-step-seen caches using only last rows (cheap).
+        """
+        local_db = self._layer_forward_db if is_forward else self._layer_backward_db
+        sampler_name = local_db.sampler_name
+        cache = self._rank_last_step_fwd if is_forward else self._rank_last_step_bwd
+
+        for rank, db in self._iter_rank_dbs(local_db, sampler_name):
+            s = self._db_last_step(db)
+            if s is None:
+                continue
+            cache[rank] = max(cache.get(rank, -1), int(s))
+
+        # Ensure rank0 key exists for stable min() behavior in DDP
+        cache.setdefault(0, -1)
+
+
+    def _iter_rank_dbs(self, local_db: Database, sampler_name: str) -> Iterable[Tuple[int, Database]]:
+        """
+        Yield (rank, db) for local first, then remotes.
+        """
+        yield 0, local_db
+
+
+        if not self._remote_store:
+            return
+
+        ws = self._infer_world_size()
+        for rank in range(1, ws):
+            db = self._remote_store.get_db(rank, sampler_name)
+            if db is not None:
+                yield rank, db
+
+
+
+    def _compute_step_aligned_snapshot(
+        self,
+        local_db: Database,
+        is_forward: bool,
+        step: int,
+    ) -> Tuple[Dict[str, Dict[str, float]], bool, List[int]]:
+        """
+        Build a snapshot aligned on a single step `step`.
+
+        Returns:
+          snapshot: {layer: {"current_peak": x, "global_peak": y}}
+          ok: True if all expected ranks had data for this step
+          missing_ranks: ranks lacking step `step` (best-effort)
+
+        Semantics (per layer):
+          - current_peak: memory at exactly step `step` (max over devices)
+          - global_peak: max memory over steps <= `step` (max over devices)
+        Join across ranks:
+          - worst-rank wins (max)
+        """
+        if step < 0:
+            return {}, False, []
+
+        sampler_name = local_db.sampler_name
+        ws = self._infer_world_size()
+
+        layer_current: Dict[str, float] = {}
+        layer_peak: Dict[str, float] = {}
+        missing_ranks: List[int] = []
+
+        expected_ranks = list(range(ws)) if ws > 1 else [0]
+
+        for rank in expected_ranks:
+            db = local_db if rank == 0 else (self._remote_store.get_db(rank, sampler_name) if self._remote_store else None)
+            if db is None:
+                missing_ranks.append(rank)
+                continue
+
+            # verify rank contains step `step` somewhere (any table) and compute aggregates
+            rank_has_step = False
+
+            for layer, rows in db.all_tables().items():
+                if not rows:
+                    continue
+
+                row = self._row_at_step(rows, step)
+                if row is not None:
+                    rank_has_step = True
+                    cur = self._row_max_device_memory(row)
+                    layer_current[layer] = max(layer_current.get(layer, 0.0), cur)
+
+                # peak up to step
+                p = self._peak_upto_step(rows, step)
+                layer_peak[layer] = max(layer_peak.get(layer, 0.0), p)
+
+            if ws > 1 and not rank_has_step:
+                missing_ranks.append(rank)
+
+        ok = (len(missing_ranks) == 0)
+        snapshot = {
+            layer: {
+                "current_peak": layer_current.get(layer, 0.0),
+                "global_peak": layer_peak.get(layer, 0.0),
+            }
+            for layer in (set(layer_current) | set(layer_peak))
+        }
+        return snapshot, ok, missing_ranks
+
+
+    @staticmethod
+    def _db_last_step(db: Database) -> Optional[int]:
+        """
+        Get last step seen in DB using only tail rows (cheap).
+        """
+        last_step: Optional[int] = None
+        for _, rows in db.all_tables().items():
+            if not rows:
+                continue
+            s = rows[-1].get("step", None)
+            if s is None:
+                continue
+            try:
+                s_i = int(s)
+            except Exception:
+                continue
+            last_step = s_i if last_step is None else max(last_step, s_i)
+        return last_step
+
+
+    @staticmethod
+    def _row_at_step(rows: list, step: int) -> Optional[dict]:
+        """
+        Find the row with row['step'] == step by scanning from the end.
+        Assumes rows are usually appended in increasing step order.
+        """
+        for r in reversed(rows):
+            s = r.get("step", None)
+            if s is None:
+                continue
+            try:
+                s_i = int(s)
+            except Exception:
+                continue
+            if s_i == step:
+                return r
+            if s_i < step:
+                # Monotonic-ish: once below target, stop early.
+                return None
+        return None
+
+
+    @staticmethod
+    def _row_max_device_memory(row: dict) -> float:
+        mem = row.get("memory", {}) or {}
+        cur = 0.0
+        for _, v in mem.items():
+            try:
+                cur = max(cur, float(v))
+            except Exception:
+                continue
+        return float(cur)
+
+
+    @staticmethod
+    def _peak_upto_step(rows: list, step: int) -> float:
+        peak = 0.0
+        for r in rows:
+            s = r.get("step", None)
+            if s is None:
+                continue
+            try:
+                s_i = int(s)
+            except Exception:
+                continue
+            if s_i > step:
+                continue
+            mem = r.get("memory", {}) or {}
+            for _, v in mem.items():
+                try:
+                    peak = max(peak, float(v))
+                except Exception:
+                    continue
+        return float(peak)
+
+
+    @staticmethod
+    def _merge_cache(cache, new_data):
+        """
+        Merge snapshot into cache:
+          - current: overwritten (latest safe-step)
+          - global: max with previous (monotonic peak up to safe-step)
+        """
+        if not new_data:
+            return
+        for layer, entry in new_data.items():
+            cur = entry.get("current_peak", 0.0)
+            gbl = entry.get("global_peak", 0.0)
+            if layer not in cache:
+                cache[layer] = {"current": cur, "global": gbl}
+            else:
+                cache[layer]["current"] = cur
+                cache[layer]["global"] = max(cache[layer]["global"], gbl)
+
 
     def _build_layer_row(
         self,
@@ -135,59 +509,6 @@ class LayerCombinedMemoryData:
             "pct": pct,
         }
 
-    def _compute_layer_snapshot(self) -> Dict[str, Any]:
-        if not self._layer_table:
-            return {"layer_memory": {}, "model_index": "—"}
-
-        last = self._layer_table[-1]
-        return {
-            "layer_memory": last.get("layer_memory", {}) or {},
-            "model_index": last.get("model_index", "—"),
-        }
-
-    def _compute_snapshot(self, is_forward: bool) -> Dict[str, Dict[str, float]]:
-        db = self._layer_forward_db if is_forward else self._layer_backward_db
-        layer_peaks = {}
-        layer_current = {}
-
-        for layer, rows in db.all_tables().items():
-            if not rows:
-                continue
-
-            latest_per_device = {}
-            global_peak = 0.0
-
-            for r in rows:
-                mem = r.get("memory", {}) or {}
-                for dev, size in mem.items():
-                    size_f = float(size)
-                    latest_per_device[dev] = size_f
-                    global_peak = max(global_peak, size_f)
-
-            layer_current[layer] = (
-                max(latest_per_device.values()) if latest_per_device else 0.0
-            )
-            layer_peaks[layer] = global_peak
-
-        return {
-            layer: {
-                "current_peak": layer_current.get(layer, 0.0),
-                "global_peak": layer_peaks.get(layer, 0.0),
-            }
-            for layer in (set(layer_current) | set(layer_peaks))
-        }
-
-    def _merge_cache(self, cache, new_data):
-        if not new_data:
-            return
-        for layer, entry in new_data.items():
-            cur = entry.get("current_peak", 0.0)
-            gbl = entry.get("global_peak", 0.0)
-            if layer not in cache:
-                cache[layer] = {"current": cur, "global": gbl}
-            else:
-                cache[layer]["current"] = cur
-                cache[layer]["global"] = max(cache[layer]["global"], gbl)
 
 
 class LayerCombinedMemorySummary:

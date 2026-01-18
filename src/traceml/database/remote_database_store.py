@@ -1,5 +1,6 @@
 import time
-from typing import Dict, Iterable, Optional
+from typing import Dict, Optional
+from traceml.loggers.error_log import get_error_logger
 
 from .database import Database
 
@@ -15,10 +16,11 @@ class RemoteDBStore:
       - Enforces bounded size via Database(max_rows)
     """
 
-    def __init__(self, max_rows: int = 200):
+    def __init__(self, max_rows: int = 2000):
         self.max_rows = int(max_rows)
         self._dbs: Dict[int, Dict[str, Database]] = {}
         self._last_seen: Dict[int, float] = {}
+        self.logger = get_error_logger("RemoteDBStore")
 
     def _get_or_create_db(self, rank: int, sampler_name: str) -> Database:
         """
@@ -47,7 +49,7 @@ class RemoteDBStore:
             message (dict): payload from DBIncrementalSender.flush()
         """
         if message is None:
-            return # nothing to ingest
+            return
 
         rank = message.get("rank")
         sampler_name = message.get("sampler")
