@@ -220,6 +220,7 @@ class TraceMLRuntime:
             ModelCombinedRenderer(
                 time_db=step_timer.db,
                 memory_db=step_mem.db,
+                remote_store=remote_store,
             ),
         ]
 

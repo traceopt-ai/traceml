@@ -12,7 +12,7 @@ from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
     LAYER_COMBINED_TIMER_LAYOUT,
 )
-from traceml.renderers.combined_timing.services import (
+from traceml.renderers.layer_combined_timing.services import (
     LayerCombinedTimerData,
     LayerCombinedTimerSummary,
 )
