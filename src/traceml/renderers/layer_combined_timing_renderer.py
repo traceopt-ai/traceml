@@ -1,5 +1,5 @@
 import shutil
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from rich.panel import Panel
 from rich.table import Table
@@ -18,6 +18,7 @@ from traceml.renderers.combined_timing.services import (
 )
 from traceml.renderers.utils import truncate_layer_name
 from traceml.utils.formatting import fmt_time_ms
+from traceml.database.remote_database_store import RemoteDBStore
 
 
 class LayerCombinedTimerRenderer(BaseRenderer):
@@ -30,6 +31,7 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         forward_db: Database = None,
         backward_db: Database = None,
         top_n_layers: int = 20,
+        remote_store: Optional[RemoteDBStore] = None,
     ):
         super().__init__(
             name="Layer-wise Combined Timings",
@@ -39,6 +41,7 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             forward_db=forward_db,
             backward_db=backward_db,
             top_n_layers=top_n_layers,
+            remote_store=remote_store,
         )
 
         self._summary_service = LayerCombinedTimerSummary(

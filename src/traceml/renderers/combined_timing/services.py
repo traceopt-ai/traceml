@@ -62,14 +62,17 @@ class LayerCombinedTimerData:
         self._remote_store = remote_store
         self._top_n = int(top_n_layers) if top_n_layers is not None else 20
         self._ema_alpha = float(ema_alpha)
+
         # Per-layer caches: {"current": float, "avg": float, "peak": float, "on_gpu": bool}
         self._forward_cache: Dict[str, Dict[str, Any]] = {}
         self._backward_cache: Dict[str, Dict[str, Any]] = {}
+
         # Per-rank last-step watermarks
         self._rank_last_step_fwd: Dict[int, int] = {}
         self._rank_last_step_bwd: Dict[int, int] = {}
         self._last_safe_step: int = -1
         self._join_status: Optional[DDPJoinStatus] = None
+
         # Latest "worst rank" computed for each layer at the safe step
         self._worst_rank_by_layer: Dict[str, int] = {}
         self.logger = get_error_logger("LayerCombinedTimerData")

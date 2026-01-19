@@ -547,9 +547,6 @@ class LayerCombinedMemorySummary:
             "model_memory": avg_memory,
         }
 
-    # ------------------------------------------------------------------
-    # Global peaks (for top-k lists)
-    # ------------------------------------------------------------------
 
     def compute_global_peaks(self, is_forward: bool) -> Dict[str, float]:
         """
@@ -568,9 +565,6 @@ class LayerCombinedMemorySummary:
             peaks[layer_name] = peak
         return peaks
 
-    # ------------------------------------------------------------------
-    # Helper: top-n from dict
-    # ------------------------------------------------------------------
 
     @staticmethod
     def top_n_from_dict(d: Dict[str, float], n: int = 3):

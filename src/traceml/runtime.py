@@ -232,6 +232,7 @@ class TraceMLRuntime:
                 forward_db=fwd_time.db,
                 backward_db=bwd_time.db,
                 top_n_layers=num_display_layers,
+                remote_store=remote_store,
             )
         ]
 
