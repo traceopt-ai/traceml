@@ -48,16 +48,25 @@ class StepMemoryTracker:
     def record(self):
         """
         Record peak memory at step end.
+
+        Semantics:
+        - CUDA: record real peak allocated / reserved memory
+        - Non-CUDA: emit a sentinel event with 0 values
+          (means: step memory not applicable on this device)
         """
-        if self.device.type != "cuda":
-            return
+        if self.device.type == "cuda":
+            peak_allocated = torch.cuda.max_memory_allocated(self.device)
+            peak_reserved = torch.cuda.max_memory_reserved(self.device)
+        else:
+            peak_allocated = 0.0
+            peak_reserved = 0.0
 
         evt = StepMemoryEvent(
             model_id=self.model_id,
             device=str(self.device),
-            peak_allocated_mb=torch.cuda.max_memory_allocated(self.device),
-            peak_reserved_mb=torch.cuda.max_memory_reserved(self.device),
-            step=-1,
+            peak_allocated_mb=float(peak_allocated),
+            peak_reserved_mb=float(peak_reserved),
+            step=-1,  # filled during flush
         )
         _temp_step_memory_buffer[self.model_id] = evt
 

@@ -280,8 +280,6 @@ class ModelCombinedRenderer(BaseRenderer):
     def build_live_telemetry_payload(self) -> Dict[str, Any]:
         completed_step = self._compute_latest_completed_step()
 
-        self.logger.error(f"Computed completed_step: {completed_step}")
-
         # ---- cache hit ----
         if (
             completed_step is None
