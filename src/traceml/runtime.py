@@ -216,7 +216,7 @@ class TraceMLRuntime:
         step_timer = StepTimerSampler()
         samplers += [step_mem, step_timer]
         renderers += [
-            StepTimerRenderer(database=step_timer.db),
+            StepTimerRenderer(database=step_timer.db, remote_store=remote_store),
             ModelCombinedRenderer(
                 time_db=step_timer.db,
                 memory_db=step_mem.db,

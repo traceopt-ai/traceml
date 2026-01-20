@@ -48,7 +48,7 @@ class StdoutStderrRenderer(BaseRenderer):
 
         return Panel(
             content,
-            title="[bold cyan]STDOUT / STDERR[/bold cyan]",
+            title="[bold cyan]STDOUT / STDERR (RANK 0)[/bold cyan]",
             border_style="cyan",
         )
 
