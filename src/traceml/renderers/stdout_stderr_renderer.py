@@ -1,6 +1,7 @@
 from rich.panel import Panel
 from rich.text import Text
 from IPython.display import HTML
+from itertools import islice
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import STDOUT_STDERR_LAYOUT
@@ -27,8 +28,15 @@ class StdoutStderrRenderer(BaseRenderer):
         self._table = self.db.create_or_get_table("stdout_stderr")
 
 
+    @staticmethod
+    def _tail(dq, n):
+        if not dq:
+            return []
+        return list(islice(dq, max(0, len(dq) - n), len(dq)))
+
+
     def get_panel_renderable(self) -> Panel:
-        rows = self._table[-self.display_lines :] if self._table else []
+        rows = self._tail(self._table, self.display_lines)
 
         if not rows:
             content = Text(
@@ -46,7 +54,7 @@ class StdoutStderrRenderer(BaseRenderer):
 
 
     def get_notebook_renderable(self) -> HTML:
-        rows = self._table[-self.display_lines :] if self._table else []
+        rows = self._tail(self._table, self.display_lines)
 
         if not rows:
             html = "<div style='opacity:0.6;'>Waiting for stdout/stderr…</div>"

@@ -75,6 +75,7 @@ def launch_tracer_process(
         raise ValueError(f"Invalid mode '{args.mode}'")
 
     print("Launching TraceML tracer:", " ".join(cmd))
+    print("Launching TraceML tracer:", " ".join(cmd))
     sys.exit(subprocess.call(cmd, env=env))
 
 
@@ -132,8 +133,7 @@ def build_parser():
         type=int,
         default=1,
         help=(
-            "Number of processes to launch via torchrun. "
-            "Default is 1. Distributed tracing is not supported yet."
+            "Number of processes to launch via torchrun."
         ),
     )
 

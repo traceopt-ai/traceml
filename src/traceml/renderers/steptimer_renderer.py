@@ -161,9 +161,6 @@ class StepTimerRenderer(BaseRenderer):
             device=device,
         )
 
-    # ------------------------------------------------------------------
-    # Public data pipeline
-    # ------------------------------------------------------------------
 
     def _build_rows(self) -> List[StepTimerRow]:
         series = self._aggregate_top_n(self._collect_series())
@@ -177,9 +174,7 @@ class StepTimerRenderer(BaseRenderer):
         rows.sort(key=lambda r: r.name == "Other")
         return rows
 
-    # ------------------------------------------------------------------
-    # Renderers
-    # ------------------------------------------------------------------
+
 
     def get_panel_renderable(self) -> Panel:
         rows = self._build_rows()
