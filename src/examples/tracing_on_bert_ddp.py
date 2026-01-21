@@ -211,7 +211,7 @@ def main():
     # TraceML: attach hooks to the *real* model
     # --------------------------------------------------------
     # Do this BEFORE wrapping with DistributedDataParallel
-    trace_model_instance(model)
+    # trace_model_instance(model)
 
 
     # Wrap model with DDP
