@@ -350,8 +350,8 @@ class ModelCombinedRenderer(BaseRenderer):
         table.add_column("p95")
         table.add_column("Avg(100)")
         table.add_column("Trend")
-        table.add_column("Rank skew")
-        table.add_column("Slowest rank")
+        table.add_column("Skew (%)" )
+        table.add_column("Worst Rank")
 
         for name, entry in payload.items():
             s = entry["stats"]
@@ -364,7 +364,7 @@ class ModelCombinedRenderer(BaseRenderer):
                 fmt(s["p95"]),
                 fmt(s["avg100"]),
                 s["trend"],
-                f"{s['rank_skew_abs']:.2f} ({s['rank_skew_pct']*100:.1f}%)",
+                f"{fmt_mem_new(s['rank_skew_abs'])} ({s['rank_skew_pct']*100:.1f}%)",
                 str(s["slowest_rank"]) if s["slowest_rank"] is not None else "—",
             )
 
