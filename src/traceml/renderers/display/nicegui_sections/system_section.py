@@ -90,7 +90,7 @@ def build_system_section():
             # B
             _, gpu_v, gpu_s = _tile("GPU Util (now/p50/p95)", title_color="#ff9800")
             # C
-            _, imb_v, imb_s = _tile("GPU Util Imbalance (now/p50/p95)", title_color="#ff9800")
+            _, imb_v, imb_s = _tile("GPU Util Imbalance (now/p95)", title_color="#ff9800")
             # D
             _, ram_v, ram_s = _tile("RAM (now/p95/headroom) (total)", title_color="#ff9800")
             # E

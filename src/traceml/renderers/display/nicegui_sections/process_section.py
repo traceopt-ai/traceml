@@ -92,7 +92,7 @@ def build_process_section():
             # B
             _, ram_v, ram_s = _tile("RAM (now/p95/headroom)", title_color="#ff9800")
             # C
-            _, gmem_v, gmem_s = _tile("GPU Mem (now/p95/) (total)", title_color="#ff9800")
+            _, gmem_v, gmem_s = _tile("GPU Mem (now/p95) (total)", title_color="#ff9800")
 
             # D
             _, ranks_v, ranks_s = _tile("Ranks (seen/stale)", title_color="#ff9800")
@@ -228,8 +228,7 @@ def update_process_section(panel, data, window_n=100, stale_after_s=5.0):
     else:
         panel["gmem_v"].content = (
             f"<b>{fmt_mem_new(g['used_now'])}</b>/"
-            f"{fmt_mem_new(g['used_p95'])}/"
-            f"{fmt_mem_new(g['headroom'])} "
+            f"{fmt_mem_new(g['used_p95'])} "
             f"({fmt_mem_new(g['total'])})"
         )
         panel["gmem_s"].content = ""
