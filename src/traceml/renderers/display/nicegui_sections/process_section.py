@@ -1,98 +1,48 @@
 from nicegui import ui
 import plotly.graph_objects as go
 from traceml.utils.formatting import fmt_mem_new
-from traceml.renderers.display.nicegui_sections.helper import (
-    level_bar_continuous,
-    extract_time_axis,
-)
+from traceml.renderers.display.nicegui_sections.helper import extract_time_axis
 
 
 METRIC_TEXT = "text-sm leading-normal text-gray-700"
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 
+# --- compact metric tile (same style as System section) ---
+LABEL = "text-[11px] font-semibold tracking-wide leading-tight"
+VAL   = "text-[12.5px] text-gray-700 leading-tight"
+SUB   = "text-[11px] text-gray-500 leading-tight"
 
-def build_process_section():
-    card = ui.card().classes("m-2 p-2 w-full")
-    card.style(
-        """
-        background: ffffff;
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.25);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-        overflow-y: auto; 
-        line-height: 1.1;
-        height: 350px;
+
+def _tile(title, title_color=None, shaded=False):
     """
-    )
+    Compact tile: title + one value line + optional subtle subline.
+    Designed to fit 2 rows x 3 cols under a 150px graph inside 350px card.
+    """
+    cls = "w-full px-1 py-1"
+    box = ui.column().classes(cls).style("min-height: 46px;")  # keeps grid aligned but not tall
 
-    with card:
-        ui.label("Process Metrics").classes(METRIC_TEXT).style("color:#d47a00;")
+    if shaded:
+        box.classes("rounded-md").style("background: rgba(0,0,0,0.02);")
 
-        graph = _build_graph_section()
-        cpu_text, cpu_bar = _build_cpu_section()
-        ram_text, ram_bar = _build_ram_section()
-        gpu_text, gpu_bar = _build_gpu_section()
+    with box:
+        t = ui.html(title, sanitize=False).classes(LABEL)
+        if title_color:
+            t.style(f"color:{title_color};")
+        v = ui.html("–", sanitize=False).classes(VAL)
+        s = ui.html("", sanitize=False).classes(SUB)
 
-    return {
-        "cpu_text": cpu_text,
-        "cpu_bar": cpu_bar,
-        "ram_text": ram_text,
-        "ram_bar": ram_bar,
-        "gpu_text": gpu_text,
-        "gpu_bar": gpu_bar,
-        "graph": graph,
-    }
-
-
-def update_process_section(panel, data):
-
-    # CPU
-    cpu = data["cpu_used"]
-    cores = data["cpu_logical_core_count"]
-
-    panel["cpu_text"].content = f"CPU ({cores} cores): {cpu:.1f}%"
-    panel["cpu_bar"].content = level_bar_continuous(cpu / cores)
-
-    # RAM
-    ru, rt = data["ram_used"], data["ram_total"]
-    if rt:
-        pct = (ru * 100.0) / rt
-        panel["ram_text"].content = (
-            f"RAM: {fmt_mem_new(ru)} / {fmt_mem_new(rt)} ({pct:.1f}%)"
-        )
-        panel["ram_bar"].content = level_bar_continuous(pct)
-    else:
-        panel["ram_text"].content = "RAM: –"
-        panel["ram_bar"].content = ""
-
-    # GPU
-    used = data["gpu_used"]
-    reserved = data["gpu_reserved"]
-    total = data["gpu_total"]
-
-    if used is None or total is None:
-        panel["gpu_text"].content = "GPU Mem: Not available"
-        panel["gpu_bar"].content = ""
-    else:
-
-        used_pct = (used * 100.0) / total
-        panel["gpu_text"].content = (
-            f"GPU Mem: {fmt_mem_new(used)} used / "
-            f"{fmt_mem_new(reserved)} reserved / "
-            f"{fmt_mem_new(total)} total"
-        )
-        panel["gpu_bar"].content = level_bar_continuous(used_pct)
-
-    _update_graph_section(panel, data["table"])
+    return box, v, s
 
 
 def _build_graph_section():
+    """
+    Graph: RAM % on left axis, GPU Mem % on right axis.
+    (Matches your original intent but with the System-section layout.)
+    """
     fig = go.Figure()
     fig.update_layout(
-        height=175,
-        margin=dict(l=10, r=10, t=10, b=35),
+        height=150,
+        margin=dict(l=10, r=10, t=2, b=24),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
         xaxis=dict(showgrid=False, visible=False),
@@ -108,142 +58,300 @@ def _build_graph_section():
             title=dict(text="GPU Mem (%)", font=dict(color="#ff9800")),
             tickfont=dict(color="#ff9800"),
         ),
+        showlegend=False,
     )
-    graph = ui.plotly(fig).classes("w-full mt-1")
-    return graph
+    return ui.plotly(fig).classes("w-full")
 
 
-def _build_cpu_section():
-    with ui.row().classes("items-center justify-between w-full"):
-        cpu_text = (
-            ui.html("CPU: –", sanitize=False).classes(METRIC_TEXT).style("color:#333")
-        )
-        cpu_bar = ui.html("", sanitize=False)
-    return cpu_text, cpu_bar
+# -------------------------
+# Build
+# -------------------------
+def build_process_section():
+    card = ui.card().classes("m-2 p-2 w-full")
+    card.style(
+        """
+        background: ffffff;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.25);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        height: 350px;
+        overflow: hidden;
+        """
+    )
+
+    with card:
+        with ui.row().classes("w-full items-center justify-between"):
+            ui.label("Process Metrics").classes(METRIC_TITLE).style("color:#d47a00;")
+            window_text = ui.html("window: –", sanitize=False).classes("text-xs text-gray-500 mr-1")
+
+        graph = _build_graph_section()
+
+        # 2 rows x 3 columns: A B C / D E F
+        with ui.grid(columns=3).classes("w-full gap-1 mt-1"):
+            # A
+            _, cpu_v, cpu_s = _tile("CPU (now/p50/p95)", title_color="#ff9800")
+            # B
+            _, ram_v, ram_s = _tile("RAM (now/p95/headroom)", title_color="#ff9800")
+            # C
+            _, gmem_v, gmem_s = _tile("GPU Mem (now/p95/) (total)", title_color="#ff9800")
+
+            # D
+            _, ranks_v, ranks_s = _tile("Ranks (seen/stale)", title_color="#ff9800")
+            # E
+            _, oomh_v, oomh_s = _tile("OOM Headroom (worst rank)", title_color="#ff9800")
+            # F
+            _, imb_v, imb_s = _tile("GPU Mem Imbalance (max-min)", title_color="#ff9800")
+
+    return {
+        "window_text": window_text,
+        "graph": graph,
+        "cpu_v": cpu_v, "cpu_s": cpu_s,
+        "ram_v": ram_v, "ram_s": ram_s,
+        "gmem_v": gmem_v, "gmem_s": gmem_s,
+        "ranks_v": ranks_v, "ranks_s": ranks_s,
+        "oomh_v": oomh_v, "oomh_s": oomh_s,
+        "imb_v": imb_v, "imb_s": imb_s,
+    }
 
 
-def _build_ram_section():
-    with ui.row().classes("items-center justify-between w-full"):
-        ram_text = (
-            ui.html("RAM: –", sanitize=False).classes(METRIC_TEXT).style("color:#333")
-        )
-        ram_bar = ui.html("", sanitize=False)
-    return ram_text, ram_bar
+# -------------------------
+# Rollups (last N samples)
+# -------------------------
+def _percentile(values, p: float, default=0.0) -> float:
+    vals = [v for v in values if v is not None]
+    if not vals:
+        return default
+    vals.sort()
+    if len(vals) == 1:
+        return float(vals[0])
+    k = (len(vals) - 1) * (p / 100.0)
+    f = int(k)
+    c = min(f + 1, len(vals) - 1)
+    if c == f:
+        return float(vals[f])
+    d0 = vals[f] * (c - k)
+    d1 = vals[c] * (k - f)
+    return float(d0 + d1)
 
 
-def _build_gpu_section():
-    with ui.row().classes("items-center justify-between w-full"):
-        gpu_text = (
-            ui.html("GPU Mem: –", sanitize=False)
-            .classes(METRIC_TEXT)
-            .style("color:#333")
-        )
-        gpu_bar = ui.html("", sanitize=False)
-    return gpu_text, gpu_bar
+def _last_n(table, n=100):
+    if not table:
+        return []
+    return table[-n:] if len(table) > n else table
 
 
-def _update_graph_section(panel, process_table):
+def _compute_rollups_from_process_table(process_table, n=100):
     """
-    Updates the Plotly graph in process panel using the historical samples.
-    process_table = list of records from db.tables["process"]
+    Process table is local history (rank 0). This function computes rolling stats
+    for the time-series tiles + graph (now/p50/p95 + headroom).
     """
+    window = _last_n(process_table, n=n)
+    last = window[-1] if window else {}
 
+    # CPU (already percent)
+    cpu_hist = [float(r.get("cpu_percent", 0.0) or 0.0) for r in window]
+    cpu_now = float(last.get("cpu_percent", 0.0) or 0.0)
+    cpu_p50 = _percentile(cpu_hist, 50, default=0.0)
+    cpu_p95 = _percentile(cpu_hist, 95, default=0.0)
+
+    # RAM (RSS bytes)
+    ram_total = float(last.get("ram_total", 0.0) or 0.0)
+    ram_used_hist = [float(r.get("ram_used", 0.0) or 0.0) for r in window]
+    ram_now = float(last.get("ram_used", 0.0) or 0.0)
+    ram_p95 = _percentile(ram_used_hist, 95, default=0.0)
+    ram_headroom = max(ram_total - ram_now, 0.0) if ram_total else 0.0
+
+    # GPU mem (process-local, single device)
+    gpu_available = bool(last.get("gpu_available", False))
+    g_total = float(last.get("gpu_mem_total", 0.0) or 0.0)
+    g_used_hist = [float(r.get("gpu_mem_used", 0.0) or 0.0) for r in window]
+    g_used_now = float(last.get("gpu_mem_used", 0.0) or 0.0)
+    g_used_p95 = _percentile(g_used_hist, 95, default=0.0)
+    g_headroom = max(g_total - g_used_now, 0.0) if g_total else 0.0
+
+    return {
+        "cpu": {"now": cpu_now, "p50": cpu_p50, "p95": cpu_p95},
+        "ram": {"used_now": ram_now, "used_p95": ram_p95, "total": ram_total, "headroom": ram_headroom},
+        "gpu": {"available": gpu_available, "used_now": g_used_now, "used_p95": g_used_p95, "total": g_total, "headroom": g_headroom},
+    }
+
+
+# -------------------------
+# Update
+# -------------------------
+def update_process_section(panel, data, window_n=100, stale_after_s=5.0):
+    """
+    Update Process section from ProcessRenderer dashboard payload.
+
+    Expected `data` from ProcessRenderer.get_dashboard_renderable():
+      {
+        "cpu_used": ..., "ram_used": ..., "ram_total": ...,
+        "gpu_used": ..., "gpu_reserved": ..., "gpu_total": ...,
+        "gpu_used_imbalance": ...,
+        "n_ranks": ...,
+        "table": <deque of local samples>,
+        "remote_last_seen": {rank: last_seen_epoch, ...}   # optional
+      }
+    """
+    data = data or {}
+    process_table = data.get("table", None) or []
+    if not process_table:
+        panel["window_text"].content = "window: –"
+        return
+
+    # Window label (for the graph + now/p50/p95 rollups)
+    panel["window_text"].content = f"window: last {min(window_n, len(process_table))} samples"
+
+    # Rolling (rank-0 local history)
+    roll = _compute_rollups_from_process_table(process_table, n=window_n)
+
+    # A: CPU now/p50/p95 (use rolling series; more stable than single snapshot)
+    cpu = roll["cpu"]
+    panel["cpu_v"].content = f"<b>{cpu['now']:.0f}%</b> / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
+    panel["cpu_s"].content = ""
+
+    # B: RAM RSS now/p95/headroom (total)
+    ram = roll["ram"]
+    if ram["total"] > 0:
+        panel["ram_v"].content = (
+            f"<b>{fmt_mem_new(ram['used_now'])}</b>/"
+            f"{fmt_mem_new(ram['used_p95'])} "
+            f"({fmt_mem_new(ram['total'])})"
+        )
+        panel["ram_s"].content = ""
+    else:
+        panel["ram_v"].content = "–"
+        panel["ram_s"].content = ""
+
+    # C: GPU mem now/p95/headroom (total) — local history
+    g = roll["gpu"]
+    if not g["available"] or g["total"] <= 0:
+        panel["gmem_v"].content = "Not available"
+        panel["gmem_s"].content = ""
+    else:
+        panel["gmem_v"].content = (
+            f"<b>{fmt_mem_new(g['used_now'])}</b>/"
+            f"{fmt_mem_new(g['used_p95'])}/"
+            f"{fmt_mem_new(g['headroom'])} "
+            f"({fmt_mem_new(g['total'])})"
+        )
+        panel["gmem_s"].content = ""
+
+    # D: ranks (seen / stale)
+    n_ranks = int(data.get("n_ranks", 1) or 1)
+    remote_last_seen = data.get("remote_last_seen", {}) or {}
+
+    # remote_last_seen excludes local rank 0, so "seen" should include local.
+    seen = 1 + len(remote_last_seen) if n_ranks > 1 else 1
+
+    stale = 0
+    if remote_last_seen:
+        now = __import__("time").time()
+        stale = sum(1 for _, ts in remote_last_seen.items() if (now - float(ts)) > float(stale_after_s))
+
+    panel["ranks_v"].content = f"<b>{seen}</b> seen"
+    panel["ranks_s"].content = f"stale: {stale}" if n_ranks > 1 else ""
+
+    # E: OOM headroom (worst rank) — use aggregated snapshot fields from ProcessRenderer
+    # data["gpu_used"] / ["gpu_total"] are "max across ranks" when DDP.
+    used_worst = data.get("gpu_used", None)
+    total_worst = data.get("gpu_total", None)
+    if used_worst is None or total_worst is None or float(total_worst) <= 0:
+        panel["oomh_v"].content = "–"
+        panel["oomh_s"].content = ""
+    else:
+        headroom = max(float(total_worst) - float(used_worst), 0.0)
+        panel["oomh_v"].content = f"<b>{fmt_mem_new(headroom)}</b>"
+        panel["oomh_s"].content = "max rank headroom"
+
+    # F: GPU mem imbalance (max-min) — aggregated field from ProcessRenderer
+    imb = data.get("gpu_used_imbalance", None)
+    if imb is None:
+        panel["imb_v"].content = "–"
+        panel["imb_s"].content = ""
+    else:
+        panel["imb_v"].content = f"<b>{fmt_mem_new(float(imb))}</b>"
+        panel["imb_s"].content = "across ranks"
+
+    # Graph update (rolling window, local process table)
+    _update_process_graph(panel, process_table)
+
+
+# -------------------------
+# Graph update
+# -------------------------
+def _update_process_graph(panel, process_table):
     if not process_table:
         return
 
-    fig = go.Figure()
+    process_table = _last_n(process_table, n=100)
     x_hist = extract_time_axis(process_table)
-    _update_ram_graph(process_table, fig, x_hist)
-    _update_gpu_graph(process_table, fig, x_hist)
 
-    gpu_available = process_table[-1].get("gpu_available", False)
-    _update_graph_layout(gpu_available, fig)
-    panel["graph"].update_figure(fig)
+    # RAM % (relative to ram_total)
+    ram_total = float(process_table[-1].get("ram_total", 0.0) or 0.0) or 1.0
+    ram_pct = [min(max((float(r.get("ram_used", 0.0) or 0.0) / ram_total) * 100.0, 0.0), 100.0) for r in process_table]
 
+    # GPU mem % (relative to gpu_mem_total)
+    gpu_available = bool(process_table[-1].get("gpu_available", False))
+    gpu_total = float(process_table[-1].get("gpu_mem_total", 0.0) or 0.0) or 1.0
+    if gpu_available:
+        gpu_pct = [
+            min(max((float(r.get("gpu_mem_used", 0.0) or 0.0) / gpu_total) * 100.0, 0.0), 100.0)
+            for r in process_table
+        ]
+    else:
+        gpu_pct = []
 
-def _update_ram_graph(process_table, fig, x_hist):
-    ram_total = process_table[-1].get("ram_total", 1)
-    ram_hist = [round(rec.get("ram_used", 0) / ram_total, 2) for rec in process_table][
-        -100:
-    ]
+    fig = go.Figure()
+
     fig.add_trace(
         go.Scatter(
-            y=ram_hist,
+            y=ram_pct,
             x=x_hist,
             mode="lines",
-            name="RAM (%)",
+            name="RAM",
             yaxis="y",
             line=dict(color="#4caf50"),
         )
     )
 
-
-def _update_gpu_graph(process_table, fig, x_hist):
-    gpu_available = process_table[-1].get("gpu_available", False)
     if gpu_available:
-        gpu_hist = []
-        for rec in process_table:
-            gpu_raw = rec.get("gpu_raw", {}) or {}
-            if gpu_raw:
-                gpu_total = sum(v.get("total", 0) for v in gpu_raw.values()) or 1
-                gpu_hist.append(
-                    sum(
-                        v.get("reserved", 0) / gpu_total * 100 for v in gpu_raw.values()
-                    )
-                )
-            else:
-                gpu_hist.append(0)
-        gpu_hist = gpu_hist[-100:]
-
         fig.add_trace(
             go.Scatter(
-                y=gpu_hist,
+                y=gpu_pct,
                 x=x_hist,
                 mode="lines",
-                name="GPU Mem (%)",
+                name="GPU Mem",
                 yaxis="y2",
                 line=dict(color="#ff9800"),
             )
         )
 
-
-def _update_graph_layout(gpu_available, fig):
-    common_layout = dict(
-        height=175,
-        margin=dict(l=10, r=10, t=10, b=35),
+    fig.update_layout(
+        height=150,
+        margin=dict(l=10, r=10, t=2, b=24),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
-        xaxis=dict(
-            showgrid=False,
-            tickangle=-30,
-            tickmode="auto",
-            nticks=10,  # LIMIT LABELS TO 10
-        ),
+        xaxis=dict(showgrid=False, tickangle=-30, tickmode="auto", nticks=8),
         showlegend=False,
+        yaxis=dict(
+            range=[0, 100],
+            title=dict(text="RAM (%)", font=dict(color="#4caf50")),
+            tickfont=dict(color="#4caf50"),
+        ),
     )
 
     if gpu_available:
         fig.update_layout(
-            **common_layout,
-            yaxis=dict(
-                range=[0, 100],
-                title=dict(text="RAM (%)", font=dict(color="#4caf50")),
-                tickfont=dict(color="#4caf50"),
-            ),
             yaxis2=dict(
                 range=[0, 100],
                 overlaying="y",
                 side="right",
                 title=dict(text="GPU Mem (%)", font=dict(color="#ff9800")),
                 tickfont=dict(color="#ff9800"),
-            ),
+            )
         )
-    else:
-        fig.update_layout(
-            **common_layout,
-            yaxis=dict(
-                range=[0, 100],
-                title=dict(text="RAM (%)", font=dict(color="#4caf50")),
-                tickfont=dict(color="#4caf50"),
-            ),
-        )
+
+    panel["graph"].update_figure(fig)

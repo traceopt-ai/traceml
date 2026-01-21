@@ -318,7 +318,7 @@ class StepTimerRenderer(BaseRenderer):
         # Stable worst rank selection (windowed, not per-step).
         metric_key = "p95" if self.worst_metric == "p95" else "avg"
         worst_rank_id = max(rank_stats.keys(), key=lambda r: float(rank_stats[r][metric_key]))
-        worst_rank = f"r{worst_rank_id}"
+        worst_rank = f"{worst_rank_id}"
 
         # Display worst-case values across ranks.
         last = max(float(s["last"]) for s in rank_stats.values())

@@ -9,7 +9,7 @@ class Database:
     Bounded memory per table (keeps only the last N records)
     Fast append (O(1)) and fast drop-oldest (O(1)) via deque(maxlen=...)
     """
-    DEFAULT_MAX_ROWS = 5000
+    DEFAULT_MAX_ROWS = 3000
 
     def __init__(self, sampler_name, max_rows: Optional[int] = None):
         self.max_rows: int = int(max_rows) if max_rows is not None else self.DEFAULT_MAX_ROWS
