@@ -35,8 +35,8 @@ MAX_TRAIN_EXAMPLES = 100000
 MAX_VAL_EXAMPLES = 0
 
 BATCH_SIZE = 256
-EPOCHS = 2
-LR = 2e-5
+EPOCHS = 20
+LR = 2e-6
 WARMUP_RATIO = 0.06
 
 
@@ -211,7 +211,7 @@ def main():
     # TraceML: attach hooks to the *real* model
     # --------------------------------------------------------
     # Do this BEFORE wrapping with DistributedDataParallel
-    # trace_model_instance(model)
+    trace_model_instance(model)
 
 
     # Wrap model with DDP
