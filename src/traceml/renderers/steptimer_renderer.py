@@ -415,14 +415,14 @@ class StepTimerRenderer(BaseRenderer):
 
         # New DDP columns
         table.add_column("Worst", justify="center")
-        table.add_column("Cov", justify="center")
-        table.add_column("MinN", justify="right")
+        # table.add_column("Cov", justify="center")
+        # table.add_column("MinN", justify="right")
 
         if not rows:
             table.add_row(
                 "[dim]No step timers recorded[/dim]",
-                "—", "—", "—", "—", "", "—",
-                "—", "—", "—",
+                "—", "—", "—", "—", "", "—","—",
+                # "—", "—",
             )
         else:
             for r in rows:
@@ -435,8 +435,8 @@ class StepTimerRenderer(BaseRenderer):
                     r.trend,
                     r.device,
                     r.worst_rank,
-                    r.coverage,
-                    str(r.min_samples) if r.min_samples else "—",
+                    # r.coverage,
+                    # str(r.min_samples) if r.min_samples else "—",
                 )
 
         cols, _ = shutil.get_terminal_size()
@@ -444,7 +444,7 @@ class StepTimerRenderer(BaseRenderer):
 
         return Panel(
             Group(table),
-            title="[bold blue]Trace Timers (DDP worst-rank aggregation)[/bold blue]",
+            title="[bold blue]Trace Timers (stats = max over DDP ranks)[/bold blue]",
             border_style="blue",
             width=width,
         )

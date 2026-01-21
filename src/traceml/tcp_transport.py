@@ -5,6 +5,7 @@ import socket
 import threading
 from dataclasses import dataclass
 from typing import Dict, Iterator, Optional
+from traceml.loggers.error_log import get_error_logger
 
 
 @dataclass(frozen=True)
@@ -156,6 +157,7 @@ class TCPClient:
         self._sock: Optional[socket.socket] = None
         self._lock = threading.Lock()
         self._connected = False
+        self.logger = get_error_logger("TraceML-TCPClient")
 
 
     def send(self, payload: Dict) -> None:
