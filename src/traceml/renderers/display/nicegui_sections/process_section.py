@@ -37,7 +37,6 @@ def _tile(title, title_color=None, shaded=False):
 def _build_graph_section():
     """
     Graph: RAM % on left axis, GPU Mem % on right axis.
-    (Matches your original intent but with the System-section layout.)
     """
     fig = go.Figure()
     fig.update_layout(
@@ -63,9 +62,7 @@ def _build_graph_section():
     return ui.plotly(fig).classes("w-full")
 
 
-# -------------------------
-# Build
-# -------------------------
+
 def build_process_section():
     card = ui.card().classes("m-2 p-2 w-full")
     card.style(
@@ -116,9 +113,7 @@ def build_process_section():
     }
 
 
-# -------------------------
 # Rollups (last N samples)
-# -------------------------
 def _percentile(values, p: float, default=0.0) -> float:
     vals = [v for v in values if v is not None]
     if not vals:
@@ -279,9 +274,6 @@ def update_process_section(panel, data, window_n=100, stale_after_s=5.0):
     _update_process_graph(panel, process_table)
 
 
-# -------------------------
-# Graph update
-# -------------------------
 def _update_process_graph(panel, process_table):
     if not process_table:
         return
