@@ -1,72 +1,125 @@
 import json
-import os
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from traceml.distributed import get_ddp_info
 from traceml.session import get_session_id
 from traceml.config import config
 
 
+
 def _rank_suffix() -> str:
-    """Return a stable rank suffix for DDP workers.
-
-    We intentionally *do not* depend on torch.distributed here to avoid any chance
-    of interacting with the user's process group. We only read env vars that are
-    set by torchrun / torch.distributed.run.
-
-    Returns:
-        str: e.g. "rank_0" if LOCAL_RANK is set, otherwise "rank_-1".
     """
-    try:
-        # torchrun sets LOCAL_RANK for each worker.
-        lr = int(os.environ.get("LOCAL_RANK", "-1"))
-    except Exception:
-        lr = -1
-    return f"rank_{lr}"
+    Return a rank suffix for filesystem isolation.
+
+    NOTE:
+    This currently uses LOCAL_RANK via get_ddp_info(), which is sufficient
+    for single-node multi-GPU DDP.
+
+    TODO:
+    Switch to global RANK when enabling multi-node support to avoid
+    cross-node file collisions.
+    """
+    _, local_rank, _ = get_ddp_info()
+    return f"rank_{local_rank}"
 
 
 
 class DatabaseWriter:
-    """Writes incremental updates from a Database instance to JSONL files.
+    """"
+    Incrementally writes Database tables to disk in JSONL format.
 
-    Design goals:
-      - Append-only JSONL per table (cheap, streamable).
-      - Only write new rows since the last flush (tracked via per-table offsets).
-      - DDP-safe: when running under torchrun, each worker writes to a rank-scoped
-        folder so multiple ranks never append to the same file.
+    This writer is designed to work with bounded deques where old entries
+    may be evicted at any time. As a result, we do NOT rely on positional
+    indices for incremental writes.
 
-    Directory layout:
+    Design principles
+    -----------------
+    - Append-only JSONL files (stream-friendly, crash-safe)
+    - Delta writes only (no full table rewrites)
+    - Safe under deque eviction
+    - DDP-safe: each rank writes to its own directory
+    - Low overhead: flush frequency is throttled locally
 
+    Directory layout
+    ----------------
         <logs_dir>/<session_id>/data/<rank_suffix>/<sampler_name>/<table>.jsonl
-
     """
 
-    def __init__(self, db, sampler_name):
+    def __init__(self, db, sampler_name: str, flush_every: int = 100):
+        """
+        Parameters
+        ----------
+        db : Database
+            In-memory database instance to flush.
+        sampler_name : str
+            Name of the sampler owning this writer.
+        flush_every : int, optional
+            Flush once every N calls to `flush()` (default: 100).
+        """
         self.db = db
-        session_id = get_session_id()
+        self.flush_every = max(1, int(flush_every))
+        self._flush_counter = 0
 
-        # IMPORTANT: rank-scoped folder to avoid file collisions in DDP.
-        # This is a minimal change that keeps existing layout compatible.
+        session_id = get_session_id()
         rank_dir = _rank_suffix()
 
-        self.logs_dir = os.path.join(
-            config.logs_dir, session_id, "data", rank_dir, sampler_name)
+        # Pathlib-based log root
+        self.logs_dir = (
+                Path(config.logs_dir)
+                / session_id
+                / "data"
+                / rank_dir
+                / sampler_name
+        )
 
-        self._last_written = {}  # table_name → index
+        # Tracks the *last written record object* per table.
+        # Used instead of positional offsets because deques may evict data.
+        self._last_written_record: Dict[str, Any] = {}
+
 
     def flush(self):
-        """Write only new rows from each table to its own file."""
+        """
+        Flush new records from all tables to disk.
+
+        Notes
+        -----
+        - This method may be called very frequently (e.g., every training step).
+        - Actual disk I/O is throttled via `flush_every`.
+        - Only records that were not written in previous flushes are appended.
+        """
         if not config.enable_logging:
             return
 
-        for table_name, rows in self.db.all_tables().items():
-            os.makedirs(self.logs_dir, exist_ok=True)
-            path = os.path.join(self.logs_dir, f"{table_name}.jsonl")
+        self._flush_counter += 1
+        if self._flush_counter % self.flush_every != 0:
+            return
 
-            last = self._last_written.get(table_name, 0)
-            new_rows = rows[last:]
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+        for table_name, rows in self.db.all_tables().items():
+            if not rows:
+                continue
+
+            path = self.logs_dir / f"{table_name}.jsonl"
+            last_written = self._last_written_record.get(table_name)
+
+            # Collect unseen rows by scanning from the tail backwards.
+            new_rows = []
+            for r in reversed(rows):
+                if last_written is not None and r == last_written:
+                    break
+                new_rows.append(r)
+
             if not new_rows:
                 continue
+
+            # Restore original order before writing
+            new_rows.reverse()
 
             with open(path, "a") as f:
                 for r in new_rows:
                     f.write(json.dumps(r) + "\n")
 
-            self._last_written[table_name] = len(rows)
+            # Track the newest record we just wrote
+            self._last_written_record[table_name] = new_rows[-1]

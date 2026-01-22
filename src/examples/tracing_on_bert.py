@@ -33,7 +33,7 @@ MODEL_NAME = "prajjwal1/bert-mini"
 
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 1000
+MAX_TRAIN_EXAMPLES = 5000
 MAX_VAL_EXAMPLES = 0
 BATCH_SIZE = 32
 EPOCHS = 1

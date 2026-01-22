@@ -60,7 +60,7 @@ class TraceMLRuntime:
       - DDP single-node (CPU / GPU, NCCL or Gloo)
 
     Principles:
-      - samplers run on all ranks
+      - samplers run on all ranks except System Sampler
       - renderers + display run only on rank 0
       - workers send incremental DB rows via TCP
       - rank 0 stores remotes it in RemoteDBStore
@@ -186,15 +186,17 @@ class TraceMLRuntime:
         samplers: List[BaseSampler] = []
         renderers: List[BaseRenderer] = []
 
-        # Rank 0 only: system / process
+        # Rank 0 only: system / host sampler
         if not (is_ddp and local_rank != 0):
             sys_sampler = SystemSampler()
-            proc_sampler = ProcessSampler()
-            samplers += [sys_sampler, proc_sampler]
-            renderers += [
-                SystemRenderer(database=sys_sampler.db),
-                ProcessRenderer(database=proc_sampler.db),
-            ]
+            samplers += [sys_sampler]
+            renderers += [SystemRenderer(database=sys_sampler.db)]
+
+        # Process sampler
+        proc_sampler = ProcessSampler()
+        samplers += [proc_sampler]
+        renderers += [ProcessRenderer(database=proc_sampler.db)]
+
 
         # Layer memory
         layer_mem = LayerMemorySampler()
