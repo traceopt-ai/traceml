@@ -34,10 +34,7 @@ def attach_backward_entry_hook(output, layer_name: str):
 
 
 def attach_execution_entry_hooks(
-    model: nn.Module,
-    include_names=None, 
-    exclude_names=None,     
-    leaf_only=True
+    model: nn.Module
 ):
     model_id = id(model)
     if _execution_entry_hook_registry.get(model_id):
