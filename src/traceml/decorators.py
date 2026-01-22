@@ -132,12 +132,7 @@ def trace_model_instance(
             )
 
         if trace_execution:
-            attach_execution_entry_hooks(
-                model,
-                include_names=include_names,
-                exclude_names=exclude_names,
-                leaf_only=leaf_only,
-            )
+            attach_execution_entry_hooks(model)
 
     except Exception as e:
         print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)

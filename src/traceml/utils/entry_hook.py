@@ -43,7 +43,9 @@ def attach_execution_entry_hooks(
     if _execution_entry_hook_registry.get(model_id):
         return
 
-    for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
+    for name, module in model.named_modules():
+        if any(module.children()):
+            continue
 
         module.register_forward_pre_hook(ForwardEntryHook(name))
         module.register_forward_hook(
