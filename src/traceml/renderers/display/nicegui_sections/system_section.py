@@ -151,8 +151,8 @@ def _compute_rollups(system_table, n=100):
     last = window[-1] if window else {}
 
     # CPU
-    cpu_hist = [float(r.get("cpu_percent", 0.0) or 0.0) for r in window]
-    cpu_now = float(last.get("cpu_percent", 0.0) or 0.0)
+    cpu_hist = [float(r.get("cpu", 0.0) or 0.0) for r in window]
+    cpu_now = float(last.get("cpu", 0.0) or 0.0)
     cpu_p50 = _percentile(cpu_hist, 50, default=0.0)
     cpu_p95 = _percentile(cpu_hist, 95, default=0.0)
 
@@ -312,7 +312,7 @@ def _update_graph_section(panel, system_table):
     fig = go.Figure()
 
     # CPU
-    cpu_hist = [rec.get("cpu_percent", 0) or 0 for rec in system_table]
+    cpu_hist = [rec.get("cpu", 0) or 0 for rec in system_table]
     fig.add_trace(
         go.Scatter(
             y=cpu_hist,

@@ -1,7 +1,8 @@
-import shutil
-from typing import Dict, Any, Optional, Iterable, Mapping, List, Tuple
-from collections.abc import Iterable as ABCIterable
+from collections import deque
+from typing import Dict, Any, Optional, List
+
 import numpy as np
+import shutil
 
 from rich.panel import Panel
 from rich.table import Table
@@ -18,266 +19,280 @@ from .utils import CARD_STYLE
 
 class ProcessRenderer(BaseRenderer):
     """
-    Process metrics renderer (single-process + DDP with RemoteDBStore).
+    Renderer for process-level telemetry (CPU, RAM, GPU memory).
 
-    This renderer reads rows produced by ProcessSampler (local + remote ranks)
-    and exposes three views:
-      1) CLI panel (rich)
-      2) Notebook HTML card
-      3) Dashboard payload (dict)
+    Scope
+    -----
+    - Rank-0 coordinator only
+    - Supports single-process and DDP via RemoteDBStore
 
-    Why a separate "Process" panel?
-      - These are *process-local* metrics (CPU%, RSS RAM, torch CUDA allocator usage).
-      - In DDP, every rank is its own process; rank-0 can optionally aggregate telemetry
-        from other ranks via RemoteDBStore.
+    High-level semantics
+    --------------------
+    1. Live views:
+       - Stateless
+       - Current-only
+       - Pessimistic aggregation (worst rank)
 
-    Expected ProcessSampler row schema (flat fields):
-      {
-        "timestamp": float,
-        "pid": int,
-        "cpu_logical_core_count": int,
-        "cpu_percent": float,            # process cpu%
-        "ram_used": float,               # RSS bytes
-        "ram_total": float,              # system total bytes (for context)
-        "gpu_available": bool,
-        "gpu_count": int,
-        "gpu_device_index": int | None,  # device used by this process
-        "gpu_mem_used": float,           # bytes (torch.cuda.memory_allocated)
-        "gpu_mem_reserved": float,       # bytes (torch.cuda.memory_reserved)
-        "gpu_mem_total": float,          # bytes (device total memory)
-        # optionally: rank/local_rank/world_size ...
-      }
+    2. Dashboard history:
+       - Incremental aggregation
+       - Bounded rolling window
+       - No strict step or timestamp alignment
 
-    Aggregation semantics when remote_store is provided (rank-0 dashboard):
-      - CPU/RAM: median across ranks (stable "typical" process)
-      - GPU memory: max across ranks (OOM-risk signal)
-      - GPU imbalance: max(gpu_used) - min(gpu_used) across ranks
-
-    Summary semantics (compute_summary):
-      - Pools samples across all ranks (local + remote) and computes p50/p95/peak.
-      - This is "distribution across all process samples received", not time-aligned
-        "max-across-ranks per timestep".
+    3. Summary:
+       - Computed from rank-0 local data only
+       - Remote summary intentionally deferred
     """
 
-    # RemoteDBStore keys must match sender payload:
-    # message = {"rank": int, "sampler": str, "tables": {"process": [rows...]}}
     REMOTE_SAMPLER_NAME = "ProcessSampler"
     TABLE_NAME = "process"
 
+    # Dashboard history size (rolling window)
+    DASHBOARD_MAX_ROWS = 200
+
     def __init__(self, database: Database, remote_store: Optional[RemoteDBStore] = None):
         super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT)
+
         self.db = database
         self.remote_store = remote_store
 
         # local table reference (deque-like)
         self._table = self.db.create_or_get_table(self.TABLE_NAME)
 
-    # Table/row utilities (robust to list, deque, or dict-of-deques)
-    @staticmethod
-    def _iter_rows(obj) -> Iterable[Dict[str, Any]]:
-        """
-        Yield row dicts from:
-          - a deque/list of rows
-          - a mapping {table_name -> deque/list of rows}
+        # Rolling dashboard aggregation (rank-0 only)
+        self._dashboard_rollup = deque(maxlen=self.DASHBOARD_MAX_ROWS)
 
-        This makes the renderer resilient to how Database stores tables internally.
-        """
-        if obj is None:
-            return
-        if isinstance(obj, Mapping):
-            for _, table in obj.items():
-                if table:
-                    for row in table:
-                        if isinstance(row, dict):
-                            yield row
-            return
-        if isinstance(obj, ABCIterable):
-            for row in obj:
-                if isinstance(row, dict):
-                    yield row
+        # Track how many samples we have consumed per rank
+        self._last_seen_sample_idx: Dict[int, int] = {}
 
     @staticmethod
-    def _safe_float(x, default: float = 0.0) -> float:
+    def _safe_float(x: Any, default: float = 0.0) -> float:
         try:
-            if x is None:
-                return float(default)
             return float(x)
         except Exception:
-            return float(default)
+            return default
 
-    def _latest_row(self, db: Database, table_name: str) -> Optional[Dict[str, Any]]:
+    def _compute_live_snapshot(self) -> Dict[str, Any]:
         """
-        Return the latest row dict from db.get_last_record(table_name), if available.
+        Compute the current live snapshot.
+
+        Semantics
+        ---------
+        - CPU: max across ranks (current)
+        - GPU: rank with least headroom (current)
+        - GPU imbalance: max - min used (current)
         """
+        per_rank_rows: Dict[int, Dict[str, Any]] = {}
+
+        # Always include rank 0
         try:
-            return db.get_last_record(table_name)
-        except Exception:
-            return None
-
-
-    # Remote iteration pattern
-    def _iter_rank_dbs(self, local_db: Database, sampler_name: str):
-        """
-        Yield (rank, Database) pairs:
-          - rank 0 is always local_db
-          - if remote_store is provided, yield remote rank DBs too
-        """
-        yield 0, local_db
-
-        if not self.remote_store:
-            return
-
-        for rank in self.remote_store.ranks():
-            r = int(rank)
-            db = self.remote_store.get_db(r, sampler_name)
-            if db is not None:
-                yield r, db
-
-    def _collect_latest_per_rank(self) -> Dict[int, Dict[str, Any]]:
-        """
-        Get the latest process row per rank (local + remote ranks).
-        """
-        out: Dict[int, Dict[str, Any]] = {}
-        for rank, db in self._iter_rank_dbs(self.db, self.REMOTE_SAMPLER_NAME):
-            row = self._latest_row(db, self.TABLE_NAME)
+            row = self.db.get_last_record(self.TABLE_NAME)
             if row:
-                out[rank] = row
-        return out
+                per_rank_rows[0] = row
+        except Exception:
+            pass
 
+        # Include remote ranks if present
+        if self.remote_store:
+            for rank in self.remote_store.ranks():
+                db = self.remote_store.get_db(rank, self.REMOTE_SAMPLER_NAME)
+                if not db:
+                    continue
+                try:
+                    row = db.get_last_record(self.TABLE_NAME)
+                    if row:
+                        per_rank_rows[rank] = row
+                except Exception:
+                    continue
 
-    # Snapshot computation (used by CLI + notebook + dashboard)
-    def _compute_snapshot(self) -> Dict[str, Any]:
-        """
-        Compute the latest process snapshot.
-
-        If remote telemetry exists, aggregates across ranks as described in class docstring.
-        """
-        per_rank = self._collect_latest_per_rank()
-        if not per_rank:
-            return self._empty_snapshot()
+        if not per_rank_rows:
+            return {}
 
         cpu_vals: List[float] = []
-        core_vals: List[float] = []
-        ram_vals: List[float] = []
-        ram_totals: List[float] = []
-
         gpu_used: List[float] = []
         gpu_reserved: List[float] = []
         gpu_total: List[float] = []
-        gpu_dev: List[Any] = []
+        gpu_rank: List[int] = []
 
-        for _, row in per_rank.items():
-            cpu_vals.append(self._safe_float(row.get("cpu_percent", 0.0), 0.0))
-            core_vals.append(self._safe_float(row.get("cpu_logical_core_count", 0.0), 0.0))
-            ram_vals.append(self._safe_float(row.get("ram_used", 0.0), 0.0))
-            ram_totals.append(self._safe_float(row.get("ram_total", 0.0), 0.0))
+        for rank, row in per_rank_rows.items():
+            cpu_vals.append(self._safe_float(row.get("cpu")))
 
-            if bool(row.get("gpu_available", False)) and row.get("gpu_mem_total", None) is not None:
-                gpu_used.append(self._safe_float(row.get("gpu_mem_used", 0.0), 0.0))
-                gpu_reserved.append(self._safe_float(row.get("gpu_mem_reserved", 0.0), 0.0))
-                gpu_total.append(self._safe_float(row.get("gpu_mem_total", 0.0), 0.0))
-                gpu_dev.append(row.get("gpu_device_index", None))
+            gpu = row.get("gpu")
+            if row.get("gpu_available", False) and gpu:
+                used = self._safe_float(gpu.get("mem_used"))
+                reserved = self._safe_float(gpu.get("mem_reserved"))
+                total = self._safe_float(gpu.get("mem_total"))
 
-        n_ranks = len(per_rank)
+                gpu_used.append(used)
+                gpu_reserved.append(reserved)
+                gpu_total.append(total)
+                gpu_rank.append(rank)
 
-        # CPU/RAM: "typical rank"
-        cpu_med = float(np.median(cpu_vals)) if cpu_vals else 0.0
-        cores = float(np.max(core_vals)) if core_vals else 0.0
+        snapshot = {
+            "cpu_used": max(cpu_vals) if cpu_vals else 0.0,
+        }
 
-        ram_med = float(np.median(ram_vals)) if ram_vals else 0.0
-        ram_total = float(np.max(ram_totals)) if ram_totals else 0.0
-
-        # GPU: "risk / worst rank"
         if gpu_total:
-            used_max = float(np.max(gpu_used)) if gpu_used else 0.0
-            reserved_max = float(np.max(gpu_reserved)) if gpu_reserved else 0.0
-            total_max = float(np.max(gpu_total)) if gpu_total else 0.0
+            headrooms = [t - r for t, r in zip(gpu_total, gpu_reserved)]
+            idx = int(np.argmin(headrooms))
 
-            used_min = float(np.min(gpu_used)) if gpu_used else 0.0
-            used_imb = used_max - used_min
+            snapshot.update(
+                {
+                    "gpu_used": gpu_used[idx],
+                    "gpu_reserved": gpu_reserved[idx],
+                    "gpu_total": gpu_total[idx],
+                    "gpu_rank": gpu_rank[idx],
+                    "gpu_used_imbalance": (
+                        max(gpu_used) - min(gpu_used)
+                        if len(gpu_used) > 1 else 0.0
+                    ),
+                }
+            )
 
-            dev_main = None
-            if gpu_used and gpu_dev:
-                try:
-                    idx = int(np.argmax(np.asarray(gpu_used)))
-                    dev_main = gpu_dev[idx] if idx < len(gpu_dev) else None
-                except Exception:
-                    dev_main = None
-        else:
-            used_max = reserved_max = total_max = None
-            used_imb = None
-            dev_main = None
+        return snapshot
 
-        return {
-            "n_ranks": n_ranks,
-            "cpu_used": cpu_med,
-            "cpu_logical_core_count": cores,
-            "ram_used": ram_med,
-            "ram_total": ram_total,
-            "gpu_used": used_max,
-            "gpu_reserved": reserved_max,
-            "gpu_total": total_max,
-            "gpu_device_index": dev_main,
-            "gpu_used_imbalance": used_imb,
-        }
-
-    @staticmethod
-    def _empty_snapshot() -> Dict[str, Any]:
+    def _update_dashboard_rollup(self) -> None:
         """
-        Default snapshot when no records exist.
+        Incrementally update the dashboard rolling history.
+
+        Strategy
+        --------
+        - Each remote rank maintains a monotonically increasing `sample_idx`
+        - Remote tables are bounded deques, appended in order
+        - For each rank:
+            * iterate the table in reverse
+            * collect rows with sample_idx > last_seen_sample_idx[rank]
+            * stop as soon as we hit an already-seen sample
+        - Let N = min(#new rows across ranks)
+        - For i in [0, N):
+            * CPU = max across ranks
+            * GPU = rank with least headroom
+        - Append aggregated rows to the rolling dashboard deque
+        - Advance last_seen_sample_idx for all ranks
         """
-        return {
-            "n_ranks": 0,
-            "cpu_used": 0.0,
-            "cpu_logical_core_count": 0.0,
-            "ram_used": 0.0,
-            "ram_total": 0.0,
-            "gpu_used": None,
-            "gpu_reserved": None,
-            "gpu_total": None,
-            "gpu_device_index": None,
-            "gpu_used_imbalance": None,
-        }
+        if not self.remote_store:
+            return
+
+        per_rank_new: Dict[int, List[Dict[str, Any]]] = {}
+
+        # ------------------------------------------------------------------
+        # Step 1: collect new rows per rank (reverse scan, cheap)
+        # ------------------------------------------------------------------
+        for rank in self.remote_store.ranks():
+            db = self.remote_store.get_db(rank, self.REMOTE_SAMPLER_NAME)
+            if not db:
+                continue
+
+            table = db.create_or_get_table(self.TABLE_NAME)
+            last_seen = self._last_seen_sample_idx.get(rank, 0)
+
+            new_rows: List[Dict[str, Any]] = []
+
+            # Walk backwards until we hit an already-processed sample
+            for row in reversed(table):
+                sample_idx = row.get("sample_idx", 0)
+                if sample_idx <= last_seen:
+                    break
+                new_rows.append(row)
+
+            if new_rows:
+                # Restore chronological order
+                per_rank_new[rank] = list(reversed(new_rows))
+
+        if not per_rank_new:
+            return
+
+        # ------------------------------------------------------------------
+        # Step 2: aggregate only as many samples as all ranks can provide
+        # ------------------------------------------------------------------
+        n_new = min(len(rows) for rows in per_rank_new.values())
+
+        for i in range(n_new):
+            cpu_vals: List[float] = []
+            gpu_candidates: List[tuple] = []
+
+            for rank, rows in per_rank_new.items():
+                row = rows[i]
+
+                cpu_vals.append(self._safe_float(row.get("cpu")))
+
+                gpu = row.get("gpu")
+                if row.get("gpu_available", False) and gpu:
+                    used = self._safe_float(gpu.get("mem_used"))
+                    reserved = self._safe_float(gpu.get("mem_reserved"))
+                    total = self._safe_float(gpu.get("mem_total"))
+                    headroom = total - reserved
+
+                    gpu_candidates.append(
+                        (headroom, rank, used, reserved, total)
+                    )
+
+            entry = {
+                "cpu_max": max(cpu_vals) if cpu_vals else 0.0,
+            }
+
+            if gpu_candidates:
+                _, rank, used, reserved, total = min(gpu_candidates)
+                entry.update(
+                    {
+                        "gpu_rank": rank,
+                        "gpu_used": used,
+                        "gpu_reserved": reserved,
+                        "gpu_total": total,
+                    }
+                )
+
+            self._dashboard_rollup.append(entry)
+
+        # ------------------------------------------------------------------
+        # Step 3: advance cursors (sample_idx-based, robust to drops)
+        # ------------------------------------------------------------------
+        for rank, rows in per_rank_new.items():
+            self._last_seen_sample_idx[rank] = rows[n_new - 1].get(
+                "sample_idx",
+                self._last_seen_sample_idx.get(rank, 0),
+            )
 
     # -------------------------------------------------------------------------
     # CLI panel rendering (Rich)
     # -------------------------------------------------------------------------
     def get_panel_renderable(self) -> Panel:
-        snap = self._compute_snapshot()
-        n_ranks = int(snap.get("n_ranks", 1) or 1)
+        snap = self._compute_live_snapshot()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="white")
         table.add_column(justify="left", style="white")
 
-        cpu_label = "CPU" if n_ranks <= 1 else f"CPU (median/{n_ranks}r)"
-        ram_label = "RAM" if n_ranks <= 1 else f"RAM (median/{n_ranks}r)"
-
+        # CPU: worst rank
         table.add_row(
-            f"[bold green]{cpu_label}[/bold green] {fmt_percent(snap.get('cpu_used', 0.0))}",
-            f"[bold green]{ram_label}[/bold green] {fmt_mem_new(snap.get('ram_used', 0.0))}",
+            "[bold green]CPU (worst rank)[/bold green] "
+            f"{fmt_percent(snap.get('cpu_used', 0.0))}",
+            "",
         )
 
         table.add_row(" ")
 
-        if snap.get("gpu_total"):
+        # GPU memory
+        if snap.get("gpu_total") is not None:
             gpu_str = (
                 f"{fmt_mem_new(snap['gpu_used'])}/"
                 f"{fmt_mem_new(snap['gpu_reserved'])}/"
                 f"{fmt_mem_new(snap['gpu_total'])}"
+                f" [dim](rank {snap.get('gpu_rank')})[/dim]"
             )
-            if n_ranks > 1:
-                gpu_str += " [dim](max across ranks)[/dim]"
         else:
             gpu_str = "[red]Not available[/red]"
 
-        table.add_row(f"[bold green]GPU MEM (used/reserved/total)[/bold green] {gpu_str}")
+        table.add_row(
+            "[bold green]GPU MEM (used/reserved/total)[/bold green]",
+            gpu_str,
+        )
 
-        # DDP-only: imbalance is a strong signal for skewed ranks
-        if n_ranks > 1 and snap.get("gpu_used_imbalance") is not None:
+        # GPU imbalance (only if present)
+        if snap.get("gpu_used_imbalance", 0.0) > 0.0:
             table.add_row(
-                f"[bold green]GPU used imbalance[/bold green] "
-                f"{fmt_mem_new(snap['gpu_used_imbalance'])} [dim](max-min across ranks)[/dim]"
+                "[bold green]GPU used imbalance[/bold green]",
+                f"{fmt_mem_new(snap['gpu_used_imbalance'])} "
+                "[dim](max-min across ranks)[/dim]",
             )
 
         cols, _ = shutil.get_terminal_size()
@@ -291,21 +306,29 @@ class ProcessRenderer(BaseRenderer):
             width=panel_width,
         )
 
+    # ------------------------------------------------------------------
+    # Dashboard payload
+    # ------------------------------------------------------------------
+    def get_dashboard_renderable(self) -> Dict[str, Any]:
+        self._update_dashboard_rollup()
+
+        snap = self._compute_live_snapshot()
+        snap["history"] = list(self._dashboard_rollup)
+        return snap
+
     # -------------------------------------------------------------------------
     # Notebook HTML rendering
     # -------------------------------------------------------------------------
     def get_notebook_renderable(self) -> HTML:
-        snap = self._compute_snapshot()
-        n_ranks = int(snap.get("n_ranks", 1) or 1)
+        snap = self._compute_live_snapshot()
 
-        if snap.get("gpu_total"):
+        if snap.get("gpu_total") is not None:
             gpu_html = f"""
                 <div>
-                    <b>GPU MEM:</b>
+                    <b>GPU MEM (worst rank {snap.get("gpu_rank")}):</b>
                     {fmt_mem_new(snap['gpu_used'])} /
                     {fmt_mem_new(snap['gpu_reserved'])} /
                     {fmt_mem_new(snap['gpu_total'])}
-                    {"<span style='color:#777;'>(max across ranks)</span>" if n_ranks > 1 else ""}
                 </div>
             """
         else:
@@ -316,130 +339,74 @@ class ProcessRenderer(BaseRenderer):
             """
 
         imb_html = ""
-        if n_ranks > 1 and snap.get("gpu_used_imbalance") is not None:
+        if snap.get("gpu_used_imbalance", 0.0) > 0.0:
             imb_html = f"""
-                <div><b>GPU used imbalance (max-min):</b> {fmt_mem_new(snap['gpu_used_imbalance'])}</div>
+                <div>
+                    <b>GPU used imbalance (max-min):</b>
+                    {fmt_mem_new(snap['gpu_used_imbalance'])}
+                </div>
             """
-
-        cpu_label = "CPU" if n_ranks <= 1 else f"CPU (median across {n_ranks} ranks)"
-        ram_label = "RAM" if n_ranks <= 1 else f"RAM (median across {n_ranks} ranks)"
 
         html = f"""
         <div style="{CARD_STYLE}">
             <h4 style="color:#d47a00; margin-top:0;">Process Metrics</h4>
-            <div><b>{cpu_label}:</b> {fmt_percent(snap.get('cpu_used', 0.0))}</div>
-            <div><b>{ram_label}:</b> {fmt_mem_new(snap.get('ram_used', 0.0))}</div>
+
+            <div>
+                <b>CPU (worst rank):</b>
+                {fmt_percent(snap.get('cpu_used', 0.0))}
+            </div>
+
             {gpu_html}
             {imb_html}
         </div>
         """
         return HTML(html)
 
-    # -------------------------------------------------------------------------
-    # Dashboard payload
-    # -------------------------------------------------------------------------
-    def get_dashboard_renderable(self) -> Dict[str, Any]:
-        """
-        Payload for your NiceGUI/Plotly dashboard.
-
-        Returns:
-          - snapshot fields
-          - local table reference (deque-like)
-          - optionally, per-rank "last seen" timestamps if remote_store exists
-        """
-        snap = self._compute_snapshot()
-        snap["table"] = self._table  # local process history (rank 0)
-
-        if self.remote_store:
-            snap["remote_last_seen"] = {
-                int(r): float(self.remote_store.last_seen(int(r))) for r in self.remote_store.ranks()
-            }
-        return snap
-
-    # -------------------------------------------------------------------------
-    # Summary (pooled across ranks if remote_store exists)
-    # -------------------------------------------------------------------------
-    def _collect_all_rows_local_and_remote(self) -> List[Dict[str, Any]]:
-        """
-        Collect all process rows from:
-          - local "process" table
-          - remote ranks' "process" tables (if remote_store exists)
-        """
-        rows: List[Dict[str, Any]] = []
-
-        # local
-        rows.extend(list(self._iter_rows(self._table)))
-
-        # remote
-        if self.remote_store:
-            for rank in self.remote_store.ranks():
-                db = self.remote_store.get_db(int(rank), self.REMOTE_SAMPLER_NAME)
-                if not db:
-                    continue
-                t = db.create_or_get_table(self.TABLE_NAME)
-                rows.extend(list(self._iter_rows(t)))
-
-        return rows
-
+    # ------------------------------------------------------------------
+    # Summary (rank-0 only)
+    # ------------------------------------------------------------------
     def compute_summary(self) -> Dict[str, Any]:
         """
-        Compute summary stats over pooled process samples.
-
-        Returns keys compatible with your earlier summary style, but updated to
-        flat GPU field names:
-          - cpu_cores_p50/p95, cpu_logical_core_count
-          - ram_used_p95/peak, ram_total
-          - is_GPU_available
-          - gpu_mem_used_p95_single / peak_single
-          - gpu_mem_reserved_peak_single
-          - gpu_mem_total_capacity
+        Compute summary statistics from rank-0 local samples only.
         """
-        rows = self._collect_all_rows_local_and_remote()
+        rows = list(self._table)
         if not rows:
             return {"total_samples": 0}
 
-        cpu_vals_pct: List[float] = []
-        cpu_logical_cores: List[float] = []
-        ram_vals: List[float] = []
-        ram_total_vals: List[float] = []
+        cpu_vals = [
+            self._safe_float(r.get("cpu")) / 100.0
+            for r in rows
+        ]
+        ram_vals = [r["ram_used"] for r in rows]
 
-        gpu_used_vals: List[float] = []
-        gpu_reserved_vals: List[float] = []
-        gpu_total_vals: List[float] = []
+        gpu_used = []
+        gpu_reserved = []
+        gpu_total = []
 
-        for row in rows:
-            cpu_vals_pct.append(self._safe_float(row.get("cpu_percent", 0.0), 0.0))
-            cpu_logical_cores.append(self._safe_float(row.get("cpu_logical_core_count", 0.0), 0.0))
+        for r in rows:
+            gpu = r.get("gpu")
+            if r.get("gpu_available", False) and gpu:
+                gpu_used.append(self._safe_float(gpu.get("mem_used")))
+                gpu_reserved.append(self._safe_float(gpu.get("mem_reserved")))
+                gpu_total.append(self._safe_float(gpu.get("mem_total")))
 
-            ram_vals.append(self._safe_float(row.get("ram_used", 0.0), 0.0))
-            ram_total_vals.append(self._safe_float(row.get("ram_total", 0.0), 0.0))
-
-            if bool(row.get("gpu_available", False)) and row.get("gpu_mem_total", None) is not None:
-                gpu_used_vals.append(self._safe_float(row.get("gpu_mem_used", 0.0), 0.0))
-                gpu_reserved_vals.append(self._safe_float(row.get("gpu_mem_reserved", 0.0), 0.0))
-                gpu_total_vals.append(self._safe_float(row.get("gpu_mem_total", 0.0), 0.0))
-
-        # Keep legacy behavior: interpret cpu_percent as "cores fraction" by dividing by 100.
-        cpu_cores = [v / 100.0 for v in cpu_vals_pct]
-
-        summary: Dict[str, Any] = {
+        summary = {
             "total_samples": len(rows),
-            "cpu_cores_p50": round(float(np.median(cpu_cores)), 2) if cpu_cores else 0.0,
-            "cpu_cores_p95": round(float(np.percentile(cpu_cores, 95)), 2) if cpu_cores else 0.0,
-            "cpu_logical_core_count": float(np.max(cpu_logical_cores)) if cpu_logical_cores else 0.0,
-            "ram_used_p95": round(float(np.percentile(ram_vals, 95)), 2) if ram_vals else 0.0,
-            "ram_used_peak": round(float(np.max(ram_vals)), 2) if ram_vals else 0.0,
-            "ram_total": float(np.max(ram_total_vals)) if ram_total_vals else 0.0,
-            "is_GPU_available": bool(gpu_used_vals),
+            "cpu_cores_p50": float(np.median(cpu_vals)),
+            "cpu_cores_p95": float(np.percentile(cpu_vals, 95)),
+            "ram_used_p95": float(np.percentile(ram_vals, 95)),
+            "ram_used_peak": float(np.max(ram_vals)),
+            "ram_total": float(max(r["ram_total"] for r in rows)),
+            "is_GPU_available": bool(gpu_used),
         }
 
-        if gpu_used_vals:
+        if gpu_used:
             summary.update(
                 {
-                    "gpu_mem_used_p95_single": round(float(np.percentile(gpu_used_vals, 95)), 2),
-                    "gpu_mem_used_peak_single": round(float(np.max(gpu_used_vals)), 2),
-                    "gpu_mem_reserved_peak_single": round(float(np.max(gpu_reserved_vals)), 2),
-                    "gpu_mem_total_capacity": float(np.max(gpu_total_vals)) if gpu_total_vals else 0.0,
+                    "gpu_mem_used_p95_single": float(np.percentile(gpu_used, 95)),
+                    "gpu_mem_used_peak_single": float(np.max(gpu_used)),
+                    "gpu_mem_reserved_peak_single": float(np.max(gpu_reserved)),
+                    "gpu_mem_total_capacity": float(np.max(gpu_total)),
                 }
             )
 

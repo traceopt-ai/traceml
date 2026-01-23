@@ -1,6 +1,7 @@
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 import shutil
 import numpy as np
+
 from rich.panel import Panel
 from rich.table import Table
 from rich.console import Console
@@ -15,8 +16,21 @@ from .utils import append_text, CARD_STYLE
 
 class SystemRenderer(BaseRenderer):
     """
-    Renderer that reads from the 'system' table (list of samples)
-    and computes live + summary statistics for CPU, RAM, and GPU.
+    Renderer for system-level telemetry.
+
+    This renderer consumes records from the ``system`` table and produces:
+    - Live snapshots for interactive display
+    - Aggregated summaries over the full run
+    - Multiple presentation formats (CLI, notebook, dashboard)
+
+    Scope
+    -----
+    This class is intentionally presentation-focused. All computations here
+    are display-oriented aggregations derived from sampled telemetry.
+
+    It does NOT:
+    - Modify or enrich raw telemetry
+    - Coordinate across ranks
     """
 
     def __init__(self, database: Database):
@@ -24,8 +38,16 @@ class SystemRenderer(BaseRenderer):
         self.db = database
         self._table = database.create_or_get_table("system")
 
+    # Snapshot computation (latest state)
     def _compute_snapshot(self) -> Dict[str, Any]:
-        """Return latest system info for live display."""
+        """
+        Compute a presentation-friendly snapshot from the most recent sample.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Flattened system metrics suitable for rendering.
+        """
         latest = self.db.get_last_record("system")
         if not latest:
             return {
@@ -33,85 +55,90 @@ class SystemRenderer(BaseRenderer):
                 "ram_used": 0.0,
                 "ram_total": 0.0,
                 "gpu_available": False,
+                "gpu_count": 0,
                 "gpu_util_total": None,
                 "gpu_mem_used": None,
                 "gpu_mem_total": None,
                 "gpu_temp_max": None,
                 "gpu_power_usage": None,
                 "gpu_power_limit": None,
-                "gpu_count": 0,
             }
 
-        gpu_raw = latest.get("gpu_raw", {}) or {}
+        gpus: List[List[float]] = latest.get("gpus", []) or []
 
-        # total util, mem & mem_total across all GPUs
-        util_total = sum(v["util"] for v in gpu_raw.values()) if gpu_raw else None
-        mem_used_total = (
-            sum(v["mem_used"] for v in gpu_raw.values()) if gpu_raw else None
-        )
-        mem_total_total = (
-            sum(v["mem_total"] for v in gpu_raw.values()) if gpu_raw else None
-        )
-
-        temp_max = max(v["temperature"] for v in gpu_raw.values()) if gpu_raw else None
-        power_total = (
-            sum(v["power_usage"] for v in gpu_raw.values()) if gpu_raw else None
-        )
-        power_limit_total = (
-            sum(v["power_limit"] for v in gpu_raw.values()) if gpu_raw else None
-        )
+        if gpus:
+            # Unpack per-GPU wire format:
+            # [util, mem_used, mem_total, temperature, power, power_limit]
+            util_total = sum(g[0] for g in gpus)
+            mem_used_total = sum(g[1] for g in gpus)
+            mem_total_total = sum(g[2] for g in gpus)
+            temp_max = max(g[3] for g in gpus)
+            power_total = sum(g[4] for g in gpus)
+            power_limit_total = sum(g[5] for g in gpus)
+        else:
+            util_total = mem_used_total = mem_total_total = None
+            temp_max = power_total = power_limit_total = None
 
         return {
-            "cpu": latest.get("cpu_percent", 0.0),
+            "cpu": latest.get("cpu", 0.0),
             "ram_used": latest.get("ram_used", 0.0),
             "ram_total": latest.get("ram_total", 0.0),
             "gpu_available": latest.get("gpu_available", False),
+            "gpu_count": latest.get("gpu_count", 0),
             "gpu_util_total": util_total,
             "gpu_mem_used": mem_used_total,
             "gpu_mem_total": mem_total_total,
             "gpu_temp_max": temp_max,
             "gpu_power_usage": power_total,
             "gpu_power_limit": power_limit_total,
-            "gpu_count": latest.get("gpu_count", 0),
         }
-
 
     def _get_panel_cpu_row(self, table, data):
         ram_pct_str = ""
         if data["ram_total"]:
             ram_pct = data["ram_used"] * 100.0 / data["ram_total"]
             ram_pct_str = f" ({ram_pct:.1f}%)"
+
         table.add_row(
             f"[bold green]CPU[/bold green] {fmt_percent(data['cpu'])}",
             f"[bold green]RAM[/bold green] {fmt_mem_new(data['ram_used'])}/{fmt_mem_new(data['ram_total'])}{ram_pct_str}",
         )
 
     def _get_panel_gpu_row(self, table, data):
-        if data["gpu_available"]:
-            # first GPU row: util + memory
-            table.add_row(
-                f"[bold green]GPU UTIL[/bold green] {fmt_percent(data['gpu_util_total'])}",
-                f"[bold green]GPU MEM[/bold green] {fmt_mem_new(data['gpu_mem_used'])}/{fmt_mem_new(data['gpu_mem_total'])}",
-            )
-            # second GPU row: temperature + power
-            temp = data.get("gpu_temp_max")
-            pu = data.get("gpu_power_usage")
-            pl = data.get("gpu_power_limit")
-            temp_str = (
-                f"[bold green]GPU TEMP[/bold green] {temp:.1f}°C"
-                if temp is not None
-                else "[bold green]GPU TEMP[/bold green] N/A"
-            )
-            power_str = (
-                f"[bold green]GPU POWER[/bold green] {pu:.1f}W / {pl:.1f}W"
-                if pu is not None and pl is not None
-                else "[bold green]GPU POWER[/bold green] N/A"
-            )
-            table.add_row(temp_str, power_str)
-        else:
+        """Render GPU metrics into a Rich table."""
+        if not data["gpu_available"]:
             table.add_row("[bold green]GPU[/bold green]", "[red]Not available[/red]")
+            return
+
+        table.add_row(
+            f"[bold green]GPU UTIL[/bold green] {fmt_percent(data['gpu_util_total'])}",
+            f"[bold green]GPU MEM[/bold green] "
+            f"{fmt_mem_new(data['gpu_mem_used'])}/"
+            f"{fmt_mem_new(data['gpu_mem_total'])}",
+        )
+
+        # second GPU row: temperature + power
+        temp = data.get("gpu_temp_max")
+        pu = data.get("gpu_power_usage")
+        pl = data.get("gpu_power_limit")
+
+        temp_str = (
+            f"[bold green]GPU TEMP[/bold green] {temp:.1f}°C"
+            if temp is not None
+            else "[bold green]GPU TEMP[/bold green] N/A"
+        )
+        power_str = (
+            f"[bold green]GPU POWER[/bold green] {pu:.1f}W / {pl:.1f}W"
+            if pu is not None and pl is not None
+            else "[bold green]GPU POWER[/bold green] N/A"
+        )
+        table.add_row(temp_str, power_str)
+
 
     def get_panel_renderable(self) -> Panel:
+        """
+        Return a Rich Panel for CLI display.
+        """
         data = self._compute_snapshot()
 
         table = Table.grid(padding=(0, 2))
@@ -142,24 +169,22 @@ class SystemRenderer(BaseRenderer):
                 pass
 
         cpu_ram_html = f"""
-                    <div style="
-                        display:flex;
-                        justify-content:space-between;
-                        align-items:center;
-                        margin-bottom:12px;
-                    ">
-                        <div>
-                            <b>CPU:</b> {fmt_percent(data['cpu'])}
-                        </div>
-                        <div>
-                            <b>RAM:</b>
-                            {fmt_mem_new(data['ram_used'])} / {fmt_mem_new(data['ram_total'])}{ram_pct}
-                        </div>
-                    </div>
-                """
+            <div style="display:flex; justify-content:space-between;
+                align-items:center; margin-bottom:12px;
+            ">
+                <div><b>CPU:</b> {fmt_percent(data['cpu'])}</div>
+                <div>
+                    <b>RAM:</b>
+                    {fmt_mem_new(data['ram_used'])}/{fmt_mem_new(data['ram_total'])}{ram_pct}
+                </div>
+            </div>
+        """
         return cpu_ram_html
 
     def get_notebook_renderable(self) -> HTML:
+        """
+        Return an HTML renderable for Jupyter notebooks.
+        """
         data = self._compute_snapshot()
 
         # --- CPU + RAM ---
@@ -215,11 +240,7 @@ class SystemRenderer(BaseRenderer):
 
     def get_dashboard_renderable(self):
         """
-        Return an object suitable for Streamlit's st.write():
-        - str / Markdown
-        - pandas.DataFrame
-        - matplotlib/plotly figure
-        - etc.
+        Return an object suitable for dashboard rendering.:
         """
         data = self._compute_snapshot()
         data["table"] = self._table
@@ -227,14 +248,21 @@ class SystemRenderer(BaseRenderer):
 
 
     def _compute_summary(self) -> Dict[str, Any]:
-        """Compute averages and peaks from the entire table."""
+        """
+        Compute aggregated statistics over the entire run.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Summary statistics for logging or reporting.
+        """
         if not self._table:
             return {"error": "no data", "total_samples": 0}
 
         gpu_available = self._table[-1].get("gpu_available", False)
         gpu_count = self._table[-1].get("gpu_count", 0)
 
-        cpu_vals = [x.get("cpu_percent", 0.0) for x in self._table]
+        cpu_vals = [x.get("cpu", 0.0) for x in self._table]
         ram_vals = [x.get("ram_used", 0.0) for x in self._table]
         ram_total = self._table[-1].get("ram_total", 0.0)
 
@@ -242,12 +270,9 @@ class SystemRenderer(BaseRenderer):
             "total_samples": len(self._table),
 
             "cpu_avg_percent": round(float(np.mean(cpu_vals)), 2),
-            "cpu_median_percent": round(float(np.median(cpu_vals)), 2),
             "cpu_p95_percent": round(float(np.percentile(cpu_vals, 95)), 2),
 
             "ram_avg_used": round(float(np.mean(ram_vals)), 2),
-            "ram_median_used": round(float(np.median(ram_vals)), 2),
-            "ram_p95_used": round(float(np.percentile(ram_vals, 95)), 2),
             "ram_peak_used": round(float(np.max(ram_vals)), 2),
 
             "ram_total": ram_total,
@@ -284,7 +309,6 @@ class SystemRenderer(BaseRenderer):
                 {
                     # GPU utilization (aggregate)
                     "gpu_util_total_avg": round(float(np.mean(util_totals)), 2),
-                    "gpu_util_total_median": round(float(np.median(util_totals)), 2),
                     "gpu_util_total_peak": round(float(np.max(util_totals)), 2),
 
                     # GPU memory (aggregate footprint over time)
@@ -301,14 +325,7 @@ class SystemRenderer(BaseRenderer):
 
                     # GPU temperature (single-device thermal risk)
                     # Typical + absolute
-                    "gpu_temp_median": round(float(np.median(temp_max_vals)), 2),
                     "gpu_temp_peak": round(float(np.max(temp_max_vals)), 2),
-
-                    # GPU power (node-level, informational)
-                    # Typical + absolute
-                    "gpu_power_avg": round(float(np.mean(power_usage_totals)), 2),
-                    "gpu_power_peak": round(float(np.max(power_usage_totals)), 2),
-                    "gpu_power_limit": round(float(np.mean(power_limit_totals)), 2),
                 }
             )
         return summary
@@ -316,17 +333,16 @@ class SystemRenderer(BaseRenderer):
 
     def _cpu_summary(self, t, s):
         t.add_row(
-            "CPU (avg / p50 / p95)",
+            "CPU (avg / p95)",
             "[cyan]|[/cyan]",
-            f"{s['cpu_avg_percent']:.1f}% / {s['cpu_median_percent']:.1f}% / {s['cpu_p95_percent']:.1f}%",
+            f"{s['cpu_avg_percent']:.1f}%  / {s['cpu_p95_percent']:.1f}%",
         )
 
     def _ram_summary(self, t, s):
         t.add_row(
-            "RAM (avg / p95 / peak / total)",
+            "RAM (avg / peak / total)",
             "[cyan]|[/cyan]",
             f"{fmt_mem_new(s['ram_avg_used'])} / "
-            f"{fmt_mem_new(s['ram_p95_used'])} / "
             f"{fmt_mem_new(s['ram_peak_used'])} / "
             f"{fmt_mem_new(s['ram_total'])}",
         )
@@ -338,10 +354,9 @@ class SystemRenderer(BaseRenderer):
 
         t.add_row("GPU COUNT", "[cyan]|[/cyan]", str(s["gpu_total_count"]))
         t.add_row(
-            "GPU UTIL (avg / p50 / peak)",
+            "GPU UTIL (avg / peak)",
             "|",
             f"{s['gpu_util_total_avg']:.1f}% / "
-            f"{s['gpu_util_total_median']:.1f}% / "
             f"{s['gpu_util_total_peak']:.1f}%",
         )
 
@@ -359,17 +374,9 @@ class SystemRenderer(BaseRenderer):
         )
 
         t.add_row(
-            "GPU TEMP (p50 / peak)",
+            "GPU TEMP (peak)",
             "[cyan]|[/cyan]",
-            f"{s['gpu_temp_median']:.1f}°C / {s['gpu_temp_peak']:.1f}°C",
-        )
-
-        t.add_row(
-            "GPU POWER (avg / peak / limit)",
-            "[cyan]|[/cyan]",
-            f"{s['gpu_power_avg']:.0f}W / "
-            f"{s['gpu_power_peak']:.0f}W / "
-            f"{s['gpu_power_limit']:.0f}W",
+            f"{s['gpu_temp_peak']:.1f}°C",
         )
 
     def log_summary(self, path) -> None:
