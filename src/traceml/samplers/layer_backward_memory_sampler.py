@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 from .base_sampler import BaseSampler
 from traceml.utils.layer_backward_memory_hook import get_layer_backward_queue
 from traceml.loggers.error_log import get_error_logger
@@ -6,57 +6,83 @@ from traceml.loggers.error_log import get_error_logger
 
 class LayerBackwardMemorySampler(BaseSampler):
     """
-    Drain-all backward-event sampler.
+    Sampler for backward-pass (gradient) activation memory at the layer level.
 
-    Each call to `sample()`:
-      - Drains the backward queue.
-      - Save it internally in dict.
+    This sampler drains the shared backward-memory event queue and
+    stores each backward memory event as a single record in the database.
+
+    Design
+    ------
+    - One table: `layer_backward_memory`
+    - One row per event (per step flush)
+
+    Expected event payload
+    ----------------------
+    LayerBackwardMemoryEvents with fields:
+      - model_id : int
+      - layers   : List[(layer_name: str, gradient_memory_bytes: float)]
+      - device   : str
+      - step     : int
     """
+
+    TABLE_NAME = "layer_backward_memory"
 
     def __init__(self) -> None:
         self.sampler_name = "LayerBackwardMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
-    def _save_event(self, event: Dict[str, Any]) -> None:
-        model_id = getattr(event, "model_id", None)
-        layers = getattr(event, "layers", None)
-        step = getattr(event, "step", None)
-
-        if not layers:
-            return
-
-        for layer_name, memory_per_device in layers:
-            record = {
-                "model_id": model_id,
-                "memory": memory_per_device,
-                "step": step,
-            }
-            self.db.add_record(layer_name, record)
-
     def _drain_queue(self) -> None:
         """
-        Drain entire backward queue and save every event.
+        Drain the backward-memory queue and persist all available events.
+
+        This method is intentionally non-blocking and tolerant to
+        malformed or partial events.
         """
         queue = get_layer_backward_queue()
-        if queue.empty():
-            return
-
         while not queue.empty():
             try:
                 event = queue.get_nowait()
             except Exception:
+                # Queue state changed unexpectedly
                 break
 
             if event is None:
                 continue
+
             self._save_event(event)
 
-    def sample(self):
+    def _save_event(self, event: Any) -> None:
         """
-        Drain queue → save raw events → no computation.
+        Save a single backward-memory event into the database.
+
+        Parameters
+        ----------
+        event : LayerBackwardMemoryEvents
+            Event produced by backward hooks.
+        """
+        layers = getattr(event, "layers", None)
+        if not layers:
+            return
+
+        record = {
+            "model_id": getattr(event, "model_id", None),
+            "step": getattr(event, "step", None),
+            "device": getattr(event, "device", None),
+            "layers": layers,
+        }
+        self.db.add_record(self.TABLE_NAME, record)
+
+    def sample(self) -> None:
+        """
+        Ingest all available backward-memory events from the queue.
+
+        Safe to call frequently; does nothing if the queue is empty.
         """
         try:
             self._drain_queue()
         except Exception as e:
-            self.logger.error(f"[TraceML] LayerBackwardMemorySampler error: {e}")
+            # Sampler must never disrupt training
+            self.logger.error(
+                f"[TraceML] LayerBackwardMemorySampler error: {e}"
+            )

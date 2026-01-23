@@ -6,7 +6,7 @@ import time
 import torch
 from contextlib import contextmanager
 
-from traceml.utils.patch import model_queue
+from traceml.utils.layer_parameter_memory import model_queue, collect_layer_parameter_memory
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.layer_forward_memory_hook import attach_layer_forward_memory_hooks
 from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memory_hooks
@@ -97,7 +97,8 @@ def trace_model_instance(
         if not isinstance(model, nn.Module):
             raise TypeError("trace_model_instance expects an nn.Module.")
         if sample_layer_memory:
-            model_queue.put(model)
+            layer_memory = collect_layer_parameter_memory(model)
+            model_queue.put(layer_memory)
 
         if trace_layer_forward_memory:
             attach_layer_forward_memory_hooks(model)
