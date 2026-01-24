@@ -32,6 +32,7 @@ class LayerForwardMemorySampler(BaseSampler):
         self.sampler_name = "LayerForwardMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
+        self.sample_idx = 0
 
     def _drain_queue(self) -> None:
         """
@@ -68,6 +69,7 @@ class LayerForwardMemorySampler(BaseSampler):
             return
 
         record = {
+            "seq": self.sample_idx,
             "model_id": getattr(event, "model_id", None),
             "step": getattr(event, "step", None),
             "device": getattr(event, "device", None),
@@ -81,6 +83,7 @@ class LayerForwardMemorySampler(BaseSampler):
 
         Safe to call frequently; does nothing if the queue is empty.
         """
+        self.sample_idx += 1
         try:
             self._drain_queue()
         except Exception as e:

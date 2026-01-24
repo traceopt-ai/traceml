@@ -34,11 +34,13 @@ class LayerMemorySampler(BaseSampler):
     def __init__(self) -> None:
         self.sampler_name = "LayerMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
+        self.sample_idx = 0
 
         self.logger = get_error_logger(self.sampler_name)
 
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
+
 
     def _compute_signature(self, layer_memory: Dict[str, float]) -> str:
         """
@@ -131,9 +133,11 @@ class LayerMemorySampler(BaseSampler):
         This method is safe to call frequently; actual writes occur
         only when a new, unseen model snapshot is encountered.
         """
+        self.sample_idx += 1
         try:
             sample = self._sample_from_queue()
             if sample:
+                sample["seq"] = self.sample_idx
                 self.db.add_record(self.TABLE_NAME, sample)
 
         except Exception as e:

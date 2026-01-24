@@ -28,14 +28,14 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 
 SEED = 42
-MODEL_NAME = "bert-base-uncased"
+MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 10000
+MAX_TRAIN_EXAMPLES = 5000
 MAX_VAL_EXAMPLES = 0
 
 BATCH_SIZE = 256
-EPOCHS = 10
+EPOCHS = 2
 LR = 2e-6
 WARMUP_RATIO = 0.06
 

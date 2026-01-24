@@ -26,7 +26,7 @@ class Database:
     - This database is intentionally simple and in-memory only; persistence
       and export are handled by `DatabaseWriter`.
     """
-    DEFAULT_MAX_ROWS = 2000
+    DEFAULT_MAX_ROWS = 3000
 
     def __init__(self, sampler_name, max_rows: Optional[int] = None):
         """
