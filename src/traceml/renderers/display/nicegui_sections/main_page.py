@@ -82,15 +82,15 @@ def define_main_page(cls):
             with ui.column().classes("w-[30%]"):
                 cls.cards[PROCESS_LAYOUT] = build_process_section()
                 cls.update_funcs[PROCESS_LAYOUT] = update_process_section
-        #
-        #     with ui.column().classes("w-[33]"):
-        #         cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
-        #         cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
-        #
-        # with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
-        #     with ui.column().classes("w-[99%]"):
-        #         cls.cards[MODEL_COMBINED_LAYOUT] = build_model_combined_section()
-        #         cls.update_funcs[MODEL_COMBINED_LAYOUT] = update_model_combined_section
+
+            with ui.column().classes("w-[33]"):
+                cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
+                cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
+
+        with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
+            with ui.column().classes("w-[99%]"):
+                cls.cards[MODEL_COMBINED_LAYOUT] = build_model_combined_section()
+                cls.update_funcs[MODEL_COMBINED_LAYOUT] = update_model_combined_section
         #
         # with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
         #
