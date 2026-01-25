@@ -154,15 +154,11 @@ def _tile(title):
     """Create a compact metric tile."""
     box = ui.column().classes("w-full px-1 py-1").style("min-height: 46px;")
     with box:
-        ui.html(title, sanitize=False).classes(LABEL)
+        ui.html(title, sanitize=False).classes(LABEL).style(f"color:#ff9800;")
         v = ui.html("–", sanitize=False).classes(VAL)
         s = ui.html("", sanitize=False).classes(SUB)
     return box, v, s
 
-
-# =====================================================================
-# UPDATE (live binding)
-# =====================================================================
 
 def update_system_section(panel, data, window_n=100):
     """
@@ -191,9 +187,6 @@ def update_system_section(panel, data, window_n=100):
     _update_graph(panel, window)
 
 
-# =====================================================================
-# TILE UPDATE
-# =====================================================================
 
 def _update_tiles(panel, roll):
     """Update all metric tiles."""
@@ -236,9 +229,6 @@ def _update_tiles(panel, roll):
     panel["temp_s"].content = f"Status: {temp['status']}"
 
 
-# =====================================================================
-# GRAPH UPDATE
-# =====================================================================
 
 def _update_graph(panel, window):
     """Rebuild and update the CPU/GPU utilization time series graph."""
@@ -270,10 +260,6 @@ def _update_graph(panel, window):
     fig.update_layout(panel["graph"].figure.layout)
     panel["graph"].update_figure(fig)
 
-
-# =====================================================================
-# HELPERS (pure logic)
-# =====================================================================
 
 def _last_n(table, n):
     return table[-n:] if len(table) > n else table

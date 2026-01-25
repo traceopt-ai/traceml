@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 import subprocess
+import signal
 from pathlib import Path
 from .session import get_session_id
 
@@ -75,8 +76,28 @@ def launch_tracer_process(
         raise ValueError(f"Invalid mode '{args.mode}'")
 
     print("Launching TraceML tracer:", " ".join(cmd))
-    print("Launching TraceML tracer:", " ".join(cmd))
-    sys.exit(subprocess.call(cmd, env=env))
+
+    # Start torchrun in a NEW process group (critical)
+    p = subprocess.Popen(cmd, env=env, start_new_session=True)
+    try:
+        return_code = p.wait()
+        sys.exit(return_code)
+    except KeyboardInterrupt:
+        print("\n[TraceML] Interrupt received — terminating torchrun process group…", file=sys.stderr)
+        # Send SIGTERM to the whole process group
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+        except Exception:
+            pass
+        # If it doesn't die quickly, SIGKILL
+        try:
+            p.wait(timeout=5)
+        except Exception:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except Exception:
+                pass
+        sys.exit(0)
 
 
 def run_with_tracing(args):

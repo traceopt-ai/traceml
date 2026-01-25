@@ -195,7 +195,7 @@ class TraceMLRuntime:
         # Process sampler
         proc_sampler = ProcessSampler()
         samplers += [proc_sampler]
-        renderers += [ProcessRenderer(database=proc_sampler.db)]
+        renderers += [ProcessRenderer(database=proc_sampler.db, remote_store=remote_store)]
 
 
         # Layer memory

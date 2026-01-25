@@ -15,6 +15,7 @@ from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
 from .utils import CARD_STYLE
+from traceml.loggers.error_log import get_error_logger
 
 
 class ProcessRenderer(BaseRenderer):
@@ -36,7 +37,7 @@ class ProcessRenderer(BaseRenderer):
     2. Dashboard history:
        - Incremental aggregation
        - Bounded rolling window
-       - No strict step or timestamp alignment
+       - Seq alignment
 
     3. Summary:
        - Computed from rank-0 local data only
@@ -61,8 +62,10 @@ class ProcessRenderer(BaseRenderer):
         # Rolling dashboard aggregation (rank-0 only)
         self._dashboard_rollup = deque(maxlen=self.DASHBOARD_MAX_ROWS)
 
-        # Track how many samples we have consumed per rank
-        self._last_seen_sample_idx: Dict[int, int] = {}
+        # Track how many samples we have consumed by all rank
+        self._last_completed_seq: int = -1
+        self.logger = get_error_logger("ProcessRenderer")
+
 
     @staticmethod
     def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -152,109 +155,129 @@ class ProcessRenderer(BaseRenderer):
 
     def _update_dashboard_rollup(self) -> None:
         """
-        Incrementally update the dashboard rolling history.
+        Advance dashboard history using globally synchronized seq numbers.
 
-        Strategy
-        --------
-        - Each remote rank maintains a monotonically increasing `sample_idx`
-        - Remote tables are bounded deques, appended in order
-        - For each rank:
-            * iterate the table in reverse
-            * collect rows with sample_idx > last_seen_sample_idx[rank]
-            * stop as soon as we hit an already-seen sample
-        - Let N = min(#new rows across ranks)
-        - For i in [0, N):
-            * CPU = max across ranks
-            * GPU = rank with least headroom
-        - Append aggregated rows to the rolling dashboard deque
-        - Advance last_seen_sample_idx for all ranks
+        Invariant
+        ---------
+        One dashboard entry == one seq that *all active ranks* have completed.
         """
-        if not self.remote_store:
+
+        # ------------------------------------------------------------
+        # 1. Collect databases for all active ranks (include local)
+        # ------------------------------------------------------------
+        rank_dbs: Dict[int, Database] = {0: self.db}
+
+        if self.remote_store:
+            for r in self.remote_store.ranks():
+                db = self.remote_store.get_db(r, self.REMOTE_SAMPLER_NAME)
+                if db:
+                    rank_dbs[r] = db
+
+        if not rank_dbs:
             return
 
-        per_rank_new: Dict[int, List[Dict[str, Any]]] = {}
+        # ------------------------------------------------------------
+        # 2. Determine last completed seq per rank
+        # ------------------------------------------------------------
+        last_seq_per_rank: Dict[int, int] = {}
 
-        # ------------------------------------------------------------------
-        # Step 1: collect new rows per rank (reverse scan, cheap)
-        # ------------------------------------------------------------------
-        for rank in self.remote_store.ranks():
-            db = self.remote_store.get_db(rank, self.REMOTE_SAMPLER_NAME)
-            if not db:
+        for rank, db in rank_dbs.items():
+            table = db.create_or_get_table(self.TABLE_NAME)
+            if not table:
+                return  # at least one rank has no data yet
+            last_seq_per_rank[rank] = table[-1].get("seq", -1)
+
+        # Global commit point: all ranks have completed up to this seq
+        committed_upto = min(last_seq_per_rank.values())
+
+        if committed_upto <= self._last_completed_seq:
+            return
+
+        # ------------------------------------------------------------
+        # 3. Aggregate strictly synchronized seqs
+        # ------------------------------------------------------------
+        for seq in range(self._last_completed_seq + 1, committed_upto + 1):
+
+            rows_per_rank: Dict[int, dict] = {}
+
+            # --- hard synchronization check ---
+            for rank, db in rank_dbs.items():
+                table = db.create_or_get_table(self.TABLE_NAME)
+                row = next(
+                    (r for r in reversed(table) if r.get("seq") == seq),
+                    None,
+                )
+                if row is None:
+                    # Safety: skip this seq entirely if any rank is missing
+                    rows_per_rank = {}
+                    break
+                rows_per_rank[rank] = row
+
+            if not rows_per_rank:
                 continue
 
-            table = db.create_or_get_table(self.TABLE_NAME)
-            last_seen = self._last_seen_sample_idx.get(rank, 0)
+            # 4. Cross-rank aggregation
+            cpu_vals = []
+            ram_used_vals = []
+            gpu_used_vals = []
+            gpu_candidates = []
+            ram_total = 0.0
 
-            new_rows: List[Dict[str, Any]] = []
-
-            # Walk backwards until we hit an already-processed sample
-            for row in reversed(table):
-                sample_idx = row.get("sample_idx", 0)
-                if sample_idx <= last_seen:
-                    break
-                new_rows.append(row)
-
-            if new_rows:
-                # Restore chronological order
-                per_rank_new[rank] = list(reversed(new_rows))
-
-        if not per_rank_new:
-            return
-
-        # ------------------------------------------------------------------
-        # Step 2: aggregate only as many samples as all ranks can provide
-        # ------------------------------------------------------------------
-        n_new = min(len(rows) for rows in per_rank_new.values())
-
-        for i in range(n_new):
-            cpu_vals: List[float] = []
-            gpu_candidates: List[tuple] = []
-
-            for rank, rows in per_rank_new.items():
-                row = rows[i]
-
+            for rank, row in rows_per_rank.items():
                 cpu_vals.append(self._safe_float(row.get("cpu")))
+
+                ram_used = self._safe_float(row.get("ram_used"))
+                ram_used_vals.append(ram_used)
+                ram_total = max(ram_total, self._safe_float(row.get("ram_total")))
 
                 gpu = row.get("gpu")
                 if row.get("gpu_available", False) and gpu:
                     used = self._safe_float(gpu.get("mem_used"))
                     reserved = self._safe_float(gpu.get("mem_reserved"))
                     total = self._safe_float(gpu.get("mem_total"))
-                    headroom = total - reserved
 
-                    gpu_candidates.append(
-                        (headroom, rank, used, reserved, total)
-                    )
+                    headroom = total - reserved
+                    gpu_used_vals.append(used)
+                    gpu_candidates.append((headroom, rank, used, total))
 
             entry = {
+                "seq": seq,
+                "ranks_seen": len(rows_per_rank),
                 "cpu_max": max(cpu_vals) if cpu_vals else 0.0,
+                "ram_used_max": max(ram_used_vals) if ram_used_vals else 0.0,
+                "ram_total": ram_total,
             }
 
             if gpu_candidates:
-                _, rank, used, reserved, total = min(gpu_candidates)
+                headroom, worst_rank, used, total = min(gpu_candidates)
                 entry.update(
                     {
-                        "gpu_rank": rank,
                         "gpu_used": used,
-                        "gpu_reserved": reserved,
                         "gpu_total": total,
+                        "gpu_headroom": headroom,
+                        "gpu_rank": worst_rank,
+                        "gpu_used_imbalance": (
+                            max(gpu_used_vals) - min(gpu_used_vals)
+                            if len(gpu_used_vals) > 1 else 0.0
+                        ),
+                    }
+                )
+            else:
+                entry.update(
+                    {
+                        "gpu_used": None,
+                        "gpu_total": None,
+                        "gpu_headroom": None,
+                        "gpu_rank": None,
+                        "gpu_used_imbalance": 0.0,
                     }
                 )
 
             self._dashboard_rollup.append(entry)
+        self._last_completed_seq = committed_upto
 
-        # ------------------------------------------------------------------
-        # Step 3: advance cursors (sample_idx-based, robust to drops)
-        # ------------------------------------------------------------------
-        for rank, rows in per_rank_new.items():
-            self._last_seen_sample_idx[rank] = rows[n_new - 1].get(
-                "sample_idx",
-                self._last_seen_sample_idx.get(rank, 0),
-            )
 
-    # -------------------------------------------------------------------------
     # CLI panel rendering (Rich)
-    # -------------------------------------------------------------------------
     def get_panel_renderable(self) -> Panel:
         snap = self._compute_live_snapshot()
 
@@ -311,14 +334,11 @@ class ProcessRenderer(BaseRenderer):
     # ------------------------------------------------------------------
     def get_dashboard_renderable(self) -> Dict[str, Any]:
         self._update_dashboard_rollup()
-
         snap = self._compute_live_snapshot()
         snap["history"] = list(self._dashboard_rollup)
         return snap
 
-    # -------------------------------------------------------------------------
-    # Notebook HTML rendering
-    # -------------------------------------------------------------------------
+
     def get_notebook_renderable(self) -> HTML:
         snap = self._compute_live_snapshot()
 

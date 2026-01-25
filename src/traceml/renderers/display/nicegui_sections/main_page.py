@@ -77,11 +77,11 @@ def define_main_page(cls):
             with ui.column().classes("w-[36%]"):
                 cls.cards[SYSTEM_LAYOUT] = build_system_section()
                 cls.update_funcs[SYSTEM_LAYOUT] = update_system_section
-        #
-        #     # Process (middle column)
-        #     with ui.column().classes("w-[30%]"):
-        #         cls.cards[PROCESS_LAYOUT] = build_process_section()
-        #         cls.update_funcs[PROCESS_LAYOUT] = update_process_section
+
+            # Process (middle column)
+            with ui.column().classes("w-[30%]"):
+                cls.cards[PROCESS_LAYOUT] = build_process_section()
+                cls.update_funcs[PROCESS_LAYOUT] = update_process_section
         #
         #     with ui.column().classes("w-[33]"):
         #         cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()

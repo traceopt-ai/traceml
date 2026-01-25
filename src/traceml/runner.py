@@ -91,7 +91,7 @@ def start_runtime(cfg):
             remote_max_rows=cfg["remote_max_rows"],
             session_id=cfg["session_id"],
         )
-        print("[TraceML] Starting tracker")
+        print("[TraceML] Starting Runtime")
         runtime.start()
         return runtime
     except Exception as e:
