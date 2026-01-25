@@ -102,7 +102,7 @@ def build_parser():
     run_parser.add_argument("--interval", type=float, default=2.0)
     run_parser.add_argument("--enable-logging", action="store_true")
     run_parser.add_argument("--logs-dir", type=str, default="./logs")
-    run_parser.add_argument("--num-display-layers", type=int, default=10)
+    run_parser.add_argument("--num-display-layers", type=int, default=5)
     run_parser.add_argument("--session-id", type=str, default="")
     run_parser.add_argument(
         "--disable-ddp-telemetry",

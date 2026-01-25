@@ -69,10 +69,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             for r in d["top_items"]:
                 table.add_row(
                     truncate_layer_name(r["layer"]),
-                    f"{fmt_time_ms(r.get('forward_current', 0.0))} / "
-                    f"{fmt_time_ms(r.get('forward_avg', 0.0))}",
-                    f"{fmt_time_ms(r.get('backward_current', 0.0))} / "
-                    f"{fmt_time_ms(r.get('backward_avg', 0.0))}",
+                    f"{fmt_time_ms(r.get('forward_current', 0.0))}/{fmt_time_ms(r.get('forward_avg', 0.0))}",
+                    f"{fmt_time_ms(r.get('backward_current', 0.0))}/{fmt_time_ms(r.get('backward_avg', 0.0))}",
                     f"{float(r.get('pct', 0.0)):.1f}%",
                 )
         else:
@@ -85,10 +83,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         ) > 0:
             table.add_row(
                 "Other Layers",
-                f"{fmt_time_ms(o.get('total_forward_current', 0.0))} / "
-                f"{fmt_time_ms(o.get('total_forward_avg', 0.0))}",
-                f"{fmt_time_ms(o.get('total_backward_current', 0.0))} / "
-                f"{fmt_time_ms(o.get('total_backward_avg', 0.0))}",
+                f"{fmt_time_ms(o.get('total_forward_current', 0.0))}/{fmt_time_ms(o.get('total_forward_avg', 0.0))}",
+                f"{fmt_time_ms(o.get('total_backward_current', 0.0))}/{fmt_time_ms(o.get('total_backward_avg', 0.0))}",
                 f"{float(o.get('pct', 0.0)):.1f}%",
             )
 
@@ -113,12 +109,10 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             <tr>
                 <td>{truncate_layer_name(r["layer"])}</td>
                 <td style="text-align:right;">
-                    {fmt_time_ms(r.get('forward_current', 0.0))} /
-                    {fmt_time_ms(r.get('forward_peak', 0.0))}
+                    {fmt_time_ms(r.get('forward_current', 0.0))}/{fmt_time_ms(r.get('forward_peak', 0.0))}
                 </td>
                 <td style="text-align:right;">
-                    {fmt_time_ms(r.get('backward_current', 0.0))} /
-                    {fmt_time_ms(r.get('backward_peak', 0.0))}
+                    {fmt_time_ms(r.get('backward_current', 0.0))}/{fmt_time_ms(r.get('backward_peak', 0.0))}
                 </td>
                 <td style="text-align:right;">{float(r.get('pct', 0.0)):.1f}%</td>
             </tr>
