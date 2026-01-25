@@ -91,24 +91,24 @@ def define_main_page(cls):
             with ui.column().classes("w-[99%]"):
                 cls.cards[MODEL_COMBINED_LAYOUT] = build_model_combined_section()
                 cls.update_funcs[MODEL_COMBINED_LAYOUT] = update_model_combined_section
-        #
-        # with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
-        #
-        #     with ui.column().classes("w-[54%]"):
-        #         cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
-        #             build_layer_memory_table_section()
-        #         )
-        #         cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = (
-        #             update_layer_memory_table_section
-        #         )
-        #
-        #     with ui.column().classes("w-[44%]"):
-        #         cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = (
-        #             build_layer_timer_table_section()
-        #         )
-        #         cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = (
-        #             update_layer_timer_table_section
-        #         )
+
+        with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
+
+            with ui.column().classes("w-[54%]"):
+                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
+                    build_layer_memory_table_section()
+                )
+                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = (
+                    update_layer_memory_table_section
+                )
+
+            with ui.column().classes("w-[44%]"):
+                cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = (
+                    build_layer_timer_table_section()
+                )
+                cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = (
+                    update_layer_timer_table_section
+                )
 
         # background update loop
         ui.timer(0.75, cls._ui_update_loop)
