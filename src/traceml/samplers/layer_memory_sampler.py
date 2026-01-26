@@ -4,7 +4,6 @@ from typing import Dict, Any, Optional, Set
 
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.utils.shared_utils import get_hookable_modules
 from traceml.utils.layer_parameter_memory import get_model_queue
 
 
@@ -61,7 +60,7 @@ class LayerMemorySampler(BaseSampler):
         """
         items = [f"{k}:{int(v)}" for k, v in sorted(layer_memory.items())]
         raw = "|".join(items)
-        return hashlib.md5(raw.encode()).hexdigest()
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
     def _build_sample(
         self,
