@@ -1,7 +1,6 @@
 import torch.nn as nn
 import torch
 from traceml.utils.shared_utils import EXECUTION_LAYER
-from traceml.utils.shared_utils import get_hookable_modules
 
 _execution_entry_hook_registry = {}
 
@@ -33,9 +32,7 @@ def attach_backward_entry_hook(output, layer_name: str):
         output.register_hook(BackwardEntryHook(layer_name))
 
 
-def attach_execution_entry_hooks(
-    model: nn.Module
-):
+def attach_execution_entry_hooks(model: nn.Module):
     model_id = id(model)
     if _execution_entry_hook_registry.get(model_id):
         return
