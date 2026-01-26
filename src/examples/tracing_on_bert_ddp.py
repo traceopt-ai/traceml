@@ -31,11 +31,11 @@ SEED = 42
 MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 5000
+MAX_TRAIN_EXAMPLES = 100000
 MAX_VAL_EXAMPLES = 0
 
 BATCH_SIZE = 256
-EPOCHS = 2
+EPOCHS = 20
 LR = 2e-6
 WARMUP_RATIO = 0.06
 
