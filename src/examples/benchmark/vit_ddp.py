@@ -44,11 +44,11 @@ def set_seed(seed: int):
 
 def prepare_dataloader(rank: int, world_size: int):
     """
-    ImageNet-1k sliced to 10% (~15–20 GB).
-    Automatically downloaded on first run.
+    ImageWoof: public, ImageNet-derived, realistic.
+    No auth required.
     """
-    dataset = load_dataset("places365", split="train[:20%]")
 
+    dataset = load_dataset("imagewoof", split="train")
 
     transform = transforms.Compose(
         [
@@ -90,6 +90,7 @@ def prepare_dataloader(rank: int, world_size: int):
     )
 
     return loader, sampler
+
 
 
 @trace_time("data_transfer", use_gpu=False)
@@ -150,7 +151,7 @@ def main():
     # --------------------------------------------------------
     # Model
     # --------------------------------------------------------
-    model = vit_b_16(num_classes=1000).to(device)
+    model = vit_b_16(num_classes=10).to(device)
 
     # Attach TraceML hooks BEFORE DDP
     trace_model_instance(model)
