@@ -63,14 +63,6 @@ class LayerMemorySampler(BaseSampler):
         raw = "|".join(items)
         return hashlib.md5(raw.encode()).hexdigest()
 
-    def _compute_layer_memory(self, model: torch.nn.Module) -> Dict[str, float]:
-        """Compute per-layer parameter memory."""
-        include_names = getattr(model, "_traceml_include_names", None)
-        exclude_names = getattr(model, "_traceml_exclude_names", None)
-        leaf_only = getattr(model, "_traceml_leaf_only", True)
-        layer_mem = {}
-        for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
-
     def _build_sample(
         self,
         layer_memory: Dict[str, float],
