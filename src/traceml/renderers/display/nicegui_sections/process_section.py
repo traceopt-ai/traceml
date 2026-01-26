@@ -17,10 +17,6 @@ GPU memory (now / p95 / total)
     - GPU memory used by the training process
     - Local rank history only
 
-OOM headroom (worst rank)
-    - Conservative signal derived from ProcessRenderer snapshot
-    - total_gpu_mem - used_gpu_mem on the most constrained rank
-
 GPU memory imbalance
     - max(mem_used) - min(mem_used) across ranks (current only)
 
@@ -86,7 +82,6 @@ def build_process_section():
             - **CPU**: worst rank (current), percentiles over rolling window  
             - **RAM**: worst rank (current), percentiles over rolling window  
             - **GPU mem**: most constrained rank with least headroom
-            - **OOM headroom**: worst-rank snapshot
             - **Imbalance**: max − min across ranks (current)
             """
                     )
@@ -101,7 +96,6 @@ def build_process_section():
             _, cpu_v, _ = _tile("CPU (now/p50/p95)")
             _, ram_v, _ = _tile("RAM (now/p95/total)")
             _, gmem_v, _ = _tile("GPU Mem (now/p95)")
-            _, oomh_v, _ = _tile("OOM Headroom (worst)")
             _, imb_v, _ = _tile("GPU Mem Imbalance")
 
     return {
@@ -110,7 +104,6 @@ def build_process_section():
         "cpu_v": cpu_v,
         "ram_v": ram_v,
         "gmem_v": gmem_v,
-        "oomh_v": oomh_v,
         "imb_v": imb_v,
     }
 
@@ -198,12 +191,6 @@ def _update_tiles(panel, roll, snap):
     else:
         panel["gmem_v"].content = "Not available"
 
-    # OOM headroom — snapshot only (correct)
-    panel["oomh_v"].content = (
-        fmt_mem_new(snap["gpu_headroom"])
-        if snap.get("gpu_headroom") is not None
-        else "–"
-    )
     panel["imb_v"].content = (
         fmt_mem_new(snap["gpu_used_imbalance"])
         if snap.get("gpu_used_imbalance") is not None

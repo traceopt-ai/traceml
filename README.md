@@ -54,6 +54,22 @@ This makes it easy to catch cases like “8 GPUs slower than 1” *as it happens
 
 ---
 
+## What TraceML Is Not
+
+TraceML is **not** an auto-tuner or a profiler replacement.
+
+- It does not automatically optimize your batch size
+- It does not always “find a problem”
+- It does not replace Nsight or PyTorch Profiler
+
+Instead, TraceML answers a more basic question:
+
+> “Which part of my training step is responsible for what I’m seeing — or is everything behaving normally?”
+
+If your run is healthy, TraceML will tell you that explicitly.
+
+---
+
 ## Views
 
 TraceML supports two ways to consume runtime signals:

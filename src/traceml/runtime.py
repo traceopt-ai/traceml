@@ -256,9 +256,6 @@ class TraceMLRuntime:
                     f"{sampler.sampler_name}.sender.flush failed", db.sender.flush
                 )
 
-        if self.is_rank0 and self.display_manager:
-            self._safe("Display update failed", self.display_manager.update_display)
-
     def _drain_remote(self):
         if not (self.is_rank0 and self.enable_ddp_telemetry and self._tcp_server):
             return
@@ -284,7 +281,7 @@ class TraceMLRuntime:
 
             self._safe(f"{renderer.__class__.__name__}.register failed", register)
 
-        # self._safe("Display update failed", self.display_manager.update_display)
+        self._safe("Display update failed", self.display_manager.update_display)
 
     def _run_once(self):
         self._run_samplers_and_flush()

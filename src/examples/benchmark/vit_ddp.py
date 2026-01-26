@@ -25,8 +25,8 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 SEED = 42
 IMAGE_SIZE = 224
 
-PER_GPU_BATCH = 64
-NUM_WORKERS = 8
+PER_GPU_BATCH = 192
+NUM_WORKERS = 2
 
 LR = 3e-4
 WEIGHT_DECAY = 0.05
@@ -47,7 +47,14 @@ def prepare_dataloader(rank: int, world_size: int):
     ImageWoof: public, ImageNet-derived, realistic.
     No auth required.
     """
+    if rank == 0:
+        dataset = load_dataset(
+            "ljnlonoljpiljm/places365-256px",
+            split="train[:20%]"
+        )
+    dist.barrier()  # wait until download finishes
 
+     # now all ranks load from cache
     dataset = load_dataset(
         "ljnlonoljpiljm/places365-256px",
         split="train[:20%]"
@@ -157,7 +164,7 @@ def main():
     model = vit_b_16(num_classes=365).to(device)
 
     # Attach TraceML hooks BEFORE DDP
-    trace_model_instance(model)
+    # trace_model_instance(model)
 
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[local_rank]

@@ -55,6 +55,7 @@ Design notes
 - Worst-case signals are preferred over averages for failure detection
 """
 
+from itertools import islice
 from nicegui import ui
 import plotly.graph_objects as go
 
@@ -289,6 +290,18 @@ def _update_graph(panel, window):
 
 
 def _last_n(table, n):
+    """
+    Return the last n records efficiently.
+    Works for deque and list.
+    Cost: O(n)
+    """
+    if not table:
+        return []
+    # deque supports reversed() efficiently
+    if hasattr(table, "__reversed__"):
+        return list(islice(reversed(table), n))[::-1]
+
+    # fallback for other sequences
     return table[-n:] if len(table) > n else table
 
 
