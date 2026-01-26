@@ -28,7 +28,7 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 
 SEED = 42
-MODEL_NAME = "prajjwal1/bert-mini"
+MODEL_NAME = "bert-base-uncased"
 
 # Increase these to generate a LOT of profiling data
 MAX_TRAIN_EXAMPLES = 100000
@@ -55,7 +55,6 @@ def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Te
     Simple per-batch accuracy (rank-local).
     """
     preds = torch.argmax(logits, dim=-1)
-    return (preds == labels).float().mean()
     return (preds == labels).float().mean()
 
 
