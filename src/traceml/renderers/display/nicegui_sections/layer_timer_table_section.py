@@ -40,8 +40,8 @@ def update_layer_timer_table_section(panel, dashboard_data):
         <thead style="position: sticky; top: 0; background: #f0f0f0; z-index: 1;">
             <tr>
                 <th style="text-align:left; padding:4px 8px;">Layer</th>
-                <th style="text-align:right; padding:4px 8px;">Activation (curr / avg)</th>
-                <th style="text-align:right; padding:4px 12px;">Gradient (curr / avg)</th>
+                <th style="text-align:right; padding:4px 8px;">Forward (curr / avg)</th>
+                <th style="text-align:right; padding:4px 12px;">Backward (curr / avg)</th>
                 <th style="text-align:right; padding:4px 12px;">%</th>
             </tr>
         </thead>

@@ -1,3 +1,20 @@
+"""
+Layer forward activation memory instrumentation for TraceML.
+
+This module captures *forward-pass activation memory* at a per-layer level.
+It uses PyTorch forward hooks to record the size of tensors produced by
+each leaf module during forward execution.
+
+Design principles
+-----------------
+- Forward hooks are attached once per model (idempotent).
+- Memory is accumulated per layer per step.
+- Data is buffered during forward execution and flushed explicitly
+  at step boundaries.
+- Only scalar memory values are tracked (single-device assumption, V1).
+- No live tensors or modules escape this module.
+"""
+
 from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Dict, Any, List, Tuple
@@ -20,29 +37,56 @@ _layer_forward_memory_buffer: Dict[int, List] = {}
 @dataclass
 class LayerForwardMemoryEvents:
     """
-    Represents a single forward-pass snapshot for a model layer.
+    Represents a single forward-pass activation memory snapshot.
+
+    Attributes
+    ----------
+    model_id : int
+        Identity of the model instance (id(model)).
+    layers : List[Tuple[str, float]]
+        List of (layer_name, activation_memory_bytes).
+    device : str
+        Device on which the forward pass executed (e.g. "cuda:0", "cpu").
+    step : int
     """
 
     model_id: int
-    layers: List[Tuple[str, Dict[str, float]]]
+    layers: List[Tuple[str, float]]
+    device: str
     step: int
 
 
 def get_layer_forward_memory_queue() -> Queue:
-    """Return the shared queue of activation events."""
+    """
+    Return the shared queue containing flushed forward memory events.
+
+    This queue is drained by the corresponding sampler.
+    """
     return layer_forward_memory_queue
 
 
 def _tensor_size(tensor: torch.Tensor) -> float:
     """
-    Compute the memory footprint of a tensor in megabytes.
+    Compute the memory footprint of a tensor in bytes.
+
+    Parameters
+    ----------
+    tensor : torch.Tensor
+
+    Returns
+    -------
+    float
+        Tensor size in bytes.
     """
     return float(tensor.numel() * tensor.element_size())
 
 
 class LayerForwardMemoryHook:
     """
-    Callable class used as a forward hook to capture forward tensor sizes for a layer.
+    Forward hook that records activation memory for a single layer.
+
+    The hook accumulates the size of all tensors produced by the layer
+    during a forward pass and stores the result in a per-model buffer.
     """
 
     def __init__(self, model_id: int, layer_name: str):
@@ -51,13 +95,12 @@ class LayerForwardMemoryHook:
 
     def __call__(self, module: nn.Module, inputs: Any, output: Any):
         try:
-            layer_acc: Dict[str, float] = {}
+            total_bytes = 0.0
 
-            def accumulate(t):
-                if isinstance(t, torch.Tensor):
-                    device_str = str(t.device)
-                    size_mb = _tensor_size(t)
-                    layer_acc[device_str] = layer_acc.get(device_str, 0.0) + size_mb
+            def accumulate(obj: Any) -> None:
+                nonlocal total_bytes
+                if isinstance(obj, torch.Tensor):
+                    total_bytes += _tensor_size(obj)
 
             # Handle tensor or collection of tensors
             if isinstance(output, torch.Tensor):
@@ -69,9 +112,10 @@ class LayerForwardMemoryHook:
                 for o in output.values():
                     accumulate(o)
 
-            _layer_forward_memory_buffer.setdefault(self.model_id, []).append(
-                (self.layer_name, layer_acc)
-            )
+            if total_bytes > 0:
+                _layer_forward_memory_buffer.setdefault(self.model_id, []).append(
+                    (self.layer_name, total_bytes)
+                )
 
         except Exception:
             print(
@@ -80,44 +124,65 @@ class LayerForwardMemoryHook:
             )
 
 
-def flush_layer_forward_memory_buffers(model: nn.Module, step: int):
+def flush_layer_forward_memory_buffers(model: nn.Module, step: int) -> None:
     """
-    Convert buffered activation memory into events and enqueue them.
-    Called before optimizer.step().
+    Flush buffered forward activation memory for a model into the queue.
+
+    This function should be called at a step boundary (e.g. before or after
+    optimizer.step()).
+
+    Parameters
+    ----------
+    model : nn.Module
+        Model whose forward buffers should be flushed.
+    step : int
+        Current training step.
     """
     model_id = id(model)
     buf = _layer_forward_memory_buffer.pop(model_id, None)
-
     if not buf:
         return
+
+    # Resolve execution device
+    try:
+        device = str(next(model.parameters()).device)
+    except StopIteration:
+        device = "unknown"
 
     event = LayerForwardMemoryEvents(
         model_id=model_id,
         layers=buf,
+        device=device,
         step=step,
     )
     try:
         layer_forward_memory_queue.put_nowait(event)
     except Full:
+        # Drop event silently to avoid backpressure on training
         pass
 
 
-def attach_layer_forward_memory_hooks(model: nn.Module):
+def attach_layer_forward_memory_hooks(model: nn.Module) -> None:
     """
-    Attach a class-based forward hook to all leaf modules of `model`.
-    Hooks are idempotent: repeated calls do nothing.
+    Attach forward hooks to all leaf modules of a model.
 
-    Args:
-        model (nn.Module): PyTorch model to instrument.
+    Hooks are idempotent: calling this function multiple times for the same
+    model instance has no effect.
+
+    Parameters
+    ----------
+    model : nn.Module
+        PyTorch model to instrument.
     """
     model_id = id(model)
     if _layer_forward_memory_hook_registry.get(model_id):
         # Hooks already attached
         return
 
-    # Register ActivationHook on all leaf modules
+    # Register LayerForwardMemoryHook on all leaf modules
     for name, module in model.named_modules():
-        if any(module.children()):  # skip non-leaf modules
+        # Only attach to leaf modules
+        if any(module.children()):
             continue
         module.register_forward_hook(LayerForwardMemoryHook(model_id, name))
 

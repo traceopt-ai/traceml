@@ -1,5 +1,5 @@
 import shutil
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from rich.panel import Panel
 from rich.table import Table
@@ -12,12 +12,13 @@ from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
     LAYER_COMBINED_TIMER_LAYOUT,
 )
-from traceml.renderers.combined_timing.services import (
+from traceml.renderers.layer_combined_timing.services import (
     LayerCombinedTimerData,
     LayerCombinedTimerSummary,
 )
 from traceml.renderers.utils import truncate_layer_name
 from traceml.utils.formatting import fmt_time_ms
+from traceml.database.remote_database_store import RemoteDBStore
 
 
 class LayerCombinedTimerRenderer(BaseRenderer):
@@ -30,6 +31,7 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         forward_db: Database = None,
         backward_db: Database = None,
         top_n_layers: int = 20,
+        remote_store: Optional[RemoteDBStore] = None,
     ):
         super().__init__(
             name="Layer-wise Combined Timings",
@@ -39,6 +41,7 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             forward_db=forward_db,
             backward_db=backward_db,
             top_n_layers=top_n_layers,
+            remote_store=remote_store,
         )
 
         self._summary_service = LayerCombinedTimerSummary(
@@ -66,10 +69,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             for r in d["top_items"]:
                 table.add_row(
                     truncate_layer_name(r["layer"]),
-                    f"{fmt_time_ms(r.get('forward_current', 0.0))} / "
-                    f"{fmt_time_ms(r.get('forward_avg', 0.0))}",
-                    f"{fmt_time_ms(r.get('backward_current', 0.0))} / "
-                    f"{fmt_time_ms(r.get('backward_avg', 0.0))}",
+                    f"{fmt_time_ms(r.get('forward_current', 0.0))}/{fmt_time_ms(r.get('forward_avg', 0.0))}",
+                    f"{fmt_time_ms(r.get('backward_current', 0.0))}/{fmt_time_ms(r.get('backward_avg', 0.0))}",
                     f"{float(r.get('pct', 0.0)):.1f}%",
                 )
         else:
@@ -82,10 +83,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         ) > 0:
             table.add_row(
                 "Other Layers",
-                f"{fmt_time_ms(o.get('total_forward_current', 0.0))} / "
-                f"{fmt_time_ms(o.get('total_forward_avg', 0.0))}",
-                f"{fmt_time_ms(o.get('total_backward_current', 0.0))} / "
-                f"{fmt_time_ms(o.get('total_backward_avg', 0.0))}",
+                f"{fmt_time_ms(o.get('total_forward_current', 0.0))}/{fmt_time_ms(o.get('total_forward_avg', 0.0))}",
+                f"{fmt_time_ms(o.get('total_backward_current', 0.0))}/{fmt_time_ms(o.get('total_backward_avg', 0.0))}",
                 f"{float(o.get('pct', 0.0)):.1f}%",
             )
 
@@ -110,12 +109,10 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             <tr>
                 <td>{truncate_layer_name(r["layer"])}</td>
                 <td style="text-align:right;">
-                    {fmt_time_ms(r.get('forward_current', 0.0))} /
-                    {fmt_time_ms(r.get('forward_peak', 0.0))}
+                    {fmt_time_ms(r.get('forward_current', 0.0))}/{fmt_time_ms(r.get('forward_peak', 0.0))}
                 </td>
                 <td style="text-align:right;">
-                    {fmt_time_ms(r.get('backward_current', 0.0))} /
-                    {fmt_time_ms(r.get('backward_peak', 0.0))}
+                    {fmt_time_ms(r.get('backward_current', 0.0))}/{fmt_time_ms(r.get('backward_peak', 0.0))}
                 </td>
                 <td style="text-align:right;">{float(r.get('pct', 0.0)):.1f}%</td>
             </tr>
@@ -168,7 +165,9 @@ class LayerCombinedTimerRenderer(BaseRenderer):
 
         self._render_section_layer_stats(table, layer_stats)
         self._render_section_topk(table, "Top 3 Forward Layers (Avg)", top_acts, "cyan")
-        self._render_section_topk(table, "TOP-3 Backward Layers (Avg)", top_grads, "green")
+        self._render_section_topk(
+            table, "TOP-3 Backward Layers (Avg)", top_grads, "green"
+        )
 
         panel = Panel(
             table,

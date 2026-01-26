@@ -39,9 +39,14 @@ def choose_color(pct: float) -> str:
         return "#4CAF50"  # green - good
 
 
-def extract_time_axis(table):
-    t_raw = [rec.get("timestamp") for rec in table][-100:]
+def extract_time_axis(table, key="timestamp"):
+    t_raw = [rec.get(key) for rec in table][-100:]
     x_hist = [time.strftime("%H:%M:%S", time.localtime(t)) for t in t_raw]
+    return x_hist
+
+
+def extract_x_axis(table, key="seq"):
+    x_hist = [rec.get(key) for rec in table][-100:]
     return x_hist
 
 

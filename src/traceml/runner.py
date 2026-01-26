@@ -1,10 +1,37 @@
+"""
+TraceML runner.
+
+This module is the execution wrapper used by TraceML to run user scripts
+in a controlled environment.
+
+Responsibilities:
+- Read TraceML configuration from environment variables
+- Start and stop the TrackerManager lifecycle
+- Execute the user script in-process via runpy
+- Capture crashes and enrich error reporting
+
+This module intentionally runs in the same Python process as the user
+script to ensure hooks, stack traces, and execution context are accurate.
+"""
+
 import os
 import sys
 import runpy
 import traceback
 
-from traceml.manager.tracker_manager import TrackerManager
+from traceml.runtime import TraceMLRuntime
 from traceml.utils.shared_utils import EXECUTION_LAYER
+
+
+class NoOpRuntime:
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def log_summaries(self, path=None):
+        pass
 
 
 def read_traceml_env():
@@ -22,6 +49,11 @@ def read_traceml_env():
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
         "num_display_layers": int(os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")),
+        "enable_ddp_telemetry": os.environ.get("TRACEML_DDP_TELEMETRY", "1") == "1",
+        "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
+        "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
+        "remote_max_rows": int(os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")),
+        "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
     }
 
 
@@ -41,7 +73,7 @@ def extract_script_args():
         return []
 
 
-def start_tracker(cfg):
+def start_runtime(cfg):
     """
     Initialize and start the TraceML tracker.
 
@@ -50,26 +82,44 @@ def start_tracker(cfg):
     - start background samplers
     - capture early allocations
     """
-    tracker = TrackerManager(
-        interval_sec=cfg["interval"],
-        mode=cfg["mode"],
-        num_display_layers=cfg["num_display_layers"],
-        enable_logging=cfg["enable_logging"],
-        logs_dir=cfg["logs_dir"],
-    )
-    print("[TraceML] Starting tracker")
-    tracker.start()
-    return tracker
+    try:
+        runtime = TraceMLRuntime(
+            interval_sec=cfg["interval"],
+            mode=cfg["mode"],
+            num_display_layers=cfg["num_display_layers"],
+            enable_logging=cfg["enable_logging"],
+            logs_dir=cfg["logs_dir"],
+            enable_ddp_telemetry=cfg["enable_ddp_telemetry"],
+            tcp_host=cfg["tcp_host"],
+            tcp_port=cfg["tcp_port"],
+            remote_max_rows=cfg["remote_max_rows"],
+            session_id=cfg["session_id"],
+        )
+        print("[TraceML] Starting Runtime")
+        runtime.start()
+        return runtime
+    except Exception as e:
+        print(f"[TraceML] Failed to start TraceMLRuntime: {e}", file=sys.stderr)
+        traceback.print_exception(type(e), e, e.__traceback__)
+        return NoOpRuntime()
 
 
-def stop_tracker(tracker):
+def stop_runtime(runtime):
     """
-    Stop the tracker and flush all collected data.
-
-    This is always called, even if the user script crashes.
+    Best-effort shutdown.
+    Never raise.
     """
-    tracker.stop()
-    tracker.log_summaries(path=None)
+    try:
+        runtime.stop()
+        ## Summaries are disabled
+        # TODO: clear summaries and show only rank 0 for now
+        # runtime.log_summaries(path=None)
+    except Exception as e:
+        print(
+            "[TraceML] Error during shutdown (ignored)",
+            file=sys.stderr,
+        )
+        traceback.print_exception(type(e), e, e.__traceback__)
 
 
 def run_user_script(script_path, script_args):
@@ -116,7 +166,7 @@ def main():
     cfg = read_traceml_env()
     script_args = extract_script_args()
 
-    tracker = start_tracker(cfg)
+    runtime = start_runtime(cfg)
 
     exit_code = 0
     error = None
@@ -132,7 +182,7 @@ def main():
         exit_code = 1
 
     finally:
-        stop_tracker(tracker)
+        stop_runtime(runtime)
 
     if error:
         report_crash(error)

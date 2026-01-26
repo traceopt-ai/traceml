@@ -1,7 +1,6 @@
 import shutil
-from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Iterable
 
 import numpy as np
 from rich.console import Console, Group
@@ -10,6 +9,8 @@ from rich.table import Table
 from IPython.display import HTML
 
 from traceml.database.database import Database
+from traceml.database.remote_database_store import RemoteDBStore
+from traceml.distributed import get_ddp_info
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import STEPTIMER_LAYOUT
 from traceml.renderers.utils import fmt_time_run
@@ -18,6 +19,16 @@ from .utils import CARD_STYLE
 
 @dataclass
 class StepTimerRow:
+    """
+    One display row for a timer event, aggregated across ranks.
+
+    Semantics:
+      - last / p50_100 / p95_100 / avg_100 are "worst-case across ranks" over a recent window.
+      - worst_rank is computed stably over the window (not per-step), to avoid flicker.
+      - coverage indicates how many ranks contributed samples for this timer.
+      - min_samples is the minimum samples count among ranks that had any samples.
+    """
+
     name: str
     last: float
     p50_100: float
@@ -26,170 +37,366 @@ class StepTimerRow:
     trend: str
     device: str
 
+    # New DDP-aware fields
+    worst_rank: str
+    coverage: str
+    min_samples: int
+
 
 class StepTimerRenderer(BaseRenderer):
     """
     Renderer for user-defined step timers.
 
-    Pipeline:
-        DB → raw series → top-N aggregation → stats rows → render
+    DDP semantics (NO STEP alignment):
+      - Each rank produces a sequence of timer durations per event name.
+      - We compute stats per rank on the last N samples (default N=100).
+      - We then aggregate across ranks using "worst wins" to reflect DDP bottleneck behavior.
+
+    Why no step alignment:
+      - Timers are event-based and may not occur at exactly the same steps on all ranks.
+      - Step alignment would drop useful data and delay detection.
+      - Instead we compute stable windowed stats per rank and pick the slowest rank.
+
+    Output:
+      - last / p50 / p95 / avg: worst-case across ranks (over window)
+      - worst_rank: rank with highest p95 (default) or avg over window
+      - coverage: ranks_with_data / world_size
+      - min_samples: minimum #samples among ranks that contributed (best-effort)
     """
 
-    def __init__(self, database: Database, top_n: int = 5):
+    def __init__(
+        self,
+        database: Database,
+        top_n: int = 5,
+        remote_store: Optional[RemoteDBStore] = None,
+        window_size: int = 100,
+        worst_metric: str = "p95",  # "p95" or "avg"
+    ):
         super().__init__(name="Step Timers", layout_section_name=STEPTIMER_LAYOUT)
         self.db = database
-        self.top_n = top_n
+        self.top_n = int(top_n)
+
+        # Remote store (rank-0 only) contains per-rank DBs mirrored from workers.
+        self.remote_store = remote_store
+
+        # Window size used for stable aggregation and trend detection.
+        self.window_size = max(int(window_size), 1)
+
+        # Stable "worst rank" definition.
+        self.worst_metric = worst_metric.lower().strip()
+        if self.worst_metric not in ("p95", "avg"):
+            self.worst_metric = "p95"
+
+    def _infer_world_size(self) -> int:
+        """
+        Best-effort world size inference.
+        In non-DDP runs, returns 1.
+        """
+        try:
+            _, _, ws = get_ddp_info()
+            return max(int(ws), 1)
+        except Exception:
+            return 1
+
+    def _iter_rank_dbs(self) -> Iterable[Tuple[int, Database]]:
+        """
+        Yield (rank, db) for the local DB first, then remote rank DBs (if available).
+
+        Important:
+          - The local DB is always treated as rank 0 in this renderer, consistent with
+            RemoteDBStore usage on rank 0.
+          - In worker ranks, remote_store is typically None, so we only yield local.
+        """
+        yield 0, self.db
+
+        if not self.remote_store:
+            return
+
+        ws = self._infer_world_size()
+        sampler_name = getattr(self.db, "sampler_name", None)
+
+        # RemoteDBStore is expected to serve per-rank DBs by (rank, sampler_name)
+        for rank in range(1, ws):
+            db = self.remote_store.get_db(rank, sampler_name) if sampler_name else None
+            if db is not None:
+                yield rank, db
 
     def _is_internal(self, name: str) -> bool:
         return name.startswith("_traceml_internal:")
 
-    def _collect_cpu_series(self) -> Dict[str, List[float]]:
-        table = self.db.create_or_get_table("step_timer_cpu")
-        out: Dict[str, List[float]] = defaultdict(list)
+    def _collect_series_by_rank(self) -> Dict[str, Dict[int, Dict[str, List[float]]]]:
+        """
+        Collect per-event series for each rank.
 
-        for row in table:
-            name = row.get("event_name")
-            if name:
-                out[name].append(float(row.get("duration_ms", 0.0)))
+        Returns:
+          {
+            event_name: {
+              rank: {"cpu": [..], "gpu": [..]}   # exactly one of cpu/gpu is populated
+            }
+          }
 
+        Notes:
+          - We do not step-align events. We treat each rank's event stream independently.
+          - We assume event tables store rows with 'duration_ms' and boolean 'is_gpu'.
+        """
+        out: Dict[str, Dict[int, Dict[str, List[float]]]] = {}
+
+        for rank, db in self._iter_rank_dbs():
+            for table_name, rows in db.all_tables().items():
+                if self._is_internal(table_name):
+                    continue
+                if not rows:
+                    continue
+
+                # Extract durations for this rank/event.
+                vals = [float(r.get("duration_ms", 0.0)) for r in rows]
+                is_gpu = bool(rows[-1].get("is_gpu"))
+
+                if table_name not in out:
+                    out[table_name] = {}
+
+                out[table_name][rank] = {
+                    "cpu": [] if is_gpu else vals,
+                    "gpu": vals if is_gpu else [],
+                }
         return out
 
-    def _collect_gpu_series(self) -> Dict[str, List[float]]:
-        out: Dict[str, List[float]] = defaultdict(list)
-
-        for table_name, rows in self.db.all_tables().items():
-            if not table_name.startswith("step_timer_cuda"):
-                continue
-            for row in rows:
-                name = row.get("event_name")
-                if name:
-                    out[name].append(float(row.get("duration_ms", 0.0)))
-
-        return out
-
-    def _collect_series(self) -> Dict[str, Dict[str, List[float]]]:
-        cpu = self._collect_cpu_series()
-        gpu = self._collect_gpu_series()
-
-        return {
-            name: {"cpu": cpu.get(name, []), "gpu": gpu.get(name, [])}
-            for name in set(cpu) | set(gpu)
-            if not self._is_internal(name)
-        }
-
-    def _mean_for_display(self, vals: Dict[str, List[float]]) -> float:
-        arr = vals["gpu"] if vals["gpu"] else vals["cpu"]
-        return float(np.mean(arr)) if arr else 0.0
-
-    def _aggregate_top_n(
-        self, series: Dict[str, Dict[str, List[float]]]
-    ) -> Dict[str, Dict[str, List[float]]]:
-        if not series or self.top_n <= 0:
-            return series
-
-        items = sorted(
-            series.items(),
-            key=lambda kv: self._mean_for_display(kv[1]),
-            reverse=True,
-        )
-
-        if len(items) <= self.top_n:
-            return dict(items)
-
-        keep = items[: self.top_n - 1]
-        rest = items[self.top_n - 1 :]
-
-        def sum_series(key: str) -> List[float]:
-            max_len = max(len(v[key]) for _, v in rest)
-            return [
-                sum(v[key][i] for _, v in rest if i < len(v[key]))
-                for i in range(max_len)
-            ]
-
-        out = dict(keep)
-        out["Other"] = {
-            "cpu": sum_series("cpu"),
-            "gpu": sum_series("gpu"),
-        }
-        return out
-
-    def _safe_percentile(self, arr: np.ndarray, q: float) -> float:
+    @staticmethod
+    def _safe_percentile(arr: np.ndarray, q: float) -> float:
         return float(np.percentile(arr, q)) if arr.size else 0.0
 
-    def _compute_row(
-        self, name: str, cpu_vals: List[float], gpu_vals: List[float]
-    ) -> StepTimerRow:
-        arr = np.asarray(gpu_vals or cpu_vals, dtype=np.float64)
-        device = "GPU" if gpu_vals else "CPU"
+    def _window(self, vals: List[float]) -> np.ndarray:
+        """
+        Return last `window_size` samples as a float64 array.
+        """
+        if not vals:
+            return np.asarray([], dtype=np.float64)
+        n = min(self.window_size, len(vals))
+        return np.asarray(vals[-n:], dtype=np.float64)
 
+    def _rank_stats(
+        self,
+        cpu_vals: List[float],
+        gpu_vals: List[float],
+    ) -> Dict[str, float]:
+        """
+        Compute rank-local windowed stats (no cross-rank logic).
+
+        Returns keys:
+          - last, p50, p95, avg, nsamples
+        """
+        arr = self._window(gpu_vals or cpu_vals)
         if arr.size == 0:
-            return StepTimerRow(name, 0, 0, 0, 0, "", device)
+            return {"last": 0.0, "p50": 0.0, "p95": 0.0, "avg": 0.0, "nsamples": 0.0}
 
-        last = float(arr[-1])
-        win100 = arr[-min(100, arr.size) :]
-        avg100 = float(win100.mean())
+        return {
+            "last": float(arr[-1]),
+            "p50": self._safe_percentile(arr, 50),
+            "p95": self._safe_percentile(arr, 95),
+            "avg": float(arr.mean()),
+            "nsamples": float(arr.size),
+        }
 
-        trend = ""
-        n = arr.size
+    def _trend_from_history(self, arr_full: np.ndarray) -> str:
+        """
+        Trend indicator based on recent vs previous window (stable, best-effort).
 
-        # Early instability
-        if n >= 50 and n <= 200:
-            early_p95 = np.percentile(arr[:50], 95)
-            later_avg = arr[50:].mean() if n > 50 else arr.mean()
+        Uses the full series for the event on the chosen device for the aggregated view.
+        (We apply this only after we decide the aggregated device stream.)
+        """
+        n = arr_full.size
+        if n == 0:
+            return ""
+
+        # Early instability: if early p95 is much worse than later average.
+        if 50 <= n <= 200:
+            early = arr_full[:50]
+            rest = arr_full[50:] if n > 50 else arr_full
+            early_p95 = np.percentile(early, 95)
+            later_avg = rest.mean() if rest.size else arr_full.mean()
 
             if later_avg > 1e-9 and early_p95 > 2.0 * later_avg:
                 pct = (early_p95 - later_avg) / later_avg * 100.0
-
                 if abs(pct) >= 5.0:
                     sign = "+" if pct > 0 else ""
-                    trend = f"! {sign}{pct:.1f}%"
-                else:
-                    trend = "!"
+                    return f"! {sign}{pct:.1f}%"
+                return "!"
 
-        # Recent vs previous trend (percentage)
+        # Recent vs previous: compare last window vs previous window (both 100).
         if n >= 200:
-            recent_avg = arr[-100:].mean()
-            prev_avg = arr[-200:-100].mean()
+            recent_avg = arr_full[-100:].mean()
+            prev_avg = arr_full[-200:-100].mean()
 
             if prev_avg > 1e-9:
                 pct_change = (recent_avg - prev_avg) / prev_avg * 100.0
-
                 if abs(pct_change) < 1.0:
-                    trend = "≈0%"
-                else:
-                    sign = "+" if pct_change > 0 else ""
-                    trend = f"{sign}{pct_change:.1f}%"
+                    return "≈0%"
+                sign = "+" if pct_change > 0 else ""
+                return f"{sign}{pct_change:.1f}%"
+
+        return ""
+
+    def _compute_aggregated_row(
+        self,
+        name: str,
+        per_rank: Dict[int, Dict[str, List[float]]],
+    ) -> StepTimerRow:
+        """
+        Compute a single aggregated row across ranks for one timer event.
+
+        Aggregation rules:
+          - Compute per-rank stats over last N samples.
+          - Choose stable worst rank based on chosen metric ('p95' or 'avg').
+          - Display values as worst-case across ranks (max of each stat).
+          - coverage/min_samples describe data availability.
+        """
+        ws = self._infer_world_size()
+
+        # Per-rank windowed stats.
+        rank_stats: Dict[int, Dict[str, float]] = {}
+        ranks_with_data: List[int] = []
+
+        # Track device consistency: event should typically be CPU-only or GPU-only.
+        # If some ranks disagree, we label it "MIXED" (rare, but safe).
+        saw_cpu = False
+        saw_gpu = False
+
+        # For trend: we build an aggregated "history stream" (best-effort) by concatenating
+        # all available samples across ranks. This is not step-aligned, but trend is heuristic.
+        history_concat: List[float] = []
+
+        for r in range(ws):
+            vals = per_rank.get(r)
+            if not vals:
+                continue
+
+            cpu_vals = vals.get("cpu", []) or []
+            gpu_vals = vals.get("gpu", []) or []
+
+            if gpu_vals:
+                saw_gpu = True
+                history_concat.extend(gpu_vals)
+            else:
+                saw_cpu = True
+                history_concat.extend(cpu_vals)
+
+            st = self._rank_stats(cpu_vals=cpu_vals, gpu_vals=gpu_vals)
+            if st["nsamples"] > 0:
+                rank_stats[r] = st
+                ranks_with_data.append(r)
+
+        # Coverage and minimum samples (among ranks that have any data).
+        if ranks_with_data:
+            min_samples = int(min(rank_stats[r]["nsamples"] for r in ranks_with_data))
+        else:
+            min_samples = 0
+
+        coverage = f"{len(ranks_with_data)}/{ws}" if ws > 1 else "1/1"
+
+        device = "MIXED" if (saw_cpu and saw_gpu) else ("GPU" if saw_gpu else "CPU")
+
+        if not rank_stats:
+            return StepTimerRow(
+                name=name,
+                last=0.0,
+                p50_100=0.0,
+                p95_100=0.0,
+                avg_100=0.0,
+                trend="",
+                device=device,
+                worst_rank="—",
+                coverage=coverage,
+                min_samples=min_samples,
+            )
+
+        # Stable worst rank selection (windowed, not per-step).
+        metric_key = "p95" if self.worst_metric == "p95" else "avg"
+        worst_rank_id = max(
+            rank_stats.keys(), key=lambda r: float(rank_stats[r][metric_key])
+        )
+        worst_rank = f"{worst_rank_id}"
+
+        # Display worst-case values across ranks.
+        last = max(float(s["last"]) for s in rank_stats.values())
+        p50 = max(float(s["p50"]) for s in rank_stats.values())
+        p95 = max(float(s["p95"]) for s in rank_stats.values())
+        avg = max(float(s["avg"]) for s in rank_stats.values())
+
+        # Trend heuristic based on concatenated history.
+        trend = self._trend_from_history(np.asarray(history_concat, dtype=np.float64))
 
         return StepTimerRow(
             name=name,
             last=last,
-            p50_100=self._safe_percentile(win100, 50),
-            p95_100=self._safe_percentile(win100, 95),
-            avg_100=avg100,
+            p50_100=p50,
+            p95_100=p95,
+            avg_100=avg,
             trend=trend,
             device=device,
+            worst_rank=worst_rank,
+            coverage=coverage,
+            min_samples=min_samples,
         )
 
-    # ------------------------------------------------------------------
-    # Public data pipeline
-    # ------------------------------------------------------------------
+    def _score_for_sort(self, row: StepTimerRow) -> float:
+        """
+        Sort score: worst-case avg_100 by default.
+        (You can switch to p95_100 if you prefer.)
+        """
+        return float(row.avg_100)
 
     def _build_rows(self) -> List[StepTimerRow]:
-        series = self._aggregate_top_n(self._collect_series())
+        """
+        Build StepTimerRow rows for display.
+
+        We optionally keep top_n-1 rows plus an "Other" row, similar to v1.
+        "Other" is aggregated as a single distribution across remaining events, with
+        worst_rank shown as "—" because it does not represent a single timer.
+        """
+        series_by_rank = self._collect_series_by_rank()
+        if not series_by_rank:
+            return []
+
+        # Compute a row per event.
         rows = [
-            self._compute_row(name, vals["cpu"], vals["gpu"])
-            for name, vals in series.items()
+            self._compute_aggregated_row(name, per_rank)
+            for name, per_rank in series_by_rank.items()
         ]
 
-        # Stable display order
-        rows.sort(key=lambda r: r.avg_100, reverse=True)
-        rows.sort(key=lambda r: r.name == "Other")
-        return rows
+        # Stable display order: slowest events first.
+        rows.sort(key=self._score_for_sort, reverse=True)
 
-    # ------------------------------------------------------------------
-    # Renderers
-    # ------------------------------------------------------------------
+        if self.top_n <= 0 or len(rows) <= self.top_n:
+            return rows
 
+        # Keep top_n-1, aggregate the rest into "Other".
+        keep = rows[: self.top_n - 1]
+        rest_names = [r.name for r in rows[self.top_n - 1 :]]
+
+        # Aggregate "Other" by concatenating samples across remaining events and ranks.
+        # This preserves "distributional" meaning but does not represent a single timer/rank.
+        other_cpu: List[float] = []
+        other_gpu: List[float] = []
+
+        for name in rest_names:
+            per_rank = series_by_rank.get(name, {})
+            for _, vals in per_rank.items():
+                other_cpu.extend(vals.get("cpu", []) or [])
+                other_gpu.extend(vals.get("gpu", []) or [])
+
+        other_row = self._compute_aggregated_row(
+            name="Other",
+            per_rank={0: {"cpu": other_cpu, "gpu": other_gpu}},
+        )
+        # Override fields that are not meaningful for "Other".
+        other_row.worst_rank = "—"
+        other_row.coverage = "—"
+        other_row.min_samples = 0
+
+        # Ensure "Other" is always last.
+        return keep + [other_row]
+
+    # Renderers: Rich / Notebook / Dashboard
     def get_panel_renderable(self) -> Panel:
         rows = self._build_rows()
 
@@ -202,9 +409,22 @@ class StepTimerRenderer(BaseRenderer):
         table.add_column("Trend", justify="center")
         table.add_column("Device", justify="center", style="magenta")
 
+        # New DDP columns
+        table.add_column("Worst", justify="center")
+        # table.add_column("Cov", justify="center")
+        # table.add_column("MinN", justify="right")
+
         if not rows:
             table.add_row(
-                "[dim]No step timers recorded[/dim]", "—", "—", "—", "—", "", "—"
+                "[dim]No step timers recorded[/dim]",
+                "—",
+                "—",
+                "—",
+                "—",
+                "",
+                "—",
+                "—",
+                # "—", "—",
             )
         else:
             for r in rows:
@@ -216,14 +436,17 @@ class StepTimerRenderer(BaseRenderer):
                     fmt_time_run(r.avg_100),
                     r.trend,
                     r.device,
+                    r.worst_rank,
+                    # r.coverage,
+                    # str(r.min_samples) if r.min_samples else "—",
                 )
 
         cols, _ = shutil.get_terminal_size()
-        width = min(max(100, int(cols * 0.75)), 110)
+        width = min(max(110, int(cols * 0.90)), 140)
 
         return Panel(
             Group(table),
-            title="[bold blue]Trace Timers[/bold blue]",
+            title="[bold blue]Trace Timers (stats = max over DDP ranks)[/bold blue]",
             border_style="blue",
             width=width,
         )
@@ -234,21 +457,19 @@ class StepTimerRenderer(BaseRenderer):
         if not rows:
             body = """
             <tr>
-                <td colspan="7" style="text-align:center;color:gray;">
+                <td colspan="10" style="text-align:center;color:gray;">
                     No step timers recorded
                 </td>
             </tr>
             """
         else:
             body = ""
-
             for r in rows:
                 trend_text = "—"
                 trend_color = "#666"
 
                 if isinstance(r.trend, str) and r.trend:
                     if r.trend.startswith("!"):
-                        # Instability
                         trend_text = r.trend
                         trend_color = "#f57c00"  # orange
                     elif r.trend.startswith("+"):
@@ -264,21 +485,21 @@ class StepTimerRenderer(BaseRenderer):
                 body += f"""
                 <tr>
                     <td>{r.name}</td>
-                    <td>{fmt_time_run(r.last)}</td>
-                    <td>{fmt_time_run(r.p50_100)}</td>
-                    <td>{fmt_time_run(r.p95_100)}</td>
-                    <td>{fmt_time_run(r.avg_100)}</td>
+                    <td style="text-align:right;">{fmt_time_run(r.last)}</td>
+                    <td style="text-align:right;">{fmt_time_run(r.p50_100)}</td>
+                    <td style="text-align:right;">{fmt_time_run(r.p95_100)}</td>
+                    <td style="text-align:right;">{fmt_time_run(r.avg_100)}</td>
                     <td style="
                         color:{trend_color};
                         font-weight:700;
                         text-align:center;
-                    ">
-                        {trend_text}
-                    </td>
-                    <td>{r.device}</td>
+                    ">{trend_text}</td>
+                    <td style="text-align:center;">{r.device}</td>
+                    <td style="text-align:center;">{r.worst_rank}</td>
+                    <td style="text-align:center;">{r.coverage}</td>
+                    <td style="text-align:right;">{r.min_samples if r.min_samples else "—"}</td>
                 </tr>
                 """
-
 
         table_html = f"""
         <table style="
@@ -288,13 +509,16 @@ class StepTimerRenderer(BaseRenderer):
         ">
             <thead>
                 <tr style="border-bottom:1px solid #e0e0e0;">
-                    <th align="left">Step</th>
+                    <th align="left">Event</th>
                     <th align="right">Last</th>
                     <th align="right">p50(100)</th>
                     <th align="right">p95(100)</th>
                     <th align="right">Avg(100)</th>
                     <th align="center">Trend</th>
                     <th align="center">Device</th>
+                    <th align="center">Worst</th>
+                    <th align="center">Cov</th>
+                    <th align="right">MinN</th>
                 </tr>
             </thead>
             <tbody>
@@ -303,20 +527,22 @@ class StepTimerRenderer(BaseRenderer):
         </table>
         """
 
-        return HTML(f"""
+        return HTML(
+            f"""
         <div style="{CARD_STYLE}">
-            <h4 style="
-                color:#d47a00;
-                margin:0 0 10px 0;
-            ">
-                Step Timings
+            <h4 style="color:#d47a00;margin:0 0 10px 0;">
+                Step Timings (DDP worst-rank aggregation)
             </h4>
-
             {table_html}
         </div>
-        """)
+        """
+        )
 
     def get_dashboard_renderable(self):
+        """
+        Dashboard expects JSON-serializable rows.
+        We include worst_rank/coverage/min_samples so UI can show them.
+        """
         return [r.__dict__ for r in self._build_rows()]
 
     def log_summary(self, path: Optional[str] = None) -> None:

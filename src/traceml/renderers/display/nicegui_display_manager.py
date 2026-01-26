@@ -59,4 +59,21 @@ class NiceGUIDisplayManager:
 
     @classmethod
     def release_display(cls):
-        pass
+        """
+        Gracefully shut down the NiceGUI display server.
+
+        This must be called from the TraceML runtime shutdown path.
+        It is safe to call multiple times.
+        """
+        if not cls._ui_started:
+            return
+
+        cls._ui_started = False
+        cls._ui_ready = False
+
+        # Stop UI updates
+        with cls._latest_data_lock:
+            cls.latest_data.clear()
+            cls.cards.clear()
+            cls.update_funcs.clear()
+            cls._layout_content_fns.clear()

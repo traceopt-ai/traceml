@@ -1,85 +1,108 @@
 # TraceML
 
-**Real-time training observability and failure attribution tool for PyTorch — lightweight, always-on, and actionable.**
+**Always-on, live observability and failure attribution for distributed PyTorch training (Alpha)**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/traceml-ai?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/traceml-ai)
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
-[![Python 3.9-3.13](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/) 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
+[![Downloads](https://static.pepy.tech/badge/traceml-ai)](https://pepy.tech/project/traceml-ai)
+[![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
+[![Python 3.9-3.13](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-yellow)](./LICENSE)
+
+
+TraceML is a lightweight **runtime observability** tool for **distributed PyTorch training**.  
+It makes training behavior visible *while it runs* using **semantic, step-level signals** that are typically missing from infrastructure metrics and too expensive to keep enabled with full profilers.
+
+> **Status:** **Alpha**  
+> Current focus: **single-node DDP** stability, signal accuracy, and overhead optimization (Python/GIL behavior, communication paths, synchronization strategy, and UI/collector performance).  
+> Multi-node distributed training (DDP/FSDP) is planned.
 
 ---
 
-Demo Video:  https://www.loom.com/share/492ce49cc4e24c5885572e2e7e14ed64
+## Why TraceML
 
---- 
+Training deep learning models often becomes a black box once you scale beyond toy workloads.
 
-## The Problem TraceML Solves
+Common pain points:
+- **Slow / unstable steps** without knowing whether the bottleneck is dataloader, compute, communication, or optimizer
+- **CUDA OOM errors** with limited attribution to the responsible layer
+- **Layer-level opacity**: unclear memory and compute hotspots
+- **Heavy profilers** that are too intrusive to keep enabled during real training
 
-Training deep learning models shouldn't feel like debugging a black box. Yet we constantly face:
-
-- **💥 CUDA OOM errors** with no insight into which layer caused the memory spike
-- **🐌 Slow training** without knowing if the bottleneck is data loading, forward pass, backward pass, or optimizer
-- **🔍 Layer-level mysteries** — which layers consume the most memory? Which are slowest?
-- **📊 Heavy profilers** that are impractical to keep running during actual training
-
-TraceML changes this with continuous, low-overhead visibility while your training runs. 
+TraceML is designed to be **always-on**, giving you actionable attribution during long-running jobs.
 
 ---
 
-## What TraceML Does
+## What TraceML Shows (Core Signals)
 
-TraceML answers the questions you actually need answered:
+TraceML focuses on the signals you actually debug with:
 
-| Question                              | TraceML Answer                                                 |
-|---------------------------------------|----------------------------------------------------------------|
-| Which **layer caused OOM** ?          | Automatic detection of the failing layer during forward or backward pass        |
-| What's slowing down my training step? | Step-level timing: dataloader → forward → backward → optimizer |
-| Where did that memory spike happen?   | Step-level (batch-level) memory tracking with peak attribution     |
-| Which layer is eating my GPU memory?  | Per-layer memory breakdown (params + forward + backward)       |
-| Which layer is slow?                  | Per-layer compute time (forward + backward)                    |
+### Step-aware signals (synchronized across ranks)
+For each training step (in single-node DDP):
+- **Dataloader fetch time**
+- **Training step time** (**GPU-aware** via CUDA events)
+- **Step GPU memory** (allocated + peak)
 
-**Three ways to view the results:**
-- 🖥️ **Terminal** — live updates in your console
-- 🌐 **Web UI** — local browser at `localhost:8765`
-- 📓 **Jupyter notebooks** — inline visualizations
+Across ranks, TraceML reports:
+- **Median rank** (typical behavior)
+- **Worst rank** (straggler / bottleneck)
+
+This makes it easy to catch cases like “8 GPUs slower than 1” *as it happens*, and understand whether you’re bottlenecked by input pipeline, compute, or rank-level stragglers.
+
+### Failure attribution
+- **OOM attribution** (Deep-Dive mode): surface the layer most likely responsible during forward/backward
 
 ---
 
-## Tracking Profiles (New)
+## What TraceML Is Not
 
-TraceML supports two tracking profiles so you can choose the right trade-off between insight and overhead.
+TraceML is **not** an auto-tuner or a profiler replacement.
 
-### ESSENTIAL mode (lightweight, always-on)
+- It does not automatically optimize your batch size
+- It does not always “find a problem”
+- It does not replace Nsight or PyTorch Profiler
 
-Best for day-to-day training and long runs.
+Instead, TraceML answers a more basic question:
+
+> “Which part of my training step is responsible for what I’m seeing — or is everything behaving normally?”
+
+If your run is healthy, TraceML will tell you that explicitly.
+
+---
+
+## Views
+
+TraceML supports two ways to consume runtime signals:
+
+- 🖥️ **Terminal dashboard** — live updates in your console
+- 🌐 **Web dashboard** — local browser at `http://localhost:8765`
+
+Note: Notebook is temporarily disabled in alpha 
+
+---
+
+## Tracking Profiles
+
+TraceML provides two tracking profiles so you can choose the right trade-off between insight and overhead.
+
+### ESSENTIAL mode (always-on runtime signals)
+Designed for day-to-day training and long-running jobs.
 
 Tracks:
 - Dataloader fetch time
 - Training step time (GPU-aware)
-- Step GPU memory (allocated + peak)
-- System stats (CPU, RAM, GPU)
+- Step-level GPU memory (allocated and peak)
+- System metrics (CPU, RAM, GPU)
+- Basic failure signals
+
+This mode is intended to run **continuously during real training**.
 
 ### DEEP-DIVE mode (diagnostic)
+Designed for performance pathology debugging and OOM investigations.
 
-Best for debugging OOMs and performance pathologies.
-
-Tracks everything in **Essential**, plus:
+Includes everything in **ESSENTIAL**, plus:
 - Per-layer memory (parameters, activations, gradients)
-- Per-layer forward and backward time
-
-
-### Timed Regions (optional, very low overhead)
-
-**Optional instrumentation for specific code blocks.**  
-Executed **once per step per decorated function**.
-
-Tracks:
-- Custom timing blocks (e.g. dataloader, forward, backward, optimizer)
-- CPU or GPU time (via CUDA events)
-- Low (one timing measurement per step)
-
-
+- Per-layer forward and backward compute time
+- OOM layer attribution (forward/backward)
 
 ---
 
@@ -97,21 +120,23 @@ cd traceml
 pip install -e '.[dev]'
 ```
 
-**Requirements:** Python 3.9-3.13, PyTorch 1.12+
-
-**Platform support:** macOS (Intel/ARM), Linux. Single-GPU training (DDP support coming soon).
+**Requirements:** Python 3.9–3.13, PyTorch 1.12+  
+**Platform support:** macOS (Intel/ARM), Linux  
+**Training support:** Single GPU and **single-node DDP (alpha)**
 
 ---
 
-## Quick Start (Important)
+## Quick Start
 
-### Step-level tracking (required for all modes)
+### 1) Step-level tracking (required)
+
+TraceML computes step timing / memory only inside a `trace_step()` scope.
 
 ```python
 from traceml.decorators import trace_step
 
 for batch in dataloader:
-    with trace_step():
+    with trace_step(model):
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
         loss.backward()
@@ -119,23 +144,23 @@ for batch in dataloader:
         optimizer.zero_grad(set_to_none=True)
 ```
 
-Without `trace_step(...)`:
+Without `trace_step()`:
 - Step timing is not computed
 - Step memory is not recorded
 - Live dashboards will not update
 
+---
 
+### 2) Optional: Time specific code regions
 
-### Optional: Timing Specific Code Regions
-
-Use `@trace_time` to time specific functions.
-This works in **all modes** and has **low overhead**.
+Use `@trace_time` to time specific functions.  
+This works in **all modes** and is designed to have **low overhead**.
 
 ```python
 from traceml.decorators import trace_time
 
 @trace_time("backward", use_gpu=True)
-def backward_pass(loss, scaler=None):
+def backward_pass(loss):
     loss.backward()
 ```
 
@@ -143,14 +168,12 @@ Notes:
 - `use_gpu=True` uses CUDA events (correct for async GPU work)
 - `use_gpu=False` uses CPU wall-clock time
 
-#### Deprecation (⚠️ **Breaking change**)
+#### Deprecation (Breaking change)
+- `@trace_timestep` is deprecated — use `@trace_time` instead
 
-- `@trace_timestep` is deprecated, use `@trace_time` instead
+---
 
-
-### Deep-Dive: Model Registration
-
-Required **only for Deep-Dive mode**.
+### 3) Deep-Dive: model registration (only for Deep-Dive)
 
 ```python
 from traceml.decorators import trace_model_instance
@@ -158,99 +181,99 @@ from traceml.decorators import trace_model_instance
 trace_model_instance(model)
 ```
 
-Notes:
-- Enables forward/backward hooks
-- Required for per-layer memory and timing
-- Required for OOM layer attribution
+Enables forward/backward hooks required for:
+- per-layer memory and timing (layerwise worst across ranks)
+- OOM layer attribution (experimental, work-in-progress)
 
 ---
 
-### Running TraceML
-
-```python
-traceml run train.py 
-```
-
-You'll immediately see a live terminal dashboard tracking:
-- System resources (CPU, RAM, GPU)
-- Dataloader fetch time, training step time and training step GPU memory
-- (Deep-Dive only) Per-layer memory and compute time
-
-![TraceML CLI Demo](demo_gc.png)
-
----
-
-### 🌐 Web Dashboard
+## Running TraceML
 
 ```bash
-traceml run train.py --mode=dashboard
+traceml run train.py --nproc-per-node=2
+```
+
+You’ll see a live terminal dashboard tracking:
+- System resources (CPU, RAM, GPU)
+- Dataloader fetch time, step time, step GPU memory
+- (Deep-Dive only) per-layer memory + compute time
+
+> Tip: for **DDP**, run TraceML on rank 0 and collect rank signals via the TraceML runtime.
+
+---
+
+## Web Dashboard
+
+```bash
+traceml run train.py --nproc-per-node=2 --mode=dashboard
 ```
 
 Opens `http://localhost:8765` with interactive charts and real-time updates.
-
-<img src="web_demo.png" width="1200" alt="TraceML CLI Demo">
-
-
-### 📓 Jupyter Notebooks
-
-Please see the [notebook example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb) for inline visualizations.
-
 
 ---
 
 ## Roadmap
 
+TraceML prioritizes **clear attribution and low overhead** over exhaustive tracing.
 
-- ***Performance & Stability Improvements***: 
-Continuous reduction of tracing overhead, improved robustness for long-running training jobs, and better defaults for production-scale workloads.
+Near-term:
+- **Optimize single-node DDP**: reduce overhead, improve rank synchronization accuracy, improve comm + GIL behavior
+- **Broaden workload coverage**: validated examples + benchmarks for representative workloads:
+  - CV (e.g., ResNet / ViT)
+  - NLP / LLM fine-tuning (e.g., BERT / small decoder models)
+  - Diffusion / vision-language (as time permits)
+- **Documentation improvements**: clearer docs + examples (targeting beta)
 
-- ***Distributed Training Support***:
-Support for multi-GPU training (DDP / FSDP) and, over time, multi-node distributed setups with clear failure and performance attribution.
-
-- ***Framework Integrations***:
-Native integrations with popular training frameworks such as PyTorch Lightning and Hugging Face Accelerate.
-
-- ***Advanced Diagnostics***:
-Memory leak detection, clearer attribution of performance regressions, and richer debugging signals for complex training runs.
-
-- ***Actionable Insights & Automation***:
-Smarter summaries and recommendations to help users identify bottlenecks and optimize training configurations.
+Next:
+- **Multi-node distributed support** (DDP → FSDP)
+- Integrations: PyTorch Lightning / Hugging Face Accelerate (as optional wrappers)
+- Advanced diagnostics: leak detection, regression attribution, and automated “why is my step slower?” summaries
 
 ---
 
-
-
 ## Contributing
 
-We welcome contributions! Here's how to help:
+Contributions are welcome.
 
-1. ⭐ **Star the repo** to show support
-2. 🐛 **Report bugs** via [GitHub Issues](https://github.com/traceopt-ai/traceml/issues)
-3. 💡 **Request features** we should prioritize
-4. 🔧 **Submit PRs** for improvements
+1. ⭐ Star the repo
+2. 🐛 Report bugs via GitHub Issues
+3. 💡 Request features / workloads you want supported
+4. 🔧 Submit PRs (small focused PRs are ideal)
 
+If you hit an issue, please open a GitHub Issue with:
+- minimal repro script
+- hardware + CUDA + PyTorch versions
+- whether you used ESSENTIAL or DEEP-DIVE
+- single GPU vs DDP
+
+We’ll try to respond and resolve quickly.
+
+---
 
 ## Community & Support
 
 - 📧 Email: abhinav@traceopt.ai
-- 🐙 LinkedIn: [Abhinav Srivastav](https://www.linkedin.com/in/abhinavsriva/)
-- 📋 User Survey: [Help shape the roadmap](https://forms.gle/vaDQao8L81oAoAkv9) (2 minutes)
+- 🐙 LinkedIn:  [Abhinav Srivastav](https://www.linkedin.com/in/abhinavsriva/)
+- 📋 User Survey: Help shape the roadmap (2 minutes) https://forms.gle/KwPSLaPmJnJjoVXSA
+- Stars help the project grow and makes it easier for other to find our work.🌟
 
+<a href="https://www.star-history.com/#traceopt-ai/traceml&type=date&legend=top-left">
+  <img src="https://api.star-history.com/svg?repos=traceopt-ai/traceml&type=date&legend=top-left" width="50%">
+</a>
 ---
 
 ## License
 
 TraceML is released under the **MIT License with Commons Clause**.
 
-**What this means:**
+**Summary:**
 - ✅ Free for personal use
 - ✅ Free for research and academic use
 - ✅ Free for internal company use
 - ❌ Not allowed for resale or SaaS products
 
-For commercial licensing inquiries, contact abhinav@traceopt.ai.
-
-See [LICENSE](./LICENSE) for full details.
+See [LICENSE](./LICENSE) for full details.  
+For commercial licensing, contact: abhinav@traceopt.ai
 
 ---
 
@@ -271,8 +294,8 @@ If TraceML helps your research, please cite:
 
 <div align="center">
 
-**TraceML — Stop guessing. Start profiling.**
+**TraceML — Stop guessing. Start attributing.**
 
-Made with ❤️ by [TraceOpt AI](https://traceopt.ai)
+Made with ❤️ by TraceOpt AI
 
 </div>

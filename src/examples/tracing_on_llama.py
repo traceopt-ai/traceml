@@ -1,5 +1,4 @@
 import os
-import time
 import random
 
 import torch
@@ -31,20 +30,20 @@ DATASET_NAME = "tatsu-lab/alpaca"
 
 # Training + demo knobs
 MAX_LENGTH = 1024
-MAX_TRAIN_EXAMPLES = 20000     # raise for longer runs; keep smaller for quick demo
-BATCH_SIZE = 1                 # QLoRA-friendly on T4
+MAX_TRAIN_EXAMPLES = 20000  # raise for longer runs; keep smaller for quick demo
+BATCH_SIZE = 1  # QLoRA-friendly on T4
 GRAD_ACCUM_STEPS = 8
 EPOCHS = 1
 LR = 2e-4
 WEIGHT_DECAY = 0.0
 WARMUP_RATIO = 0.03
-MAX_STEPS = 1200               # cap steps for demo
+MAX_STEPS = 1200  # cap steps for demo
 
 NUM_WORKERS = 2
 PIN_MEMORY = True
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DTYPE = torch.float16          # T4 friendly
+DTYPE = torch.float16  # T4 friendly
 
 
 # =========================
@@ -59,6 +58,7 @@ def set_seed(seed: int = SEED):
 # ============================================================
 # TraceML: Optional fine-grained user-defined timers
 # ============================================================
+
 
 @trace_time("data_transfer", use_gpu=False)
 def load_batch_to_device(batch, device):
@@ -169,7 +169,7 @@ def build_model():
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         quantization_config=bnb_config,
-        device_map="auto",   # important for quantized load; keeps it on GPU if available
+        device_map="auto",  # important for quantized load; keeps it on GPU if available
     )
 
     # Prep for k-bit training (layer norms, etc.)
@@ -200,7 +200,9 @@ def build_model():
 def main():
     set_seed()
 
-    assert torch.cuda.is_available(), "This script is intended for CUDA GPUs (e.g., T4)."
+    assert (
+        torch.cuda.is_available()
+    ), "This script is intended for CUDA GPUs (e.g., T4)."
     dtype = DTYPE
 
     tokenizer, train_loader = prepare_data()
@@ -227,9 +229,7 @@ def main():
     # Scheduler steps happen on optimizer steps (after grad accumulation)
     # Compute total optimizer steps
     steps_per_epoch = min(MAX_STEPS, len(train_loader))
-    total_optimizer_steps = max(
-        1, (EPOCHS * steps_per_epoch) // GRAD_ACCUM_STEPS
-    )
+    total_optimizer_steps = max(1, (EPOCHS * steps_per_epoch) // GRAD_ACCUM_STEPS)
     warmup_steps = int(WARMUP_RATIO * total_optimizer_steps)
 
     scheduler = get_linear_schedule_with_warmup(
@@ -245,7 +245,6 @@ def main():
     opt_step = 0
 
     running_loss = 0.0
-
 
     for epoch in range(EPOCHS):
         for batch in train_loader:
@@ -265,7 +264,7 @@ def main():
                 # Backward
                 backward_pass(loss, scaler)
 
-                running_loss += (loss.detach().float().item() * GRAD_ACCUM_STEPS)
+                running_loss += loss.detach().float().item() * GRAD_ACCUM_STEPS
                 global_step += 1
 
                 # Optimizer step only every GRAD_ACCUM_STEPS

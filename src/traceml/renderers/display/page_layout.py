@@ -15,12 +15,10 @@ TRACE_ML_PAGE = [
         PROCESS_LAYOUT,
         STEPTIMER_LAYOUT,
     ],
-
     # Row 2: model summary
     [
         MODEL_COMBINED_LAYOUT,
     ],
-
     # Row 3: layer tables
     [
         LAYER_COMBINED_MEMORY_LAYOUT,
