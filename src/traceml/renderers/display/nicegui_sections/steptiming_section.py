@@ -72,7 +72,7 @@ def build_step_timing_table_section():
     card = ui.card().classes("m-2 p-4 w-full")
     card.style(
         f"""
-        height: 350px;
+        height: 360px;
         display: flex;
         flex-direction: column;
         {CARD_STYLE}

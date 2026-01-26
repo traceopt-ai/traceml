@@ -108,7 +108,9 @@ def stop_runtime(runtime):
     """
     try:
         runtime.stop()
-        runtime.log_summaries(path=None)
+        ## Summaries are disabled
+        # TODO: clear summaries and show only rank 0 for now 
+        # runtime.log_summaries(path=None)
     except Exception as e:
         print(
             "[TraceML] Error during shutdown (ignored)",

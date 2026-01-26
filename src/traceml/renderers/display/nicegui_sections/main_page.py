@@ -42,6 +42,26 @@ def fake_build():
 def fake_update():
     pass
 
+
+def build_top_tabs(active: str):
+    """
+    Shared top navigation tabs.
+    `active` ∈ {"overview", "layers"}
+    """
+    with ui.row().classes("w-full px-4 pt-2"):
+        with ui.tabs().classes("text-lg") as tabs:
+            overview = ui.tab("Overview")
+            layers = ui.tab("Layer-wise")
+
+        if active == "overview":
+            tabs.value = overview
+        else:
+            tabs.value = layers
+
+        overview.on("click", lambda: ui.navigate.to("/"))
+        layers.on("click", lambda: ui.navigate.to("/layers"))
+
+
 def define_main_page(cls):
     """Attach the NiceGUI main page to the UI server."""
 
@@ -65,6 +85,8 @@ def define_main_page(cls):
         </style>
         """
         )
+
+        build_top_tabs(active="overview")
 
         # ----- PAGE LAYOUT -----
         ui.label("TraceML").classes(
@@ -92,8 +114,38 @@ def define_main_page(cls):
                 cls.cards[MODEL_COMBINED_LAYOUT] = build_model_combined_section()
                 cls.update_funcs[MODEL_COMBINED_LAYOUT] = update_model_combined_section
 
-        with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
+        # with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
+        #
+        #     with ui.column().classes("w-[54%]"):
+        #         cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
+        #             build_layer_memory_table_section()
+        #         )
+        #         cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = (
+        #             update_layer_memory_table_section
+        #         )
+        #
+        #     with ui.column().classes("w-[44%]"):
+        #         cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = (
+        #             build_layer_timer_table_section()
+        #         )
+        #         cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = (
+        #             update_layer_timer_table_section
+        #         )
 
+        # background update loop
+        ui.timer(0.75, cls._ui_update_loop)
+        cls._ui_ready = True
+
+
+    @ui.page("/layers")
+    def layer_page():
+        ui.label("TraceML").classes(
+            "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
+        ).style("color:#d47a00;")
+
+        build_top_tabs(active="layers")
+
+        with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
             with ui.column().classes("w-[54%]"):
                 cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
                     build_layer_memory_table_section()
@@ -110,6 +162,4 @@ def define_main_page(cls):
                     update_layer_timer_table_section
                 )
 
-        # background update loop
         ui.timer(0.75, cls._ui_update_loop)
-        cls._ui_ready = True

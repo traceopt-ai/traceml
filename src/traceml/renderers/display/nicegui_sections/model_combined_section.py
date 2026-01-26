@@ -331,7 +331,7 @@ def _build_metric_card(title: str) -> Dict[str, Any]:
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 10px rgba(0,0,0,0.10);
-        height: 300px;
+        height: 360px;
         """
     )
 

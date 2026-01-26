@@ -69,7 +69,7 @@ def build_process_section():
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-        height: 350px;
+        height: 360px;
         overflow-y: auto;
         overflow-x: hidden;
         """
@@ -78,9 +78,22 @@ def build_process_section():
     with card:
         with ui.row().classes("w-full items-center justify-between"):
             ui.label("Process Metrics").classes(METRIC_TITLE).style("color:#d47a00;")
+            with ui.icon("info").classes("text-gray-400 cursor-pointer") as info:
+                with ui.menu().props("anchor='bottom left' self='top left'"):
+                    ui.markdown("""
+            **Process Metrics**
+            
+            - **CPU**: worst rank (current), percentiles over rolling window  
+            - **RAM**: worst rank (current), percentiles over rolling window  
+            - **GPU mem**: most constrained rank with least headroom
+            - **OOM headroom**: worst-rank snapshot
+            - **Imbalance**: max − min across ranks (current)
+            """)
+
             window_text = ui.html("window: –", sanitize=False).classes(
                 "text-xs text-gray-500 mr-1"
             )
+
 
         graph = _build_graph()
 
