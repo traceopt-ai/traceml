@@ -44,8 +44,6 @@ class ProcessSampler(BaseSampler):
         self._warmup_cpu()
         self._init_gpu()
 
-        # Resolve the single GPU this process is using (if any)
-        self.device_index = self._resolve_device_index()
 
     def _init_process(self) -> None:
         """
@@ -91,25 +89,16 @@ class ProcessSampler(BaseSampler):
             self.cpu_count = 0
 
     def _init_gpu(self) -> None:
-        """Detect GPU availability for this process."""
+        """
+        Detect GPU availability
+        """
         self.gpu_available = torch.cuda.is_available()
-        self.gpu_count = torch.cuda.device_count() if self.gpu_available else 0
-
-    def _resolve_device_index(self) -> int:
-        """
-        Resolve the CUDA device index used by this process.
-
-        Resolution order:
-        1. Current CUDA device (if initialized)
-        2. Fallback to device 0
-        """
         if not self.gpu_available:
-            return -1
-
-        try:
-            return int(torch.cuda.current_device())
-        except Exception:
-            return 0
+            self.gpu_count = 0
+            return
+        # Number of visible GPUs (after CUDA_VISIBLE_DEVICES)
+        self.gpu_count = torch.cuda.device_count()
+        self.device_index = None
 
     def _sample_cpu(self):
         """Return process CPU utilization as a percentage."""
@@ -133,6 +122,14 @@ class ProcessSampler(BaseSampler):
             )
             return 0.0
 
+    def _ensure_cuda_device(self):
+        if not self.gpu_available or self.device_index is not None:
+            return
+
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+        self.device_index = local_rank
+
     def _sample_gpu(self) -> Optional[ProcessGPUMetrics]:
         """
         Sample GPU memory usage for the device used by this process.
@@ -142,9 +139,10 @@ class ProcessSampler(BaseSampler):
         Optional[ProcessGPUMetrics]
             GPU metrics if available, otherwise None.
         """
-        if not self.gpu_available or self.device_index < 0:
+        if not self.gpu_available:
             return None
 
+        self._ensure_cuda_device()
         i = self.device_index
         try:
             # Current device context
@@ -185,7 +183,6 @@ class ProcessSampler(BaseSampler):
                 gpu_count=self.gpu_count,
                 gpu=self._sample_gpu(),
             )
-
             self.db.add_record("process", sample.to_wire())
 
         except Exception as e:

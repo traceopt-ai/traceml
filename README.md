@@ -8,7 +8,6 @@
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 [![Python 3.9-3.13](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-yellow)](./LICENSE)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/src/examples/tracing_bert_notebook.ipynb)
 
 
 TraceML is a lightweight **runtime observability** tool for **distributed PyTorch training**.  

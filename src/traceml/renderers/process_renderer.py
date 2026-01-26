@@ -75,49 +75,74 @@ class ProcessRenderer(BaseRenderer):
         except Exception:
             return default
 
+
     def _compute_live_snapshot(self) -> Dict[str, Any]:
         """
-        Compute the current live snapshot.
+        Compute a step-synchronized live snapshot.
 
         Semantics
         ---------
-        - CPU: max across ranks (current)
-        - GPU: rank with least headroom (current)
-        - GPU imbalance: max - min used (current)
+        - Snapshot is computed only for the latest seq completed by *all* ranks
+        - CPU: max across ranks at that seq
+        - GPU: rank with least headroom at that seq
+        - GPU imbalance: max - min used at that seq
         """
-        per_rank_rows: Dict[int, Dict[str, Any]] = {}
 
-        # Always include rank 0
-        try:
-            row = self.db.get_last_record(self.TABLE_NAME)
-            if row:
-                per_rank_rows[0] = row
-        except Exception:
-            pass
+        # ------------------------------------------------------------
+        # 1. Collect databases for all active ranks (include local)
+        # ------------------------------------------------------------
+        rank_dbs: Dict[int, Database] = {0: self.db}
 
-        # Include remote ranks if present
         if self.remote_store:
-            for rank in self.remote_store.ranks():
-                db = self.remote_store.get_db(rank, self.REMOTE_SAMPLER_NAME)
-                if not db:
-                    continue
-                try:
-                    row = db.get_last_record(self.TABLE_NAME)
-                    if row:
-                        per_rank_rows[rank] = row
-                except Exception:
-                    continue
+            for r in self.remote_store.ranks():
+                db = self.remote_store.get_db(r, self.REMOTE_SAMPLER_NAME)
+                if db:
+                    rank_dbs[r] = db
 
-        if not per_rank_rows:
+        if not rank_dbs:
             return {}
 
+        # ------------------------------------------------------------
+        # 2. Determine last completed seq per rank
+        # ------------------------------------------------------------
+        last_seq_per_rank: Dict[int, int] = {}
+
+        for rank, db in rank_dbs.items():
+            table = db.create_or_get_table(self.TABLE_NAME)
+            if not table:
+                return {}
+            last_seq_per_rank[rank] = table[-1].get("seq", -1)
+
+        # Latest seq completed by *all* ranks
+        committed_seq = min(last_seq_per_rank.values())
+        if committed_seq < 0:
+            return {}
+
+        # ------------------------------------------------------------
+        # 3. Fetch rows at committed seq for all ranks
+        # ------------------------------------------------------------
+        rows_per_rank: Dict[int, Dict[str, Any]] = {}
+
+        for rank, db in rank_dbs.items():
+            table = db.create_or_get_table(self.TABLE_NAME)
+            row = next(
+                (r for r in reversed(table) if r.get("seq") == committed_seq),
+                None,
+            )
+            if row is None:
+                return {}  # hard safety: missing data
+            rows_per_rank[rank] = row
+
+        # ------------------------------------------------------------
+        # 4. Cross-rank aggregation (same logic as dashboard)
+        # ------------------------------------------------------------
         cpu_vals: List[float] = []
         gpu_used: List[float] = []
         gpu_reserved: List[float] = []
         gpu_total: List[float] = []
         gpu_rank: List[int] = []
 
-        for rank, row in per_rank_rows.items():
+        for rank, row in rows_per_rank.items():
             cpu_vals.append(self._safe_float(row.get("cpu")))
 
             gpu = row.get("gpu")
@@ -132,6 +157,7 @@ class ProcessRenderer(BaseRenderer):
                 gpu_rank.append(rank)
 
         snapshot = {
+            "seq": committed_seq,
             "cpu_used": max(cpu_vals) if cpu_vals else 0.0,
         }
 
@@ -146,7 +172,8 @@ class ProcessRenderer(BaseRenderer):
                     "gpu_total": gpu_total[idx],
                     "gpu_rank": gpu_rank[idx],
                     "gpu_used_imbalance": (
-                        max(gpu_used) - min(gpu_used) if len(gpu_used) > 1 else 0.0
+                        max(gpu_used) - min(gpu_used)
+                        if len(gpu_used) > 1 else 0.0
                     ),
                 }
             )

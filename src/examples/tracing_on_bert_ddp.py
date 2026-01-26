@@ -66,7 +66,7 @@ def prepare_data(rank: int, world_size: int):
       - all samples are seen exactly once per epoch
     """
 
-    raw = load_dataset("ag_news")
+    raw = load_dataset("fancyzhx/ag_news", revision="main")
 
     train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
     val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
