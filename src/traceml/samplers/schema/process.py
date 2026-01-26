@@ -18,6 +18,7 @@ Design principles
 - Stable field names for storage and transport
 
 """
+
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 
@@ -25,6 +26,7 @@ from typing import Dict, Any, Optional
 # ---------------------------------------------------------------------------
 # Process GPU metrics
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ProcessGPUMetrics:
@@ -85,9 +87,11 @@ class ProcessGPUMetrics:
             mem_total=data["mem_total"],
         )
 
+
 # ---------------------------------------------------------------------------
 # Process snapshot
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ProcessSample:

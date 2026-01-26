@@ -41,6 +41,7 @@ Compatibility guarantee
     }
 - CLI / notebook formatting remains the same.
 """
+
 import shutil
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Iterable
@@ -68,6 +69,7 @@ _dbg = get_error_logger("ModelCombinedRenderer.debug")
 # -------------------------
 # Small utilities
 # -------------------------
+
 
 def _tail_rows(
     table: Any,
@@ -142,8 +144,8 @@ def _compute_stats(arr: np.ndarray) -> Dict[str, Any]:
         return dict(last=0.0, p50=0.0, p95=0.0, avg100=0.0, trend="")
 
     last = float(arr[-1])
-    win100 = arr[-min(100, arr.size):]
-    win200 = arr[-min(200, arr.size):]
+    win100 = arr[-min(100, arr.size) :]
+    win200 = arr[-min(200, arr.size) :]
 
     p50 = _safe_percentile(win100, 50)
     p95 = _safe_percentile(win100, 95)
@@ -253,7 +255,9 @@ def _aggregate_worst_and_median(
         # Here we log only latest step composition.
         latest = steps[-1] if steps else None
         if latest is not None:
-            _dbg.error(f"[agg debug] latest_step={latest} ranks={sorted(aligned[latest].keys())}")
+            _dbg.error(
+                f"[agg debug] latest_step={latest} ranks={sorted(aligned[latest].keys())}"
+            )
 
     return dict(
         steps=steps,
@@ -268,6 +272,7 @@ def _aggregate_worst_and_median(
 # -------------------------
 # Renderer
 # -------------------------
+
 
 class ModelCombinedRenderer(BaseRenderer):
     """
@@ -300,7 +305,9 @@ class ModelCombinedRenderer(BaseRenderer):
         remote_store: Optional[RemoteDBStore] = None,
         max_points: int = 300,
     ):
-        super().__init__(name="Model Summary", layout_section_name=MODEL_COMBINED_LAYOUT)
+        super().__init__(
+            name="Model Summary", layout_section_name=MODEL_COMBINED_LAYOUT
+        )
 
         self.time_db = time_db
         self.memory_db = memory_db
@@ -324,7 +331,9 @@ class ModelCombinedRenderer(BaseRenderer):
     # Rank DB iteration
     # ---------
 
-    def _iter_rank_dbs(self, local_db: Database, sampler_name: str) -> Iterable[Tuple[int, Database]]:
+    def _iter_rank_dbs(
+        self, local_db: Database, sampler_name: str
+    ) -> Iterable[Tuple[int, Database]]:
         """
         Yield (rank, Database) pairs.
         Rank 0 is always local.
@@ -407,8 +416,9 @@ class ModelCombinedRenderer(BaseRenderer):
 
         return min(steps) if steps else None
 
-
-    def _collect_time_series(self, event_name: str) -> Dict[int, List[Tuple[int, float]]]:
+    def _collect_time_series(
+        self, event_name: str
+    ) -> Dict[int, List[Tuple[int, float]]]:
         """
         Collect per-rank time series for a given time event table.
 
@@ -420,11 +430,12 @@ class ModelCombinedRenderer(BaseRenderer):
         # In this implementation: sampler_name == event_name for time_db tables.
         for rank, db in self._iter_rank_dbs(self.time_db, "StepTimerSampler"):
             table = db.create_or_get_table(event_name)
-            pairs = _tail_rows(table, step_key="step", value_key="duration_ms", limit=self.max_points)
+            pairs = _tail_rows(
+                table, step_key="step", value_key="duration_ms", limit=self.max_points
+            )
             if pairs:
                 out[rank] = pairs
         return out
-
 
     def _collect_step_memory(self) -> Dict[int, List[Tuple[int, float]]]:
         """
@@ -437,12 +448,16 @@ class ModelCombinedRenderer(BaseRenderer):
 
         for rank, db in self._iter_rank_dbs(self.memory_db, "StepMemorySampler"):
             table = db.create_or_get_table("step_memory")
-            pairs = _tail_rows(table, step_key="step", value_key="peak_allocated_mb", limit=self.max_points)
+            pairs = _tail_rows(
+                table,
+                step_key="step",
+                value_key="peak_allocated_mb",
+                limit=self.max_points,
+            )
             if pairs:
                 out[rank] = pairs
 
         return out
-
 
     def build_live_telemetry_payload(self) -> Dict[str, Any]:
         """
@@ -494,7 +509,9 @@ class ModelCombinedRenderer(BaseRenderer):
 
         # ---- timers (each gated by its own completed step) ----
         for internal, friendly in self.FRIENDLY_NAMES.items():
-            completed_step = dl_completed if internal.endswith("dataloader_next") else st_completed
+            completed_step = (
+                dl_completed if internal.endswith("dataloader_next") else st_completed
+            )
             if completed_step is None:
                 continue
 
@@ -524,7 +541,6 @@ class ModelCombinedRenderer(BaseRenderer):
         self._cached_payload = payload
 
         return payload
-
 
     def get_panel_renderable(self) -> Panel:
         """
@@ -620,7 +636,9 @@ class ModelCombinedRenderer(BaseRenderer):
         title = "[bold blue]Model Summary (worst/median)[/bold blue]"
         if self._cached_signature is not None:
             # show the most conservative "global" step for display only
-            step_for_title = max(self._cached_signature)  # signature stores latest completed per metric
+            step_for_title = max(
+                self._cached_signature
+            )  # signature stores latest completed per metric
             if step_for_title >= 0:
                 title += f" (Step {step_for_title})"
 
@@ -722,13 +740,22 @@ class ModelCombinedRenderer(BaseRenderer):
 
         blocks: List[str] = []
         if "dataLoader_fetch" in payload:
-            blocks.append(metric_block("Dataloader Fetch Time", payload["dataLoader_fetch"], fmt_time_run))
+            blocks.append(
+                metric_block(
+                    "Dataloader Fetch Time", payload["dataLoader_fetch"], fmt_time_run
+                )
+            )
         if "step_time" in payload:
-            blocks.append(metric_block("Training Step Time", payload["step_time"], fmt_time_run))
+            blocks.append(
+                metric_block("Training Step Time", payload["step_time"], fmt_time_run)
+            )
         if "step_gpu_memory" in payload:
-            blocks.append(metric_block("GPU Step Memory", payload["step_gpu_memory"], fmt_mem_new))
+            blocks.append(
+                metric_block("GPU Step Memory", payload["step_gpu_memory"], fmt_mem_new)
+            )
 
-        html = HTML(f"""
+        html = HTML(
+            f"""
         <div style="{CARD_STYLE}; width:100%;">
             <h4 style="color:#d47a00; margin:0 0 12px 0;">
                 Model Summary
@@ -742,7 +769,8 @@ class ModelCombinedRenderer(BaseRenderer):
                 {''.join(blocks)}
             </div>
         </div>
-        """)
+        """
+        )
 
         self._cached_notebook = html
         return html

@@ -24,9 +24,14 @@ from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
 class NoOpRuntime:
-    def start(self): pass
-    def stop(self): pass
-    def log_summaries(self, path=None): pass
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def log_summaries(self, path=None):
+        pass
 
 
 def read_traceml_env():
@@ -44,7 +49,6 @@ def read_traceml_env():
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
         "num_display_layers": int(os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")),
-
         "enable_ddp_telemetry": os.environ.get("TRACEML_DDP_TELEMETRY", "1") == "1",
         "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
         "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
@@ -100,7 +104,6 @@ def start_runtime(cfg):
         return NoOpRuntime()
 
 
-
 def stop_runtime(runtime):
     """
     Best-effort shutdown.
@@ -109,7 +112,7 @@ def stop_runtime(runtime):
     try:
         runtime.stop()
         ## Summaries are disabled
-        # TODO: clear summaries and show only rank 0 for now 
+        # TODO: clear summaries and show only rank 0 for now
         # runtime.log_summaries(path=None)
     except Exception as e:
         print(

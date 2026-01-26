@@ -23,6 +23,7 @@ class DDPJoinStatus:
     world_size : int
         Inferred number of ranks.
     """
+
     safe_step: Optional[int]
     incomplete: bool
     missing_ranks: List[int]
@@ -85,7 +86,6 @@ class LayerCombinedMemoryData:
 
         self.logger = get_error_logger("LayerCombinedMemoryData")
 
-
     def compute_display_data(self) -> Dict[str, Any]:
         """
         Compute all layer-wise memory metrics required by renderers.
@@ -115,9 +115,7 @@ class LayerCombinedMemoryData:
         if safe_step_candidate >= 0 and fwd_ok and bwd_ok:
             self._last_safe_step = safe_step_candidate
             missing = sorted(set(fwd_missing) | set(bwd_missing))
-            self._join_status = self._build_join_status(
-                safe_step_candidate, missing
-            )
+            self._join_status = self._build_join_status(safe_step_candidate, missing)
         elif self._last_safe_step >= 0:
             fwd_snapshot, _, fwd_missing = self._compute_step_snapshot(
                 self._layer_forward_db, self._last_safe_step
@@ -126,9 +124,7 @@ class LayerCombinedMemoryData:
                 self._layer_backward_db, self._last_safe_step
             )
             missing = sorted(set(fwd_missing) | set(bwd_missing))
-            self._join_status = self._build_join_status(
-                self._last_safe_step, missing
-            )
+            self._join_status = self._build_join_status(self._last_safe_step, missing)
         else:
             self._join_status = self._build_join_status(None, [])
 
@@ -136,9 +132,7 @@ class LayerCombinedMemoryData:
         self._merge_cache(self._backward_cache, bwd_snapshot)
 
         rows = self._build_rows(param_layers)
-        rows_sorted = sorted(
-            rows, key=lambda r: r["total_peak_memory"], reverse=True
-        )
+        rows_sorted = sorted(rows, key=lambda r: r["total_peak_memory"], reverse=True)
 
         top_items = rows_sorted[: self._top_n]
         other_items = rows_sorted[self._top_n :]
@@ -162,7 +156,6 @@ class LayerCombinedMemoryData:
             "world_size": join.world_size if join else 1,
         }
 
-
     def _get_latest_layer_snapshot(self) -> Dict[str, Any]:
         if not self._layer_table:
             return {"layer_memory": {}, "model_index": "—"}
@@ -185,7 +178,11 @@ class LayerCombinedMemoryData:
         def last_step(db: Database) -> int:
 
             return max(
-                (row.get("step", -1) for row in db.all_tables().values() for row in row),
+                (
+                    row.get("step", -1)
+                    for row in db.all_tables().values()
+                    for row in row
+                ),
                 default=-1,
             )
 
@@ -262,7 +259,6 @@ class LayerCombinedMemoryData:
 
         return snapshot, not missing, missing
 
-
     def _get_rank_db(self, local_db: Database, rank: int) -> Optional[Database]:
         if rank == 0:
             return local_db
@@ -280,10 +276,15 @@ class LayerCombinedMemoryData:
         return None
 
     @staticmethod
-    def _merge_cache(cache: Dict[str, Dict[str, float]], snapshot: Dict[str, Dict[str, float]]):
+    def _merge_cache(
+        cache: Dict[str, Dict[str, float]], snapshot: Dict[str, Dict[str, float]]
+    ):
         for layer, v in snapshot.items():
             if layer not in cache:
-                cache[layer] = {"current": v["current_peak"], "global": v["global_peak"]}
+                cache[layer] = {
+                    "current": v["current_peak"],
+                    "global": v["global_peak"],
+                }
             else:
                 cache[layer]["current"] = v["current_peak"]
                 cache[layer]["global"] = max(cache[layer]["global"], v["global_peak"])
@@ -299,26 +300,34 @@ class LayerCombinedMemoryData:
             current = param_mem + fwd.get("current", 0.0) + bwd.get("current", 0.0)
             peak = param_mem + fwd.get("global", 0.0) + bwd.get("global", 0.0)
 
-            rows.append({
-                "layer": layer,
-                "param_memory": float(param_mem),
-                "forward_current": float(fwd.get("current", 0.0)),
-                "forward_peak": float(fwd.get("global", 0.0)),
-                "backward_current": float(bwd.get("current", 0.0)),
-                "backward_peak": float(bwd.get("global", 0.0)),
-                "total_current_memory": float(current),
-                "total_peak_memory": float(peak),
-                "pct": 0.0,  # filled later
-            })
+            rows.append(
+                {
+                    "layer": layer,
+                    "param_memory": float(param_mem),
+                    "forward_current": float(fwd.get("current", 0.0)),
+                    "forward_peak": float(fwd.get("global", 0.0)),
+                    "backward_current": float(bwd.get("current", 0.0)),
+                    "backward_peak": float(bwd.get("global", 0.0)),
+                    "total_current_memory": float(current),
+                    "total_peak_memory": float(peak),
+                    "pct": 0.0,  # filled later
+                }
+            )
 
             total_current_sum += current
 
         for r in rows:
-            r["pct"] = (r["total_current_memory"] / total_current_sum * 100.0) if total_current_sum else 0.0
+            r["pct"] = (
+                (r["total_current_memory"] / total_current_sum * 100.0)
+                if total_current_sum
+                else 0.0
+            )
 
         return rows
 
-    def _aggregate_other(self, rows: List[Dict[str, Any]], total_current_sum: float) -> Dict[str, Any]:
+    def _aggregate_other(
+        self, rows: List[Dict[str, Any]], total_current_sum: float
+    ) -> Dict[str, Any]:
         cur = sum(r["total_current_memory"] for r in rows)
         return {
             "param_memory": sum(r["param_memory"] for r in rows),
@@ -330,7 +339,9 @@ class LayerCombinedMemoryData:
             "pct": (cur / total_current_sum * 100.0) if total_current_sum else 0.0,
         }
 
-    def _build_join_status(self, step: Optional[int], missing: List[int]) -> DDPJoinStatus:
+    def _build_join_status(
+        self, step: Optional[int], missing: List[int]
+    ) -> DDPJoinStatus:
         _, _, world_size = get_ddp_info()
         return DDPJoinStatus(
             safe_step=step,

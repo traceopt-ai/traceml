@@ -17,6 +17,7 @@ class DDPJoinStatus:
         missing_ranks: Ranks missing safe_step data (best-effort).
         world_size: Inferred world size (best-effort).
     """
+
     safe_step: Optional[int]
     incomplete: bool
     missing_ranks: List[int]
@@ -77,7 +78,6 @@ class LayerCombinedTimerData:
         self._worst_rank_by_layer: Dict[str, int] = {}
         self.logger = get_error_logger("LayerCombinedTimerData")
 
-
     def compute_display_data(self) -> Dict[str, Any]:
         """
         Compute layer timing rows for renderers (CLI/notebook/dashboard).
@@ -87,15 +87,19 @@ class LayerCombinedTimerData:
 
         safe_step_candidate = self._compute_candidate_safe_step_completed()
 
-        fwd_snapshot, fwd_ok, fwd_missing, fwd_rank_curr = self._compute_step_aligned_snapshot(
-            local_db=self._forward_db,
-            is_forward=True,
-            step=safe_step_candidate,
+        fwd_snapshot, fwd_ok, fwd_missing, fwd_rank_curr = (
+            self._compute_step_aligned_snapshot(
+                local_db=self._forward_db,
+                is_forward=True,
+                step=safe_step_candidate,
+            )
         )
-        bwd_snapshot, bwd_ok, bwd_missing, bwd_rank_curr = self._compute_step_aligned_snapshot(
-            local_db=self._backward_db,
-            is_forward=False,
-            step=safe_step_candidate,
+        bwd_snapshot, bwd_ok, bwd_missing, bwd_rank_curr = (
+            self._compute_step_aligned_snapshot(
+                local_db=self._backward_db,
+                is_forward=False,
+                step=safe_step_candidate,
+            )
         )
 
         # If candidate safe step isn't fully available, fall back to last safe step.
@@ -110,15 +114,19 @@ class LayerCombinedTimerData:
             )
         else:
             if self._last_safe_step >= 0:
-                fwd_snapshot, _, fwd_missing, fwd_rank_curr = self._compute_step_aligned_snapshot(
-                    local_db=self._forward_db,
-                    is_forward=True,
-                    step=self._last_safe_step,
+                fwd_snapshot, _, fwd_missing, fwd_rank_curr = (
+                    self._compute_step_aligned_snapshot(
+                        local_db=self._forward_db,
+                        is_forward=True,
+                        step=self._last_safe_step,
+                    )
                 )
-                bwd_snapshot, _, bwd_missing, bwd_rank_curr = self._compute_step_aligned_snapshot(
-                    local_db=self._backward_db,
-                    is_forward=False,
-                    step=self._last_safe_step,
+                bwd_snapshot, _, bwd_missing, bwd_rank_curr = (
+                    self._compute_step_aligned_snapshot(
+                        local_db=self._backward_db,
+                        is_forward=False,
+                        step=self._last_safe_step,
+                    )
                 )
                 missing = sorted(set(fwd_missing) | set(bwd_missing))
                 self._join_status = DDPJoinStatus(
@@ -146,7 +154,6 @@ class LayerCombinedTimerData:
         )
 
         return self._build_rows_payload()
-
 
     def _infer_world_size(self) -> int:
         try:
@@ -176,7 +183,6 @@ class LayerCombinedTimerData:
         base = min(f_min, b_min)
         return (base - 1) if base >= 1 else -1
 
-
     def _update_rank_last_step_cache(self, is_forward: bool) -> None:
         """
         Update per-rank last-step-seen caches using only tail rows (cheap).
@@ -188,7 +194,9 @@ class LayerCombinedTimerData:
         cache = self._rank_last_step_fwd if is_forward else self._rank_last_step_bwd
         sampler_name = local_db.sampler_name
 
-        for rank, db in self._iter_rank_dbs(local_db=local_db, sampler_name=sampler_name):
+        for rank, db in self._iter_rank_dbs(
+            local_db=local_db, sampler_name=sampler_name
+        ):
             s = self._db_last_step(db)
             if s is None:
                 continue
@@ -196,8 +204,9 @@ class LayerCombinedTimerData:
 
         cache.setdefault(0, -1)
 
-
-    def _iter_rank_dbs(self, local_db: Database, sampler_name: str) -> Iterable[Tuple[int, Database]]:
+    def _iter_rank_dbs(
+        self, local_db: Database, sampler_name: str
+    ) -> Iterable[Tuple[int, Database]]:
         """
         Yield (rank, db) for local first, then remotes.
         """
@@ -211,7 +220,6 @@ class LayerCombinedTimerData:
             db = self._remote_store.get_db(rank, sampler_name)
             if db is not None:
                 yield rank, db
-
 
     def _compute_step_aligned_snapshot(
         self,
@@ -263,7 +271,11 @@ class LayerCombinedTimerData:
             db = (
                 local_db
                 if rank == 0
-                else (self._remote_store.get_db(rank, sampler_name) if self._remote_store else None)
+                else (
+                    self._remote_store.get_db(rank, sampler_name)
+                    if self._remote_store
+                    else None
+                )
             )
             if db is None:
                 missing_ranks.append(rank)
@@ -285,7 +297,9 @@ class LayerCombinedTimerData:
                     rank_curr_map.setdefault(layer, {})[rank] = cur
 
                     # aggregate "current" as worst-rank max
-                    layer_current_worst[layer] = max(layer_current_worst.get(layer, 0.0), cur)
+                    layer_current_worst[layer] = max(
+                        layer_current_worst.get(layer, 0.0), cur
+                    )
                     layer_on_gpu[layer] = bool(layer_on_gpu.get(layer, False) or on_gpu)
 
                 # aggregate peak up to step
@@ -295,7 +309,7 @@ class LayerCombinedTimerData:
             if ws > 1 and not rank_has_step:
                 missing_ranks.append(rank)
 
-        ok = (len(missing_ranks) == 0)
+        ok = len(missing_ranks) == 0
 
         snapshot = {
             layer: {
@@ -307,7 +321,6 @@ class LayerCombinedTimerData:
         }
 
         return snapshot, ok, missing_ranks, rank_curr_map
-
 
     def _compute_worst_ranks(
         self,
@@ -365,7 +378,6 @@ class LayerCombinedTimerData:
             last_step = s_i if last_step is None else max(last_step, s_i)
         return last_step
 
-
     @staticmethod
     def _row_at_step(rows, step: int) -> Optional[Mapping[str, Any]]:
         """
@@ -403,7 +415,6 @@ class LayerCombinedTimerData:
         except Exception:
             return 0.0, on_gpu
 
-
     @staticmethod
     def _peak_upto_step(rows, step: int) -> float:
         """
@@ -424,9 +435,12 @@ class LayerCombinedTimerData:
             peak = max(peak, d)
         return float(peak)
 
-
     @staticmethod
-    def _merge_cache(cache: Dict[str, Dict[str, Any]], snapshot: Dict[str, Dict[str, Any]], alpha: float) -> None:
+    def _merge_cache(
+        cache: Dict[str, Dict[str, Any]],
+        snapshot: Dict[str, Dict[str, Any]],
+        alpha: float,
+    ) -> None:
         """
         Merge snapshot into cache.
 
@@ -448,19 +462,29 @@ class LayerCombinedTimerData:
             on_gpu = bool(entry.get("on_gpu", False))
 
             if layer not in cache:
-                cache[layer] = {"current": cur, "avg": cur, "peak": peak, "on_gpu": on_gpu}
+                cache[layer] = {
+                    "current": cur,
+                    "avg": cur,
+                    "peak": peak,
+                    "on_gpu": on_gpu,
+                }
             else:
                 cache[layer]["current"] = cur
-                cache[layer]["avg"] = (1.0 - a) * float(cache[layer].get("avg", cur)) + a * cur
+                cache[layer]["avg"] = (1.0 - a) * float(
+                    cache[layer].get("avg", cur)
+                ) + a * cur
                 cache[layer]["peak"] = max(float(cache[layer].get("peak", 0.0)), peak)
-                cache[layer]["on_gpu"] = bool(cache[layer].get("on_gpu", False) or on_gpu)
-
+                cache[layer]["on_gpu"] = bool(
+                    cache[layer].get("on_gpu", False) or on_gpu
+                )
 
     def _build_rows_payload(self) -> Dict[str, Any]:
         """
         Convert caches into table rows and aggregates.
         """
-        join = self._join_status or DDPJoinStatus(safe_step=None, incomplete=False, missing_ranks=[], world_size=1)
+        join = self._join_status or DDPJoinStatus(
+            safe_step=None, incomplete=False, missing_ranks=[], world_size=1
+        )
         layers = set(self._forward_cache.keys()) | set(self._backward_cache.keys())
 
         if not layers:
@@ -495,12 +519,22 @@ class LayerCombinedTimerData:
                 }
             )
 
-        total_current_sum_ms = sum((r["forward_current"] + r["backward_current"]) for r in rows)
+        total_current_sum_ms = sum(
+            (r["forward_current"] + r["backward_current"]) for r in rows
+        )
         for r in rows:
             layer_total = r["forward_current"] + r["backward_current"]
-            r["pct"] = (layer_total / total_current_sum_ms * 100.0) if total_current_sum_ms > 0 else 0.0
+            r["pct"] = (
+                (layer_total / total_current_sum_ms * 100.0)
+                if total_current_sum_ms > 0
+                else 0.0
+            )
 
-        rows_sorted = sorted(rows, key=lambda r: float(r["forward_avg"]) + float(r["backward_avg"]), reverse=True)
+        rows_sorted = sorted(
+            rows,
+            key=lambda r: float(r["forward_avg"]) + float(r["backward_avg"]),
+            reverse=True,
+        )
 
         top_items = rows_sorted[: self._top_n]
         other_items = rows_sorted[self._top_n :]
@@ -513,7 +547,11 @@ class LayerCombinedTimerData:
             "total_forward_avg": sum(r["forward_avg"] for r in other_items),
             "total_backward_current": other_b_cur,
             "total_backward_avg": sum(r["backward_avg"] for r in other_items),
-            "pct": (((other_f_cur + other_b_cur) / total_current_sum_ms) * 100.0) if total_current_sum_ms > 0 else 0.0,
+            "pct": (
+                (((other_f_cur + other_b_cur) / total_current_sum_ms) * 100.0)
+                if total_current_sum_ms > 0
+                else 0.0
+            ),
         }
 
         return {
@@ -545,7 +583,6 @@ class LayerCombinedTimerData:
         }
 
 
-
 class LayerCombinedTimerSummary:
     """
     Computes global summary stats for log_summary() from local DBs.
@@ -553,7 +590,9 @@ class LayerCombinedTimerSummary:
     This does not currently join remote ranks.
     """
 
-    def __init__(self, forward_db: Optional[Database], backward_db: Optional[Database] = None) -> None:
+    def __init__(
+        self, forward_db: Optional[Database], backward_db: Optional[Database] = None
+    ) -> None:
         self._forward_db = forward_db
         self._backward_db = backward_db
 
@@ -577,12 +616,20 @@ class LayerCombinedTimerSummary:
 
     def _compute_db_summary(self, db: Optional[Database]) -> Dict[str, Any]:
         if db is None:
-            return {"total_samples": 0, "layers_seen": set(), "average": 0.0, "p50_ms": 0.0, "p95_ms": 0.0}
+            return {
+                "total_samples": 0,
+                "layers_seen": set(),
+                "average": 0.0,
+                "p50_ms": 0.0,
+                "p95_ms": 0.0,
+            }
 
         layers_seen = set()
         durations: List[float] = []
 
-        tables_iter = db.iter_tables() if hasattr(db, "iter_tables") else db.all_tables().items()
+        tables_iter = (
+            db.iter_tables() if hasattr(db, "iter_tables") else db.all_tables().items()
+        )
         for layer_name, rows in tables_iter:
             if not rows:
                 continue
@@ -601,7 +648,13 @@ class LayerCombinedTimerSummary:
         else:
             average = p50 = p95 = 0.0
 
-        return {"total_samples": total, "layers_seen": layers_seen, "average": average, "p50_ms": p50, "p95_ms": p95}
+        return {
+            "total_samples": total,
+            "layers_seen": layers_seen,
+            "average": average,
+            "p50_ms": p50,
+            "p95_ms": p95,
+        }
 
     @staticmethod
     def _pick_duration_ms(row: Mapping[str, Any]) -> Optional[float]:
@@ -620,7 +673,9 @@ class LayerCombinedTimerSummary:
             return {}
 
         avgs: Dict[str, float] = {}
-        tables_iter = db.iter_tables() if hasattr(db, "iter_tables") else db.all_tables().items()
+        tables_iter = (
+            db.iter_tables() if hasattr(db, "iter_tables") else db.all_tables().items()
+        )
 
         for layer_name, rows in tables_iter:
             vals: List[float] = []

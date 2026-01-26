@@ -101,7 +101,9 @@ def build_step_timing_table_section():
 
 
 # Normalization / Sorting
-def _normalize_rows(dashboard_data: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+def _normalize_rows(
+    dashboard_data: Optional[List[Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
     """
     Convert StepTimerRenderer output into a stable list of table rows.
 

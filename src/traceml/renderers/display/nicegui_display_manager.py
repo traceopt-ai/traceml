@@ -60,11 +60,11 @@ class NiceGUIDisplayManager:
     @classmethod
     def release_display(cls):
         """
-            Gracefully shut down the NiceGUI display server.
+        Gracefully shut down the NiceGUI display server.
 
-            This must be called from the TraceML runtime shutdown path.
-            It is safe to call multiple times.
-            """
+        This must be called from the TraceML runtime shutdown path.
+        It is safe to call multiple times.
+        """
         if not cls._ui_started:
             return
 
@@ -77,4 +77,3 @@ class NiceGUIDisplayManager:
             cls.cards.clear()
             cls.update_funcs.clear()
             cls._layout_content_fns.clear()
-

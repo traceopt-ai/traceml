@@ -16,11 +16,11 @@ Design principles
 
 from dataclasses import dataclass
 from typing import List, Dict, Any
-from enum import IntEnum
 
 # ---------------------------------------------------------------------------
 # GPU metrics
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class GPUMetrics:
@@ -99,9 +99,11 @@ class GPUMetrics:
             power_limit=data[5],
         )
 
+
 # ---------------------------------------------------------------------------
 # System snapshot
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SystemSample:
@@ -118,6 +120,7 @@ class SystemSample:
     - This class is immutable (`frozen=True`) to prevent accidental mutation
       after sampling.
     """
+
     sample_idx: int
     timestamp: float
     cpu_percent: float

@@ -57,7 +57,6 @@ class RemoteDBStore:
         self._last_seen: Dict[int, float] = {}
         self.logger = get_error_logger("RemoteDBStore")
 
-
     def _get_or_create_db(self, rank: int, sampler_name: str) -> Database:
         """
         Return the bounded Database for a given (rank, sampler).
@@ -86,7 +85,6 @@ class RemoteDBStore:
             )
 
         return self._dbs[rank][sampler_name]
-
 
     def ingest(self, message: dict) -> None:
         """
@@ -121,9 +119,7 @@ class RemoteDBStore:
 
         # Basic validation to avoid corrupt internal state
         if rank is None or sampler_name is None:
-            self.logger.warning(
-                "Invalid remote DB message: missing rank or sampler"
-            )
+            self.logger.warning("Invalid remote DB message: missing rank or sampler")
             return
 
         try:
@@ -156,7 +152,6 @@ class RemoteDBStore:
 
             for r in rows:
                 db.add_record(table_name, r)
-
 
     def get_db(self, rank: int, sampler_name: str) -> Optional[Database]:
         """

@@ -6,7 +6,10 @@ import time
 import torch
 from contextlib import contextmanager
 
-from traceml.utils.layer_parameter_memory import model_queue, collect_layer_parameter_memory
+from traceml.utils.layer_parameter_memory import (
+    model_queue,
+    collect_layer_parameter_memory,
+)
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.layer_forward_memory_hook import attach_layer_forward_memory_hooks
 from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memory_hooks
@@ -45,8 +48,8 @@ def trace_step(model: nn.Module):
     start_timed = False
     step_completed = False
 
-    try:    ## User code block
-        try: ## timed_region
+    try:  ## User code block
+        try:  ## timed_region
             with timed_region("_traceml_internal:step_time", use_gpu=True):
                 start_timed = True
                 yield
@@ -69,7 +72,6 @@ def trace_step(model: nn.Module):
             flush_traceml_buffers(model, TraceState.step)
         except Exception as e:
             print(f"[TraceML] flush failed: {e}", file=sys.stderr)
-
 
 
 def trace_model_instance(

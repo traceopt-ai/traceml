@@ -83,9 +83,7 @@ class NotebookDisplayManager:
                     sections_html[name] = html_obj.data
             except Exception as e:
                 sections_html[name] = (
-                    f"<div style='color:red;'>"
-                    f"Error rendering {name}: {e}"
-                    f"</div>"
+                    f"<div style='color:red;'>" f"Error rendering {name}: {e}" f"</div>"
                 )
                 cls.logger.error(
                     f"[TraceML] Error rendering notebook section {name}: {e}"

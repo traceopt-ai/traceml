@@ -30,7 +30,6 @@ class StdoutStderrSampler(BaseSampler):
         self.log_path = logs_dir / log_filename
         self.log_path.write_text("[TraceML] New run started\n\n", encoding="utf-8")
 
-
     def sample(self):
         capture = StreamCapture._stdout_stderr_capture
         if capture is None:
@@ -47,7 +46,7 @@ class StdoutStderrSampler(BaseSampler):
                 "stdout_stderr",
                 {
                     "line": ln,
-                }
+                },
             )
 
         # persist to file

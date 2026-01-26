@@ -75,6 +75,7 @@ class LayerBackwardTimeSampler(BaseSampler):
                 "step": evt.step,
             }
             self.db.add_record(table_name, record)
+
     def sample(self) -> None:
         """
         Ingest → resolve (FIFO) → persist

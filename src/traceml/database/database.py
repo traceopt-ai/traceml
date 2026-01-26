@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Deque
+from typing import Any, Dict, Optional, Deque
 from collections import deque
 
 from traceml.database.database_writer import DatabaseWriter
@@ -26,6 +26,7 @@ class Database:
     - This database is intentionally simple and in-memory only; persistence
       and export are handled by `DatabaseWriter`.
     """
+
     DEFAULT_MAX_ROWS = 3000
 
     def __init__(self, sampler_name, max_rows: Optional[int] = None):
@@ -48,7 +49,9 @@ class Database:
         self.sampler_name = sampler_name
 
         # Resolve max row limit
-        self.max_rows: int = int(max_rows) if max_rows is not None else self.DEFAULT_MAX_ROWS
+        self.max_rows: int = (
+            int(max_rows) if max_rows is not None else self.DEFAULT_MAX_ROWS
+        )
         if self.max_rows <= 0:
             raise ValueError(f"max_rows must be > 0, got {max_rows}")
 
@@ -61,7 +64,6 @@ class Database:
 
         # Optional external sender (e.g., TCP); may be set later
         self.sender = None
-
 
     def create_table(self, name: str) -> Deque[Any]:
         """
@@ -89,7 +91,6 @@ class Database:
         self._tables[name] = deque(maxlen=self.max_rows)
         return self._tables[name]
 
-
     def create_or_get_table(self, name: str) -> Deque[Any]:
         """
         Create a table if it does not exist, otherwise return the existing one.
@@ -110,7 +111,6 @@ class Database:
         if name not in self._tables:
             self._tables[name] = deque(maxlen=self.max_rows)
         return self._tables[name]
-
 
     def add_record(self, table: str, record: Any) -> None:
         """
@@ -134,21 +134,20 @@ class Database:
         # O(1) append; eviction handled automatically by deque(maxlen)
         rows.append(record)
 
-
     def get_last_record(self, table: str) -> Optional[Any]:
         """
-       Return the most recently added record from a table.
+        Return the most recently added record from a table.
 
-       Parameters
-       ----------
-       table : str
-           Name of the table.
+        Parameters
+        ----------
+        table : str
+            Name of the table.
 
-       Returns
-       -------
-       Optional[Any]
-           The most recent record, or None if the table does not exist
-           or contains no records.
+        Returns
+        -------
+        Optional[Any]
+            The most recent record, or None if the table does not exist
+            or contains no records.
         """
         rows = self._tables.get(table)
         if not rows:
@@ -156,7 +155,6 @@ class Database:
 
         # Access last element without converting to list
         return next(reversed(rows))
-
 
     def all_tables(self) -> Dict[str, Deque[Any]]:
         """
@@ -175,7 +173,6 @@ class Database:
             Mapping from table name to backing deque.
         """
         return self._tables
-
 
     def get_table(self, name: str) -> Optional[Deque[Any]]:
         """
@@ -196,7 +193,6 @@ class Database:
             The deque backing the table, or None if the table does not exist.
         """
         return self._tables.get(name)
-
 
     def clear(self):
         """

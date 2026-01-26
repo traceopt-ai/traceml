@@ -59,7 +59,6 @@ def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Te
     return (preds == labels).float().mean()
 
 
-
 def prepare_data(rank: int, world_size: int):
     """
     Load dataset and create a DistributedSampler so that:
@@ -85,7 +84,6 @@ def prepare_data(rank: int, world_size: int):
 
     collator = DataCollatorWithPadding(tokenizer)
 
-
     # DistributedSampler shards the dataset across ranks.
     train_sampler = DistributedSampler(
         train_ds,
@@ -97,7 +95,7 @@ def prepare_data(rank: int, world_size: int):
     train_loader = DataLoader(
         train_ds,
         batch_size=BATCH_SIZE,
-        sampler=train_sampler,   # sampler replaces shuffle=True
+        sampler=train_sampler,  # sampler replaces shuffle=True
         collate_fn=collator,
         pin_memory=True,
     )
@@ -117,6 +115,7 @@ def prepare_data(rank: int, world_size: int):
 # ============================================================
 # These are NOT required for TraceML to work.
 # They add extra visibility into specific code regions.
+
 
 @trace_time("data_transfer", use_gpu=False)
 def load_batch_to_device(batch, device):
@@ -163,7 +162,7 @@ def main():
     # DDP ENVIRONMENT (provided automatically by torchrun)
     # --------------------------------------------------------
     # torchrun sets these OS environment variables per process
-    rank = int(os.environ.get("RANK", 0))           # global rank
+    rank = int(os.environ.get("RANK", 0))  # global rank
     local_rank = int(os.environ.get("LOCAL_RANK", 0))  # GPU index on this node
     world_size = int(os.environ.get("WORLD_SIZE", 1))  # total number of processes
 
@@ -196,9 +195,7 @@ def main():
     # --------------------------------------------------------
     # Data
     # --------------------------------------------------------
-    tokenizer, train_loader, val_loader, train_sampler = prepare_data(
-        rank, world_size
-    )
+    tokenizer, train_loader, val_loader, train_sampler = prepare_data(rank, world_size)
 
     # --------------------------------------------------------
     # Model
@@ -212,7 +209,6 @@ def main():
     # --------------------------------------------------------
     # Do this BEFORE wrapping with DistributedDataParallel
     trace_model_instance(model)
-
 
     # Wrap model with DDP
     if use_cuda:
@@ -238,7 +234,9 @@ def main():
         num_training_steps=total_steps,
     )
 
-    scaler = torch.amp.GradScaler(enabled=use_cuda, device="cuda" if use_cuda else "cpu")
+    scaler = torch.amp.GradScaler(
+        enabled=use_cuda, device="cuda" if use_cuda else "cpu"
+    )
 
     # --------------------------------------------------------
     # TRAINING LOOP

@@ -1,0 +1,219 @@
+import os
+import time
+import random
+from typing import Dict
+
+import torch
+import torch.distributed as dist
+from torch.utils.data import DataLoader, DistributedSampler
+from torch.optim import AdamW
+from torch.cuda.amp import autocast, GradScaler
+
+from torchvision import transforms
+from torchvision.models import vit_b_16
+
+from datasets import load_dataset
+
+# ============================================================
+# TraceML imports
+# ============================================================
+from traceml.decorators import trace_model_instance, trace_step, trace_time
+
+# ============================================================
+# CONFIG
+# ============================================================
+SEED = 42
+IMAGE_SIZE = 224
+
+PER_GPU_BATCH = 64
+NUM_WORKERS = 8
+
+LR = 3e-4
+WEIGHT_DECAY = 0.05
+
+MAX_STEPS = 45_000
+LOG_EVERY = 50
+
+
+def set_seed(seed: int):
+    random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+
+def prepare_dataloader(rank: int, world_size: int):
+    """
+    ImageNet-1k sliced to 10% (~15–20 GB).
+    Automatically downloaded on first run.
+    """
+
+    dataset = load_dataset(
+        "imagenet-1k",
+        split="train[:10%]",
+        trust_remote_code=True,
+    )
+
+    transform = transforms.Compose(
+        [
+            transforms.Resize(256),
+            transforms.RandomResizedCrop(IMAGE_SIZE),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.485, 0.456, 0.406),
+                std=(0.229, 0.224, 0.225),
+            ),
+        ]
+    )
+
+    def preprocess(batch):
+        images = [transform(img.convert("RGB")) for img in batch["image"]]
+        return {
+            "pixel_values": images,
+            "labels": batch["label"],
+        }
+
+    dataset = dataset.with_transform(preprocess)
+
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=True,
+        drop_last=True,
+    )
+
+    loader = DataLoader(
+        dataset,
+        batch_size=PER_GPU_BATCH,
+        sampler=sampler,
+        num_workers=NUM_WORKERS,
+        pin_memory=True,
+        persistent_workers=True,
+    )
+
+    return loader, sampler
+
+
+@trace_time("data_transfer", use_gpu=False)
+def load_batch_to_device(batch: Dict, device: torch.device):
+    return {
+        "images": batch["pixel_values"].to(device, non_blocking=True),
+        "labels": batch["labels"].to(device, non_blocking=True),
+    }
+
+
+@trace_time("forward", use_gpu=True)
+def forward_pass(model, images):
+    return model(images)
+
+
+@trace_time("loss", use_gpu=True)
+def compute_loss(logits, labels):
+    return torch.nn.functional.cross_entropy(logits, labels)
+
+
+@trace_time("backward", use_gpu=True)
+def backward_pass(loss, scaler: GradScaler):
+    scaler.scale(loss).backward()
+
+
+@trace_time("optimizer_step", use_gpu=True)
+def optimizer_step(
+    optimizer: torch.optim.Optimizer,
+    scaler: GradScaler,
+):
+    scaler.step(optimizer)
+    scaler.update()
+    optimizer.zero_grad(set_to_none=True)
+
+
+# ============================================================
+# MAIN
+# ============================================================
+def main():
+    # --------------------------------------------------------
+    # DDP setup
+    # --------------------------------------------------------
+    rank = int(os.environ["RANK"])
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = int(os.environ["WORLD_SIZE"])
+
+    torch.cuda.set_device(local_rank)
+    device = torch.device("cuda", local_rank)
+
+    dist.init_process_group("nccl")
+    set_seed(SEED + rank)
+
+    # --------------------------------------------------------
+    # Data
+    # --------------------------------------------------------
+    train_loader, train_sampler = prepare_dataloader(rank, world_size)
+
+    # --------------------------------------------------------
+    # Model
+    # --------------------------------------------------------
+    model = vit_b_16(num_classes=1000).to(device)
+
+    # Attach TraceML hooks BEFORE DDP
+    trace_model_instance(model)
+
+    model = torch.nn.parallel.DistributedDataParallel(
+        model, device_ids=[local_rank]
+    )
+
+    optimizer = AdamW(
+        model.parameters(),
+        lr=LR,
+        weight_decay=WEIGHT_DECAY,
+    )
+
+    scaler = GradScaler()
+
+    model.train()
+    global_step = 0
+    start_time = time.time()
+
+    # ========================================================
+    # TRAINING LOOP (STEP-BOUND, STEADY-STATE)
+    # ========================================================
+    while global_step < MAX_STEPS:
+        train_sampler.set_epoch(global_step)
+
+        for batch in train_loader:
+            if global_step >= MAX_STEPS:
+                break
+
+            # ------------------------------------------------
+            # TraceML: ONE logical training step
+            # ------------------------------------------------
+            with trace_step(model.module):
+
+                batch = load_batch_to_device(batch, device)
+
+                with autocast(dtype=torch.float16):
+                    logits = forward_pass(model, batch["images"])
+                    loss = compute_loss(logits, batch["labels"])
+
+                backward_pass(loss, scaler)
+                optimizer_step(optimizer, scaler)
+
+            global_step += 1
+
+            if rank == 0 and global_step % LOG_EVERY == 0:
+                elapsed = (time.time() - start_time) / 60
+                print(
+                    f"step {global_step:6d} | "
+                    f"loss {loss.item():.4f} | "
+                    f"elapsed {elapsed:.1f} min"
+                )
+
+    if rank == 0:
+        print("Training complete")
+
+    dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    main()

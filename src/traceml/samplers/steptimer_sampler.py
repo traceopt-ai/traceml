@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import List
 from queue import Empty
 from collections import deque
 
@@ -33,7 +33,6 @@ class StepTimerSampler(BaseSampler):
         # Keeps ordering and avoids GPU events blocking CPU events in the shared queue.
         self._local_gpu_q = deque()
 
-
     def _drain_global_queue(self) -> List[StepTimeEvent]:
         """
         Drain the shared queue completely.
@@ -59,7 +58,6 @@ class StepTimerSampler(BaseSampler):
 
         return ready
 
-
     def _drain_local_gpu_queue(self) -> List[StepTimeEvent]:
         """
         Resolve GPU events in strict FIFO order.
@@ -77,7 +75,6 @@ class StepTimerSampler(BaseSampler):
 
         return ready
 
-
     def _save_events(self, events: List[StepTimeEvent]) -> None:
         """
         Save resolved events into per-event tables.
@@ -93,7 +90,7 @@ class StepTimerSampler(BaseSampler):
                 "device": evt.device,  # 'cpu' or 'cuda:0'
                 "is_gpu": is_gpu,
                 "duration_ms": float(evt.gpu_time_ms if is_gpu else cpu_ms),
-             }
+            }
             self.db.add_record(evt.name, record)
 
     def sample(self):

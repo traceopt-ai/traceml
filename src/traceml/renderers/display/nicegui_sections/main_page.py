@@ -36,8 +36,10 @@ from .model_combined_section import (
 
 import pandas
 
+
 def fake_build():
     pass
+
 
 def fake_update():
     pass
@@ -135,7 +137,6 @@ def define_main_page(cls):
         # background update loop
         ui.timer(0.75, cls._ui_update_loop)
         cls._ui_ready = True
-
 
     @ui.page("/layers")
     def layer_page():

@@ -165,7 +165,9 @@ class LayerCombinedTimerRenderer(BaseRenderer):
 
         self._render_section_layer_stats(table, layer_stats)
         self._render_section_topk(table, "Top 3 Forward Layers (Avg)", top_acts, "cyan")
-        self._render_section_topk(table, "TOP-3 Backward Layers (Avg)", top_grads, "green")
+        self._render_section_topk(
+            table, "TOP-3 Backward Layers (Avg)", top_grads, "green"
+        )
 
         panel = Panel(
             table,

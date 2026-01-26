@@ -33,10 +33,7 @@ def prepare_log_directory(log_dir: str = None) -> str:
     return str(Path(log_dir).resolve())
 
 
-def launch_tracer_process(
-    script_path,
-    args
-):
+def launch_tracer_process(script_path, args):
     """
     Parent launcher.
 
@@ -58,20 +55,23 @@ def launch_tracer_process(
     env["TRACEML_LOGS_DIR"] = args.logs_dir
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(args.num_display_layers)
     env["TRACEML_SESSION_ID"] = args.session_id if args.session_id else get_session_id()
-    env["TRACEML_DDP_TELEMETRY"] = (
-        "0" if args.disable_ddp_telemetry else "1"
-    )
+    env["TRACEML_DDP_TELEMETRY"] = "0" if args.disable_ddp_telemetry else "1"
     env["TRACEML_TCP_HOST"] = args.tcp_host
     env["TRACEML_TCP_PORT"] = str(args.tcp_port)
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     script_args = args.args or []
 
-
     runner_path = str(Path(__file__).parent / "runner.py")
 
     if args.mode in ["cli", "dashboard"]:
-        cmd = ["torchrun", f"--nproc_per_node={args.nproc_per_node}", runner_path, "--", *script_args]
+        cmd = [
+            "torchrun",
+            f"--nproc_per_node={args.nproc_per_node}",
+            runner_path,
+            "--",
+            *script_args,
+        ]
     else:
         raise ValueError(f"Invalid mode '{args.mode}'")
 
@@ -83,7 +83,10 @@ def launch_tracer_process(
         return_code = p.wait()
         sys.exit(return_code)
     except KeyboardInterrupt:
-        print("\n[TraceML] Interrupt received — terminating torchrun process group…", file=sys.stderr)
+        print(
+            "\n[TraceML] Interrupt received — terminating torchrun process group…",
+            file=sys.stderr,
+        )
         # Send SIGTERM to the whole process group
         try:
             os.killpg(p.pid, signal.SIGTERM)
@@ -106,10 +109,7 @@ def run_with_tracing(args):
     """
     script_path = validate_script_path(args.script)
 
-    launch_tracer_process(
-        script_path=script_path,
-        args=args
-    )
+    launch_tracer_process(script_path=script_path, args=args)
 
 
 def build_parser():
@@ -153,9 +153,7 @@ def build_parser():
         "--nproc-per-node",
         type=int,
         default=1,
-        help=(
-            "Number of processes to launch via torchrun."
-        ),
+        help=("Number of processes to launch via torchrun."),
     )
 
     run_parser.add_argument("--args", nargs=argparse.REMAINDER)

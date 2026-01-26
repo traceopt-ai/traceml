@@ -72,9 +72,7 @@ def prepare_data():
     train_ds = train_ds.rename_column("label", "labels")
     val_ds = val_ds.rename_column("label", "labels")
 
-    collator = DataCollatorWithPadding(
-        tokenizer=tokenizer, padding=True
-    )
+    collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True)
 
     train_loader = DataLoader(
         train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator

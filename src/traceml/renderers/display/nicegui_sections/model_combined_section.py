@@ -150,7 +150,11 @@ def _parse_metric(tlm: Dict[str, Any]) -> Optional[AggregatedMetric]:
         return None
 
     # Keep arrays aligned defensively (clip to min length)
-    n = min(len(steps), len(worst_y) if worst_y else len(steps), len(median_y) if median_y else len(steps))
+    n = min(
+        len(steps),
+        len(worst_y) if worst_y else len(steps),
+        len(median_y) if median_y else len(steps),
+    )
     steps = steps[:n]
     if worst_y:
         worst_y = worst_y[:n]
@@ -196,7 +200,9 @@ def _make_empty_figure() -> go.Figure:
     return fig
 
 
-def _update_metric_graph(plotly_ui, x: List[int], y_worst: List[float], y_median: List[float], y_label: str) -> None:
+def _update_metric_graph(
+    plotly_ui, x: List[int], y_worst: List[float], y_median: List[float], y_label: str
+) -> None:
     """Update Plotly graph with worst + median curves (same units)."""
     fig = go.Figure()
 
@@ -265,12 +271,17 @@ def _stats_table_html_dual(
     - Worst row includes imbalance + worst rank.
     - Median row shows '—' for those fields.
     """
+
     def fmt_row(label: str, s: SeriesStats, show_skew: bool) -> str:
         last = value_fmt(s.last)
         p50 = value_fmt(s.p50)
         p95 = value_fmt(s.p95)
         avg = value_fmt(s.avg100)
-        trend_html = _trend_badge(s.trend) if (label == "Worst" or show_median_trend) else "<span style='color:#888;'>—</span>"
+        trend_html = (
+            _trend_badge(s.trend)
+            if (label == "Worst" or show_median_trend)
+            else "<span style='color:#888;'>—</span>"
+        )
 
         if show_skew:
             imbalance = f"{skew_fmt(skew_abs)} ({_fmt_pct(skew_pct)})"
@@ -338,7 +349,9 @@ def _build_metric_card(title: str) -> Dict[str, Any]:
     with card:
         ui.label(title).classes(METRIC_TITLE).style("color:#d47a00;")
         plotly_ui = ui.plotly(_make_empty_figure()).classes("w-full")
-        stats_html = ui.html("", sanitize=False).classes(METRIC_TEXT).style("color:#333")
+        stats_html = (
+            ui.html("", sanitize=False).classes(METRIC_TEXT).style("color:#333")
+        )
 
     return {"card": card, "graph": plotly_ui, "stats_html": stats_html}
 
@@ -364,8 +377,9 @@ def build_model_combined_section() -> Dict[str, Any]:
     }
 
 
-
-def update_model_combined_section(panel: Dict[str, Any], telemetry: Optional[Dict[str, Any]]) -> None:
+def update_model_combined_section(
+    panel: Dict[str, Any], telemetry: Optional[Dict[str, Any]]
+) -> None:
     """
     Update the model summary cards from ModelCombinedRenderer telemetry.
 
@@ -378,7 +392,9 @@ def update_model_combined_section(panel: Dict[str, Any], telemetry: Optional[Dic
         return
 
     # Map UI card keys -> renderer metric keys + y labels + formatters
-    mapping: Dict[str, Tuple[str, str, Callable[[float], str], Callable[[float], str]]] = {
+    mapping: Dict[
+        str, Tuple[str, str, Callable[[float], str], Callable[[float], str]]
+    ] = {
         "dataloader": ("dataLoader_fetch", "Time (ms)", fmt_time_run, fmt_time_run),
         "step_time": ("step_time", "Time (ms)", fmt_time_run, fmt_time_run),
         "step_memory": ("step_gpu_memory", "Memory (MB)", fmt_mem_new, fmt_mem_new),

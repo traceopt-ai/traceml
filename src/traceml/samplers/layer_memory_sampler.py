@@ -41,7 +41,6 @@ class LayerMemorySampler(BaseSampler):
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
 
-
     def _compute_signature(self, layer_memory: Dict[str, float]) -> str:
         """
         Compute a stable signature for a model based on its layer memory.
@@ -64,8 +63,8 @@ class LayerMemorySampler(BaseSampler):
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
     def _build_sample(
-            self,
-            layer_memory: Dict[str, float],
+        self,
+        layer_memory: Dict[str, float],
     ) -> Dict[str, Any]:
         """
         Build a normalized sample record for storage.
@@ -124,7 +123,6 @@ class LayerMemorySampler(BaseSampler):
         except Exception as e:
             self.logger.error(f"[TraceML] Layer memory queue ingestion failed: {e}")
         return None
-
 
     def sample(self) -> None:
         """

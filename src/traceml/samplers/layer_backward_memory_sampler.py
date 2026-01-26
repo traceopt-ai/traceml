@@ -81,11 +81,9 @@ class LayerBackwardMemorySampler(BaseSampler):
 
         Safe to call frequently; does nothing if the queue is empty.
         """
-        self.sample_idx +=1
+        self.sample_idx += 1
         try:
             self._drain_queue()
         except Exception as e:
             # Sampler must never disrupt training
-            self.logger.error(
-                f"[TraceML] LayerBackwardMemorySampler error: {e}"
-            )
+            self.logger.error(f"[TraceML] LayerBackwardMemorySampler error: {e}")

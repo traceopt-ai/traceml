@@ -50,7 +50,9 @@ class ProcessRenderer(BaseRenderer):
     # Dashboard history size (rolling window)
     DASHBOARD_MAX_ROWS = 200
 
-    def __init__(self, database: Database, remote_store: Optional[RemoteDBStore] = None):
+    def __init__(
+        self, database: Database, remote_store: Optional[RemoteDBStore] = None
+    ):
         super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT)
 
         self.db = database
@@ -65,7 +67,6 @@ class ProcessRenderer(BaseRenderer):
         # Track how many samples we have consumed by all rank
         self._last_completed_seq: int = -1
         self.logger = get_error_logger("ProcessRenderer")
-
 
     @staticmethod
     def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -145,8 +146,7 @@ class ProcessRenderer(BaseRenderer):
                     "gpu_total": gpu_total[idx],
                     "gpu_rank": gpu_rank[idx],
                     "gpu_used_imbalance": (
-                        max(gpu_used) - min(gpu_used)
-                        if len(gpu_used) > 1 else 0.0
+                        max(gpu_used) - min(gpu_used) if len(gpu_used) > 1 else 0.0
                     ),
                 }
             )
@@ -258,7 +258,8 @@ class ProcessRenderer(BaseRenderer):
                         "gpu_rank": worst_rank,
                         "gpu_used_imbalance": (
                             max(gpu_used_vals) - min(gpu_used_vals)
-                            if len(gpu_used_vals) > 1 else 0.0
+                            if len(gpu_used_vals) > 1
+                            else 0.0
                         ),
                     }
                 )
@@ -275,7 +276,6 @@ class ProcessRenderer(BaseRenderer):
 
             self._dashboard_rollup.append(entry)
         self._last_completed_seq = committed_upto
-
 
     # CLI panel rendering (Rich)
     def get_panel_renderable(self) -> Panel:
@@ -338,7 +338,6 @@ class ProcessRenderer(BaseRenderer):
         snap["history"] = list(self._dashboard_rollup)
         return snap
 
-
     def get_notebook_renderable(self) -> HTML:
         snap = self._compute_live_snapshot()
 
@@ -393,10 +392,7 @@ class ProcessRenderer(BaseRenderer):
         if not rows:
             return {"total_samples": 0}
 
-        cpu_vals = [
-            self._safe_float(r.get("cpu")) / 100.0
-            for r in rows
-        ]
+        cpu_vals = [self._safe_float(r.get("cpu")) / 100.0 for r in rows]
         ram_vals = [r["ram_used"] for r in rows]
 
         gpu_used = []
@@ -490,7 +486,11 @@ class ProcessRenderer(BaseRenderer):
         t.add_column(justify="center", style="dim", no_wrap=True)
         t.add_column(justify="right", style="white")
 
-        t.add_row("TOTAL PROCESS SAMPLES", "[magenta]|[/magenta]", str(summary.get("total_samples", 0)))
+        t.add_row(
+            "TOTAL PROCESS SAMPLES",
+            "[magenta]|[/magenta]",
+            str(summary.get("total_samples", 0)),
+        )
 
         if summary.get("total_samples", 0) > 0:
             self._proc_cpu_summary(t, summary)

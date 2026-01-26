@@ -64,9 +64,8 @@ from traceml.renderers.display.nicegui_sections.helper import extract_x_axis
 
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 LABEL = "text-[11px] font-semibold tracking-wide leading-tight"
-VAL   = "text-[12.5px] text-gray-700 leading-tight"
-SUB   = "text-[11px] text-gray-500 leading-tight"
-
+VAL = "text-[12.5px] text-gray-700 leading-tight"
+SUB = "text-[11px] text-gray-500 leading-tight"
 
 
 def build_system_section():
@@ -97,10 +96,14 @@ def build_system_section():
     with card:
         with ui.row().classes("w-full items-center justify-between"):
             ui.label("System Metrics").classes(METRIC_TITLE).style("color:#d47a00;")
-            with ui.icon("info").classes("text-gray-400 cursor-pointer") as info:
-                with ui.menu().props("anchor='bottom left' self='top left' auto-close"
-                ).classes("w-96 p-2"):
-                    ui.markdown("""
+            with ui.icon("info").classes("text-gray-400 cursor-pointer"):
+                with (
+                    ui.menu()
+                    .props("anchor='bottom left' self='top left' auto-close")
+                    .classes("w-96 p-2")
+                ):
+                    ui.markdown(
+                        """
             **System Metrics (node-local)**
 
             - **CPU**: host stats over rolling window.
@@ -108,7 +111,8 @@ def build_system_section():
             - **GPU Util**: average across GPUs visible on this node; skew = max − min.
             - **GPU Mem**: worst GPU (max mem across local GPUs).
             - **Temp**: max GPU temperature on this node.
-            """)
+            """
+                    )
             window_text = ui.html("window: –", sanitize=False).classes(
                 "text-xs text-gray-500 mr-1"
             )
@@ -117,22 +121,28 @@ def build_system_section():
 
         # 2 rows x 3 columns
         with ui.grid(columns=3).classes("w-full gap-1 mt-1"):
-            _, cpu_v, cpu_s   = _tile("CPU (now/p50/p95)")
-            _, gpu_v, gpu_s   = _tile("GPU Util (now/p50/p95)")
-            _, imb_v, imb_s   = _tile("GPU Util Skew (now/p95)")
-            _, ram_v, ram_s   = _tile("RAM (now/p95/total)")
+            _, cpu_v, cpu_s = _tile("CPU (now/p50/p95)")
+            _, gpu_v, gpu_s = _tile("GPU Util (now/p50/p95)")
+            _, imb_v, imb_s = _tile("GPU Util Skew (now/p95)")
+            _, ram_v, ram_s = _tile("RAM (now/p95/total)")
             _, gmem_v, gmem_s = _tile("GPU Mem (now/p95)")
             _, temp_v, temp_s = _tile("Temp (max GPU)")
 
     return {
         "window_text": window_text,
         "graph": graph,
-        "cpu_v": cpu_v, "cpu_s": cpu_s,
-        "gpu_v": gpu_v, "gpu_s": gpu_s,
-        "imb_v": imb_v, "imb_s": imb_s,
-        "ram_v": ram_v, "ram_s": ram_s,
-        "gmem_v": gmem_v, "gmem_s": gmem_s,
-        "temp_v": temp_v, "temp_s": temp_s,
+        "cpu_v": cpu_v,
+        "cpu_s": cpu_s,
+        "gpu_v": gpu_v,
+        "gpu_s": gpu_s,
+        "imb_v": imb_v,
+        "imb_s": imb_s,
+        "ram_v": ram_v,
+        "ram_s": ram_s,
+        "gmem_v": gmem_v,
+        "gmem_s": gmem_s,
+        "temp_v": temp_v,
+        "temp_s": temp_s,
     }
 
 
@@ -166,7 +176,7 @@ def _tile(title):
     """Create a compact metric tile."""
     box = ui.column().classes("w-full px-1 py-1").style("min-height: 46px;")
     with box:
-        ui.html(title, sanitize=False).classes(LABEL).style(f"color:#ff9800;")
+        ui.html(title, sanitize=False).classes(LABEL).style("color:#ff9800;")
         v = ui.html("–", sanitize=False).classes(VAL)
         s = ui.html("", sanitize=False).classes(SUB)
     return box, v, s
@@ -197,7 +207,6 @@ def update_system_section(panel, data, window_n=100):
 
     _update_tiles(panel, roll)
     _update_graph(panel, window)
-
 
 
 def _update_tiles(panel, roll):
@@ -232,14 +241,12 @@ def _update_tiles(panel, roll):
 
     gmem = roll["gpu_mem"]
     panel["gmem_v"].content = (
-        f"<b>{fmt_mem_new(gmem['now'])}</b>/"
-        f"{fmt_mem_new(gmem['p95'])}"
+        f"<b>{fmt_mem_new(gmem['now'])}</b>/" f"{fmt_mem_new(gmem['p95'])}"
     )
 
     temp = roll["temp"]
     panel["temp_v"].content = f"{temp['now']:.0f}°C · p95 {temp['p95']:.0f}°C"
     panel["temp_s"].content = f"Status: {temp['status']}"
-
 
 
 def _update_graph(panel, window):
@@ -251,11 +258,15 @@ def _update_graph(panel, window):
     cpu_hist = [r.get("cpu", 0.0) or 0.0 for r in window]
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=x, y=cpu_hist, mode="lines",
-        line=dict(color="#4caf50"),
-        yaxis="y",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=cpu_hist,
+            mode="lines",
+            line=dict(color="#4caf50"),
+            yaxis="y",
+        )
+    )
 
     if window[-1].get("gpu_available"):
         gpu_hist = []
@@ -263,11 +274,15 @@ def _update_graph(panel, window):
             utils = _gpu_utils(r)
             gpu_hist.append(sum(utils) / len(utils) if utils else 0.0)
 
-        fig.add_trace(go.Scatter(
-            x=x, y=gpu_hist, mode="lines",
-            line=dict(color="#ff9800"),
-            yaxis="y2",
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=gpu_hist,
+                mode="lines",
+                line=dict(color="#ff9800"),
+                yaxis="y2",
+            )
+        )
 
     fig.update_layout(panel["graph"].figure.layout)
     panel["graph"].update_figure(fig)
@@ -319,7 +334,7 @@ def _compute_rollups(window):
 
     for r in window:
         utils = _gpu_utils(r)
-        mems  = _gpu_mems(r)
+        mems = _gpu_mems(r)
         temps = _gpu_temps(r)
 
         if utils:
@@ -368,9 +383,9 @@ def _compute_rollups(window):
             "now": temp_hist[-1],
             "p95": _percentile(temp_hist, 95),
             "status": (
-                "Hot" if temp_hist[-1] >= 85
-                else "Warm" if temp_hist[-1] >= 80
-                else "OK"
+                "Hot"
+                if temp_hist[-1] >= 85
+                else "Warm" if temp_hist[-1] >= 80 else "OK"
             ),
         },
     }

@@ -15,7 +15,6 @@ Design principles
 - No live tensors or modules escape this module.
 """
 
-
 from dataclasses import dataclass
 from queue import Queue, Full
 from typing import Dict, Any, List, Tuple
@@ -114,9 +113,9 @@ class LayerForwardMemoryHook:
                     accumulate(o)
 
             if total_bytes > 0:
-                _layer_forward_memory_buffer.setdefault(
-                    self.model_id, []
-                ).append((self.layer_name, total_bytes))
+                _layer_forward_memory_buffer.setdefault(self.model_id, []).append(
+                    (self.layer_name, total_bytes)
+                )
 
         except Exception:
             print(
@@ -185,8 +184,6 @@ def attach_layer_forward_memory_hooks(model: nn.Module) -> None:
         # Only attach to leaf modules
         if any(module.children()):
             continue
-        module.register_forward_hook(
-            LayerForwardMemoryHook(model_id, name)
-        )
+        module.register_forward_hook(LayerForwardMemoryHook(model_id, name))
 
     _layer_forward_memory_hook_registry[model_id] = True

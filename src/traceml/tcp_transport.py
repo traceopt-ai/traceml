@@ -54,7 +54,6 @@ class TCPServer:
             except Exception:
                 pass
 
-
     def poll(self) -> Iterator[Dict]:
         """
         Drain all currently available messages.
@@ -66,7 +65,6 @@ class TCPServer:
                 yield self._queue.get_nowait()
             except queue.Empty:
                 break
-
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -140,7 +138,6 @@ class TCPServer:
                 pass
 
 
-
 # TCP Client (worker ranks)
 class TCPClient:
     """
@@ -159,7 +156,6 @@ class TCPClient:
         self._connected = False
         self.logger = get_error_logger("TraceML-TCPClient")
 
-
     def send(self, payload: Dict) -> None:
         """
         Send a single JSON message (newline-delimited).
@@ -177,7 +173,6 @@ class TCPClient:
 
     def close(self) -> None:
         self._close()
-
 
     def _ensure_connected(self) -> None:
         if self._connected:

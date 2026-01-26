@@ -1,11 +1,10 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from traceml.distributed import get_ddp_info
 from traceml.session import get_session_id
 from traceml.config import config
-
 
 
 def _rank_suffix() -> str:
@@ -24,9 +23,8 @@ def _rank_suffix() -> str:
     return f"rank_{local_rank}"
 
 
-
 class DatabaseWriter:
-    """"
+    """ "
     Incrementally writes Database tables to disk in JSONL format.
 
     This writer is designed to work with bounded deques where old entries
@@ -66,17 +64,12 @@ class DatabaseWriter:
 
         # Pathlib-based log root
         self.logs_dir = (
-                Path(config.logs_dir)
-                / session_id
-                / "data"
-                / rank_dir
-                / sampler_name
+            Path(config.logs_dir) / session_id / "data" / rank_dir / sampler_name
         )
 
         # Tracks the *last written record object* per table.
         # Used instead of positional offsets because deques may evict data.
         self._last_written_record: Dict[str, Any] = {}
-
 
     def flush(self):
         """

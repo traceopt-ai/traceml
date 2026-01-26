@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import shutil
 import numpy as np
 
@@ -134,7 +134,6 @@ class SystemRenderer(BaseRenderer):
         )
         table.add_row(temp_str, power_str)
 
-
     def get_panel_renderable(self) -> Panel:
         """
         Return a Rich Panel for CLI display.
@@ -246,7 +245,6 @@ class SystemRenderer(BaseRenderer):
         data["table"] = self._table
         return data
 
-
     def _compute_summary(self) -> Dict[str, Any]:
         """
         Compute aggregated statistics over the entire run.
@@ -268,13 +266,10 @@ class SystemRenderer(BaseRenderer):
 
         summary = {
             "total_samples": len(self._table),
-
             "cpu_avg_percent": round(float(np.mean(cpu_vals)), 2),
             "cpu_p95_percent": round(float(np.percentile(cpu_vals, 95)), 2),
-
             "ram_avg_used": round(float(np.mean(ram_vals)), 2),
             "ram_peak_used": round(float(np.max(ram_vals)), 2),
-
             "ram_total": ram_total,
             "gpu_available": gpu_available,
             "gpu_total_count": gpu_count,
@@ -295,13 +290,15 @@ class SystemRenderer(BaseRenderer):
                 util_totals.append(sum(v["util"] for v in gpu_raw.values()))
                 mem_used_totals.append(sum(v["mem_used"] for v in gpu_raw.values()))
                 mem_total_totals.append(sum(v["mem_total"] for v in gpu_raw.values()))
-                power_usage_totals.append(sum(v["power_usage"] for v in gpu_raw.values()))
-                power_limit_totals.append(sum(v["power_limit"] for v in gpu_raw.values()))
+                power_usage_totals.append(
+                    sum(v["power_usage"] for v in gpu_raw.values())
+                )
+                power_limit_totals.append(
+                    sum(v["power_limit"] for v in gpu_raw.values())
+                )
 
                 # failure-critical per-device signals
-                max_single_gpu_mem.append(
-                    max(v["mem_used"] for v in gpu_raw.values())
-                )
+                max_single_gpu_mem.append(max(v["mem_used"] for v in gpu_raw.values()))
                 temp_max_vals.append(max(v["temperature"] for v in gpu_raw.values()))
 
         if gpu_available and util_totals:
@@ -310,26 +307,24 @@ class SystemRenderer(BaseRenderer):
                     # GPU utilization (aggregate)
                     "gpu_util_total_avg": round(float(np.mean(util_totals)), 2),
                     "gpu_util_total_peak": round(float(np.max(util_totals)), 2),
-
                     # GPU memory (aggregate footprint over time)
                     # Near-worst sustained + absolute peak
                     "gpu_mem_total_p95": round(
                         float(np.percentile(mem_used_totals, 95)), 2
                     ),
                     "gpu_mem_total_peak": round(float(np.max(mem_used_totals)), 2),
-                    "gpu_mem_total_capacity": round(float(np.mean(mem_total_totals)), 2),
-
+                    "gpu_mem_total_capacity": round(
+                        float(np.mean(mem_total_totals)), 2
+                    ),
                     # GPU memory (single-device OOM risk)
                     # Absolute risk only
                     "gpu_mem_single_peak": round(float(np.max(max_single_gpu_mem)), 2),
-
                     # GPU temperature (single-device thermal risk)
                     # Typical + absolute
                     "gpu_temp_peak": round(float(np.max(temp_max_vals)), 2),
                 }
             )
         return summary
-
 
     def _cpu_summary(self, t, s):
         t.add_row(
@@ -356,8 +351,7 @@ class SystemRenderer(BaseRenderer):
         t.add_row(
             "GPU UTIL (avg / peak)",
             "|",
-            f"{s['gpu_util_total_avg']:.1f}% / "
-            f"{s['gpu_util_total_peak']:.1f}%",
+            f"{s['gpu_util_total_avg']:.1f}% / " f"{s['gpu_util_total_peak']:.1f}%",
         )
 
         t.add_row(

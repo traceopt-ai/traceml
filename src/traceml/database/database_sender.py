@@ -28,19 +28,19 @@ class DBIncrementalSender:
 
     def __init__(self, db, sampler_name, sender, rank):
         """
-       Initialize the incremental sender.
+        Initialize the incremental sender.
 
-       Parameters
-       ----------
-       db : Database
-           In-memory database instance holding sampler telemetry.
-       sampler_name : str
-           Logical name of the sampler emitting the data.
-       sender : Any
-           Transport abstraction with a `.send(payload)` method
-           (e.g., socket sender, IPC sender, async queue).
-       rank : int
-           Distributed rank of the current process (e.g., DDP rank).
+        Parameters
+        ----------
+        db : Database
+            In-memory database instance holding sampler telemetry.
+        sampler_name : str
+            Logical name of the sampler emitting the data.
+        sender : Any
+            Transport abstraction with a `.send(payload)` method
+            (e.g., socket sender, IPC sender, async queue).
+        rank : int
+            Distributed rank of the current process (e.g., DDP rank).
         """
         self.db = db
         self.sampler_name = sampler_name
@@ -55,7 +55,6 @@ class DBIncrementalSender:
         # This remains safe even with bounded deques, which only drop references
         # without copying or mutating objects.
         self._last_sent_record = {}
-
 
     def flush(self):
         """
@@ -130,4 +129,3 @@ class DBIncrementalSender:
                 "tables": tables_payload,
             }
         )
-

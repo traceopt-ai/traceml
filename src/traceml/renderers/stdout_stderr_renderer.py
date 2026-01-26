@@ -27,13 +27,11 @@ class StdoutStderrRenderer(BaseRenderer):
         self.display_lines = display_lines
         self._table = self.db.create_or_get_table("stdout_stderr")
 
-
     @staticmethod
     def _tail(dq, n):
         if not dq:
             return []
         return list(islice(dq, max(0, len(dq) - n), len(dq)))
-
 
     def get_panel_renderable(self) -> Panel:
         rows = self._tail(self._table, self.display_lines)
@@ -51,7 +49,6 @@ class StdoutStderrRenderer(BaseRenderer):
             title="[bold cyan]STDOUT / STDERR (RANK 0)[/bold cyan]",
             border_style="cyan",
         )
-
 
     def get_notebook_renderable(self) -> HTML:
         rows = self._tail(self._table, self.display_lines)

@@ -43,9 +43,6 @@ from traceml.tcp_transport import TCPServer, TCPClient, TCPConfig
 from traceml.stdout_stderr_capture import StreamCapture
 
 
-
-import sys
-
 _DISPLAY_BACKENDS = {
     "cli": (CLIDisplayManager, "get_panel_renderable"),
     "notebook": (NotebookDisplayManager, "get_notebook_renderable"),
@@ -67,19 +64,19 @@ class TraceMLRuntime:
     """
 
     def __init__(
-            self,
-            samplers: Optional[List[BaseSampler]] = None,
-            renderers: Optional[List[BaseRenderer]] = None,
-            interval_sec: float = 1.0,
-            mode: str = "cli",
-            num_display_layers: int = 20,
-            enable_logging: bool = False,
-            logs_dir: str = "./logs",
-            enable_ddp_telemetry: bool = False,
-            remote_max_rows: int = 200,
-            tcp_host: str = "127.0.0.1",
-            tcp_port: int = 29765,
-            session_id: str = "",
+        self,
+        samplers: Optional[List[BaseSampler]] = None,
+        renderers: Optional[List[BaseRenderer]] = None,
+        interval_sec: float = 1.0,
+        mode: str = "cli",
+        num_display_layers: int = 20,
+        enable_logging: bool = False,
+        logs_dir: str = "./logs",
+        enable_ddp_telemetry: bool = False,
+        remote_max_rows: int = 200,
+        tcp_host: str = "127.0.0.1",
+        tcp_port: int = 29765,
+        session_id: str = "",
     ):
         # Update global config
         config.enable_logging = enable_logging
@@ -130,7 +127,6 @@ class TraceMLRuntime:
                 remote_max_rows=remote_max_rows,
             )
 
-
         # Runtime thread
         self._stop_event = threading.Event()
         self._thread = threading.Thread(
@@ -139,14 +135,12 @@ class TraceMLRuntime:
             daemon=True,
         )
 
-
     def _safe(self, label: str, fn):
         try:
             return fn()
         except Exception as e:
             self.logger.error(f"[TraceML] {label}: {e}")
             return None
-
 
     def _init_ddp_transport_runtime(self, host: str, port: int, remote_max_rows: int):
         cfg = TCPConfig(host=host, port=port)
@@ -177,9 +171,9 @@ class TraceMLRuntime:
 
     @staticmethod
     def _build_components(
-            mode: str,
-            num_display_layers: int,
-            remote_store: Optional[RemoteDBStore] = None,
+        mode: str,
+        num_display_layers: int,
+        remote_store: Optional[RemoteDBStore] = None,
     ) -> Tuple[List[BaseSampler], List[BaseRenderer]]:
         is_ddp, local_rank, _ = get_ddp_info()
 
@@ -195,8 +189,9 @@ class TraceMLRuntime:
         # Process sampler
         proc_sampler = ProcessSampler()
         samplers += [proc_sampler]
-        renderers += [ProcessRenderer(database=proc_sampler.db, remote_store=remote_store)]
-
+        renderers += [
+            ProcessRenderer(database=proc_sampler.db, remote_store=remote_store)
+        ]
 
         # Layer memory
         layer_mem = LayerMemorySampler()
@@ -246,7 +241,6 @@ class TraceMLRuntime:
 
         return samplers, renderers
 
-
     def _run_samplers_and_flush(self):
         for sampler in self.samplers:
             self._safe(f"{sampler.sampler_name}.sample failed", sampler.sample)
@@ -258,11 +252,12 @@ class TraceMLRuntime:
             self._safe(f"{sampler.sampler_name}.writer.flush failed", db.writer.flush)
 
             if self.is_worker and self.enable_ddp_telemetry and db.sender is not None:
-                self._safe(f"{sampler.sampler_name}.sender.flush failed", db.sender.flush)
+                self._safe(
+                    f"{sampler.sampler_name}.sender.flush failed", db.sender.flush
+                )
 
         if self.is_rank0 and self.display_manager:
             self._safe("Display update failed", self.display_manager.update_display)
-
 
     def _drain_remote(self):
         if not (self.is_rank0 and self.enable_ddp_telemetry and self._tcp_server):
@@ -274,12 +269,12 @@ class TraceMLRuntime:
             except Exception as e:
                 self.logger.error(f"[TraceML] Remote ingest failed: {e}")
 
-
     def _render_and_update(self):
         if not self.is_rank0 or self.display_manager is None:
             return
 
         for renderer in self.renderers:
+
             def register(r=renderer):
                 render_fn = getattr(r, self._render_attr)
                 self.display_manager.register_layout_content(
@@ -291,12 +286,10 @@ class TraceMLRuntime:
 
         # self._safe("Display update failed", self.display_manager.update_display)
 
-
     def _run_once(self):
         self._run_samplers_and_flush()
         self._drain_remote()
         self._render_and_update()
-
 
     def _run(self):
         if self.is_rank0 and self.display_manager is not None:
@@ -307,7 +300,6 @@ class TraceMLRuntime:
             self._stop_event.wait(self.interval_sec)
 
         self._run_once()
-
 
     def start(self):
         # Enable stdout/stderr capture for the whole process
@@ -337,8 +329,6 @@ class TraceMLRuntime:
             "Stdout/stderr restore failed",
             StreamCapture.redirect_to_original,
         )
-
-
 
     def log_summaries(self, path=None):
         if not self.is_rank0:

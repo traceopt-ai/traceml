@@ -10,7 +10,6 @@ from traceml.loggers.error_log import get_error_logger
 from traceml.samplers.schema.process import ProcessSample, ProcessGPUMetrics
 
 
-
 class ProcessSampler(BaseSampler):
     """
     Process-level telemetry sampler.
@@ -48,7 +47,6 @@ class ProcessSampler(BaseSampler):
         # Resolve the single GPU this process is using (if any)
         self.device_index = self._resolve_device_index()
 
-
     def _init_process(self) -> None:
         """
         Attach to the current Python process via psutil.
@@ -74,7 +72,6 @@ class ProcessSampler(BaseSampler):
             self.ram_total = psutil.virtual_memory().total
         except Exception as e:
             self.logger.error(f"[TraceML] WARNING: psutil failed to allocate RAM: {e}")
-
 
     def _warmup_cpu(self) -> None:
         """
@@ -114,17 +111,17 @@ class ProcessSampler(BaseSampler):
         except Exception:
             return 0
 
-
     def _sample_cpu(self):
         """Return process CPU utilization as a percentage."""
         try:
-            return float(self.process.cpu_percent(interval=None)) if self.process else 0.0
+            return (
+                float(self.process.cpu_percent(interval=None)) if self.process else 0.0
+            )
         except Exception as e:
             self.logger.error(
                 f"[TraceML] WARNING: Failed to sample CPU usage from process CPU usage: {e}"
             )
             return 0.0
-
 
     def _sample_ram(self):
         """Return process resident memory (RSS) in bytes."""
@@ -154,9 +151,7 @@ class ProcessSampler(BaseSampler):
             with torch.cuda.device(i):
                 used = float(torch.cuda.memory_allocated(i))
                 reserved = float(torch.cuda.memory_reserved(i))
-                total = float(
-                    torch.cuda.get_device_properties(i).total_memory
-                )
+                total = float(torch.cuda.get_device_properties(i).total_memory)
 
             return ProcessGPUMetrics(
                 device_index=i,
@@ -166,11 +161,8 @@ class ProcessSampler(BaseSampler):
             )
 
         except Exception as e:
-            self.logger.error(
-                f"[TraceML] GPU {i} process memory read failed: {e}"
-            )
+            self.logger.error(f"[TraceML] GPU {i} process memory read failed: {e}")
             return None
-
 
     def sample(self):
         """

@@ -49,6 +49,7 @@ def extract_x_axis(table, key="seq"):
     x_hist = [rec.get(key) for rec in table][-100:]
     return x_hist
 
+
 def build_fake_section():
     return {}
 

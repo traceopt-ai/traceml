@@ -11,4 +11,3 @@ def _generate_session_id():
 def get_session_id():
     _SESSION_ID = _generate_session_id()
     return _SESSION_ID
-

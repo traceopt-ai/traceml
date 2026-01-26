@@ -65,12 +65,12 @@ class StepTimerRenderer(BaseRenderer):
     """
 
     def __init__(
-            self,
-            database: Database,
-            top_n: int = 5,
-            remote_store: Optional[RemoteDBStore] = None,
-            window_size: int = 100,
-            worst_metric: str = "p95",  # "p95" or "avg"
+        self,
+        database: Database,
+        top_n: int = 5,
+        remote_store: Optional[RemoteDBStore] = None,
+        window_size: int = 100,
+        worst_metric: str = "p95",  # "p95" or "avg"
     ):
         super().__init__(name="Step Timers", layout_section_name=STEPTIMER_LAYOUT)
         self.db = database
@@ -87,7 +87,6 @@ class StepTimerRenderer(BaseRenderer):
         if self.worst_metric not in ("p95", "avg"):
             self.worst_metric = "p95"
 
-
     def _infer_world_size(self) -> int:
         """
         Best-effort world size inference.
@@ -98,7 +97,6 @@ class StepTimerRenderer(BaseRenderer):
             return max(int(ws), 1)
         except Exception:
             return 1
-
 
     def _iter_rank_dbs(self) -> Iterable[Tuple[int, Database]]:
         """
@@ -167,7 +165,6 @@ class StepTimerRenderer(BaseRenderer):
     def _safe_percentile(arr: np.ndarray, q: float) -> float:
         return float(np.percentile(arr, q)) if arr.size else 0.0
 
-
     def _window(self, vals: List[float]) -> np.ndarray:
         """
         Return last `window_size` samples as a float64 array.
@@ -176,7 +173,6 @@ class StepTimerRenderer(BaseRenderer):
             return np.asarray([], dtype=np.float64)
         n = min(self.window_size, len(vals))
         return np.asarray(vals[-n:], dtype=np.float64)
-
 
     def _rank_stats(
         self,
@@ -200,7 +196,6 @@ class StepTimerRenderer(BaseRenderer):
             "avg": float(arr.mean()),
             "nsamples": float(arr.size),
         }
-
 
     def _trend_from_history(self, arr_full: np.ndarray) -> str:
         """
@@ -241,11 +236,10 @@ class StepTimerRenderer(BaseRenderer):
 
         return ""
 
-
     def _compute_aggregated_row(
-            self,
-            name: str,
-            per_rank: Dict[int, Dict[str, List[float]]],
+        self,
+        name: str,
+        per_rank: Dict[int, Dict[str, List[float]]],
     ) -> StepTimerRow:
         """
         Compute a single aggregated row across ranks for one timer event.
@@ -317,7 +311,9 @@ class StepTimerRenderer(BaseRenderer):
 
         # Stable worst rank selection (windowed, not per-step).
         metric_key = "p95" if self.worst_metric == "p95" else "avg"
-        worst_rank_id = max(rank_stats.keys(), key=lambda r: float(rank_stats[r][metric_key]))
+        worst_rank_id = max(
+            rank_stats.keys(), key=lambda r: float(rank_stats[r][metric_key])
+        )
         worst_rank = f"{worst_rank_id}"
 
         # Display worst-case values across ranks.
@@ -349,7 +345,6 @@ class StepTimerRenderer(BaseRenderer):
         """
         return float(row.avg_100)
 
-
     def _build_rows(self) -> List[StepTimerRow]:
         """
         Build StepTimerRow rows for display.
@@ -363,7 +358,10 @@ class StepTimerRenderer(BaseRenderer):
             return []
 
         # Compute a row per event.
-        rows = [self._compute_aggregated_row(name, per_rank) for name, per_rank in series_by_rank.items()]
+        rows = [
+            self._compute_aggregated_row(name, per_rank)
+            for name, per_rank in series_by_rank.items()
+        ]
 
         # Stable display order: slowest events first.
         rows.sort(key=self._score_for_sort, reverse=True)
@@ -398,8 +396,6 @@ class StepTimerRenderer(BaseRenderer):
         # Ensure "Other" is always last.
         return keep + [other_row]
 
-
-
     # Renderers: Rich / Notebook / Dashboard
     def get_panel_renderable(self) -> Panel:
         rows = self._build_rows()
@@ -421,7 +417,13 @@ class StepTimerRenderer(BaseRenderer):
         if not rows:
             table.add_row(
                 "[dim]No step timers recorded[/dim]",
-                "—", "—", "—", "—", "", "—","—",
+                "—",
+                "—",
+                "—",
+                "—",
+                "",
+                "—",
+                "—",
                 # "—", "—",
             )
         else:
@@ -448,7 +450,6 @@ class StepTimerRenderer(BaseRenderer):
             border_style="blue",
             width=width,
         )
-
 
     def get_notebook_renderable(self) -> HTML:
         rows = self._build_rows()
@@ -526,14 +527,16 @@ class StepTimerRenderer(BaseRenderer):
         </table>
         """
 
-        return HTML(f"""
+        return HTML(
+            f"""
         <div style="{CARD_STYLE}">
             <h4 style="color:#d47a00;margin:0 0 10px 0;">
                 Step Timings (DDP worst-rank aggregation)
             </h4>
             {table_html}
         </div>
-        """)
+        """
+        )
 
     def get_dashboard_renderable(self):
         """
@@ -544,5 +547,3 @@ class StepTimerRenderer(BaseRenderer):
 
     def log_summary(self, path: Optional[str] = None) -> None:
         Console().print(self.get_panel_renderable())
-
-

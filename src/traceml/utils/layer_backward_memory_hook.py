@@ -136,9 +136,9 @@ class LayerBackwardModuleHook:
             total_bytes = _accumulate_tensor_bytes(grad_output)
 
             if total_bytes > 0:
-                _layer_backward_memory_buffer.setdefault(
-                    self.model_id, []
-                ).append((self.layer_name, total_bytes))
+                _layer_backward_memory_buffer.setdefault(self.model_id, []).append(
+                    (self.layer_name, total_bytes)
+                )
 
         except Exception:
             print(
