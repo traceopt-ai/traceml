@@ -28,10 +28,12 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 
 SEED = 42
-MODEL_NAME = "bert-base-uncased"
+# MODEL_NAME = "bert-base-uncased"
+MODEL_NAME = "prajjwal1/bert-mini"
+
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 1000
+MAX_TRAIN_EXAMPLES = 5000
 MAX_VAL_EXAMPLES = 0
 BATCH_SIZE = 32
 EPOCHS = 1
@@ -70,9 +72,7 @@ def prepare_data():
     train_ds = train_ds.rename_column("label", "labels")
     val_ds = val_ds.rename_column("label", "labels")
 
-    collator = DataCollatorWithPadding(
-        tokenizer=tokenizer, padding=True
-    )
+    collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True)
 
     train_loader = DataLoader(
         train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator

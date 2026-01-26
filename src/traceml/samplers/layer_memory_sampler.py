@@ -1,33 +1,65 @@
-import torch
 import time
-from typing import Dict, Any, Optional, Set
 import hashlib
-from .base_sampler import BaseSampler
-from traceml.utils.patch import get_model_queue
+from typing import Dict, Any, Optional, Set
+
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 from traceml.utils.shared_utils import get_hookable_modules
+from traceml.utils.layer_parameter_memory import get_model_queue
+
 
 class LayerMemorySampler(BaseSampler):
     """
-    Sampler that tracks parameter memory usage of PyTorch models at a per-layer level.
+    Sampler for static, per-layer *parameter* memory of PyTorch models.
+
+    This sampler ingests precomputed layer-memory snapshots produced
+    by the training code (not live model objects). Each unique model
+    architecture is recorded at most once.
+
+    Scope
+    -----
+    - One-time / low-frequency sampling
+    - Parameter memory only (no activations, no gradients)
+    - Architecture-level, not step-level
+
+    Design principles
+    -----------------
+    - Sampler never touches live `nn.Module` objects
+    - Deterministic, race-free ingestion
+    - Deduplication based on stable content signature
+    - Safe to run asynchronously
     """
+
+    TABLE_NAME = "layer_memory"
 
     def __init__(self) -> None:
         self.sampler_name = "LayerMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
+        self.sample_idx = 0
+
         self.logger = get_error_logger(self.sampler_name)
-        self._table = self.db.create_or_get_table("layer_memory")
+
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
 
-    def _get_model_signature(self, model: torch.nn.Module) -> str:
+    def _compute_signature(self, layer_memory: Dict[str, float]) -> str:
         """
-        Generate a unique signature for the model.
+        Compute a stable signature for a model based on its layer memory.
+
+        The signature is derived from the ordered (layer_name, bytes)
+        pairs, making it robust to object identity and process lifetime.
+
+        Parameters
+        ----------
+        layer_memory : Dict[str, float]
+            Mapping from layer name to parameter memory (bytes).
+
+        Returns
+        -------
+        str
+            Stable hash identifying the model architecture.
         """
-        items = [model.__class__.__name__]
-        # record each module class name in order
-        for name, module in model.named_modules():
-            items.append(module.__class__.__name__)
+        items = [f"{k}:{int(v)}" for k, v in sorted(layer_memory.items())]
         raw = "|".join(items)
         return hashlib.md5(raw.encode()).hexdigest()
 
@@ -39,67 +71,82 @@ class LayerMemorySampler(BaseSampler):
         layer_mem = {}
         for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
 
-            total = 0.0
-            for p in module.parameters(recurse=False):
-                total += p.element_size() * p.nelement()
+    def _build_sample(
+        self,
+        layer_memory: Dict[str, float],
+    ) -> Dict[str, Any]:
+        """
+        Build a normalized sample record for storage.
 
-            if total > 0:
-                layer_mem[name] = total
-        return layer_mem
+        Parameters
+        ----------
+        layer_memory : Dict[str, float]
+            Per-layer parameter memory (bytes).
 
-    def _sample_model(self, model: torch.nn.Module) -> Optional[Dict[str, Any]]:
-        """Process one model if new, otherwise ignore."""
-        try:
-            sig = self._get_model_signature(model)
-            if sig in self.seen_signatures:
-                return None
+        Returns
+        -------
+        Dict[str, Any]
+            Record ready to be stored in the database.
+        """
+        signature = self._compute_signature(layer_memory)
 
-            self.seen_signatures.add(sig)
-            layer_mem = self._compute_layer_memory(model)
+        if signature in self.seen_signatures:
+            return {}
 
-            sample = {
-                "timestamp": time.time(),
-                "model_index": len(self.seen_signatures) - 1,
-                "total_memory": float(sum(layer_mem.values())),
-                "layer_memory": layer_mem,
-                "model_signature": str(sig),
-            }
-            return sample
+        self.seen_signatures.add(signature)
 
-        except Exception as e:
-            self.logger.error(f"[TraceML] Error sampling model: {e}")
-            return {
-                "timestamp": time.time(),
-                "error": str(e),
-                "model_index": -1,
-                "total_memory": 0.0,
-                "layer_memory": {},
-                "model_signature": None,
-            }
+        return {
+            "timestamp": time.time(),
+            "model_index": len(self.seen_signatures) - 1,
+            "model_signature": signature,
+            "total_memory": float(sum(layer_memory.values())),
+            "layer_memory": layer_memory,
+        }
 
     def _sample_from_queue(self) -> Optional[Dict[str, Any]]:
-        """Iterate the traced model queue and sample the first unseen model."""
+        """
+        Consume the model queue and return the first unseen sample.
+
+        The queue is expected to contain **dict payloads** produced by
+        training code (e.g. via `collect_layer_parameter_memory`).
+
+        Returns
+        -------
+        Optional[Dict[str, Any]]
+            A new sample if available, otherwise None.
+        """
         try:
             queue = get_model_queue()
             if queue.empty():
                 return None
 
             while not queue.empty():
-                model = queue.get_nowait()
-                snap = self._sample_model(model)
-                if snap is not None:
-                    return snap
+                payload = queue.get_nowait()
+                if not payload:
+                    continue
+
+                sample = self._build_sample(payload)
+                if sample:
+                    return sample
+
         except Exception as e:
-            self.logger.error(f"[TraceML] Queue sampling failed: {e}")
+            self.logger.error(f"[TraceML] Layer memory queue ingestion failed: {e}")
         return None
 
-    def sample(self):
+    def sample(self) -> None:
         """
-        Sample memory usage from models in the queue.
+        Ingest one layer-memory snapshot from the queue (if available).
+
+        This method is safe to call frequently; actual writes occur
+        only when a new, unseen model snapshot is encountered.
         """
+        self.sample_idx += 1
         try:
             sample = self._sample_from_queue()
-            if sample is not None:
-                self._table.append(sample)
+            if sample:
+                sample["seq"] = self.sample_idx
+                self.db.add_record(self.TABLE_NAME, sample)
+
         except Exception as e:
-            self.logger.error(f"[TraceML] Layer memory sampling error: {e}")
+            # Absolute safety net — sampling must never break training
+            self.logger.error(f"[TraceML] LayerMemorySampler error: {e}")

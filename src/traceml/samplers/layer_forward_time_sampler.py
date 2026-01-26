@@ -64,8 +64,6 @@ class LayerForwardTimeSampler(BaseSampler):
         """
         for evt in events:
             table_name = f"{evt.layer_name}"
-            table = self.db.create_or_get_table(table_name)
-
             record = {
                 "timestamp": evt.cpu_end,
                 "model_id": evt.model_id,
@@ -75,7 +73,7 @@ class LayerForwardTimeSampler(BaseSampler):
                 "gpu_duration_ms": evt.gpu_duration_ms,
                 "step": evt.step,
             }
-            table.append(record)
+            self.db.add_record(table_name, record)
 
     def sample(self) -> None:
         """

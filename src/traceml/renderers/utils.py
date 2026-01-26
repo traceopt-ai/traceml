@@ -15,6 +15,7 @@ CARD_STYLE = """
     font-family:Arial, sans-serif;
 """
 
+
 def truncate_layer_name(s: str, max_len: int = 20) -> str:
     """
     Truncate layer name by keeping the last max_len characters.

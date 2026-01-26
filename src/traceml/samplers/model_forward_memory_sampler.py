@@ -20,7 +20,6 @@ class ModelForwardMemorySampler(BaseSampler):
         self.sampler_name = "ModelForwardMemorySampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
-        self.db.create_table("model_forward_memory")
 
     def _drain_queue(self) -> None:
         """
@@ -63,7 +62,6 @@ class ModelForwardMemorySampler(BaseSampler):
             "peak_allocated_mb": peak_alloc,
             "peak_reserved_mb": peak_resv,
         }
-
         self.db.add_record("model_forward_memory", record)
 
     def sample(self):

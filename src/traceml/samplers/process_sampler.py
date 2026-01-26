@@ -1,22 +1,42 @@
-import psutil
-import torch
 import os
 import time
-from .base_sampler import BaseSampler
+from typing import Optional
+
+import psutil
+import torch
+
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
+from traceml.samplers.schema.process import ProcessSample, ProcessGPUMetrics
 
 
 class ProcessSampler(BaseSampler):
     """
-    Sampler that tracks CPU and RAM usage of the current Python process
-    (or a specified PID) over time using psutil.
+    Process-level telemetry sampler.
+
+    This sampler tracks resource usage attributed to the *current Python process*:
+    - CPU utilization (process-relative)
+    - Resident memory usage (RSS)
+    - GPU memory usage for the single CUDA device used by this process
+
+    Scope
+    -----
+    - Single-process, single-node
+    - Single GPU per process
+
+    Guarantees
+    -----------------
+    - Sampling failures never propagate
+    - Partial data is acceptable
+    - Overhead is negligible compared to training
     """
 
     def __init__(self) -> None:
         self.sampler_name = "ProcessSampler"
         super().__init__(sampler_name=self.sampler_name)
+        self.sample_idx = 0
+
         self.logger = get_error_logger(self.sampler_name)
-        self.db.create_table("process")
 
         # Initiate
         self._init_process()
@@ -24,8 +44,13 @@ class ProcessSampler(BaseSampler):
         self._warmup_cpu()
         self._init_gpu()
 
+
     def _init_process(self) -> None:
-        """Attach to target process (default: current pid)."""
+        """
+        Attach to the current Python process via psutil.
+
+        Failure degrades sampling gracefully (CPU/RAM reported as zero).
+        """
         try:
             self.pid = os.getpid()
             self.process = psutil.Process(self.pid)
@@ -33,10 +58,13 @@ class ProcessSampler(BaseSampler):
             self.logger.error(
                 f"[TraceML] WARNING: Failed to attach to process {os.getpid()}: {e}"
             )
-            self.pid = None
+            self.pid = -1
             self.process = None
 
     def _init_ram(self) -> None:
+        """
+        Total system RAM.
+        """
         self.ram_total = 0.0
         try:
             self.ram_total = psutil.virtual_memory().total
@@ -44,7 +72,12 @@ class ProcessSampler(BaseSampler):
             self.logger.error(f"[TraceML] WARNING: psutil failed to allocate RAM: {e}")
 
     def _warmup_cpu(self) -> None:
-        # CPU usage measurement
+        """
+        Warm up process CPU sampling.
+
+        psutil requires an initial call to avoid blocking
+        on the first real measurement.
+        """
         try:
             if self.process:
                 self.process.cpu_percent(interval=None)
@@ -56,90 +89,101 @@ class ProcessSampler(BaseSampler):
             self.cpu_count = 0
 
     def _init_gpu(self) -> None:
-        self.gpu_available = False
-        self.gpu_count = 0
-        if torch.cuda.is_available():
-            self.gpu_count = torch.cuda.device_count()
-            self.gpu_available = True
+        """
+        Detect GPU availability
+        """
+        self.gpu_available = torch.cuda.is_available()
+        if not self.gpu_available:
+            self.gpu_count = 0
+            return
+        # Number of visible GPUs (after CUDA_VISIBLE_DEVICES)
+        self.gpu_count = torch.cuda.device_count()
+        self.device_index = None
 
     def _sample_cpu(self):
+        """Return process CPU utilization as a percentage."""
         try:
-            cpu_percent = float(self.process.cpu_percent(interval=None))
+            return (
+                float(self.process.cpu_percent(interval=None)) if self.process else 0.0
+            )
         except Exception as e:
             self.logger.error(
                 f"[TraceML] WARNING: Failed to sample CPU usage from process CPU usage: {e}"
             )
-            cpu_percent = 0.0
-        return cpu_percent
+            return 0.0
 
     def _sample_ram(self):
+        """Return process resident memory (RSS) in bytes."""
         try:
-            ram_percent = float(self.process.memory_info().rss)
+            return float(self.process.memory_info().rss) if self.process else 0.0
         except Exception as e:
             self.logger.error(
                 f"[TraceML] WARNING: Failed to sample RAM usage from process RAM usage: {e}"
             )
-            ram_percent = 0.0
-        return ram_percent
+            return 0.0
 
-    def _sample_gpu(self):
+    def _ensure_cuda_device(self):
+        if not self.gpu_available or self.device_index is not None:
+            return
+
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        torch.cuda.set_device(local_rank)
+        self.device_index = local_rank
+
+    def _sample_gpu(self) -> Optional[ProcessGPUMetrics]:
         """
-        Return per-GPU memory information
+        Sample GPU memory usage for the device used by this process.
+
+        Returns
+        -------
+        Optional[ProcessGPUMetrics]
+            GPU metrics if available, otherwise None.
         """
         if not self.gpu_available:
-            return {}
+            return None
 
-        gpu_info = {}
+        self._ensure_cuda_device()
+        i = self.device_index
         try:
-            for i in range(self.gpu_count):
-                try:
-                    # Current device context
-                    with torch.cuda.device(i):
-                        used = torch.cuda.memory_allocated(i)
-                        reserved = torch.cuda.memory_reserved(i)
-                        total = torch.cuda.get_device_properties(i).total_memory
+            # Current device context
+            with torch.cuda.device(i):
+                used = float(torch.cuda.memory_allocated(i))
+                reserved = float(torch.cuda.memory_reserved(i))
+                total = float(torch.cuda.get_device_properties(i).total_memory)
 
-                    gpu_info[i] = {
-                        "used": float(used),
-                        "reserved": float(reserved),
-                        "total": float(total),
-                    }
+            return ProcessGPUMetrics(
+                device_index=i,
+                mem_used=used,
+                mem_reserved=reserved,
+                mem_total=total,
+            )
 
-                except Exception as e:
-                    self.logger.error(
-                        f"[TraceML] GPU {i} process memory read failed: {e}"
-                    )
-                    gpu_info[i] = {"used": 0.0, "reserved": 0.0, "total": 0.0}
-
-        except Exception as outer:
-            self.logger.error(f"[TraceML] Iterating GPUs failed: {outer}")
-            return {}
-
-        return gpu_info
+        except Exception as e:
+            self.logger.error(f"[TraceML] GPU {i} process memory read failed: {e}")
+            return None
 
     def sample(self):
         """
-        Sample current CPU, RAM and GPU usage of the monitored process.
-        Returns:
-            envelope dict via BaseSampler helpers
-        """
-        try:
-            cpu_pct = self._sample_cpu()
-            ram_rss = self._sample_ram()
-            gpu_mem = self._sample_gpu()
+        Collect a single process-level telemetry snapshot.
 
-            record = {
-                "timestamp": time.time(),
-                "pid": self.pid,
-                "cpu_logical_core_count": self.cpu_count,
-                "cpu_percent": cpu_pct,
-                "ram_used": ram_rss,
-                "ram_total": self.ram_total,
-                "gpu_available": self.gpu_available,
-                "gpu_count": self.gpu_count,
-                "gpu_raw": gpu_mem,
-            }
-            self.db.add_record("process", record)
+        The sample is converted to its wire representation and stored
+        in the local database. All exceptions are caught and logged.
+        """
+        self.sample_idx += 1
+        try:
+            sample = ProcessSample(
+                sample_idx=self.sample_idx,
+                timestamp=time.time(),
+                pid=self.pid,
+                cpu_percent=self._sample_cpu(),
+                cpu_logical_core_count=self.cpu_count,
+                ram_used=self._sample_ram(),
+                ram_total=self.ram_total,
+                gpu_available=self.gpu_available,
+                gpu_count=self.gpu_count,
+                gpu=self._sample_gpu(),
+            )
+            self.db.add_record("process", sample.to_wire())
 
         except Exception as e:
             self.logger.error(f"[TraceML] Process sampling error: {e}")

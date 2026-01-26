@@ -26,7 +26,11 @@ class StreamCapture(StringIO):
 
     def read_buffer(self) -> str:
         with self._local_lock:
-            return self.getvalue()
+            value = self.getvalue()
+            if value:
+                self.seek(0)
+                self.truncate(0)
+            return value
 
     @classmethod
     def redirect_to_capture(cls):

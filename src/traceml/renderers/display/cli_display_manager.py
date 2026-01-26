@@ -5,7 +5,7 @@ from rich.panel import Panel
 from rich.text import Text
 from typing import Dict, Any, Callable, Optional
 from traceml.loggers.error_log import get_error_logger
-from traceml.renderers.display.stdout_stderr_capture import StreamCapture
+from traceml.stdout_stderr_capture import StreamCapture
 from traceml.renderers.display.layout import (
     ROOT_LAYOUT,
     SYSTEM_LAYOUT,
@@ -42,8 +42,8 @@ class CLIDisplayManager:
         )
         dashboard = cls._layout["dashboard"]
         dashboard.split_column(
-            Layout(name="upper_row", ratio=2),
-            Layout(name="middle_row", ratio=3),
+            Layout(name="upper_row", ratio=3),
+            Layout(name="middle_row", ratio=4),
             Layout(name="layer_row", ratio=6),
         )
         dashboard["upper_row"].split_row(
@@ -105,7 +105,6 @@ class CLIDisplayManager:
             )
             try:
                 cls._live_display.start()
-                StreamCapture.redirect_to_capture()
             except Exception as e:
                 cls.logger.error(f"[TraceML] Failed to start shared live display: {e}")
                 cls._live_display = None

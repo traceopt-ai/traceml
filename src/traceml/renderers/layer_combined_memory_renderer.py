@@ -34,7 +34,8 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         layer_db: Database,
         layer_forward_db: Database,
         layer_backward_db: Database,
-        top_n_layers: Optional[int] = 20,
+        top_n_layers: Optional[int] = 5,
+        remote_store: Optional[Any] = None,
     ):
         super().__init__(
             name="Layer-wise Combined Memory",
@@ -47,6 +48,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
             layer_forward_db=layer_forward_db,
             layer_backward_db=layer_backward_db,
             top_n_layers=top_n_layers,
+            remote_store=remote_store,
         )
         self._summary_service = LayerCombinedMemorySummary(
             layer_table=layer_table,
@@ -75,10 +77,8 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
             table.add_row(
                 truncate_layer_name(row["layer"]),
                 fmt_mem_new(row["param_memory"]),
-                f"{fmt_mem_new(row['forward_current'])} / "
-                f"{fmt_mem_new(row['forward_peak'])}",
-                f"{fmt_mem_new(row['backward_current'])} / "
-                f"{fmt_mem_new(row['backward_peak'])}",
+                f"{fmt_mem_new(row['forward_current'])}/{fmt_mem_new(row['forward_peak'])}",
+                f"{fmt_mem_new(row['backward_current'])}/{fmt_mem_new(row['backward_peak'])}",
                 f"{row['pct']:.1f}%",
             )
 
@@ -100,7 +100,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
         title = (
             f"[bold blue]Model #{d['model_index']}[/bold blue] • "
-            f"Total Current: [white]{fmt_mem_new(d['total_current_sum'])}[/white]"
+            f"[white]curr=max across ranks, peak=max curr across steps[/white]"
         )
         return Panel(Group(table), title=title, border_style="blue", width=panel_width)
 
@@ -117,13 +117,11 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                     <td style="text-align:right;">{fmt_mem_new(row['param_memory'])}</td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(row['forward_current'])} /
-                        {fmt_mem_new(row['forward_peak'])}
+                        {fmt_mem_new(row['forward_current'])}/{fmt_mem_new(row['forward_peak'])}
                     </td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(row['backward_current'])} /
-                        {fmt_mem_new(row['backward_peak'])}
+                        {fmt_mem_new(row['backward_current'])}/{fmt_mem_new(row['backward_peak'])}
                     </td>
 
                     <td style="text-align:right;">{fmt_mem_new(row['total_current_memory'])}</td>
@@ -143,13 +141,11 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
                     <td style="text-align:right;">{fmt_mem_new(o['param_memory'])}</td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(o['forward_current'])} /
-                        {fmt_mem_new(o['forward_peak'])}
+                        {fmt_mem_new(o['forward_current'])}/{fmt_mem_new(o['forward_peak'])}
                     </td>
 
                     <td style="text-align:right;">
-                        {fmt_mem_new(o['backward_current'])} /
-                        {fmt_mem_new(o['backward_peak'])}
+                        {fmt_mem_new(o['backward_current'])}/{fmt_mem_new(o['backward_peak'])}
                     </td>
 
                     <td style="text-align:right;">{fmt_mem_new(o['total_current_memory'])}</td>
