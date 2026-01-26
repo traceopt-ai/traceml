@@ -29,13 +29,14 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
+# MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 100000
+MAX_TRAIN_EXAMPLES = 10000
 MAX_VAL_EXAMPLES = 0
 
 BATCH_SIZE = 256
-EPOCHS = 20
+EPOCHS = 10
 LR = 2e-6
 WARMUP_RATIO = 0.06
 
@@ -116,7 +117,7 @@ def prepare_data(rank: int, world_size: int):
 # They add extra visibility into specific code regions.
 
 
-@trace_time("data_transfer", use_gpu=False)
+# @trace_time("data_transfer", use_gpu=False)
 def load_batch_to_device(batch, device):
     """
     Measure CPU → GPU transfer time.
@@ -124,7 +125,7 @@ def load_batch_to_device(batch, device):
     return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
 
-@trace_time("forward", use_gpu=True)
+# @trace_time("forward", use_gpu=True)
 def forward_pass(model, batch, dtype):
     """
     Measure forward pass time (with AMP).
@@ -134,7 +135,7 @@ def forward_pass(model, batch, dtype):
         return model(**batch)
 
 
-@trace_time("backward", use_gpu=True)
+# @trace_time("backward", use_gpu=True)
 def backward_pass(loss, scaler):
     """
     Measure backward pass time.
@@ -142,7 +143,7 @@ def backward_pass(loss, scaler):
     scaler.scale(loss).backward()
 
 
-@trace_time("optimizer_step", use_gpu=True)
+# @trace_time("optimizer_step", use_gpu=True)
 def optimizer_step(scaler, optimizer, scheduler):
     """
     Measure optimizer + scheduler step.
@@ -207,7 +208,7 @@ def main():
     # TraceML: attach hooks to the *real* model
     # --------------------------------------------------------
     # Do this BEFORE wrapping with DistributedDataParallel
-    trace_model_instance(model)
+    # trace_model_instance(model)
 
     # Wrap model with DDP
     if use_cuda:
