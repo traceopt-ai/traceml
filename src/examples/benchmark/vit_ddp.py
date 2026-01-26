@@ -48,7 +48,10 @@ def prepare_dataloader(rank: int, world_size: int):
     No auth required.
     """
 
-    dataset = load_dataset("imagewoof", split="train")
+    dataset = load_dataset(
+        "ljnlonoljpiljm/places365-256px",
+        split="train[:20%]"
+    )
 
     transform = transforms.Compose(
         [
@@ -151,7 +154,7 @@ def main():
     # --------------------------------------------------------
     # Model
     # --------------------------------------------------------
-    model = vit_b_16(num_classes=10).to(device)
+    model = vit_b_16(num_classes=365).to(device)
 
     # Attach TraceML hooks BEFORE DDP
     trace_model_instance(model)
