@@ -47,12 +47,8 @@ def prepare_dataloader(rank: int, world_size: int):
     ImageNet-1k sliced to 10% (~15–20 GB).
     Automatically downloaded on first run.
     """
+    dataset = load_dataset("places365", split="train[:20%]")
 
-    dataset = load_dataset(
-        "imagenet-1k",
-        split="train[:10%]",
-        trust_remote_code=True,
-    )
 
     transform = transforms.Compose(
         [
