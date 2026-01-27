@@ -22,7 +22,7 @@ from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSample
 from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
 
 # Renderers
-from traceml.renderers.system_renderer import SystemRenderer
+from traceml.renderers.system.system_renderer import SystemRenderer
 from traceml.renderers.process_renderer import ProcessRenderer
 from traceml.renderers.layer_combined_memory_renderer import LayerCombinedMemoryRenderer
 from traceml.renderers.steptimer_renderer import StepTimerRenderer

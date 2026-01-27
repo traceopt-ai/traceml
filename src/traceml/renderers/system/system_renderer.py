@@ -1,4 +1,18 @@
-from typing import Dict, Any, List
+"""
+System renderer.
+
+This module contains all presentation logic for system-level telemetry,
+including:
+- CLI rendering (Rich)
+- Notebook rendering (HTML)
+- Dashboard payload adaptation
+- Summary logging
+
+All metric computation is delegated to `SystemMetricsComputer`.
+"""
+
+
+from typing import Dict, Any
 import shutil
 import numpy as np
 
@@ -11,87 +25,35 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
-from .utils import append_text, CARD_STYLE
+from traceml.renderers.utils import append_text, CARD_STYLE
+from .system_compute import SystemMetricsComputer
 
 
 class SystemRenderer(BaseRenderer):
     """
-    Renderer for system-level telemetry.
+        Renderer for system-level telemetry.
 
-    This renderer consumes records from the ``system`` table and produces:
-    - Live snapshots for interactive display
-    - Aggregated summaries over the full run
-    - Multiple presentation formats (CLI, notebook, dashboard)
+        This class is presentation-focused and delegates all aggregation
+        logic to `SystemMetricsComputer`.
 
-    Scope
-    -----
-    This class is intentionally presentation-focused. All computations here
-    are display-oriented aggregations derived from sampled telemetry.
-
-    It does NOT:
-    - Modify or enrich raw telemetry
-    - Coordinate across ranks
-    """
+        Outputs
+        -------
+        - CLI Rich panels
+        - Jupyter notebook HTML cards
+        - Dashboard-compatible payloads
+        - Text summaries for logging
+        """
 
     def __init__(self, database: Database):
         super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT)
         self.db = database
         self._table = database.create_or_get_table("system")
+        self._computer = SystemMetricsComputer(self._table)
 
     # Snapshot computation (latest state)
     def _compute_snapshot(self) -> Dict[str, Any]:
-        """
-        Compute a presentation-friendly snapshot from the most recent sample.
+        return self._computer.compute_snapshot()
 
-        Returns
-        -------
-        Dict[str, Any]
-            Flattened system metrics suitable for rendering.
-        """
-        latest = self.db.get_last_record("system")
-        if not latest:
-            return {
-                "cpu": 0.0,
-                "ram_used": 0.0,
-                "ram_total": 0.0,
-                "gpu_available": False,
-                "gpu_count": 0,
-                "gpu_util_total": None,
-                "gpu_mem_used": None,
-                "gpu_mem_total": None,
-                "gpu_temp_max": None,
-                "gpu_power_usage": None,
-                "gpu_power_limit": None,
-            }
-
-        gpus: List[List[float]] = latest.get("gpus", []) or []
-
-        if gpus:
-            # Unpack per-GPU wire format:
-            # [util, mem_used, mem_total, temperature, power, power_limit]
-            util_total = sum(g[0] for g in gpus)
-            mem_used_total = sum(g[1] for g in gpus)
-            mem_total_total = sum(g[2] for g in gpus)
-            temp_max = max(g[3] for g in gpus)
-            power_total = sum(g[4] for g in gpus)
-            power_limit_total = sum(g[5] for g in gpus)
-        else:
-            util_total = mem_used_total = mem_total_total = None
-            temp_max = power_total = power_limit_total = None
-
-        return {
-            "cpu": latest.get("cpu", 0.0),
-            "ram_used": latest.get("ram_used", 0.0),
-            "ram_total": latest.get("ram_total", 0.0),
-            "gpu_available": latest.get("gpu_available", False),
-            "gpu_count": latest.get("gpu_count", 0),
-            "gpu_util_total": util_total,
-            "gpu_mem_used": mem_used_total,
-            "gpu_mem_total": mem_total_total,
-            "gpu_temp_max": temp_max,
-            "gpu_power_usage": power_total,
-            "gpu_power_limit": power_limit_total,
-        }
 
     def _get_panel_cpu_row(self, table, data):
         ram_pct_str = ""
@@ -246,85 +208,7 @@ class SystemRenderer(BaseRenderer):
         return data
 
     def _compute_summary(self) -> Dict[str, Any]:
-        """
-        Compute aggregated statistics over the entire run.
-
-        Returns
-        -------
-        Dict[str, Any]
-            Summary statistics for logging or reporting.
-        """
-        if not self._table:
-            return {"error": "no data", "total_samples": 0}
-
-        gpu_available = self._table[-1].get("gpu_available", False)
-        gpu_count = self._table[-1].get("gpu_count", 0)
-
-        cpu_vals = [x.get("cpu", 0.0) for x in self._table]
-        ram_vals = [x.get("ram_used", 0.0) for x in self._table]
-        ram_total = self._table[-1].get("ram_total", 0.0)
-
-        summary = {
-            "total_samples": len(self._table),
-            "cpu_avg_percent": round(float(np.mean(cpu_vals)), 2),
-            "cpu_p95_percent": round(float(np.percentile(cpu_vals, 95)), 2),
-            "ram_avg_used": round(float(np.mean(ram_vals)), 2),
-            "ram_peak_used": round(float(np.max(ram_vals)), 2),
-            "ram_total": ram_total,
-            "gpu_available": gpu_available,
-            "gpu_total_count": gpu_count,
-        }
-
-        util_totals = []
-        mem_used_totals = []
-        mem_total_totals = []
-        max_single_gpu_mem = []
-        temp_max_vals = []
-        power_usage_totals = []
-        power_limit_totals = []
-
-        for x in self._table:
-            gpu_raw = x.get("gpu_raw", {}) or {}
-            if gpu_raw:
-                # aggregate over GPUs (job-level)
-                util_totals.append(sum(v["util"] for v in gpu_raw.values()))
-                mem_used_totals.append(sum(v["mem_used"] for v in gpu_raw.values()))
-                mem_total_totals.append(sum(v["mem_total"] for v in gpu_raw.values()))
-                power_usage_totals.append(
-                    sum(v["power_usage"] for v in gpu_raw.values())
-                )
-                power_limit_totals.append(
-                    sum(v["power_limit"] for v in gpu_raw.values())
-                )
-
-                # failure-critical per-device signals
-                max_single_gpu_mem.append(max(v["mem_used"] for v in gpu_raw.values()))
-                temp_max_vals.append(max(v["temperature"] for v in gpu_raw.values()))
-
-        if gpu_available and util_totals:
-            summary.update(
-                {
-                    # GPU utilization (aggregate)
-                    "gpu_util_total_avg": round(float(np.mean(util_totals)), 2),
-                    "gpu_util_total_peak": round(float(np.max(util_totals)), 2),
-                    # GPU memory (aggregate footprint over time)
-                    # Near-worst sustained + absolute peak
-                    "gpu_mem_total_p95": round(
-                        float(np.percentile(mem_used_totals, 95)), 2
-                    ),
-                    "gpu_mem_total_peak": round(float(np.max(mem_used_totals)), 2),
-                    "gpu_mem_total_capacity": round(
-                        float(np.mean(mem_total_totals)), 2
-                    ),
-                    # GPU memory (single-device OOM risk)
-                    # Absolute risk only
-                    "gpu_mem_single_peak": round(float(np.max(max_single_gpu_mem)), 2),
-                    # GPU temperature (single-device thermal risk)
-                    # Typical + absolute
-                    "gpu_temp_peak": round(float(np.max(temp_max_vals)), 2),
-                }
-            )
-        return summary
+        return self._computer.compute_summary()
 
     def _cpu_summary(self, t, s):
         t.add_row(
