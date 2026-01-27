@@ -40,7 +40,7 @@ def launch_tracer_process(script_path, args):
     This function:
     1. Sets TraceML configuration via environment variables
     2. Launches a *child Python process* via torchrun
-    3. Hands off execution to runner.py, which then runs the user script
+    3. Hands off execution to executor.py, which then runs the user script
 
     We intentionally isolate tracing in a subprocess so:
     - user code remains untouched
@@ -62,7 +62,7 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     script_args = args.args or []
 
-    runner_path = str(Path(__file__).parent / "runner.py")
+    runner_path = str(Path(__file__).parent / "executor.py")
 
     if args.mode in ["cli", "dashboard"]:
         cmd = [

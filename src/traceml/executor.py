@@ -1,5 +1,5 @@
 """
-TraceML runner.
+TraceML executor
 
 This module is the execution wrapper used by TraceML to run user scripts
 in a controlled environment.
