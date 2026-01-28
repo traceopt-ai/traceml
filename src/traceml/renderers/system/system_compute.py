@@ -20,7 +20,7 @@ class SystemMetricsComputer:
 
     Parameters
     ----------
-    table : deque[Any]
+    table : list[Any]
         The in-memory system table containing sampled telemetry records.
     """
 

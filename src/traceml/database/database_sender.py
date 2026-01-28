@@ -1,4 +1,5 @@
 import time
+from traceml.loggers.error_log import get_error_logger
 
 
 class DBIncrementalSender:
@@ -55,6 +56,7 @@ class DBIncrementalSender:
         # This remains safe even with bounded deques, which only drop references
         # without copying or mutating objects.
         self._last_sent_record = {}
+        self.logger = get_error_logger("DBIncrementalSender")
 
     def flush(self):
         """
@@ -121,11 +123,14 @@ class DBIncrementalSender:
             return
 
         # Send the incremental payload through the configured transport TCP
-        self.sender.send(
-            {
-                "rank": self.rank,
-                "sampler": self.sampler_name,
-                "timestamp": time.time(),
-                "tables": tables_payload,
-            }
-        )
+        try:
+            self.sender.send(
+                {
+                    "rank": self.rank,
+                    "sampler": self.sampler_name,
+                    "timestamp": time.time(),
+                    "tables": tables_payload,
+                }
+            )
+        except Exception as e:
+            self.logger.error(f"[DBIncrementalSender] sending payload failed with exception {e}")

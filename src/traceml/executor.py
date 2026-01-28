@@ -19,7 +19,7 @@ import sys
 import runpy
 import traceback
 
-from traceml.runtime import TraceMLRuntime
+from traceml.runtime import TraceMLRuntime, TraceMLSettings, TraceMLTCPSettings
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
@@ -83,18 +83,23 @@ def start_runtime(cfg):
     - capture early allocations
     """
     try:
-        runtime = TraceMLRuntime(
-            interval_sec=cfg["interval"],
+        settings = TraceMLSettings(
             mode=cfg["mode"],
+            sampler_interval_sec=cfg["interval"],
+            # you can keep render cadence same or slower; simplest:
+            render_interval_sec=cfg["interval"],
             num_display_layers=cfg["num_display_layers"],
             enable_logging=cfg["enable_logging"],
             logs_dir=cfg["logs_dir"],
-            enable_ddp_telemetry=cfg["enable_ddp_telemetry"],
-            tcp_host=cfg["tcp_host"],
-            tcp_port=cfg["tcp_port"],
             remote_max_rows=cfg["remote_max_rows"],
             session_id=cfg["session_id"],
+            tcp=TraceMLTCPSettings(
+                host=cfg["tcp_host"],
+                port=cfg["tcp_port"],
+            ),
         )
+        runtime = TraceMLRuntime(settings=settings)
+
         print("[TraceML] Starting Runtime")
         runtime.start()
         return runtime

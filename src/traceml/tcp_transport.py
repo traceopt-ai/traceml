@@ -32,6 +32,7 @@ class TCPServer:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._queue: "queue.Queue[Dict]" = queue.Queue()
+        self.logger = get_error_logger("TraceML-TCPServer")
 
     def start(self) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)

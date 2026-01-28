@@ -12,7 +12,7 @@ class BaseSampler(ABC):
 
     def __init__(self, sampler_name) -> None:
         self.db = Database(sampler_name=sampler_name)
-        self.enable_ddp_send: bool = True
+        self.enable_send: bool = True
 
     @abstractmethod
     def sample(self):

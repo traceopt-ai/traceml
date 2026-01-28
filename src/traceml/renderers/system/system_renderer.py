@@ -12,9 +12,8 @@ All metric computation is delegated to `SystemMetricsComputer`.
 """
 
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import shutil
-import numpy as np
 
 from rich.panel import Panel
 from rich.table import Table
@@ -22,11 +21,12 @@ from rich.console import Console
 from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.database.database import Database
+from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.renderers.utils import append_text, CARD_STYLE
 from .system_compute import SystemMetricsComputer
+from traceml.loggers.error_log import get_error_logger
 
 
 class SystemRenderer(BaseRenderer):
@@ -43,15 +43,34 @@ class SystemRenderer(BaseRenderer):
         - Dashboard-compatible payloads
         - Text summaries for logging
         """
+    SAMPLER_NAME = "SystemSampler"
+    TABLE_NAME = "system"
 
-    def __init__(self, database: Database):
+    def __init__(self, remote_store: RemoteDBStore):
         super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT)
-        self.db = database
-        self._table = database.create_or_get_table("system")
-        self._computer = SystemMetricsComputer(self._table)
+        self._store = remote_store
+        self._logger = get_error_logger("SystemRenderer")
+
+    def _get_table(self) -> Optional[Any]:
+        """
+        Retrieve the system table from the RemoteDBStore.
+        Returns None if:
+        - no data has arrived yet
+        - DB or table has not been created yet
+        """
+        try:
+            db = self._store.get_db(rank=0, sampler_name=self.SAMPLER_NAME)
+            if db is None:
+                return None
+            return db.get_table(self.TABLE_NAME)
+        except Exception as e:
+            self._logger.error(f"[TraceML] Failed to fetch system table: {e}")
+            return None
 
     # Snapshot computation (latest state)
     def _compute_snapshot(self) -> Dict[str, Any]:
+        table = self._get_table()
+        self._computer = SystemMetricsComputer(table)
         return self._computer.compute_snapshot()
 
 
