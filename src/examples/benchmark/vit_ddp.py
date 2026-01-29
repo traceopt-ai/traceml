@@ -25,7 +25,7 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 SEED = 42
 IMAGE_SIZE = 224
 
-PER_GPU_BATCH = 192
+PER_GPU_BATCH = 64
 NUM_WORKERS = 2
 
 LR = 3e-4
@@ -75,7 +75,7 @@ def prepare_dataloader(rank: int, world_size: int):
 
     base_sleep = 0.0
     if rank == 0:
-        base_sleep = 0.2
+        base_sleep = 0.02
 
     def preprocess(batch):
         images = []
