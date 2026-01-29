@@ -73,8 +73,16 @@ def prepare_dataloader(rank: int, world_size: int):
         ]
     )
 
+    base_sleep = 0.0
+    if rank == 0:
+        base_sleep = 0.02
+
     def preprocess(batch):
-        images = [transform(img.convert("RGB")) for img in batch["image"]]
+        images = []
+        for img in batch["image"]:
+            if base_sleep > 0:
+                time.sleep(base_sleep)
+            images.append(transform(img.convert("RGB")))
         return {
             "pixel_values": images,
             "labels": batch["label"],
