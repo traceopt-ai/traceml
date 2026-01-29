@@ -53,7 +53,7 @@ from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
 
 # Renderers (IMPORTANT: must read ONLY from RemoteDBStore)
 from traceml.renderers.system.system_renderer import SystemRenderer
-from traceml.renderers.process_renderer import ProcessRenderer
+from traceml.renderers.process.process_renderer import ProcessRenderer
 from traceml.renderers.layer_combined_memory_renderer import LayerCombinedMemoryRenderer
 from traceml.renderers.steptimer_renderer import StepTimerRenderer
 from traceml.renderers.model_combined_renderer import ModelCombinedRenderer
@@ -200,7 +200,7 @@ class TraceMLAggregator:
         """
         renderers: List[BaseRenderer] = [
             SystemRenderer(remote_store=remote_store),
-            # ProcessRenderer(remote_store=remote_store),
+            ProcessRenderer(remote_store=remote_store),
             # LayerCombinedMemoryRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
             # StepTimerRenderer(remote_store=remote_store),
             # ModelCombinedRenderer(remote_store=remote_store),
@@ -315,8 +315,8 @@ class TraceMLRuntime:
         if not (is_ddp and local_rank != 0):
             samplers.append(SystemSampler())
 
-        # samplers += [
-        #     ProcessSampler(),
+        samplers += [
+            ProcessSampler(),
         #     LayerMemorySampler(),
         #     LayerForwardMemorySampler(),
         #     LayerBackwardMemorySampler(),
@@ -325,7 +325,7 @@ class TraceMLRuntime:
         #     LayerForwardTimeSampler(),
         #     LayerBackwardTimeSampler(),
         #     StdoutStderrSampler(),
-        # ]
+        ]
         return samplers
 
 
