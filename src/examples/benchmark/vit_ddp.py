@@ -75,7 +75,7 @@ def prepare_dataloader(rank: int, world_size: int):
 
     base_sleep = 0.0
     if rank == 0:
-        base_sleep = 0.02
+        base_sleep = 0.2
 
     def preprocess(batch):
         images = []
