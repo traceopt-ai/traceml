@@ -1,6 +1,7 @@
-from typing import Dict, Callable, Any, Optional
-from IPython.display import display
+from typing import Any, Callable, Dict, Optional
+
 import ipywidgets as widgets
+from IPython.display import display
 
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.display.page_layout import TRACE_ML_PAGE
@@ -30,7 +31,7 @@ class NotebookDisplayManager:
         """Create and display the page once."""
         if cls._active_logger_count == 0:
             cls._page = widgets.HTML(
-                value="<div style='color:gray;'>Initializing TraceML…</div>"
+                value="<div style='color:gray;'>Initializing TraceML…</div>",
             )
             display(cls._page)
         cls._active_logger_count += 1
@@ -55,7 +56,9 @@ class NotebookDisplayManager:
 
     @classmethod
     def register_layout_content(
-        cls, layout_section: str, content_fn: Callable[[], Any]
+        cls,
+        layout_section: str,
+        content_fn: Callable[[], Any],
     ):
         """
         Register a section render function.
@@ -83,10 +86,12 @@ class NotebookDisplayManager:
                     sections_html[name] = html_obj.data
             except Exception as e:
                 sections_html[name] = (
-                    f"<div style='color:red;'>" f"Error rendering {name}: {e}" f"</div>"
+                    f"<div style='color:red;'>"
+                    f"Error rendering {name}: {e}"
+                    f"</div>"
                 )
                 cls.logger.error(
-                    f"[TraceML] Error rendering notebook section {name}: {e}"
+                    f"[TraceML] Error rendering notebook section {name}: {e}",
                 )
 
         cls._page.value = cls._render_page(sections_html)
@@ -115,7 +120,7 @@ class NotebookDisplayManager:
                     <div style="flex:1; min-width:0;">
                         {section_html(section)}
                     </div>
-                    """
+                    """,
                 )
 
             rows_html.append(
@@ -127,7 +132,7 @@ class NotebookDisplayManager:
                 ">
                     {''.join(cols_html)}
                 </div>
-                """
+                """,
             )
 
         return f"""

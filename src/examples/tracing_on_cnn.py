@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from traceml.decorators import trace_model_instance, trace_time, trace_step
+from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 # -------------------------
 # Medium CNN for MNIST
@@ -70,11 +70,14 @@ def main():
             transforms.RandomRotation(10),
             transforms.ToTensor(),
             # slow_op,
-        ]
+        ],
     )
 
     dataset = datasets.MNIST(
-        root="./mnist", train=True, download=False, transform=transform
+        root="./mnist",
+        train=True,
+        download=False,
+        transform=transform,
     )
     loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
 

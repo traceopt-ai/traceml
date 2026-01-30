@@ -1,7 +1,11 @@
-from nicegui import ui
 import threading
 import time
-from traceml.renderers.display.nicegui_sections.main_page import define_main_page
+
+from nicegui import ui
+
+from traceml.renderers.display.nicegui_sections.main_page import (
+    define_main_page,
+)
 
 
 class NiceGUIDisplayManager:

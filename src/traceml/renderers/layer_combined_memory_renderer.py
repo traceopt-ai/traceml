@@ -1,23 +1,22 @@
-from typing import Dict, Any, List, Optional
 import shutil
+from typing import Any, Dict, List, Optional
 
+from IPython.display import HTML
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Group, Console
-from IPython.display import HTML
 
-from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
+from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import (
     LAYER_COMBINED_MEMORY_LAYOUT,
 )
-from traceml.utils.formatting import fmt_mem_new
-
 from traceml.renderers.layer_combined_memory.services import (
     LayerCombinedMemoryData,
     LayerCombinedMemorySummary,
 )
 from traceml.renderers.utils import truncate_layer_name
+from traceml.utils.formatting import fmt_mem_new
 
 
 class LayerCombinedMemoryRenderer(BaseRenderer):
@@ -70,7 +69,11 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         table.add_column("Layer", justify="left", style="magenta")
         table.add_column("Params", justify="right", style="white")
         table.add_column("Forward (curr/peak)", justify="right", style="cyan")
-        table.add_column("Backward (curr/peak)", justify="right", style="green")
+        table.add_column(
+            "Backward (curr/peak)",
+            justify="right",
+            style="green",
+        )
         table.add_column("% curr", justify="right", style="white")
 
         for row in d["top_items"]:
@@ -96,13 +99,21 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
             table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—")
 
         cols, _ = shutil.get_terminal_size()
-        panel_width = min(max(100, int(cols * 0.75)), 120)  # allow wider output
+        panel_width = min(
+            max(100, int(cols * 0.75)),
+            120,
+        )  # allow wider output
 
         title = (
             f"[bold blue]Model #{d['model_index']}[/bold blue] • "
             f"[white]curr=max across ranks, peak=max curr across steps[/white]"
         )
-        return Panel(Group(table), title=title, border_style="blue", width=panel_width)
+        return Panel(
+            Group(table),
+            title=title,
+            border_style="blue",
+            width=panel_width,
+        )
 
     def get_notebook_renderable(self) -> HTML:
         d = self._data_service.compute_display_data()
@@ -197,7 +208,9 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
         layer_stats = self._summary_service.compute_layer_memory_summary()
         fwd_peaks = self._summary_service.compute_global_peaks(is_forward=True)
-        bwd_peaks = self._summary_service.compute_global_peaks(is_forward=False)
+        bwd_peaks = self._summary_service.compute_global_peaks(
+            is_forward=False,
+        )
 
         top_fwds = self._summary_service.top_n_from_dict(fwd_peaks, n=3)
         top_bwds = self._summary_service.top_n_from_dict(bwd_peaks, n=3)
@@ -218,7 +231,11 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         )
         console.print(panel)
 
-    def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
+    def _render_section_layer_stats(
+        self,
+        table: Table,
+        stats: Dict[str, Any],
+    ) -> None:
         table.add_row(
             "[blue]MODEL MEMORY[/blue]",
             "[dim]|[/dim]",
@@ -226,7 +243,11 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         )
 
     def _render_section_topk(
-        self, table: Table, title: str, items: List, color: str
+        self,
+        table: Table,
+        title: str,
+        items: List,
+        color: str,
     ) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
         if items:

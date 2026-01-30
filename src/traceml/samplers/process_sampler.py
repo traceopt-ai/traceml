@@ -5,9 +5,9 @@ from typing import Optional
 import psutil
 import torch
 
-from traceml.samplers.base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.samplers.schema.process import ProcessSample, ProcessGPUMetrics
+from traceml.samplers.base_sampler import BaseSampler
+from traceml.samplers.schema.process import ProcessGPUMetrics, ProcessSample
 
 
 class ProcessSampler(BaseSampler):
@@ -44,7 +44,6 @@ class ProcessSampler(BaseSampler):
         self._warmup_cpu()
         self._init_gpu()
 
-
     def _init_process(self) -> None:
         """
         Attach to the current Python process via psutil.
@@ -56,7 +55,7 @@ class ProcessSampler(BaseSampler):
             self.process = psutil.Process(self.pid)
         except Exception as e:
             self.logger.error(
-                f"[TraceML] WARNING: Failed to attach to process {os.getpid()}: {e}"
+                f"[TraceML] WARNING: Failed to attach to process {os.getpid()}: {e}",
             )
             self.pid = -1
             self.process = None
@@ -69,7 +68,9 @@ class ProcessSampler(BaseSampler):
         try:
             self.ram_total = psutil.virtual_memory().total
         except Exception as e:
-            self.logger.error(f"[TraceML] WARNING: psutil failed to allocate RAM: {e}")
+            self.logger.error(
+                f"[TraceML] WARNING: psutil failed to allocate RAM: {e}",
+            )
 
     def _warmup_cpu(self) -> None:
         """
@@ -84,7 +85,7 @@ class ProcessSampler(BaseSampler):
             self.cpu_count = psutil.cpu_count(logical=True) or 0
         except Exception as e:
             self.logger.error(
-                f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}"
+                f"[TraceML] WARNING: process.cpu_percent() initial call failed: {e}",
             )
             self.cpu_count = 0
 
@@ -104,21 +105,25 @@ class ProcessSampler(BaseSampler):
         """Return process CPU utilization as a percentage."""
         try:
             return (
-                float(self.process.cpu_percent(interval=None)) if self.process else 0.0
+                float(self.process.cpu_percent(interval=None))
+                if self.process
+                else 0.0
             )
         except Exception as e:
             self.logger.error(
-                f"[TraceML] WARNING: Failed to sample CPU usage from process CPU usage: {e}"
+                f"[TraceML] WARNING: Failed to sample CPU usage from process CPU usage: {e}",
             )
             return 0.0
 
     def _sample_ram(self):
         """Return process resident memory (RSS) in bytes."""
         try:
-            return float(self.process.memory_info().rss) if self.process else 0.0
+            return (
+                float(self.process.memory_info().rss) if self.process else 0.0
+            )
         except Exception as e:
             self.logger.error(
-                f"[TraceML] WARNING: Failed to sample RAM usage from process RAM usage: {e}"
+                f"[TraceML] WARNING: Failed to sample RAM usage from process RAM usage: {e}",
             )
             return 0.0
 
@@ -159,7 +164,9 @@ class ProcessSampler(BaseSampler):
             )
 
         except Exception as e:
-            self.logger.error(f"[TraceML] GPU {i} process memory read failed: {e}")
+            self.logger.error(
+                f"[TraceML] GPU {i} process memory read failed: {e}",
+            )
             return None
 
     def sample(self):

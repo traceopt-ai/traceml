@@ -1,7 +1,7 @@
-import torch.nn as nn
 import torch
-from traceml.utils.shared_utils import EXECUTION_LAYER
+import torch.nn as nn
 
+from traceml.utils.shared_utils import EXECUTION_LAYER
 
 _execution_entry_hook_registry = {}
 
@@ -44,7 +44,7 @@ def attach_execution_entry_hooks(model: nn.Module):
 
         module.register_forward_pre_hook(ForwardEntryHook(name))
         module.register_forward_hook(
-            lambda m, i, o, name=name: attach_backward_entry_hook(o, name)
+            lambda m, i, o, name=name: attach_backward_entry_hook(o, name),
         )
 
     _execution_entry_hook_registry[model_id] = True

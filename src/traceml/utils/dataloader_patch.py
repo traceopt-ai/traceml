@@ -58,7 +58,10 @@ def _traceml_dataloader_iter(self):
 
     while True:
         try:
-            with timed_region(name="_traceml_internal:dataloader_next", use_gpu=False):
+            with timed_region(
+                name="_traceml_internal:dataloader_next",
+                use_gpu=False,
+            ):
                 batch = next(it)
         except StopIteration:
             break

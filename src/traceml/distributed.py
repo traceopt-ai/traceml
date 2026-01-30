@@ -1,4 +1,5 @@
 import os
+
 import torch
 
 
@@ -32,7 +33,9 @@ def get_ddp_info():
             # torchrun always sets LOCAL_RANK
             # mp.spawn often sets RANK
             try:
-                local_rank = int(os.environ["RANK"]) % torch.cuda.device_count()
+                local_rank = (
+                    int(os.environ["RANK"]) % torch.cuda.device_count()
+                )
             except Exception:
                 local_rank = 0
 

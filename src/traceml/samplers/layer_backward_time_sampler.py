@@ -1,13 +1,14 @@
-from typing import List, Deque
-from queue import Empty
 from collections import deque
+from queue import Empty
+from typing import Deque, List
 
-from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 from traceml.utils.layer_backward_time_hooks import (
     LayerBackwardTimeEvent,
     get_layer_backward_time_queue,
 )
+
+from .base_sampler import BaseSampler
 
 
 class LayerBackwardTimeSampler(BaseSampler):

@@ -127,5 +127,5 @@ class DBIncrementalSender:
                 "sampler": self.sampler_name,
                 "timestamp": time.time(),
                 "tables": tables_payload,
-            }
+            },
         )

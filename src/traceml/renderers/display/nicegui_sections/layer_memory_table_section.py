@@ -1,6 +1,6 @@
 from nicegui import ui
-from traceml.utils.formatting import fmt_mem_new
 
+from traceml.utils.formatting import fmt_mem_new
 
 METRIC_TEXT = "text-sm leading-normal text-gray-700"
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
@@ -19,13 +19,15 @@ def build_layer_memory_table_section():
         border-radius: 14px;
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-    """
+    """,
     )
 
     with card:
-        ui.label("Per Layer Memory Stats").classes(METRIC_TITLE).style("color:#d47a00;")
+        ui.label("Per Layer Memory Stats").classes(METRIC_TITLE).style(
+            "color:#d47a00;",
+        )
         container = ui.html("", sanitize=False).style(
-            "flex: 1; overflow-y: auto; width: 100%; padding-right: 12px;"
+            "flex: 1; overflow-y: auto; width: 100%; padding-right: 12px;",
         )
 
     return {"table": container}

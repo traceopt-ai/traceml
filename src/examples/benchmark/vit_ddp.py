@@ -1,23 +1,21 @@
 import os
-import time
 import random
+import time
 from typing import Dict
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader, DistributedSampler
+from datasets import load_dataset
+from torch.cuda.amp import GradScaler, autocast
 from torch.optim import AdamW
-from torch.cuda.amp import autocast, GradScaler
-
+from torch.utils.data import DataLoader, DistributedSampler
 from torchvision import transforms
 from torchvision.models import vit_b_16
-
-from datasets import load_dataset
 
 # ============================================================
 # TraceML imports
 # ============================================================
-from traceml.decorators import trace_model_instance, trace_step, trace_time
+from traceml.decorators import trace_step, trace_time
 
 # ============================================================
 # CONFIG
@@ -41,7 +39,6 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-
 def prepare_dataloader(rank: int, world_size: int):
     """
     ImageWoof: public, ImageNet-derived, realistic.
@@ -50,14 +47,14 @@ def prepare_dataloader(rank: int, world_size: int):
     if rank == 0:
         dataset = load_dataset(
             "ljnlonoljpiljm/places365-256px",
-            split="train[:20%]"
+            split="train[:20%]",
         )
     dist.barrier()  # wait until download finishes
 
-     # now all ranks load from cache
+    # now all ranks load from cache
     dataset = load_dataset(
         "ljnlonoljpiljm/places365-256px",
-        split="train[:20%]"
+        split="train[:20%]",
     )
 
     transform = transforms.Compose(
@@ -70,7 +67,7 @@ def prepare_dataloader(rank: int, world_size: int):
                 mean=(0.485, 0.456, 0.406),
                 std=(0.229, 0.224, 0.225),
             ),
-        ]
+        ],
     )
 
     def preprocess(batch):
@@ -100,7 +97,6 @@ def prepare_dataloader(rank: int, world_size: int):
     )
 
     return loader, sampler
-
 
 
 @trace_time("data_transfer", use_gpu=False)
@@ -167,7 +163,8 @@ def main():
     # trace_model_instance(model)
 
     model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[local_rank]
+        model,
+        device_ids=[local_rank],
     )
 
     optimizer = AdamW(
@@ -213,7 +210,7 @@ def main():
                 print(
                     f"step {global_step:6d} | "
                     f"loss {loss.item():.4f} | "
-                    f"elapsed {elapsed:.1f} min"
+                    f"elapsed {elapsed:.1f} min",
                 )
 
     if rank == 0:

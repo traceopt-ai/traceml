@@ -35,10 +35,10 @@ Design notes
 - Display-only logic
 """
 
-from nicegui import ui
 import plotly.graph_objects as go
-from traceml.utils.formatting import fmt_mem_new
+from nicegui import ui
 
+from traceml.utils.formatting import fmt_mem_new
 
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 LABEL = "text-[11px] font-semibold tracking-wide leading-tight"
@@ -67,27 +67,29 @@ def build_process_section():
         height: 360px;
         overflow-y: auto;
         overflow-x: hidden;
-        """
+        """,
     )
 
     with card:
         with ui.row().classes("w-full items-center justify-between"):
-            ui.label("Process Metrics").classes(METRIC_TITLE).style("color:#d47a00;")
+            ui.label("Process Metrics").classes(METRIC_TITLE).style(
+                "color:#d47a00;",
+            )
             with ui.icon("info").classes("text-gray-400 cursor-pointer"):
                 with ui.menu().props("anchor='bottom left' self='top left'"):
                     ui.markdown(
                         """
             **Process Metrics**
-            
-            - **CPU**: worst rank (current), percentiles over rolling window  
-            - **RAM**: worst rank (current), percentiles over rolling window  
+
+            - **CPU**: worst rank (current), percentiles over rolling window
+            - **RAM**: worst rank (current), percentiles over rolling window
             - **GPU mem**: most constrained rank with least headroom
             - **Imbalance**: max − min across ranks (current)
-            """
+            """,
                     )
 
             window_text = ui.html("window: –", sanitize=False).classes(
-                "text-xs text-gray-500 mr-1"
+                "text-xs text-gray-500 mr-1",
             )
 
         graph = _build_graph()
@@ -212,7 +214,7 @@ def _update_graph(panel, window):
             mode="lines",
             yaxis="y",
             line=dict(color="#4caf50"),
-        )
+        ),
     )
 
     if window[-1].get("gpu_used") is not None:
@@ -230,7 +232,7 @@ def _update_graph(panel, window):
                 mode="lines",
                 yaxis="y2",
                 line=dict(color="#ff9800"),
-            )
+            ),
         )
 
     fig.update_layout(panel["graph"].figure.layout)

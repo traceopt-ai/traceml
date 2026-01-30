@@ -2,6 +2,7 @@ import time
 from typing import Dict, Optional
 
 from traceml.loggers.error_log import get_error_logger
+
 from .database import Database
 
 
@@ -119,7 +120,9 @@ class RemoteDBStore:
 
         # Basic validation to avoid corrupt internal state
         if rank is None or sampler_name is None:
-            self.logger.warning("Invalid remote DB message: missing rank or sampler")
+            self.logger.warning(
+                "Invalid remote DB message: missing rank or sampler",
+            )
             return
 
         try:

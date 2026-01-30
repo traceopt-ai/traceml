@@ -1,7 +1,9 @@
 from typing import Any
-from .base_sampler import BaseSampler
-from traceml.utils.layer_backward_memory_hook import get_layer_backward_queue
+
 from traceml.loggers.error_log import get_error_logger
+from traceml.utils.layer_backward_memory_hook import get_layer_backward_queue
+
+from .base_sampler import BaseSampler
 
 
 class LayerBackwardMemorySampler(BaseSampler):
@@ -86,4 +88,6 @@ class LayerBackwardMemorySampler(BaseSampler):
             self._drain_queue()
         except Exception as e:
             # Sampler must never disrupt training
-            self.logger.error(f"[TraceML] LayerBackwardMemorySampler error: {e}")
+            self.logger.error(
+                f"[TraceML] LayerBackwardMemorySampler error: {e}",
+            )

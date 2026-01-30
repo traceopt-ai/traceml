@@ -1,21 +1,21 @@
+import shutil
 from collections import deque
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
-import shutil
-
+from IPython.display import HTML
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Console
-from IPython.display import HTML
 
-from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import PROCESS_LAYOUT
-from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from .utils import CARD_STYLE
 from traceml.loggers.error_log import get_error_logger
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.cli_display_manager import PROCESS_LAYOUT
+from traceml.utils.formatting import fmt_mem_new, fmt_percent
+
+from .utils import CARD_STYLE
 
 
 class ProcessRenderer(BaseRenderer):
@@ -51,7 +51,9 @@ class ProcessRenderer(BaseRenderer):
     DASHBOARD_MAX_ROWS = 200
 
     def __init__(
-        self, database: Database, remote_store: Optional[RemoteDBStore] = None
+        self,
+        database: Database,
+        remote_store: Optional[RemoteDBStore] = None,
     ):
         super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT)
 
@@ -74,7 +76,6 @@ class ProcessRenderer(BaseRenderer):
             return float(x)
         except Exception:
             return default
-
 
     def _compute_live_snapshot(self) -> Dict[str, Any]:
         """
@@ -173,9 +174,10 @@ class ProcessRenderer(BaseRenderer):
                     "gpu_rank": gpu_rank[idx],
                     "gpu_used_imbalance": (
                         max(gpu_used) - min(gpu_used)
-                        if len(gpu_used) > 1 else 0.0
+                        if len(gpu_used) > 1
+                        else 0.0
                     ),
-                }
+                },
             )
 
         return snapshot
@@ -255,7 +257,10 @@ class ProcessRenderer(BaseRenderer):
 
                 ram_used = self._safe_float(row.get("ram_used"))
                 ram_used_vals.append(ram_used)
-                ram_total = max(ram_total, self._safe_float(row.get("ram_total")))
+                ram_total = max(
+                    ram_total,
+                    self._safe_float(row.get("ram_total")),
+                )
 
                 gpu = row.get("gpu")
                 if row.get("gpu_available", False) and gpu:
@@ -288,7 +293,7 @@ class ProcessRenderer(BaseRenderer):
                             if len(gpu_used_vals) > 1
                             else 0.0
                         ),
-                    }
+                    },
                 )
             else:
                 entry.update(
@@ -298,7 +303,7 @@ class ProcessRenderer(BaseRenderer):
                         "gpu_headroom": None,
                         "gpu_rank": None,
                         "gpu_used_imbalance": 0.0,
-                    }
+                    },
                 )
 
             self._dashboard_rollup.append(entry)
@@ -446,11 +451,15 @@ class ProcessRenderer(BaseRenderer):
         if gpu_used:
             summary.update(
                 {
-                    "gpu_mem_used_p95_single": float(np.percentile(gpu_used, 95)),
+                    "gpu_mem_used_p95_single": float(
+                        np.percentile(gpu_used, 95),
+                    ),
                     "gpu_mem_used_peak_single": float(np.max(gpu_used)),
-                    "gpu_mem_reserved_peak_single": float(np.max(gpu_reserved)),
+                    "gpu_mem_reserved_peak_single": float(
+                        np.max(gpu_reserved),
+                    ),
                     "gpu_mem_total_capacity": float(np.max(gpu_total)),
-                }
+                },
             )
 
         return summary
@@ -486,7 +495,11 @@ class ProcessRenderer(BaseRenderer):
 
     def _proc_gpu_memory(self, t: Table, block: dict) -> None:
         if not block.get("is_GPU_available", False):
-            t.add_row("GPU", "[magenta]|[/magenta]", "[red]Not available[/red]")
+            t.add_row(
+                "GPU",
+                "[magenta]|[/magenta]",
+                "[red]Not available[/red]",
+            )
             return
 
         total = block.get("gpu_mem_total_capacity", 0.0)
@@ -529,5 +542,5 @@ class ProcessRenderer(BaseRenderer):
                 t,
                 title="[bold magenta]Process - Summary[/bold magenta]",
                 border_style="magenta",
-            )
+            ),
         )

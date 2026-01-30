@@ -1,13 +1,14 @@
-from typing import List, Deque
-from queue import Empty
 from collections import deque
+from queue import Empty
+from typing import Deque, List
 
-from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 from traceml.utils.layer_forward_time_hooks import (
     LayerForwardTimeEvent,
     get_layer_forward_time_queue,
 )
+
+from .base_sampler import BaseSampler
 
 
 class LayerForwardTimeSampler(BaseSampler):

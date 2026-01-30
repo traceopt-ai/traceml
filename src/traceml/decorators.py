@@ -1,28 +1,38 @@
 import functools
 import sys
-from typing import Callable, Optional, List
-import torch.nn as nn
 import time
-import torch
 from contextlib import contextmanager
+from typing import Callable, List, Optional
 
-from traceml.utils.layer_parameter_memory import (
-    model_queue,
-    collect_layer_parameter_memory,
-)
-from traceml.utils.step_memory import StepMemoryTracker
-from traceml.utils.layer_forward_memory_hook import attach_layer_forward_memory_hooks
-from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memory_hooks
+import torch
+import torch.nn as nn
 
-from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
-from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
-
-from traceml.utils.steptimer import StepTimeEvent, record_step_time_event, timed_region
+from traceml.utils.cuda_event_pool import get_cuda_event
+from traceml.utils.dataloader_patch import patch_dataloader
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
-
-from traceml.utils.dataloader_patch import patch_dataloader
-from traceml.utils.cuda_event_pool import get_cuda_event
+from traceml.utils.layer_backward_memory_hook import (
+    attach_layer_backward_memory_hooks,
+)
+from traceml.utils.layer_backward_time_hooks import (
+    attach_layer_backward_time_hooks,
+)
+from traceml.utils.layer_forward_memory_hook import (
+    attach_layer_forward_memory_hooks,
+)
+from traceml.utils.layer_forward_time_hooks import (
+    attach_layer_forward_time_hooks,
+)
+from traceml.utils.layer_parameter_memory import (
+    collect_layer_parameter_memory,
+    model_queue,
+)
+from traceml.utils.step_memory import StepMemoryTracker
+from traceml.utils.steptimer import (
+    StepTimeEvent,
+    record_step_time_event,
+    timed_region,
+)
 
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
@@ -84,7 +94,7 @@ def trace_model_instance(
     trace_execution: bool = True,
     include_names: Optional[List[str]] = None,
     exclude_names: Optional[List[str]] = None,
-    leaf_only: bool = True
+    leaf_only: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -144,7 +154,10 @@ def trace_model_instance(
             attach_execution_entry_hooks(model)
 
     except Exception as e:
-        print(f"[TraceML] Failed to trace model instance: {e}", file=sys.stderr)
+        print(
+            f"[TraceML] Failed to trace model instance: {e}",
+            file=sys.stderr,
+        )
 
 
 def trace_time(name: str, use_gpu: bool = True) -> Callable:
@@ -186,7 +199,10 @@ def trace_time(name: str, use_gpu: bool = True) -> Callable:
                 result = func(*args, **kwargs)
                 cpu_end = time.time()
                 evt = StepTimeEvent(
-                    name=name, device=device, cpu_start=cpu_start, cpu_end=cpu_end
+                    name=name,
+                    device=device,
+                    cpu_start=cpu_start,
+                    cpu_end=cpu_end,
                 )
 
             record_step_time_event(evt)

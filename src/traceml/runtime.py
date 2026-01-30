@@ -2,46 +2,58 @@ import threading
 from typing import List, Optional, Tuple
 
 from traceml.config import config
-from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.distributed import get_ddp_info
-from .session import get_session_id
-
-from traceml.samplers.base_sampler import BaseSampler
-from traceml.renderers.base_renderer import BaseRenderer
-
-# Samplers
-from traceml.samplers.system_sampler import SystemSampler
-from traceml.samplers.process_sampler import ProcessSampler
-from traceml.samplers.step_memory_sampler import StepMemorySampler
-from traceml.samplers.layer_memory_sampler import LayerMemorySampler
-from traceml.samplers.layer_forward_memory_sampler import LayerForwardMemorySampler
-from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySampler
-from traceml.samplers.steptimer_sampler import StepTimerSampler
-from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
-from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
-from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
-
-# Renderers
-from traceml.renderers.system_renderer import SystemRenderer
-from traceml.renderers.process_renderer import ProcessRenderer
-from traceml.renderers.layer_combined_memory_renderer import LayerCombinedMemoryRenderer
-from traceml.renderers.steptimer_renderer import StepTimerRenderer
-from traceml.renderers.model_combined_renderer import ModelCombinedRenderer
-from traceml.renderers.layer_combined_timing_renderer import LayerCombinedTimerRenderer
-from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
-
-# Display backends
-from traceml.renderers.display.cli_display_manager import CLIDisplayManager
-from traceml.renderers.display.notebook_display_manager import NotebookDisplayManager
-from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayManager
+from traceml.database.database_sender import DBIncrementalSender
 
 # DDP telemetry
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.database.database_sender import DBIncrementalSender
-from traceml.tcp_transport import TCPServer, TCPClient, TCPConfig
+from traceml.distributed import get_ddp_info
+from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.renderers.base_renderer import BaseRenderer
 
+# Display backends
+from traceml.renderers.display.cli_display_manager import CLIDisplayManager
+from traceml.renderers.display.nicegui_display_manager import (
+    NiceGUIDisplayManager,
+)
+from traceml.renderers.display.notebook_display_manager import (
+    NotebookDisplayManager,
+)
+from traceml.renderers.layer_combined_memory_renderer import (
+    LayerCombinedMemoryRenderer,
+)
+from traceml.renderers.layer_combined_timing_renderer import (
+    LayerCombinedTimerRenderer,
+)
+from traceml.renderers.model_combined_renderer import ModelCombinedRenderer
+from traceml.renderers.process_renderer import ProcessRenderer
+from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
+from traceml.renderers.steptimer_renderer import StepTimerRenderer
+
+# Renderers
+from traceml.renderers.system_renderer import SystemRenderer
+from traceml.samplers.base_sampler import BaseSampler
+from traceml.samplers.layer_backward_memory_sampler import (
+    LayerBackwardMemorySampler,
+)
+from traceml.samplers.layer_backward_time_sampler import (
+    LayerBackwardTimeSampler,
+)
+from traceml.samplers.layer_forward_memory_sampler import (
+    LayerForwardMemorySampler,
+)
+from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
+from traceml.samplers.layer_memory_sampler import LayerMemorySampler
+from traceml.samplers.process_sampler import ProcessSampler
+from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
+from traceml.samplers.step_memory_sampler import StepMemorySampler
+from traceml.samplers.steptimer_sampler import StepTimerSampler
+
+# Samplers
+from traceml.samplers.system_sampler import SystemSampler
 from traceml.stdout_stderr_capture import StreamCapture
+from traceml.tcp_transport import TCPClient, TCPConfig, TCPServer
 
+from .session import get_session_id
 
 _DISPLAY_BACKENDS = {
     "cli": (CLIDisplayManager, "get_panel_renderable"),
@@ -103,7 +115,9 @@ class TraceMLRuntime:
             self.remote_store = None
 
         self.display_manager_cls, self._render_attr = _DISPLAY_BACKENDS[mode]
-        self.display_manager = self.display_manager_cls() if self.is_rank0 else None
+        self.display_manager = (
+            self.display_manager_cls() if self.is_rank0 else None
+        )
 
         if samplers is None or renderers is None:
             built_samplers, built_renderers = self._build_components(
@@ -142,7 +156,12 @@ class TraceMLRuntime:
             self.logger.error(f"[TraceML] {label}: {e}")
             return None
 
-    def _init_ddp_transport_runtime(self, host: str, port: int, remote_max_rows: int):
+    def _init_ddp_transport_runtime(
+        self,
+        host: str,
+        port: int,
+        remote_max_rows: int,
+    ):
         cfg = TCPConfig(host=host, port=port)
 
         if self.is_rank0:
@@ -190,7 +209,10 @@ class TraceMLRuntime:
         proc_sampler = ProcessSampler()
         samplers += [proc_sampler]
         renderers += [
-            ProcessRenderer(database=proc_sampler.db, remote_store=remote_store)
+            ProcessRenderer(
+                database=proc_sampler.db,
+                remote_store=remote_store,
+            ),
         ]
 
         # Layer memory
@@ -205,7 +227,7 @@ class TraceMLRuntime:
                 layer_backward_db=bwd_mem.db,
                 top_n_layers=num_display_layers,
                 remote_store=remote_store,
-            )
+            ),
         ]
 
         # Step memory + timers
@@ -213,7 +235,10 @@ class TraceMLRuntime:
         step_timer = StepTimerSampler()
         samplers += [step_mem, step_timer]
         renderers += [
-            StepTimerRenderer(database=step_timer.db, remote_store=remote_store),
+            StepTimerRenderer(
+                database=step_timer.db,
+                remote_store=remote_store,
+            ),
             ModelCombinedRenderer(
                 time_db=step_timer.db,
                 memory_db=step_mem.db,
@@ -231,7 +256,7 @@ class TraceMLRuntime:
                 backward_db=bwd_time.db,
                 top_n_layers=num_display_layers,
                 remote_store=remote_store,
-            )
+            ),
         ]
 
         std_sampler = StdoutStderrSampler()
@@ -249,15 +274,25 @@ class TraceMLRuntime:
             if db is None:
                 continue
 
-            self._safe(f"{sampler.sampler_name}.writer.flush failed", db.writer.flush)
+            self._safe(
+                f"{sampler.sampler_name}.writer.flush failed",
+                db.writer.flush,
+            )
 
-            if self.is_worker and self.enable_ddp_telemetry and db.sender is not None:
+            if (
+                self.is_worker
+                and self.enable_ddp_telemetry
+                and db.sender is not None
+            ):
                 self._safe(
-                    f"{sampler.sampler_name}.sender.flush failed", db.sender.flush
+                    f"{sampler.sampler_name}.sender.flush failed",
+                    db.sender.flush,
                 )
 
     def _drain_remote(self):
-        if not (self.is_rank0 and self.enable_ddp_telemetry and self._tcp_server):
+        if not (
+            self.is_rank0 and self.enable_ddp_telemetry and self._tcp_server
+        ):
             return
 
         for msg in self._tcp_server.poll():
@@ -279,9 +314,15 @@ class TraceMLRuntime:
                     render_fn,
                 )
 
-            self._safe(f"{renderer.__class__.__name__}.register failed", register)
+            self._safe(
+                f"{renderer.__class__.__name__}.register failed",
+                register,
+            )
 
-        self._safe("Display update failed", self.display_manager.update_display)
+        self._safe(
+            "Display update failed",
+            self.display_manager.update_display,
+        )
 
     def _run_once(self):
         self._run_samplers_and_flush()
@@ -290,7 +331,10 @@ class TraceMLRuntime:
 
     def _run(self):
         if self.is_rank0 and self.display_manager is not None:
-            self._safe("Display start failed", self.display_manager.start_display)
+            self._safe(
+                "Display start failed",
+                self.display_manager.start_display,
+            )
 
         while not self._stop_event.is_set():
             self._run_once()
@@ -311,10 +355,15 @@ class TraceMLRuntime:
         self._thread.join(timeout=self.interval_sec * 5)
 
         if self._thread.is_alive():
-            self.logger.error("[TraceML] WARNING: runtime thread did not terminate")
+            self.logger.error(
+                "[TraceML] WARNING: runtime thread did not terminate",
+            )
 
         if self.is_rank0 and self.display_manager is not None:
-            self._safe("Display release failed", self.display_manager.release_display)
+            self._safe(
+                "Display release failed",
+                self.display_manager.release_display,
+            )
 
         if self._tcp_server:
             self._safe("TCPServer.stop failed", self._tcp_server.stop)

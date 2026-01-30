@@ -72,7 +72,7 @@ def setup_error_logger() -> logging.Logger:
         logging.Formatter(
             "%(asctime)s\t%(levelname)s\t%(name)s\t%(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        ),
     )
     logger.addHandler(fh)
 
