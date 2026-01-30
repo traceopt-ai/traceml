@@ -91,17 +91,19 @@ def build_system_section():
         height: 360px;
         overflow-y: auto;
         overflow-x: hidden;
-        """
+        """,
     )
 
     with card:
         with ui.row().classes("w-full items-center justify-between"):
-            ui.label("System Metrics").classes(METRIC_TITLE).style("color:#d47a00;")
+            ui.label("System Metrics").classes(METRIC_TITLE).style(
+                "color:#d47a00;",
+            )
             with ui.icon("info").classes("text-gray-400 cursor-pointer"):
                 with (
                     ui.menu()
                     .props("anchor='bottom left' self='top left' auto-close")
-                    .classes("w-96 p-2")
+                    .classes("w-96 p-2"),
                 ):
                     ui.markdown(
                         """
@@ -112,10 +114,10 @@ def build_system_section():
             - **GPU Util**: average across GPUs visible on this node; skew = max − min.
             - **GPU Mem**: worst GPU (max mem across local GPUs).
             - **Temp**: max GPU temperature on this node.
-            """
+            """,
                     )
             window_text = ui.html("window: –", sanitize=False).classes(
-                "text-xs text-gray-500 mr-1"
+                "text-xs text-gray-500 mr-1",
             )
 
         graph = _build_graph()
@@ -266,7 +268,7 @@ def _update_graph(panel, window):
             mode="lines",
             line=dict(color="#4caf50"),
             yaxis="y",
-        )
+        ),
     )
 
     if window[-1].get("gpu_available"):
@@ -282,7 +284,7 @@ def _update_graph(panel, window):
                 mode="lines",
                 line=dict(color="#ff9800"),
                 yaxis="y2",
-            )
+            ),
         )
 
     fig.update_layout(panel["graph"].figure.layout)

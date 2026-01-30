@@ -193,14 +193,22 @@ def _make_empty_figure() -> go.Figure:
             x=1.0,
             font=dict(size=9),
         ),
-        xaxis=dict(showgrid=False, title="Training Step", tickfont=dict(size=9)),
+        xaxis=dict(
+            showgrid=False,
+            title="Training Step",
+            tickfont=dict(size=9),
+        ),
         yaxis=dict(tickfont=dict(size=9)),
     )
     return fig
 
 
 def _update_metric_graph(
-    plotly_ui, x: List[int], y_worst: List[float], y_median: List[float], y_label: str
+    plotly_ui,
+    x: List[int],
+    y_worst: List[float],
+    y_median: List[float],
+    y_label: str,
 ) -> None:
     """Update Plotly graph with worst + median curves (same units)."""
     fig = go.Figure()
@@ -213,7 +221,7 @@ def _update_metric_graph(
             mode="lines",
             name="Worst",
             line=dict(width=2),
-        )
+        ),
     )
 
     # Median curve (dashed, slightly thinner)
@@ -224,7 +232,7 @@ def _update_metric_graph(
             mode="lines",
             name="Median",
             line=dict(width=1, dash="dash"),
-        )
+        ),
     )
 
     fig.update_layout(
@@ -342,14 +350,16 @@ def _build_metric_card(title: str) -> Dict[str, Any]:
         border: 1px solid rgba(255,255,255,0.25);
         box-shadow: 0 4px 10px rgba(0,0,0,0.10);
         height: 360px;
-        """
+        """,
     )
 
     with card:
         ui.label(title).classes(METRIC_TITLE).style("color:#d47a00;")
         plotly_ui = ui.plotly(_make_empty_figure()).classes("w-full")
         stats_html = (
-            ui.html("", sanitize=False).classes(METRIC_TEXT).style("color:#333")
+            ui.html("", sanitize=False)
+            .classes(METRIC_TEXT)
+            .style("color:#333")
         )
 
     return {"card": card, "graph": plotly_ui, "stats_html": stats_html}
@@ -377,7 +387,8 @@ def build_model_combined_section() -> Dict[str, Any]:
 
 
 def update_model_combined_section(
-    panel: Dict[str, Any], telemetry: Optional[Dict[str, Any]]
+    panel: Dict[str, Any],
+    telemetry: Optional[Dict[str, Any]],
 ) -> None:
     """
     Update the model summary cards from ModelCombinedRenderer telemetry.
@@ -392,14 +403,30 @@ def update_model_combined_section(
 
     # Map UI card keys -> renderer metric keys + y labels + formatters
     mapping: Dict[
-        str, Tuple[str, str, Callable[[float], str], Callable[[float], str]]
+        str,
+        Tuple[str, str, Callable[[float], str], Callable[[float], str]],
     ] = {
-        "dataloader": ("dataLoader_fetch", "Time (ms)", fmt_time_run, fmt_time_run),
+        "dataloader": (
+            "dataLoader_fetch",
+            "Time (ms)",
+            fmt_time_run,
+            fmt_time_run,
+        ),
         "step_time": ("step_time", "Time (ms)", fmt_time_run, fmt_time_run),
-        "step_memory": ("step_gpu_memory", "Memory (MB)", fmt_mem_new, fmt_mem_new),
+        "step_memory": (
+            "step_gpu_memory",
+            "Memory (MB)",
+            fmt_mem_new,
+            fmt_mem_new,
+        ),
     }
 
-    for card_key, (metric_name, y_label, value_fmt, skew_fmt) in mapping.items():
+    for card_key, (
+        metric_name,
+        y_label,
+        value_fmt,
+        skew_fmt,
+    ) in mapping.items():
         card_handles = panel.get(card_key)
         if not card_handles:
             continue

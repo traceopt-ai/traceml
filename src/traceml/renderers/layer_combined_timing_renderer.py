@@ -9,7 +9,9 @@ from rich.table import Table
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import LAYER_COMBINED_TIMER_LAYOUT
+from traceml.renderers.display.cli_display_manager import (
+    LAYER_COMBINED_TIMER_LAYOUT,
+)
 from traceml.renderers.layer_combined_timing.services import (
     LayerCombinedTimerData,
     LayerCombinedTimerSummary,
@@ -76,7 +78,8 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         o = d.get("other") or {}
         # show Other only if it contributes something
         if (
-            o.get("total_forward_current", 0.0) + o.get("total_backward_current", 0.0)
+            o.get("total_forward_current", 0.0)
+            + o.get("total_backward_current", 0.0)
         ) > 0:
             table.add_row(
                 "Other Layers",
@@ -149,8 +152,12 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         console = Console()
 
         layer_stats = self._summary_service.compute_layer_timing_summary()
-        act_peaks = self._summary_service.compute_global_averages(is_forward=True)
-        grad_peaks = self._summary_service.compute_global_averages(is_forward=False)
+        act_peaks = self._summary_service.compute_global_averages(
+            is_forward=True,
+        )
+        grad_peaks = self._summary_service.compute_global_averages(
+            is_forward=False,
+        )
 
         top_acts = self._summary_service.top_n_from_dict(act_peaks, n=3)
         top_grads = self._summary_service.top_n_from_dict(grad_peaks, n=3)
@@ -161,9 +168,17 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         table.add_column(justify="right", style="white")
 
         self._render_section_layer_stats(table, layer_stats)
-        self._render_section_topk(table, "Top 3 Forward Layers (Avg)", top_acts, "cyan")
         self._render_section_topk(
-            table, "TOP-3 Backward Layers (Avg)", top_grads, "green"
+            table,
+            "Top 3 Forward Layers (Avg)",
+            top_acts,
+            "cyan",
+        )
+        self._render_section_topk(
+            table,
+            "TOP-3 Backward Layers (Avg)",
+            top_grads,
+            "green",
         )
 
         panel = Panel(
@@ -173,7 +188,11 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         )
         console.print(panel)
 
-    def _render_section_layer_stats(self, table: Table, stats: Dict[str, Any]) -> None:
+    def _render_section_layer_stats(
+        self,
+        table: Table,
+        stats: Dict[str, Any],
+    ) -> None:
         table.add_row(
             "[blue]TOTAL LAYERS SEEN[/blue]",
             "[dim]|[/dim]",
@@ -181,7 +200,11 @@ class LayerCombinedTimerRenderer(BaseRenderer):
         )
 
     def _render_section_topk(
-        self, table: Table, title: str, items: List, color: str
+        self,
+        table: Table,
+        title: str,
+        items: List,
+        color: str,
     ) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
         if items:

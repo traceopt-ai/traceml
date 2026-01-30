@@ -64,7 +64,11 @@ class DatabaseWriter:
 
         # Pathlib-based log root
         self.logs_dir = (
-            Path(config.logs_dir) / session_id / "data" / rank_dir / sampler_name
+            Path(config.logs_dir)
+            / session_id
+            / "data"
+            / rank_dir
+            / sampler_name
         )
 
         # Tracks the *last written record object* per table.

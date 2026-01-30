@@ -256,7 +256,7 @@ def _aggregate_worst_and_median(
         latest = steps[-1] if steps else None
         if latest is not None:
             _dbg.error(
-                f"[agg debug] latest_step={latest} ranks={sorted(aligned[latest].keys())}"
+                f"[agg debug] latest_step={latest} ranks={sorted(aligned[latest].keys())}",
             )
 
     return dict(
@@ -306,7 +306,8 @@ class ModelCombinedRenderer(BaseRenderer):
         max_points: int = 300,
     ):
         super().__init__(
-            name="Model Summary", layout_section_name=MODEL_COMBINED_LAYOUT
+            name="Model Summary",
+            layout_section_name=MODEL_COMBINED_LAYOUT,
         )
 
         self.time_db = time_db
@@ -332,7 +333,9 @@ class ModelCombinedRenderer(BaseRenderer):
     # ---------
 
     def _iter_rank_dbs(
-        self, local_db: Database, sampler_name: str
+        self,
+        local_db: Database,
+        sampler_name: str,
     ) -> Iterable[Tuple[int, Database]]:
         """
         Yield (rank, Database) pairs.
@@ -352,7 +355,11 @@ class ModelCombinedRenderer(BaseRenderer):
             if db is not None:
                 yield int(rank), db
 
-    def _latest_step_for_db(self, db: Database, table_name: str) -> Optional[int]:
+    def _latest_step_for_db(
+        self,
+        db: Database,
+        table_name: str,
+    ) -> Optional[int]:
         """
         Return the last step recorded in `table_name` for this DB, else None.
         """
@@ -417,7 +424,8 @@ class ModelCombinedRenderer(BaseRenderer):
         return min(steps) if steps else None
 
     def _collect_time_series(
-        self, event_name: str
+        self,
+        event_name: str,
     ) -> Dict[int, List[Tuple[int, float]]]:
         """
         Collect per-rank time series for a given time event table.
@@ -431,7 +439,10 @@ class ModelCombinedRenderer(BaseRenderer):
         for rank, db in self._iter_rank_dbs(self.time_db, "StepTimerSampler"):
             table = db.create_or_get_table(event_name)
             pairs = _tail_rows(
-                table, step_key="step", value_key="duration_ms", limit=self.max_points
+                table,
+                step_key="step",
+                value_key="duration_ms",
+                limit=self.max_points,
             )
             if pairs:
                 out[rank] = pairs
@@ -446,7 +457,10 @@ class ModelCombinedRenderer(BaseRenderer):
         """
         out: Dict[int, List[Tuple[int, float]]] = {}
 
-        for rank, db in self._iter_rank_dbs(self.memory_db, "StepMemorySampler"):
+        for rank, db in self._iter_rank_dbs(
+            self.memory_db,
+            "StepMemorySampler",
+        ):
             table = db.create_or_get_table("step_memory")
             pairs = _tail_rows(
                 table,
@@ -492,7 +506,11 @@ class ModelCombinedRenderer(BaseRenderer):
         )
 
         # If nothing is available yet, return cached payload or empty.
-        if dl_completed is None and st_completed is None and mem_completed is None:
+        if (
+            dl_completed is None
+            and st_completed is None
+            and mem_completed is None
+        ):
             return self._cached_payload or {}
 
         signature = (
@@ -502,7 +520,10 @@ class ModelCombinedRenderer(BaseRenderer):
         )
 
         # Cache hit: if nothing advanced, return cached.
-        if self._cached_signature is not None and signature <= self._cached_signature:
+        if (
+            self._cached_signature is not None
+            and signature <= self._cached_signature
+        ):
             return self._cached_payload or {}
 
         payload: Dict[str, Any] = {}
@@ -510,7 +531,9 @@ class ModelCombinedRenderer(BaseRenderer):
         # ---- timers (each gated by its own completed step) ----
         for internal, friendly in self.FRIENDLY_NAMES.items():
             completed_step = (
-                dl_completed if internal.endswith("dataloader_next") else st_completed
+                dl_completed
+                if internal.endswith("dataloader_next")
+                else st_completed
             )
             if completed_step is None:
                 continue
@@ -568,7 +591,10 @@ class ModelCombinedRenderer(BaseRenderer):
 
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("[bold cyan]Stat[/bold cyan]")
-        table.add_column("[bold blue]Dataload time[/bold blue]", justify="right")
+        table.add_column(
+            "[bold blue]Dataload time[/bold blue]",
+            justify="right",
+        )
         table.add_column("[bold blue]Step time[/bold blue]", justify="right")
         table.add_column("[bold blue]Step memory[/bold blue]", justify="right")
 
@@ -637,7 +663,7 @@ class ModelCombinedRenderer(BaseRenderer):
         if self._cached_signature is not None:
             # show the most conservative "global" step for display only
             step_for_title = max(
-                self._cached_signature
+                self._cached_signature,
             )  # signature stores latest completed per metric
             if step_for_title >= 0:
                 title += f" (Step {step_for_title})"
@@ -742,16 +768,26 @@ class ModelCombinedRenderer(BaseRenderer):
         if "dataLoader_fetch" in payload:
             blocks.append(
                 metric_block(
-                    "Dataloader Fetch Time", payload["dataLoader_fetch"], fmt_time_run
-                )
+                    "Dataloader Fetch Time",
+                    payload["dataLoader_fetch"],
+                    fmt_time_run,
+                ),
             )
         if "step_time" in payload:
             blocks.append(
-                metric_block("Training Step Time", payload["step_time"], fmt_time_run)
+                metric_block(
+                    "Training Step Time",
+                    payload["step_time"],
+                    fmt_time_run,
+                ),
             )
         if "step_gpu_memory" in payload:
             blocks.append(
-                metric_block("GPU Step Memory", payload["step_gpu_memory"], fmt_mem_new)
+                metric_block(
+                    "GPU Step Memory",
+                    payload["step_gpu_memory"],
+                    fmt_mem_new,
+                ),
             )
 
         html = HTML(
@@ -769,7 +805,7 @@ class ModelCombinedRenderer(BaseRenderer):
                 {''.join(blocks)}
             </div>
         </div>
-        """
+        """,
         )
 
         self._cached_notebook = html

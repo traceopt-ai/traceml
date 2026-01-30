@@ -94,12 +94,15 @@ class LayerBackwardTimePreHook:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            model_buf = _backward_time_start_buffer.setdefault(self.model_id, {})
+            model_buf = _backward_time_start_buffer.setdefault(
+                self.model_id,
+                {},
+            )
             model_buf.setdefault(self.layer_name, deque()).append(
                 {
                     "cpu_start": cpu_start,
                     "gpu_start": gpu_start,
-                }
+                },
             )
         except Exception:
             print(
@@ -124,7 +127,7 @@ class LayerBackwardTimePostHook:
             cpu_end = time.perf_counter()
 
             layer_q = _backward_time_start_buffer.get(self.model_id, {}).get(
-                self.layer_name
+                self.layer_name,
             )
             if not layer_q:
                 return
@@ -152,7 +155,9 @@ class LayerBackwardTimePostHook:
                 step=-1,
             )
 
-            _backward_time_buffer.setdefault(self.model_id, deque()).append(event)
+            _backward_time_buffer.setdefault(self.model_id, deque()).append(
+                event,
+            )
 
         except Exception:
             print(
@@ -189,7 +194,10 @@ def flush_layer_backward_time_buffers(model: nn.Module, step: int) -> None:
 
 
 def attach_layer_backward_time_hooks(
-    model: nn.Module, include_names=None, exclude_names=None, leaf_only=True
+    model: nn.Module,
+    include_names=None,
+    exclude_names=None,
+    leaf_only=True,
 ):
     """
     Attach backward pre/post hooks for backward timing.
@@ -201,14 +209,17 @@ def attach_layer_backward_time_hooks(
     on_gpu = model_is_on_cuda(model)
 
     for name, module in get_hookable_modules(
-        model, include_names, exclude_names, leaf_only
+        model,
+        include_names,
+        exclude_names,
+        leaf_only,
     ):
 
         module.register_full_backward_pre_hook(
-            LayerBackwardTimePreHook(model_id, name, on_gpu=on_gpu)
+            LayerBackwardTimePreHook(model_id, name, on_gpu=on_gpu),
         )
         module.register_full_backward_hook(
-            LayerBackwardTimePostHook(model_id, name, on_gpu=on_gpu)
+            LayerBackwardTimePostHook(model_id, name, on_gpu=on_gpu),
         )
 
     _backward_time_hook_registry[model_id] = True

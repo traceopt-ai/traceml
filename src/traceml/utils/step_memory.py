@@ -36,7 +36,9 @@ class StepMemoryTracker:
         try:
             self.device = next(model.parameters()).device
         except StopIteration:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.device = torch.device(
+                "cuda" if torch.cuda.is_available() else "cpu",
+            )
 
     def reset(self):
         """

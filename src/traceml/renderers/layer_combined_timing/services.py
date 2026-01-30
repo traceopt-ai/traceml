@@ -145,8 +145,16 @@ class LayerCombinedTimerData:
                 )
 
         # Merge into caches
-        self._merge_cache(self._forward_cache, fwd_snapshot, alpha=self._ema_alpha)
-        self._merge_cache(self._backward_cache, bwd_snapshot, alpha=self._ema_alpha)
+        self._merge_cache(
+            self._forward_cache,
+            fwd_snapshot,
+            alpha=self._ema_alpha,
+        )
+        self._merge_cache(
+            self._backward_cache,
+            bwd_snapshot,
+            alpha=self._ema_alpha,
+        )
 
         # Compute worst-rank per layer from per-rank currents at this safe step
         self._worst_rank_by_layer = self._compute_worst_ranks(
@@ -192,11 +200,16 @@ class LayerCombinedTimerData:
         if local_db is None:
             return
 
-        cache = self._rank_last_step_fwd if is_forward else self._rank_last_step_bwd
+        cache = (
+            self._rank_last_step_fwd
+            if is_forward
+            else self._rank_last_step_bwd
+        )
         sampler_name = local_db.sampler_name
 
         for rank, db in self._iter_rank_dbs(
-            local_db=local_db, sampler_name=sampler_name
+            local_db=local_db,
+            sampler_name=sampler_name,
         ):
             s = self._db_last_step(db)
             if s is None:
@@ -206,7 +219,9 @@ class LayerCombinedTimerData:
         cache.setdefault(0, -1)
 
     def _iter_rank_dbs(
-        self, local_db: Database, sampler_name: str
+        self,
+        local_db: Database,
+        sampler_name: str,
     ) -> Iterable[Tuple[int, Database]]:
         """
         Yield (rank, db) for local first, then remotes.
@@ -299,13 +314,19 @@ class LayerCombinedTimerData:
 
                     # aggregate "current" as worst-rank max
                     layer_current_worst[layer] = max(
-                        layer_current_worst.get(layer, 0.0), cur
+                        layer_current_worst.get(layer, 0.0),
+                        cur,
                     )
-                    layer_on_gpu[layer] = bool(layer_on_gpu.get(layer, False) or on_gpu)
+                    layer_on_gpu[layer] = bool(
+                        layer_on_gpu.get(layer, False) or on_gpu,
+                    )
 
                 # aggregate peak up to step
                 p = self._peak_upto_step(rows, step)
-                layer_peak_worst[layer] = max(layer_peak_worst.get(layer, 0.0), p)
+                layer_peak_worst[layer] = max(
+                    layer_peak_worst.get(layer, 0.0),
+                    p,
+                )
 
             if ws > 1 and not rank_has_step:
                 missing_ranks.append(rank)
@@ -344,14 +365,23 @@ class LayerCombinedTimerData:
             per_rank_total: Dict[int, float] = {}
 
             for r, v in fwd_rank_curr.get(layer, {}).items():
-                per_rank_total[int(r)] = per_rank_total.get(int(r), 0.0) + float(v)
+                per_rank_total[int(r)] = per_rank_total.get(
+                    int(r),
+                    0.0,
+                ) + float(v)
             for r, v in bwd_rank_curr.get(layer, {}).items():
-                per_rank_total[int(r)] = per_rank_total.get(int(r), 0.0) + float(v)
+                per_rank_total[int(r)] = per_rank_total.get(
+                    int(r),
+                    0.0,
+                ) + float(v)
 
             if not per_rank_total:
                 continue
 
-            worst_rank = max(per_rank_total.items(), key=lambda kv: float(kv[1]))[0]
+            worst_rank = max(
+                per_rank_total.items(),
+                key=lambda kv: float(kv[1]),
+            )[0]
             worst[layer] = int(worst_rank)
 
         return worst
@@ -408,7 +438,11 @@ class LayerCombinedTimerData:
             (duration_ms, on_gpu)
         """
         on_gpu = bool(row.get("on_gpu", False))
-        d = row.get("gpu_duration_ms") if on_gpu else row.get("cpu_duration_ms")
+        d = (
+            row.get("gpu_duration_ms")
+            if on_gpu
+            else row.get("cpu_duration_ms")
+        )
         if d is None:
             return 0.0, on_gpu
         try:
@@ -472,11 +506,14 @@ class LayerCombinedTimerData:
             else:
                 cache[layer]["current"] = cur
                 cache[layer]["avg"] = (1.0 - a) * float(
-                    cache[layer].get("avg", cur)
+                    cache[layer].get("avg", cur),
                 ) + a * cur
-                cache[layer]["peak"] = max(float(cache[layer].get("peak", 0.0)), peak)
+                cache[layer]["peak"] = max(
+                    float(cache[layer].get("peak", 0.0)),
+                    peak,
+                )
                 cache[layer]["on_gpu"] = bool(
-                    cache[layer].get("on_gpu", False) or on_gpu
+                    cache[layer].get("on_gpu", False) or on_gpu,
                 )
 
     def _build_rows_payload(self) -> Dict[str, Any]:
@@ -484,9 +521,14 @@ class LayerCombinedTimerData:
         Convert caches into table rows and aggregates.
         """
         join = self._join_status or DDPJoinStatus(
-            safe_step=None, incomplete=False, missing_ranks=[], world_size=1
+            safe_step=None,
+            incomplete=False,
+            missing_ranks=[],
+            world_size=1,
         )
-        layers = set(self._forward_cache.keys()) | set(self._backward_cache.keys())
+        layers = set(self._forward_cache.keys()) | set(
+            self._backward_cache.keys(),
+        )
 
         if not layers:
             return self._empty_payload(safe_step=join.safe_step)
@@ -517,7 +559,7 @@ class LayerCombinedTimerData:
                     "backward_peak": b_peak,
                     "on_gpu": on_gpu,
                     "worst_rank": self._worst_rank_by_layer.get(layer),
-                }
+                },
             )
 
         total_current_sum_ms = sum(
@@ -592,7 +634,9 @@ class LayerCombinedTimerSummary:
     """
 
     def __init__(
-        self, forward_db: Optional[Database], backward_db: Optional[Database] = None
+        self,
+        forward_db: Optional[Database],
+        backward_db: Optional[Database] = None,
     ) -> None:
         self._forward_db = forward_db
         self._backward_db = backward_db
@@ -602,7 +646,9 @@ class LayerCombinedTimerSummary:
         bwd = self._compute_db_summary(self._backward_db)
 
         total_samples = max(fwd["total_samples"], bwd["total_samples"])
-        total_layers_seen = len(set(fwd["layers_seen"]) | set(bwd["layers_seen"]))
+        total_layers_seen = len(
+            set(fwd["layers_seen"]) | set(bwd["layers_seen"]),
+        )
 
         return {
             "total_samples": total_samples,
@@ -629,7 +675,9 @@ class LayerCombinedTimerSummary:
         durations: List[float] = []
 
         tables_iter = (
-            db.iter_tables() if hasattr(db, "iter_tables") else db.all_tables().items()
+            db.iter_tables()
+            if hasattr(db, "iter_tables")
+            else db.all_tables().items()
         )
         for layer_name, rows in tables_iter:
             if not rows:
@@ -660,7 +708,11 @@ class LayerCombinedTimerSummary:
     @staticmethod
     def _pick_duration_ms(row: Mapping[str, Any]) -> Optional[float]:
         on_gpu = bool(row.get("on_gpu", False))
-        d = row.get("gpu_duration_ms") if on_gpu else row.get("cpu_duration_ms")
+        d = (
+            row.get("gpu_duration_ms")
+            if on_gpu
+            else row.get("cpu_duration_ms")
+        )
         if d is None:
             return None
         try:
@@ -675,7 +727,9 @@ class LayerCombinedTimerSummary:
 
         avgs: Dict[str, float] = {}
         tables_iter = (
-            db.iter_tables() if hasattr(db, "iter_tables") else db.all_tables().items()
+            db.iter_tables()
+            if hasattr(db, "iter_tables")
+            else db.all_tables().items()
         )
 
         for layer_name, rows in tables_iter:

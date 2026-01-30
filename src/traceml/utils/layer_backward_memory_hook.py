@@ -138,8 +138,11 @@ class LayerBackwardModuleHook:
             total_bytes = _accumulate_tensor_bytes(grad_output)
 
             if total_bytes > 0:
-                _layer_backward_memory_buffer.setdefault(self.model_id, []).append(
-                    (self.layer_name, total_bytes)
+                _layer_backward_memory_buffer.setdefault(
+                    self.model_id,
+                    [],
+                ).append(
+                    (self.layer_name, total_bytes),
                 )
 
         except Exception:
@@ -189,7 +192,10 @@ def flush_layer_backward_memory_buffers(model: nn.Module, step: int) -> None:
 
 
 def attach_layer_backward_memory_hooks(
-    model: nn.Module, include_names=None, exclude_names=None, leaf_only=True
+    model: nn.Module,
+    include_names=None,
+    exclude_names=None,
+    leaf_only=True,
 ) -> None:
     """
     Attach backward hooks to all leaf modules of a model.
@@ -208,10 +214,18 @@ def attach_layer_backward_memory_hooks(
 
     try:
         for name, module in get_hookable_modules(
-            model, include_names, exclude_names, leaf_only
+            model,
+            include_names,
+            exclude_names,
+            leaf_only,
         ):
             # full backward hook works on module outputs
-            module.register_full_backward_hook(LayerBackwardModuleHook(model_id, name))
+            module.register_full_backward_hook(
+                LayerBackwardModuleHook(model_id, name),
+            )
         _layer_backward_hook_registry[model_id] = True
     except Exception as e:
-        print(f"[TraceML] Failed to attach layer backward hooks: {e}", file=sys.stderr)
+        print(
+            f"[TraceML] Failed to attach layer backward hooks: {e}",
+            file=sys.stderr,
+        )

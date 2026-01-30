@@ -27,7 +27,9 @@ DATASET_NAME = "tatsu-lab/alpaca"
 
 # Training + demo knobs
 MAX_LENGTH = 1024
-MAX_TRAIN_EXAMPLES = 20000  # raise for longer runs; keep smaller for quick demo
+MAX_TRAIN_EXAMPLES = (
+    20000  # raise for longer runs; keep smaller for quick demo
+)
 BATCH_SIZE = 1  # QLoRA-friendly on T4
 GRAD_ACCUM_STEPS = 8
 EPOCHS = 1
@@ -65,7 +67,10 @@ def load_batch_to_device(batch, device):
 @trace_time("forward", use_gpu=True)
 def forward_pass(model, batch, dtype):
     # For LLMs, autocast fp16 is standard on T4
-    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+    with torch.cuda.amp.autocast(
+        enabled=torch.cuda.is_available(),
+        dtype=dtype,
+    ):
         return model(**batch)
 
 
@@ -226,7 +231,10 @@ def main():
     # Scheduler steps happen on optimizer steps (after grad accumulation)
     # Compute total optimizer steps
     steps_per_epoch = min(MAX_STEPS, len(train_loader))
-    total_optimizer_steps = max(1, (EPOCHS * steps_per_epoch) // GRAD_ACCUM_STEPS)
+    total_optimizer_steps = max(
+        1,
+        (EPOCHS * steps_per_epoch) // GRAD_ACCUM_STEPS,
+    )
     warmup_steps = int(WARMUP_RATIO * total_optimizer_steps)
 
     scheduler = get_linear_schedule_with_warmup(
@@ -274,7 +282,7 @@ def main():
                         avg_loss = running_loss / 10.0
                         print(
                             f"[Train] epoch {epoch+1} step {global_step:04d} "
-                            f"(opt_step {opt_step:04d}) | loss {avg_loss:.4f} "
+                            f"(opt_step {opt_step:04d}) | loss {avg_loss:.4f} ",
                         )
                         running_loss = 0.0
 

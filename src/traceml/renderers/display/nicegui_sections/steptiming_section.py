@@ -76,13 +76,15 @@ def build_step_timing_table_section():
         display: flex;
         flex-direction: column;
         {CARD_STYLE}
-        """
+        """,
     )
 
     with card:
         # Header row: title + small hint
         with ui.row().classes("w-full items-center justify-between"):
-            ui.label("Trace Timers").classes("text-l font-bold mb-2").style(TITLE_STYLE)
+            ui.label("Trace Timers").classes("text-l font-bold mb-2").style(
+                TITLE_STYLE,
+            )
             ui.html(
                 "stats: <b>worst-rank</b> over last 100",
                 sanitize=False,
@@ -94,7 +96,7 @@ def build_step_timing_table_section():
             overflow-y: auto;
             width: 100%;
             padding-right: 12px;
-            """
+            """,
         )
 
     return {"table": container}
@@ -128,7 +130,7 @@ def _normalize_rows(
                 "device": str(r.get("device", "—") or "—"),
                 "worst_rank": str(r.get("worst_rank", "—") or "—"),
                 "ranks": str(r.get("coverage", "—") or "—"),
-            }
+            },
         )
 
     # Sort: slowest first (p95 is a good bottleneck proxy for training)

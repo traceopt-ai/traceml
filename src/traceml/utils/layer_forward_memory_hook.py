@@ -114,8 +114,11 @@ class LayerForwardMemoryHook:
                     accumulate(o)
 
             if total_bytes > 0:
-                _layer_forward_memory_buffer.setdefault(self.model_id, []).append(
-                    (self.layer_name, total_bytes)
+                _layer_forward_memory_buffer.setdefault(
+                    self.model_id,
+                    [],
+                ).append(
+                    (self.layer_name, total_bytes),
                 )
 
         except Exception:
@@ -186,7 +189,10 @@ def attach_layer_forward_memory_hooks(
 
     # Register ActivationHook on all leaf modules
     for name, module in get_hookable_modules(
-        model, include_names, exclude_names, leaf_only
+        model,
+        include_names,
+        exclude_names,
+        leaf_only,
     ):
         module.register_forward_hook(LayerForwardMemoryHook(model_id, name))
 

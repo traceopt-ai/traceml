@@ -51,7 +51,9 @@ class ProcessRenderer(BaseRenderer):
     DASHBOARD_MAX_ROWS = 200
 
     def __init__(
-        self, database: Database, remote_store: Optional[RemoteDBStore] = None
+        self,
+        database: Database,
+        remote_store: Optional[RemoteDBStore] = None,
     ):
         super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT)
 
@@ -171,9 +173,11 @@ class ProcessRenderer(BaseRenderer):
                     "gpu_total": gpu_total[idx],
                     "gpu_rank": gpu_rank[idx],
                     "gpu_used_imbalance": (
-                        max(gpu_used) - min(gpu_used) if len(gpu_used) > 1 else 0.0
+                        max(gpu_used) - min(gpu_used)
+                        if len(gpu_used) > 1
+                        else 0.0
                     ),
-                }
+                },
             )
 
         return snapshot
@@ -253,7 +257,10 @@ class ProcessRenderer(BaseRenderer):
 
                 ram_used = self._safe_float(row.get("ram_used"))
                 ram_used_vals.append(ram_used)
-                ram_total = max(ram_total, self._safe_float(row.get("ram_total")))
+                ram_total = max(
+                    ram_total,
+                    self._safe_float(row.get("ram_total")),
+                )
 
                 gpu = row.get("gpu")
                 if row.get("gpu_available", False) and gpu:
@@ -286,7 +293,7 @@ class ProcessRenderer(BaseRenderer):
                             if len(gpu_used_vals) > 1
                             else 0.0
                         ),
-                    }
+                    },
                 )
             else:
                 entry.update(
@@ -296,7 +303,7 @@ class ProcessRenderer(BaseRenderer):
                         "gpu_headroom": None,
                         "gpu_rank": None,
                         "gpu_used_imbalance": 0.0,
-                    }
+                    },
                 )
 
             self._dashboard_rollup.append(entry)
@@ -444,11 +451,15 @@ class ProcessRenderer(BaseRenderer):
         if gpu_used:
             summary.update(
                 {
-                    "gpu_mem_used_p95_single": float(np.percentile(gpu_used, 95)),
+                    "gpu_mem_used_p95_single": float(
+                        np.percentile(gpu_used, 95),
+                    ),
                     "gpu_mem_used_peak_single": float(np.max(gpu_used)),
-                    "gpu_mem_reserved_peak_single": float(np.max(gpu_reserved)),
+                    "gpu_mem_reserved_peak_single": float(
+                        np.max(gpu_reserved),
+                    ),
                     "gpu_mem_total_capacity": float(np.max(gpu_total)),
-                }
+                },
             )
 
         return summary
@@ -484,7 +495,11 @@ class ProcessRenderer(BaseRenderer):
 
     def _proc_gpu_memory(self, t: Table, block: dict) -> None:
         if not block.get("is_GPU_available", False):
-            t.add_row("GPU", "[magenta]|[/magenta]", "[red]Not available[/red]")
+            t.add_row(
+                "GPU",
+                "[magenta]|[/magenta]",
+                "[red]Not available[/red]",
+            )
             return
 
         total = block.get("gpu_mem_total_capacity", 0.0)
@@ -527,5 +542,5 @@ class ProcessRenderer(BaseRenderer):
                 t,
                 title="[bold magenta]Process - Summary[/bold magenta]",
                 border_style="magenta",
-            )
+            ),
         )

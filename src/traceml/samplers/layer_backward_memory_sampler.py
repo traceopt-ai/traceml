@@ -88,4 +88,6 @@ class LayerBackwardMemorySampler(BaseSampler):
             self._drain_queue()
         except Exception as e:
             # Sampler must never disrupt training
-            self.logger.error(f"[TraceML] LayerBackwardMemorySampler error: {e}")
+            self.logger.error(
+                f"[TraceML] LayerBackwardMemorySampler error: {e}",
+            )

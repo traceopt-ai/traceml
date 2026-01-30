@@ -88,7 +88,9 @@ class SystemSampler(BaseSampler):
             psutil.cpu_percent(interval=None)
             self.cpu_logical_core_count = psutil.cpu_count(logical=True)
         except Exception as e:
-            self.logger.error(f"[TraceML] CPU sampler initialization failed: {e}")
+            self.logger.error(
+                f"[TraceML] CPU sampler initialization failed: {e}",
+            )
 
     def _init_ram(self) -> None:
         """
@@ -100,7 +102,9 @@ class SystemSampler(BaseSampler):
         try:
             self.ram_total_memory = float(psutil.virtual_memory().total)
         except Exception as e:
-            self.logger.error(f"[TraceML] RAM sampler initialization failed: {e}")
+            self.logger.error(
+                f"[TraceML] RAM sampler initialization failed: {e}",
+            )
 
     def _init_gpu(self) -> None:
         """
@@ -118,7 +122,7 @@ class SystemSampler(BaseSampler):
             self.gpu_available = self.gpu_count > 0
         except NVMLError as e:
             self.logger.error(
-                f"[TraceML] NVML initialization failed (GPU unavailable): {e}"
+                f"[TraceML] NVML initialization failed (GPU unavailable): {e}",
             )
 
     # ------------------------------------------------------------------
@@ -185,7 +189,9 @@ class SystemSampler(BaseSampler):
                 mem = nvmlDeviceGetMemoryInfo(handle)
                 temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
                 power = nvmlDeviceGetPowerUsage(handle) / 1000.0  # mW → W
-                power_limit = nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
+                power_limit = (
+                    nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
+                )
 
                 gpus.append(
                     GPUMetrics(
@@ -195,11 +201,13 @@ class SystemSampler(BaseSampler):
                         temperature=float(temp),
                         power_usage=float(power),
                         power_limit=float(power_limit),
-                    )
+                    ),
                 )
 
             except Exception as e:
-                self.logger.error(f"[TraceML] GPU {gpu_id} sampling failed: {e}")
+                self.logger.error(
+                    f"[TraceML] GPU {gpu_id} sampling failed: {e}",
+                )
 
                 # Preserve GPU ordering even on failure
                 gpus.append(
@@ -210,7 +218,7 @@ class SystemSampler(BaseSampler):
                         temperature=0.0,
                         power_usage=0.0,
                         power_limit=0.0,
-                    )
+                    ),
                 )
 
         return gpus
@@ -241,4 +249,6 @@ class SystemSampler(BaseSampler):
 
         except Exception as e:
             # Absolute safety net: this should never crash the runtime
-            self.logger.error(f"[TraceML] SystemSampler failed to collect sample: {e}")
+            self.logger.error(
+                f"[TraceML] SystemSampler failed to collect sample: {e}",
+            )

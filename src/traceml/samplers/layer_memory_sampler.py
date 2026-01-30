@@ -121,7 +121,9 @@ class LayerMemorySampler(BaseSampler):
                     return sample
 
         except Exception as e:
-            self.logger.error(f"[TraceML] Layer memory queue ingestion failed: {e}")
+            self.logger.error(
+                f"[TraceML] Layer memory queue ingestion failed: {e}",
+            )
         return None
 
     def sample(self) -> None:

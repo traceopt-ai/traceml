@@ -73,7 +73,10 @@ class StepTimerRenderer(BaseRenderer):
         window_size: int = 100,
         worst_metric: str = "p95",  # "p95" or "avg"
     ):
-        super().__init__(name="Step Timers", layout_section_name=STEPTIMER_LAYOUT)
+        super().__init__(
+            name="Step Timers",
+            layout_section_name=STEPTIMER_LAYOUT,
+        )
         self.db = database
         self.top_n = int(top_n)
 
@@ -118,14 +121,20 @@ class StepTimerRenderer(BaseRenderer):
 
         # RemoteDBStore is expected to serve per-rank DBs by (rank, sampler_name)
         for rank in range(1, ws):
-            db = self.remote_store.get_db(rank, sampler_name) if sampler_name else None
+            db = (
+                self.remote_store.get_db(rank, sampler_name)
+                if sampler_name
+                else None
+            )
             if db is not None:
                 yield rank, db
 
     def _is_internal(self, name: str) -> bool:
         return name.startswith("_traceml_internal:")
 
-    def _collect_series_by_rank(self) -> Dict[str, Dict[int, Dict[str, List[float]]]]:
+    def _collect_series_by_rank(
+        self,
+    ) -> Dict[str, Dict[int, Dict[str, List[float]]]]:
         """
         Collect per-event series for each rank.
 
@@ -188,7 +197,13 @@ class StepTimerRenderer(BaseRenderer):
         """
         arr = self._window(gpu_vals or cpu_vals)
         if arr.size == 0:
-            return {"last": 0.0, "p50": 0.0, "p95": 0.0, "avg": 0.0, "nsamples": 0.0}
+            return {
+                "last": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+                "avg": 0.0,
+                "nsamples": 0.0,
+            }
 
         return {
             "last": float(arr[-1]),
@@ -288,13 +303,17 @@ class StepTimerRenderer(BaseRenderer):
 
         # Coverage and minimum samples (among ranks that have any data).
         if ranks_with_data:
-            min_samples = int(min(rank_stats[r]["nsamples"] for r in ranks_with_data))
+            min_samples = int(
+                min(rank_stats[r]["nsamples"] for r in ranks_with_data),
+            )
         else:
             min_samples = 0
 
         coverage = f"{len(ranks_with_data)}/{ws}" if ws > 1 else "1/1"
 
-        device = "MIXED" if (saw_cpu and saw_gpu) else ("GPU" if saw_gpu else "CPU")
+        device = (
+            "MIXED" if (saw_cpu and saw_gpu) else ("GPU" if saw_gpu else "CPU")
+        )
 
         if not rank_stats:
             return StepTimerRow(
@@ -313,7 +332,8 @@ class StepTimerRenderer(BaseRenderer):
         # Stable worst rank selection (windowed, not per-step).
         metric_key = "p95" if self.worst_metric == "p95" else "avg"
         worst_rank_id = max(
-            rank_stats.keys(), key=lambda r: float(rank_stats[r][metric_key])
+            rank_stats.keys(),
+            key=lambda r: float(rank_stats[r][metric_key]),
         )
         worst_rank = f"{worst_rank_id}"
 
@@ -324,7 +344,9 @@ class StepTimerRenderer(BaseRenderer):
         avg = max(float(s["avg"]) for s in rank_stats.values())
 
         # Trend heuristic based on concatenated history.
-        trend = self._trend_from_history(np.asarray(history_concat, dtype=np.float64))
+        trend = self._trend_from_history(
+            np.asarray(history_concat, dtype=np.float64),
+        )
 
         return StepTimerRow(
             name=name,
@@ -536,7 +558,7 @@ class StepTimerRenderer(BaseRenderer):
             </h4>
             {table_html}
         </div>
-        """
+        """,
         )
 
     def get_dashboard_renderable(self):

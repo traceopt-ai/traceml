@@ -39,7 +39,9 @@ class StdoutStderrRenderer(BaseRenderer):
 
         if not rows:
             content = Text(
-                "Waiting for stdout/stderr...", style="dim", justify="center"
+                "Waiting for stdout/stderr...",
+                style="dim",
+                justify="center",
             )
         else:
             lines = [Text(r["line"], style="white") for r in rows]

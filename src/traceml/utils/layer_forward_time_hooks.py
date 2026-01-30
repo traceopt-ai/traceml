@@ -91,13 +91,16 @@ class LayerForwardTimePreHook:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            model_buf = _layer_forward_time_start_buffer.setdefault(self.model_id, {})
+            model_buf = _layer_forward_time_start_buffer.setdefault(
+                self.model_id,
+                {},
+            )
             layer_q = model_buf.setdefault(self.layer_name, deque())
             layer_q.append(
                 {
                     "cpu_start": cpu_start,
                     "gpu_start": gpu_start,
-                }
+                },
             )
         except Exception:
             print(
@@ -116,8 +119,11 @@ class LayerForwardTimePostHook:
         try:
             cpu_end = time.perf_counter()
 
-            layer_q = _layer_forward_time_start_buffer.get(self.model_id, {}).get(
-                self.layer_name
+            layer_q = _layer_forward_time_start_buffer.get(
+                self.model_id,
+                {},
+            ).get(
+                self.layer_name,
             )
             if not layer_q:
                 return  # No start recorded
@@ -143,8 +149,11 @@ class LayerForwardTimePostHook:
                 gpu_end=gpu_end,
                 step=-1,
             )
-            _layer_forward_time_event_buffer.setdefault(self.model_id, deque()).append(
-                event
+            _layer_forward_time_event_buffer.setdefault(
+                self.model_id,
+                deque(),
+            ).append(
+                event,
             )
 
         except Exception:
@@ -185,7 +194,10 @@ def flush_layer_forward_time_buffers(model: nn.Module, step: int) -> None:
 
 
 def attach_layer_forward_time_hooks(
-    model: nn.Module, include_names=None, exclude_names=None, leaf_only=True
+    model: nn.Module,
+    include_names=None,
+    exclude_names=None,
+    leaf_only=True,
 ):
     """
     Attach pre and post hooks for timing.
@@ -197,14 +209,17 @@ def attach_layer_forward_time_hooks(
 
     on_gpu = model_is_on_cuda(model)
     for name, module in get_hookable_modules(
-        model, include_names, exclude_names, leaf_only
+        model,
+        include_names,
+        exclude_names,
+        leaf_only,
     ):
 
         module.register_forward_pre_hook(
-            LayerForwardTimePreHook(model_id, name, on_gpu=on_gpu)
+            LayerForwardTimePreHook(model_id, name, on_gpu=on_gpu),
         )
         module.register_forward_hook(
-            LayerForwardTimePostHook(model_id, name, on_gpu=on_gpu)
+            LayerForwardTimePostHook(model_id, name, on_gpu=on_gpu),
         )
 
     _layer_forward_time_hook_registry[model_id] = True

@@ -49,7 +49,10 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def accuracy_from_logits(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+) -> torch.Tensor:
     """
     Simple per-batch accuracy (rank-local).
     """
@@ -66,8 +69,12 @@ def prepare_data(rank: int, world_size: int):
 
     raw = load_dataset("fancyzhx/ag_news", revision="main")
 
-    train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
-    val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
+    train_raw = raw["train"].select(
+        range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))),
+    )
+    val_raw = raw["test"].select(
+        range(min(MAX_VAL_EXAMPLES, len(raw["test"]))),
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
@@ -162,7 +169,9 @@ def main():
     # torchrun sets these OS environment variables per process
     rank = int(os.environ.get("RANK", 0))  # global rank
     local_rank = int(os.environ.get("LOCAL_RANK", 0))  # GPU index on this node
-    world_size = int(os.environ.get("WORLD_SIZE", 1))  # total number of processes
+    world_size = int(
+        os.environ.get("WORLD_SIZE", 1),
+    )  # total number of processes
 
     # --------------------------------------------------------
     # Initialize distributed communication
@@ -193,13 +202,17 @@ def main():
     # --------------------------------------------------------
     # Data
     # --------------------------------------------------------
-    tokenizer, train_loader, val_loader, train_sampler = prepare_data(rank, world_size)
+    tokenizer, train_loader, val_loader, train_sampler = prepare_data(
+        rank,
+        world_size,
+    )
 
     # --------------------------------------------------------
     # Model
     # --------------------------------------------------------
     model = AutoModelForSequenceClassification.from_pretrained(
-        MODEL_NAME, num_labels=4
+        MODEL_NAME,
+        num_labels=4,
     ).to(device)
 
     # --------------------------------------------------------
@@ -233,7 +246,8 @@ def main():
     )
 
     scaler = torch.amp.GradScaler(
-        enabled=use_cuda, device="cuda" if use_cuda else "cpu"
+        enabled=use_cuda,
+        device="cuda" if use_cuda else "cpu",
     )
 
     # --------------------------------------------------------
@@ -287,7 +301,7 @@ def main():
                     print(
                         f"[Train] epoch {epoch+1} step {global_step} "
                         f"| loss {(running_loss/50).item():.4f} "
-                        f"| acc {(running_acc/50).item():.4f}"
+                        f"| acc {(running_acc/50).item():.4f}",
                     )
                     running_loss.zero_()
                     running_acc.zero_()

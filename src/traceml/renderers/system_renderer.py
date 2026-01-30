@@ -108,7 +108,10 @@ class SystemRenderer(BaseRenderer):
     def _get_panel_gpu_row(self, table, data):
         """Render GPU metrics into a Rich table."""
         if not data["gpu_available"]:
-            table.add_row("[bold green]GPU[/bold green]", "[red]Not available[/red]")
+            table.add_row(
+                "[bold green]GPU[/bold green]",
+                "[red]Not available[/red]",
+            )
             return
 
         table.add_row(
@@ -201,7 +204,9 @@ class SystemRenderer(BaseRenderer):
 
             temp_html = f"{temp:.1f}°C" if temp is not None else "N/A"
             power_html = (
-                f"{pu:.1f}W / {pl:.1f}W" if pu is not None and pl is not None else "N/A"
+                f"{pu:.1f}W / {pl:.1f}W"
+                if pu is not None and pl is not None
+                else "N/A"
             )
 
             gpu_section = f"""
@@ -289,41 +294,63 @@ class SystemRenderer(BaseRenderer):
             if gpu_raw:
                 # aggregate over GPUs (job-level)
                 util_totals.append(sum(v["util"] for v in gpu_raw.values()))
-                mem_used_totals.append(sum(v["mem_used"] for v in gpu_raw.values()))
-                mem_total_totals.append(sum(v["mem_total"] for v in gpu_raw.values()))
+                mem_used_totals.append(
+                    sum(v["mem_used"] for v in gpu_raw.values()),
+                )
+                mem_total_totals.append(
+                    sum(v["mem_total"] for v in gpu_raw.values()),
+                )
                 power_usage_totals.append(
-                    sum(v["power_usage"] for v in gpu_raw.values())
+                    sum(v["power_usage"] for v in gpu_raw.values()),
                 )
                 power_limit_totals.append(
-                    sum(v["power_limit"] for v in gpu_raw.values())
+                    sum(v["power_limit"] for v in gpu_raw.values()),
                 )
 
                 # failure-critical per-device signals
-                max_single_gpu_mem.append(max(v["mem_used"] for v in gpu_raw.values()))
-                temp_max_vals.append(max(v["temperature"] for v in gpu_raw.values()))
+                max_single_gpu_mem.append(
+                    max(v["mem_used"] for v in gpu_raw.values()),
+                )
+                temp_max_vals.append(
+                    max(v["temperature"] for v in gpu_raw.values()),
+                )
 
         if gpu_available and util_totals:
             summary.update(
                 {
                     # GPU utilization (aggregate)
-                    "gpu_util_total_avg": round(float(np.mean(util_totals)), 2),
-                    "gpu_util_total_peak": round(float(np.max(util_totals)), 2),
+                    "gpu_util_total_avg": round(
+                        float(np.mean(util_totals)),
+                        2,
+                    ),
+                    "gpu_util_total_peak": round(
+                        float(np.max(util_totals)),
+                        2,
+                    ),
                     # GPU memory (aggregate footprint over time)
                     # Near-worst sustained + absolute peak
                     "gpu_mem_total_p95": round(
-                        float(np.percentile(mem_used_totals, 95)), 2
+                        float(np.percentile(mem_used_totals, 95)),
+                        2,
                     ),
-                    "gpu_mem_total_peak": round(float(np.max(mem_used_totals)), 2),
+                    "gpu_mem_total_peak": round(
+                        float(np.max(mem_used_totals)),
+                        2,
+                    ),
                     "gpu_mem_total_capacity": round(
-                        float(np.mean(mem_total_totals)), 2
+                        float(np.mean(mem_total_totals)),
+                        2,
                     ),
                     # GPU memory (single-device OOM risk)
                     # Absolute risk only
-                    "gpu_mem_single_peak": round(float(np.max(max_single_gpu_mem)), 2),
+                    "gpu_mem_single_peak": round(
+                        float(np.max(max_single_gpu_mem)),
+                        2,
+                    ),
                     # GPU temperature (single-device thermal risk)
                     # Typical + absolute
                     "gpu_temp_peak": round(float(np.max(temp_max_vals)), 2),
-                }
+                },
             )
         return summary
 
@@ -352,7 +379,8 @@ class SystemRenderer(BaseRenderer):
         t.add_row(
             "GPU UTIL (avg / peak)",
             "|",
-            f"{s['gpu_util_total_avg']:.1f}% / " f"{s['gpu_util_total_peak']:.1f}%",
+            f"{s['gpu_util_total_avg']:.1f}% / "
+            f"{s['gpu_util_total_peak']:.1f}%",
         )
 
         t.add_row(
@@ -383,7 +411,11 @@ class SystemRenderer(BaseRenderer):
         t.add_column(style="dim", no_wrap=True)
         t.add_column(style="white")
 
-        t.add_row("TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(s["total_samples"]))
+        t.add_row(
+            "TOTAL SYSTEM SAMPLES",
+            "[cyan]|[/cyan]",
+            str(s["total_samples"]),
+        )
 
         if s["total_samples"]:
             self._cpu_summary(t, s)
@@ -392,8 +424,10 @@ class SystemRenderer(BaseRenderer):
 
         console.print(
             Panel(
-                t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"
-            )
+                t,
+                title="[bold cyan]System - Summary[/bold cyan]",
+                border_style="cyan",
+            ),
         )
         if path:
             text = console.export_text(clear=False)

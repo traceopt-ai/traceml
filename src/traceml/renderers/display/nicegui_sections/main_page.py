@@ -77,16 +77,18 @@ def define_main_page(cls):
                 background-image: none !important;
             }
         </style>
-        """
+        """,
         )
         # ----- PAGE LAYOUT -----
         ui.label("TraceML").classes(
-            "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
+            "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left",
         ).style("color:#d47a00;")
 
         build_top_tabs(active="overview")
 
-        with ui.row().classes("mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"):
+        with ui.row().classes(
+            "mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center",
+        ):
 
             # System (left column)
             with ui.column().classes("w-[36%]"):
@@ -100,12 +102,18 @@ def define_main_page(cls):
 
             with ui.column().classes("w-[33]"):
                 cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
-                cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
+                cls.update_funcs[STEPTIMER_LAYOUT] = (
+                    update_step_timing_table_section
+                )
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
             with ui.column().classes("w-[99%]"):
-                cls.cards[MODEL_COMBINED_LAYOUT] = build_model_combined_section()
-                cls.update_funcs[MODEL_COMBINED_LAYOUT] = update_model_combined_section
+                cls.cards[MODEL_COMBINED_LAYOUT] = (
+                    build_model_combined_section()
+                )
+                cls.update_funcs[MODEL_COMBINED_LAYOUT] = (
+                    update_model_combined_section
+                )
 
         # background update loop
         ui.timer(0.75, cls._ui_update_loop)
@@ -114,7 +122,7 @@ def define_main_page(cls):
     @ui.page("/layers")
     def layer_page():
         ui.label("TraceML").classes(
-            "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
+            "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left",
         ).style("color:#d47a00;")
 
         build_top_tabs(active="layers")

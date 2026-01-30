@@ -46,7 +46,10 @@ class ModelForwardMemoryPreHook:
             if self.device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(self.device)
         except Exception:
-            print("[TraceML] Error in ModelForwardMemoryPreHook", file=sys.stderr)
+            print(
+                "[TraceML] Error in ModelForwardMemoryPreHook",
+                file=sys.stderr,
+            )
 
 
 class ModelForwardMemoryPostHook:
@@ -73,13 +76,17 @@ class ModelForwardMemoryPostHook:
             _model_forward_memory_buffer[self.model_id] = evt
 
         except Exception:
-            print("[TraceML] Error in ModelForwardMemoryPostHook", file=sys.stderr)
+            print(
+                "[TraceML] Error in ModelForwardMemoryPostHook",
+                file=sys.stderr,
+            )
 
 
 def flush_model_forward_memory_buffers(model: nn.Module, step: int) -> None:
     model_id = id(model)
     evt: Optional[ModelForwardMemoryEvent] = _model_forward_memory_buffer.pop(
-        model_id, None
+        model_id,
+        None,
     )
     if evt is None:
         return

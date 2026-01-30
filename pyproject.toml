@@ -43,11 +43,14 @@ dev = [
 
 [tool.isort]
 profile = "black"
-line_length = 88
+line_length = 79
 
 [tool.black]
-line-length = 88
+line-length = 79
 target-version = ['py39']
+
+[tool.ruff]
+line-length = 79
 
 [project.scripts]
 traceml = "traceml.cli:main"

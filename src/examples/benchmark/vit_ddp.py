@@ -45,11 +45,17 @@ def prepare_dataloader(rank: int, world_size: int):
     No auth required.
     """
     if rank == 0:
-        dataset = load_dataset("ljnlonoljpiljm/places365-256px", split="train[:20%]")
+        dataset = load_dataset(
+            "ljnlonoljpiljm/places365-256px",
+            split="train[:20%]",
+        )
     dist.barrier()  # wait until download finishes
 
     # now all ranks load from cache
-    dataset = load_dataset("ljnlonoljpiljm/places365-256px", split="train[:20%]")
+    dataset = load_dataset(
+        "ljnlonoljpiljm/places365-256px",
+        split="train[:20%]",
+    )
 
     transform = transforms.Compose(
         [
@@ -61,7 +67,7 @@ def prepare_dataloader(rank: int, world_size: int):
                 mean=(0.485, 0.456, 0.406),
                 std=(0.229, 0.224, 0.225),
             ),
-        ]
+        ],
     )
 
     def preprocess(batch):
@@ -156,7 +162,10 @@ def main():
     # Attach TraceML hooks BEFORE DDP
     # trace_model_instance(model)
 
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
+    model = torch.nn.parallel.DistributedDataParallel(
+        model,
+        device_ids=[local_rank],
+    )
 
     optimizer = AdamW(
         model.parameters(),
@@ -201,7 +210,7 @@ def main():
                 print(
                     f"step {global_step:6d} | "
                     f"loss {loss.item():.4f} | "
-                    f"elapsed {elapsed:.1f} min"
+                    f"elapsed {elapsed:.1f} min",
                 )
 
     if rank == 0:

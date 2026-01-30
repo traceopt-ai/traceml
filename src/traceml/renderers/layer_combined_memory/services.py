@@ -106,25 +106,35 @@ class LayerCombinedMemoryData:
         safe_step_candidate = self._compute_candidate_safe_step()
 
         fwd_snapshot, fwd_ok, fwd_missing = self._compute_step_snapshot(
-            self._layer_forward_db, safe_step_candidate
+            self._layer_forward_db,
+            safe_step_candidate,
         )
         bwd_snapshot, bwd_ok, bwd_missing = self._compute_step_snapshot(
-            self._layer_backward_db, safe_step_candidate
+            self._layer_backward_db,
+            safe_step_candidate,
         )
 
         if safe_step_candidate >= 0 and fwd_ok and bwd_ok:
             self._last_safe_step = safe_step_candidate
             missing = sorted(set(fwd_missing) | set(bwd_missing))
-            self._join_status = self._build_join_status(safe_step_candidate, missing)
+            self._join_status = self._build_join_status(
+                safe_step_candidate,
+                missing,
+            )
         elif self._last_safe_step >= 0:
             fwd_snapshot, _, fwd_missing = self._compute_step_snapshot(
-                self._layer_forward_db, self._last_safe_step
+                self._layer_forward_db,
+                self._last_safe_step,
             )
             bwd_snapshot, _, bwd_missing = self._compute_step_snapshot(
-                self._layer_backward_db, self._last_safe_step
+                self._layer_backward_db,
+                self._last_safe_step,
             )
             missing = sorted(set(fwd_missing) | set(bwd_missing))
-            self._join_status = self._build_join_status(self._last_safe_step, missing)
+            self._join_status = self._build_join_status(
+                self._last_safe_step,
+                missing,
+            )
         else:
             self._join_status = self._build_join_status(None, [])
 
@@ -132,7 +142,11 @@ class LayerCombinedMemoryData:
         self._merge_cache(self._backward_cache, bwd_snapshot)
 
         rows = self._build_rows(param_layers)
-        rows_sorted = sorted(rows, key=lambda r: r["total_peak_memory"], reverse=True)
+        rows_sorted = sorted(
+            rows,
+            key=lambda r: r["total_peak_memory"],
+            reverse=True,
+        )
 
         top_items = rows_sorted[: self._top_n]
         other_items = rows_sorted[self._top_n :]
@@ -238,7 +252,10 @@ class LayerCombinedMemoryData:
 
             if cur_row:
                 for layer, mem in cur_row.get("layers", []):
-                    layer_current[layer] = max(layer_current.get(layer, 0.0), mem)
+                    layer_current[layer] = max(
+                        layer_current.get(layer, 0.0),
+                        mem,
+                    )
 
             for r in rows:
                 if r.get("step", -1) > step:
@@ -259,7 +276,11 @@ class LayerCombinedMemoryData:
 
         return snapshot, not missing, missing
 
-    def _get_rank_db(self, local_db: Database, rank: int) -> Optional[Database]:
+    def _get_rank_db(
+        self,
+        local_db: Database,
+        rank: int,
+    ) -> Optional[Database]:
         if rank == 0:
             return local_db
         if self._remote_store:
@@ -277,7 +298,8 @@ class LayerCombinedMemoryData:
 
     @staticmethod
     def _merge_cache(
-        cache: Dict[str, Dict[str, float]], snapshot: Dict[str, Dict[str, float]]
+        cache: Dict[str, Dict[str, float]],
+        snapshot: Dict[str, Dict[str, float]],
     ):
         for layer, v in snapshot.items():
             if layer not in cache:
@@ -287,9 +309,15 @@ class LayerCombinedMemoryData:
                 }
             else:
                 cache[layer]["current"] = v["current_peak"]
-                cache[layer]["global"] = max(cache[layer]["global"], v["global_peak"])
+                cache[layer]["global"] = max(
+                    cache[layer]["global"],
+                    v["global_peak"],
+                )
 
-    def _build_rows(self, param_layers: Dict[str, float]) -> List[Dict[str, Any]]:
+    def _build_rows(
+        self,
+        param_layers: Dict[str, float],
+    ) -> List[Dict[str, Any]]:
         rows = []
         total_current_sum = 0.0
 
@@ -297,7 +325,9 @@ class LayerCombinedMemoryData:
             fwd = self._forward_cache.get(layer, {})
             bwd = self._backward_cache.get(layer, {})
 
-            current = param_mem + fwd.get("current", 0.0) + bwd.get("current", 0.0)
+            current = (
+                param_mem + fwd.get("current", 0.0) + bwd.get("current", 0.0)
+            )
             peak = param_mem + fwd.get("global", 0.0) + bwd.get("global", 0.0)
 
             rows.append(
@@ -311,7 +341,7 @@ class LayerCombinedMemoryData:
                     "total_current_memory": float(current),
                     "total_peak_memory": float(peak),
                     "pct": 0.0,  # filled later
-                }
+                },
             )
 
             total_current_sum += current
@@ -326,7 +356,9 @@ class LayerCombinedMemoryData:
         return rows
 
     def _aggregate_other(
-        self, rows: List[Dict[str, Any]], total_current_sum: float
+        self,
+        rows: List[Dict[str, Any]],
+        total_current_sum: float,
     ) -> Dict[str, Any]:
         cur = sum(r["total_current_memory"] for r in rows)
         return {
@@ -336,11 +368,15 @@ class LayerCombinedMemoryData:
             "backward_current": sum(r["backward_current"] for r in rows),
             "backward_peak": sum(r["backward_peak"] for r in rows),
             "total_current_memory": cur,
-            "pct": (cur / total_current_sum * 100.0) if total_current_sum else 0.0,
+            "pct": (
+                (cur / total_current_sum * 100.0) if total_current_sum else 0.0
+            ),
         }
 
     def _build_join_status(
-        self, step: Optional[int], missing: List[int]
+        self,
+        step: Optional[int],
+        missing: List[int],
     ) -> DDPJoinStatus:
         _, _, world_size = get_ddp_info()
         return DDPJoinStatus(
@@ -400,4 +436,8 @@ class LayerCombinedMemorySummary:
 
     @staticmethod
     def top_n_from_dict(d: Dict[str, float], n: int = 3):
-        return sorted(d.items(), key=lambda x: x[1], reverse=True)[:n] if d else []
+        return (
+            sorted(d.items(), key=lambda x: x[1], reverse=True)[:n]
+            if d
+            else []
+        )

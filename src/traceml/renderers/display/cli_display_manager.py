@@ -71,26 +71,26 @@ class CLIDisplayManager:
 
         # Initialize panels with placeholder text
         dashboard[SYSTEM_LAYOUT].update(
-            Panel(Text("Waiting for System Metrics...", justify="center"))
+            Panel(Text("Waiting for System Metrics...", justify="center")),
         )
         dashboard[PROCESS_LAYOUT].update(
-            Panel(Text("Waiting for Process Metrics...", justify="center"))
+            Panel(Text("Waiting for Process Metrics...", justify="center")),
         )
         dashboard[LAYER_COMBINED_MEMORY_LAYOUT].update(
-            Panel(Text("Waiting for Layer Memory...", justify="center"))
+            Panel(Text("Waiting for Layer Memory...", justify="center")),
         )
         dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
-            Panel(Text("Waiting for Layer Timing...", justify="center"))
+            Panel(Text("Waiting for Layer Timing...", justify="center")),
         )
         dashboard[STEPTIMER_LAYOUT].update(
-            Panel(Text("Waiting for Step Timers...", justify="center"))
+            Panel(Text("Waiting for Step Timers...", justify="center")),
         )
         cls._layout[STDOUT_STDERR_LAYOUT].update(
             Panel(
                 Text("Waiting for Stdout/Stderr...", justify="center"),
                 title="Logs",
                 border_style="cyan",
-            )
+            ),
         )
 
     @classmethod
@@ -108,7 +108,9 @@ class CLIDisplayManager:
             try:
                 cls._live_display.start()
             except Exception as e:
-                cls.logger.error(f"[TraceML] Failed to start shared live display: {e}")
+                cls.logger.error(
+                    f"[TraceML] Failed to start shared live display: {e}",
+                )
                 cls._live_display = None
 
         cls._active_logger_count += 1
@@ -135,14 +137,16 @@ class CLIDisplayManager:
 
     @classmethod
     def register_layout_content(
-        cls, layout_section: str, content_fn: Callable[[], Any]
+        cls,
+        layout_section: str,
+        content_fn: Callable[[], Any],
     ):
         """
         Registers a function that provides content for a specific layout panel.
         """
         if cls._layout.get(layout_section) is None:
             cls.logger.error(
-                f"[TraceML] WARNING: Layout panel '{layout_section}' not found. Cannot register content."
+                f"[TraceML] WARNING: Layout panel '{layout_section}' not found. Cannot register content.",
             )
             return
         cls._layout_content_fns.setdefault(layout_section, content_fn)
@@ -171,7 +175,7 @@ class CLIDisplayManager:
                     )
                     cls._layout[section_name].update(error_panel)
                     cls.logger.error(
-                        f"[TraceML] Error in rendering content for panel {section_name}: {e}"
+                        f"[TraceML] Error in rendering content for panel {section_name}: {e}",
                     )
 
             StreamCapture.redirect_to_original()

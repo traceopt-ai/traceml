@@ -44,7 +44,10 @@ def set_seed(seed: int = SEED):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def accuracy_from_logits(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+) -> torch.Tensor:
     preds = torch.argmax(logits, dim=-1)
     correct = (preds == labels).sum()
     total = labels.size(0)
@@ -55,8 +58,12 @@ def prepare_data():
     """Load & tokenize AG News (bigger subset for better logs)."""
     raw = load_dataset("ag_news")
 
-    train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
-    val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
+    train_raw = raw["train"].select(
+        range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))),
+    )
+    val_raw = raw["test"].select(
+        range(min(MAX_VAL_EXAMPLES, len(raw["test"]))),
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
@@ -72,10 +79,16 @@ def prepare_data():
     collator = DataCollatorWithPadding(tokenizer=tokenizer, padding=True)
 
     train_loader = DataLoader(
-        train_ds, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator
+        train_ds,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        collate_fn=collator,
     )
     val_loader = DataLoader(
-        val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collator
+        val_ds,
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        collate_fn=collator,
     )
 
     return tokenizer, train_loader, val_loader
@@ -122,7 +135,8 @@ def run_validation(model, val_loader, dtype, device):
         for batch in val_loader:
             batch = load_batch_to_device(batch, device)
             with torch.cuda.amp.autocast(
-                enabled=torch.cuda.is_available(), dtype=dtype
+                enabled=torch.cuda.is_available(),
+                dtype=dtype,
             ):
                 out = model(**batch)
                 loss = out.loss
@@ -149,7 +163,8 @@ def main():
     tokenizer, train_loader, val_loader = prepare_data()
 
     model = AutoModelForSequenceClassification.from_pretrained(
-        MODEL_NAME, num_labels=4
+        MODEL_NAME,
+        num_labels=4,
     ).to(device)
 
     # ========================================================
@@ -175,7 +190,9 @@ def main():
     total_steps = EPOCHS * math.ceil(len(train_loader))
     warmup_steps = int(WARMUP_RATIO * total_steps)
     scheduler = get_linear_schedule_with_warmup(
-        optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+        optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps,
     )
 
     scaler = torch.amp.GradScaler(device="cuda", enabled=True)
@@ -221,7 +238,7 @@ def main():
 
                     print(
                         f"[Train] epoch {epoch + 1} step {global_step} "
-                        f"| loss {avg_loss:.4f} | acc {avg_acc:.4f}"
+                        f"| loss {avg_loss:.4f} | acc {avg_acc:.4f}",
                     )
 
                     running_loss.zero_()
