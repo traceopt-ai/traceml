@@ -2,23 +2,20 @@ import os
 import random
 
 import torch
-from torch.utils.data import DataLoader
-
 from datasets import load_dataset
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from torch.utils.data import DataLoader
 from transformers import (
-    AutoTokenizer,
     AutoModelForCausalLM,
+    AutoTokenizer,
     BitsAndBytesConfig,
     get_linear_schedule_with_warmup,
 )
-
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 # =========================
 # TraceML imports
 # =========================
 from traceml.decorators import trace_model_instance, trace_step, trace_time
-
 
 # =========================
 # Config

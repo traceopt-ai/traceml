@@ -1,21 +1,21 @@
+import shutil
 from collections import deque
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
-import shutil
-
+from IPython.display import HTML
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Console
-from IPython.display import HTML
 
-from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import PROCESS_LAYOUT
-from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from .utils import CARD_STYLE
 from traceml.loggers.error_log import get_error_logger
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.cli_display_manager import PROCESS_LAYOUT
+from traceml.utils.formatting import fmt_mem_new, fmt_percent
+
+from .utils import CARD_STYLE
 
 
 class ProcessRenderer(BaseRenderer):
@@ -74,7 +74,6 @@ class ProcessRenderer(BaseRenderer):
             return float(x)
         except Exception:
             return default
-
 
     def _compute_live_snapshot(self) -> Dict[str, Any]:
         """
@@ -172,8 +171,7 @@ class ProcessRenderer(BaseRenderer):
                     "gpu_total": gpu_total[idx],
                     "gpu_rank": gpu_rank[idx],
                     "gpu_used_imbalance": (
-                        max(gpu_used) - min(gpu_used)
-                        if len(gpu_used) > 1 else 0.0
+                        max(gpu_used) - min(gpu_used) if len(gpu_used) > 1 else 0.0
                     ),
                 }
             )

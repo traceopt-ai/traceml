@@ -56,12 +56,12 @@ Design notes
 """
 
 from itertools import islice
-from nicegui import ui
+
 import plotly.graph_objects as go
+from nicegui import ui
 
-from traceml.utils.formatting import fmt_mem_new
 from traceml.renderers.display.nicegui_sections.helper import extract_x_axis
-
+from traceml.utils.formatting import fmt_mem_new
 
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 LABEL = "text-[11px] font-semibold tracking-wide leading-tight"

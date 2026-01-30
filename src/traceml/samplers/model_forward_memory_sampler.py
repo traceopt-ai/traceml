@@ -1,10 +1,9 @@
 import time
 
-from .base_sampler import BaseSampler
-from traceml.utils.model_forward_memory_hook import (
-    get_model_forward_memory_queue,
-)
 from traceml.loggers.error_log import get_error_logger
+from traceml.utils.model_forward_memory_hook import get_model_forward_memory_queue
+
+from .base_sampler import BaseSampler
 
 
 class ModelForwardMemorySampler(BaseSampler):

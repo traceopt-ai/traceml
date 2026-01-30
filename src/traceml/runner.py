@@ -15,8 +15,8 @@ script to ensure hooks, stack traces, and execution context are accurate.
 """
 
 import os
-import sys
 import runpy
+import sys
 import traceback
 
 from traceml.runtime import TraceMLRuntime

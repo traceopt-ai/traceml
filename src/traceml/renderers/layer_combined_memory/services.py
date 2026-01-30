@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List, Tuple, Deque
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore

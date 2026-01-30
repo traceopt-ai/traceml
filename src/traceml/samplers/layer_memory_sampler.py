@@ -1,9 +1,9 @@
-import time
 import hashlib
-from typing import Dict, Any, Optional, Set
+import time
+from typing import Any, Dict, Optional, Set
 
-from traceml.samplers.base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.utils.layer_parameter_memory import get_model_queue
 
 

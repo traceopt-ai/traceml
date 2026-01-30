@@ -44,7 +44,7 @@ Compatibility guarantee
 
 import shutil
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple, Iterable
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 from IPython.display import HTML
@@ -59,8 +59,8 @@ from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import MODEL_COMBINED_LAYOUT
 from traceml.renderers.utils import fmt_mem_new, fmt_time_run
-from .utils import CARD_STYLE
 
+from .utils import CARD_STYLE
 
 # Prefer renderer logger, but keep this separate if you want targeted debug output.
 _dbg = get_error_logger("ModelCombinedRenderer.debug")

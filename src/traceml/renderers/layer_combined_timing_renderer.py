@@ -1,24 +1,21 @@
 import shutil
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
+from IPython.display import HTML
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Group, Console
-from IPython.display import HTML
 
-
-from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
-from traceml.renderers.display.cli_display_manager import (
-    LAYER_COMBINED_TIMER_LAYOUT,
-)
+from traceml.database.remote_database_store import RemoteDBStore
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.cli_display_manager import LAYER_COMBINED_TIMER_LAYOUT
 from traceml.renderers.layer_combined_timing.services import (
     LayerCombinedTimerData,
     LayerCombinedTimerSummary,
 )
 from traceml.renderers.utils import truncate_layer_name
 from traceml.utils.formatting import fmt_time_ms
-from traceml.database.remote_database_store import RemoteDBStore
 
 
 class LayerCombinedTimerRenderer(BaseRenderer):

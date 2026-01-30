@@ -1,6 +1,6 @@
 from nicegui import ui
-from traceml.utils.formatting import fmt_time_ms
 
+from traceml.utils.formatting import fmt_time_ms
 
 METRIC_TEXT = "text-sm leading-normal text-gray-700"
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"

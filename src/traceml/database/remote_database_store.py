@@ -2,6 +2,7 @@ import time
 from typing import Dict, Optional
 
 from traceml.loggers.error_log import get_error_logger
+
 from .database import Database
 
 

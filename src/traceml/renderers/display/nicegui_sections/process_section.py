@@ -35,10 +35,10 @@ Design notes
 - Display-only logic
 """
 
-from nicegui import ui
 import plotly.graph_objects as go
-from traceml.utils.formatting import fmt_mem_new
+from nicegui import ui
 
+from traceml.utils.formatting import fmt_mem_new
 
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 LABEL = "text-[11px] font-semibold tracking-wide leading-tight"
@@ -78,9 +78,9 @@ def build_process_section():
                     ui.markdown(
                         """
             **Process Metrics**
-            
-            - **CPU**: worst rank (current), percentiles over rolling window  
-            - **RAM**: worst rank (current), percentiles over rolling window  
+
+            - **CPU**: worst rank (current), percentiles over rolling window
+            - **RAM**: worst rank (current), percentiles over rolling window
             - **GPU mem**: most constrained rank with least headroom
             - **Imbalance**: max − min across ranks (current)
             """

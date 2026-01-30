@@ -1,6 +1,6 @@
 # Contributing to TraceML
 
-Thanks for your interest in contributing to TraceML!  
+Thanks for your interest in contributing to TraceML!
 We welcome contributions from the community, especially around performance, robustness, and usability.
 
 ## Ways to Contribute
@@ -23,6 +23,7 @@ If you are unsure where to start, check the GitHub Issues page or open a discuss
 git clone https://github.com/traceopt-ai/traceml.git
 cd traceml
 pip install -e ".[dev]"
+pre-commit install
 ```
 
 Requirements:

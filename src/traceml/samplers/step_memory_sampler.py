@@ -1,8 +1,9 @@
 import time
 
-from .base_sampler import BaseSampler
-from traceml.utils.step_memory import step_memory_queue
 from traceml.loggers.error_log import get_error_logger
+from traceml.utils.step_memory import step_memory_queue
+
+from .base_sampler import BaseSampler
 
 
 class StepMemorySampler(BaseSampler):

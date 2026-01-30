@@ -1,22 +1,14 @@
 from nicegui import ui
 
 from traceml.renderers.display.layout import (
-    SYSTEM_LAYOUT,
-    PROCESS_LAYOUT,
     LAYER_COMBINED_MEMORY_LAYOUT,
-    STEPTIMER_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
+    PROCESS_LAYOUT,
+    STEPTIMER_LAYOUT,
+    SYSTEM_LAYOUT,
 )
 
-from .system_section import (
-    build_system_section,
-    update_system_section,
-)
-from .process_section import (
-    build_process_section,
-    update_process_section,
-)
 from .layer_memory_table_section import (
     build_layer_memory_table_section,
     update_layer_memory_table_section,
@@ -25,16 +17,16 @@ from .layer_timer_table_section import (
     build_layer_timer_table_section,
     update_layer_timer_table_section,
 )
-from .steptiming_section import (
-    build_step_timing_table_section,
-    update_step_timing_table_section,
-)
 from .model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
 )
-
-import pandas
+from .process_section import build_process_section, update_process_section
+from .steptiming_section import (
+    build_step_timing_table_section,
+    update_step_timing_table_section,
+)
+from .system_section import build_system_section, update_system_section
 
 
 def fake_build():

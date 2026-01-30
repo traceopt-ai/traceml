@@ -5,9 +5,9 @@ from typing import Optional
 import psutil
 import torch
 
-from traceml.samplers.base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.samplers.schema.process import ProcessSample, ProcessGPUMetrics
+from traceml.samplers.base_sampler import BaseSampler
+from traceml.samplers.schema.process import ProcessGPUMetrics, ProcessSample
 
 
 class ProcessSampler(BaseSampler):
@@ -43,7 +43,6 @@ class ProcessSampler(BaseSampler):
         self._init_ram()
         self._warmup_cpu()
         self._init_gpu()
-
 
     def _init_process(self) -> None:
         """

@@ -1,10 +1,10 @@
-from dataclasses import dataclass
-import torch
-from typing import Dict
 import sys
-import torch.nn as nn
+from dataclasses import dataclass
 from queue import Full, Queue
+from typing import Dict
 
+import torch
+import torch.nn as nn
 
 step_memory_queue: Queue = Queue(maxsize=2048)
 

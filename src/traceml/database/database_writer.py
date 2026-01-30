@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
+from traceml.config import config
 from traceml.distributed import get_ddp_info
 from traceml.session import get_session_id
-from traceml.config import config
 
 
 def _rank_suffix() -> str:

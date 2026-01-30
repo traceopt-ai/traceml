@@ -8,3 +8,4 @@ env.bak/
 venv.bak/
 
 src/traceml_ai.egg-info/
+.ruff_cache

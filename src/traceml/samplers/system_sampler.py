@@ -20,21 +20,21 @@ from typing import List
 
 import psutil
 from pynvml import (
-    nvmlInit,
-    nvmlDeviceGetHandleByIndex,
-    nvmlDeviceGetTemperature,
-    nvmlDeviceGetPowerUsage,
-    nvmlDeviceGetPowerManagementLimit,
-    nvmlDeviceGetMemoryInfo,
-    nvmlDeviceGetUtilizationRates,
-    nvmlDeviceGetCount,
-    NVMLError,
     NVML_TEMPERATURE_GPU,
+    NVMLError,
+    nvmlDeviceGetCount,
+    nvmlDeviceGetHandleByIndex,
+    nvmlDeviceGetMemoryInfo,
+    nvmlDeviceGetPowerManagementLimit,
+    nvmlDeviceGetPowerUsage,
+    nvmlDeviceGetTemperature,
+    nvmlDeviceGetUtilizationRates,
+    nvmlInit,
 )
 
 from traceml.loggers.error_log import get_error_logger
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.samplers.schema.system import SystemSample, GPUMetrics
+from traceml.samplers.schema.system import GPUMetrics, SystemSample
 
 
 class SystemSampler(BaseSampler):

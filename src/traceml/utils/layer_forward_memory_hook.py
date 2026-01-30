@@ -15,14 +15,15 @@ Design principles
 - No live tensors or modules escape this module.
 """
 
-from dataclasses import dataclass
-from queue import Queue, Full
-from typing import Dict, Any, List, Tuple
 import sys
-from traceml.utils.shared_utils import get_hookable_modules
+from dataclasses import dataclass
+from queue import Full, Queue
+from typing import Any, Dict, List, Tuple
+
 import torch
 import torch.nn as nn
 
+from traceml.utils.shared_utils import get_hookable_modules
 
 # Shared queue for forward events
 layer_forward_memory_queue: Queue = Queue(maxsize=4096)
@@ -163,11 +164,8 @@ def flush_layer_forward_memory_buffers(model: nn.Module, step: int) -> None:
 
 
 def attach_layer_forward_memory_hooks(
-    model: nn.Module,
-    include_names=None, 
-    exclude_names=None, 
-    leaf_only=True
-    ):
+    model: nn.Module, include_names=None, exclude_names=None, leaf_only=True
+):
     """
     Attach forward hooks to specific modules of `model` based on filtering criteria.
     Hooks are idempotent: repeated calls for the same model instance do nothing.
@@ -184,7 +182,9 @@ def attach_layer_forward_memory_hooks(
         return
 
     # Register ActivationHook on all leaf modules
-    for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
+    for name, module in get_hookable_modules(
+        model, include_names, exclude_names, leaf_only
+    ):
         module.register_forward_hook(LayerForwardMemoryHook(model_id, name))
 
     _layer_forward_memory_hook_registry[model_id] = True

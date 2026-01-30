@@ -1,7 +1,7 @@
-import torch.nn as nn
 import torch
-from traceml.utils.shared_utils import EXECUTION_LAYER
+import torch.nn as nn
 
+from traceml.utils.shared_utils import EXECUTION_LAYER
 
 _execution_entry_hook_registry = {}
 

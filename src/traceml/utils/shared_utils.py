@@ -1,16 +1,18 @@
-import torch.nn as nn
 import threading
-import re
-from typing import List, Optional, Iterable, Tuple
+from typing import Iterable, List, Optional, Tuple
+
+import torch.nn as nn
+
 subtree_param_cache: dict[nn.Module, int] = {}
 
 EXECUTION_LAYER = threading.local()
+
 
 def get_hookable_modules(
     model: nn.Module,
     include_names: Optional[List[str]] = None,
     exclude_names: Optional[List[str]] = None,
-    leaf_only: bool = True
+    leaf_only: bool = True,
 ) -> Iterable[Tuple[str, nn.Module]]:
     """
     Yields (name, module) pairs that satisfy the filtering criteria.
@@ -19,7 +21,7 @@ def get_hookable_modules(
         # Handle leaf-only logic (current default)
         if leaf_only and any(module.children()):
             continue
-        
+
         # If not leaf_only, we might still want to skip the root model itself
         if not leaf_only and name == "":
             continue
@@ -27,13 +29,14 @@ def get_hookable_modules(
         # Filter by included names (substring match)
         if include_names and not any(inc in name for inc in include_names):
             continue
-            
+
         # Filter by excluded names
         if exclude_names and any(exc in name for exc in exclude_names):
             continue
 
         yield name, module
-        
+
+
 def subtree_param_bytes(module: nn.Module) -> int:
     """Total parameter memory of this module INCLUDING descendants."""
     if module in subtree_param_cache:

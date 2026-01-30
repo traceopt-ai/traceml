@@ -33,13 +33,12 @@ Notes
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, List, Callable, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from nicegui import ui
 import plotly.graph_objects as go
+from nicegui import ui
 
-from traceml.renderers.utils import fmt_time_run, fmt_mem_new
-
+from traceml.renderers.utils import fmt_mem_new, fmt_time_run
 
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 METRIC_TEXT = "text-sm leading-normal text-gray-700"

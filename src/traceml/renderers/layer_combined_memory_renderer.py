@@ -1,23 +1,20 @@
-from typing import Dict, Any, List, Optional
 import shutil
+from typing import Any, Dict, List, Optional
 
+from IPython.display import HTML
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Group, Console
-from IPython.display import HTML
 
-from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
-from traceml.renderers.display.cli_display_manager import (
-    LAYER_COMBINED_MEMORY_LAYOUT,
-)
-from traceml.utils.formatting import fmt_mem_new
-
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.cli_display_manager import LAYER_COMBINED_MEMORY_LAYOUT
 from traceml.renderers.layer_combined_memory.services import (
     LayerCombinedMemoryData,
     LayerCombinedMemorySummary,
 )
 from traceml.renderers.utils import truncate_layer_name
+from traceml.utils.formatting import fmt_mem_new
 
 
 class LayerCombinedMemoryRenderer(BaseRenderer):

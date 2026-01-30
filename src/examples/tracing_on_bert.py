@@ -1,19 +1,17 @@
+import math
 import os
 import random
-import math
 
 import torch
-from torch.utils.data import DataLoader
-from torch.optim import AdamW
-
 from datasets import load_dataset
+from torch.optim import AdamW
+from torch.utils.data import DataLoader
 from transformers import (
-    AutoTokenizer,
     AutoModelForSequenceClassification,
+    AutoTokenizer,
     DataCollatorWithPadding,
     get_linear_schedule_with_warmup,
 )
-
 
 # =========================
 # TraceML imports
@@ -25,7 +23,6 @@ from transformers import (
 # trace_timestep:a
 #   Optional fine-grained timers for user-defined code sections
 from traceml.decorators import trace_model_instance, trace_step, trace_time
-
 
 SEED = 42
 # MODEL_NAME = "bert-base-uncased"
@@ -166,8 +163,8 @@ def main():
     # No changes to training loop required.
     trace_model_instance(
         model,
-        include_names=["embeddings", "attention"], 
-        leaf_only=False
+        include_names=["embeddings", "attention"],
+        leaf_only=False,
         # sample_layer_memory=False,
         # trace_layer_forward__memory=False,
         # trace_layer_backward_memory=False,

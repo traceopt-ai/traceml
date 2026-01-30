@@ -30,12 +30,24 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "black>=25.0.0",
-    "flake8>=7.0.0",
+    "black>=26.1.0",
+    "ruff>=0.14.14",
+    "isort>=7.0.0",
+    "pre-commit",
+    "codespell>=2.4.1",
+    "nbstripout",
     "pytest>=8.0.0",
     "datasets",
     "transformers",
 ]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
 
 [project.scripts]
 traceml = "traceml.cli:main"

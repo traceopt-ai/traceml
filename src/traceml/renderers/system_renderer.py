@@ -1,17 +1,18 @@
-from typing import Dict, Any, List
 import shutil
-import numpy as np
+from typing import Any, Dict, List
 
+import numpy as np
+from IPython.display import HTML
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Console
-from IPython.display import HTML
 
-from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
+from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
-from traceml.utils.formatting import fmt_percent, fmt_mem_new
-from .utils import append_text, CARD_STYLE
+from traceml.utils.formatting import fmt_mem_new, fmt_percent
+
+from .utils import CARD_STYLE, append_text
 
 
 class SystemRenderer(BaseRenderer):
@@ -205,8 +206,8 @@ class SystemRenderer(BaseRenderer):
 
             gpu_section = f"""
                 <div style="
-                    display:flex; 
-                    flex-direction:column; 
+                    display:flex;
+                    flex-direction:column;
                     gap:6px;
                 ">
                     <div>

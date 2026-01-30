@@ -9,11 +9,11 @@
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-yellow)](./LICENSE)
 
 
-TraceML is a lightweight **runtime observability** tool for **distributed PyTorch training**.  
+TraceML is a lightweight **runtime observability** tool for **distributed PyTorch training**.
 It makes training behavior visible *while it runs* using **semantic, step-level signals** that are typically missing from infrastructure metrics and too expensive to keep enabled with full profilers.
 
-> **Status:** **Alpha**  
-> Current focus: **single-node DDP** stability, signal accuracy, and overhead optimization (Python/GIL behavior, communication paths, synchronization strategy, and UI/collector performance).  
+> **Status:** **Alpha**
+> Current focus: **single-node DDP** stability, signal accuracy, and overhead optimization (Python/GIL behavior, communication paths, synchronization strategy, and UI/collector performance).
 > Multi-node distributed training (DDP/FSDP) is planned.
 
 ---
@@ -76,7 +76,7 @@ TraceML supports two ways to consume runtime signals:
 - 🖥️ **Terminal dashboard** — live updates in your console
 - 🌐 **Web dashboard** — local browser at `http://localhost:8765`
 
-Note: Notebook is temporarily disabled in alpha 
+Note: Notebook is temporarily disabled in alpha
 
 ---
 
@@ -120,8 +120,8 @@ cd traceml
 pip install -e '.[dev]'
 ```
 
-**Requirements:** Python 3.9–3.13, PyTorch 1.12+  
-**Platform support:** macOS (Intel/ARM), Linux  
+**Requirements:** Python 3.9–3.13, PyTorch 1.12+
+**Platform support:** macOS (Intel/ARM), Linux
 **Training support:** Single GPU and **single-node DDP (alpha)**
 
 ---
@@ -153,7 +153,7 @@ Without `trace_step()`:
 
 ### 2) Optional: Time specific code regions
 
-Use `@trace_time` to time specific functions.  
+Use `@trace_time` to time specific functions.
 This works in **all modes** and is designed to have **low overhead**.
 
 ```python
@@ -272,7 +272,7 @@ TraceML is released under the **MIT License with Commons Clause**.
 - ✅ Free for internal company use
 - ❌ Not allowed for resale or SaaS products
 
-See [LICENSE](./LICENSE) for full details.  
+See [LICENSE](./LICENSE) for full details.
 For commercial licensing, contact: abhinav@traceopt.ai
 
 ---

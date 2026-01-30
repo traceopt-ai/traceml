@@ -1,6 +1,7 @@
-from typing import Dict, Callable, Any, Optional
-from IPython.display import display
+from typing import Any, Callable, Dict, Optional
+
 import ipywidgets as widgets
+from IPython.display import display
 
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.display.page_layout import TRACE_ML_PAGE

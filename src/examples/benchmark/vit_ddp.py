@@ -1,23 +1,21 @@
 import os
-import time
 import random
+import time
 from typing import Dict
 
 import torch
 import torch.distributed as dist
-from torch.utils.data import DataLoader, DistributedSampler
+from datasets import load_dataset
+from torch.cuda.amp import GradScaler, autocast
 from torch.optim import AdamW
-from torch.cuda.amp import autocast, GradScaler
-
+from torch.utils.data import DataLoader, DistributedSampler
 from torchvision import transforms
 from torchvision.models import vit_b_16
-
-from datasets import load_dataset
 
 # ============================================================
 # TraceML imports
 # ============================================================
-from traceml.decorators import trace_model_instance, trace_step, trace_time
+from traceml.decorators import trace_step, trace_time
 
 # ============================================================
 # CONFIG
@@ -41,24 +39,17 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-
 def prepare_dataloader(rank: int, world_size: int):
     """
     ImageWoof: public, ImageNet-derived, realistic.
     No auth required.
     """
     if rank == 0:
-        dataset = load_dataset(
-            "ljnlonoljpiljm/places365-256px",
-            split="train[:20%]"
-        )
+        dataset = load_dataset("ljnlonoljpiljm/places365-256px", split="train[:20%]")
     dist.barrier()  # wait until download finishes
 
-     # now all ranks load from cache
-    dataset = load_dataset(
-        "ljnlonoljpiljm/places365-256px",
-        split="train[:20%]"
-    )
+    # now all ranks load from cache
+    dataset = load_dataset("ljnlonoljpiljm/places365-256px", split="train[:20%]")
 
     transform = transforms.Compose(
         [
@@ -100,7 +91,6 @@ def prepare_dataloader(rank: int, world_size: int):
     )
 
     return loader, sampler
-
 
 
 @trace_time("data_transfer", use_gpu=False)
@@ -166,9 +156,7 @@ def main():
     # Attach TraceML hooks BEFORE DDP
     # trace_model_instance(model)
 
-    model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[local_rank]
-    )
+    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank])
 
     optimizer = AdamW(
         model.parameters(),

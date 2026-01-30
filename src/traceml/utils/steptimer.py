@@ -1,13 +1,14 @@
-from dataclasses import dataclass
-from typing import Optional
-from queue import Queue, Full
-from collections import deque
 import sys
-import torch
 import time
+from collections import deque
 from contextlib import contextmanager
-from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+from dataclasses import dataclass
+from queue import Full, Queue
+from typing import Optional
 
+import torch
+
+from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 _temp_step_time_buffer: deque = deque()
 

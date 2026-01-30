@@ -1,10 +1,11 @@
 import pickle
-import struct
 import queue
 import socket
+import struct
 import threading
 from dataclasses import dataclass
 from typing import Dict, Iterator, Optional
+
 from traceml.loggers.error_log import get_error_logger
 
 

@@ -29,8 +29,8 @@ Semantics:
 from typing import Any, Dict, List, Optional
 
 from nicegui import ui
-from traceml.renderers.utils import fmt_time_run
 
+from traceml.renderers.utils import fmt_time_run
 
 # -----------------------------
 # Styling (match your dashboard)

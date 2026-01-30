@@ -1,7 +1,7 @@
-from dataclasses import dataclass
-from queue import Queue, Full
-from typing import Dict, Optional
 import sys
+from dataclasses import dataclass
+from queue import Full, Queue
+from typing import Dict, Optional
 
 import torch
 import torch.nn as nn

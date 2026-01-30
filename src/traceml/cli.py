@@ -1,9 +1,10 @@
 import argparse
 import os
-import sys
-import subprocess
 import signal
+import subprocess
+import sys
 from pathlib import Path
+
 from .session import get_session_id
 
 

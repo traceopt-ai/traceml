@@ -1,10 +1,11 @@
-from typing import List
-from queue import Empty
 from collections import deque
+from queue import Empty
+from typing import List
 
-from traceml.utils.steptimer import StepTimeEvent, get_steptimer_queue
-from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
+from traceml.utils.steptimer import StepTimeEvent, get_steptimer_queue
+
+from .base_sampler import BaseSampler
 
 
 class StepTimerSampler(BaseSampler):
