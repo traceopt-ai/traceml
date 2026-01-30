@@ -164,7 +164,10 @@ def flush_layer_forward_memory_buffers(model: nn.Module, step: int) -> None:
 
 
 def attach_layer_forward_memory_hooks(
-    model: nn.Module, include_names=None, exclude_names=None, leaf_only=True
+    model: nn.Module,
+    include_names=None,
+    exclude_names=None,
+    leaf_only=True,
 ):
     """
     Attach forward hooks to specific modules of `model` based on filtering criteria.
