@@ -60,7 +60,9 @@ class SystemSampler(BaseSampler):
         during initialization are logged but do not prevent the sampler
         from operating in a degraded mode.
         """
-        self.sampler_name = "SystemSampler"
+        self.name = "System"
+        self.sampler_name = self.name+"Sampler"
+        self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
         self.sample_idx = 0
 
@@ -237,7 +239,7 @@ class SystemSampler(BaseSampler):
 
             # Store the wire representation to keep DB and transport
             # independent of Python-specific objects.
-            self.db.add_record("system", sample.to_wire())
+            self.db.add_record(self.table_name, sample.to_wire())
 
         except Exception as e:
             # Absolute safety net: this should never crash the runtime

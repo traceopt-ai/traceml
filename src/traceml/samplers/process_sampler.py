@@ -32,7 +32,9 @@ class ProcessSampler(BaseSampler):
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "ProcessSampler"
+        self.name = "Process"
+        self.sampler_name = self.name+"Sampler"
+        self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
         self.sample_idx = 0
 
@@ -183,7 +185,7 @@ class ProcessSampler(BaseSampler):
                 gpu_count=self.gpu_count,
                 gpu=self._sample_gpu(),
             )
-            self.db.add_record("process", sample.to_wire())
+            self.db.add_record(self.table_name, sample.to_wire())
 
         except Exception as e:
             self.logger.error(f"[TraceML] Process sampling error: {e}")

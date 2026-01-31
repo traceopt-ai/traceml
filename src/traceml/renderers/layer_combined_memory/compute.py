@@ -164,12 +164,12 @@ class LayerCombinedMemoryData:
         safe_step_candidate = self._compute_candidate_safe_step(world_size)
 
         fwd_snapshot, fwd_ok, fwd_missing = self._compute_step_snapshot(
-            sampler_name=self.LAYER_FORWARD_NAME,
+            sampler_name=self.LAYER_FORWARD_NAME+"Sampler",
             step=safe_step_candidate,
             world_size=world_size,
         )
         bwd_snapshot, bwd_ok, bwd_missing = self._compute_step_snapshot(
-            sampler_name=self.LAYER_BACKWARD_NAME,
+            sampler_name=self.LAYER_BACKWARD_NAME+"Sampler",
             step=safe_step_candidate,
             world_size=world_size,
         )
@@ -181,12 +181,12 @@ class LayerCombinedMemoryData:
         elif self._last_safe_step >= 0:
             # Fall back to last known safe step for a stable UI during transient gaps.
             fwd_snapshot, _, fwd_missing = self._compute_step_snapshot(
-                sampler_name=self.LAYER_FORWARD_NAME,
+                sampler_name=self.LAYER_FORWARD_NAME+"Sampler",
                 step=self._last_safe_step,
                 world_size=world_size,
             )
             bwd_snapshot, _, bwd_missing = self._compute_step_snapshot(
-                sampler_name=self.LAYER_BACKWARD_NAME,
+                sampler_name=self.LAYER_BACKWARD_NAME+"Sampler",
                 step=self._last_safe_step,
                 world_size=world_size,
             )
@@ -257,7 +257,7 @@ class LayerCombinedMemoryData:
         mismatched: List[int] = []
 
         for rank in range(world_size):
-            db = self._remote_store.get_db(rank, self.LAYER_MEMORY_NAME)
+            db = self._remote_store.get_db(rank, self.LAYER_MEMORY_NAME+"Sampler")
             last = self._get_last_row(db)
             if not last:
                 missing.append(rank)
@@ -317,8 +317,8 @@ class LayerCombinedMemoryData:
         # bounded by both forward and backward streams.
         steps: List[int] = []
         for rank in range(world_size):
-            db_f = self._remote_store.get_db(rank, self.LAYER_FORWARD_NAME)
-            db_b = self._remote_store.get_db(rank, self.LAYER_FORWARD_NAME)
+            db_f = self._remote_store.get_db(rank, self.LAYER_FORWARD_NAME+"Sampler")
+            db_b = self._remote_store.get_db(rank, self.LAYER_BACKWARD_NAME+"Sampler")
             if not db_f or not db_b:
                 return -1
             steps.append(min(last_step(db_f), last_step(db_b)))
@@ -557,11 +557,11 @@ class LayerCombinedMemorySummary:
         totals: List[float] = []
 
         for rank in self._remote_store.ranks():
-            db = self._safe_get_db(rank, self.layer_memory_name)
+            db = self._safe_get_db(rank, self.layer_memory_name+"Sampler")
             if not db:
                 continue
 
-            rows = db.get_table(self.layer_memory_name)
+            rows = db.get_table(self.layer_memory_name+"Table")
             if not rows:
                 continue
 

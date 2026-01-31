@@ -43,13 +43,12 @@ class SystemRenderer(BaseRenderer):
         - Dashboard-compatible payloads
         - Text summaries for logging
         """
-    SAMPLER_NAME = "SystemSampler"
-    TABLE_NAME = "system"
+    NAME = "System"
 
     def __init__(self, remote_store: RemoteDBStore):
-        super().__init__(name="System", layout_section_name=SYSTEM_LAYOUT)
+        super().__init__(name=self.NAME, layout_section_name=SYSTEM_LAYOUT)
         self._store = remote_store
-        self._logger = get_error_logger("SystemRenderer")
+        self._logger = get_error_logger(self.NAME+"Renderer")
 
     def _get_table(self) -> Optional[Any]:
         """
@@ -59,10 +58,10 @@ class SystemRenderer(BaseRenderer):
         - DB or table has not been created yet
         """
         try:
-            db = self._store.get_db(rank=0, sampler_name=self.SAMPLER_NAME)
+            db = self._store.get_db(rank=0, sampler_name=self.NAME+"Sampler")
             if db is None:
                 return None
-            return db.get_table(self.TABLE_NAME)
+            return db.get_table(self.NAME+"Table")
         except Exception as e:
             self._logger.error(f"[TraceML] Failed to fetch system table: {e}")
             return None

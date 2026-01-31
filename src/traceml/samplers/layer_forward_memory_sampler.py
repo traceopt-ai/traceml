@@ -28,8 +28,9 @@ class LayerForwardMemorySampler(BaseSampler):
 
 
     def __init__(self) -> None:
-        self.sampler_name = "LayerForwardMemory"
-        self.table_name = "LayerForwardMemory"
+        self.name = "LayerForwardMemory"
+        self.sampler_name = self.name+"Sampler"
+        self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
         self.sample_idx = 0

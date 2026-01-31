@@ -37,10 +37,10 @@ class ProcessRenderer(BaseRenderer):
     Renderer for process-level telemetry.
     """
 
-    TABLE_NAME = "process"
+    NAME = "Process"
 
     def __init__(self, remote_store: Optional[RemoteDBStore] = None):
-        super().__init__(name="Process", layout_section_name=PROCESS_LAYOUT)
+        super().__init__(name=self.NAME, layout_section_name=PROCESS_LAYOUT)
 
         self._remote_store = remote_store
         self._computer = ProcessMetricsComputer(remote_store)

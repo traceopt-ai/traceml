@@ -43,7 +43,7 @@ class ProcessMetricsComputer:
        - Intended for end-of-run reporting
     """
 
-    TABLE_NAME = "process"
+    TABLE_NAME = "ProcessTable"
     SAMPLER_NAME = "ProcessSampler"
     DASHBOARD_MAX_ROWS = 200
 
@@ -56,9 +56,7 @@ class ProcessMetricsComputer:
         # Highest sequence number fully processed into dashboard
         self._last_completed_seq: int = -1
 
-    # ------------------------------------------------------------------
-    # Utilities
-    # ------------------------------------------------------------------
+
     @staticmethod
     def _safe_float(x: Any, default: float = 0.0) -> float:
         try:

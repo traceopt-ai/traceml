@@ -31,12 +31,13 @@ class LayerMemorySampler(BaseSampler):
 
 
     def __init__(self) -> None:
-        self.sampler_name = "LayerMemory"
-        self.table_name = "LayerMemory"
+        self.name = "LayerMemory"
+        self.sampler_name = self.name+"Sampler"
+        self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
         self.sample_idx = 0
 
-        self.logger = get_error_logger(self.sampler_name+"Sampler")
+        self.logger = get_error_logger(self.sampler_name)
 
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()

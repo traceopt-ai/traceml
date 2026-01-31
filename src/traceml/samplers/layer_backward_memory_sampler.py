@@ -27,10 +27,11 @@ class LayerBackwardMemorySampler(BaseSampler):
 
 
     def __init__(self) -> None:
-        self.sampler_name = "LayerBackwardMemory"
-        self.table_name = "LayerBackwardMemory"
+        self.name = "LayerBackwardMemory"
+        self.sampler_name = self.name+"Sampler"
+        self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
-        self.logger = get_error_logger(self.sampler_name+"Sampler")
+        self.logger = get_error_logger(self.sampler_name)
         self.sample_idx = 0
 
     def _drain_queue(self) -> None:
