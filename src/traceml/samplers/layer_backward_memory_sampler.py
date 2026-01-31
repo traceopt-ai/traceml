@@ -25,12 +25,12 @@ class LayerBackwardMemorySampler(BaseSampler):
       - step     : int
     """
 
-    TABLE_NAME = "layer_backward_memory"
 
     def __init__(self) -> None:
-        self.sampler_name = "LayerBackwardMemorySampler"
+        self.sampler_name = "LayerBackwardMemory"
+        self.table_name = "LayerBackwardMemory"
         super().__init__(sampler_name=self.sampler_name)
-        self.logger = get_error_logger(self.sampler_name)
+        self.logger = get_error_logger(self.sampler_name+"Sampler")
         self.sample_idx = 0
 
     def _drain_queue(self) -> None:
@@ -73,7 +73,7 @@ class LayerBackwardMemorySampler(BaseSampler):
             "device": getattr(event, "device", None),
             "layers": layers,
         }
-        self.db.add_record(self.TABLE_NAME, record)
+        self.db.add_record(self.table_name, record)
 
     def sample(self) -> None:
         """

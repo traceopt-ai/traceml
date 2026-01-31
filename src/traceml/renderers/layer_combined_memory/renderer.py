@@ -7,13 +7,12 @@ from rich.console import Group, Console
 from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
     LAYER_COMBINED_MEMORY_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new
 
-from traceml.renderers.layer_combined_memory.services import (
+from traceml.renderers.layer_combined_memory.compute import (
     LayerCombinedMemoryData,
     LayerCombinedMemorySummary,
 )
@@ -31,33 +30,24 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
     def __init__(
         self,
-        layer_db: Database,
-        layer_forward_db: Database,
-        layer_backward_db: Database,
-        top_n_layers: Optional[int] = 5,
         remote_store: Optional[Any] = None,
+        top_n_layers: Optional[int] = 5,
     ):
         super().__init__(
             name="Layer-wise Combined Memory",
             layout_section_name=LAYER_COMBINED_MEMORY_LAYOUT,
         )
 
-        layer_table = layer_db.create_or_get_table("layer_memory")
-        self._data_service = LayerCombinedMemoryData(
-            layer_table=layer_table,
-            layer_forward_db=layer_forward_db,
-            layer_backward_db=layer_backward_db,
+        self._compute_service = LayerCombinedMemoryData(
             top_n_layers=top_n_layers,
             remote_store=remote_store,
         )
         self._summary_service = LayerCombinedMemorySummary(
-            layer_table=layer_table,
-            layer_forward_db=layer_forward_db,
-            layer_backward_db=layer_backward_db,
+            remote_store=remote_store,
         )
 
     def get_panel_renderable(self) -> Panel:
-        d = self._data_service.compute_display_data()
+        d = self._compute_service.compute_display_data()
 
         table = Table(
             show_header=True,
@@ -98,9 +88,13 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 120)  # allow wider output
 
+        status = d.get("status_message")
+        status_suffix = f" • [dim]{status}[/dim]" if status else ""
+
         title = (
             f"[bold blue]Model #{d['model_index']}[/bold blue] • "
             f"[white]curr=max across ranks, peak=max curr across steps[/white]"
+            f"{status_suffix}"
         )
         return Panel(Group(table), title=title, border_style="blue", width=panel_width)
 

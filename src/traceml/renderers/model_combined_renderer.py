@@ -62,10 +62,6 @@ from traceml.renderers.utils import fmt_mem_new, fmt_time_run
 from .utils import CARD_STYLE
 
 
-# Prefer renderer logger, but keep this separate if you want targeted debug output.
-_dbg = get_error_logger("ModelCombinedRenderer.debug")
-
-
 # -------------------------
 # Small utilities
 # -------------------------

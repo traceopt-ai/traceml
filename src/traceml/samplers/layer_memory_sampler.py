@@ -29,14 +29,14 @@ class LayerMemorySampler(BaseSampler):
     - Safe to run asynchronously
     """
 
-    TABLE_NAME = "layer_memory"
 
     def __init__(self) -> None:
-        self.sampler_name = "LayerMemorySampler"
+        self.sampler_name = "LayerMemory"
+        self.table_name = "LayerMemory"
         super().__init__(sampler_name=self.sampler_name)
         self.sample_idx = 0
 
-        self.logger = get_error_logger(self.sampler_name)
+        self.logger = get_error_logger(self.sampler_name+"Sampler")
 
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
@@ -136,7 +136,7 @@ class LayerMemorySampler(BaseSampler):
             sample = self._sample_from_queue()
             if sample:
                 sample["seq"] = self.sample_idx
-                self.db.add_record(self.TABLE_NAME, sample)
+                self.db.add_record(self.table_name, sample)
 
         except Exception as e:
             # Absolute safety net — sampling must never break training

@@ -26,10 +26,10 @@ class LayerForwardMemorySampler(BaseSampler):
       - step     : int
     """
 
-    TABLE_NAME = "layer_forward_memory"
 
     def __init__(self) -> None:
-        self.sampler_name = "LayerForwardMemorySampler"
+        self.sampler_name = "LayerForwardMemory"
+        self.table_name = "LayerForwardMemory"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
         self.sample_idx = 0
@@ -75,7 +75,7 @@ class LayerForwardMemorySampler(BaseSampler):
             "device": getattr(event, "device", None),
             "layers": layers,
         }
-        self.db.add_record(self.TABLE_NAME, record)
+        self.db.add_record(self.table_name, record)
 
     def sample(self):
         """

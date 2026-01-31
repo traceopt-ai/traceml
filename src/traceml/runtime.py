@@ -42,23 +42,14 @@ from traceml.renderers.base_renderer import BaseRenderer
 # Samplers
 from traceml.samplers.system_sampler import SystemSampler
 from traceml.samplers.process_sampler import ProcessSampler
-from traceml.samplers.step_memory_sampler import StepMemorySampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.layer_forward_memory_sampler import LayerForwardMemorySampler
 from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySampler
-from traceml.samplers.steptimer_sampler import StepTimerSampler
-from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
-from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
-from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
 
 # Renderers (IMPORTANT: must read ONLY from RemoteDBStore)
 from traceml.renderers.system.system_renderer import SystemRenderer
 from traceml.renderers.process.process_renderer import ProcessRenderer
-from traceml.renderers.layer_combined_memory_renderer import LayerCombinedMemoryRenderer
-from traceml.renderers.steptimer_renderer import StepTimerRenderer
-from traceml.renderers.model_combined_renderer import ModelCombinedRenderer
-from traceml.renderers.layer_combined_timing_renderer import LayerCombinedTimerRenderer
-from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
+from traceml.renderers.layer_combined_memory.renderer import LayerCombinedMemoryRenderer
 
 # Display backends
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
@@ -201,7 +192,7 @@ class TraceMLAggregator:
         renderers: List[BaseRenderer] = [
             SystemRenderer(remote_store=remote_store),
             ProcessRenderer(remote_store=remote_store),
-            # LayerCombinedMemoryRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
+            LayerCombinedMemoryRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
             # StepTimerRenderer(remote_store=remote_store),
             # ModelCombinedRenderer(remote_store=remote_store),
             # LayerCombinedTimerRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
@@ -317,9 +308,11 @@ class TraceMLRuntime:
 
         samplers += [
             ProcessSampler(),
-        #     LayerMemorySampler(),
-        #     LayerForwardMemorySampler(),
-        #     LayerBackwardMemorySampler(),
+
+            LayerMemorySampler(),
+            LayerForwardMemorySampler(),
+            LayerBackwardMemorySampler(),
+
         #     StepMemorySampler(),
         #     StepTimerSampler(),
         #     LayerForwardTimeSampler(),
