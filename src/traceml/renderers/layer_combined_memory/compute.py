@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional, List, Tuple, Deque
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.distributed import get_ddp_info
+from traceml.transport.distributed import get_ddp_info
 from traceml.loggers.error_log import get_error_logger
 
 

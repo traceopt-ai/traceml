@@ -4,7 +4,7 @@ import sys
 import subprocess
 import signal
 from pathlib import Path
-from .session import get_session_id
+from traceml.runtime.session import get_session_id
 
 
 def validate_script_path(script_path: str) -> str:
@@ -62,7 +62,7 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     script_args = args.args or []
 
-    runner_path = str(Path(__file__).parent / "executor.py")
+    runner_path = str(Path(__file__).parent / "runtime/executor.py")
 
     if args.mode in ["cli", "dashboard"]:
         cmd = [

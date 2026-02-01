@@ -10,7 +10,7 @@ from IPython.display import HTML
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.distributed import get_ddp_info
+from traceml.transport.distributed import get_ddp_info
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import STEPTIMER_LAYOUT
 from traceml.renderers.utils import fmt_time_run

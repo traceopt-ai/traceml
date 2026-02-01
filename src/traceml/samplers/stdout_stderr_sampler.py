@@ -1,8 +1,8 @@
 from pathlib import Path
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.stdout_stderr_capture import StreamCapture
-from traceml.config import config
-from traceml.distributed import get_ddp_info
+from traceml.runtime.stdout_stderr_capture import StreamCapture
+from traceml.runtime.config import config
+from traceml.transport.distributed import get_ddp_info
 
 
 class StdoutStderrSampler(BaseSampler):

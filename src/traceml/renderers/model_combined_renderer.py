@@ -54,7 +54,7 @@ from rich.table import Table
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.distributed import get_ddp_info
+from traceml.transport.distributed import get_ddp_info
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.cli_display_manager import MODEL_COMBINED_LAYOUT

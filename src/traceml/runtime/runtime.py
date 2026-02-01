@@ -29,10 +29,10 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
-from traceml.config import config
-from traceml.distributed import get_ddp_info
+from traceml.runtime.config import config
+from traceml.transport.distributed import get_ddp_info
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.stdout_stderr_capture import StreamCapture
+from traceml.runtime.stdout_stderr_capture import StreamCapture
 
 from .session import get_session_id
 
@@ -59,7 +59,7 @@ from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayMana
 # Telemetry transport + store
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.database.database_sender import DBIncrementalSender
-from traceml.tcp_transport import TCPServer, TCPClient, TCPConfig
+from traceml.transport.tcp_transport import TCPServer, TCPClient, TCPConfig
 
 
 # Configuration (runtime-level)

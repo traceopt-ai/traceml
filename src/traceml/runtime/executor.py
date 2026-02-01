@@ -19,7 +19,7 @@ import sys
 import runpy
 import traceback
 
-from traceml.runtime import TraceMLRuntime, TraceMLSettings, TraceMLTCPSettings
+from traceml.runtime.runtime import TraceMLRuntime, TraceMLSettings, TraceMLTCPSettings
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 

@@ -89,7 +89,7 @@ def trace_model_instance(
     Args:
         model (nn.Module): The model instance to trace.
         sample_layer_memory: enqueue model for memory sampling.
-        trace_layer_forward__memory: attach activation hooks to capture activations.
+        trace_layer_forward_memory: attach activation hooks to capture activations.
         trace_layer_backward_memory: attach gradient hooks to capture grad sizes (module + param).
         trace_layer_forward_time: attach forward *time* hooks (pre + post).
         trace_layer_backward_time: attach backward *time* hooks (pre + post).
