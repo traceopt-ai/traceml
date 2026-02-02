@@ -258,6 +258,7 @@ class LayerCombinedMemoryData:
 
         for rank in range(world_size):
             db = self._remote_store.get_db(rank, self.LAYER_MEMORY_NAME+"Sampler")
+
             last = self._get_last_row(db)
             if not last:
                 missing.append(rank)

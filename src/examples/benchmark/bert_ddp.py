@@ -28,11 +28,11 @@ from traceml.decorators import trace_model_instance, trace_step, trace_time
 
 
 SEED = 42
-MODEL_NAME = "bert-base-uncased"
-# MODEL_NAME = "prajjwal1/bert-mini"
+# MODEL_NAME = "bert-base-uncased"
+MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 10000
+MAX_TRAIN_EXAMPLES = 1000
 MAX_VAL_EXAMPLES = 0
 
 BATCH_SIZE = 16
@@ -208,7 +208,7 @@ def main():
     # TraceML: attach hooks to the *real* model
     # --------------------------------------------------------
     # Do this BEFORE wrapping with DistributedDataParallel
-    # trace_model_instance(model)
+    trace_model_instance(model)
 
     # Wrap model with DDP
     if use_cuda:

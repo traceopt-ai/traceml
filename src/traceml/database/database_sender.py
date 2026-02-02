@@ -124,6 +124,7 @@ class DBIncrementalSender:
 
         # Send the incremental payload through the configured transport TCP
         try:
+            # self.logger.error(f"[DBIncrementalSender] sending payload {self.rank} {self.sampler_name}")
             self.sender.send(
                 {
                     "rank": self.rank,

@@ -45,11 +45,14 @@ from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.layer_forward_memory_sampler import LayerForwardMemorySampler
 from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySampler
+from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
+from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
 
 # Renderers (IMPORTANT: must read ONLY from RemoteDBStore)
-from traceml.renderers.system.system_renderer import SystemRenderer
-from traceml.renderers.process.process_renderer import ProcessRenderer
+from traceml.renderers.system.renderer import SystemRenderer
+from traceml.renderers.process.renderer import ProcessRenderer
 from traceml.renderers.layer_combined_memory.renderer import LayerCombinedMemoryRenderer
+from traceml.renderers.layer_combined_timing.renderer import LayerCombinedTimeRenderer
 
 # Display backends
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
@@ -193,6 +196,7 @@ class TraceMLAggregator:
             SystemRenderer(remote_store=remote_store),
             ProcessRenderer(remote_store=remote_store),
             LayerCombinedMemoryRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
+            LayerCombinedTimeRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
             # StepTimerRenderer(remote_store=remote_store),
             # ModelCombinedRenderer(remote_store=remote_store),
             # LayerCombinedTimerRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
@@ -313,10 +317,11 @@ class TraceMLRuntime:
             LayerForwardMemorySampler(),
             LayerBackwardMemorySampler(),
 
+            LayerForwardTimeSampler(),
+            LayerBackwardTimeSampler(),
+
         #     StepMemorySampler(),
         #     StepTimerSampler(),
-        #     LayerForwardTimeSampler(),
-        #     LayerBackwardTimeSampler(),
         #     StdoutStderrSampler(),
         ]
         return samplers

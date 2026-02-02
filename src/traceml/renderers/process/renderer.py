@@ -28,7 +28,7 @@ from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 
-from .process_compute import ProcessMetricsComputer
+from .compute import ProcessMetricsComputer
 from traceml.renderers.utils import CARD_STYLE
 
 

@@ -25,7 +25,7 @@ from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.renderers.utils import append_text, CARD_STYLE
-from .system_compute import SystemMetricsComputer
+from .compute import SystemMetricsComputer
 from traceml.loggers.error_log import get_error_logger
 
 

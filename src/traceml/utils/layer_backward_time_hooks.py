@@ -1,42 +1,71 @@
+"""
+Layer backward timing instrumentation for TraceML.
+
+This module captures *per-layer backward execution time* using PyTorch
+full backward pre/post hooks.
+
+Architecture
+------------
+- Hooks emit low-level timing events (per backward invocation).
+- Events are buffered during the step.
+- At step boundaries, all events are flushed together as a step snapshot.
+- Aggregation (per-layer summation) is intentionally deferred to the sampler.
+
+Design Principles
+-----------------
+- No GPU synchronization
+- Correct handling of shared / re-entered modules
+- Step semantics handled outside hooks
+- Single-device assumption (V1)
+"""
+
+
 from dataclasses import dataclass
-from queue import Queue, Full
-from typing import Dict, Deque, Optional
 from collections import deque
+from queue import Queue, Full
+from typing import Dict, Optional, List
 import time
 import sys
+
 import torch
 import torch.nn as nn
+
 from traceml.utils.shared_utils import model_is_on_cuda
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 
 # Shared queue for backward timing events
-layer_backward_time_queue: Queue = Queue(maxsize=2048)
-
-# Prevent double hook attachment
-_backward_time_hook_registry: Dict[int, bool] = {}
-
-# Temporary buffer to match backward pre <-> post
-# model_id -> layer_name -> deque[{cpu_start, gpu_start}]
-_backward_time_start_buffer: Dict[int, Dict[str, Deque[dict]]] = {}
-
-# Main in-memory FIFO buffer
-# model_id -> deque
-_backward_time_buffer: Dict[int, Deque] = {}
+layer_backward_time_queue: Queue = Queue(maxsize=4906)
 
 
 def get_layer_backward_time_queue() -> Queue:
     return layer_backward_time_queue
 
 
+# Prevent double hook attachment
+_backward_time_hook_registry: Dict[int, bool] = {}
+
+# Pre-hook FIFO buffer:
+#   model_id -> layer_name -> deque[start_records]
+_layer_backward_time_start_buffer: Dict[int, Dict[str, deque]] = {}
+
+# Post-hook event buffer:
+#   model_id -> List[LayerBackwardTimeEvent]
+_layer_backward_time_event_buffer: Dict[int, List["LayerBackwardTimeEvent"]] = {}
+
+
 @dataclass
 class LayerBackwardTimeEvent:
     """
-    Time event for a single backward pass of a layer.
+    Timing event for a *single backward invocation* of a layer.
+
+    This is an internal, transient object:
+    - Created by hooks
+    - Paired via FIFO
+    - Resolved asynchronously
+    - Never written directly to the database
     """
 
-    step: int
-    model_id: int
     layer_name: str
     on_gpu: bool
 
@@ -51,6 +80,9 @@ class LayerBackwardTimeEvent:
     resolved: bool = False
 
     def try_resolve(self) -> bool:
+        """
+        Attempt to resolve GPU timing without blocking.
+        """
         if self.resolved:
             return True
 
@@ -58,14 +90,12 @@ class LayerBackwardTimeEvent:
             self.resolved = True
             return True
 
-        # Non-blocking readiness check
         if self.gpu_end.query():
             self.gpu_duration_ms = self.gpu_start.elapsed_time(self.gpu_end)
 
             return_cuda_event(self.gpu_start)
             return_cuda_event(self.gpu_end)
 
-            # release CUDA event handles
             self.gpu_start = None
             self.gpu_end = None
             self.resolved = True
@@ -73,10 +103,24 @@ class LayerBackwardTimeEvent:
         return self.resolved
 
 
+@dataclass
+class LayerBackwardTimeStepEvent:
+    """
+    Backward timing snapshot for a *single training step*.
+    """
+
+    model_id: int
+    step: int
+    device: str
+    layers: List[LayerBackwardTimeEvent]
+
+
 class LayerBackwardTimePreHook:
     """
-    Full backward *pre* hook: record start markers.
-    Signature: (module, grad_output) -> None
+    Full backward *pre* hook.
+
+    Signature:
+        (module, grad_output) -> None
     """
 
     def __init__(self, model_id: int, layer_name: str, on_gpu: bool):
@@ -89,28 +133,32 @@ class LayerBackwardTimePreHook:
             cpu_start = time.perf_counter()
             gpu_start = None
 
-            if self.on_gpu and torch.cuda.is_available():
+            if self.on_gpu:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            model_buf = _backward_time_start_buffer.setdefault(self.model_id, {})
-            model_buf.setdefault(self.layer_name, deque()).append(
+            model_buf = _layer_backward_time_start_buffer.setdefault(self.model_id, {})
+            layer_q = model_buf.setdefault(self.layer_name, deque())
+            layer_q.append(
                 {
                     "cpu_start": cpu_start,
                     "gpu_start": gpu_start,
                 }
             )
+
         except Exception:
             print(
-                f"[TraceML] Error in LayerBackwardTimePreHook for layer {self.layer_name}",
+                f"[TraceML] Error in LayerBackwardTimePreHook ({self.layer_name})",
                 file=sys.stderr,
             )
 
 
 class LayerBackwardTimePostHook:
     """
-    Full backward hook: record end markers and enqueue event.
-    Signature: (module, grad_input, grad_output) -> None
+    Full backward *post* hook.
+
+    Signature:
+        (module, grad_input, grad_output) -> None
     """
 
     def __init__(self, model_id: int, layer_name: str, on_gpu: bool):
@@ -122,25 +170,23 @@ class LayerBackwardTimePostHook:
         try:
             cpu_end = time.perf_counter()
 
-            layer_q = _backward_time_start_buffer.get(self.model_id, {}).get(
+            layer_q = _layer_backward_time_start_buffer.get(self.model_id, {}).get(
                 self.layer_name
             )
             if not layer_q:
                 return
 
-            start_rec = layer_q.popleft()  # FIFO match
-            cpu_start = start_rec["cpu_start"]
+            start = layer_q.popleft()
+            cpu_start = start["cpu_start"]
             cpu_duration_ms = (cpu_end - cpu_start) * 1000.0
 
-            gpu_start = start_rec["gpu_start"]
+            gpu_start = start["gpu_start"]
             gpu_end = None
-
             if self.on_gpu:
                 gpu_end = get_cuda_event()
                 gpu_end.record()
 
             event = LayerBackwardTimeEvent(
-                model_id=self.model_id,
                 layer_name=self.layer_name,
                 on_gpu=self.on_gpu,
                 cpu_start=cpu_start,
@@ -148,43 +194,46 @@ class LayerBackwardTimePostHook:
                 cpu_duration_ms=cpu_duration_ms,
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
-                step=-1,
             )
 
-            _backward_time_buffer.setdefault(self.model_id, deque()).append(event)
+            _layer_backward_time_event_buffer.setdefault(self.model_id, []).append(
+                event
+            )
 
         except Exception:
             print(
-                f"[TraceML] Error in GradientTimePostHook for layer {self.layer_name}",
+                f"[TraceML] Error in LayerBackwardTimePostHook ({self.layer_name})",
                 file=sys.stderr,
             )
 
 
 def flush_layer_backward_time_buffers(model: nn.Module, step: int) -> None:
     """
-    Drain the backward-time buffer for `model` and enqueue as a NEW deque.
-    - Preserves FIFO order
-    - Producer buffer is fully emptied
-    - Consumer gets independent ownership
+    Flush all backward timing events for `model` at a step boundary.
+    Emits a single LayerBackwardTimeStepEvent into the shared queue.
     """
     model_id = id(model)
-    src = _backward_time_buffer.get(model_id, None)
-    if not src:
+    layers = _layer_backward_time_event_buffer.pop(model_id, None)
+    if not layers:
         return
 
-    dst: Deque = deque()
+    try:
+        device = str(next(model.parameters()).device)
+    except StopIteration:
+        device = "unknown"
 
-    while src:
-        event = src.popleft()
-        event.step = step  ## step is updated during flush
-        dst.append(event)
-
-    _backward_time_buffer.pop(model_id, None)
+    event = LayerBackwardTimeStepEvent(
+        model_id=model_id,
+        step=step,
+        device=device,
+        layers=layers,
+    )
 
     try:
-        layer_backward_time_queue.put_nowait(dst)
+        layer_backward_time_queue.put_nowait(event)
     except Full:
         pass
+
 
 
 def attach_layer_backward_time_hooks(model: nn.Module):

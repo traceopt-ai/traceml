@@ -1,17 +1,46 @@
+"""
+Layer forward timing instrumentation for TraceML.
+
+This module captures *per-layer forward execution time* using PyTorch
+forward pre/post hooks.
+
+Architecture
+------------
+- Hooks emit low-level timing events (per invocation).
+- Events are buffered during the step.
+- At step boundaries, all events are flushed together as a step snapshot.
+- Aggregation (per-layer summation) is intentionally deferred to the sampler.
+
+Design Principles
+-----------------
+- No GPU synchronization
+- Correct handling of shared / re-entered modules
+- Step semantics handled outside hooks
+- Single-device assumption (V1)
+"""
+
+
+
 from dataclasses import dataclass
 from collections import deque
 from queue import Queue, Full
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import time
 import sys
 
 import torch
 import torch.nn as nn
+
 from traceml.utils.shared_utils import model_is_on_cuda
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
 # Shared queue (consumer-facing)
 layer_forward_time_queue: Queue = Queue(maxsize=4096)
+
+def get_layer_forward_time_queue() -> Queue:
+    return layer_forward_time_queue
+
+# Internal registries & buffers
 
 # Prevent double hook attachment
 _layer_forward_time_hook_registry: Dict[int, bool] = {}
@@ -19,18 +48,22 @@ _layer_forward_time_hook_registry: Dict[int, bool] = {}
 # Temporary pre-hook buffer: model_id -> layer -> FIFO start records
 _layer_forward_time_start_buffer: Dict[int, Dict[str, deque]] = {}
 
-# Main FIFO event buffer: model_id -> deque[]
-_layer_forward_time_event_buffer: Dict[int, deque] = {}
+# Post-hook event buffer:
+#   model_id -> List[LayerForwardTimeEvent]
+_layer_forward_time_event_buffer: Dict[int,  List["LayerForwardTimeEvent"]] = {}
 
 
 @dataclass
 class LayerForwardTimeEvent:
     """
-    Time event for a single forward pass of a layer.
-    """
+    Timing event for a *single forward invocation* of a layer.
 
-    step: int
-    model_id: int
+    This is an internal, transient object:
+    - Created by hooks
+    - Paired via FIFO
+    - Resolved asynchronously
+    - Never written directly to the database
+    """
     layer_name: str
     on_gpu: bool
 
@@ -46,33 +79,57 @@ class LayerForwardTimeEvent:
 
     def try_resolve(self) -> bool:
         """
-        Attempt to resolve GPU timings, non-blocking.
-        Returns:
-            bool: True if fully resolved (CPU-only or GPU completed).
+        Attempt to resolve GPU timing without blocking.
+
+        Returns
+        -------
+        bool
+            True if the event is fully resolved (CPU-only or GPU completed).
         """
         if self.resolved:
             return True
-        # On CPU only
+
         if not self.on_gpu:
             self.resolved = True
             return True
 
-        # On GPU (non-blocking)
         if self.gpu_end.query():
             self.gpu_duration_ms = self.gpu_start.elapsed_time(self.gpu_end)
 
             return_cuda_event(self.gpu_start)
             return_cuda_event(self.gpu_end)
 
-            # Release CUDA event handles
             self.gpu_start = None
             self.gpu_end = None
             self.resolved = True
+
         return self.resolved
 
 
-def get_layer_forward_time_queue() -> Queue:
-    return layer_forward_time_queue
+@dataclass
+class LayerForwardTimeStepEvent:
+    """
+    Forward timing snapshot for a *single training step*.
+
+    This mirrors LayerForwardMemoryEvents and represents the
+    semantic unit of observability.
+
+    Attributes
+    ----------
+    model_id : int
+        Identity of the model instance.
+    step : int
+        Training step index.
+    device : str
+        Execution device (single-device assumption in V1).
+    layers : List[LayerForwardTimeEvent]
+        All per-layer forward timing events for this step.
+    """
+
+    model_id: int
+    step: int
+    device: str
+    layers: List[LayerForwardTimeEvent]
 
 
 class LayerForwardTimePreHook:
@@ -106,6 +163,11 @@ class LayerForwardTimePreHook:
 
 
 class LayerForwardTimePostHook:
+    """
+    Forward post-hook that records CPU/GPU end timestamps
+    and emits per-invocation timing events.
+    """
+
     def __init__(self, model_id: int, layer_name: str, on_gpu: bool):
         self.model_id = model_id
         self.layer_name = layer_name
@@ -132,7 +194,6 @@ class LayerForwardTimePostHook:
                 gpu_end.record()
 
             event = LayerForwardTimeEvent(
-                model_id=self.model_id,
                 layer_name=self.layer_name,
                 on_gpu=self.on_gpu,
                 cpu_start=cpu_start,
@@ -140,9 +201,8 @@ class LayerForwardTimePostHook:
                 cpu_duration_ms=cpu_duration_ms,
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
-                step=-1,
             )
-            _layer_forward_time_event_buffer.setdefault(self.model_id, deque()).append(
+            _layer_forward_time_event_buffer.setdefault(self.model_id, []).append(
                 event
             )
 
@@ -155,31 +215,30 @@ class LayerForwardTimePostHook:
 
 def flush_layer_forward_time_buffers(model: nn.Module, step: int) -> None:
     """
-    Drain the forward-time buffer for `model` and enqueue it as a NEW deque.
-
-    - Preserves order
-    - Producer buffer is fully emptied
-    - Consumer receives independent ownership
-    - No GPU resolve here
+    Flush all forward timing events for `model` at a step boundary.
+    Emits a single LayerForwardTimeStepEvent into the shared queue.
     """
     model_id = id(model)
-    src = _layer_forward_time_event_buffer.get(model_id, None)
-    if not src:
+    layers = _layer_forward_time_event_buffer.pop(model_id, None)
+    if not layers:
         return
 
-    # Create a new deque for the consumer
-    dst = deque()
-    while src:
-        event = src.popleft()
-        event.step = step  ## Step is updated to correct value here
-        dst.append(event)
+    try:
+        device = str(next(model.parameters()).device)
+    except StopIteration:
+        device = "unknown"
 
-    # Remove empty buffer entry
-    _layer_forward_time_event_buffer.pop(model_id, None)
+    event = LayerForwardTimeStepEvent(
+        model_id=model_id,
+        step=step,
+        device=device,
+        layers=layers,
+    )
 
     try:
-        layer_forward_time_queue.put_nowait(dst)
+        layer_forward_time_queue.put_nowait(event)
     except Full:
+        # Drop silently to avoid backpressure on training
         pass
 
 

@@ -1,88 +1,174 @@
-from typing import List, Deque
-from queue import Empty
+from typing import Dict, List, Tuple
 from collections import deque
+from queue import Empty
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 from traceml.utils.layer_backward_time_hooks import (
-    LayerBackwardTimeEvent,
+    LayerBackwardTimeStepEvent,
     get_layer_backward_time_queue,
 )
 
 
 class LayerBackwardTimeSampler(BaseSampler):
     """
-    Drain-all gradient-time event sampler.
+    Sampler for backward-pass execution time at the layer level.
 
-    Each call to `sample()`:
-      - Drains the gradient time queue.
-      - Resolves GPU events non-blocking via try_resolve()
-      - Stores each event in a per-layer table inside the local DB.
+    This sampler mirrors LayerForwardTimeSampler exactly, but operates
+    on backward (gradient) execution.
+
+    Design
+    ------
+    - One table: `LayerBackwardTimeTable`
+    - One row per (model_id, step)
+    - Uses a local FIFO buffer to ensure:
+        * steps are written in order
+        * no step is written until *all* GPU timings are resolved
+
+    Final record format
+    -------------------
+    {
+        "seq": int,
+        "model_id": int,
+        "step": int,
+        "device": str,
+        "layers": List[
+            (layer_name: str,
+             cpu_time_ms: float,
+             gpu_time_ms: Optional[float],
+             n_calls: int)
+        ]
+    }
+
+    Notes
+    -----
+    Multiple backward invocations of the same layer within a step can occur due to:
+    - gradient accumulation
+    - shared parameters
+    - checkpointing / recomputation
+
+    These are aggregated by summation.
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "LayerBackwardTimeSampler"
+        self.name = "LayerBackwardTime"
+        self.sampler_name = self.name + "Sampler"
+        self.table_name = self.name + "Table"
         super().__init__(sampler_name=self.sampler_name)
+
         self.logger = get_error_logger(self.sampler_name)
-        # Local FIFO buffer owned by the sampler
-        self._local_buffer: Deque[LayerBackwardTimeEvent] = deque()
+
+        # FIFO of LayerBackwardTimeStepEvent
+        self._local_buffer: deque[LayerBackwardTimeStepEvent] = deque()
+
+        self.sample_idx = 0
+
 
     def _ingest_queue(self) -> None:
         """
-        Drain shared gradient-time queue and append all batches
-        into the local FIFO buffer (order preserved).
+        Drain the shared backward-time queue into the local FIFO buffer.
+
+        Queue payload is expected to be LayerBackwardTimeStepEvent.
         """
         q = get_layer_backward_time_queue()
+
         while True:
             try:
-                batch = q.get_nowait()
+                event = q.get_nowait()
             except Empty:
                 break
-            # Preserve order across batches
-            self._local_buffer.extend(batch)
 
-    def _resolve_ready_events(self) -> List[LayerBackwardTimeEvent]:
+            if event is None:
+                continue
+
+            self._local_buffer.append(event)
+
+
+    def _step_is_resolved(self, event: LayerBackwardTimeStepEvent) -> bool:
         """
-        Resolve events from the head of the local buffer.
+        Check whether *all* backward timing events in the step are resolved.
 
-        FIFO invariant:
-          If the first event is not resolved, no later event can be resolved.
+        FIFO rule:
+          If the earliest step is not fully resolved,
+          later steps must not be processed.
         """
-        resolved: List = []
+        for layer_evt in event.layers:
+            if not layer_evt.try_resolve():
+                return False
+        return True
 
-        while self._local_buffer:
-            evt = self._local_buffer[0]  # peek head
-            if not evt.try_resolve():
-                break
-            resolved.append(evt)
-            self._local_buffer.popleft()
 
-        return resolved
-
-    def _save_events(self, events: List) -> None:
+    def _aggregate_step(
+            self, event: LayerBackwardTimeStepEvent
+    ) -> Dict[str, object]:
         """
-        Save resolved gradient timing events into per-layer tables.
+        Aggregate per-call backward timing events into per-layer summaries.
+
+        Aggregation is done by summation over:
+        - CPU time
+        - GPU time
+        - number of calls
         """
-        for evt in events:
-            table_name = f"{evt.layer_name}"
-            record = {
-                "timestamp": evt.cpu_end,
-                "model_id": evt.model_id,
-                "layer_name": evt.layer_name,
-                "on_gpu": evt.on_gpu,
-                "cpu_duration_ms": evt.cpu_duration_ms,
-                "gpu_duration_ms": evt.gpu_duration_ms,
-                "step": evt.step,
-            }
-            self.db.add_record(table_name, record)
+        agg: Dict[str, Dict[str, float]] = {}
+
+        for evt in event.layers:
+            rec = agg.setdefault(
+                evt.layer_name,
+                {
+                    "cpu_ms": 0.0,
+                    "gpu_ms": None,
+                    "n_calls": 0,
+                },
+            )
+
+            rec["cpu_ms"] += evt.cpu_duration_ms
+            if evt.gpu_duration_ms is not None:
+                rec["gpu_ms"] = (rec["gpu_ms"] or 0.0) + evt.gpu_duration_ms
+            rec["n_calls"] += 1
+
+        layers: List[Tuple[str, float, float, int]] = []
+        for layer_name, rec in agg.items():
+            layers.append(
+                (
+                    layer_name,
+                    rec["cpu_ms"],
+                    rec["gpu_ms"],
+                    int(rec["n_calls"]),
+                )
+            )
+
+        return {
+            "seq": self.sample_idx,
+            "model_id": event.model_id,
+            "step": event.step,
+            "device": event.device,
+            "layers": layers,
+        }
+
 
     def sample(self) -> None:
         """
-        Ingest → resolve (FIFO) → persist
+        Ingest → resolve earliest step → aggregate → persist.
+
+        Stops at the first unresolved step to preserve FIFO semantics.
         """
         try:
             self._ingest_queue()
-            ready_events = self._resolve_ready_events()
-            self._save_events(ready_events)
+
+            while self._local_buffer:
+                event = self._local_buffer[0]
+
+                if not self._step_is_resolved(event):
+                    break
+
+                # Step fully resolved
+                self._local_buffer.popleft()
+                self.sample_idx += 1
+
+                record = self._aggregate_step(event)
+                self.db.add_record(self.table_name, record)
+
         except Exception as e:
-            self.logger.error(f"[TraceML] LayerBackwardTimeSampler error: {e}")
+            self.logger.error(
+                f"[TraceML] LayerBackwardTimeSampler error: {e}"
+            )

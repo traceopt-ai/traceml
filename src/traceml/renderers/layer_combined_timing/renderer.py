@@ -12,7 +12,7 @@ from traceml.database.database import Database
 from traceml.renderers.display.cli_display_manager import (
     LAYER_COMBINED_TIMER_LAYOUT,
 )
-from traceml.renderers.layer_combined_timing.services import (
+from traceml.renderers.layer_combined_timing.compute import (
     LayerCombinedTimerData,
     LayerCombinedTimerSummary,
 )
@@ -21,7 +21,7 @@ from traceml.utils.formatting import fmt_time_ms
 from traceml.database.remote_database_store import RemoteDBStore
 
 
-class LayerCombinedTimerRenderer(BaseRenderer):
+class LayerCombinedTimeRenderer(BaseRenderer):
     """
     Layer-wise activation timing renderer.
     """
@@ -38,15 +38,12 @@ class LayerCombinedTimerRenderer(BaseRenderer):
             layout_section_name=LAYER_COMBINED_TIMER_LAYOUT,
         )
         self._service = LayerCombinedTimerData(
-            forward_db=forward_db,
-            backward_db=backward_db,
             top_n_layers=top_n_layers,
             remote_store=remote_store,
         )
 
         self._summary_service = LayerCombinedTimerSummary(
-            forward_db=backward_db,
-            backward_db=backward_db,
+            remote_store=remote_store,
         )
 
     def get_panel_renderable(self) -> Panel:
