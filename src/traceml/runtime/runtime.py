@@ -48,6 +48,7 @@ from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySa
 from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
 from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
 from traceml.samplers.time_sampler import TimeSampler
+from traceml.samplers.step_memory_sampler import StepMemorySampler
 
 # Renderers (IMPORTANT: must read ONLY from RemoteDBStore)
 from traceml.renderers.system.renderer import SystemRenderer
@@ -55,6 +56,7 @@ from traceml.renderers.process.renderer import ProcessRenderer
 from traceml.renderers.layer_combined_memory.renderer import LayerCombinedMemoryRenderer
 from traceml.renderers.layer_combined_timing.renderer import LayerCombinedTimeRenderer
 from traceml.renderers.user_time_renderer import UserTimeRenderer
+from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 
 # Display backends
 from traceml.renderers.display.cli_display_manager import CLIDisplayManager
@@ -200,7 +202,7 @@ class TraceMLAggregator:
             LayerCombinedMemoryRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
             LayerCombinedTimeRenderer(remote_store=remote_store, top_n_layers=num_display_layers),
             UserTimeRenderer(remote_store=remote_store),
-            # ModelCombinedRenderer(remote_store=remote_store),
+            StepCombinedRenderer(remote_store=remote_store),
         ]
         # if mode == "cli":
         #     renderers.append(StdoutStderrRenderer(remote_store=remote_store))
@@ -321,9 +323,8 @@ class TraceMLRuntime:
             LayerForwardTimeSampler(),
             LayerBackwardTimeSampler(),
 
-            TimeSampler()
-        #     StepMemorySampler(),
-        #     StepTimerSampler(),
+            TimeSampler(),
+            StepMemorySampler(),
         #     StdoutStderrSampler(),
         ]
         return samplers

@@ -2,8 +2,6 @@ import functools
 import sys
 from typing import Callable
 import torch.nn as nn
-import time
-import torch
 from contextlib import contextmanager
 
 from traceml.utils.layer_parameter_memory import (
@@ -155,14 +153,11 @@ def trace_time(name: str, scope:str = "global", use_gpu: bool = True) -> Callabl
             "Expected 'step' or 'global'."
         )
 
-    scope_enum = (
-        TimeScope.STEP if scope == "step" else TimeScope.GLOBAL
-    )
 
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            with timed_region(name, scope=scope_enum, use_gpu=use_gpu):
+            with timed_region(name, scope=scope, use_gpu=use_gpu):
                 return func(*args, **kwargs)
         return wrapper
 

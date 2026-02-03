@@ -88,7 +88,6 @@ class TimeSampler(BaseSampler):
                 "timestamp": float(evt.cpu_end),
                 "step": int(evt.step),
                 "scope": evt.scope,
-                "event_name": evt.name,
                 "device": evt.device,  # 'cpu' or 'cuda:0'
                 "is_gpu": is_gpu,
                 "duration_ms": float(evt.gpu_time_ms if is_gpu else cpu_ms),

@@ -52,6 +52,7 @@ class TimeEvent:
     step: int = -1
     scope: TimeScope = TimeScope.STEP
 
+
     def try_resolve(self) -> bool:
         """
         Attempt to resolve GPU timing without blocking.
@@ -107,7 +108,7 @@ def record_event(evt: TimeEvent) -> None:
     STEP events are buffered until flush.
     GLOBAL events are enqueued immediately.
     """
-    if evt.scope is TimeScope.STEP:
+    if evt.scope == TimeScope.STEP:
         _STEP_BUFFER.append(evt)
     else:
         _enqueue(evt)
@@ -127,7 +128,6 @@ def flush_step_time_buffer(step: int) -> None:
 @contextmanager
 def timed_region(
     name: str,
-    *,
     scope: TimeScope = TimeScope.STEP,
     use_gpu: bool = True,
 ):
