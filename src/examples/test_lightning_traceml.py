@@ -44,6 +44,10 @@ class MNISTLightning(L.LightningModule):
         xb, yb = batch
         out = self(xb)
         loss = self.loss_fn(out, yb)
+        
+        if batch_idx % 50 == 0:
+            print(f"Step {batch_idx}, loss={loss.item():.4f}")
+        
         self.log("train_loss", loss)
         return loss
 
@@ -67,7 +71,7 @@ def main():
     
     # TraceML automatically patches this Trainer to add the TraceMLCallback
     trainer = L.Trainer(
-        max_steps=100,
+        max_steps=500,
         accelerator="auto",
         devices=1,
         log_every_n_steps=10
