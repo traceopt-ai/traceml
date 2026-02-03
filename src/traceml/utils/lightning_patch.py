@@ -27,12 +27,7 @@ def patch_lightning():
         phase timings (forward, backward, optimizer_step).
         """
         
-        # Use __slots__ for memory efficiency - avoids per-instance __dict__
-        __slots__ = ('_traceml_state', '_forward_timer', '_backward_timer', '_optimizer_timer')
-        
         def __init__(self):
-            # Note: Callback base class uses __dict__, so we call super().__init__()
-            # but our instance attributes use slots
             super().__init__()
             self._traceml_state = None
             self._forward_timer = None
