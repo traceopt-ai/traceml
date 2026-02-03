@@ -99,9 +99,9 @@ class CLIDisplayManager:
             cls._live_display = Live(
                 cls._layout,
                 console=cls._console,
-                auto_refresh=False,
+                refresh_per_second=4,
                 transient=False,
-                screen=True,
+                vertical_overflow="visible",
             )
             try:
                 cls._live_display.start()
@@ -151,7 +151,6 @@ class CLIDisplayManager:
         Triggers an update of the entire live display by calling all registered
         content functions and updating the layout.
         """
-        pass
         if cls._live_display is None:
             return
 
