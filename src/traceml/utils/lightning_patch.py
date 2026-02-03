@@ -35,6 +35,7 @@ def patch_lightning():
             self._optimizer_timer_state = None
         
         def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+            print("[TraceML] Callback triggered!")
             # Store instrumentation state on the callback instance
             self._traceml_state = begin_trace_step(pl_module)
             # Start timing the forward pass (ends in on_before_backward)
