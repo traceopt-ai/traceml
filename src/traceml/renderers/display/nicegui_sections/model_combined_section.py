@@ -12,7 +12,7 @@ Section that renders:
 Expected input telemetry (from ModelCombinedRenderer.get_dashboard_renderable()):
   telemetry: Dict[str, Any] shaped like:
     {
-      "dataLoader_fetch": {
+      "dataloading_time": {
         "steps": List[int],
         "worst":  { "y": np.ndarray, "stats": {last,p50,p95,avg100,trend} },
         "median": { "y": np.ndarray, "stats": {last,p50,p95,avg100,trend} },
@@ -28,8 +28,6 @@ Notes
 -----
 - We plot the per-step aggregated series (already step-synchronized via renderer).
 - We show imbalance + worst rank only for the "Worst" row (because it refers to gating rank).
-- Card size and graph height remain unchanged (card 300px; graph 160px).
-- Safe with numpy arrays: never uses `or []` on a ndarray.
 """
 
 from dataclasses import dataclass
@@ -395,7 +393,7 @@ def update_model_combined_section(
     mapping: Dict[
         str, Tuple[str, str, Callable[[float], str], Callable[[float], str]]
     ] = {
-        "dataloader": ("dataLoader_fetch", "Time (ms)", fmt_time_run, fmt_time_run),
+        "dataloader": ("dataloading_time", "Time (ms)", fmt_time_run, fmt_time_run),
         "step_time": ("step_time", "Time (ms)", fmt_time_run, fmt_time_run),
         "step_memory": ("step_gpu_memory", "Memory (MB)", fmt_mem_new, fmt_mem_new),
     }

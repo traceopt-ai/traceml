@@ -234,6 +234,7 @@ def aggregate_worst_and_median(
 
     worst_vals: List[float] = []
     median_vals: List[float] = []
+    sum_vals: List[float] = []
 
     slowest_rank: Optional[int] = None
     skew_abs = 0.0
@@ -249,9 +250,12 @@ def aggregate_worst_and_median(
 
         worst = values[-1]
         median = float(np.median(values))
+        total = float(sum(values))
 
         worst_vals.append(worst)
         median_vals.append(median)
+        sum_vals.append(total)
+
 
         if s == completed_step:
             slowest_rank = max(vals, key=lambda r: vals[r])
@@ -260,11 +264,13 @@ def aggregate_worst_and_median(
 
     worst_arr = np.asarray(worst_vals, dtype=float)
     median_arr = np.asarray(median_vals, dtype=float)
+    sum_arr = np.asarray(sum_vals, dtype=float)
 
     return dict(
         steps=steps,
         worst=dict(y=worst_arr, stats=compute_stats(worst_arr)),
         median=dict(y=median_arr, stats=compute_stats(median_arr)),
+        sum=dict(y=sum_vals, stats=compute_stats(sum_arr)),
         rank_skew_abs=skew_abs,
         rank_skew_pct=skew_pct,
         slowest_rank=slowest_rank,

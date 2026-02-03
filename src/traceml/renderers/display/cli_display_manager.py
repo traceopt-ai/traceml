@@ -43,8 +43,8 @@ class CLIDisplayManager:
         dashboard = cls._layout["dashboard"]
         dashboard.split_column(
             Layout(name="upper_row", ratio=3),
-            Layout(name="middle_row", ratio=4),
-            Layout(name="layer_row", ratio=6),
+            Layout(name="middle_row", ratio=6),
+            Layout(name="layer_row", ratio=5),
         )
         dashboard["upper_row"].split_row(
             Layout(name=SYSTEM_LAYOUT, ratio=4),

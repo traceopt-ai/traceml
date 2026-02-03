@@ -8,11 +8,12 @@ This module contains *no aggregation logic*.
 """
 
 import shutil
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 from IPython.display import HTML
 
 from traceml.database.remote_database_store import RemoteDBStore
@@ -51,9 +52,9 @@ class StepCombinedRenderer(BaseRenderer):
 
         table = Table(show_header=True, header_style="bold blue", box=None)
         table.add_column("Stat")
-        table.add_column("Dataloader")
-        table.add_column("Step")
-        table.add_column("Memory")
+        table.add_column("Dataloader Time")
+        table.add_column("Step Time")
+        table.add_column("Step Memory")
 
         def cell(key, kind):
             entry = payload.get(key)
@@ -91,10 +92,62 @@ class StepCombinedRenderer(BaseRenderer):
                 cell("step_gpu_memory", kind),
             )
 
+        table.add_row("", "", "", "")
+        table.add_row(
+            "[bold yellow]Cluster Cost[/bold yellow]",
+            "",
+            "",
+            "",
+        )
+
+        def sum_cell(key, stat):
+            entry = payload.get(key)
+            if not entry or "sum" not in entry:
+                return "—"
+            stats = entry["sum"]["stats"]
+            fmt = fmt_mem_new if "memory" in key else fmt_time_run
+            return fmt(stats.get(stat, 0.0))
+
+        table.add_row(
+            "Sum (last)",
+            sum_cell("dataloading_time", "last"),
+            sum_cell("step_time", "last"),
+            "—",  # memory sum intentionally hidden
+        )
+
+        table.add_row(
+            "Sum p95",
+            sum_cell("dataloading_time", "p95"),
+            sum_cell("step_time", "p95"),
+            "—",
+        )
+
+        # Recent DL cost line
+        dl_entry = payload.get("dataloading_time")
+        st_entry = payload.get("step_time")
+
+        dl_cost_line = Text("Recent Dataloading Cost: —", style="dim")
+
+        if dl_entry and st_entry:
+            dl_avg = dl_entry.get("sum", {}).get("stats", {}).get("avg100", 0.0)
+            st_avg = st_entry.get("sum", {}).get("stats", {}).get("avg100", 0.0)
+
+            if st_avg > 0:
+                pct = dl_avg / st_avg * 100.0
+                dl_cost_line = Text(
+                    f"Recent Dataloading Cost (avg100): "
+                    f"{fmt_time_run(dl_avg)} / {fmt_time_run(st_avg)} = {pct:.1f}%",
+                    style="bold",
+                )
+
         cols, _ = shutil.get_terminal_size()
         width = min(max(100, int(cols * 0.75)), 120)
 
-        return Panel(table, title="Model Summary (worst / median)", width=width)
+        return Panel(
+            Group(table, Text(""), dl_cost_line),
+            title="Model Summary (tail latency + cluster cost)",
+            width=width,
+        )
 
     def get_notebook_renderable(self) -> HTML:
         """
