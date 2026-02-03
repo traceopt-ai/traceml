@@ -16,6 +16,10 @@ def patch_lightning():
     if getattr(Trainer, "_traceml_patched", False):
         return
 
+    # Cache imports at patch time (once) rather than per-callback-call
+    from traceml.decorators import begin_trace_step, end_trace_step
+    from traceml.utils.steptimer import begin_timed_region, end_timed_region
+
     class TraceMLCallback(Callback):
         """
         Internal callback to wrap Lightning training batches with TraceML instrumentation.
@@ -23,65 +27,60 @@ def patch_lightning():
         phase timings (forward, backward, optimizer_step).
         """
         
+        # Use __slots__ for memory efficiency - avoids per-instance __dict__
+        __slots__ = ('_traceml_state', '_forward_timer', '_backward_timer', '_optimizer_timer')
+        
         def __init__(self):
+            # Note: Callback base class uses __dict__, so we call super().__init__()
+            # but our instance attributes use slots
             super().__init__()
             self._traceml_state = None
-            self._forward_timer_state = None
-            self._backward_timer_state = None
-            self._optimizer_timer_state = None
+            self._forward_timer = None
+            self._backward_timer = None
+            self._optimizer_timer = None
         
         def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-            from traceml.decorators import begin_trace_step
-            from traceml.utils.steptimer import begin_timed_region
-            # Store instrumentation state on the callback instance
+            # Start step boundary + forward timer
             self._traceml_state = begin_trace_step(pl_module)
-            # Start timing the forward pass (ends in on_before_backward)
-            self._forward_timer_state = begin_timed_region("forward")
+            self._forward_timer = begin_timed_region("forward")
 
         def on_before_backward(self, trainer, pl_module, loss):
-            from traceml.utils.steptimer import end_timed_region, begin_timed_region
-            # End forward timing
-            if self._forward_timer_state is not None:
-                end_timed_region(self._forward_timer_state)
-                self._forward_timer_state = None
-            # Start backward timing
-            self._backward_timer_state = begin_timed_region("backward")
+            # End forward, start backward
+            if self._forward_timer:
+                end_timed_region(self._forward_timer)
+                self._forward_timer = None
+            self._backward_timer = begin_timed_region("backward")
 
         def on_after_backward(self, trainer, pl_module):
-            from traceml.utils.steptimer import end_timed_region
-            # End backward timing
-            if self._backward_timer_state is not None:
-                end_timed_region(self._backward_timer_state)
-                self._backward_timer_state = None
+            # End backward
+            if self._backward_timer:
+                end_timed_region(self._backward_timer)
+                self._backward_timer = None
 
         def on_before_optimizer_step(self, trainer, pl_module, optimizer):
-            from traceml.utils.steptimer import begin_timed_region
-            # Start optimizer step timing
-            self._optimizer_timer_state = begin_timed_region("optimizer_step")
+            # Start optimizer step timer
+            self._optimizer_timer = begin_timed_region("optimizer_step")
 
         def on_before_zero_grad(self, trainer, pl_module, optimizer):
-            from traceml.utils.steptimer import end_timed_region
-            # End optimizer step timing (zero_grad happens after step)
-            if self._optimizer_timer_state is not None:
-                end_timed_region(self._optimizer_timer_state)
-                self._optimizer_timer_state = None
+            # End optimizer step timer (zero_grad happens after step)
+            if self._optimizer_timer:
+                end_timed_region(self._optimizer_timer)
+                self._optimizer_timer = None
 
         def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-            from traceml.decorators import end_trace_step
-            from traceml.utils.steptimer import end_timed_region
+            # Safety cleanup for edge cases (gradient accumulation, skipped steps, etc.)
+            if self._forward_timer:
+                end_timed_region(self._forward_timer)
+                self._forward_timer = None
+            if self._backward_timer:
+                end_timed_region(self._backward_timer)
+                self._backward_timer = None
+            if self._optimizer_timer:
+                end_timed_region(self._optimizer_timer)
+                self._optimizer_timer = None
             
-            # Safety: end any timers that weren't ended (edge cases)
-            if self._forward_timer_state is not None:
-                end_timed_region(self._forward_timer_state)
-                self._forward_timer_state = None
-            if self._backward_timer_state is not None:
-                end_timed_region(self._backward_timer_state)
-                self._backward_timer_state = None
-            if self._optimizer_timer_state is not None:
-                end_timed_region(self._optimizer_timer_state)
-                self._optimizer_timer_state = None
-                
-            if self._traceml_state is not None:
+            # End step boundary and flush buffers
+            if self._traceml_state:
                 end_trace_step(pl_module, self._traceml_state)
                 self._traceml_state = None
 
@@ -90,11 +89,11 @@ def patch_lightning():
     @functools.wraps(_orig_init)
     def traceml_init(self, *args, **kwargs):
         # Retrieve existing callbacks or initialize a new list
-        cbs = kwargs.get("callbacks", []) or []
+        cbs = kwargs.get("callbacks") or []
         if not isinstance(cbs, list):
             cbs = [cbs]
         else:
-            cbs = list(cbs) # Copy to avoid modifying user's list in place
+            cbs = list(cbs)  # Copy to avoid mutating user's list
 
         # Inject TraceMLCallback if not already present
         if not any(isinstance(c, TraceMLCallback) for c in cbs):
@@ -102,7 +101,6 @@ def patch_lightning():
         
         kwargs["callbacks"] = cbs
         _orig_init(self, *args, **kwargs)
-    
-   
+
     Trainer.__init__ = traceml_init
     Trainer._traceml_patched = True
