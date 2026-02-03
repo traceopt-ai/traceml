@@ -2,14 +2,15 @@ from typing import List
 from queue import Empty
 from collections import deque
 
-from traceml.utils.steptimer import StepTimeEvent, get_steptimer_queue
+from traceml.utils.timing import TimeEvent, get_time_queue
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 
 
-class StepTimerSampler(BaseSampler):
+class TimeSampler(BaseSampler):
     """
     Design:
+    - Single totally ordered timing stream per rank.
     - One DB table per event_name: event_name
     - CPU events are resolved immediately
     - GPU events are staged in a local FIFO queue
@@ -25,7 +26,7 @@ class StepTimerSampler(BaseSampler):
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "StepTimerSampler"
+        self.sampler_name = "TimeSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
@@ -33,14 +34,14 @@ class StepTimerSampler(BaseSampler):
         # Keeps ordering and avoids GPU events blocking CPU events in the shared queue.
         self._local_gpu_q = deque()
 
-    def _drain_global_queue(self) -> List[StepTimeEvent]:
+    def _drain_global_queue(self) -> List[TimeEvent]:
         """
         Drain the shared queue completely.
         - CPU-only events are appended to `ready` (they resolve immediately).
         - GPU events are moved to the local GPU deque (no resolving here).
         """
-        q = get_steptimer_queue()
-        ready: List[StepTimeEvent] = []
+        q = get_time_queue()
+        ready: List[TimeEvent] = []
 
         while True:
             try:
@@ -58,12 +59,12 @@ class StepTimerSampler(BaseSampler):
 
         return ready
 
-    def _drain_local_gpu_queue(self) -> List[StepTimeEvent]:
+    def _drain_local_gpu_queue(self) -> List[TimeEvent]:
         """
         Resolve GPU events in strict FIFO order.
         We only attempt to resolve the *front*; if it isn't ready, stop.
         """
-        ready: List[StepTimeEvent] = []
+        ready: List[TimeEvent] = []
 
         while self._local_gpu_q:
             evt = self._local_gpu_q[0]  # peek front (preserves FIFO)
@@ -75,7 +76,7 @@ class StepTimerSampler(BaseSampler):
 
         return ready
 
-    def _save_events(self, events: List[StepTimeEvent]) -> None:
+    def _save_events(self, events: List[TimeEvent]) -> None:
         """
         Save resolved events into per-event tables.
         """
@@ -86,6 +87,7 @@ class StepTimerSampler(BaseSampler):
             record = {
                 "timestamp": float(evt.cpu_end),
                 "step": int(evt.step),
+                "scope": evt.scope,
                 "event_name": evt.name,
                 "device": evt.device,  # 'cpu' or 'cuda:0'
                 "is_gpu": is_gpu,
@@ -104,4 +106,4 @@ class StepTimerSampler(BaseSampler):
             ready_gpu = self._drain_local_gpu_queue()
             self._save_events(ready_cpu + ready_gpu)
         except Exception as e:
-            self.logger.error(f"[TraceML] StepTimerSampler error: {e}")
+            self.logger.error(f"[TraceML] TimeSampler error: {e}")

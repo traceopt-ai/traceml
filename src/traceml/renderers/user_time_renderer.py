@@ -18,15 +18,14 @@ from .utils import CARD_STYLE
 
 
 @dataclass
-class StepTimerRow:
+class UserTimeRow:
     """
-    One display row for a timer event, aggregated across ranks.
+    One display row for a user-defined timer, aggregated across ranks.
 
     Semantics:
       - last / p50_100 / p95_100 / avg_100 are "worst-case across ranks" over a recent window.
-      - worst_rank is computed stably over the window (not per-step), to avoid flicker.
-      - coverage indicates how many ranks contributed samples for this timer.
-      - min_samples is the minimum samples count among ranks that had any samples.
+      - Aggregation across ranks uses "worst wins" semantics (DDP bottleneck model)
+      - No step alignment is performed
     """
 
     name: str
@@ -36,16 +35,14 @@ class StepTimerRow:
     avg_100: float
     trend: str
     device: str
-
-    # New DDP-aware fields
     worst_rank: str
     coverage: str
     min_samples: int
 
 
-class StepTimerRenderer(BaseRenderer):
+class UserTimeRenderer(BaseRenderer):
     """
-    Renderer for user-defined step timers.
+    Renderer for **user-defined timing events** (`@trace_time`).
 
     DDP semantics (NO STEP alignment):
       - Each rank produces a sequence of timer durations per event name.
@@ -64,20 +61,20 @@ class StepTimerRenderer(BaseRenderer):
       - min_samples: minimum #samples among ranks that contributed (best-effort)
     """
 
+    SAMPLER_NAME = "TimeSampler"
+
     def __init__(
         self,
-        database: Database,
         top_n: int = 5,
         remote_store: Optional[RemoteDBStore] = None,
         window_size: int = 100,
         worst_metric: str = "p95",  # "p95" or "avg"
+        show_internal: bool = False,
     ):
-        super().__init__(name="Step Timers", layout_section_name=STEPTIMER_LAYOUT)
-        self.db = database
+        super().__init__(name="User Times", layout_section_name=STEPTIMER_LAYOUT)
         self.top_n = int(top_n)
-
-        # Remote store (rank-0 only) contains per-rank DBs mirrored from workers.
         self.remote_store = remote_store
+        self.show_internal = show_internal
 
         # Window size used for stable aggregation and trend detection.
         self.window_size = max(int(window_size), 1)
@@ -107,22 +104,21 @@ class StepTimerRenderer(BaseRenderer):
             RemoteDBStore usage on rank 0.
           - In worker ranks, remote_store is typically None, so we only yield local.
         """
-        yield 0, self.db
-
         if not self.remote_store:
             return
 
         ws = self._infer_world_size()
-        sampler_name = getattr(self.db, "sampler_name", None)
 
         # RemoteDBStore is expected to serve per-rank DBs by (rank, sampler_name)
-        for rank in range(1, ws):
-            db = self.remote_store.get_db(rank, sampler_name) if sampler_name else None
+        for rank in range(0, ws):
+            db = self.remote_store.get_db(rank, self.SAMPLER_NAME) if self.SAMPLER_NAME else None
             if db is not None:
                 yield rank, db
 
+
     def _is_internal(self, name: str) -> bool:
         return name.startswith("_traceml_internal:")
+
 
     def _collect_series_by_rank(self) -> Dict[str, Dict[int, Dict[str, List[float]]]]:
         """
@@ -143,7 +139,7 @@ class StepTimerRenderer(BaseRenderer):
 
         for rank, db in self._iter_rank_dbs():
             for table_name, rows in db.all_tables().items():
-                if self._is_internal(table_name):
+                if not self.show_internal and self._is_internal(table_name):
                     continue
                 if not rows:
                     continue
@@ -173,6 +169,7 @@ class StepTimerRenderer(BaseRenderer):
             return np.asarray([], dtype=np.float64)
         n = min(self.window_size, len(vals))
         return np.asarray(vals[-n:], dtype=np.float64)
+
 
     def _rank_stats(
         self,
@@ -240,7 +237,7 @@ class StepTimerRenderer(BaseRenderer):
         self,
         name: str,
         per_rank: Dict[int, Dict[str, List[float]]],
-    ) -> StepTimerRow:
+    ) -> UserTimeRow:
         """
         Compute a single aggregated row across ranks for one timer event.
 
@@ -296,7 +293,7 @@ class StepTimerRenderer(BaseRenderer):
         device = "MIXED" if (saw_cpu and saw_gpu) else ("GPU" if saw_gpu else "CPU")
 
         if not rank_stats:
-            return StepTimerRow(
+            return UserTimeRow(
                 name=name,
                 last=0.0,
                 p50_100=0.0,
@@ -325,7 +322,7 @@ class StepTimerRenderer(BaseRenderer):
         # Trend heuristic based on concatenated history.
         trend = self._trend_from_history(np.asarray(history_concat, dtype=np.float64))
 
-        return StepTimerRow(
+        return UserTimeRow(
             name=name,
             last=last,
             p50_100=p50,
@@ -338,14 +335,14 @@ class StepTimerRenderer(BaseRenderer):
             min_samples=min_samples,
         )
 
-    def _score_for_sort(self, row: StepTimerRow) -> float:
+    def _score_for_sort(self, row: UserTimeRow) -> float:
         """
         Sort score: worst-case avg_100 by default.
         (You can switch to p95_100 if you prefer.)
         """
         return float(row.avg_100)
 
-    def _build_rows(self) -> List[StepTimerRow]:
+    def _build_rows(self) -> List[UserTimeRow]:
         """
         Build StepTimerRow rows for display.
 
@@ -446,7 +443,7 @@ class StepTimerRenderer(BaseRenderer):
 
         return Panel(
             Group(table),
-            title="[bold blue]Trace Timers (stats = max over DDP ranks)[/bold blue]",
+            title="[bold blue]User Time (stats = max over DDP ranks)[/bold blue]",
             border_style="blue",
             width=width,
         )
@@ -458,7 +455,7 @@ class StepTimerRenderer(BaseRenderer):
             body = """
             <tr>
                 <td colspan="10" style="text-align:center;color:gray;">
-                    No step timers recorded
+                    No user timers recorded
                 </td>
             </tr>
             """
@@ -531,7 +528,7 @@ class StepTimerRenderer(BaseRenderer):
             f"""
         <div style="{CARD_STYLE}">
             <h4 style="color:#d47a00;margin:0 0 10px 0;">
-                Step Timings (DDP worst-rank aggregation)
+                User Timings (DDP worst-rank aggregation)
             </h4>
             {table_html}
         </div>
