@@ -22,22 +22,6 @@ def patch_lightning():
         Captures full step time (forward + backward + optimizer) as well as individual
         phase timings (forward, backward, optimizer_step).
         """
-        # Lazy-loaded imports to avoid circular import with decorators.py
-        _begin_trace_step = None
-        _end_trace_step = None
-        _begin_timed_region = None
-        _end_timed_region = None
-        
-        @classmethod
-        def _ensure_imports(cls):
-            """Lazy import TraceML utilities on first callback invocation."""
-            if cls._begin_trace_step is None:
-                from traceml.decorators import begin_trace_step, end_trace_step
-                from traceml.utils.steptimer import begin_timed_region, end_timed_region
-                cls._begin_trace_step = begin_trace_step
-                cls._end_trace_step = end_trace_step
-                cls._begin_timed_region = begin_timed_region
-                cls._end_timed_region = end_timed_region
         
         def __init__(self):
             super().__init__()
@@ -47,55 +31,57 @@ def patch_lightning():
             self._optimizer_timer_state = None
         
         def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
-            self._ensure_imports()
+            from traceml.decorators import begin_trace_step
+            from traceml.utils.steptimer import begin_timed_region
             # Store instrumentation state on the callback instance
-            self._traceml_state = self._begin_trace_step(pl_module)
+            self._traceml_state = begin_trace_step(pl_module)
             # Start timing the forward pass (ends in on_before_backward)
-            self._forward_timer_state = self._begin_timed_region("forward")
+            self._forward_timer_state = begin_timed_region("forward")
 
         def on_before_backward(self, trainer, pl_module, loss):
-            self._ensure_imports()
+            from traceml.utils.steptimer import begin_timed_region, end_timed_region
             # End forward timing
             if self._forward_timer_state is not None:
-                self._end_timed_region(self._forward_timer_state)
+                end_timed_region(self._forward_timer_state)
                 self._forward_timer_state = None
             # Start backward timing
-            self._backward_timer_state = self._begin_timed_region("backward")
+            self._backward_timer_state = begin_timed_region("backward")
 
         def on_after_backward(self, trainer, pl_module):
-            self._ensure_imports()
+            from traceml.utils.steptimer import end_timed_region
             # End backward timing
             if self._backward_timer_state is not None:
-                self._end_timed_region(self._backward_timer_state)
+                end_timed_region(self._backward_timer_state)
                 self._backward_timer_state = None
 
         def on_before_optimizer_step(self, trainer, pl_module, optimizer):
-            self._ensure_imports()
+            from traceml.utils.steptimer import begin_timed_region
             # Start optimizer step timing
-            self._optimizer_timer_state = self._begin_timed_region("optimizer_step")
+            self._optimizer_timer_state = begin_timed_region("optimizer_step")
 
         def on_before_zero_grad(self, trainer, pl_module, optimizer):
-            self._ensure_imports()
+            from traceml.utils.steptimer import end_timed_region
             # End optimizer step timing (zero_grad happens after step)
             if self._optimizer_timer_state is not None:
-                self._end_timed_region(self._optimizer_timer_state)
+                end_timed_region(self._optimizer_timer_state)
                 self._optimizer_timer_state = None
 
         def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-            self._ensure_imports()
+            from traceml.decorators import end_trace_step
+            from traceml.utils.steptimer import end_timed_region
             # Safety: end any timers that weren't ended (edge cases)
             if self._forward_timer_state is not None:
-                self._end_timed_region(self._forward_timer_state)
+                end_timed_region(self._forward_timer_state)
                 self._forward_timer_state = None
             if self._backward_timer_state is not None:
-                self._end_timed_region(self._backward_timer_state)
+                end_timed_region(self._backward_timer_state)
                 self._backward_timer_state = None
             if self._optimizer_timer_state is not None:
-                self._end_timed_region(self._optimizer_timer_state)
+                end_timed_region(self._optimizer_timer_state)
                 self._optimizer_timer_state = None
                 
             if self._traceml_state is not None:
-                self._end_trace_step(pl_module, self._traceml_state)
+                end_trace_step(pl_module, self._traceml_state)
                 self._traceml_state = None
 
     _orig_init = Trainer.__init__
