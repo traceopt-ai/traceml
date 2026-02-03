@@ -17,7 +17,13 @@ from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memor
 from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
 from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
 
-from traceml.utils.steptimer import StepTimeEvent, record_step_time_event, timed_region
+from traceml.utils.steptimer import (
+    StepTimeEvent, 
+    record_step_time_event, 
+    timed_region,
+    begin_timed_region,
+    end_timed_region
+)
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_traceml_buffers
 
@@ -32,47 +38,54 @@ from traceml.utils.cuda_event_pool import get_cuda_event
 patch_dataloader()
 
 
+try:
+    from traceml.utils.lightning_patch import patch_lightning
+    patch_lightning()
+except Exception:
+    pass
+
 class TraceState:
     step = 0
 
-
-@contextmanager
-def trace_step(model: nn.Module):
+def begin_trace_step(model: nn.Module):
+    """Logic to run at the start of a training step."""
     mem_tracker = StepMemoryTracker(model)
 
     try:
-        mem_tracker.reset()
+        mem_tracker.reset() # Clears peak memory counters
     except Exception as e:
-        print(f"[TraceML] reset failed: {e}", file=sys.stderr)
+        print(f"[TraceML] memory reset failed: {e}", file=sys.stderr)
 
-    start_timed = False
-    step_completed = False
+    timer_state = begin_timed_region("_traceml_internal:step_time")
+    return {"mem_tracker": mem_tracker, "timer_state": timer_state}
 
-    try:  ## User code block
-        try:  ## timed_region
-            with timed_region("_traceml_internal:step_time", use_gpu=True):
-                start_timed = True
-                yield
-                step_completed = True
-        except Exception:
-            if not start_timed:
-                yield  # timed_region failed to enter
-                step_completed = True
-            else:
-                raise  # user code failed → propagate
+def end_trace_step(model: nn.Module, state: dict):
+    """Logic to run at the end of a training step."""
+    TraceState.step += 1
+    
+    # End the timer
+    end_timed_region(state["timer_state"])
+    
+    # Record peak memory
+    try:
+        state["mem_tracker"].record()
+    except Exception as e:
+        print(f"[TraceML] memory record failed: {e}", file=sys.stderr)
+
+    # Flush all buffers (layer metrics, step metrics) to dashboard
+    try:
+        flush_traceml_buffers(model, TraceState.step)
+    except Exception as e:
+        print(f"[TraceML] buffer flush failed: {e}", file=sys.stderr)
+
+@contextmanager
+def trace_step(model: nn.Module):
+    """Original context manager, now using split logic internally."""
+    state = begin_trace_step(model)
+    try:
+        yield
     finally:
-        if step_completed:
-            TraceState.step += 1
-        try:
-            mem_tracker.record()
-        except Exception as e:
-            print(f"[TraceML] record failed: {e}", file=sys.stderr)
-
-        try:
-            flush_traceml_buffers(model, TraceState.step)
-        except Exception as e:
-            print(f"[TraceML] flush failed: {e}", file=sys.stderr)
-
+        end_trace_step(model, state)
 
 def trace_model_instance(
     model: nn.Module,
