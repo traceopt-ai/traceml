@@ -103,14 +103,6 @@ def update_model_combined_section(
 
     fig = go.Figure()
 
-    fig.add_trace(
-        go.Bar(
-            x=dl_x,
-            y=dl_y,
-            name="Dataloader Fetch",
-            marker_color="#d32f2f",
-        )
-    )
 
     fig.add_trace(
         go.Bar(
@@ -118,6 +110,15 @@ def update_model_combined_section(
             y=st_y,
             name="Step Compute",
             marker_color="#2e7d32",
+        )
+    )
+    
+    fig.add_trace(
+        go.Bar(
+            x=dl_x,
+            y=dl_y,
+            name="Dataloader Fetch",
+            marker_color="#d32f2f",
         )
     )
 
