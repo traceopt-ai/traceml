@@ -23,7 +23,7 @@ from rich.console import Console
 from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import PROCESS_LAYOUT
+from traceml.renderers.display.managers.cli_display_manager import PROCESS_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger

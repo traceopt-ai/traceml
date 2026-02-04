@@ -59,9 +59,9 @@ from traceml.renderers.user_time_renderer import UserTimeRenderer
 from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 
 # Display backends
-from traceml.renderers.display.cli_display_manager import CLIDisplayManager
-from traceml.renderers.display.notebook_display_manager import NotebookDisplayManager
-from traceml.renderers.display.nicegui_display_manager import NiceGUIDisplayManager
+from traceml.renderers.display.managers.cli_display_manager import CLIDisplayManager
+from traceml.renderers.display.managers.notebook_display_manager import NotebookDisplayManager
+from traceml.renderers.display.managers.nicegui_display_manager import NiceGUIDisplayManager
 
 # Telemetry transport + store
 from traceml.database.remote_database_store import RemoteDBStore

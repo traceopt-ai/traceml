@@ -18,7 +18,7 @@ from IPython.display import HTML
 
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import MODEL_COMBINED_LAYOUT
+from traceml.renderers.display.managers.cli_display_manager import MODEL_COMBINED_LAYOUT
 from traceml.renderers.utils import fmt_time_run, fmt_mem_new
 from traceml.renderers.utils import CARD_STYLE
 from .compute import StepCombinedComputer

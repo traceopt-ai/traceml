@@ -9,7 +9,7 @@ from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.database import Database
-from traceml.renderers.display.cli_display_manager import (
+from traceml.renderers.display.managers.cli_display_manager import (
     LAYER_COMBINED_TIMER_LAYOUT,
 )
 from traceml.renderers.layer_combined_timing.compute import (

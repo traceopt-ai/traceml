@@ -7,7 +7,7 @@ from rich.console import Group, Console
 from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import (
+from traceml.renderers.display.managers.cli_display_manager import (
     LAYER_COMBINED_MEMORY_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new

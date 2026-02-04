@@ -22,7 +22,7 @@ from IPython.display import HTML
 
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.renderers.display.cli_display_manager import SYSTEM_LAYOUT
+from traceml.renderers.display.managers.cli_display_manager import SYSTEM_LAYOUT
 from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.renderers.utils import append_text, CARD_STYLE
 from .compute import SystemMetricsComputer
@@ -222,7 +222,7 @@ class SystemRenderer(BaseRenderer):
         Return an object suitable for dashboard rendering.:
         """
         data = self._compute_snapshot()
-        data["table"] = self._table
+        data["table"] = self._get_table()
         return data
 
     def _compute_summary(self) -> Dict[str, Any]:
