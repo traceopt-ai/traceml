@@ -17,7 +17,7 @@ If you are unsure where to start, check the GitHub Issues page or open a discuss
 
 ---
 
-# Contributor License Agreement
+## Contributor License Agreement
 
 By submitting a pull request, you agree that you grant the project maintainer
 a perpetual, irrevocable, worldwide, royalty-free license to use, modify,
