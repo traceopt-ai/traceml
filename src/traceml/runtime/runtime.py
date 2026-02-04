@@ -340,17 +340,8 @@ class TraceMLRuntime:
         for sampler in self._samplers:
             if not getattr(sampler, "enable_send", False):
                 continue
-
-            db = getattr(sampler, "db", None)
-            if db is None:
-                continue
-
-            db.sender = DBIncrementalSender(
-                db=db,
-                sampler_name=sampler.sampler_name,
-                sender=self._tcp_client,
-                rank=self.local_rank,
-            )
+            sampler.sender.sender=self._tcp_client
+            sampler.sender.rank=self.local_rank
 
 
     def _tick(self) -> None:
@@ -371,7 +362,7 @@ class TraceMLRuntime:
 
             _safe(self._logger, f"{sampler.sampler_name}.writer.flush failed", db.writer.flush)
 
-            sender = getattr(db, "sender", None)
+            sender = getattr(sampler, "sender", None)
             if sender is not None:
                 _safe(self._logger, f"{sampler.sampler_name}.sender.flush failed", sender.flush)
 

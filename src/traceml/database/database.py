@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional, Deque
 from collections import deque
 
-from traceml.database.database_writer import DatabaseWriter
+from .database_writer import DatabaseWriter
 
 
 class Database:
@@ -61,9 +61,6 @@ class Database:
 
         # Writer handles persistence / export of database contents
         self.writer = DatabaseWriter(self, sampler_name=sampler_name)
-
-        # Optional external sender (e.g., TCP); may be set later
-        self.sender = None
 
     def create_table(self, name: str) -> Deque[Any]:
         """

@@ -37,14 +37,6 @@ from .model_combined_section import (
 import pandas
 
 
-def fake_build():
-    pass
-
-
-def fake_update():
-    pass
-
-
 def build_top_tabs(active: str):
     """
     Shared top navigation tabs.
@@ -64,7 +56,7 @@ def build_top_tabs(active: str):
         layers.on("click", lambda: ui.navigate.to("/layers"))
 
 
-def define_main_page(cls):
+def define_pages(cls):
     """Attach the NiceGUI main page to the UI server."""
 
     @ui.page("/")

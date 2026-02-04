@@ -1,92 +1,159 @@
 """
-Model Summary (Worst vs Median)
+Model Step Time Breakdown (Dataloader vs Compute)
 
-Section that renders:
-  - 3 metric cards in a 3-column grid
-  - Each card shows:
-      (1) a Plotly line chart with TWO curves: Worst + Median (same units)
-      (2) a compact 2-row stats table under the chart:
-            Worst:  Last, p50, p95, Avg(100), Trend, Imbalance, Worst Rank
-            Median: Last, p50, p95, Avg(100), Trend (optional), —, —
+UI section that renders a single combined time-series chart showing:
 
-Expected input telemetry (from ModelCombinedRenderer.get_dashboard_renderable()):
-  telemetry: Dict[str, Any] shaped like:
-    {
-      "dataloading_time": {
-        "steps": List[int],
-        "worst":  { "y": np.ndarray, "stats": {last,p50,p95,avg100,trend} },
-        "median": { "y": np.ndarray, "stats": {last,p50,p95,avg100,trend} },
-        "rank_skew_abs": float,
-        "rank_skew_pct": float,      # 0..1
-        "slowest_rank": Optional[int]
-      },
-      "step_time": {...},
-      "step_gpu_memory": {...}
-    }
+  - Dataloader fetch time (red)
+  - Training step compute time (green)
 
-Notes
------
-- We plot the per-step aggregated series (already step-synchronized via renderer).
-- We show imbalance + worst rank only for the "Worst" row (because it refers to gating rank).
+Key properties
+--------------
+- UI-only derived visualization
+- Reads pre-aggregated telemetry from renderer
+- Aligns series by *step intersection*, not by index
+- Respects renderer truncation ("last X points")
+- Never extrapolates or pads missing steps
+- Safe under partial / delayed sampler emission
+
+Expected telemetry shape
+------------------------
+telemetry: Dict[str, Any] containing:
+  - "dataloading_time"
+  - "step_time"
+
+Each metric follows the StepCombinedComputer contract.
 """
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, List, Callable, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from nicegui import ui
 import plotly.graph_objects as go
 
-from traceml.renderers.utils import fmt_time_run, fmt_mem_new
 
 
-METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
-METRIC_TEXT = "text-sm leading-normal text-gray-700"
 
-
-def _safe_float(v: Any, default: float = 0.0) -> float:
-    """Convert to float safely; return default on failure."""
-    try:
-        return float(v)
-    except Exception:
-        return default
-
-
-def _fmt_pct(v01: float) -> str:
-    """Format a 0..1 fraction as percent string."""
-    return f"{v01 * 100.0:.1f}%"
-
-
-def _trend_badge(trend: str) -> str:
+def build_model_combined_section() -> Dict[str, Any]:
     """
-    Trend emitted by renderer as "+x.x%", "-x.x%", "≈0%" or "".
-    Returns small HTML badge.
+    Build the Model Step Time Breakdown section.
+
+    Returns handles required for incremental updates.
     """
-    t = (trend or "").strip()
-    if not t:
-        return "<span style='color:#888;'>—</span>"
+    card = ui.card().classes("p-3 w-full")
+    card.style(
+        """
+        background: #ffffff;
+        border-radius: 14px;
+        border: 1px solid rgba(255,255,255,0.25);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.10);
+        """
+    )
 
-    # Subtle but readable
-    color = "#666"
-    prefix = ""
-    if t.startswith("+"):
-        color = "#d32f2f"  # regression
-        prefix = "↑ "
-    elif t.startswith("-"):
-        color = "#2e7d32"  # improvement
-        prefix = "↓ "
-    elif "≈" in t:
-        color = "#666"
+    with card:
+        ui.label("Step Time Breakdown").classes(
+            "text-lg font-bold mb-1"
+        ).style("color:#d47a00;")
 
-    return f"<span style='color:{color}; font-weight:700;'>{prefix}{t}</span>"
+        plot = ui.plotly(_empty_figure()).classes("w-full")
+
+        hint = ui.label("").classes("text-xs text-gray-500 mt-1")
+
+    return {
+        "card": card,
+        "plot": plot,
+        "hint": hint,
+    }
+
+
+
+def update_model_combined_section(
+    panel: Dict[str, Any],
+    telemetry: Optional[Dict[str, Any]],
+) -> None:
+    """
+    Update the combined step time graph.
+
+    Visualization policy
+    --------------------
+    - Uses sum series for both metrics
+    - Plots only the intersection of step ranges
+    - Never pads or extrapolates
+    - Safe under partial data arrival
+    """
+    if not telemetry or not isinstance(telemetry, dict):
+        return
+
+    dl_steps, dl_vals = _extract_series(
+        telemetry.get("dataloading_time")
+    )
+    st_steps, st_vals = _extract_series(
+        telemetry.get("step_time")
+    )
+
+    intersection = _intersect_step_ranges(dl_steps, st_steps)
+    if not intersection:
+        return
+
+    start, end = intersection
+
+    dl_x, dl_y = _clip_series(dl_steps, dl_vals, start, end)
+    st_x, st_y = _clip_series(st_steps, st_vals, start, end)
+
+    if not dl_x or not st_x:
+        return
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Bar(
+            x=dl_x,
+            y=dl_y,
+            name="Dataloader Fetch",
+            marker_color="#d32f2f",
+        )
+    )
+
+    fig.add_trace(
+        go.Bar(
+            x=st_x,
+            y=st_y,
+            name="Step Compute",
+            marker_color="#2e7d32",
+        )
+    )
+
+    fig.update_layout(
+        height=220,
+        margin=dict(l=10, r=10, t=6, b=28),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0.05)",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1.0,
+            font=dict(size=10),
+        ),
+        xaxis=dict(
+            title="Training Step",
+            showgrid=False,
+            tickfont=dict(size=9),
+        ),
+        yaxis=dict(
+            title="Time (ms)",
+            tickfont=dict(size=9),
+        ),
+        barmode="stack"
+    )
+
+    panel["plot"].update_figure(fig)
+
+
 
 
 def _to_list(v: Any) -> List[Any]:
-    """
-    Convert numpy arrays / iterables to list.
-    - None => []
-    - ndarray => list(ndarray)
-    - list/tuple => list(...)
-    """
+    """Safely convert iterables / numpy arrays to list."""
     if v is None:
         return []
     try:
@@ -95,92 +162,79 @@ def _to_list(v: Any) -> List[Any]:
         return []
 
 
-@dataclass(frozen=True)
-class SeriesStats:
-    last: float = 0.0
-    p50: float = 0.0
-    p95: float = 0.0
-    avg100: float = 0.0
-    trend: str = ""
+def _safe_float(v: Any, default: float = 0.0) -> float:
+    """Convert to float defensively."""
+    try:
+        return float(v)
+    except Exception:
+        return default
 
 
-@dataclass(frozen=True)
-class AggregatedMetric:
-    steps: List[int]
-    worst_y: List[float]
-    median_y: List[float]
-    worst_stats: SeriesStats
-    median_stats: SeriesStats
-    rank_skew_abs: float
-    rank_skew_pct: float  # 0..1
-    slowest_rank: Optional[int]
+def _extract_series(metric: Dict[str, Any]) -> Tuple[List[int], List[float]]:
+    """
+    Extract (steps, sum_values) from renderer metric payload.
 
+    Returns empty lists if data is missing or malformed.
+    """
+    if not isinstance(metric, dict):
+        return [], []
 
-def _parse_series_stats(d: Dict[str, Any]) -> SeriesStats:
-    """Parse stats dict coming from renderer."""
-    return SeriesStats(
-        last=_safe_float(d.get("last", 0.0)),
-        p50=_safe_float(d.get("p50", 0.0)),
-        p95=_safe_float(d.get("p95", 0.0)),
-        avg100=_safe_float(d.get("avg100", 0.0)),
-        trend=str(d.get("trend", "") or ""),
+    steps = _to_list(metric.get("steps"))
+    summation = metric.get("sum", {}) or {}
+    values = _to_list(summation.get("y"))
+
+    if not steps or not values:
+        return [], []
+
+    n = min(len(steps), len(values))
+    return (
+        [int(s) for s in steps[:n]],
+        [_safe_float(v) for v in values[:n]],
     )
 
 
-def _parse_metric(tlm: Dict[str, Any]) -> Optional[AggregatedMetric]:
+def _intersect_step_ranges(
+    a_steps: List[int],
+    b_steps: List[int],
+) -> Optional[Tuple[int, int]]:
     """
-    Convert renderer metric dict into a normalized object for UI rendering.
+    Compute the valid intersection [start, end] between two step ranges.
 
-    Returns None if tlm is missing required fields.
+    Returns None if no overlap exists.
     """
-    if not isinstance(tlm, dict):
+    if not a_steps or not b_steps:
         return None
 
-    steps = _to_list(tlm.get("steps"))
-    worst = tlm.get("worst", {}) or {}
-    median = tlm.get("median", {}) or {}
+    start = max(a_steps[0], b_steps[0])
+    end = min(a_steps[-1], b_steps[-1])
 
-    worst_y = _to_list(worst.get("y"))
-    median_y = _to_list(median.get("y"))
-
-    # Must have steps and at least one series to plot
-    if not steps or (not worst_y and not median_y):
+    if start > end:
         return None
 
-    # Keep arrays aligned defensively (clip to min length)
-    n = min(
-        len(steps),
-        len(worst_y) if worst_y else len(steps),
-        len(median_y) if median_y else len(steps),
-    )
-    steps = steps[:n]
-    if worst_y:
-        worst_y = worst_y[:n]
-    else:
-        worst_y = [0.0] * n
-    if median_y:
-        median_y = median_y[:n]
-    else:
-        median_y = [0.0] * n
-
-    return AggregatedMetric(
-        steps=[int(s) for s in steps],
-        worst_y=[_safe_float(v) for v in worst_y],
-        median_y=[_safe_float(v) for v in median_y],
-        worst_stats=_parse_series_stats(worst.get("stats", {}) or {}),
-        median_stats=_parse_series_stats(median.get("stats", {}) or {}),
-        rank_skew_abs=_safe_float(tlm.get("rank_skew_abs", 0.0)),
-        rank_skew_pct=_safe_float(tlm.get("rank_skew_pct", 0.0)),
-        slowest_rank=tlm.get("slowest_rank", None),
-    )
+    return start, end
 
 
-def _make_empty_figure() -> go.Figure:
-    """Create a baseline empty figure with your current sizing."""
+def _clip_series(
+    steps: List[int],
+    values: List[float],
+    start: int,
+    end: int,
+) -> Tuple[List[int], List[float]]:
+    """Clip a (steps, values) series to [start, end] inclusive."""
+    out_steps, out_vals = [], []
+    for s, v in zip(steps, values):
+        if start <= s <= end:
+            out_steps.append(s)
+            out_vals.append(v)
+    return out_steps, out_vals
+
+
+def _empty_figure() -> go.Figure:
+    """Baseline empty Plotly figure."""
     fig = go.Figure()
     fig.update_layout(
-        height=160,
-        margin=dict(l=10, r=10, t=4, b=18),
+        height=220,
+        margin=dict(l=10, r=10, t=6, b=28),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
         showlegend=True,
@@ -190,241 +244,16 @@ def _make_empty_figure() -> go.Figure:
             y=1.02,
             xanchor="right",
             x=1.0,
-            font=dict(size=9),
+            font=dict(size=10),
         ),
-        xaxis=dict(showgrid=False, title="Training Step", tickfont=dict(size=9)),
-        yaxis=dict(tickfont=dict(size=9)),
-    )
-    return fig
-
-
-def _update_metric_graph(
-    plotly_ui, x: List[int], y_worst: List[float], y_median: List[float], y_label: str
-) -> None:
-    """Update Plotly graph with worst + median curves (same units)."""
-    fig = go.Figure()
-
-    # Worst curve (thicker)
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y_worst,
-            mode="lines",
-            name="Worst",
-            line=dict(width=2),
-        )
-    )
-
-    # Median curve (dashed, slightly thinner)
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y_median,
-            mode="lines",
-            name="Median",
-            line=dict(width=1, dash="dash"),
-        )
-    )
-
-    fig.update_layout(
-        height=160,
-        margin=dict(l=10, r=10, t=4, b=18),
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1.0,
-            font=dict(size=9),
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0.05)",
         xaxis=dict(
-            title=dict(text="Training Step", font=dict(color="#4caf50")),
+            title="Training Step",
             showgrid=False,
             tickfont=dict(size=9),
         ),
         yaxis=dict(
-            title=dict(text=y_label, font=dict(color="#4caf50")),
+            title="Time (ms)",
             tickfont=dict(size=9),
         ),
     )
-
-    plotly_ui.update_figure(fig)
-
-
-def _stats_table_html_dual(
-    worst: SeriesStats,
-    median: SeriesStats,
-    value_fmt: Callable[[float], str],
-    skew_fmt: Callable[[float], str],
-    skew_abs: float,
-    skew_pct: float,
-    slowest_rank: Optional[int],
-    show_median_trend: bool = False,  # default off to reduce noise
-) -> str:
-    """
-    Render a compact 2-row stats table.
-    - Worst row includes imbalance + worst rank.
-    - Median row shows '—' for those fields.
-    """
-
-    def fmt_row(label: str, s: SeriesStats, show_skew: bool) -> str:
-        last = value_fmt(s.last)
-        p50 = value_fmt(s.p50)
-        p95 = value_fmt(s.p95)
-        avg = value_fmt(s.avg100)
-        trend_html = (
-            _trend_badge(s.trend)
-            if (label == "Worst" or show_median_trend)
-            else "<span style='color:#888;'>—</span>"
-        )
-
-        if show_skew:
-            imbalance = f"{skew_fmt(skew_abs)} ({_fmt_pct(skew_pct)})"
-            rank = f"r{slowest_rank}" if slowest_rank is not None else "—"
-        else:
-            imbalance = "—"
-            rank = "—"
-
-        return f"""
-        <tr>
-          <td style="text-align:left; padding:5px 6px;"><b>{label}</b></td>
-          <td style="text-align:right; padding:5px 6px;">{last}</td>
-          <td style="text-align:right; padding:5px 6px;">{p50}</td>
-          <td style="text-align:right; padding:5px 6px;">{p95}</td>
-          <td style="text-align:right; padding:5px 6px;">{avg}</td>
-          <td style="text-align:center; padding:5px 6px;">{trend_html}</td>
-          <td style="text-align:center; padding:5px 6px;">{imbalance}</td>
-          <td style="text-align:center; padding:5px 6px;">{rank}</td>
-        </tr>
-        """
-
-    return f"""
-    <div style="margin-top:6px;">
-      <table style="width:100%; border-collapse:collapse; font-size:12.5px;">
-        <thead>
-          <tr style="border-bottom:1px solid #e0e0e0;">
-            <th style="text-align:left; padding:4px 6px;">Series</th>
-            <th style="text-align:right; padding:4px 6px;">Last</th>
-            <th style="text-align:right; padding:4px 6px;">p50</th>
-            <th style="text-align:right; padding:4px 6px;">p95</th>
-            <th style="text-align:right; padding:4px 6px;">Avg(100)</th>
-            <th style="text-align:center; padding:4px 6px;">Trend</th>
-            <th style="text-align:center; padding:4px 6px;">Imbalance</th>
-            <th style="text-align:center; padding:4px 6px;">Worst Rank</th>
-          </tr>
-        </thead>
-        <tbody>
-          {fmt_row("Worst", worst, show_skew=True)}
-          {fmt_row("Median", median, show_skew=False)}
-        </tbody>
-      </table>
-    </div>
-    """
-
-
-def _build_metric_card(title: str) -> Dict[str, Any]:
-    """
-    Create a single metric card:
-      - title label
-      - plotly graph
-      - stats HTML block
-    Returns handles needed for updates.
-    """
-    card = ui.card().classes("p-2 w-full")
-    card.style(
-        """
-        background: #ffffff;
-        border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.25);
-        box-shadow: 0 4px 10px rgba(0,0,0,0.10);
-        height: 360px;
-        """
-    )
-
-    with card:
-        ui.label(title).classes(METRIC_TITLE).style("color:#d47a00;")
-        plotly_ui = ui.plotly(_make_empty_figure()).classes("w-full")
-        stats_html = (
-            ui.html("", sanitize=False).classes(METRIC_TEXT).style("color:#333")
-        )
-
-    return {"card": card, "graph": plotly_ui, "stats_html": stats_html}
-
-
-def build_model_combined_section() -> Dict[str, Any]:
-    """
-    Build a 3-up grid section:
-      - Dataloader Fetch
-      - Training Step Time
-      - GPU Step Memory
-
-    Returns a dict of "handles" to be mutated by update_model_combined_section(...).
-    """
-    with ui.grid(columns=3).classes("m-2 w-full gap-x-3"):
-        dataloader_card = _build_metric_card("Dataloader Fetch")
-        step_time_card = _build_metric_card("Training Step Time")
-        step_mem_card = _build_metric_card("GPU Step Memory")
-
-    return {
-        "dataloader": dataloader_card,
-        "step_time": step_time_card,
-        "step_memory": step_mem_card,
-    }
-
-
-def update_model_combined_section(
-    panel: Dict[str, Any], telemetry: Optional[Dict[str, Any]]
-) -> None:
-    """
-    Update the model summary cards from ModelCombinedRenderer telemetry.
-
-    This is intentionally defensive:
-      - handles missing metrics gracefully
-      - converts numpy arrays to lists safely
-      - preserves card + graph sizes (no layout changes)
-    """
-    if not telemetry or not isinstance(telemetry, dict):
-        return
-
-    # Map UI card keys -> renderer metric keys + y labels + formatters
-    mapping: Dict[
-        str, Tuple[str, str, Callable[[float], str], Callable[[float], str]]
-    ] = {
-        "dataloader": ("dataloading_time", "Time (ms)", fmt_time_run, fmt_time_run),
-        "step_time": ("step_time", "Time (ms)", fmt_time_run, fmt_time_run),
-        "step_memory": ("step_gpu_memory", "Memory (MB)", fmt_mem_new, fmt_mem_new),
-    }
-
-    for card_key, (metric_name, y_label, value_fmt, skew_fmt) in mapping.items():
-        card_handles = panel.get(card_key)
-        if not card_handles:
-            continue
-
-        tlm_raw = telemetry.get(metric_name)
-        metric = _parse_metric(tlm_raw) if tlm_raw else None
-        if metric is None:
-            continue
-
-        # Update chart with two curves (worst + median)
-        _update_metric_graph(
-            card_handles["graph"],
-            x=metric.steps,
-            y_worst=metric.worst_y,
-            y_median=metric.median_y,
-            y_label=y_label,
-        )
-
-        # Update two-row stats table
-        card_handles["stats_html"].content = _stats_table_html_dual(
-            worst=metric.worst_stats,
-            median=metric.median_stats,
-            value_fmt=value_fmt,
-            skew_fmt=skew_fmt,
-            skew_abs=metric.rank_skew_abs,
-            skew_pct=metric.rank_skew_pct,
-            slowest_rank=metric.slowest_rank,
-            show_median_trend=False,  # keep Median trend off by default (less noise)
-        )
+    return fig

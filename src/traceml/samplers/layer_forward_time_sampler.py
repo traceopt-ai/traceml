@@ -49,6 +49,9 @@ class LayerForwardTimeSampler(BaseSampler):
         self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
 
+        # Sample transport: send only the most recent row per flush (drops backlog)
+        self.sender.max_rows_per_flush = 1
+
         self.logger = get_error_logger(self.sampler_name)
 
         # Local FIFO buffer owned by the sampler

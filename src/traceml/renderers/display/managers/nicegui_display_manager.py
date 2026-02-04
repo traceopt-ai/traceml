@@ -1,7 +1,7 @@
 from nicegui import ui
 import threading
 import time
-from traceml.renderers.display.nicegui_sections.main_page import define_main_page
+from traceml.renderers.display.nicegui_sections.pages import define_pages
 
 
 class NiceGUIDisplayManager:
@@ -24,7 +24,7 @@ class NiceGUIDisplayManager:
 
     @classmethod
     def _start_ui_server(cls):
-        define_main_page(cls)
+        define_pages(cls)
         ui.run(port=8765, reload=False, show=True, title="TraceML Dashboard")
 
     @classmethod
@@ -32,13 +32,13 @@ class NiceGUIDisplayManager:
         if not cls._ui_ready:
             return
         with cls._latest_data_lock:
-            for section, data in cls.latest_data.items():
+            for layout, data in cls.latest_data.items():
                 try:
-                    update_fn = cls.update_funcs.get(section)
+                    update_fn = cls.update_funcs.get(layout)
                     if update_fn:
-                        update_fn(cls.cards[section], data)
+                        update_fn(cls.cards[layout], data)
                 except Exception:
-                    for label in cls.cards[section].values():
+                    for label in cls.cards[layout].values():
                         label.text = "⚠️ Could not update"
 
     @classmethod
@@ -51,11 +51,11 @@ class NiceGUIDisplayManager:
         if not cls._ui_ready:
             return
         with cls._latest_data_lock:
-            for section, fn in cls._layout_content_fns.items():
+            for layout, fn in cls._layout_content_fns.items():
                 try:
-                    cls.latest_data[section] = fn()
+                    cls.latest_data[layout] = fn()
                 except Exception as e:
-                    cls.latest_data[section] = f"[Error] {e}"
+                    cls.latest_data[layout] = f"[Error] {e}"
 
     @classmethod
     def release_display(cls):
