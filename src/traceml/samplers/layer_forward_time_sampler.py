@@ -1,12 +1,19 @@
-from typing import Dict, List, Tuple
+import time
+from typing import Any, Dict, List, Optional
 from collections import deque
 from queue import Empty
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
+
 from traceml.utils.layer_forward_time_hooks import (
     LayerForwardTimeStepEvent,
     get_layer_forward_time_queue,
+)
+
+from traceml.samplers.schema.layer_forward_backward_time import (
+    LayerForwardBackwardTimePayload,
+    LayerForwardBackwardTimeSample,
 )
 
 
@@ -14,32 +21,28 @@ class LayerForwardTimeSampler(BaseSampler):
     """
     Sampler for forward-pass execution time at the layer level.
 
-    This sampler mirrors the semantics of LayerForwardMemorySampler,
-    with the additional constraint that GPU timings may resolve
-    asynchronously.
+    This sampler records *aggregated per-layer execution time* for each
+    fully resolved forward step of a model.
+
+    Key characteristics
+    -------------------
+    - Step-level (not per-call) telemetry
+    - Aggregates multiple invocations of the same layer within a step
+    - Handles asynchronous GPU timing safely
+    - FIFO semantics ensure strict step ordering
 
     Design
     ------
     - One table: `LayerForwardTimeTable`
-    - One row per (model_id, step)
-    - Uses a local FIFO buffer to ensure:
-        * steps are written in order
-        * no step is written until *all* timings are resolved
+    - One row per fully resolved (model_id, step, device)
+    - Forward/backward share the same schema
+      (semantic difference expressed by table identity)
 
-    Final record format
-    -------------------
-    {
-        "seq": int,
-        "model_id": int,
-        "step": int,
-        "device": str,
-        "layers": List[
-            (layer_name: str,
-             cpu_time_ms: float,
-             gpu_time_ms: Optional[float],
-             n_calls: int)
-        ]
-    }
+    Correctness guarantees
+    ----------------------
+    - A step is written **only after all layer GPU timings resolve**
+    - Later steps are blocked until earlier ones are complete
+    - Sampler failures never propagate to training
     """
 
 
@@ -49,8 +52,8 @@ class LayerForwardTimeSampler(BaseSampler):
         self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
 
-        # Sample transport: send only the most recent row per flush (drops backlog)
-        self.sender.max_rows_per_flush = 1
+        # Sample transport: send only the N-most recent row per flush (drops backlog)
+        self.sender.max_rows_per_flush = 5
 
         self.logger = get_error_logger(self.sampler_name)
 
@@ -87,21 +90,24 @@ class LayerForwardTimeSampler(BaseSampler):
                 return False
         return True
 
-
-    def _aggregate_step(self, event: LayerForwardTimeStepEvent) -> Dict[str, object]:
+    def _aggregate_step(
+            self, event: LayerForwardTimeStepEvent
+    ) -> LayerForwardBackwardTimePayload:
         """
-        Aggregate per-call timing events into per-layer summaries.
+        Aggregate per-call timing events into a per-layer payload.
 
-        Notes
-        -----
-        Multiple entries for the same layer name can occur due to:
+        Aggregation semantics
+        ---------------------
+        - CPU time: summed across calls
+        - GPU time: summed across calls (if available)
+        - Call count: total number of invocations
+
+        Multiple entries per layer can occur due to:
         - shared modules
         - gradient accumulation
-        - multiple forward invocations per optimizer step
-
-        Aggregation is done by *summation*.
+        - repeated forward calls within a step
         """
-        agg: Dict[str, Dict[str, float]] = {}
+        agg: Dict[str, Dict[str, Optional[float]]] = {}
 
         for evt in event.layers:
             rec = agg.setdefault(
@@ -113,35 +119,30 @@ class LayerForwardTimeSampler(BaseSampler):
                 },
             )
 
-            rec["cpu_ms"] += evt.cpu_duration_ms
+            rec["cpu_ms"] += float(evt.cpu_duration_ms)
+
             if evt.gpu_duration_ms is not None:
-                rec["gpu_ms"] = (rec["gpu_ms"] or 0.0) + evt.gpu_duration_ms
+                rec["gpu_ms"] = (rec["gpu_ms"] or 0.0) + float(evt.gpu_duration_ms)
+
             rec["n_calls"] += 1
 
-        layers: List[Tuple[str, float, float, int]] = []
-        for layer_name, rec in agg.items():
-            layers.append(
-                (
-                    layer_name,
-                    rec["cpu_ms"],
-                    rec["gpu_ms"],
-                    int(rec["n_calls"]),
-                )
-            )
+        # Deterministic ordering by layer name
+        layer_names = sorted(agg.keys())
 
-        return {
-            "seq": self.sample_idx,
-            "model_id": event.model_id,
-            "step": event.step,
-            "device": event.device,
-            "layers": layers,
-        }
+        return LayerForwardBackwardTimePayload(
+            layer_names=layer_names,
+            cpu_time_ms=[agg[k]["cpu_ms"] for k in layer_names],
+            gpu_time_ms=[agg[k]["gpu_ms"] for k in layer_names],
+            n_calls=[int(agg[k]["n_calls"]) for k in layer_names],
+        )
 
     def sample(self) -> None:
         """
         Ingest → resolve earliest step → aggregate → persist.
 
-        Stops at the first unresolved step to preserve FIFO semantics.
+        FIFO rule:
+          If the earliest step is unresolved,
+          later steps MUST NOT be written.
         """
         try:
             self._ingest_queue()
@@ -156,10 +157,21 @@ class LayerForwardTimeSampler(BaseSampler):
                 self._local_buffer.popleft()
                 self.sample_idx += 1
 
-                record = self._aggregate_step(event)
-                self.db.add_record(self.table_name, record)
+                payload = self._aggregate_step(event)
+
+                sample = LayerForwardBackwardTimeSample(
+                    sample_idx=self.sample_idx,
+                    timestamp=time.time(),
+                    model_id=event.model_id,
+                    step=event.step,
+                    device=event.device,
+                    payload=payload,
+                )
+
+                self.db.add_record(self.table_name, sample.to_wire())
 
         except Exception as e:
+            # Absolute safety net: sampler must never disrupt training
             self.logger.error(
                 f"[TraceML] LayerForwardTimeSampler error: {e}"
             )

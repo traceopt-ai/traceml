@@ -13,7 +13,7 @@ from traceml.renderers.display.managers.cli_display_manager import (
 from traceml.utils.formatting import fmt_mem_new
 from traceml.renderers.utils import truncate_layer_name
 
-from traceml.renderers.layer_combined_memory.compute1 import (
+from traceml.renderers.layer_combined_memory.compute import (
     LayerCombinedMemoryData,
     LayerCombinedMemorySummary,
 )

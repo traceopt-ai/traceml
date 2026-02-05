@@ -1,5 +1,5 @@
 import time
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.utils.layer_backward_memory_hook import (
@@ -28,6 +28,16 @@ class LayerBackwardMemorySampler(BaseSampler):
     - Schema is shared with forward memory sampling
       (semantic difference expressed by table identity)
 
+     Aggregation semantics
+    ---------------------
+    - Multiple observations of the same layer within a single step
+      can occur due to:
+        * gradient accumulation
+        * shared parameters
+        * recomputation / checkpointing
+    - Gradient memory is a *capacity* metric, not additive work.
+    - Therefore, per-layer memory is aggregated using **MAX**, not SUM.
+
     Expected event payload
     ----------------------
     LayerBackwardMemoryEvents with attributes:
@@ -38,7 +48,7 @@ class LayerBackwardMemorySampler(BaseSampler):
 
     Notes
     -----
-    - This sampler is non-blocking and best-effort
+    - Non-blocking and best-effort
     - Malformed or partial events are safely ignored
     - Serialization is optimized for TCP transport
     """
@@ -49,9 +59,9 @@ class LayerBackwardMemorySampler(BaseSampler):
         self.table_name = self.name + "Table"
         super().__init__(sampler_name=self.sampler_name)
 
-        # Transport policy: only the most recent row per flush
-        # (drops backlog to avoid UI lag)
-        self.sender.max_rows_per_flush = 1
+        # Transport policy: only keep N most recent rows per flush
+        # to prevent UI lag under high-frequency events.
+        self.sender.max_rows_per_flush = 5
 
         self.logger = get_error_logger(self.sampler_name)
         self.sample_idx = 0
@@ -79,28 +89,38 @@ class LayerBackwardMemorySampler(BaseSampler):
             self._save_event(event)
 
 
-    def _normalize_layers(
-            self, layers: List[Tuple[str, float]]
+    def _aggregate_layers_max(
+        self, layers: List[Tuple[str, float]]
     ) -> LayerForwardBackwardMemoryPayload:
         """
-        Normalize raw layer tuples into a deterministic payload.
+        Aggregate raw per-call gradient memory observations using MAX.
 
-        Sorting ensures:
-        - stable wire representation
-        - predictable compute and rendering behavior
+        Rationale
+        ---------
+        - Gradient memory reflects peak tensor residency.
+        - Multiple backward calls do NOT add memory.
+        - We conservatively track the maximum observed value per layer.
+
+        The output payload is:
+        - deterministic
+        - compact
+        - safe for transport and downstream aggregation
         """
-        names = [name for name, _ in layers]
-        bytes_ = [float(b) for _, b in layers]
+        agg: Dict[str, float] = {}
 
-        order = sorted(range(len(names)), key=lambda i: names[i])
-        layer_names = [names[i] for i in order]
-        layer_bytes = [bytes_[i] for i in order]
+        for layer_name, mem in layers:
+            mem = float(mem)
+            prev = agg.get(layer_name)
+            agg[layer_name] = mem if prev is None else max(prev, mem)
+
+        # Deterministic ordering for wire format & hashing
+        layer_names = sorted(agg.keys())
+        layer_bytes = [agg[name] for name in layer_names]
 
         return LayerForwardBackwardMemoryPayload(
             layer_names=layer_names,
             layer_memory_bytes=layer_bytes,
         )
-
 
     def _save_event(self, event: Any) -> None:
         """
@@ -116,7 +136,7 @@ class LayerBackwardMemorySampler(BaseSampler):
             return
 
         try:
-            payload = self._normalize_layers(layers)
+            payload = self._aggregate_layers_max(layers)
 
             sample = LayerForwardBackwardMemorySample(
                 sample_idx=self.sample_idx,
@@ -130,11 +150,10 @@ class LayerBackwardMemorySampler(BaseSampler):
             self.db.add_record(self.table_name, sample.to_wire())
 
         except Exception as e:
-            # Never let sampler failures propagate
+            # Never let sampler failures propagate into training
             self.logger.error(
                 f"[TraceML] Failed to persist backward layer memory event: {e}"
             )
-
 
     def sample(self) -> None:
         """

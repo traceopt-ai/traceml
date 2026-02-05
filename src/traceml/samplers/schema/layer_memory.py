@@ -1,5 +1,5 @@
 """
-Layer (parameter) memory schema for TraceML.
+Layer (parameter) memory schema.
 
 This module defines the canonical data structures used to represent
 static, per-layer *parameter memory* of PyTorch models.

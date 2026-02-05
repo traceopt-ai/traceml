@@ -1,5 +1,5 @@
 """
-Process telemetry schema for TraceML.
+Process telemetry schema.
 
 This module defines the canonical data structures used to represent
 process-level metrics collected from the running Python process.

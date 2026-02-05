@@ -54,7 +54,7 @@ from traceml.samplers.step_memory_sampler import StepMemorySampler
 from traceml.renderers.system.renderer import SystemRenderer
 from traceml.renderers.process.renderer import ProcessRenderer
 from traceml.renderers.layer_combined_memory.renderer import LayerCombinedMemoryRenderer
-from traceml.renderers.layer_combined_timing.renderer import LayerCombinedTimeRenderer
+from traceml.renderers.layer_combined_time.renderer import LayerCombinedTimeRenderer
 from traceml.renderers.user_time_renderer import UserTimeRenderer
 from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 

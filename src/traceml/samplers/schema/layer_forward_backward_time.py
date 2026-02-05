@@ -1,13 +1,14 @@
 """
-Layer forward / backward activation memory schema.
+Layer forward / backward execution time schema.
 
-This module defines the canonical data structures used to represent
-per-layer activation memory observed during the forward or backward
+This module defines data structures used to represent
+per-layer *execution time* observed during the forward or backward
 pass of a PyTorch model.
 
-Tracked metrics focus on *runtime activation memory*:
-- Per-layer activation / gradient memory (bytes)
-- Model- and step-scoped observations
+Tracked metrics focus on *runtime execution cost*:
+- Per-layer CPU execution time (milliseconds)
+- Per-layer GPU execution time (milliseconds), if available
+- Number of execution calls per layer
 
 Semantics
 ---------
@@ -16,7 +17,7 @@ Semantics
     * training step
     * device
 - Forward and backward passes share the same structure.
-  Semantic differences are expressed by table identity, not schema.
+- GPU timings may resolve asynchronously and may be absent.
 
 Design principles
 -----------------
@@ -29,26 +30,32 @@ Design principles
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+
 
 
 @dataclass(frozen=True)
-class LayerForwardBackwardMemoryPayload:
+class LayerForwardBackwardTimePayload:
     """
-    Per-layer activation memory payload.
+    Per-layer execution time payload.
 
-    This payload captures memory attributed to each layer during
-    either the forward or backward pass.
+    This payload captures *aggregated* execution time per layer
+    for a fully resolved forward or backward step.
 
     Invariants
     ----------
-    - layer_names and layer_memory_bytes have identical length
-    - ordering is deterministic and stable
-    - units are bytes
+    - All lists have identical length
+    - Ordering is deterministic and stable
+    - Units:
+        * cpu_time_ms : milliseconds
+        * gpu_time_ms : milliseconds (None if unavailable)
+        * n_calls     : integer count
     """
 
     layer_names: List[str]
-    layer_memory_bytes: List[float]
+    cpu_time_ms: List[float]
+    gpu_time_ms: List[Optional[float]]
+    n_calls: List[int]
 
     def to_wire(self) -> Dict[str, Any]:
         """
@@ -60,16 +67,19 @@ class LayerForwardBackwardMemoryPayload:
             * faster serialization
             * lower overhead
             * deterministic ordering
+        - Optional GPU timings encoded as nulls
         """
         return {
             "layers": self.layer_names,
-            "bytes": self.layer_memory_bytes,
+            "cpu_ms": self.cpu_time_ms,
+            "gpu_ms": self.gpu_time_ms,
+            "n_calls": self.n_calls,
         }
 
     @staticmethod
-    def from_wire(data: Dict[str, Any]) -> "LayerForwardBackwardMemoryPayload":
+    def from_wire(data: Dict[str, Any]) -> "LayerForwardBackwardTimePayload":
         """
-        Reconstruct LayerForwardBackwardPayload from wire representation.
+        Reconstruct LayerForwardBackwardTimePayload from wire representation.
 
         Parameters
         ----------
@@ -78,27 +88,30 @@ class LayerForwardBackwardMemoryPayload:
 
         Returns
         -------
-        LayerForwardBackwardPayload
+        LayerForwardBackwardTimePayload
             Reconstructed payload instance.
         """
-        return LayerForwardBackwardMemoryPayload(
+        return LayerForwardBackwardTimePayload(
             layer_names=data["layers"],
-            layer_memory_bytes=data["bytes"],
+            cpu_time_ms=data["cpu_ms"],
+            gpu_time_ms=data["gpu_ms"],
+            n_calls=data["n_calls"],
         )
 
 
 @dataclass(frozen=True)
-class LayerForwardBackwardMemorySample:
+class LayerForwardBackwardTimeSample:
     """
-    Layer-level forward/backward activation memory snapshot.
+    Layer-level forward/backward execution time snapshot.
 
     Represents a single, timestamped observation of per-layer
-    activation memory for a given model, step, and device.
+    execution time for a given model, step, and device.
 
     Notes
     -----
     - This schema is *step-level*, not architecture-level
-    - One row corresponds to one forward or backward event
+    - One row corresponds to one fully resolved forward or backward step
+    - Multiple calls per layer are aggregated
     - Semantic meaning (forward vs backward) is defined by table identity
     - Immutability prevents accidental mutation across threads
     """
@@ -110,7 +123,7 @@ class LayerForwardBackwardMemorySample:
     step: int
     device: str
 
-    payload: LayerForwardBackwardMemoryPayload
+    payload: LayerForwardBackwardTimePayload
 
     def to_wire(self) -> Dict[str, Any]:
         """
@@ -129,13 +142,15 @@ class LayerForwardBackwardMemorySample:
             "step": self.step,
             "device": self.device,
             "layers": self.payload.layer_names,
-            "layer_bytes": self.payload.layer_memory_bytes,
+            "cpu_ms": self.payload.cpu_time_ms,
+            "gpu_ms": self.payload.gpu_time_ms,
+            "n_calls": self.payload.n_calls,
         }
 
     @staticmethod
-    def from_wire(data: Dict[str, Any]) -> "LayerForwardBackwardMemorySample":
+    def from_wire(data: Dict[str, Any]) -> "LayerForwardBackwardTimeSample":
         """
-        Reconstruct LayerForwardBackwardSample from wire representation.
+        Reconstruct LayerForwardBackwardTimeSample from wire representation.
 
         Parameters
         ----------
@@ -144,15 +159,17 @@ class LayerForwardBackwardMemorySample:
 
         Returns
         -------
-        LayerForwardBackwardSample
+        LayerForwardBackwardTimeSample
             Reconstructed sample instance.
         """
-        payload = LayerForwardBackwardMemoryPayload(
+        payload = LayerForwardBackwardTimePayload(
             layer_names=data["layers"],
-            layer_memory_bytes=data["layer_bytes"],
+            cpu_time_ms=data["cpu_ms"],
+            gpu_time_ms=data["gpu_ms"],
+            n_calls=data["n_calls"],
         )
 
-        return LayerForwardBackwardMemorySample(
+        return LayerForwardBackwardTimeSample(
             sample_idx=data["seq"],
             timestamp=data["ts"],
             model_id=data["model_id"],
