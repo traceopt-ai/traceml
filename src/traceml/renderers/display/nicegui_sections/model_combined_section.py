@@ -112,7 +112,7 @@ def update_model_combined_section(
             marker_color="#2e7d32",
         )
     )
-    
+
     fig.add_trace(
         go.Bar(
             x=dl_x,

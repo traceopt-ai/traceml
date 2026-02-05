@@ -11,21 +11,30 @@ from traceml.renderers.display.managers.cli_display_manager import (
     LAYER_COMBINED_MEMORY_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new
+from traceml.renderers.utils import truncate_layer_name
 
-from traceml.renderers.layer_combined_memory.compute import (
+from traceml.renderers.layer_combined_memory.compute1 import (
     LayerCombinedMemoryData,
     LayerCombinedMemorySummary,
 )
-from traceml.renderers.utils import truncate_layer_name
+
+from traceml.renderers.layer_combined_memory.schema import (
+    LayerCombinedMemoryResult,
+    LayerCombinedMemoryRow,
+    LayerCombinedOther,
+)
 
 
 class LayerCombinedMemoryRenderer(BaseRenderer):
     """
-    Combined renderer using NEW total_peak_memory logic:
+    Renderer for combined per-layer memory usage.
+    This renderer displays a *capacity-oriented* view of memory:
+        total_current = param + forward_current + backward_current
+        total_peak    = param + forward_peak    + backward_peak
 
-       total_peak = param + forward_peak + backward_peak
-
-    Sorting, % calculations, and display use this unified metric.
+    Notes
+    -----
+    - Uses the typed `LayerCombinedMemoryResult` contract
     """
 
     def __init__(
@@ -47,7 +56,9 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         )
 
     def get_panel_renderable(self) -> Panel:
-        d = self._compute_service.compute_display_data()
+        result: LayerCombinedMemoryResult = (
+            self._compute_service.compute_display_data()
+        )
 
         table = Table(
             show_header=True,
@@ -63,87 +74,89 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         table.add_column("Backward (curr/peak)", justify="right", style="green")
         table.add_column("% curr", justify="right", style="white")
 
-        for row in d["top_items"]:
+        for row in result.top_items:
             table.add_row(
-                truncate_layer_name(row["layer"]),
-                fmt_mem_new(row["param_memory"]),
-                f"{fmt_mem_new(row['forward_current'])}/{fmt_mem_new(row['forward_peak'])}",
-                f"{fmt_mem_new(row['backward_current'])}/{fmt_mem_new(row['backward_peak'])}",
-                f"{row['pct']:.1f}%",
+                truncate_layer_name(row.layer),
+                fmt_mem_new(row.param_memory),
+                f"{fmt_mem_new(row.forward_current)}/{fmt_mem_new(row.forward_peak)}",
+                f"{fmt_mem_new(row.backward_current)}/{fmt_mem_new(row.backward_peak)}",
+                f"{row.pct:.1f}%",
             )
 
-        o = d["other"]
-        if o["total_current_memory"] > 0:
+        other: LayerCombinedOther = result.other
+        if other.total_current_memory > 0:
             table.add_row(
                 "Other Layers",
-                fmt_mem_new(o["param_memory"]),
-                f"{fmt_mem_new(o['forward_current'])}/{fmt_mem_new(o['forward_peak'])}",
-                f"{fmt_mem_new(o['backward_current'])}/{fmt_mem_new(o['backward_peak'])}",
-                f"{o['pct']:.1f}%",
+                fmt_mem_new(other.param_memory),
+                f"{fmt_mem_new(other.forward_current)}/{fmt_mem_new(other.forward_peak)}",
+                f"{fmt_mem_new(other.backward_current)}/{fmt_mem_new(other.backward_peak)}",
+                f"{other.pct:.1f}%",
             )
 
-        if not d["top_items"] and o["total_current_memory"] <= 0:
+        if not result.top_items and other.total_current_memory <= 0:
             table.add_row("[dim]No layers detected[/dim]", "—", "—", "—", "—")
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 120)  # allow wider output
 
-        status = d.get("status_message")
-        status_suffix = f" • [dim]{status}[/dim]" if status else ""
+        status_suffix = (
+            f" • [dim]{result.status_message}[/dim]"
+            if result.status_message
+            else ""
+        )
 
         title = (
-            f"[bold blue]Model #{d['model_index']}[/bold blue] • "
+            f"[bold blue]Model #{result.model_index}[/bold blue] • "
             f"[white]curr=max across ranks, peak=max curr across steps[/white]"
             f"{status_suffix}"
         )
-        return Panel(Group(table), title=title, border_style="blue", width=panel_width)
+
+        return Panel(
+            Group(table), title=title, border_style="blue", width=panel_width,
+        )
+
 
     def get_notebook_renderable(self) -> HTML:
-        d = self._data_service.compute_display_data()
+        result: LayerCombinedMemoryResult = (
+            self._compute_service.compute_display_data()
+        )
 
         rows_html = ""
 
-        for row in d["top_items"]:
+        for row in result.top_items:
             rows_html += f"""
                 <tr>
-                    <td>{truncate_layer_name(row['layer'])}</td>
-
-                    <td style="text-align:right;">{fmt_mem_new(row['param_memory'])}</td>
-
+                    <td>{truncate_layer_name(row.layer)}</td>
+                    <td style="text-align:right;">{fmt_mem_new(row.param_memory)}</td>
                     <td style="text-align:right;">
-                        {fmt_mem_new(row['forward_current'])}/{fmt_mem_new(row['forward_peak'])}
+                        {fmt_mem_new(row.forward_current)}/{fmt_mem_new(row.forward_peak)}
                     </td>
-
                     <td style="text-align:right;">
-                        {fmt_mem_new(row['backward_current'])}/{fmt_mem_new(row['backward_peak'])}
+                        {fmt_mem_new(row.backward_current)}/{fmt_mem_new(row.backward_peak)}
                     </td>
-
-                    <td style="text-align:right;">{fmt_mem_new(row['total_current_memory'])}</td>
-                    <td style="text-align:right;">{row['pct']:.1f}%</td>
+                    <td style="text-align:right;">
+                        {fmt_mem_new(row.total_current_memory)}
+                    </td>
+                    <td style="text-align:right;">{row.pct:.1f}%</td>
                 </tr>
             """
 
-        # -------------------------------------------------------
-        # OTHER LAYERS
-        # -------------------------------------------------------
-        o = d["other"]
-        if o["total_current_memory"] > 0:
+        other = result.other
+        if other.total_current_memory > 0:
             rows_html += f"""
                 <tr style="color:gray;">
                     <td>Other Layers</td>
-
-                    <td style="text-align:right;">{fmt_mem_new(o['param_memory'])}</td>
-
+                    <td style="text-align:right;">{fmt_mem_new(other.param_memory)}</td>
                     <td style="text-align:right;">
-                        {fmt_mem_new(o['forward_current'])}/{fmt_mem_new(o['forward_peak'])}
+                        {fmt_mem_new(other.forward_current)}/{fmt_mem_new(other.forward_peak)}
                     </td>
-
                     <td style="text-align:right;">
-                        {fmt_mem_new(o['backward_current'])}/{fmt_mem_new(o['backward_peak'])}
+                        {fmt_mem_new(other.backward_current)}/{fmt_mem_new(other.backward_peak)}
                     </td>
-
-                    <td style="text-align:right;">{fmt_mem_new(o['total_current_memory'])}</td>
-                    <td style="text-align:right;">{o['pct']:.1f}%</td>
+                    <td style="text-align:right;">
+                        {fmt_mem_new(other.total_current_memory)}
+                    </td>
+                    <td style="text-align:right;">{other.pct:.1f}%</td>
                 </tr>
             """
 
@@ -160,8 +173,8 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         <div style="border:2px solid #2196f3; border-radius:8px;
                     padding:10px; margin-top:10px;">
             <h4 style="color:#2196f3; margin:0;">
-                Model #{d['model_index']}
-                • Total Current: {fmt_mem_new(d['total_current_sum'])}
+                Model #{result.model_index}
+                • Total Current: {fmt_mem_new(result.total_current_sum)}
             </h4>
 
             <table style="width:100%; border-collapse:collapse; margin-top:8px;">
@@ -183,8 +196,12 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         """
         return HTML(html)
 
-    def get_dashboard_renderable(self) -> Dict[str, Any]:
-        return self._data_service.compute_display_data()
+    def get_dashboard_renderable(self) -> LayerCombinedMemoryResult:
+        """
+        Return the typed compute result directly to dashboard consumers.
+        """
+        return self._compute_service.compute_display_data()
+
 
     def log_summary(self, path) -> None:
         console = Console()
@@ -220,7 +237,7 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         )
 
     def _render_section_topk(
-        self, table: Table, title: str, items: List, color: str
+            self, table: Table, title: str, items: List, color: str
     ) -> None:
         table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
         if items:

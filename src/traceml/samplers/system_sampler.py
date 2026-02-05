@@ -64,6 +64,9 @@ class SystemSampler(BaseSampler):
         self.sampler_name = self.name+"Sampler"
         self.table_name = self.name+"Table"
         super().__init__(sampler_name=self.sampler_name)
+
+        # We are sampling and sending only latest values
+        self.sender.max_rows_per_flush = 1
         self.sample_idx = 0
 
         # Dedicated error logger (ERROR-level only)

@@ -1,7 +1,16 @@
-from typing import Any
-from .base_sampler import BaseSampler
-from traceml.utils.layer_backward_memory_hook import get_layer_backward_queue
+import time
+from typing import Any, List, Tuple
+
+from traceml.samplers.base_sampler import BaseSampler
+from traceml.utils.layer_backward_memory_hook import (
+    get_layer_backward_queue,
+)
 from traceml.loggers.error_log import get_error_logger
+
+from traceml.samplers.schema.layer_forward_backward_memory import (
+    LayerForwardBackwardMemoryPayload,
+    LayerForwardBackwardMemorySample,
+)
 
 
 class LayerBackwardMemorySampler(BaseSampler):
@@ -9,34 +18,44 @@ class LayerBackwardMemorySampler(BaseSampler):
     Sampler for backward-pass (gradient) activation memory at the layer level.
 
     This sampler drains the shared backward-memory event queue and
-    stores each backward memory event as a single record in the database.
+    records per-layer gradient memory using the canonical
+    `LayerForwardBackwardSample` schema.
 
     Design
     ------
-    - One table: `layer_backward_memory`
-    - One row per event (per step flush)
+    - One table: `LayerBackwardMemoryTable`
+    - One row per backward-pass event
+    - Schema is shared with forward memory sampling
+      (semantic difference expressed by table identity)
 
     Expected event payload
     ----------------------
-    LayerBackwardMemoryEvents with fields:
+    LayerBackwardMemoryEvents with attributes:
       - model_id : int
-      - layers   : List[(layer_name: str, gradient_memory_bytes: float)]
-      - device   : str
       - step     : int
-    """
+      - device   : str
+      - layers   : List[(layer_name: str, gradient_memory_bytes: float)]
 
+    Notes
+    -----
+    - This sampler is non-blocking and best-effort
+    - Malformed or partial events are safely ignored
+    - Serialization is optimized for TCP transport
+    """
 
     def __init__(self) -> None:
         self.name = "LayerBackwardMemory"
-        self.sampler_name = self.name+"Sampler"
-        self.table_name = self.name+"Table"
+        self.sampler_name = self.name + "Sampler"
+        self.table_name = self.name + "Table"
         super().__init__(sampler_name=self.sampler_name)
 
-        # Sample transport: send only the most recent row per flush (drops backlog)
+        # Transport policy: only the most recent row per flush
+        # (drops backlog to avoid UI lag)
         self.sender.max_rows_per_flush = 1
 
         self.logger = get_error_logger(self.sampler_name)
         self.sample_idx = 0
+
 
     def _drain_queue(self) -> None:
         """
@@ -46,6 +65,7 @@ class LayerBackwardMemorySampler(BaseSampler):
         malformed or partial events.
         """
         queue = get_layer_backward_queue()
+
         while not queue.empty():
             try:
                 event = queue.get_nowait()
@@ -58,9 +78,33 @@ class LayerBackwardMemorySampler(BaseSampler):
 
             self._save_event(event)
 
+
+    def _normalize_layers(
+            self, layers: List[Tuple[str, float]]
+    ) -> LayerForwardBackwardMemoryPayload:
+        """
+        Normalize raw layer tuples into a deterministic payload.
+
+        Sorting ensures:
+        - stable wire representation
+        - predictable compute and rendering behavior
+        """
+        names = [name for name, _ in layers]
+        bytes_ = [float(b) for _, b in layers]
+
+        order = sorted(range(len(names)), key=lambda i: names[i])
+        layer_names = [names[i] for i in order]
+        layer_bytes = [bytes_[i] for i in order]
+
+        return LayerForwardBackwardMemoryPayload(
+            layer_names=layer_names,
+            layer_memory_bytes=layer_bytes,
+        )
+
+
     def _save_event(self, event: Any) -> None:
         """
-        Save a single backward-memory event into the database.
+        Persist a single backward-memory event to the database.
 
         Parameters
         ----------
@@ -71,14 +115,26 @@ class LayerBackwardMemorySampler(BaseSampler):
         if not layers:
             return
 
-        record = {
-            "seq": self.sample_idx,
-            "model_id": getattr(event, "model_id", None),
-            "step": getattr(event, "step", None),
-            "device": getattr(event, "device", None),
-            "layers": layers,
-        }
-        self.db.add_record(self.table_name, record)
+        try:
+            payload = self._normalize_layers(layers)
+
+            sample = LayerForwardBackwardMemorySample(
+                sample_idx=self.sample_idx,
+                timestamp=time.time(),
+                model_id=getattr(event, "model_id", None),
+                step=getattr(event, "step", None),
+                device=getattr(event, "device", None),
+                payload=payload,
+            )
+
+            self.db.add_record(self.table_name, sample.to_wire())
+
+        except Exception as e:
+            # Never let sampler failures propagate
+            self.logger.error(
+                f"[TraceML] Failed to persist backward layer memory event: {e}"
+            )
+
 
     def sample(self) -> None:
         """
@@ -91,4 +147,6 @@ class LayerBackwardMemorySampler(BaseSampler):
             self._drain_queue()
         except Exception as e:
             # Sampler must never disrupt training
-            self.logger.error(f"[TraceML] LayerBackwardMemorySampler error: {e}")
+            self.logger.error(
+                f"[TraceML] LayerBackwardMemorySampler error: {e}"
+            )
