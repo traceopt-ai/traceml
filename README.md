@@ -264,16 +264,9 @@ We’ll try to respond and resolve quickly.
 
 ## License
 
-TraceML is released under the **MIT License with Commons Clause**.
-
-**Summary:**
-- ✅ Free for personal use
-- ✅ Free for research and academic use
-- ✅ Free for internal company use
-- ❌ Not allowed for resale or SaaS products
+TraceML is released under the **Apache 2.0**
 
 See [LICENSE](./LICENSE) for full details.  
-For commercial licensing, contact: abhinav@traceopt.ai
 
 ---
 
