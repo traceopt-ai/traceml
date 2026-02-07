@@ -74,7 +74,7 @@ def main():
     )
 
     dataset = datasets.MNIST(
-        root="./mnist", train=True, download=False, transform=transform
+        root="./mnist", train=True, download=True, transform=transform
     )
     loader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=0)
 
