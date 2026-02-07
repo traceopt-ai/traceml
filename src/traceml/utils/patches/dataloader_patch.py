@@ -1,5 +1,5 @@
 from torch.utils.data import DataLoader
-from .timing import timed_region
+from traceml.utils.timing import timed_region
 
 
 _ORIG_DATALOADER_ITER = DataLoader.__iter__

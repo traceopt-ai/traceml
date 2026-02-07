@@ -15,11 +15,20 @@ from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memor
 from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
 from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
 
-from traceml.utils.timing import timed_region, TimeScope
+from traceml.utils.timing import timed_region
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_step_events
 
-from traceml.utils.dataloader_patch import patch_dataloader
+from traceml.utils.patches.dataloader_patch import patch_dataloader
+from traceml.utils.patches.forward_auto_timer_patch import (
+    patch_forward, forward_auto_timer
+)
+from traceml.utils.patches.backward_auto_timer_patch import (
+    patch_backward, backward_auto_timer
+)
+from traceml.utils.patches.optimizer_step_patch import (
+    patch_optimizer, optimizer_auto_timer
+)
 
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
@@ -27,7 +36,9 @@ from traceml.utils.dataloader_patch import patch_dataloader
 # dataloader fetch time.It is idempotent and safe to import multiple times.
 
 patch_dataloader()
-
+patch_forward()
+patch_backward()
+patch_optimizer()
 
 class TraceState:
     step = 0
@@ -64,9 +75,10 @@ def trace_step(model: nn.Module):
         print(f"[TraceML] reset failed: {e}", file=sys.stderr)
 
     try:
-        with timed_region("_traceml_internal:step_time", scope="step", use_gpu=True):
-            yield
-            step_completed = True
+        with timed_region("_traceml_internal:step_time", scope="step", use_gpu=False):
+            with forward_auto_timer(), backward_auto_timer(), optimizer_auto_timer():
+                yield
+                step_completed = True
     finally:
         # Step end
         if step_completed:
