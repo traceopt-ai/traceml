@@ -37,8 +37,9 @@ TraceML focuses on the signals that explain training behavior at runtime:
 ### Step-aware signals (synchronized across ranks)
 For each training step (in single-node DDP):
 - **Dataloader fetch time**
-- **Training step time** (**GPU-aware** via CUDA events)
-- **Step GPU memory usage** (allocated + peak)
+- **Step time** 
+- **Forward / backward / optimizer** timings (DEEP-DIVE) are **CUDA-event estimates** on the current CUDA stream.
+- GPU timings are best for **relative comparisons and trend/bottleneck detection**; they may not sum to wall time due to overlap (compute/comm) and multi-stream execution.
 
 Across ranks, TraceML reports:
 - **Median rank** (typical behavior)

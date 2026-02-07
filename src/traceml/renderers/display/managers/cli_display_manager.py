@@ -43,7 +43,7 @@ class CLIDisplayManager:
         dashboard = cls._layout["dashboard"]
         dashboard.split_column(
             Layout(name="upper_row", ratio=3),
-            Layout(name="middle_row", ratio=6),
+            Layout(name=MODEL_COMBINED_LAYOUT, ratio=6),
             Layout(name="layer_row", ratio=5),
         )
         dashboard["upper_row"].split_row(
@@ -54,10 +54,10 @@ class CLIDisplayManager:
             Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=8),
             Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
         )
-        dashboard["middle_row"].split_row(
-            Layout(name=MODEL_COMBINED_LAYOUT, ratio=1),
-            Layout(name=STEPTIMER_LAYOUT, ratio=1),
-        )
+        # dashboard["middle_row"].split_row(
+        #     Layout(name=MODEL_COMBINED_LAYOUT, ratio=1),
+        #     Layout(name=STEPTIMER_LAYOUT, ratio=1),
+        # )
         return dashboard
 
     @classmethod
@@ -80,9 +80,9 @@ class CLIDisplayManager:
         dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
             Panel(Text("Waiting for Layer Timing...", justify="center"))
         )
-        dashboard[STEPTIMER_LAYOUT].update(
-            Panel(Text("Waiting for Step Timers...", justify="center"))
-        )
+        # dashboard[STEPTIMER_LAYOUT].update(
+        #     Panel(Text("Waiting for Step Timers...", justify="center"))
+        # )
         cls._layout[STDOUT_STDERR_LAYOUT].update(
             Panel(
                 Text("Waiting for Stdout/Stderr...", justify="center"),
