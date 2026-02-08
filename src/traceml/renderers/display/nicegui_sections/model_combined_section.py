@@ -124,7 +124,7 @@ def update_model_combined_section(
 
     order = [
         ("Dataloader", metrics["dataloader_fetch"]),
-        ("GPU Compute", metrics["gpu_compute"]),
+        ("Model Execution", metrics["gpu_compute"]),
         ("WAIT*", metrics["wait_proxy"]),
         ("Step Time", metrics["step_time_ms"]),
     ]
@@ -186,7 +186,7 @@ def _merge_gpu_compute(
     """
     return StepCombinedTimeMetric(
         metric="gpu_compute",
-        clock="gpu",
+        clock="mixed",
         series=a.series,
         summary=a.summary.__class__(
             window_size=a.summary.window_size,
@@ -257,7 +257,7 @@ def _render_stats_block(
         **GPU Skew:** +{gpu.summary.skew_pct * 100:.1f}%  
         **Window Size:** {steps} steps  
         
-        *WAIT = step time − GPU compute (mixed CPU/GPU proxy)*
+        *WAIT = step time − model execution (mixed CPU/GPU proxy)*
     """
 
 

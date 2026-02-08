@@ -171,7 +171,7 @@ class StepCombinedRenderer(BaseRenderer):
 
         cols, _ = shutil.get_terminal_size()
         width = min(max(100, int(cols * 0.75)), 100)
-        footer = "\n\n[dim]* WAIT = step time − GPU compute (mixed CPU/GPU proxy)[/dim]"
+        footer = "\n\n[dim]* WAIT = step time − model execution (mixed CPU/GPU proxy)[/dim]"
 
         return Panel(
             Group(
