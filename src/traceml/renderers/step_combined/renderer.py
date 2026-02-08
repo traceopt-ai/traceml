@@ -22,7 +22,7 @@ Per-step volatility belongs in plots, not summaries.
 from typing import Optional
 import shutil
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
 
@@ -87,6 +87,19 @@ class StepCombinedRenderer(BaseRenderer):
             )
 
         metrics = payload.metrics
+        step_metric = next(
+            (m for m in metrics if m.metric == "step_time_ms"),
+            None,
+        )
+        wait_metric = next(
+            (m for m in metrics if m.metric == "wait_proxy"),
+            None,
+        )
+
+        metrics = sorted(
+            metrics,
+            key=lambda m: (m.metric == "wait_proxy")
+        )
         # All metrics share the same window size by construction
         K = metrics[0].summary.steps_used
 
@@ -98,10 +111,14 @@ class StepCombinedRenderer(BaseRenderer):
         )
 
 
-        table.add_column("Metric", style="bold")
+        table.add_column("Metric", style="magenta")
 
         for m in metrics:
-            title = m.metric.replace("_", " ").title()
+            if m.metric == "wait_proxy":
+                title = "Wait*"
+            else:
+                title = m.metric.replace("_", " ").title()
+
             table.add_column(title, justify="right")
 
 
@@ -136,11 +153,31 @@ class StepCombinedRenderer(BaseRenderer):
             else "Waiting for first fully completed step"
         )
 
+        table.add_row("")
+        if step_metric and wait_metric and step_metric.summary.median_total > 0:
+            wait_share = (
+                    wait_metric.summary.median_total
+                    / step_metric.summary.median_total
+            )
+
+            table.add_row(
+                "WAIT Share (%)",
+                *[
+                    f"[red]{wait_share * 100:.1f}%[/red]" if m.metric == "wait_proxy" else ""
+                    for m in metrics
+                ],
+            )
+
+
         cols, _ = shutil.get_terminal_size()
         width = min(max(100, int(cols * 0.75)), 100)
+        footer = "\n\n[dim]* WAIT = step time − GPU compute (mixed CPU/GPU proxy)[/dim]"
 
         return Panel(
-            table,
+            Group(
+                table,
+                footer,
+            ),
             title=f"Model Step Summary ({subtitle})",
             border_style="cyan",
             width=width,

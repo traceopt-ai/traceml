@@ -9,11 +9,11 @@ from traceml.utils.layer_parameter_memory import (
     collect_layer_parameter_memory,
 )
 from traceml.utils.step_memory import StepMemoryTracker
-from traceml.utils.layer_forward_memory_hook import attach_layer_forward_memory_hooks
-from traceml.utils.layer_backward_memory_hook import attach_layer_backward_memory_hooks
+from traceml.utils.hooks.layer_forward_memory_hook import attach_layer_forward_memory_hooks
+from traceml.utils.hooks.layer_backward_memory_hook import attach_layer_backward_memory_hooks
 
-from traceml.utils.layer_forward_time_hooks import attach_layer_forward_time_hooks
-from traceml.utils.layer_backward_time_hooks import attach_layer_backward_time_hooks
+from traceml.utils.hooks.layer_forward_time_hooks import attach_layer_forward_time_hooks
+from traceml.utils.hooks.layer_backward_time_hooks import attach_layer_backward_time_hooks
 
 from traceml.utils.timing import timed_region
 from traceml.utils.entry_hook import attach_execution_entry_hooks
@@ -26,7 +26,7 @@ from traceml.utils.patches.forward_auto_timer_patch import (
 from traceml.utils.patches.backward_auto_timer_patch import (
     patch_backward, backward_auto_timer
 )
-from traceml.utils.patches.optimizer_hook import ensure_optimizer_timing_installed
+from traceml.utils.hooks.optimizer_hook import ensure_optimizer_timing_installed
 
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.

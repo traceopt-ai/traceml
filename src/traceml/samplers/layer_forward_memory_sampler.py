@@ -2,7 +2,7 @@ import time
 from typing import Any, List, Tuple, Dict
 
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.utils.layer_forward_memory_hook import (
+from traceml.utils.hooks.layer_forward_memory_hook import (
     get_layer_forward_memory_queue,
 )
 from traceml.loggers.error_log import get_error_logger

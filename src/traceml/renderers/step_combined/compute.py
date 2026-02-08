@@ -7,6 +7,16 @@ Pure compute layer for TraceML step combined time metrics.
 - Clock source (CPU/GPU) is derived from data (sample.is_gpu)
 - Aggregates per-step across ranks
 - Outputs renderer-facing StepCombinedTimeResult
+
+Derived metrics
+---------------
+This computer may also emit a derived "wait proxy" metric:
+
+    wait_proxy = step_time_cpu - (forward_gpu + backward_gpu + optimizer_gpu)
+
+This is a mixed-clock residual (CPU wall - GPU stream time). It is intentionally
+labeled as `clock="mixed"` and should be presented as a *proxy*, not as a precise
+breakdown of wall time.
 """
 
 from typing import Dict, List, Optional
@@ -59,7 +69,7 @@ class StepCombinedComputer:
         if world_size == 0:
             return StepCombinedTimeResult(metrics=[], status_message="No ranks available")
 
-        out: List[StepCombinedTimeMetric] = []
+        computed: Dict[str, StepCombinedTimeMetric] = {}
 
         for table, sampler, metric_key in self._metrics:
             metric = self._compute_one_metric(
@@ -70,11 +80,24 @@ class StepCombinedComputer:
                 world_size=world_size,
             )
             if metric is not None:
-                out.append(metric)
+                computed[metric_key] = metric
 
-        status = "OK" if out else "No complete metrics available"
-        return StepCombinedTimeResult(metrics=out, status_message=status)
+        wait_metric = self._derive_wait_proxy(
+            step_metric=computed.get("step_time_ms"),
+            gpu_metrics={
+                k: v for k, v in computed.items()
+                if k in {"forward", "backward", "optimizer_step"}
+            },
+        )
+        if wait_metric:
+            computed["wait_proxy"] = wait_metric
 
+        status = "OK" if computed else "No complete metrics available"
+
+        return StepCombinedTimeResult(
+            metrics=list(computed.values()),
+            status_message=status,
+        )
 
     def _compute_one_metric(
         self,
@@ -195,4 +218,90 @@ class StepCombinedComputer:
                 ranks_present=ranks_present,
                 incomplete=incomplete,
             ),
+        )
+
+
+    def _derive_wait_proxy(
+            self,
+            *,
+            step_metric: StepCombinedTimeMetric,
+            gpu_metrics: Dict[str, StepCombinedTimeMetric],
+    ) -> Optional[StepCombinedTimeMetric]:
+        """
+        Derive WAIT (proxy) metric as a mixed-clock residual.
+
+        Definition:
+            WAIT = step_time_cpu − (forward + backward + optimizer_step)_gpu
+
+        Notes:
+        - Uses mixed CPU/GPU clocks
+        - Rough approximation (sync, comm, overlap, CPU wait)
+        - Intended for straggler analysis, not precise accounting
+        """
+
+        if not step_metric or not gpu_metrics:
+            return None
+
+        steps = step_metric.series.steps
+        if not steps:
+            return None
+
+        # Aggregate GPU compute per step
+        gpu_median = [0.0] * len(steps)
+        gpu_worst = [0.0] * len(steps)
+        gpu_sum = [0.0] * len(steps)
+
+        for m in gpu_metrics.values():
+            if m.series.steps != steps:
+                return None  # defensive: step mismatch
+
+            for i in range(len(steps)):
+                gpu_median[i] += m.series.median[i]
+                gpu_worst[i] += m.series.worst[i]
+                gpu_sum[i] += m.series.sum[i]
+
+        # Residual (clamped to avoid negative noise)
+        wait_median = [
+            max(0.0, step_metric.series.median[i] - gpu_median[i])
+            for i in range(len(steps))
+        ]
+        wait_worst = [
+            max(0.0, step_metric.series.worst[i] - gpu_worst[i])
+            for i in range(len(steps))
+        ]
+        wait_sum = [
+            max(0.0, step_metric.series.sum[i] - gpu_sum[i])
+            for i in range(len(steps))
+        ]
+
+        # Window summary
+        median_total = float(np.median(wait_sum))
+        worst_total = float(max(wait_sum))
+        worst_rank = step_metric.summary.worst_rank
+
+        skew_ratio = worst_total / median_total if median_total > 0 else 0.0
+        skew_pct = (
+            (worst_total - median_total) / median_total
+            if median_total > 0 else 0.0
+        )
+
+        return StepCombinedTimeMetric(
+            metric="wait_proxy",
+            clock="mixed",
+            series=StepCombinedTimeSeries(
+                steps=steps,
+                median=wait_median,
+                worst=wait_worst,
+                sum=wait_sum,
+            ),
+            summary=StepCombinedTimeSummary(
+                window_size=step_metric.summary.window_size,
+                steps_used=len(steps),
+                median_total=median_total,
+                worst_total=worst_total,
+                worst_rank=worst_rank,
+                skew_ratio=skew_ratio,
+                skew_pct=skew_pct,
+            ),
+            coverage=step_metric.coverage,
         )

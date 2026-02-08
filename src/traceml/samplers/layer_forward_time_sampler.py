@@ -1,12 +1,12 @@
 import time
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
 from collections import deque
 from queue import Empty
 
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 
-from traceml.utils.layer_forward_time_hooks import (
+from traceml.utils.hooks.layer_forward_time_hooks import (
     LayerForwardTimeStepEvent,
     get_layer_forward_time_queue,
 )

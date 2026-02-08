@@ -6,7 +6,7 @@ from queue import Empty
 from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
 
-from traceml.utils.layer_backward_time_hooks import (
+from traceml.utils.hooks.layer_backward_time_hooks import (
     LayerBackwardTimeStepEvent,
     get_layer_backward_time_queue,
 )
