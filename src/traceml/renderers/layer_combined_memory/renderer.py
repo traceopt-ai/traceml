@@ -1,8 +1,8 @@
 import shutil
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from IPython.display import HTML
-from rich.console import Console, Group
+from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 

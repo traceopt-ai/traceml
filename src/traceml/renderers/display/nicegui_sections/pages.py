@@ -28,6 +28,7 @@ from .steptiming_section import (
 )
 from .system_section import build_system_section, update_system_section
 
+import pandas as pd
 
 def build_top_tabs(active: str):
     """

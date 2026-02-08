@@ -199,7 +199,11 @@ class StepMemoryRenderer(BaseRenderer):
 
         delta = float(series.worst[-1]) - float(series.worst[0])
         sign = "+" if delta >= 0 else ""
-        return f"{sign}{fmt_mem_new(abs(delta))}" if delta != 0 else fmt_mem_new(0.0)
+        return (
+            f"{sign}{fmt_mem_new(abs(delta))}"
+            if delta != 0
+            else fmt_mem_new(0.0)
+        )
 
     def get_dashboard_renderable(self) -> StepMemoryCombinedResult:
         """

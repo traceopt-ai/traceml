@@ -8,7 +8,6 @@ from .base_sampler import BaseSampler
 from traceml.samplers.schema.step_memory import StepMemorySample
 
 
-
 class StepMemorySampler(BaseSampler):
     """
     Drain-all step-level peak-memory sampler.

@@ -12,7 +12,7 @@ Pure compute layer for TraceML step-level peak memory metrics.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -76,7 +76,9 @@ class StepMemoryCombinedComputer:
 
         # Compute both metrics independently (allocated, reserved)
         for (metric_key,) in self._metrics:
-            m = self._compute_one(metric_key=metric_key, ranks=ranks, world_size=world_size)
+            m = self._compute_one(
+                metric_key=metric_key, ranks=ranks, world_size=world_size
+            )
             if m is not None:
                 out.append(m)
 
@@ -163,7 +165,11 @@ class StepMemoryCombinedComputer:
         worst: List[float] = []
 
         for s in steps:
-            vals = [per_rank_steps[r][s] for r in per_rank_steps if s in per_rank_steps[r]]
+            vals = [
+                per_rank_steps[r][s]
+                for r in per_rank_steps
+                if s in per_rank_steps[r]
+            ]
             if not vals:
                 # Defensive: should not happen due to intersection, but keep safe
                 return None
@@ -189,7 +195,11 @@ class StepMemoryCombinedComputer:
         worst_rank = max(per_rank_peak, key=lambda rr: per_rank_peak[rr])
 
         skew_ratio = worst_peak / median_peak if median_peak > 0 else 0.0
-        skew_pct = (worst_peak - median_peak) / median_peak if median_peak > 0 else 0.0
+        skew_pct = (
+            (worst_peak - median_peak) / median_peak
+            if median_peak > 0
+            else 0.0
+        )
 
         device = self._majority_device(per_rank_device)
 
@@ -225,7 +235,9 @@ class StepMemoryCombinedComputer:
     # ---------------------------------------------------------------------
 
     @staticmethod
-    def _extract_metric_value(s: StepMemorySample, metric_key: str) -> Optional[float]:
+    def _extract_metric_value(
+        s: StepMemorySample, metric_key: str
+    ) -> Optional[float]:
         if metric_key == "peak_allocated":
             return s.peak_allocated
         if metric_key == "peak_reserved":
@@ -244,7 +256,9 @@ class StepMemoryCombinedComputer:
         return sorted(common) if common else []
 
     @staticmethod
-    def _majority_device(per_rank_device: Dict[int, Optional[str]]) -> Optional[str]:
+    def _majority_device(
+        per_rank_device: Dict[int, Optional[str]],
+    ) -> Optional[str]:
         devices = [d for d in per_rank_device.values() if d]
         if not devices:
             return None

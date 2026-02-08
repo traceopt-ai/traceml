@@ -56,7 +56,7 @@ from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 
 # Renderers (IMPORTANT: must read ONLY from RemoteDBStore)
 from traceml.renderers.system.renderer import SystemRenderer
-from traceml.renderers.step_memory. renderer import StepMemoryRenderer
+from traceml.renderers.step_memory.renderer import StepMemoryRenderer
 from traceml.runtime.config import config
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler

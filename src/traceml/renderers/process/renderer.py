@@ -18,7 +18,6 @@ import shutil
 from typing import Any, Dict, Optional
 
 from IPython.display import HTML
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
@@ -28,7 +27,6 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.managers.cli_display_manager import (
     PROCESS_LAYOUT,
 )
-from traceml.renderers.utils import CARD_STYLE
 from traceml.utils.formatting import fmt_mem_new, fmt_percent
 
 from .compute import ProcessMetricsComputer

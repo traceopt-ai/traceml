@@ -15,8 +15,7 @@ from traceml.renderers.display.layout import (
     ROOT_LAYOUT,
     STDOUT_STDERR_LAYOUT,
     SYSTEM_LAYOUT,
-    STEPTIMER_LAYOUT,
-    MODEL_MEMORY_LAYOUT
+    MODEL_MEMORY_LAYOUT,
 )
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 

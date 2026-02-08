@@ -12,6 +12,7 @@ Design principles
 - Cheap conversions
 - Stable keys for storage and transport
 """
+
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 

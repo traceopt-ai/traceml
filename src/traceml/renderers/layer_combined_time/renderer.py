@@ -105,10 +105,8 @@ class LayerCombinedTimeRenderer(BaseRenderer):
         """
         return self._service.compute_display_data()
 
-
     def get_notebook_renderable(self) -> HTML:
         pass
-
 
     def log_summary(self, path) -> None:
         pass
