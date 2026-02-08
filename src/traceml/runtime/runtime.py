@@ -57,6 +57,7 @@ from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 # Renderers (IMPORTANT: must read ONLY from RemoteDBStore)
 from traceml.renderers.system.renderer import SystemRenderer
 from traceml.renderers.step_memory.renderer import StepMemoryRenderer
+from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 from traceml.runtime.config import config
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
@@ -73,6 +74,7 @@ from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.step_memory_sampler import StepMemorySampler
+from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
 
 # Samplers
 from traceml.samplers.system_sampler import SystemSampler
@@ -238,8 +240,8 @@ class TraceMLAggregator:
             StepCombinedRenderer(remote_store=remote_store),
             StepMemoryRenderer(remote_store=remote_store),
         ]
-        # if mode == "cli":
-        #     renderers.append(StdoutStderrRenderer(remote_store=remote_store))
+        if mode == "cli" :
+            renderers.append(StdoutStderrRenderer(remote_store=remote_store))
         return renderers
 
     def _register_renderers_once(self) -> None:
@@ -376,7 +378,7 @@ class TraceMLRuntime:
             LayerBackwardTimeSampler(),
             TimeSampler(),
             StepMemorySampler(),
-            #     StdoutStderrSampler(),
+            StdoutStderrSampler(),
         ]
         return samplers
 
@@ -388,7 +390,7 @@ class TraceMLRuntime:
         rows through the same TCP pipeline as worker ranks.
         """
         for sampler in self._samplers:
-            if not getattr(sampler, "enable_send", False):
+            if not getattr(sampler, "sender", None):
                 continue
             sampler.sender.sender = self._tcp_client
             sampler.sender.rank = self.local_rank

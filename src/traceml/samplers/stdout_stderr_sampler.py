@@ -20,13 +20,16 @@ class StdoutStderrSampler(BaseSampler):
         log_filename: str = "stdout_stderr.log",
     ):
         super().__init__(sampler_name=self.sampler_name)
-        self.enable_ddp_send = False  # per-rank logs only
         self.max_cache_lines = max_cache_lines
         # per-rank log file (unchanged semantics)
         session_id = config.session_id
-        _, local_rank, _ = get_ddp_info()
+        _, self.local_rank, _ = get_ddp_info()
 
-        logs_dir = Path(config.logs_dir) / session_id / str(local_rank)
+        # Disabling sending stdout to aggregator instead we store in file
+        if self.local_rank != 0:
+            self.sender = None
+
+        logs_dir = Path(config.logs_dir) / session_id / str(self.local_rank)
         logs_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = logs_dir / log_filename
         self.log_path.write_text(
@@ -43,14 +46,15 @@ class StdoutStderrSampler(BaseSampler):
         lines = [ln for ln in text.splitlines() if ln.strip()]
         if not lines:
             return
-        # append to DB
-        for ln in lines:
-            self.db.add_record(
-                "stdout_stderr",
-                {
-                    "line": ln,
-                },
-            )
+        # append to DB on Rank 0
+        if self.local_rank == 0:
+            for ln in lines:
+                self.db.add_record(
+                    "stdout_stderr",
+                    {
+                        "line": ln,
+                    },
+                )
 
         # persist to file
         with self.log_path.open("a", encoding="utf-8") as f:

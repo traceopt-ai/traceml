@@ -171,7 +171,7 @@ class StepMemoryRenderer(BaseRenderer):
         cols, _ = shutil.get_terminal_size()
         width = min(max(100, int(cols * 0.75)), 120)
 
-        footer = "\n\n[dim]* Peaks are per-rank maxima over the window; worst/median are across ranks.[/dim]"
+        footer = "\n\n[dim]Peaks = per-rank max over last K; median/worst = across ranks.[/dim]"
 
         return Panel(
             Group(
