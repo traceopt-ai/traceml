@@ -7,6 +7,7 @@ from traceml.renderers.display.layout import (
     PROCESS_LAYOUT,
     STEPTIMER_LAYOUT,
     SYSTEM_LAYOUT,
+    MODEL_MEMORY_LAYOUT,
 )
 
 from .layer_memory_table_section import (
@@ -22,10 +23,7 @@ from .model_combined_section import (
     update_model_combined_section,
 )
 from .process_section import build_process_section, update_process_section
-from .steptiming_section import (
-    build_step_timing_table_section,
-    update_step_timing_table_section,
-)
+from .step_memory_section import build_step_memory_section, update_step_memory_section
 from .system_section import build_system_section, update_system_section
 
 import pandas as pd
@@ -94,9 +92,9 @@ def define_pages(cls):
                 cls.update_funcs[PROCESS_LAYOUT] = update_process_section
 
             with ui.column().classes("w-[33]"):
-                cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
-                cls.update_funcs[STEPTIMER_LAYOUT] = (
-                    update_step_timing_table_section
+                cls.cards[MODEL_MEMORY_LAYOUT] = build_step_memory_section()
+                cls.update_funcs[MODEL_MEMORY_LAYOUT] = (
+                    update_step_memory_section
                 )
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
