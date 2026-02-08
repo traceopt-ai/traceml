@@ -90,3 +90,11 @@ def install_optimizer_time_hooks() -> None:
         register_optimizer_step_pre_hook(pre_hook),
         register_optimizer_step_post_hook(post_hook),
     )
+
+
+def ensure_optimizer_timing_installed() -> None:
+    import torch
+    if getattr(torch.optim.Optimizer, "_traceml_opt_hooks_installed", False):
+        return
+    install_optimizer_time_hooks()
+    torch.optim.Optimizer._traceml_opt_hooks_installed = True

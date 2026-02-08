@@ -137,7 +137,6 @@ class TimeSampler(BaseSampler):
             sample = self._event_to_sample(evt)
             if sample is None:
                 continue
-            self.logger.error(f"[TraceML] TimeSampler error: {evt.name}")
             self.db.add_record(evt.name, sample.to_wire())
 
     def sample(self) -> None:
