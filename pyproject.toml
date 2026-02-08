@@ -29,6 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+lightning = ["lightning>=2.6.0"]
 dev = [
     "black>=25.0.0",
     "flake8>=7.0.0",

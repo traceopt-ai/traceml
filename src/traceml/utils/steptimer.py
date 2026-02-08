@@ -61,6 +61,40 @@ class StepTimeEvent:
 
         return self.resolved
 
+def begin_timed_region(name: str, use_gpu: bool = True):
+    """Starts a timer and returns the state needed to stop it later."""
+    cpu_start = time.time()
+    gpu_start, gpu_end = None, None
+    device = "cpu"
+
+    if use_gpu and torch.cuda.is_available():
+        device = f"cuda:{torch.cuda.current_device()}"
+        gpu_start, gpu_end = get_cuda_event(), get_cuda_event()
+        gpu_start.record()
+    
+    return {
+        "name": name, 
+        "device": device, 
+        "cpu_start": cpu_start,
+        "gpu_start": gpu_start, 
+        "gpu_end": gpu_end
+    }
+
+def end_timed_region(state: dict):
+    """Stops the timer using the state from begin_timed_region."""
+    cpu_end = time.time()
+    if state["gpu_end"]:
+        state["gpu_end"].record()
+    
+    evt = StepTimeEvent(
+        name=state["name"], 
+        device=state["device"],
+        cpu_start=state["cpu_start"], 
+        cpu_end=cpu_end,
+        gpu_start=state["gpu_start"], 
+        gpu_end=state["gpu_end"],
+    )
+    record_step_time_event(evt)
 
 def get_steptimer_queue() -> Queue:
     """Return the shared queue for step timing events."""
@@ -83,39 +117,12 @@ def record_step_time_event(evt: StepTimeEvent, on_queue=False):
 
 @contextmanager
 def timed_region(name: str, use_gpu: bool = True):
-    cpu_start = time.time()
-
-    if use_gpu and torch.cuda.is_available():
-        device = f"cuda:{torch.cuda.current_device()}"
-        start_event = get_cuda_event()
-        end_event = get_cuda_event()
-
-        start_event.record()
+    """Context manager for timing a block of code."""
+    state = begin_timed_region(name, use_gpu)
+    try:
         yield
-        end_event.record()
-
-        cpu_end = time.time()
-        evt = StepTimeEvent(
-            name=name,
-            device=device,
-            cpu_start=cpu_start,
-            cpu_end=cpu_end,
-            gpu_start=start_event,
-            gpu_end=end_event,
-        )
-    else:
-        device = "cpu"
-        yield
-        cpu_end = time.time()
-        evt = StepTimeEvent(
-            name=name,
-            device=device,
-            cpu_start=cpu_start,
-            cpu_end=cpu_end,
-        )
-
-    record_step_time_event(evt)
-
+    finally:
+        end_timed_region(state)
 
 def flush_step_time_buffer(step: int) -> None:
     """Flush the temporary step time buffer to the shared queue."""

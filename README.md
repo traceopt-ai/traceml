@@ -112,17 +112,28 @@ Includes everything in **ESSENTIAL**, plus:
 pip install traceml-ai
 ```
 
+For PyTorch Lightning support:
+
+```bash
+pip install traceml-ai[lightning]
+```
+
 For development:
 
 ```bash
 git clone https://github.com/traceopt-ai/traceml.git
 cd traceml
+
+# Dev only (no Lightning)
 pip install -e '.[dev]'
+
+# Dev with Lightning support
+pip install -e '.[dev,lightning]'
 ```
 
 **Requirements:** Python 3.9–3.13, PyTorch 1.12+  
 **Platform support:** macOS (Intel/ARM), Linux  
-**Training support:** Single GPU and **single-node DDP (alpha)**
+**Training support:** Single GPU, **single-node DDP (alpha)**, and **PyTorch Lightning**
 
 ---
 
@@ -187,6 +198,32 @@ Enables forward/backward hooks required for:
 
 ---
 
+### 4) PyTorch Lightning (zero-code integration)
+
+TraceML automatically integrates with PyTorch Lightning. Just import TraceML and use `trace_model_instance()` — no manual `trace_step()` needed:
+
+```python
+import lightning as L
+from traceml.decorators import trace_model_instance
+
+class MyLightningModule(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.model = ...
+        trace_model_instance(self)  # Enable deep-dive instrumentation
+
+    def training_step(self, batch, batch_idx):
+        # TraceML automatically captures step timing here
+        ...
+```
+
+TraceML injects a callback that captures:
+- Forward, backward, and optimizer step timing
+- Per-layer memory and compute (with `trace_model_instance`)
+- Step-level GPU memory
+
+---
+
 ## Running TraceML
 
 ```bash
@@ -226,7 +263,8 @@ Near-term:
 
 Next:
 - **Multi-node distributed support** (DDP → FSDP)
-- Integrations: PyTorch Lightning / Hugging Face Accelerate (as optional wrappers)
+- PyTorch Lightning integration ✅ **Done!**
+- Hugging Face Accelerate integration (as optional wrapper)
 - Advanced diagnostics: leak detection, regression attribution, and automated “why is my step slower?” summaries
 
 ---
