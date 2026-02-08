@@ -28,6 +28,16 @@ from traceml.renderers.step_combined.schema import (
 )
 
 
+COLORS = {
+    "Dataloader": "#d32f2f",
+    "Forward": "#1976d2",
+    "Backward": "#512da8",
+    "Optimizer": "#2e7d32",
+    "WAIT*": "#f9a825",
+    "Step Time": "#455a64",
+}
+
+
 def _card_style() -> str:
     return """
     background: #ffffff;
@@ -118,13 +128,22 @@ def update_model_combined_section(
 
     metrics = _index_metrics(payload.metrics)
 
-    required = {"dataloader_fetch", "gpu_compute", "wait_proxy", "step_time_ms"}
+    required = {
+        "dataloader_fetch",
+        "forward",
+        "backward",
+        "optimizer_step",
+        "wait_proxy",
+        "step_time_ms",
+    }
     if not required.issubset(metrics):
         return
 
     order = [
         ("Dataloader", metrics["dataloader_fetch"]),
-        ("Model Execution", metrics["gpu_compute"]),
+        ("Forward", metrics["forward"]),
+        ("Backward", metrics["backward"]),
+        ("Optimizer", metrics["optimizer_step"]),
         ("WAIT*", metrics["wait_proxy"]),
         ("Step Time", metrics["step_time_ms"]),
     ]
@@ -154,51 +173,10 @@ def _index_metrics(
     metrics: List[StepCombinedTimeMetric],
 ) -> Dict[str, StepCombinedTimeMetric]:
     """
-    Index metrics by semantic key.
-
-    Returns
-    -------
-    Dict[str, StepCombinedTimeMetric]
+    Index metrics by metric key.
     """
-    out: Dict[str, StepCombinedTimeMetric] = {}
+    return {m.metric: m for m in metrics}
 
-    for m in metrics:
-        if m.metric == "wait_proxy":
-            out["wait_proxy"] = m
-        elif m.metric == "step_time_ms":
-            out["step_time_ms"] = m
-        elif m.metric == "dataloader_fetch":
-            out["dataloader_fetch"] = m
-        elif m.metric in {"forward", "backward", "optimizer_step"}:
-            out.setdefault("gpu_compute", m)
-            if out["gpu_compute"] is not m:
-                out["gpu_compute"] = _merge_gpu_compute(out["gpu_compute"], m)
-
-    return out
-
-
-def _merge_gpu_compute(
-    a: StepCombinedTimeMetric,
-    b: StepCombinedTimeMetric,
-) -> StepCombinedTimeMetric:
-    """
-    Merge two GPU compute metrics by summing window totals.
-    """
-    return StepCombinedTimeMetric(
-        metric="gpu_compute",
-        clock="mixed",
-        series=a.series,
-        summary=a.summary.__class__(
-            window_size=a.summary.window_size,
-            steps_used=a.summary.steps_used,
-            median_total=a.summary.median_total + b.summary.median_total,
-            worst_total=a.summary.worst_total + b.summary.worst_total,
-            worst_rank=a.summary.worst_rank,
-            skew_ratio=max(a.summary.skew_ratio, b.summary.skew_ratio),
-            skew_pct=max(a.summary.skew_pct, b.summary.skew_pct),
-        ),
-        coverage=a.coverage,
-    )
 
 
 def _build_bar_chart(
@@ -215,8 +193,9 @@ def _build_bar_chart(
             x=labels,
             y=values,
             marker=dict(
-                color=["#d32f2f", "#2e7d32", "#f9a825", "#455a64"]
+                color=[COLORS.get(l, "#999999") for l in labels]
             ),
+            hovertemplate="%{x}<br>%{y:.2f} ms<extra></extra>"
         )
     )
 
@@ -242,7 +221,15 @@ def _render_stats_block(
     """
     wait = metrics["wait_proxy"]
     step = metrics["step_time_ms"]
-    gpu = metrics["gpu_compute"]
+    fwd = metrics["forward"]
+    bwd = metrics["backward"]
+    opt = metrics["optimizer_step"]
+
+    exec_skew = max(
+        fwd.summary.skew_pct,
+        bwd.summary.skew_pct,
+        opt.summary.skew_pct,
+    )
 
     wait_share = (
         wait.summary.median_total / step.summary.median_total
@@ -254,11 +241,13 @@ def _render_stats_block(
         **WAIT Share:** {wait_share * 100:.1f}%  
         **Worst Rank:** r{step.summary.worst_rank}  
         **Step Skew:** +{step.summary.skew_pct * 100:.1f}%  
-        **GPU Skew:** +{gpu.summary.skew_pct * 100:.1f}%  
+        **Execution Skew:** +{exec_skew * 100:.1f}%  
         **Window Size:** {steps} steps  
         
-        *WAIT = step time − model execution (mixed CPU/GPU proxy)*
-    """
+        *WAIT = step time − (forward + backward + optimizer)*  
+        *Includes H2D copies, synchronization, and CPU-side overhead*
+        """
+
 
 
 def _empty_bar_figure(title: str) -> go.Figure:
