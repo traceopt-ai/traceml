@@ -118,6 +118,7 @@ For development:
 git clone https://github.com/traceopt-ai/traceml.git
 cd traceml
 pip install -e '.[dev]'
+pre-commit install
 ```
 
 **Requirements:** Python 3.9–3.13, PyTorch 1.12+  
