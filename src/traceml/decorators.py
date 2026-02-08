@@ -26,9 +26,7 @@ from traceml.utils.patches.forward_auto_timer_patch import (
 from traceml.utils.patches.backward_auto_timer_patch import (
     patch_backward, backward_auto_timer
 )
-from traceml.utils.patches.optimizer_step_patch import (
-    patch_optimizer, optimizer_auto_timer
-)
+from traceml.utils.patches.optimizer_hook import install_optimizer_time_hooks
 
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
@@ -38,7 +36,7 @@ from traceml.utils.patches.optimizer_step_patch import (
 patch_dataloader()
 patch_forward()
 patch_backward()
-patch_optimizer()
+install_optimizer_time_hooks()
 
 class TraceState:
     step = 0
@@ -76,7 +74,7 @@ def trace_step(model: nn.Module):
 
     try:
         with timed_region("_traceml_internal:step_time", scope="step", use_gpu=False):
-            with forward_auto_timer(), backward_auto_timer(), optimizer_auto_timer():
+            with forward_auto_timer(), backward_auto_timer():
                 yield
                 step_completed = True
     finally:

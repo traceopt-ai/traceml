@@ -42,10 +42,10 @@ class StepCombinedComputer:
 
         # Table-driven only — NO CPU/GPU assumptions here
         self._metrics = [
-            ("_traceml_internal:dataloader_next", "TimeSampler", "dataloader_fetch_ms"),
-            ("_traceml_internal:forward_time", "TimeSampler", "forward_time_ms"),
-            ("_traceml_internal:backward_time", "TimeSampler", "backward_time_ms"),
-            ("_traceml_internal:optimizer_step", "TimeSampler", "optimizer_step_ms"),
+            ("_traceml_internal:dataloader_next", "TimeSampler", "dataloader_fetch"),
+            ("_traceml_internal:forward_time", "TimeSampler", "forward"),
+            ("_traceml_internal:backward_time", "TimeSampler", "backward"),
+            ("_traceml_internal:optimizer_step", "TimeSampler", "optimizer_step"),
             ("_traceml_internal:step_time", "TimeSampler", "step_time_ms"),
         ]
 
