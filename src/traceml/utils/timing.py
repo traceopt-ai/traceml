@@ -6,15 +6,16 @@ It supports both step-scoped and global timing while preserving
 a single ordered event stream per rank.
 """
 
-from dataclasses import dataclass
-from enum import Enum
-from typing import Optional, Deque
-from queue import Queue, Full
-from collections import deque
 import sys
 import time
-import torch
+from collections import deque
 from contextlib import contextmanager
+from dataclasses import dataclass
+from enum import Enum
+from queue import Full, Queue
+from typing import Deque, Optional
+
+import torch
 
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 
@@ -26,6 +27,7 @@ class TimeScope(str, Enum):
     STEP belongs to a specific training step
     GLOBAL occurs outside the step loop (init, checkpoint, etc.)
     """
+
     STEP = "step"
     GLOBAL = "global"
 
@@ -51,7 +53,6 @@ class TimeEvent:
     resolved: bool = False
     step: int = -1
     scope: TimeScope = TimeScope.STEP
-
 
     def try_resolve(self) -> bool:
         """
@@ -122,7 +123,6 @@ def flush_step_time_buffer(step: int) -> None:
         evt = _STEP_BUFFER.popleft()
         evt.step = step
         _enqueue(evt)
-
 
 
 @contextmanager

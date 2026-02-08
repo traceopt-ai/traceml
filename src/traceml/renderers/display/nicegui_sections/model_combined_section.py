@@ -18,15 +18,15 @@ Bars represent independent metrics:
 No stacking is used to avoid mixed-clock ambiguity.
 """
 
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
 
-from nicegui import ui
 import plotly.graph_objects as go
+from nicegui import ui
 
 from traceml.renderers.step_combined.schema import (
-    StepCombinedTimeResult, StepCombinedTimeMetric
+    StepCombinedTimeMetric,
+    StepCombinedTimeResult,
 )
-
 
 COLORS = {
     "Dataloader": "#d32f2f",
@@ -46,6 +46,7 @@ def _card_style() -> str:
     box-shadow: 0 4px 10px rgba(0,0,0,0.08);
     """
 
+
 def build_model_combined_section() -> Dict[str, Any]:
     """
     Build the Model Step Time Breakdown section.
@@ -57,9 +58,7 @@ def build_model_combined_section() -> Dict[str, Any]:
       2) Worst-rank breakdown bar chart
       3) Stats / interpretation panel
     """
-    container = ui.row().classes("w-full gap-4").style(
-        "flex-wrap: nowrap;"
-    )
+    container = ui.row().classes("w-full gap-4").style("flex-wrap: nowrap;")
 
     with container:
         # -------- Card 1: Median --------
@@ -84,9 +83,9 @@ def build_model_combined_section() -> Dict[str, Any]:
                 "text-sm font-bold mb-1"
             ).style("color:#c62828;")
 
-            worst_plot = ui.plotly(
-                _empty_bar_figure("Worst Rank")
-            ).classes("w-full")
+            worst_plot = ui.plotly(_empty_bar_figure("Worst Rank")).classes(
+                "w-full"
+            )
 
         # -------- Card 3: Stats --------
         stats_card = ui.card().classes("p-3 flex-1")
@@ -168,7 +167,6 @@ def update_model_combined_section(
     )
 
 
-
 def _index_metrics(
     metrics: List[StepCombinedTimeMetric],
 ) -> Dict[str, StepCombinedTimeMetric]:
@@ -176,7 +174,6 @@ def _index_metrics(
     Index metrics by metric key.
     """
     return {m.metric: m for m in metrics}
-
 
 
 def _build_bar_chart(
@@ -192,10 +189,8 @@ def _build_bar_chart(
         go.Bar(
             x=labels,
             y=values,
-            marker=dict(
-                color=[COLORS.get(l, "#999999") for l in labels]
-            ),
-            hovertemplate="%{x}<br>%{y:.2f} ms<extra></extra>"
+            marker=dict(color=[COLORS.get(l, "#999999") for l in labels]),
+            hovertemplate="%{x}<br>%{y:.2f} ms<extra></extra>",
         )
     )
 
@@ -238,16 +233,15 @@ def _render_stats_block(
     )
 
     return f"""
-        **WAIT Share:** {wait_share * 100:.1f}%  
-        **Worst Rank:** r{step.summary.worst_rank}  
-        **Step Skew:** +{step.summary.skew_pct * 100:.1f}%  
-        **Execution Skew:** +{exec_skew * 100:.1f}%  
-        **Window Size:** {steps} steps  
-        
-        *WAIT = step time − (forward + backward + optimizer)*  
+        **WAIT Share:** {wait_share * 100:.1f}%
+        **Worst Rank:** r{step.summary.worst_rank}
+        **Step Skew:** +{step.summary.skew_pct * 100:.1f}%
+        **Execution Skew:** +{exec_skew * 100:.1f}%
+        **Window Size:** {steps} steps
+
+        *WAIT = step time − (forward + backward + optimizer)*
         *Includes H2D copies, synchronization, and CPU-side overhead*
         """
-
 
 
 def _empty_bar_figure(title: str) -> go.Figure:

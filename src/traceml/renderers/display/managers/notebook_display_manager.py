@@ -1,6 +1,7 @@
-from typing import Dict, Callable, Any, Optional
-from IPython.display import display
+from typing import Any, Callable, Dict, Optional
+
 import ipywidgets as widgets
+from IPython.display import display
 
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.display.page_layout import TRACE_ML_PAGE
@@ -83,7 +84,9 @@ class NotebookDisplayManager:
                     sections_html[name] = html_obj.data
             except Exception as e:
                 sections_html[name] = (
-                    f"<div style='color:red;'>" f"Error rendering {name}: {e}" f"</div>"
+                    f"<div style='color:red;'>"
+                    f"Error rendering {name}: {e}"
+                    f"</div>"
                 )
                 cls.logger.error(
                     f"[TraceML] Error rendering notebook section {name}: {e}"

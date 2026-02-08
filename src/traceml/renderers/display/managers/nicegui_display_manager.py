@@ -1,6 +1,8 @@
-from nicegui import ui
 import threading
 import time
+
+from nicegui import ui
+
 from traceml.renderers.display.nicegui_sections.pages import define_pages
 
 

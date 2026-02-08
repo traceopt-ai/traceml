@@ -1,22 +1,14 @@
 from nicegui import ui
 
 from traceml.renderers.display.layout import (
-    SYSTEM_LAYOUT,
-    PROCESS_LAYOUT,
     LAYER_COMBINED_MEMORY_LAYOUT,
-    STEPTIMER_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
+    PROCESS_LAYOUT,
+    STEPTIMER_LAYOUT,
+    SYSTEM_LAYOUT,
 )
 
-from .system_section import (
-    build_system_section,
-    update_system_section,
-)
-from .process_section import (
-    build_process_section,
-    update_process_section,
-)
 from .layer_memory_table_section import (
     build_layer_memory_table_section,
     update_layer_memory_table_section,
@@ -25,16 +17,16 @@ from .layer_timer_table_section import (
     build_layer_timer_table_section,
     update_layer_timer_table_section,
 )
-from .steptiming_section import (
-    build_step_timing_table_section,
-    update_step_timing_table_section,
-)
 from .model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
 )
-
-import pandas
+from .process_section import build_process_section, update_process_section
+from .steptiming_section import (
+    build_step_timing_table_section,
+    update_step_timing_table_section,
+)
+from .system_section import build_system_section, update_system_section
 
 
 def build_top_tabs(active: str):
@@ -86,7 +78,9 @@ def define_pages(cls):
 
         build_top_tabs(active="overview")
 
-        with ui.row().classes("mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"):
+        with ui.row().classes(
+            "mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"
+        ):
 
             # System (left column)
             with ui.column().classes("w-[36%]"):
@@ -100,12 +94,18 @@ def define_pages(cls):
 
             with ui.column().classes("w-[33]"):
                 cls.cards[STEPTIMER_LAYOUT] = build_step_timing_table_section()
-                cls.update_funcs[STEPTIMER_LAYOUT] = update_step_timing_table_section
+                cls.update_funcs[STEPTIMER_LAYOUT] = (
+                    update_step_timing_table_section
+                )
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
             with ui.column().classes("w-[99%]"):
-                cls.cards[MODEL_COMBINED_LAYOUT] = build_model_combined_section()
-                cls.update_funcs[MODEL_COMBINED_LAYOUT] = update_model_combined_section
+                cls.cards[MODEL_COMBINED_LAYOUT] = (
+                    build_model_combined_section()
+                )
+                cls.update_funcs[MODEL_COMBINED_LAYOUT] = (
+                    update_model_combined_section
+                )
 
         # background update loop
         ui.timer(0.75, cls._ui_update_loop)

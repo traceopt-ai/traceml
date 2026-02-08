@@ -20,19 +20,19 @@ breakdown of wall time.
 """
 
 from typing import Dict, List, Optional
+
 import numpy as np
 
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
-from traceml.samplers.schema.time_schema import TimeEventSample
-
 from traceml.renderers.step_combined.schema import (
-    StepCombinedTimeResult,
+    StepCombinedTimeCoverage,
     StepCombinedTimeMetric,
+    StepCombinedTimeResult,
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
-    StepCombinedTimeCoverage,
 )
+from traceml.samplers.schema.time_schema import TimeEventSample
 
 
 class StepCombinedComputer:
@@ -52,10 +52,18 @@ class StepCombinedComputer:
 
         # Table-driven only — NO CPU/GPU assumptions here
         self._metrics = [
-            ("_traceml_internal:dataloader_next", "TimeSampler", "dataloader_fetch"),
+            (
+                "_traceml_internal:dataloader_next",
+                "TimeSampler",
+                "dataloader_fetch",
+            ),
             ("_traceml_internal:forward_time", "TimeSampler", "forward"),
             ("_traceml_internal:backward_time", "TimeSampler", "backward"),
-            ("_traceml_internal:optimizer_step", "TimeSampler", "optimizer_step"),
+            (
+                "_traceml_internal:optimizer_step",
+                "TimeSampler",
+                "optimizer_step",
+            ),
             ("_traceml_internal:step_time", "TimeSampler", "step_time_ms"),
         ]
 
@@ -67,7 +75,9 @@ class StepCombinedComputer:
         world_size = len(ranks)
 
         if world_size == 0:
-            return StepCombinedTimeResult(metrics=[], status_message="No ranks available")
+            return StepCombinedTimeResult(
+                metrics=[], status_message="No ranks available"
+            )
 
         computed: Dict[str, StepCombinedTimeMetric] = {}
 
@@ -85,7 +95,8 @@ class StepCombinedComputer:
         wait_metric = self._derive_wait_proxy(
             step_metric=computed.get("step_time_ms"),
             gpu_metrics={
-                k: v for k, v in computed.items()
+                k: v
+                for k, v in computed.items()
                 if k in {"forward", "backward", "optimizer_step"}
             },
         )
@@ -154,12 +165,14 @@ class StepCombinedComputer:
         common_steps = None
         for step_map in per_rank_steps.values():
             steps = {s for s in step_map.keys() if s <= completed_step}
-            common_steps = steps if common_steps is None else common_steps & steps
+            common_steps = (
+                steps if common_steps is None else common_steps & steps
+            )
 
         if not common_steps:
             return None
 
-        steps = sorted(common_steps)[-self.window_size:]
+        steps = sorted(common_steps)[-self.window_size :]
 
         median_y: List[float] = []
         worst_y: List[float] = []
@@ -174,8 +187,7 @@ class StepCombinedComputer:
 
         # Window summary
         per_rank_sum = {
-            r: sum(per_rank_steps[r][s] for s in steps)
-            for r in per_rank_steps
+            r: sum(per_rank_steps[r][s] for s in steps) for r in per_rank_steps
         }
 
         sums = list(per_rank_sum.values())
@@ -184,7 +196,11 @@ class StepCombinedComputer:
         worst_rank = max(per_rank_sum, key=lambda r: per_rank_sum[r])
 
         skew_ratio = worst_total / median_total if median_total > 0 else 0.0
-        skew_pct = (worst_total - median_total) / median_total if median_total > 0 else 0.0
+        skew_pct = (
+            (worst_total - median_total) / median_total
+            if median_total > 0
+            else 0.0
+        )
 
         # Derive clock from data (majority vote)
         clocks = list(per_rank_clocks.values())
@@ -220,12 +236,11 @@ class StepCombinedComputer:
             ),
         )
 
-
     def _derive_wait_proxy(
-            self,
-            *,
-            step_metric: StepCombinedTimeMetric,
-            gpu_metrics: Dict[str, StepCombinedTimeMetric],
+        self,
+        *,
+        step_metric: StepCombinedTimeMetric,
+        gpu_metrics: Dict[str, StepCombinedTimeMetric],
     ) -> Optional[StepCombinedTimeMetric]:
         """
         Derive WAIT (proxy) metric as a mixed-clock residual.
@@ -282,7 +297,8 @@ class StepCombinedComputer:
         skew_ratio = worst_total / median_total if median_total > 0 else 0.0
         skew_pct = (
             (worst_total - median_total) / median_total
-            if median_total > 0 else 0.0
+            if median_total > 0
+            else 0.0
         )
 
         return StepCombinedTimeMetric(

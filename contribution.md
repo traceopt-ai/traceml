@@ -1,6 +1,6 @@
 # Contributing to TraceML
 
-Thanks for your interest in contributing to TraceML!  
+Thanks for your interest in contributing to TraceML!
 We welcome contributions from the community, especially around performance, robustness, and usability.
 
 ## Ways to Contribute

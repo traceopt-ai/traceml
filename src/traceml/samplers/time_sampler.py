@@ -15,15 +15,15 @@ This sampler is *clock-agnostic*:
 - Duration is always stored in `duration_ms`
 """
 
-
-from typing import List,  Optional
 from collections import deque
 from queue import Empty
+from typing import List, Optional
 
-from traceml.utils.timing import TimeEvent, get_time_queue
 from traceml.loggers.error_log import get_error_logger
-from .base_sampler import BaseSampler
 from traceml.samplers.schema.time_schema import TimeEventSample
+from traceml.utils.timing import TimeEvent, get_time_queue
+
+from .base_sampler import BaseSampler
 
 
 class TimeSampler(BaseSampler):
@@ -124,7 +124,6 @@ class TimeSampler(BaseSampler):
             )
         except Exception:
             return None
-
 
     def _save_events(self, events: List[TimeEvent]) -> None:
         """

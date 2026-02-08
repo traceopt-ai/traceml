@@ -1,7 +1,8 @@
 from pathlib import Path
-from traceml.samplers.base_sampler import BaseSampler
-from traceml.runtime.stdout_stderr_capture import StreamCapture
+
 from traceml.runtime.config import config
+from traceml.runtime.stdout_stderr_capture import StreamCapture
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.transport.distributed import get_ddp_info
 
 
@@ -28,7 +29,9 @@ class StdoutStderrSampler(BaseSampler):
         logs_dir = Path(config.logs_dir) / session_id / str(local_rank)
         logs_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = logs_dir / log_filename
-        self.log_path.write_text("[TraceML] New run started\n\n", encoding="utf-8")
+        self.log_path.write_text(
+            "[TraceML] New run started\n\n", encoding="utf-8"
+        )
 
     def sample(self):
         capture = StreamCapture._stdout_stderr_capture

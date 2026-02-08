@@ -1,19 +1,22 @@
 import shutil
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Iterable
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
+from IPython.display import HTML
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
-from IPython.display import HTML
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.transport.distributed import get_ddp_info
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.managers.cli_display_manager import STEPTIMER_LAYOUT
+from traceml.renderers.display.layout import (
+    STEPTIMER_LAYOUT,
+)
 from traceml.renderers.utils import fmt_time_run
+from traceml.transport.distributed import get_ddp_info
+
 from .utils import CARD_STYLE
 
 
@@ -71,7 +74,9 @@ class UserTimeRenderer(BaseRenderer):
         worst_metric: str = "p95",  # "p95" or "avg"
         show_internal: bool = False,
     ):
-        super().__init__(name="User Times", layout_section_name=STEPTIMER_LAYOUT)
+        super().__init__(
+            name="User Times", layout_section_name=STEPTIMER_LAYOUT
+        )
         self.top_n = int(top_n)
         self.remote_store = remote_store
         self.show_internal = show_internal
@@ -111,16 +116,20 @@ class UserTimeRenderer(BaseRenderer):
 
         # RemoteDBStore is expected to serve per-rank DBs by (rank, sampler_name)
         for rank in range(0, ws):
-            db = self.remote_store.get_db(rank, self.SAMPLER_NAME) if self.SAMPLER_NAME else None
+            db = (
+                self.remote_store.get_db(rank, self.SAMPLER_NAME)
+                if self.SAMPLER_NAME
+                else None
+            )
             if db is not None:
                 yield rank, db
-
 
     def _is_internal(self, name: str) -> bool:
         return name.startswith("_traceml_internal:")
 
-
-    def _collect_series_by_rank(self) -> Dict[str, Dict[int, Dict[str, List[float]]]]:
+    def _collect_series_by_rank(
+        self,
+    ) -> Dict[str, Dict[int, Dict[str, List[float]]]]:
         """
         Collect per-event series for each rank.
 
@@ -170,7 +179,6 @@ class UserTimeRenderer(BaseRenderer):
         n = min(self.window_size, len(vals))
         return np.asarray(vals[-n:], dtype=np.float64)
 
-
     def _rank_stats(
         self,
         cpu_vals: List[float],
@@ -184,7 +192,13 @@ class UserTimeRenderer(BaseRenderer):
         """
         arr = self._window(gpu_vals or cpu_vals)
         if arr.size == 0:
-            return {"last": 0.0, "p50": 0.0, "p95": 0.0, "avg": 0.0, "nsamples": 0.0}
+            return {
+                "last": 0.0,
+                "p50": 0.0,
+                "p95": 0.0,
+                "avg": 0.0,
+                "nsamples": 0.0,
+            }
 
         return {
             "last": float(arr[-1]),
@@ -284,13 +298,17 @@ class UserTimeRenderer(BaseRenderer):
 
         # Coverage and minimum samples (among ranks that have any data).
         if ranks_with_data:
-            min_samples = int(min(rank_stats[r]["nsamples"] for r in ranks_with_data))
+            min_samples = int(
+                min(rank_stats[r]["nsamples"] for r in ranks_with_data)
+            )
         else:
             min_samples = 0
 
         coverage = f"{len(ranks_with_data)}/{ws}" if ws > 1 else "1/1"
 
-        device = "MIXED" if (saw_cpu and saw_gpu) else ("GPU" if saw_gpu else "CPU")
+        device = (
+            "MIXED" if (saw_cpu and saw_gpu) else ("GPU" if saw_gpu else "CPU")
+        )
 
         if not rank_stats:
             return UserTimeRow(
@@ -320,7 +338,9 @@ class UserTimeRenderer(BaseRenderer):
         avg = max(float(s["avg"]) for s in rank_stats.values())
 
         # Trend heuristic based on concatenated history.
-        trend = self._trend_from_history(np.asarray(history_concat, dtype=np.float64))
+        trend = self._trend_from_history(
+            np.asarray(history_concat, dtype=np.float64)
+        )
 
         return UserTimeRow(
             name=name,

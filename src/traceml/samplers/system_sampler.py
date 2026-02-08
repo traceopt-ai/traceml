@@ -20,21 +20,21 @@ from typing import List
 
 import psutil
 from pynvml import (
-    nvmlInit,
-    nvmlDeviceGetHandleByIndex,
-    nvmlDeviceGetTemperature,
-    nvmlDeviceGetPowerUsage,
-    nvmlDeviceGetPowerManagementLimit,
-    nvmlDeviceGetMemoryInfo,
-    nvmlDeviceGetUtilizationRates,
-    nvmlDeviceGetCount,
-    NVMLError,
     NVML_TEMPERATURE_GPU,
+    NVMLError,
+    nvmlDeviceGetCount,
+    nvmlDeviceGetHandleByIndex,
+    nvmlDeviceGetMemoryInfo,
+    nvmlDeviceGetPowerManagementLimit,
+    nvmlDeviceGetPowerUsage,
+    nvmlDeviceGetTemperature,
+    nvmlDeviceGetUtilizationRates,
+    nvmlInit,
 )
 
 from traceml.loggers.error_log import get_error_logger
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.samplers.schema.system import SystemSample, GPUMetrics
+from traceml.samplers.schema.system import GPUMetrics, SystemSample
 
 
 class SystemSampler(BaseSampler):
@@ -61,8 +61,8 @@ class SystemSampler(BaseSampler):
         from operating in a degraded mode.
         """
         self.name = "System"
-        self.sampler_name = self.name+"Sampler"
-        self.table_name = self.name+"Table"
+        self.sampler_name = self.name + "Sampler"
+        self.table_name = self.name + "Table"
         super().__init__(sampler_name=self.sampler_name)
 
         # We are sampling and sending only latest values
@@ -93,7 +93,9 @@ class SystemSampler(BaseSampler):
             psutil.cpu_percent(interval=None)
             self.cpu_logical_core_count = psutil.cpu_count(logical=True)
         except Exception as e:
-            self.logger.error(f"[TraceML] CPU sampler initialization failed: {e}")
+            self.logger.error(
+                f"[TraceML] CPU sampler initialization failed: {e}"
+            )
 
     def _init_ram(self) -> None:
         """
@@ -105,7 +107,9 @@ class SystemSampler(BaseSampler):
         try:
             self.ram_total_memory = float(psutil.virtual_memory().total)
         except Exception as e:
-            self.logger.error(f"[TraceML] RAM sampler initialization failed: {e}")
+            self.logger.error(
+                f"[TraceML] RAM sampler initialization failed: {e}"
+            )
 
     def _init_gpu(self) -> None:
         """
@@ -190,7 +194,9 @@ class SystemSampler(BaseSampler):
                 mem = nvmlDeviceGetMemoryInfo(handle)
                 temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
                 power = nvmlDeviceGetPowerUsage(handle) / 1000.0  # mW → W
-                power_limit = nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
+                power_limit = (
+                    nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
+                )
 
                 gpus.append(
                     GPUMetrics(
@@ -204,7 +210,9 @@ class SystemSampler(BaseSampler):
                 )
 
             except Exception as e:
-                self.logger.error(f"[TraceML] GPU {gpu_id} sampling failed: {e}")
+                self.logger.error(
+                    f"[TraceML] GPU {gpu_id} sampling failed: {e}"
+                )
 
                 # Preserve GPU ordering even on failure
                 gpus.append(
@@ -246,4 +254,6 @@ class SystemSampler(BaseSampler):
 
         except Exception as e:
             # Absolute safety net: this should never crash the runtime
-            self.logger.error(f"[TraceML] SystemSampler failed to collect sample: {e}")
+            self.logger.error(
+                f"[TraceML] SystemSampler failed to collect sample: {e}"
+            )

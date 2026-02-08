@@ -13,23 +13,20 @@ Key semantics
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Iterable
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.transport.distributed import get_ddp_info
 from traceml.loggers.error_log import get_error_logger
-
+from traceml.renderers.layer_combined_time.schema import (
+    LayerCombinedTimerOther,
+    LayerCombinedTimerResult,
+    LayerCombinedTimerRow,
+)
 from traceml.samplers.schema.layer_forward_backward_time import (
     LayerForwardBackwardTimeSample,
 )
-
-from traceml.renderers.layer_combined_time.schema import (
-    LayerCombinedTimerRow,
-    LayerCombinedTimerOther,
-    LayerCombinedTimerResult,
-)
-
+from traceml.transport.distributed import get_ddp_info
 
 
 @dataclass(frozen=True)
@@ -42,7 +39,6 @@ class DDPJoinStatus:
     incomplete: bool
     missing_ranks: List[int]
     world_size: int
-
 
 
 class LayerCombinedTimerData:
@@ -78,8 +74,6 @@ class LayerCombinedTimerData:
 
         self.logger = get_error_logger("LayerCombinedTimerData")
 
-
-
     def compute_display_data(self) -> LayerCombinedTimerResult:
         """
         Compute renderer-ready combined timing data.
@@ -113,7 +107,6 @@ class LayerCombinedTimerData:
         )
 
         return self._build_result()
-
 
     def _compute_candidate_safe_step(
         self, world_size: int
@@ -204,7 +197,6 @@ class LayerCombinedTimerData:
 
         return snapshot, rank_curr, missing
 
-
     def _load_samples_backwards(
         self, rows: Iterable[dict], min_step: int
     ) -> List[LayerForwardBackwardTimeSample]:
@@ -260,7 +252,6 @@ class LayerCombinedTimerData:
                 out[layer] = max(totals.items(), key=lambda x: x[1])[0]
         return out
 
-
     def _build_result(self) -> LayerCombinedTimerResult:
         join = self._join_status
         layers = set(self._forward_cache) | set(self._backward_cache)
@@ -300,11 +291,7 @@ class LayerCombinedTimerData:
         out: List[LayerCombinedTimerRow] = []
         for r in rows_sorted:
             pct = (r.total_current / total_sum * 100.0) if total_sum else 0.0
-            out.append(
-                LayerCombinedTimerRow(
-                    **{**r.__dict__, "pct": pct}
-                )
-            )
+            out.append(LayerCombinedTimerRow(**{**r.__dict__, "pct": pct}))
 
         top = out[: self._top_n]
         rest = out[self._top_n :]
@@ -334,7 +321,6 @@ class LayerCombinedTimerData:
             world_size=join.world_size if join else self._world_size(),
             status_message=status,
         )
-
 
     def _world_size(self) -> int:
         _, _, ws = get_ddp_info()

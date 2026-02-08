@@ -1,20 +1,19 @@
 import time
-from typing import Dict, Optional
 from collections import deque
 from queue import Empty
+from typing import Dict, Optional
 
-from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-
+from traceml.samplers.schema.layer_forward_backward_time import (
+    LayerForwardBackwardTimePayload,
+    LayerForwardBackwardTimeSample,
+)
 from traceml.utils.hooks.layer_backward_time_hooks import (
     LayerBackwardTimeStepEvent,
     get_layer_backward_time_queue,
 )
 
-from traceml.samplers.schema.layer_forward_backward_time import (
-    LayerForwardBackwardTimePayload,
-    LayerForwardBackwardTimeSample,
-)
+from .base_sampler import BaseSampler
 
 
 class LayerBackwardTimeSampler(BaseSampler):
@@ -62,7 +61,6 @@ class LayerBackwardTimeSampler(BaseSampler):
 
         self.sample_idx = 0
 
-
     def _ingest_queue(self) -> None:
         """
         Drain the shared backward-time queue into the local FIFO buffer.
@@ -82,8 +80,6 @@ class LayerBackwardTimeSampler(BaseSampler):
 
             self._local_buffer.append(event)
 
-
-
     def _step_is_resolved(self, event: LayerBackwardTimeStepEvent) -> bool:
         """
         Check whether *all* backward timing events in the step are resolved.
@@ -96,7 +92,6 @@ class LayerBackwardTimeSampler(BaseSampler):
             if not layer_evt.try_resolve():
                 return False
         return True
-
 
     def _aggregate_step(
         self, event: LayerBackwardTimeStepEvent
@@ -130,7 +125,9 @@ class LayerBackwardTimeSampler(BaseSampler):
             rec["cpu_ms"] += float(evt.cpu_duration_ms)
 
             if evt.gpu_duration_ms is not None:
-                rec["gpu_ms"] = (rec["gpu_ms"] or 0.0) + float(evt.gpu_duration_ms)
+                rec["gpu_ms"] = (rec["gpu_ms"] or 0.0) + float(
+                    evt.gpu_duration_ms
+                )
 
             rec["n_calls"] += 1
 
@@ -143,8 +140,6 @@ class LayerBackwardTimeSampler(BaseSampler):
             gpu_time_ms=[agg[k]["gpu_ms"] for k in layer_names],
             n_calls=[int(agg[k]["n_calls"]) for k in layer_names],
         )
-
-
 
     def sample(self) -> None:
         """
@@ -182,6 +177,4 @@ class LayerBackwardTimeSampler(BaseSampler):
 
         except Exception as e:
             # Absolute safety net: sampler must never disrupt training
-            self.logger.error(
-                f"[TraceML] LayerBackwardTimeSampler error: {e}"
-            )
+            self.logger.error(f"[TraceML] LayerBackwardTimeSampler error: {e}")

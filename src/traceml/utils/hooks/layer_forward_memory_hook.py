@@ -15,14 +15,13 @@ Design principles
 - No live tensors or modules escape this module.
 """
 
-from dataclasses import dataclass
-from queue import Queue, Full
-from typing import Dict, Any, List, Tuple
 import sys
+from dataclasses import dataclass
+from queue import Full, Queue
+from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.nn as nn
-
 
 # Shared queue for forward events
 layer_forward_memory_queue: Queue = Queue(maxsize=4096)
@@ -113,9 +112,9 @@ class LayerForwardMemoryHook:
                     accumulate(o)
 
             if total_bytes > 0:
-                _layer_forward_memory_buffer.setdefault(self.model_id, []).append(
-                    (self.layer_name, total_bytes)
-                )
+                _layer_forward_memory_buffer.setdefault(
+                    self.model_id, []
+                ).append((self.layer_name, total_bytes))
 
         except Exception:
             print(

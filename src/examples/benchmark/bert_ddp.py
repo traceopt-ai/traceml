@@ -3,14 +3,13 @@ import random
 
 import torch
 import torch.distributed as dist
+from datasets import load_dataset
+from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torch.optim import AdamW
-
-from datasets import load_dataset
 from transformers import (
-    AutoTokenizer,
     AutoModelForSequenceClassification,
+    AutoTokenizer,
     DataCollatorWithPadding,
     get_linear_schedule_with_warmup,
 )
@@ -25,7 +24,6 @@ from transformers import (
 # trace_time:
 #   Optional fine-grained timers for user-defined code sections
 from traceml.decorators import trace_model_instance, trace_step
-
 
 SEED = 42
 # MODEL_NAME = "bert-base-uncased"
@@ -51,7 +49,9 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def accuracy_from_logits(
+    logits: torch.Tensor, labels: torch.Tensor
+) -> torch.Tensor:
     """
     Simple per-batch accuracy (rank-local).
     """
@@ -68,8 +68,12 @@ def prepare_data(rank: int, world_size: int):
 
     raw = load_dataset("fancyzhx/ag_news", revision="main")
 
-    train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
-    val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
+    train_raw = raw["train"].select(
+        range(min(MAX_TRAIN_EXAMPLES, len(raw["train"])))
+    )
+    val_raw = raw["test"].select(
+        range(min(MAX_VAL_EXAMPLES, len(raw["test"])))
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
@@ -160,7 +164,9 @@ def main():
     # torchrun sets these OS environment variables per process
     rank = int(os.environ.get("RANK", 0))  # global rank
     local_rank = int(os.environ.get("LOCAL_RANK", 0))  # GPU index on this node
-    world_size = int(os.environ.get("WORLD_SIZE", 1))  # total number of processes
+    world_size = int(
+        os.environ.get("WORLD_SIZE", 1)
+    )  # total number of processes
 
     # --------------------------------------------------------
     # Initialize distributed communication
@@ -191,7 +197,9 @@ def main():
     # --------------------------------------------------------
     # Data
     # --------------------------------------------------------
-    tokenizer, train_loader, val_loader, train_sampler = prepare_data(rank, world_size)
+    tokenizer, train_loader, val_loader, train_sampler = prepare_data(
+        rank, world_size
+    )
 
     # --------------------------------------------------------
     # Model

@@ -1,11 +1,14 @@
-from rich.panel import Panel
-from rich.text import Text
-from IPython.display import HTML
 from itertools import islice
 
-from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.managers.cli_display_manager import STDOUT_STDERR_LAYOUT
+from IPython.display import HTML
+from rich.panel import Panel
+from rich.text import Text
+
 from traceml.database.database import Database
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.managers.cli_display_manager import (
+    STDOUT_STDERR_LAYOUT,
+)
 
 
 class StdoutStderrRenderer(BaseRenderer):

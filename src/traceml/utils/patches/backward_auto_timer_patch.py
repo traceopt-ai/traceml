@@ -1,5 +1,6 @@
 import threading
 from typing import Any
+
 import torch
 
 from traceml.utils.timing import timed_region
@@ -22,7 +23,9 @@ def _set_depth(v: int) -> None:
     setattr(_BACKWARD_TLS, "_traceml_backward_depth", v)
 
 
-def _traceml_tensor_backward(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
+def _traceml_tensor_backward(
+    self: torch.Tensor, *args: Any, **kwargs: Any
+) -> Any:
     if not _enabled():
         return _ORIG_TENSOR_BACKWARD(self, *args, **kwargs)
 
@@ -32,7 +35,9 @@ def _traceml_tensor_backward(self: torch.Tensor, *args: Any, **kwargs: Any) -> A
 
     _set_depth(_depth() + 1)
     try:
-        with timed_region("_traceml_internal:backward_time", scope="step", use_gpu=True):
+        with timed_region(
+            "_traceml_internal:backward_time", scope="step", use_gpu=True
+        ):
             return _ORIG_TENSOR_BACKWARD(self, *args, **kwargs)
     finally:
         _set_depth(_depth() - 1)
@@ -48,7 +53,9 @@ def _traceml_autograd_backward(*args: Any, **kwargs: Any) -> Any:
 
     _set_depth(_depth() + 1)
     try:
-        with timed_region("_traceml_internal:backward_time", scope="step", use_gpu=True):
+        with timed_region(
+            "_traceml_internal:backward_time", scope="step", use_gpu=True
+        ):
             return _ORIG_AUTOGRAD_BACKWARD(*args, **kwargs)
     finally:
         _set_depth(_depth() - 1)

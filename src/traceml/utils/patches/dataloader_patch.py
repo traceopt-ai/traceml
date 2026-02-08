@@ -1,6 +1,6 @@
 from torch.utils.data import DataLoader
-from traceml.utils.timing import timed_region
 
+from traceml.utils.timing import timed_region
 
 _ORIG_DATALOADER_ITER = DataLoader.__iter__
 
@@ -10,7 +10,11 @@ def _traceml_dataloader_iter(self):
 
     while True:
         try:
-            with timed_region(name="_traceml_internal:dataloader_next", scope="step", use_gpu=False):
+            with timed_region(
+                name="_traceml_internal:dataloader_next",
+                scope="step",
+                use_gpu=False,
+            ):
                 batch = next(it)
         except StopIteration:
             break

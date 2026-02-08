@@ -14,7 +14,7 @@ Responsibilities
 """
 
 from collections import deque
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -55,7 +55,6 @@ class ProcessMetricsComputer:
 
         # Highest sequence number fully processed into dashboard
         self._last_completed_seq: int = -1
-
 
     @staticmethod
     def _safe_float(x: Any, default: float = 0.0) -> float:
@@ -160,7 +159,8 @@ class ProcessMetricsComputer:
                     "gpu_rank": gpu_rank[idx],
                     "gpu_used_imbalance": (
                         max(gpu_used) - min(gpu_used)
-                        if len(gpu_used) > 1 else 0.0
+                        if len(gpu_used) > 1
+                        else 0.0
                     ),
                 }
             )
@@ -222,7 +222,9 @@ class ProcessMetricsComputer:
 
                 ram_used = self._safe_float(row.get("ram_used"))
                 ram_used_vals.append(ram_used)
-                ram_total = max(ram_total, self._safe_float(row.get("ram_total")))
+                ram_total = max(
+                    ram_total, self._safe_float(row.get("ram_total"))
+                )
 
                 gpu = row.get("gpu")
                 if row.get("gpu_available", False) and gpu:
@@ -230,7 +232,9 @@ class ProcessMetricsComputer:
                     reserved = self._safe_float(gpu.get("mem_reserved"))
                     total = self._safe_float(gpu.get("mem_total"))
                     gpu_used_vals.append(used)
-                    gpu_candidates.append((total - reserved, rank, used, total))
+                    gpu_candidates.append(
+                        (total - reserved, rank, used, total)
+                    )
 
             entry = {
                 "seq": seq,
@@ -249,7 +253,8 @@ class ProcessMetricsComputer:
                         "gpu_rank": rank,
                         "gpu_used_imbalance": (
                             max(gpu_used_vals) - min(gpu_used_vals)
-                            if len(gpu_used_vals) > 1 else 0.0
+                            if len(gpu_used_vals) > 1
+                            else 0.0
                         ),
                     }
                 )
@@ -263,7 +268,6 @@ class ProcessMetricsComputer:
         Return the current dashboard history buffer.
         """
         return list(self._dashboard_rollup)
-
 
     def compute_summary(self, table: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -304,9 +308,13 @@ class ProcessMetricsComputer:
         if gpu_used:
             summary.update(
                 {
-                    "gpu_mem_used_p95_single": float(np.percentile(gpu_used, 95)),
+                    "gpu_mem_used_p95_single": float(
+                        np.percentile(gpu_used, 95)
+                    ),
                     "gpu_mem_used_peak_single": float(np.max(gpu_used)),
-                    "gpu_mem_reserved_peak_single": float(np.max(gpu_reserved)),
+                    "gpu_mem_reserved_peak_single": float(
+                        np.max(gpu_reserved)
+                    ),
                     "gpu_mem_total_capacity": float(np.max(gpu_total)),
                 }
             )

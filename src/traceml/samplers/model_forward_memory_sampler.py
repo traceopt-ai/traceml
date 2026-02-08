@@ -1,10 +1,11 @@
 import time
 
-from .base_sampler import BaseSampler
+from traceml.loggers.error_log import get_error_logger
 from traceml.utils.model_forward_memory_hook import (
     get_model_forward_memory_queue,
 )
-from traceml.loggers.error_log import get_error_logger
+
+from .base_sampler import BaseSampler
 
 
 class ModelForwardMemorySampler(BaseSampler):
@@ -71,4 +72,6 @@ class ModelForwardMemorySampler(BaseSampler):
         try:
             self._drain_queue()
         except Exception as e:
-            self.logger.error(f"[TraceML] ModelForwardMemorySampler error: {e}")
+            self.logger.error(
+                f"[TraceML] ModelForwardMemorySampler error: {e}"
+            )

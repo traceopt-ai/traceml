@@ -1,19 +1,17 @@
+import math
 import os
 import random
-import math
 
 import torch
-from torch.utils.data import DataLoader
-from torch.optim import AdamW
-
 from datasets import load_dataset
+from torch.optim import AdamW
+from torch.utils.data import DataLoader
 from transformers import (
-    AutoTokenizer,
     AutoModelForSequenceClassification,
+    AutoTokenizer,
     DataCollatorWithPadding,
     get_linear_schedule_with_warmup,
 )
-
 
 # =========================
 # TraceML imports
@@ -25,7 +23,6 @@ from transformers import (
 # trace_timestep:a
 #   Optional fine-grained timers for user-defined code sections
 from traceml.decorators import trace_model_instance, trace_step, trace_time
-
 
 SEED = 42
 # MODEL_NAME = "bert-base-uncased"
@@ -47,7 +44,9 @@ def set_seed(seed: int = SEED):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def accuracy_from_logits(
+    logits: torch.Tensor, labels: torch.Tensor
+) -> torch.Tensor:
     preds = torch.argmax(logits, dim=-1)
     correct = (preds == labels).sum()
     total = labels.size(0)
@@ -58,8 +57,12 @@ def prepare_data():
     """Load & tokenize AG News (bigger subset for better logs)."""
     raw = load_dataset("ag_news")
 
-    train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
-    val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
+    train_raw = raw["train"].select(
+        range(min(MAX_TRAIN_EXAMPLES, len(raw["train"])))
+    )
+    val_raw = raw["test"].select(
+        range(min(MAX_VAL_EXAMPLES, len(raw["test"])))
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
@@ -176,7 +179,9 @@ def main():
     total_steps = EPOCHS * math.ceil(len(train_loader))
     warmup_steps = int(WARMUP_RATIO * total_steps)
     scheduler = get_linear_schedule_with_warmup(
-        optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+        optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps,
     )
 
     scaler = torch.amp.GradScaler(device="cuda", enabled=True)

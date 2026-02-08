@@ -1,5 +1,5 @@
-import uuid
 import datetime
+import uuid
 
 
 def _generate_session_id():

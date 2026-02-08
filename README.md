@@ -9,10 +9,10 @@
 [![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-yellow)](./LICENSE)
 
 
-TraceML is a lightweight **runtime observability** tool for **distributed PyTorch training** (Single Node Multi-GPU).  
+TraceML is a lightweight **runtime observability** tool for **distributed PyTorch training** (Single Node Multi-GPU).
 It makes training behavior visible *while it runs* using **semantic, step-level signals** aligned with model execution.
 
-> Current focus: **single-node DDP**.  
+> Current focus: **single-node DDP**.
 > We are working on Multi-node distributed training.
 
 ---
@@ -37,7 +37,7 @@ TraceML focuses on the signals that explain training behavior at runtime:
 ### Step-aware signals (synchronized across ranks)
 For each training step (in single-node DDP):
 - **Dataloader fetch time**
-- **Step time** 
+- **Step time**
 - **Forward / backward / optimizer** timings (DEEP-DIVE) are **CUDA-event estimates** on the current CUDA stream.
 - GPU timings are best for **relative comparisons and trend/bottleneck detection**; they may not sum to wall time due to overlap (compute/comm) and multi-stream execution.
 
@@ -116,8 +116,8 @@ cd traceml
 pip install -e '.[dev]'
 ```
 
-**Requirements:** Python 3.9–3.13, PyTorch 1.12+  
-**Platform support:** macOS (Intel/ARM), Linux  
+**Requirements:** Python 3.9–3.13, PyTorch 1.12+
+**Platform support:** macOS (Intel/ARM), Linux
 **Training support:** Single GPU and **single-node DDP (alpha)**
 
 ---
@@ -149,7 +149,7 @@ Without `trace_step()`:
 
 ### 2) Optional: Time specific code regions
 
-Use `@trace_time` to time specific functions.  
+Use `@trace_time` to time specific functions.
 This works in **all modes** and is designed to have **low overhead**.
 
 ```python
@@ -268,7 +268,7 @@ TraceML is released under the **MIT License with Commons Clause**.
 - ✅ Free for internal company use
 - ❌ Not allowed for resale or SaaS products
 
-See [LICENSE](./LICENSE) for full details.  
+See [LICENSE](./LICENSE) for full details.
 For commercial licensing, contact: abhinav@traceopt.ai
 
 ---

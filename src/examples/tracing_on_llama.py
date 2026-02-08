@@ -2,23 +2,20 @@ import os
 import random
 
 import torch
-from torch.utils.data import DataLoader
-
 from datasets import load_dataset
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from torch.utils.data import DataLoader
 from transformers import (
-    AutoTokenizer,
     AutoModelForCausalLM,
+    AutoTokenizer,
     BitsAndBytesConfig,
     get_linear_schedule_with_warmup,
 )
-
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 
 # =========================
 # TraceML imports
 # =========================
 from traceml.decorators import trace_model_instance, trace_step, trace_time
-
 
 # =========================
 # Config
@@ -30,7 +27,9 @@ DATASET_NAME = "tatsu-lab/alpaca"
 
 # Training + demo knobs
 MAX_LENGTH = 1024
-MAX_TRAIN_EXAMPLES = 20000  # raise for longer runs; keep smaller for quick demo
+MAX_TRAIN_EXAMPLES = (
+    20000  # raise for longer runs; keep smaller for quick demo
+)
 BATCH_SIZE = 1  # QLoRA-friendly on T4
 GRAD_ACCUM_STEPS = 8
 EPOCHS = 1
@@ -68,7 +67,9 @@ def load_batch_to_device(batch, device):
 @trace_time("forward", use_gpu=True)
 def forward_pass(model, batch, dtype):
     # For LLMs, autocast fp16 is standard on T4
-    with torch.cuda.amp.autocast(enabled=torch.cuda.is_available(), dtype=dtype):
+    with torch.cuda.amp.autocast(
+        enabled=torch.cuda.is_available(), dtype=dtype
+    ):
         return model(**batch)
 
 
@@ -229,7 +230,9 @@ def main():
     # Scheduler steps happen on optimizer steps (after grad accumulation)
     # Compute total optimizer steps
     steps_per_epoch = min(MAX_STEPS, len(train_loader))
-    total_optimizer_steps = max(1, (EPOCHS * steps_per_epoch) // GRAD_ACCUM_STEPS)
+    total_optimizer_steps = max(
+        1, (EPOCHS * steps_per_epoch) // GRAD_ACCUM_STEPS
+    )
     warmup_steps = int(WARMUP_RATIO * total_optimizer_steps)
 
     scheduler = get_linear_schedule_with_warmup(

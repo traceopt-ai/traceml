@@ -1,5 +1,5 @@
-from typing import Any, Dict, Optional, Deque
 from collections import deque
+from typing import Any, Deque, Dict, Optional
 
 from .database_writer import DatabaseWriter
 

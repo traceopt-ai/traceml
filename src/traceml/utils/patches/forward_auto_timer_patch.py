@@ -1,7 +1,8 @@
-import torch.nn as nn
 import threading
-from traceml.utils.timing import timed_region
 
+import torch.nn as nn
+
+from traceml.utils.timing import timed_region
 
 _TLS = threading.local()
 _ORIG_MODULE_CALL = nn.Module.__call__
@@ -30,7 +31,9 @@ def _traceml_module_call(self: nn.Module, *args, **kwargs):
 
     _set_depth(_depth() + 1)
     try:
-        with timed_region("_traceml_internal:forward_time", scope="step", use_gpu=True):
+        with timed_region(
+            "_traceml_internal:forward_time", scope="step", use_gpu=True
+        ):
             return _ORIG_MODULE_CALL(self, *args, **kwargs)
     finally:
         _set_depth(_depth() - 1)

@@ -11,44 +11,47 @@ including:
 All metric computation is delegated to `SystemMetricsComputer`.
 """
 
-
-from typing import Dict, Any, Optional
 import shutil
+from typing import Any, Dict, Optional
 
+from IPython.display import HTML
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Console
-from IPython.display import HTML
 
-from traceml.renderers.base_renderer import BaseRenderer
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.renderers.display.managers.cli_display_manager import SYSTEM_LAYOUT
-from traceml.utils.formatting import fmt_percent, fmt_mem_new
-from traceml.renderers.utils import append_text, CARD_STYLE
-from .compute import SystemMetricsComputer
 from traceml.loggers.error_log import get_error_logger
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.managers.cli_display_manager import (
+    SYSTEM_LAYOUT,
+)
+from traceml.renderers.utils import CARD_STYLE, append_text
+from traceml.utils.formatting import fmt_mem_new, fmt_percent
+
+from .compute import SystemMetricsComputer
 
 
 class SystemRenderer(BaseRenderer):
     """
-        Renderer for system-level telemetry.
+    Renderer for system-level telemetry.
 
-        This class is presentation-focused and delegates all aggregation
-        logic to `SystemMetricsComputer`.
+    This class is presentation-focused and delegates all aggregation
+    logic to `SystemMetricsComputer`.
 
-        Outputs
-        -------
-        - CLI Rich panels
-        - Jupyter notebook HTML cards
-        - Dashboard-compatible payloads
-        - Text summaries for logging
-        """
+    Outputs
+    -------
+    - CLI Rich panels
+    - Jupyter notebook HTML cards
+    - Dashboard-compatible payloads
+    - Text summaries for logging
+    """
+
     NAME = "System"
 
     def __init__(self, remote_store: RemoteDBStore):
         super().__init__(name=self.NAME, layout_section_name=SYSTEM_LAYOUT)
         self._store = remote_store
-        self._logger = get_error_logger(self.NAME+"Renderer")
+        self._logger = get_error_logger(self.NAME + "Renderer")
 
     def _get_table(self) -> Optional[Any]:
         """
@@ -58,10 +61,10 @@ class SystemRenderer(BaseRenderer):
         - DB or table has not been created yet
         """
         try:
-            db = self._store.get_db(rank=0, sampler_name=self.NAME+"Sampler")
+            db = self._store.get_db(rank=0, sampler_name=self.NAME + "Sampler")
             if db is None:
                 return None
-            return db.get_table(self.NAME+"Table")
+            return db.get_table(self.NAME + "Table")
         except Exception as e:
             self._logger.error(f"[TraceML] Failed to fetch system table: {e}")
             return None
@@ -71,7 +74,6 @@ class SystemRenderer(BaseRenderer):
         table = self._get_table()
         self._computer = SystemMetricsComputer(table)
         return self._computer.compute_snapshot()
-
 
     def _get_panel_cpu_row(self, table, data):
         ram_pct_str = ""
@@ -87,7 +89,9 @@ class SystemRenderer(BaseRenderer):
     def _get_panel_gpu_row(self, table, data):
         """Render GPU metrics into a Rich table."""
         if not data["gpu_available"]:
-            table.add_row("[bold green]GPU[/bold green]", "[red]Not available[/red]")
+            table.add_row(
+                "[bold green]GPU[/bold green]", "[red]Not available[/red]"
+            )
             return
 
         table.add_row(
@@ -180,13 +184,15 @@ class SystemRenderer(BaseRenderer):
 
             temp_html = f"{temp:.1f}°C" if temp is not None else "N/A"
             power_html = (
-                f"{pu:.1f}W / {pl:.1f}W" if pu is not None and pl is not None else "N/A"
+                f"{pu:.1f}W / {pl:.1f}W"
+                if pu is not None and pl is not None
+                else "N/A"
             )
 
             gpu_section = f"""
                 <div style="
-                    display:flex; 
-                    flex-direction:column; 
+                    display:flex;
+                    flex-direction:column;
                     gap:6px;
                 ">
                     <div>
@@ -253,7 +259,8 @@ class SystemRenderer(BaseRenderer):
         t.add_row(
             "GPU UTIL (avg / peak)",
             "|",
-            f"{s['gpu_util_total_avg']:.1f}% / " f"{s['gpu_util_total_peak']:.1f}%",
+            f"{s['gpu_util_total_avg']:.1f}% / "
+            f"{s['gpu_util_total_peak']:.1f}%",
         )
 
         t.add_row(
@@ -284,7 +291,9 @@ class SystemRenderer(BaseRenderer):
         t.add_column(style="dim", no_wrap=True)
         t.add_column(style="white")
 
-        t.add_row("TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(s["total_samples"]))
+        t.add_row(
+            "TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(s["total_samples"])
+        )
 
         if s["total_samples"]:
             self._cpu_summary(t, s)
@@ -293,7 +302,9 @@ class SystemRenderer(BaseRenderer):
 
         console.print(
             Panel(
-                t, title="[bold cyan]System - Summary[/bold cyan]", border_style="cyan"
+                t,
+                title="[bold cyan]System - Summary[/bold cyan]",
+                border_style="cyan",
             )
         )
         if path:

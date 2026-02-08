@@ -11,8 +11,10 @@ Responsibilities
 - Compute aggregated summaries over the full run
 """
 
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 import numpy as np
+
 
 class SystemMetricsComputer:
     """
@@ -81,7 +83,6 @@ class SystemMetricsComputer:
             "gpu_power_limit": power_limit_total,
         }
 
-
     def compute_summary(self) -> Dict[str, Any]:
         """
         Compute aggregated statistics over the entire run.
@@ -121,20 +122,34 @@ class SystemMetricsComputer:
                 continue
 
             util_totals.append(sum(v["util"] for v in gpu_raw.values()))
-            mem_used_totals.append(sum(v["mem_used"] for v in gpu_raw.values()))
-            mem_total_totals.append(sum(v["mem_total"] for v in gpu_raw.values()))
-            max_single_gpu_mem.append(max(v["mem_used"] for v in gpu_raw.values()))
-            temp_max_vals.append(max(v["temperature"] for v in gpu_raw.values()))
+            mem_used_totals.append(
+                sum(v["mem_used"] for v in gpu_raw.values())
+            )
+            mem_total_totals.append(
+                sum(v["mem_total"] for v in gpu_raw.values())
+            )
+            max_single_gpu_mem.append(
+                max(v["mem_used"] for v in gpu_raw.values())
+            )
+            temp_max_vals.append(
+                max(v["temperature"] for v in gpu_raw.values())
+            )
 
         if summary["gpu_available"] and util_totals:
             summary.update(
                 {
-                    "gpu_util_total_avg": round(float(np.mean(util_totals)), 2),
-                    "gpu_util_total_peak": round(float(np.max(util_totals)), 2),
+                    "gpu_util_total_avg": round(
+                        float(np.mean(util_totals)), 2
+                    ),
+                    "gpu_util_total_peak": round(
+                        float(np.max(util_totals)), 2
+                    ),
                     "gpu_mem_total_p95": round(
                         float(np.percentile(mem_used_totals, 95)), 2
                     ),
-                    "gpu_mem_total_peak": round(float(np.max(mem_used_totals)), 2),
+                    "gpu_mem_total_peak": round(
+                        float(np.max(mem_used_totals)), 2
+                    ),
                     "gpu_mem_total_capacity": round(
                         float(np.mean(mem_total_totals)), 2
                     ),

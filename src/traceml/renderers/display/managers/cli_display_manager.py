@@ -1,21 +1,23 @@
+from typing import Any, Callable, Dict, Optional
+
 from rich.console import Console
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
-from typing import Dict, Any, Callable, Optional
+
 from traceml.loggers.error_log import get_error_logger
-from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.renderers.display.layout import (
-    ROOT_LAYOUT,
-    SYSTEM_LAYOUT,
-    PROCESS_LAYOUT,
     LAYER_COMBINED_MEMORY_LAYOUT,
-    STEPTIMER_LAYOUT,
-    STDOUT_STDERR_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
+    PROCESS_LAYOUT,
+    ROOT_LAYOUT,
+    STDOUT_STDERR_LAYOUT,
+    SYSTEM_LAYOUT,
+    STEPTIMER_LAYOUT
 )
+from traceml.runtime.stdout_stderr_capture import StreamCapture
 
 
 class CLIDisplayManager:
@@ -106,7 +108,9 @@ class CLIDisplayManager:
             try:
                 cls._live_display.start()
             except Exception as e:
-                cls.logger.error(f"[TraceML] Failed to start shared live display: {e}")
+                cls.logger.error(
+                    f"[TraceML] Failed to start shared live display: {e}"
+                )
                 cls._live_display = None
 
         cls._active_logger_count += 1

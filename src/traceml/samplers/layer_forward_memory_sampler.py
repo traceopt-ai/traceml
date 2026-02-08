@@ -1,15 +1,14 @@
 import time
-from typing import Any, List, Tuple, Dict
+from typing import Any, Dict, List, Tuple
 
-from traceml.samplers.base_sampler import BaseSampler
-from traceml.utils.hooks.layer_forward_memory_hook import (
-    get_layer_forward_memory_queue,
-)
 from traceml.loggers.error_log import get_error_logger
-
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.schema.layer_forward_backward_memory import (
     LayerForwardBackwardMemoryPayload,
     LayerForwardBackwardMemorySample,
+)
+from traceml.utils.hooks.layer_forward_memory_hook import (
+    get_layer_forward_memory_queue,
 )
 
 
@@ -84,9 +83,8 @@ class LayerForwardMemorySampler(BaseSampler):
 
             self._save_event(event)
 
-
     def _aggregate_layers_max(
-            self, layers: List[Tuple[str, float]]
+        self, layers: List[Tuple[str, float]]
     ) -> LayerForwardBackwardMemoryPayload:
         """
         Aggregate raw per-call layer memory observations using MAX.
@@ -117,7 +115,6 @@ class LayerForwardMemorySampler(BaseSampler):
             layer_names=layer_names,
             layer_memory_bytes=layer_bytes,
         )
-
 
     def _save_event(self, event: Any) -> None:
         """
@@ -151,7 +148,6 @@ class LayerForwardMemorySampler(BaseSampler):
             self.logger.error(
                 f"[TraceML] Failed to persist forward layer memory event: {e}"
             )
-
 
     def sample(self) -> None:
         """

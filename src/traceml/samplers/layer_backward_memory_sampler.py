@@ -1,15 +1,14 @@
 import time
 from typing import Any, Dict, List, Tuple
 
-from traceml.samplers.base_sampler import BaseSampler
-from traceml.utils.hooks.layer_backward_memory_hook import (
-    get_layer_backward_queue,
-)
 from traceml.loggers.error_log import get_error_logger
-
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.schema.layer_forward_backward_memory import (
     LayerForwardBackwardMemoryPayload,
     LayerForwardBackwardMemorySample,
+)
+from traceml.utils.hooks.layer_backward_memory_hook import (
+    get_layer_backward_queue,
 )
 
 
@@ -66,7 +65,6 @@ class LayerBackwardMemorySampler(BaseSampler):
         self.logger = get_error_logger(self.sampler_name)
         self.sample_idx = 0
 
-
     def _drain_queue(self) -> None:
         """
         Drain the backward-memory queue and persist all available events.
@@ -87,7 +85,6 @@ class LayerBackwardMemorySampler(BaseSampler):
                 continue
 
             self._save_event(event)
-
 
     def _aggregate_layers_max(
         self, layers: List[Tuple[str, float]]

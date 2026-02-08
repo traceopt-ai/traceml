@@ -19,26 +19,26 @@ Design Principles
 - Single-device assumption (V1)
 """
 
-
-
-from dataclasses import dataclass
-from collections import deque
-from queue import Queue, Full
-from typing import Dict, Optional, List
-import time
 import sys
+import time
+from collections import deque
+from dataclasses import dataclass
+from queue import Full, Queue
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
 
-from traceml.utils.shared_utils import model_is_on_cuda
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+from traceml.utils.shared_utils import model_is_on_cuda
 
 # Shared queue (consumer-facing)
 layer_forward_time_queue: Queue = Queue(maxsize=4096)
 
+
 def get_layer_forward_time_queue() -> Queue:
     return layer_forward_time_queue
+
 
 # Internal registries & buffers
 
@@ -50,7 +50,7 @@ _layer_forward_time_start_buffer: Dict[int, Dict[str, deque]] = {}
 
 # Post-hook event buffer:
 #   model_id -> List[LayerForwardTimeEvent]
-_layer_forward_time_event_buffer: Dict[int,  List["LayerForwardTimeEvent"]] = {}
+_layer_forward_time_event_buffer: Dict[int, List["LayerForwardTimeEvent"]] = {}
 
 
 @dataclass
@@ -64,6 +64,7 @@ class LayerForwardTimeEvent:
     - Resolved asynchronously
     - Never written directly to the database
     """
+
     layer_name: str
     on_gpu: bool
 
@@ -147,7 +148,9 @@ class LayerForwardTimePreHook:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            model_buf = _layer_forward_time_start_buffer.setdefault(self.model_id, {})
+            model_buf = _layer_forward_time_start_buffer.setdefault(
+                self.model_id, {}
+            )
             layer_q = model_buf.setdefault(self.layer_name, deque())
             layer_q.append(
                 {
@@ -177,9 +180,9 @@ class LayerForwardTimePostHook:
         try:
             cpu_end = time.perf_counter()
 
-            layer_q = _layer_forward_time_start_buffer.get(self.model_id, {}).get(
-                self.layer_name
-            )
+            layer_q = _layer_forward_time_start_buffer.get(
+                self.model_id, {}
+            ).get(self.layer_name)
             if not layer_q:
                 return  # No start recorded
 
@@ -202,9 +205,9 @@ class LayerForwardTimePostHook:
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
             )
-            _layer_forward_time_event_buffer.setdefault(self.model_id, []).append(
-                event
-            )
+            _layer_forward_time_event_buffer.setdefault(
+                self.model_id, []
+            ).append(event)
 
         except Exception:
             print(

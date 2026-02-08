@@ -1,20 +1,19 @@
 import time
-from typing import Dict, Optional
 from collections import deque
 from queue import Empty
+from typing import Dict, Optional
 
-from .base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-
+from traceml.samplers.schema.layer_forward_backward_time import (
+    LayerForwardBackwardTimePayload,
+    LayerForwardBackwardTimeSample,
+)
 from traceml.utils.hooks.layer_forward_time_hooks import (
     LayerForwardTimeStepEvent,
     get_layer_forward_time_queue,
 )
 
-from traceml.samplers.schema.layer_forward_backward_time import (
-    LayerForwardBackwardTimePayload,
-    LayerForwardBackwardTimeSample,
-)
+from .base_sampler import BaseSampler
 
 
 class LayerForwardTimeSampler(BaseSampler):
@@ -45,11 +44,10 @@ class LayerForwardTimeSampler(BaseSampler):
     - Sampler failures never propagate to training
     """
 
-
     def __init__(self) -> None:
         self.name = "LayerForwardTime"
-        self.sampler_name = self.name+"Sampler"
-        self.table_name = self.name+"Table"
+        self.sampler_name = self.name + "Sampler"
+        self.table_name = self.name + "Table"
         super().__init__(sampler_name=self.sampler_name)
 
         # Sample transport: send only the N-most recent row per flush (drops backlog)
@@ -58,10 +56,9 @@ class LayerForwardTimeSampler(BaseSampler):
         self.logger = get_error_logger(self.sampler_name)
 
         # Local FIFO buffer owned by the sampler
-        self._local_buffer:  deque[LayerForwardTimeStepEvent]  = deque()
+        self._local_buffer: deque[LayerForwardTimeStepEvent] = deque()
 
         self.sample_idx = 0
-
 
     def _ingest_queue(self) -> None:
         """
@@ -91,7 +88,7 @@ class LayerForwardTimeSampler(BaseSampler):
         return True
 
     def _aggregate_step(
-            self, event: LayerForwardTimeStepEvent
+        self, event: LayerForwardTimeStepEvent
     ) -> LayerForwardBackwardTimePayload:
         """
         Aggregate per-call timing events into a per-layer payload.
@@ -122,7 +119,9 @@ class LayerForwardTimeSampler(BaseSampler):
             rec["cpu_ms"] += float(evt.cpu_duration_ms)
 
             if evt.gpu_duration_ms is not None:
-                rec["gpu_ms"] = (rec["gpu_ms"] or 0.0) + float(evt.gpu_duration_ms)
+                rec["gpu_ms"] = (rec["gpu_ms"] or 0.0) + float(
+                    evt.gpu_duration_ms
+                )
 
             rec["n_calls"] += 1
 
@@ -172,6 +171,4 @@ class LayerForwardTimeSampler(BaseSampler):
 
         except Exception as e:
             # Absolute safety net: sampler must never disrupt training
-            self.logger.error(
-                f"[TraceML] LayerForwardTimeSampler error: {e}"
-            )
+            self.logger.error(f"[TraceML] LayerForwardTimeSampler error: {e}")

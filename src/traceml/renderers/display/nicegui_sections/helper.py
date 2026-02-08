@@ -55,4 +55,3 @@ def build_fake_section():
 
 def update_fake_section():
     return
-

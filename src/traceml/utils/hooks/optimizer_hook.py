@@ -1,13 +1,13 @@
 import time
+
 import torch
 from torch.optim.optimizer import (
-    register_optimizer_step_pre_hook,
     register_optimizer_step_post_hook,
+    register_optimizer_step_pre_hook,
 )
 
-from traceml.utils.timing import TimeEvent, TimeScope, record_event
 from traceml.utils.cuda_event_pool import get_cuda_event
-
+from traceml.utils.timing import TimeEvent, TimeScope, record_event
 
 # Per-optimizer in-flight timing state
 _OPT_INFLIGHT = {}
@@ -94,6 +94,7 @@ def install_optimizer_time_hooks() -> None:
 
 def ensure_optimizer_timing_installed() -> None:
     import torch
+
     if getattr(torch.optim.Optimizer, "_traceml_opt_hooks_installed", False):
         return
     install_optimizer_time_hooks()

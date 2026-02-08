@@ -1,16 +1,14 @@
-import time
 import hashlib
-from typing import Dict, Optional, Set, List
+import time
+from typing import Dict, List, Optional, Set
 
-from traceml.samplers.base_sampler import BaseSampler
 from traceml.loggers.error_log import get_error_logger
-from traceml.utils.layer_parameter_memory import get_model_queue
-
-
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.schema.layer_memory import (
     LayerMemoryPayload,
     LayerMemorySample,
 )
+from traceml.utils.layer_parameter_memory import get_model_queue
 
 
 class LayerMemorySampler(BaseSampler):
@@ -35,11 +33,10 @@ class LayerMemorySampler(BaseSampler):
     - Safe to run asynchronously
     """
 
-
     def __init__(self) -> None:
         self.name = "LayerMemory"
-        self.sampler_name = self.name+"Sampler"
-        self.table_name = self.name+"Table"
+        self.sampler_name = self.name + "Sampler"
+        self.table_name = self.name + "Table"
         super().__init__(sampler_name=self.sampler_name)
         self.sample_idx = 0
 
@@ -48,14 +45,18 @@ class LayerMemorySampler(BaseSampler):
         # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
 
-    def _compute_signature(self, layer_names: List[str], layer_bytes: List[float]) -> str:
+    def _compute_signature(
+        self, layer_names: List[str], layer_bytes: List[float]
+    ) -> str:
         """
         Compute a stable architecture signature from ordered layer memory.
 
         The signature is derived from ordered (layer_name, bytes) pairs,
         making it robust to object identity, process lifetime, and dict order.
         """
-        items = [f"{name}:{int(b)}" for name, b in zip(layer_names, layer_bytes)]
+        items = [
+            f"{name}:{int(b)}" for name, b in zip(layer_names, layer_bytes)
+        ]
         raw = "|".join(items)
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
@@ -74,8 +75,8 @@ class LayerMemorySampler(BaseSampler):
         return LayerMemoryPayload(layer_names=names, layer_param_bytes=bytes_)
 
     def _build_sample(
-            self,
-            layer_memory: Dict[str, float],
+        self,
+        layer_memory: Dict[str, float],
     ) -> Optional[LayerMemorySample]:
         """
         Build a LayerMemorySample from raw layer-memory input.

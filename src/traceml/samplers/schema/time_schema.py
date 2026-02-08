@@ -53,6 +53,7 @@ class TimeEventSample:
     Represents a single resolved timing observation at step-level
     granularity. This schema is shared between sampler and compute layers.
     """
+
     sample_idx: int
     timestamp: float
     step: int

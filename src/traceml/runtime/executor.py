@@ -15,11 +15,15 @@ script to ensure hooks, stack traces, and execution context are accurate.
 """
 
 import os
-import sys
 import runpy
+import sys
 import traceback
 
-from traceml.runtime.runtime import TraceMLRuntime, TraceMLSettings, TraceMLTCPSettings
+from traceml.runtime.runtime import (
+    TraceMLRuntime,
+    TraceMLSettings,
+    TraceMLTCPSettings,
+)
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 
@@ -48,11 +52,16 @@ def read_traceml_env():
         "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
-        "num_display_layers": int(os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")),
-        "enable_ddp_telemetry": os.environ.get("TRACEML_DDP_TELEMETRY", "1") == "1",
+        "num_display_layers": int(
+            os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
+        ),
+        "enable_ddp_telemetry": os.environ.get("TRACEML_DDP_TELEMETRY", "1")
+        == "1",
         "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
         "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
-        "remote_max_rows": int(os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")),
+        "remote_max_rows": int(
+            os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
+        ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
     }
 
@@ -104,7 +113,9 @@ def start_runtime(cfg):
         runtime.start()
         return runtime
     except Exception as e:
-        print(f"[TraceML] Failed to start TraceMLRuntime: {e}", file=sys.stderr)
+        print(
+            f"[TraceML] Failed to start TraceMLRuntime: {e}", file=sys.stderr
+        )
         traceback.print_exception(type(e), e, e.__traceback__)
         return NoOpRuntime()
 

@@ -1,11 +1,12 @@
 import shutil
-from typing import Dict, Any, List, Optional
+from typing import Optional
 
+from IPython.display import HTML
+from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Group, Console
-from IPython.display import HTML
 
+from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.display.managers.cli_display_manager import (
     LAYER_COMBINED_TIMER_LAYOUT,
@@ -15,11 +16,10 @@ from traceml.renderers.layer_combined_time.compute import (
     LayerCombinedTimerSummary,
 )
 from traceml.renderers.layer_combined_time.schema import (
-    LayerCombinedTimerResult
+    LayerCombinedTimerResult,
 )
 from traceml.renderers.utils import truncate_layer_name
 from traceml.utils.formatting import fmt_time_ms
-from traceml.database.remote_database_store import RemoteDBStore
 
 
 class LayerCombinedTimeRenderer(BaseRenderer):
@@ -48,7 +48,6 @@ class LayerCombinedTimeRenderer(BaseRenderer):
         self._summary_service = LayerCombinedTimerSummary(
             remote_store=remote_store,
         )
-
 
     def get_panel_renderable(self) -> Panel:
         d: LayerCombinedTimerResult = self._service.compute_display_data()
@@ -100,7 +99,6 @@ class LayerCombinedTimeRenderer(BaseRenderer):
             width=width,
         )
 
-
     def get_notebook_renderable(self) -> HTML:
         d: LayerCombinedTimerResult = self._service.compute_display_data()
 
@@ -146,13 +144,11 @@ class LayerCombinedTimeRenderer(BaseRenderer):
         """
         return HTML(html)
 
-
     def get_dashboard_renderable(self) -> LayerCombinedTimerResult:
         """
         Dashboard consumes the typed dataclass directly.
         """
         return self._service.compute_display_data()
-
 
     def log_summary(self, path) -> None:
         pass

@@ -1,4 +1,5 @@
 import time
+
 from traceml.loggers.error_log import get_error_logger
 
 
@@ -27,7 +28,14 @@ class DBIncrementalSender:
       in each row.
     """
 
-    def __init__(self, db, sampler_name, sender=None, rank=None, max_rows_per_flush: int = -1):
+    def __init__(
+        self,
+        db,
+        sampler_name,
+        sender=None,
+        rank=None,
+        max_rows_per_flush: int = -1,
+    ):
         """
         Initialize the incremental sender.
 
@@ -95,7 +103,10 @@ class DBIncrementalSender:
                 new_rows.append(r)
 
                 # If we are in "recent-only" mode, we only care about the latest N rows
-                if self.max_rows_per_flush != -1 and len(new_rows) >= self.max_rows_per_flush:
+                if (
+                    self.max_rows_per_flush != -1
+                    and len(new_rows) >= self.max_rows_per_flush
+                ):
                     break
 
             if not new_rows:

@@ -11,7 +11,7 @@ Design goals
 """
 
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -80,8 +80,8 @@ class StepCombinedTimeMetric:
     - optimizer_gpu_ms
     """
 
-    metric: str            # metric key / name
-    clock: str             # "cpu" or "gpu"
+    metric: str  # metric key / name
+    clock: str  # "cpu" or "gpu"
 
     series: StepCombinedTimeSeries
     summary: StepCombinedTimeSummary

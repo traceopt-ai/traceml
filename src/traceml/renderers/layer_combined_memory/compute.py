@@ -19,24 +19,21 @@ Key semantics
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List, Tuple, Deque, Iterable, Type, Set
+from typing import Any, Deque, Dict, Iterable, List, Optional, Set, Tuple
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.transport.distributed import get_ddp_info
 from traceml.loggers.error_log import get_error_logger
-
-from traceml.samplers.schema.layer_memory import LayerMemorySample
+from traceml.renderers.layer_combined_memory.schema import (
+    LayerCombinedMemoryResult,
+    LayerCombinedMemoryRow,
+    LayerCombinedOther,
+)
 from traceml.samplers.schema.layer_forward_backward_memory import (
     LayerForwardBackwardMemorySample,
 )
-
-from traceml.renderers.layer_combined_memory.schema import (
-    LayerCombinedMemoryRow,
-    LayerCombinedOther,
-    LayerCombinedMemoryResult,
-)
-
+from traceml.samplers.schema.layer_memory import LayerMemorySample
+from traceml.transport.distributed import get_ddp_info
 
 
 @dataclass(frozen=True)
@@ -88,7 +85,9 @@ class ModelSnapshotStatus:
         if self.ready:
             return "Model snapshot ready (all ranks agree)."
         if self.missing_ranks and not self.mismatched_ranks:
-            return f"Waiting for model snapshot from ranks: {self.missing_ranks}"
+            return (
+                f"Waiting for model snapshot from ranks: {self.missing_ranks}"
+            )
         if self.mismatched_ranks:
             return (
                 "Model snapshot mismatch across ranks. "
@@ -140,12 +139,11 @@ class LayerCombinedMemoryData:
 
         self.logger = get_error_logger("LayerCombinedMemoryData")
 
-
     def _load_samples_backwards(
-            self,
-            rows: Iterable[dict],
-            sample_cls,
-            min_step: int,
+        self,
+        rows: Iterable[dict],
+        sample_cls,
+        min_step: int,
     ):
         """
         Load schema objects from wire rows, scanning backwards.
@@ -176,7 +174,6 @@ class LayerCombinedMemoryData:
             out.append(s)
         return out
 
-
     def compute_display_data(self) -> LayerCombinedMemoryResult:
         """
         Compute all layer-wise memory metrics required by renderers.
@@ -196,7 +193,9 @@ class LayerCombinedMemoryData:
         # Even when model is not ready, we keep the output contract stable.
         # Renderers can show "waiting" states based on `status_message`.
         if not model_status.ready:
-            self._join_status = self._build_join_status(None, model_status.missing_ranks)
+            self._join_status = self._build_join_status(
+                None, model_status.missing_ranks
+            )
             return LayerCombinedMemoryResult(
                 model_index=model_status.canonical_model_index,
                 top_items=[],
@@ -215,7 +214,8 @@ class LayerCombinedMemoryData:
                 safe_step=None,
                 incomplete=True,
                 missing_ranks=sorted(
-                    set(model_status.missing_ranks) | set(model_status.mismatched_ranks)
+                    set(model_status.missing_ranks)
+                    | set(model_status.mismatched_ranks)
                 ),
                 world_size=world_size,
                 status_message=model_status.message(),
@@ -240,7 +240,9 @@ class LayerCombinedMemoryData:
         if safe_step_candidate >= 0 and fwd_ok and bwd_ok:
             self._last_safe_step = safe_step_candidate
             missing = sorted(set(fwd_missing) | set(bwd_missing))
-            self._join_status = self._build_join_status(safe_step_candidate, missing)
+            self._join_status = self._build_join_status(
+                safe_step_candidate, missing
+            )
         elif self._last_safe_step >= 0:
             # Fall back to last known safe step for a stable UI during transient gaps.
             fwd_snapshot, _, fwd_missing = self._compute_step_snapshot(
@@ -254,7 +256,9 @@ class LayerCombinedMemoryData:
                 world_size=world_size,
             )
             missing = sorted(set(fwd_missing) | set(bwd_missing))
-            self._join_status = self._build_join_status(self._last_safe_step, missing)
+            self._join_status = self._build_join_status(
+                self._last_safe_step, missing
+            )
         else:
             self._join_status = self._build_join_status(None, [])
 
@@ -262,7 +266,9 @@ class LayerCombinedMemoryData:
         self._merge_cache(self._backward_cache, bwd_snapshot)
 
         rows = self._build_rows(param_layers)
-        rows_sorted = sorted(rows, key=lambda r: r.total_peak_memory, reverse=True)
+        rows_sorted = sorted(
+            rows, key=lambda r: r.total_peak_memory, reverse=True
+        )
 
         top_items = rows_sorted[: self._top_n]
         other_items = rows_sorted[self._top_n :]
@@ -295,7 +301,6 @@ class LayerCombinedMemoryData:
             status_message=status_message,
         )
 
-
     def _get_model_snapshot_status(self) -> ModelSnapshotStatus:
         """
         Validate model snapshot availability and consistency across ranks.
@@ -323,7 +328,9 @@ class LayerCombinedMemoryData:
         mismatched: List[int] = []
 
         for rank in range(world_size):
-            db = self._remote_store.get_db(rank, self.LAYER_MEMORY_NAME + "Sampler")
+            db = self._remote_store.get_db(
+                rank, self.LAYER_MEMORY_NAME + "Sampler"
+            )
 
             last = self._get_last_row(db)
             if not last:
@@ -340,7 +347,10 @@ class LayerCombinedMemoryData:
             sig = sample.model_signature
             model_index = sample.model_index
             layer_memory = dict(
-                zip(sample.payload.layer_names, sample.payload.layer_param_bytes)
+                zip(
+                    sample.payload.layer_names,
+                    sample.payload.layer_param_bytes,
+                )
             )
 
             # First valid snapshot becomes canonical.
@@ -348,14 +358,18 @@ class LayerCombinedMemoryData:
                 canonical_rank = rank
                 canonical_sig = sig
                 canonical_layer_memory = layer_memory
-                canonical_model_index = int(model_index) if model_index is not None else None
+                canonical_model_index = (
+                    int(model_index) if model_index is not None else None
+                )
                 continue
 
             # Any inconsistency should be surfaced (DDP expects identical models).
             if sig != canonical_sig or layer_memory != canonical_layer_memory:
                 mismatched.append(rank)
 
-        ready = (not missing) and (not mismatched) and (canonical_rank is not None)
+        ready = (
+            (not missing) and (not mismatched) and (canonical_rank is not None)
+        )
 
         return ModelSnapshotStatus(
             ready=ready,
@@ -391,14 +405,17 @@ class LayerCombinedMemoryData:
 
         steps: List[int] = []
         for rank in range(world_size):
-            db_f = self._remote_store.get_db(rank, self.LAYER_FORWARD_NAME + "Sampler")
-            db_b = self._remote_store.get_db(rank, self.LAYER_BACKWARD_NAME + "Sampler")
+            db_f = self._remote_store.get_db(
+                rank, self.LAYER_FORWARD_NAME + "Sampler"
+            )
+            db_b = self._remote_store.get_db(
+                rank, self.LAYER_BACKWARD_NAME + "Sampler"
+            )
             if not db_f or not db_b:
                 return -1
             steps.append(min(last_step(db_f), last_step(db_b)))
 
         return min(steps) if steps else -1
-
 
     def _compute_step_snapshot(
         self,
@@ -437,7 +454,9 @@ class LayerCombinedMemoryData:
             rows = next(iter(rdb.all_tables().values()), [])
 
             # Contract: parse rows into schema objects once
-            samples = self._load_samples_backwards(rows, LayerForwardBackwardMemorySample, step)
+            samples = self._load_samples_backwards(
+                rows, LayerForwardBackwardMemorySample, step
+            )
 
             # Current at step
             cur_sample: Optional[LayerForwardBackwardMemorySample] = next(
@@ -450,7 +469,9 @@ class LayerCombinedMemoryData:
                     cur_sample.payload.layer_names,
                     cur_sample.payload.layer_memory_bytes,
                 ):
-                    layer_current[layer] = max(layer_current.get(layer, 0.0), float(mem))
+                    layer_current[layer] = max(
+                        layer_current.get(layer, 0.0), float(mem)
+                    )
             else:
                 missing.append(rank)
 
@@ -462,7 +483,9 @@ class LayerCombinedMemoryData:
                     s.payload.layer_names,
                     s.payload.layer_memory_bytes,
                 ):
-                    layer_peak[layer] = max(layer_peak.get(layer, 0.0), float(mem))
+                    layer_peak[layer] = max(
+                        layer_peak.get(layer, 0.0), float(mem)
+                    )
 
         snapshot = {
             layer: {
@@ -505,10 +528,10 @@ class LayerCombinedMemoryData:
                 break
         return None
 
-
     @staticmethod
     def _merge_cache(
-        cache: Dict[str, Dict[str, float]], snapshot: Dict[str, Dict[str, float]]
+        cache: Dict[str, Dict[str, float]],
+        snapshot: Dict[str, Dict[str, float]],
     ):
         """
         Merge an incremental snapshot into the running cache.
@@ -529,8 +552,9 @@ class LayerCombinedMemoryData:
                     float(cache[layer]["global"]), float(v["global_peak"])
                 )
 
-
-    def _build_rows(self, param_layers: Dict[str, float]) -> List[LayerCombinedMemoryRow]:
+    def _build_rows(
+        self, param_layers: Dict[str, float]
+    ) -> List[LayerCombinedMemoryRow]:
         """
         Build per-layer rows with current & peak totals.
 
@@ -546,11 +570,15 @@ class LayerCombinedMemoryData:
             fwd = self._forward_cache.get(layer, {})
             bwd = self._backward_cache.get(layer, {})
 
-            current = float(param_mem) + float(fwd.get("current", 0.0)) + float(
-                bwd.get("current", 0.0)
+            current = (
+                float(param_mem)
+                + float(fwd.get("current", 0.0))
+                + float(bwd.get("current", 0.0))
             )
-            peak = float(param_mem) + float(fwd.get("global", 0.0)) + float(
-                bwd.get("global", 0.0)
+            peak = (
+                float(param_mem)
+                + float(fwd.get("global", 0.0))
+                + float(bwd.get("global", 0.0))
             )
 
             rows.append(
@@ -571,7 +599,11 @@ class LayerCombinedMemoryData:
         # Fill pct
         out: List[LayerCombinedMemoryRow] = []
         for r in rows:
-            pct = (r.total_current_memory / total_current_sum * 100.0) if total_current_sum else 0.0
+            pct = (
+                (r.total_current_memory / total_current_sum * 100.0)
+                if total_current_sum
+                else 0.0
+            )
             out.append(
                 LayerCombinedMemoryRow(
                     layer=r.layer,
@@ -602,10 +634,14 @@ class LayerCombinedMemoryData:
             backward_current=sum(r.backward_current for r in rows),
             backward_peak=sum(r.backward_peak for r in rows),
             total_current_memory=cur,
-            pct=(cur / total_current_sum * 100.0) if total_current_sum else 0.0,
+            pct=(
+                (cur / total_current_sum * 100.0) if total_current_sum else 0.0
+            ),
         )
 
-    def _build_join_status(self, step: Optional[int], missing: List[int]) -> DDPJoinStatus:
+    def _build_join_status(
+        self, step: Optional[int], missing: List[int]
+    ) -> DDPJoinStatus:
         """
         Create a stable join-status object for renderers.
         """
@@ -708,7 +744,9 @@ class LayerCombinedMemorySummary:
         ----
         This keeps a dict return because it's a utility output for logs/reports.
         """
-        sampler = self.layer_forward_name if is_forward else self.layer_backward_name
+        sampler = (
+            self.layer_forward_name if is_forward else self.layer_backward_name
+        )
         sampler_db_name = sampler + "Sampler"
 
         peaks: Dict[str, float] = {}
@@ -739,7 +777,11 @@ class LayerCombinedMemorySummary:
         """
         Return top-N items from a dict sorted by descending value.
         """
-        return sorted(d.items(), key=lambda x: x[1], reverse=True)[:n] if d else []
+        return (
+            sorted(d.items(), key=lambda x: x[1], reverse=True)[:n]
+            if d
+            else []
+        )
 
     def _safe_get_db(self, rank: int, sampler_name: str) -> Optional[Database]:
         """

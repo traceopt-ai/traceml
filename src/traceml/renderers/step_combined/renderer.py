@@ -19,16 +19,18 @@ This table is intentionally **stable and low-noise**.
 Per-step volatility belongs in plots, not summaries.
 """
 
-from typing import Optional
 import shutil
+from typing import Optional
 
-from rich.console import Console, Group
+from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.managers.cli_display_manager import MODEL_COMBINED_LAYOUT
+from traceml.renderers.display.managers.cli_display_manager import (
+    MODEL_COMBINED_LAYOUT,
+)
 from traceml.renderers.utils import fmt_time_run
 
 from .compute import StepCombinedComputer
@@ -55,7 +57,6 @@ class StepCombinedRenderer(BaseRenderer):
         self._computer = StepCombinedComputer(remote_store)
         self._cached: Optional[StepCombinedTimeResult] = None
 
-
     def _payload(self) -> Optional[StepCombinedTimeResult]:
         """
         Fetch latest computed payload.
@@ -67,7 +68,6 @@ class StepCombinedRenderer(BaseRenderer):
         if payload and payload.metrics:
             self._cached = payload
         return self._cached
-
 
     def get_panel_renderable(self) -> Panel:
         """
@@ -96,10 +96,7 @@ class StepCombinedRenderer(BaseRenderer):
             None,
         )
 
-        metrics = sorted(
-            metrics,
-            key=lambda m: (m.metric == "wait_proxy")
-        )
+        metrics = sorted(metrics, key=lambda m: (m.metric == "wait_proxy"))
         # All metrics share the same window size by construction
         K = metrics[0].summary.steps_used
 
@@ -110,7 +107,6 @@ class StepCombinedRenderer(BaseRenderer):
             expand=False,
         )
 
-
         table.add_column("Metric", style="magenta")
 
         for m in metrics:
@@ -120,7 +116,6 @@ class StepCombinedRenderer(BaseRenderer):
                 title = m.metric.replace("_", " ").title()
 
             table.add_column(title, justify="right")
-
 
         table.add_row(
             f"Median (Σ {K})",
@@ -135,9 +130,11 @@ class StepCombinedRenderer(BaseRenderer):
         table.add_row(
             "Worst Rank",
             *[
-                f"r{m.summary.worst_rank}"
-                if m.summary.worst_rank is not None
-                else "—"
+                (
+                    f"r{m.summary.worst_rank}"
+                    if m.summary.worst_rank is not None
+                    else "—"
+                )
                 for m in metrics
             ],
         )
@@ -154,20 +151,27 @@ class StepCombinedRenderer(BaseRenderer):
         )
 
         table.add_row("")
-        if step_metric and wait_metric and step_metric.summary.median_total > 0:
+        if (
+            step_metric
+            and wait_metric
+            and step_metric.summary.median_total > 0
+        ):
             wait_share = (
-                    wait_metric.summary.median_total
-                    / step_metric.summary.median_total
+                wait_metric.summary.median_total
+                / step_metric.summary.median_total
             )
 
             table.add_row(
                 "WAIT Share (%)",
                 *[
-                    f"[red]{wait_share * 100:.1f}%[/red]" if m.metric == "wait_proxy" else ""
+                    (
+                        f"[red]{wait_share * 100:.1f}%[/red]"
+                        if m.metric == "wait_proxy"
+                        else ""
+                    )
                     for m in metrics
                 ],
             )
-
 
         cols, _ = shutil.get_terminal_size()
         width = min(max(100, int(cols * 0.75)), 100)
@@ -188,7 +192,6 @@ class StepCombinedRenderer(BaseRenderer):
         Return the typed compute result directly to dashboard consumers.
         """
         return self._payload()
-
 
     def log_summary(self, path: Optional[str] = None) -> None:
         pass

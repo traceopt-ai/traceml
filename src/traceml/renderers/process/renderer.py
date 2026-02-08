@@ -15,21 +15,23 @@ All aggregation and synchronization logic is delegated to
 """
 
 import shutil
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
+from IPython.display import HTML
+from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.console import Console
-from IPython.display import HTML
 
-from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.managers.cli_display_manager import PROCESS_LAYOUT
-from traceml.utils.formatting import fmt_percent, fmt_mem_new
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.display.managers.cli_display_manager import (
+    PROCESS_LAYOUT,
+)
+from traceml.renderers.utils import CARD_STYLE
+from traceml.utils.formatting import fmt_mem_new, fmt_percent
 
 from .compute import ProcessMetricsComputer
-from traceml.renderers.utils import CARD_STYLE
 
 
 class ProcessRenderer(BaseRenderer):
@@ -98,7 +100,6 @@ class ProcessRenderer(BaseRenderer):
         snap["history"] = self._computer.get_dashboard_history()
         return snap
 
-
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
         snap = self._computer.compute_live_snapshot()
@@ -130,7 +131,6 @@ class ProcessRenderer(BaseRenderer):
         """
 
         return HTML(html)
-
 
     # Summary logging
     def log_summary(self, path=None) -> None:
