@@ -1,260 +1,273 @@
 """
-Model Step Time Breakdown (Dataloader vs Compute)
+Model StepBreakdown (Median vs Worst)
 
-UI section that renders a single combined time-series chart showing:
+UI section that renders two simple bar charts showing window-aggregated
+step time components derived from StepCombinedTimeResult.
 
-  - Dataloader fetch time (red)
-  - Training step compute time (green)
+Charts
+------
+1. Median (typical rank) breakdown
+2. Worst-rank (tail) breakdown
 
-Key properties
---------------
-- UI-only derived visualization
-- Reads pre-aggregated telemetry from renderer
-- Aligns series by *step intersection*, not by index
-- Respects renderer truncation ("last X points")
-- Never extrapolates or pads missing steps
-- Safe under partial / delayed sampler emission
+Bars represent independent metrics:
+- Dataloader
+- GPU Compute (forward + backward + optimizer)
+- WAIT* (derived proxy)
+- Step Time
 
-Expected telemetry shape
-------------------------
-telemetry: Dict[str, Any] containing:
-  - "dataloading_time"
-  - "step_time"
-
-Each metric follows the StepCombinedComputer contract.
+No stacking is used to avoid mixed-clock ambiguity.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, List
 
 from nicegui import ui
 import plotly.graph_objects as go
 
+from traceml.renderers.step_combined.schema import (
+    StepCombinedTimeResult, StepCombinedTimeMetric
+)
 
 
+def _card_style() -> str:
+    return """
+    background: #ffffff;
+    border-radius: 14px;
+    border: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+    """
 
 def build_model_combined_section() -> Dict[str, Any]:
     """
     Build the Model Step Time Breakdown section.
 
-    Returns handles required for incremental updates.
+    Layout
+    ------
+    Single row with three cards:
+      1) Median breakdown bar chart
+      2) Worst-rank breakdown bar chart
+      3) Stats / interpretation panel
     """
-    card = ui.card().classes("p-3 w-full")
-    card.style(
-        """
-        background: #ffffff;
-        border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.25);
-        box-shadow: 0 4px 10px rgba(0,0,0,0.10);
-        """
+    container = ui.row().classes("w-full gap-4").style(
+        "flex-wrap: nowrap;"
     )
 
-    with card:
-        ui.label("Step Time Breakdown").classes(
-            "text-lg font-bold mb-1"
-        ).style("color:#d47a00;")
+    with container:
+        # -------- Card 1: Median --------
+        median_card = ui.card().classes("p-3 flex-1")
+        median_card.style(_card_style())
 
-        plot = ui.plotly(_empty_figure()).classes("w-full")
+        with median_card:
+            ui.label("Median Step Breakdown").classes(
+                "text-sm font-bold mb-1"
+            ).style("color:#2e7d32;")
 
-        hint = ui.label("").classes("text-xs text-gray-500 mt-1")
+            median_plot = ui.plotly(
+                _empty_bar_figure("Median (Typical Rank)")
+            ).classes("w-full")
+
+        # -------- Card 2: Worst --------
+        worst_card = ui.card().classes("p-3 flex-1")
+        worst_card.style(_card_style())
+
+        with worst_card:
+            ui.label("Worst Rank Breakdown").classes(
+                "text-sm font-bold mb-1"
+            ).style("color:#c62828;")
+
+            worst_plot = ui.plotly(
+                _empty_bar_figure("Worst Rank")
+            ).classes("w-full")
+
+        # -------- Card 3: Stats --------
+        stats_card = ui.card().classes("p-3 flex-1")
+        stats_card.style(_card_style())
+
+        with stats_card:
+            ui.label("Summary & Interpretation").classes(
+                "text-sm font-bold mb-2"
+            ).style("color:#455a64;")
+
+            stats = ui.markdown("").classes(
+                "text-xs text-gray-700 leading-relaxed"
+            )
 
     return {
-        "card": card,
-        "plot": plot,
-        "hint": hint,
+        "container": container,
+        "median_plot": median_plot,
+        "worst_plot": worst_plot,
+        "stats": stats,
     }
-
 
 
 def update_model_combined_section(
     panel: Dict[str, Any],
-    telemetry: Optional[Dict[str, Any]],
+    payload: Optional[StepCombinedTimeResult],
 ) -> None:
     """
-    Update the combined step time graph.
+    Update the Model Step Time Breakdown section.
 
-    Visualization policy
-    --------------------
-    - Uses sum series for both metrics
-    - Plots only the intersection of step ranges
-    - Never pads or extrapolates
-    - Safe under partial data arrival
+    Parameters
+    ----------
+    panel : Dict[str, Any]
+        UI handles returned by build_model_combined_section.
+    payload : Optional[StepCombinedTimeResult]
+        Renderer-facing aggregated step metrics.
     """
-    if not telemetry or not isinstance(telemetry, dict):
+    if not payload or not payload.metrics:
         return
 
-    dl_steps, dl_vals = _extract_series(
-        telemetry.get("dataloading_time")
-    )
-    st_steps, st_vals = _extract_series(
-        telemetry.get("step_time")
-    )
+    metrics = _index_metrics(payload.metrics)
 
-    intersection = _intersect_step_ranges(dl_steps, st_steps)
-    if not intersection:
+    required = {"dataloader_fetch", "gpu_compute", "wait_proxy", "step_time_ms"}
+    if not required.issubset(metrics):
         return
 
-    start, end = intersection
+    order = [
+        ("Dataloader", metrics["dataloader_fetch"]),
+        ("GPU Compute", metrics["gpu_compute"]),
+        ("WAIT*", metrics["wait_proxy"]),
+        ("Step Time", metrics["step_time_ms"]),
+    ]
 
-    dl_x, dl_y = _clip_series(dl_steps, dl_vals, start, end)
-    st_x, st_y = _clip_series(st_steps, st_vals, start, end)
-
-    if not dl_x or not st_x:
-        return
-
-    fig = go.Figure()
-
-
-    fig.add_trace(
-        go.Bar(
-            x=st_x,
-            y=st_y,
-            name="Step Compute",
-            marker_color="#2e7d32",
-        )
+    median_fig = _build_bar_chart(
+        title="Median (Typical Rank)",
+        values=[m.summary.median_total for _, m in order],
+        labels=[k for k, _ in order],
     )
 
-    fig.add_trace(
-        go.Bar(
-            x=dl_x,
-            y=dl_y,
-            name="Dataloader Fetch",
-            marker_color="#d32f2f",
-        )
+    worst_fig = _build_bar_chart(
+        title=f"Worst Rank r{metrics['step_time_ms'].summary.worst_rank}",
+        values=[m.summary.worst_total for _, m in order],
+        labels=[k for k, _ in order],
     )
 
-    fig.update_layout(
-        height=220,
-        margin=dict(l=10, r=10, t=6, b=28),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0.05)",
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1.0,
-            font=dict(size=10),
+    panel["median_plot"].update_figure(median_fig)
+    panel["worst_plot"].update_figure(worst_fig)
+
+    panel["stats"].set_content(
+        _render_stats_block(metrics, payload.metrics[0].summary.steps_used)
+    )
+
+
+
+def _index_metrics(
+    metrics: List[StepCombinedTimeMetric],
+) -> Dict[str, StepCombinedTimeMetric]:
+    """
+    Index metrics by semantic key.
+
+    Returns
+    -------
+    Dict[str, StepCombinedTimeMetric]
+    """
+    out: Dict[str, StepCombinedTimeMetric] = {}
+
+    for m in metrics:
+        if m.metric == "wait_proxy":
+            out["wait_proxy"] = m
+        elif m.metric == "step_time_ms":
+            out["step_time_ms"] = m
+        elif m.metric == "dataloader_fetch":
+            out["dataloader_fetch"] = m
+        elif m.metric in {"forward", "backward", "optimizer_step"}:
+            out.setdefault("gpu_compute", m)
+            if out["gpu_compute"] is not m:
+                out["gpu_compute"] = _merge_gpu_compute(out["gpu_compute"], m)
+
+    return out
+
+
+def _merge_gpu_compute(
+    a: StepCombinedTimeMetric,
+    b: StepCombinedTimeMetric,
+) -> StepCombinedTimeMetric:
+    """
+    Merge two GPU compute metrics by summing window totals.
+    """
+    return StepCombinedTimeMetric(
+        metric="gpu_compute",
+        clock="gpu",
+        series=a.series,
+        summary=a.summary.__class__(
+            window_size=a.summary.window_size,
+            steps_used=a.summary.steps_used,
+            median_total=a.summary.median_total + b.summary.median_total,
+            worst_total=a.summary.worst_total + b.summary.worst_total,
+            worst_rank=a.summary.worst_rank,
+            skew_ratio=max(a.summary.skew_ratio, b.summary.skew_ratio),
+            skew_pct=max(a.summary.skew_pct, b.summary.skew_pct),
         ),
-        xaxis=dict(
-            title="Training Step",
-            showgrid=False,
-            tickfont=dict(size=9),
-        ),
-        yaxis=dict(
-            title="Time (ms)",
-            tickfont=dict(size=9),
-        ),
-        barmode="stack"
-    )
-
-    panel["plot"].update_figure(fig)
-
-
-
-
-def _to_list(v: Any) -> List[Any]:
-    """Safely convert iterables / numpy arrays to list."""
-    if v is None:
-        return []
-    try:
-        return list(v)
-    except Exception:
-        return []
-
-
-def _safe_float(v: Any, default: float = 0.0) -> float:
-    """Convert to float defensively."""
-    try:
-        return float(v)
-    except Exception:
-        return default
-
-
-def _extract_series(metric: Dict[str, Any]) -> Tuple[List[int], List[float]]:
-    """
-    Extract (steps, sum_values) from renderer metric payload.
-
-    Returns empty lists if data is missing or malformed.
-    """
-    if not isinstance(metric, dict):
-        return [], []
-
-    steps = _to_list(metric.get("steps"))
-    summation = metric.get("sum", {}) or {}
-    values = _to_list(summation.get("y"))
-
-    if not steps or not values:
-        return [], []
-
-    n = min(len(steps), len(values))
-    return (
-        [int(s) for s in steps[:n]],
-        [_safe_float(v) for v in values[:n]],
+        coverage=a.coverage,
     )
 
 
-def _intersect_step_ranges(
-    a_steps: List[int],
-    b_steps: List[int],
-) -> Optional[Tuple[int, int]]:
-    """
-    Compute the valid intersection [start, end] between two step ranges.
-
-    Returns None if no overlap exists.
-    """
-    if not a_steps or not b_steps:
-        return None
-
-    start = max(a_steps[0], b_steps[0])
-    end = min(a_steps[-1], b_steps[-1])
-
-    if start > end:
-        return None
-
-    return start, end
-
-
-def _clip_series(
-    steps: List[int],
+def _build_bar_chart(
+    *,
+    title: str,
     values: List[float],
-    start: int,
-    end: int,
-) -> Tuple[List[int], List[float]]:
-    """Clip a (steps, values) series to [start, end] inclusive."""
-    out_steps, out_vals = [], []
-    for s, v in zip(steps, values):
-        if start <= s <= end:
-            out_steps.append(s)
-            out_vals.append(v)
-    return out_steps, out_vals
+    labels: List[str],
+) -> go.Figure:
+    """
+    Build a simple vertical bar chart.
+    """
+    fig = go.Figure(
+        go.Bar(
+            x=labels,
+            y=values,
+            marker=dict(
+                color=["#d32f2f", "#2e7d32", "#f9a825", "#455a64"]
+            ),
+        )
+    )
 
-
-def _empty_figure() -> go.Figure:
-    """Baseline empty Plotly figure."""
-    fig = go.Figure()
     fig.update_layout(
+        title=title,
         height=220,
-        margin=dict(l=10, r=10, t=6, b=28),
+        margin=dict(l=10, r=10, t=30, b=30),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1.0,
-            font=dict(size=10),
-        ),
-        xaxis=dict(
-            title="Training Step",
-            showgrid=False,
-            tickfont=dict(size=9),
-        ),
-        yaxis=dict(
-            title="Time (ms)",
-            tickfont=dict(size=9),
-        ),
+        yaxis=dict(title="Time (ms)"),
+        xaxis=dict(showgrid=False),
+        showlegend=False,
+    )
+    return fig
+
+
+def _render_stats_block(
+    metrics: Dict[str, StepCombinedTimeMetric],
+    steps: int,
+) -> str:
+    """
+    Render side statistics block.
+    """
+    wait = metrics["wait_proxy"]
+    step = metrics["step_time_ms"]
+    gpu = metrics["gpu_compute"]
+
+    wait_share = (
+        wait.summary.median_total / step.summary.median_total
+        if step.summary.median_total > 0
+        else 0.0
+    )
+
+    return f"""
+        **WAIT Share:** {wait_share * 100:.1f}%  
+        **Worst Rank:** r{step.summary.worst_rank}  
+        **Step Skew:** +{step.summary.skew_pct * 100:.1f}%  
+        **GPU Skew:** +{gpu.summary.skew_pct * 100:.1f}%  
+        **Window Size:** {steps} steps  
+        
+        *WAIT = step time − GPU compute (mixed CPU/GPU proxy)*
+    """
+
+
+def _empty_bar_figure(title: str) -> go.Figure:
+    """Create an empty placeholder bar figure."""
+    fig = go.Figure()
+    fig.update_layout(
+        title=title,
+        height=220,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0.05)",
     )
     return fig

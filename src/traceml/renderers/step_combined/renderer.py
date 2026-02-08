@@ -183,13 +183,12 @@ class StepCombinedRenderer(BaseRenderer):
             width=width,
         )
 
-    def log_summary(self, path: Optional[str] = None) -> None:
+    def get_dashboard_renderable(self) -> StepCombinedTimeResult:
         """
-        Print the rendered summary to the CLI.
+        Return the typed compute result directly to dashboard consumers.
+        """
+        return self._payload()
 
-        Parameters
-        ----------
-        path : Optional[str]
-            Ignored. Present for BaseRenderer compatibility.
-        """
-        Console().print(self.get_panel_renderable())
+
+    def log_summary(self, path: Optional[str] = None) -> None:
+        pass
