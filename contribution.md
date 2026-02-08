@@ -17,6 +17,23 @@ If you are unsure where to start, check the GitHub Issues page or open a discuss
 
 ---
 
+## License of Contributions (Apache-2.0)
+
+TraceML is licensed under the **Apache License 2.0** (see `LICENSE`).
+
+By submitting a pull request, you agree that your contribution is intentionally
+submitted for inclusion in the project and is provided under the terms of the
+Apache License 2.0 (including Section 5: “Submission of Contributions”), with
+no additional terms or conditions.
+
+You also represent that you have the right to submit the contribution (e.g., it
+is your original work or you are authorized to submit it, and it is not subject
+to conflicting employer or third-party IP obligations).
+
+All contributions must be submitted via GitHub pull requests.
+
+---
+
 ## Development Setup
 
 ```bash
@@ -28,7 +45,7 @@ pip install -e ".[dev]"
 Requirements:
 - Python 3.9+
 - PyTorch 1.12+
-- CUDA enabled GPU (recommended; contributors may use local GPUs or cloud providers such Google, AWS, Runpod, etc.)
+- CUDA enabled GPU (recommended; contributors may use local GPUs or cloud providers such as Google Cloud, AWS, Runpod, etc.)
 
 ---
 

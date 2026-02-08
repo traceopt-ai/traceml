@@ -86,5 +86,5 @@ def update_layer_timer_table_section(panel, dashboard_data):
         </tbody>
     </table>
     """
-    
+
     panel["table"].content = html
