@@ -556,11 +556,7 @@ class UserTimeRenderer(BaseRenderer):
         )
 
     def get_dashboard_renderable(self):
-        """
-        Dashboard expects JSON-serializable rows.
-        We include worst_rank/coverage/min_samples so UI can show them.
-        """
-        return [r.__dict__ for r in self._build_rows()]
+        pass
 
     def log_summary(self, path: Optional[str] = None) -> None:
-        Console().print(self.get_panel_renderable())
+        pass

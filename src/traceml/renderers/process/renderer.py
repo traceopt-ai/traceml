@@ -102,67 +102,7 @@ class ProcessRenderer(BaseRenderer):
 
     # Notebook rendering
     def get_notebook_renderable(self) -> HTML:
-        snap = self._computer.compute_live_snapshot()
+        pass
 
-        gpu_html = (
-            f"""
-            <div>
-                <b>GPU MEM (worst rank {snap.get("gpu_rank")}):</b>
-                {fmt_mem_new(snap['gpu_used'])} /
-                {fmt_mem_new(snap['gpu_reserved'])} /
-                {fmt_mem_new(snap['gpu_total'])}
-            </div>
-            """
-            if snap.get("gpu_total") is not None
-            else "<div><b>GPU:</b> <span style='color:red;'>Not available</span></div>"
-        )
-
-        html = f"""
-        <div style="{CARD_STYLE}">
-            <h4 style="color:#d47a00; margin-top:0;">Process Metrics</h4>
-
-            <div>
-                <b>CPU (worst rank):</b>
-                {fmt_percent(snap.get('cpu_used', 0.0))}
-            </div>
-
-            {gpu_html}
-        </div>
-        """
-
-        return HTML(html)
-
-    # Summary logging
     def log_summary(self, path=None) -> None:
-        """
-        Log process summary statistics.
-
-        Notes
-        -----
-        Summary semantics will be revisited. This method is kept for
-        completeness and API stability.
-        """
-        if not self._table:
-            return
-
-        summary = self._computer.compute_summary(list(self._table))
-        console = Console()
-
-        t = Table.grid(padding=(0, 1))
-        t.add_column(style="magenta")
-        t.add_column(style="dim", no_wrap=True)
-        t.add_column(style="white")
-
-        t.add_row(
-            "TOTAL PROCESS SAMPLES",
-            "[magenta]|[/magenta]",
-            str(summary.get("total_samples", 0)),
-        )
-
-        console.print(
-            Panel(
-                t,
-                title="[bold magenta]Process - Summary[/bold magenta]",
-                border_style="magenta",
-            )
-        )
+        pass

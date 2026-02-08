@@ -56,7 +56,7 @@ from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 
 # Renderers (IMPORTANT: must read ONLY from RemoteDBStore)
 from traceml.renderers.system.renderer import SystemRenderer
-from traceml.renderers.user_time_renderer import UserTimeRenderer
+from traceml.renderers.step_memory. renderer import StepMemoryRenderer
 from traceml.runtime.config import config
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
@@ -234,8 +234,9 @@ class TraceMLAggregator:
             LayerCombinedTimeRenderer(
                 remote_store=remote_store, top_n_layers=num_display_layers
             ),
-            UserTimeRenderer(remote_store=remote_store),
+            # UserTimeRenderer(remote_store=remote_store),
             StepCombinedRenderer(remote_store=remote_store),
+            StepMemoryRenderer(remote_store=remote_store),
         ]
         # if mode == "cli":
         #     renderers.append(StdoutStderrRenderer(remote_store=remote_store))

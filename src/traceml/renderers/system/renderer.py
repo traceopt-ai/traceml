@@ -164,65 +164,6 @@ class SystemRenderer(BaseRenderer):
         """
         return cpu_ram_html
 
-    def get_notebook_renderable(self) -> HTML:
-        """
-        Return an HTML renderable for Jupyter notebooks.
-        """
-        data = self._compute_snapshot()
-
-        # --- CPU + RAM ---
-        cpu_ram_html = self._get_notebook_cpu_row(data)
-
-        # --- GPU ---
-        if data["gpu_available"]:
-            gpu_util_html = f"{fmt_percent(data['gpu_util_total'])}"
-            gpu_mem_html = f"{fmt_mem_new(data['gpu_mem_used'])} / {fmt_mem_new(data['gpu_mem_total'])}"
-
-            temp = data.get("gpu_temp_max")
-            pu = data.get("gpu_power_usage")
-            pl = data.get("gpu_power_limit")
-
-            temp_html = f"{temp:.1f}°C" if temp is not None else "N/A"
-            power_html = (
-                f"{pu:.1f}W / {pl:.1f}W"
-                if pu is not None and pl is not None
-                else "N/A"
-            )
-
-            gpu_section = f"""
-                <div style="
-                    display:flex;
-                    flex-direction:column;
-                    gap:6px;
-                ">
-                    <div>
-                        <b>GPU Util:</b> {gpu_util_html}<br>
-                        <b>GPU Mem:</b> {gpu_mem_html}
-                    </div>
-                    <div>
-                        <b>GPU Temp:</b> {temp_html}<br>
-                        <b>GPU Power:</b> {power_html}
-                    </div>
-                </div>
-            """
-        else:
-            gpu_section = """
-                <div><b>GPU:</b> <span style='color:red;'>Not available</span></div>
-            """
-
-        # --- Final card ---
-        html = f"""
-        <div style="{CARD_STYLE}">
-            <h4 style="color:#d47a00;"; margin-top:0;">System Metrics</h4>
-
-            {cpu_ram_html}
-
-            {gpu_section}
-        </div>
-        """
-
-        return HTML(html)
-
     def get_dashboard_renderable(self):
         """
         Return an object suitable for dashboard rendering.:
@@ -231,82 +172,8 @@ class SystemRenderer(BaseRenderer):
         data["table"] = self._get_table()
         return data
 
-    def _compute_summary(self) -> Dict[str, Any]:
-        return self._computer.compute_summary()
-
-    def _cpu_summary(self, t, s):
-        t.add_row(
-            "CPU (avg / p95)",
-            "[cyan]|[/cyan]",
-            f"{s['cpu_avg_percent']:.1f}%  / {s['cpu_p95_percent']:.1f}%",
-        )
-
-    def _ram_summary(self, t, s):
-        t.add_row(
-            "RAM (avg / peak / total)",
-            "[cyan]|[/cyan]",
-            f"{fmt_mem_new(s['ram_avg_used'])} / "
-            f"{fmt_mem_new(s['ram_peak_used'])} / "
-            f"{fmt_mem_new(s['ram_total'])}",
-        )
-
-    def _gpu_summary(self, t, s):
-        if not s["gpu_available"]:
-            t.add_row("GPU", "[cyan]|[/cyan]", "[red]Not available[/red]")
-            return
-
-        t.add_row("GPU COUNT", "[cyan]|[/cyan]", str(s["gpu_total_count"]))
-        t.add_row(
-            "GPU UTIL (avg / peak)",
-            "|",
-            f"{s['gpu_util_total_avg']:.1f}% / "
-            f"{s['gpu_util_total_peak']:.1f}%",
-        )
-
-        t.add_row(
-            "GPU MEMORY (p95 / peak / capacity)",
-            "|",
-            f"{fmt_mem_new(s['gpu_mem_total_p95'])} / "
-            f"{fmt_mem_new(s['gpu_mem_total_peak'])}  / "
-            f"{fmt_mem_new(s['gpu_mem_total_capacity'])}",
-        )
-        t.add_row(
-            "GPU MEMORY SINGLE DEVICE (peak)",
-            "[cyan]|[/cyan]",
-            f"{fmt_mem_new(s['gpu_mem_single_peak'])}",
-        )
-
-        t.add_row(
-            "GPU TEMP (peak)",
-            "[cyan]|[/cyan]",
-            f"{s['gpu_temp_peak']:.1f}°C",
-        )
+    def get_notebook_renderable(self) -> HTML:
+        pass
 
     def log_summary(self, path) -> None:
-        s = self._compute_summary()
-        console = Console(record=True)
-
-        t = Table.grid(padding=(0, 1))
-        t.add_column(style="cyan")
-        t.add_column(style="dim", no_wrap=True)
-        t.add_column(style="white")
-
-        t.add_row(
-            "TOTAL SYSTEM SAMPLES", "[cyan]|[/cyan]", str(s["total_samples"])
-        )
-
-        if s["total_samples"]:
-            self._cpu_summary(t, s)
-            self._ram_summary(t, s)
-            self._gpu_summary(t, s)
-
-        console.print(
-            Panel(
-                t,
-                title="[bold cyan]System - Summary[/bold cyan]",
-                border_style="cyan",
-            )
-        )
-        if path:
-            text = console.export_text(clear=False)
-            append_text(path, "\n" + text + "\n")
+        pass

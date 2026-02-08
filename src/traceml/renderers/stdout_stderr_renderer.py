@@ -54,26 +54,7 @@ class StdoutStderrRenderer(BaseRenderer):
         )
 
     def get_notebook_renderable(self) -> HTML:
-        rows = self._tail(self._table, self.display_lines)
-
-        if not rows:
-            html = "<div style='opacity:0.6;'>Waiting for stdout/stderr…</div>"
-        else:
-            escaped = "<br>".join(r["line"] for r in rows)
-            html = f"""
-                <div style="
-                    font-family:monospace;
-                    white-space:pre-wrap;
-                    background:#111;
-                    color:#eee;
-                    padding:8px;
-                    border-radius:6px;
-                ">
-                    {escaped}
-                </div>
-            """
-
-        return HTML(html)
+        pass
 
     def log_summary(self, path) -> None:
         pass

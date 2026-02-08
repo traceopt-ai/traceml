@@ -119,139 +119,14 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
             width=panel_width,
         )
 
-    def get_notebook_renderable(self) -> HTML:
-        result: LayerCombinedMemoryResult = (
-            self._compute_service.compute_display_data()
-        )
-
-        rows_html = ""
-
-        for row in result.top_items:
-            rows_html += f"""
-                <tr>
-                    <td>{truncate_layer_name(row.layer)}</td>
-                    <td style="text-align:right;">{fmt_mem_new(row.param_memory)}</td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(row.forward_current)}/{fmt_mem_new(row.forward_peak)}
-                    </td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(row.backward_current)}/{fmt_mem_new(row.backward_peak)}
-                    </td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(row.total_current_memory)}
-                    </td>
-                    <td style="text-align:right;">{row.pct:.1f}%</td>
-                </tr>
-            """
-
-        other = result.other
-        if other.total_current_memory > 0:
-            rows_html += f"""
-                <tr style="color:gray;">
-                    <td>Other Layers</td>
-                    <td style="text-align:right;">{fmt_mem_new(other.param_memory)}</td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(other.forward_current)}/{fmt_mem_new(other.forward_peak)}
-                    </td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(other.backward_current)}/{fmt_mem_new(other.backward_peak)}
-                    </td>
-                    <td style="text-align:right;">
-                        {fmt_mem_new(other.total_current_memory)}
-                    </td>
-                    <td style="text-align:right;">{other.pct:.1f}%</td>
-                </tr>
-            """
-
-        if not rows_html.strip():
-            rows_html = """
-                <tr>
-                    <td colspan="6" style="text-align:center; color:gray;">
-                        No layers detected
-                    </td>
-                </tr>
-            """
-
-        html = f"""
-        <div style="border:2px solid #2196f3; border-radius:8px;
-                    padding:10px; margin-top:10px;">
-            <h4 style="color:#2196f3; margin:0;">
-                Model #{result.model_index}
-                • Total Current: {fmt_mem_new(result.total_current_sum)}
-            </h4>
-
-            <table style="width:100%; border-collapse:collapse; margin-top:8px;">
-                <thead style="background:#f0f8ff;">
-                    <tr>
-                        <th style="text-align:left;">Layer</th>
-                        <th style="text-align:right;">Params</th>
-                        <th style="text-align:right;">Forward(curr/peak)</th>
-                        <th style="text-align:right;">Backward(curr/peak)</th>
-                        <th style="text-align:right;">Current Total</th>
-                        <th style="text-align:right;">Total Share (%)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html}
-                </tbody>
-            </table>
-        </div>
-        """
-        return HTML(html)
-
     def get_dashboard_renderable(self) -> LayerCombinedMemoryResult:
         """
         Return the typed compute result directly to dashboard consumers.
         """
         return self._compute_service.compute_display_data()
 
+    def get_notebook_renderable(self) -> HTML:
+        pass
+
     def log_summary(self, path) -> None:
-        console = Console()
-
-        layer_stats = self._summary_service.compute_layer_memory_summary()
-        fwd_peaks = self._summary_service.compute_global_peaks(is_forward=True)
-        bwd_peaks = self._summary_service.compute_global_peaks(
-            is_forward=False
-        )
-
-        top_fwds = self._summary_service.top_n_from_dict(fwd_peaks, n=3)
-        top_bwds = self._summary_service.top_n_from_dict(bwd_peaks, n=3)
-
-        table = Table.grid(padding=(0, 1))
-        table.add_column(justify="left", style="bold")
-        table.add_column(justify="center", style="dim", no_wrap=True)
-        table.add_column(justify="right", style="white")
-
-        self._render_section_layer_stats(table, layer_stats)
-        self._render_section_topk(table, "TOP-3 FORWARD", top_fwds, "cyan")
-        self._render_section_topk(table, "TOP-3 BACKWARD", top_bwds, "green")
-
-        panel = Panel(
-            table,
-            title="[bold blue]Model Layer - Summary[/bold blue]",
-            border_style="blue",
-        )
-        console.print(panel)
-
-    def _render_section_layer_stats(
-        self, table: Table, stats: Dict[str, Any]
-    ) -> None:
-        table.add_row(
-            "[blue]MODEL MEMORY[/blue]",
-            "[dim]|[/dim]",
-            fmt_mem_new(stats["model_memory"]),
-        )
-
-    def _render_section_topk(
-        self, table: Table, title: str, items: List, color: str
-    ) -> None:
-        table.add_row(f"[{color}]{title}[/{color}]", "[dim]|[/dim]", "")
-        if items:
-            for layer, value in items:
-                table.add_row(
-                    f"  [{color}]• {layer}[/{color}]",
-                    "",
-                    f"[{color}]{fmt_mem_new(value)}[/{color}]",
-                )
-        else:
-            table.add_row("  • None", "", "—")
+        pass

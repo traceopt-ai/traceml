@@ -99,56 +99,16 @@ class LayerCombinedTimeRenderer(BaseRenderer):
             width=width,
         )
 
-    def get_notebook_renderable(self) -> HTML:
-        d: LayerCombinedTimerResult = self._service.compute_display_data()
-
-        rows_html = ""
-        for r in d.top_items:
-            rows_html += f"""
-            <tr>
-                <td>{truncate_layer_name(r.layer)}</td>
-                <td style="text-align:right;">
-                    {fmt_time_ms(r.forward_current)}/{fmt_time_ms(r.forward_avg)}
-                </td>
-                <td style="text-align:right;">
-                    {fmt_time_ms(r.backward_current)}/{fmt_time_ms(r.backward_avg)}
-                </td>
-                <td style="text-align:right;">{r.pct:.1f}%</td>
-            </tr>
-            """
-
-        if not rows_html.strip():
-            rows_html = """
-            <tr>
-                <td colspan="4" style="text-align:center; color:gray;">
-                    No timing data
-                </td>
-            </tr>
-            """
-
-        html = f"""
-        <div style="border:2px solid #2196f3; border-radius:8px; padding:10px;">
-            <h4 style="color:#2196f3; margin:0;">Layer Timing</h4>
-            <table style="width:100%; border-collapse:collapse; margin-top:8px;">
-                <thead>
-                    <tr>
-                        <th style="text-align:left;">Layer</th>
-                        <th style="text-align:right;">Forward (curr/avg)</th>
-                        <th style="text-align:right;">Backward (curr/avg)</th>
-                        <th style="text-align:right;">Share (%)</th>
-                    </tr>
-                </thead>
-                <tbody>{rows_html}</tbody>
-            </table>
-        </div>
-        """
-        return HTML(html)
-
     def get_dashboard_renderable(self) -> LayerCombinedTimerResult:
         """
         Dashboard consumes the typed dataclass directly.
         """
         return self._service.compute_display_data()
+
+
+    def get_notebook_renderable(self) -> HTML:
+        pass
+
 
     def log_summary(self, path) -> None:
         pass

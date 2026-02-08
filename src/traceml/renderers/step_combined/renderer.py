@@ -22,6 +22,7 @@ Per-step volatility belongs in plots, not summaries.
 import shutil
 from typing import Optional
 
+from ipywidgets import HTML
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -174,7 +175,8 @@ class StepCombinedRenderer(BaseRenderer):
             )
 
         cols, _ = shutil.get_terminal_size()
-        width = min(max(100, int(cols * 0.75)), 100)
+        width = min(max(100, int(cols * 0.75)), 120)
+
         footer = "\n\n[dim]* WAIT = step time − model execution (mixed CPU/GPU proxy)[/dim]"
 
         return Panel(
@@ -192,6 +194,9 @@ class StepCombinedRenderer(BaseRenderer):
         Return the typed compute result directly to dashboard consumers.
         """
         return self._payload()
+
+    def get_notebook_renderable(self) -> HTML:
+        pass
 
     def log_summary(self, path: Optional[str] = None) -> None:
         pass
