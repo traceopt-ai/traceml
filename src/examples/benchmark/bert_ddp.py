@@ -31,7 +31,7 @@ MODEL_NAME = "distilbert-base-uncased"
 # MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 100000
+MAX_TRAIN_EXAMPLES = 10000
 MAX_VAL_EXAMPLES = 0
 
 BATCH_SIZE = 16
@@ -179,7 +179,7 @@ def main():
         rank=rank,
         world_size=world_size,
     )
-s
+
     # --------------------------------------------------------
     # Bind this process to ONE GPU
     # --------------------------------------------------------
