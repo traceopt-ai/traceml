@@ -1,6 +1,9 @@
 from nicegui import ui
-from traceml.utils.formatting import fmt_mem_new
 
+from traceml.renderers.layer_combined_memory.schema import (
+    LayerCombinedMemoryResult,
+)
+from traceml.utils.formatting import fmt_mem_new
 
 METRIC_TEXT = "text-sm leading-normal text-gray-700"
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
@@ -23,7 +26,9 @@ def build_layer_memory_table_section():
     )
 
     with card:
-        ui.label("Per Layer Memory Stats").classes(METRIC_TITLE).style("color:#d47a00;")
+        ui.label("Per Layer Memory Stats").classes(METRIC_TITLE).style(
+            "color:#d47a00;"
+        )
         container = ui.html("", sanitize=False).style(
             "flex: 1; overflow-y: auto; width: 100%; padding-right: 12px;"
         )
@@ -31,8 +36,10 @@ def build_layer_memory_table_section():
     return {"table": container}
 
 
-def update_layer_memory_table_section(panel, dashboard_data):
-    rows = dashboard_data.get("all_items", [])
+def update_layer_memory_table_section(
+    panel, dashboard_data: LayerCombinedMemoryResult
+):
+    rows = dashboard_data.all_items  # List[LayerCombinedMemoryRow]
 
     html = """
     <table style="width:100%; border-collapse: collapse; font-size:14px;">
@@ -54,24 +61,24 @@ def update_layer_memory_table_section(panel, dashboard_data):
             html += f"""
             <tr>
                 <td style="padding:4px 8px;">
-                    {r.get("layer", "—")}
+                    {r.layer}
                 </td>
                 <td style="text-align:right; padding:4px 8px;">
-                    {fmt_mem_new(r.get("param_memory", 0.0))}
+                    {fmt_mem_new(r.param_memory)}
                 </td>
                 <td style="text-align:right; padding:4px 8px;">
-                    {fmt_mem_new(r.get("forward_current", 0.0))} /
-                    {fmt_mem_new(r.get("forward_peak", 0.0))}
+                    {fmt_mem_new(r.forward_current)} /
+                    {fmt_mem_new(r.forward_peak)}
                 </td>
                 <td style="text-align:right; padding:4px 12px;">
-                    {fmt_mem_new(r.get("backward_current", 0.0))} /
-                    {fmt_mem_new(r.get("backward_peak", 0.0))}
+                    {fmt_mem_new(r.backward_current)} /
+                    {fmt_mem_new(r.backward_peak)}
                 </td>
                 <td style="text-align:right; padding:4px 12px;">
-                    {fmt_mem_new(r.get("total_current_memory", 0.0))}
+                    {fmt_mem_new(r.total_current_memory)}
                 </td>
                 <td style="text-align:right; padding:4px 12px;">
-                    {float(r.get("pct", 0.0)):.1f}%
+                    {float(r.pct):.1f}%
                 </td>
             </tr>
             """

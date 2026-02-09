@@ -1,6 +1,7 @@
 from nicegui import ui
-from traceml.utils.formatting import fmt_time_ms
 
+from dataclasses import asdict
+from traceml.utils.formatting import fmt_time_ms
 
 METRIC_TEXT = "text-sm leading-normal text-gray-700"
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
@@ -23,7 +24,9 @@ def build_layer_timer_table_section():
     )
 
     with card:
-        ui.label("Per Layer Timing Stats").classes(METRIC_TITLE).style("color:#d47a00;")
+        ui.label("Per Layer Timing Stats").classes(METRIC_TITLE).style(
+            "color:#d47a00;"
+        )
 
         container = ui.html("", sanitize=False).style(
             "flex: 1; overflow-y: auto; width: 100%; padding-right: 12px;"
@@ -33,7 +36,10 @@ def build_layer_timer_table_section():
 
 
 def update_layer_timer_table_section(panel, dashboard_data):
-    rows = dashboard_data.get("all_items", [])
+    # Accept either dataclass or dict payloads
+    d = asdict(dashboard_data)  # converts nested dataclasses too
+
+    rows = d.get("all_items", []) or []
 
     html = """
     <table style="width:100%; border-collapse: collapse; font-size:14px;">
@@ -52,9 +58,7 @@ def update_layer_timer_table_section(panel, dashboard_data):
         for r in rows:
             html += f"""
             <tr>
-                <td style="padding:4px 8px;">
-                    {r.get("layer", "—")}
-                </td>
+                <td style="padding:4px 8px;">{r.get("layer", "—")}</td>
                 <td style="text-align:right; padding:4px 8px;">
                     {fmt_time_ms(r.get("forward_current", 0.0))} /
                     {fmt_time_ms(r.get("forward_avg", 0.0))}
@@ -71,13 +75,7 @@ def update_layer_timer_table_section(panel, dashboard_data):
     else:
         html += """
         <tr>
-            <td colspan="4"
-                style="
-                    text-align:center;
-                    padding:16px;
-                    color:#888;
-                    font-style:italic;
-                ">
+            <td colspan="4" style="text-align:center; padding:16px; color:#888; font-style:italic;">
                 No per-layer timing data detected.<br/>
                 Ensure timing hooks are attached and the model has executed at least one forward pass.
             </td>

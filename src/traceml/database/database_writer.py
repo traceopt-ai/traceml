@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-from traceml.distributed import get_ddp_info
-from traceml.session import get_session_id
-from traceml.config import config
+from traceml.runtime.config import config
+from traceml.runtime.session import get_session_id
+from traceml.transport.distributed import get_ddp_info
 
 
 def _rank_suffix() -> str:
@@ -64,7 +64,11 @@ class DatabaseWriter:
 
         # Pathlib-based log root
         self.logs_dir = (
-            Path(config.logs_dir) / session_id / "data" / rank_dir / sampler_name
+            Path(config.logs_dir)
+            / session_id
+            / "data"
+            / rank_dir
+            / sampler_name
         )
 
         # Tracks the *last written record object* per table.

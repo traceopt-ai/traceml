@@ -1,7 +1,7 @@
-from typing import Dict
-from traceml.utils.formatting import fmt_mem_new
 from pathlib import Path
+from typing import Dict
 
+from traceml.utils.formatting import fmt_mem_new
 
 CARD_STYLE = """
     border:2px solid #00bcd4;

@@ -1,10 +1,11 @@
 import argparse
 import os
-import sys
-import subprocess
 import signal
+import subprocess
+import sys
 from pathlib import Path
-from .session import get_session_id
+
+from traceml.runtime.session import get_session_id
 
 
 def validate_script_path(script_path: str) -> str:
@@ -40,7 +41,7 @@ def launch_tracer_process(script_path, args):
     This function:
     1. Sets TraceML configuration via environment variables
     2. Launches a *child Python process* via torchrun
-    3. Hands off execution to runner.py, which then runs the user script
+    3. Hands off execution to executor.py, which then runs the user script
 
     We intentionally isolate tracing in a subprocess so:
     - user code remains untouched
@@ -54,7 +55,9 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_ENABLE_LOGGING"] = "1" if args.enable_logging else "0"
     env["TRACEML_LOGS_DIR"] = args.logs_dir
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(args.num_display_layers)
-    env["TRACEML_SESSION_ID"] = args.session_id if args.session_id else get_session_id()
+    env["TRACEML_SESSION_ID"] = (
+        args.session_id if args.session_id else get_session_id()
+    )
     env["TRACEML_DDP_TELEMETRY"] = "0" if args.disable_ddp_telemetry else "1"
     env["TRACEML_TCP_HOST"] = args.tcp_host
     env["TRACEML_TCP_PORT"] = str(args.tcp_port)
@@ -62,7 +65,7 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     script_args = args.args or []
 
-    runner_path = str(Path(__file__).parent / "runner.py")
+    runner_path = str(Path(__file__).parent / "runtime/executor.py")
 
     if args.mode in ["cli", "dashboard"]:
         cmd = [
@@ -117,7 +120,9 @@ def build_parser():
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = sub.add_parser("run", help="Run a script with TraceML enabled")
+    run_parser = sub.add_parser(
+        "run", help="Run a script with TraceML enabled"
+    )
     run_parser.add_argument("script")
     run_parser.add_argument("--mode", type=str, default="cli")
     run_parser.add_argument("--interval", type=float, default=2.0)

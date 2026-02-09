@@ -5,10 +5,11 @@ This module provides a thread-safe pool of reusable CUDA events
 to avoid the overhead of creating new events on every hook call.
 """
 
+import threading
 from collections import deque
 from typing import Optional
+
 import torch
-import threading
 
 
 class CUDAEventPool:

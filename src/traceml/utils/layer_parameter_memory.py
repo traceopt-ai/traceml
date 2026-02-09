@@ -1,6 +1,7 @@
-import torch.nn as nn
-from typing import Dict
 from queue import Queue
+from typing import Dict
+
+import torch.nn as nn
 
 # Shared queues for parameter-memory and activation events
 model_queue: Queue = Queue()

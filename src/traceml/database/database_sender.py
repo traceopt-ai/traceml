@@ -1,5 +1,7 @@
 import time
 
+from traceml.loggers.error_log import get_error_logger
+
 
 class DBIncrementalSender:
     """
@@ -12,7 +14,11 @@ class DBIncrementalSender:
     ----------------
     - Tables are append-only in logical time (monotonically increasing `step`)
     - Tables are bounded in memory (e.g., backed by deque(maxlen=N))
-    - Only the most recent unseen row per table needs to be transmitted
+    - Supports a sampling knob:
+        * max_rows_per_flush = -1  -> best-effort "send everything since last sent row"
+                                   (bounded by current deque contents)
+        * max_rows_per_flush = N>0 -> send at most the latest N rows per flush
+                                   (may skip backlog by design)
 
     Design rationale
     ----------------
@@ -20,13 +26,16 @@ class DBIncrementalSender:
       may be evicted, shifting indices.
     - Instead, we track progress using a semantic key (`step`) embedded
       in each row.
-    - At most ONE new row per table is sent per flush call to:
-        * bound payload size
-        * minimize network overhead
-        * avoid bursty traffic during fast training loops
     """
 
-    def __init__(self, db, sampler_name, sender, rank):
+    def __init__(
+        self,
+        db,
+        sampler_name,
+        sender=None,
+        rank=None,
+        max_rows_per_flush: int = -1,
+    ):
         """
         Initialize the incremental sender.
 
@@ -46,36 +55,21 @@ class DBIncrementalSender:
         self.sampler_name = sampler_name
         self.sender = sender
         self.rank = rank
+        self.max_rows_per_flush = int(max_rows_per_flush)
 
         # Tracks the last successfully sent record per table:
         #   table_name -> record (dict object)
         #
-        # We rely on object identity (not indices or step numbers) to detect
+        # We rely on object identity to detect
         # new records. Records are **assumed to be immutable** after insertion.
         # This remains safe even with bounded deques, which only drop references
         # without copying or mutating objects.
         self._last_sent_record = {}
+        self.logger = get_error_logger("DBIncrementalSender")
 
-    def flush(self):
+    def flush(self) -> None:
         """
         Flush incremental updates to the sender.
-
-        Behavior
-        --------
-        - Iterates over all tables in the database
-        - For each table:
-            * retrieves the most recent row
-            * compares it with the last sent record using object identity
-            * if it is a new record, includes it in the payload
-        - Sends at most ONE row per table
-        - No-op if there is nothing new to send
-
-        Deduplication strategy
-        ----------------------
-        - Deduplication is based on **object identity**, not indices or step numbers.
-        - Records are assumed to be immutable after insertion.
-        - This is safe with bounded deques, which drop references but never copy
-          or mutate stored objects.
 
         Payload format
         --------------
@@ -84,48 +78,69 @@ class DBIncrementalSender:
             "sampler": <str>,
             "timestamp": <float>,
             "tables": {
-                table_name: [row]
+                table_name: [row, row, ...]  # possibly multiple rows per table
             }
         }
-
-        Notes
-        -----
-        - `timestamp` reflects wall-clock send time
-        - Rows are wrapped in a list to preserve compatibility with
-          future batching or multi-row sends
         """
         tables_payload = {}
 
         # Iterate over all known tables in the database
-        for table_name in self.db.all_tables().keys():
-            # Fetch the most recent row (O(1))
-            row = self.db.get_last_record(table_name)
-            if row is None:
+        for table_name, rows in self.db.all_tables().items():
+            if not rows:
                 continue
 
-            # Retrieve last record sent for this table, if any
             last_row = self._last_sent_record.get(table_name)
 
-            # Skip if this exact record was already sent
-            if last_row is row:
+            # Collect new rows since last_row (exclusive), using identity.
+            new_rows = []
+            found_last = False
+
+            # Walk newest -> oldest
+            for r in reversed(rows):
+                if last_row is not None and r is last_row:
+                    found_last = True
+                    break
+                new_rows.append(r)
+
+                # If we are in "recent-only" mode, we only care about the latest N rows
+                if (
+                    self.max_rows_per_flush != -1
+                    and len(new_rows) >= self.max_rows_per_flush
+                ):
+                    break
+
+            if not new_rows:
                 continue
 
-            # Include the new record in the payload
-            tables_payload[table_name] = [row]
+            # If the cursor row wasn't found, it likely got evicted; that's fine.
+            # Our policy in that case is to send the freshest snapshot available:
+            # - N>0 : we already collected up to N newest rows
+            # - -1  : send the entire deque (best effort)
+            if last_row is not None and not found_last:
+                if self.max_rows_per_flush == -1:
+                    # send everything currently in the deque
+                    new_rows = list(rows)
+                # else: keep the collected newest <=N rows (already correct)
 
-            # Update last sent record reference
-            self._last_sent_record[table_name] = row
+            # Restore chronological order (oldest -> newest)
+            new_rows.reverse()
 
-        # Nothing new to send → return early
+            tables_payload[table_name] = new_rows
+            self._last_sent_record[table_name] = new_rows[-1]
+
         if not tables_payload:
             return
 
-        # Send the incremental payload through the configured transport TCP
-        self.sender.send(
-            {
-                "rank": self.rank,
-                "sampler": self.sampler_name,
-                "timestamp": time.time(),
-                "tables": tables_payload,
-            }
-        )
+        try:
+            self.sender.send(
+                {
+                    "rank": self.rank,
+                    "sampler": self.sampler_name,
+                    "timestamp": time.time(),
+                    "tables": tables_payload,
+                }
+            )
+        except Exception as e:
+            self.logger.error(
+                f"[DBIncrementalSender] sending payload failed with exception {e}"
+            )

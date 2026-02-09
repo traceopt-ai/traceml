@@ -1,108 +1,129 @@
 # TraceML
 
-**Always-on, live observability and failure attribution for distributed PyTorch training (Alpha)**
+**Always-on, live observability for Multi-GPU PyTorch training (DDP)**
+
+📋 **User Survey (2 min):** https://forms.gle/KwPSLaPmJnJjoVXSA
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Downloads](https://static.pepy.tech/badge/traceml-ai)](https://pepy.tech/project/traceml-ai)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 [![Python 3.9-3.13](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT%20%2B%20Commons%20Clause-yellow)](./LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
+
+TraceML is a lightweight **runtime observability** tool for **PyTorch DDP training** (currently on **single-node Multi-GPU)**.
+It surfaces **step-level, rank-aware** signals *while your job runs*, without turning on heavy profilers. It answers 
+
+> “What’s happening inside my training step right now — and is a particular rank behaving worse than the rest?”
+
+If your run is healthy, TraceML should say so.
+
+---
+
+### Terminal dashboard (default)
 
 
-TraceML is a lightweight **runtime observability** tool for **distributed PyTorch training**.  
-It makes training behavior visible *while it runs* using **semantic, step-level signals** that are typically missing from infrastructure metrics and too expensive to keep enabled with full profilers.
+![TraceML terminal dashboard](cli_demo_v1.png)
 
-> **Status:** **Alpha**  
-> Current focus: **single-node DDP** stability, signal accuracy, and overhead optimization (Python/GIL behavior, communication paths, synchronization strategy, and UI/collector performance).  
-> Multi-node distributed training (DDP/FSDP) is planned.
+The terminal view updates **continuously during training** and shows:
+- Step time, dataloader fetch time, and GPU memory
+- Median vs worst rank (to spot imbalance / stragglers)
+- System signals (CPU, RAM, GPU) alongside training signals
 
+This is the primary interface, designed to stay open next to your training logs.
+
+### Web dashboard (optional)
+
+
+![TraceML web dashboard](web_demo_v1.png)
+
+The web dashboard mirrors the same signals in a browser:
+- Interactive charts over recent steps
+- Rank-aware comparisons
+- Useful for exploration and longer-running jobs
+
+The web UI is **read-only** and reflects exactly what TraceML computes during training.
+
+*Both views are driven by the same runtime signals and update live, step by step.*
+ 
 ---
 
 ## Why TraceML
 
-Training deep learning models often becomes a black box once you scale beyond toy workloads.
+Training deep learning becomes a black box as we scale from single GPU
 
-Common pain points:
-- **Slow / unstable steps** without knowing whether the bottleneck is dataloader, compute, communication, or optimizer
-- **CUDA OOM errors** with limited attribution to the responsible layer
-- **Layer-level opacity**: unclear memory and compute hotspots
-- **Heavy profilers** that are too intrusive to keep enabled during real training
+Typical pain:
+- Steps get **slow / unstable** and it’s unclear if the cause is input, compute, sync/comm, or optimizer work
+- “It’s slower on 8 GPUs than 1 GPU” and you don’t know **which rank** or **which part** is lagging
+- **OOMs and crashes** with little context for “where did it happen?”
+- Full profilers are powerful, but often too intrusive to keep enabled in real training
 
-TraceML is designed to be **always-on**, giving you actionable attribution during long-running jobs.
+TraceML is designed to be **live**: show the *minimum useful* truth during real runs.
 
 ---
 
 ## What TraceML Shows (Core Signals)
 
-TraceML focuses on the signals you actually debug with:
-
-### Step-aware signals (synchronized across ranks)
-For each training step (in single-node DDP):
+### Step-level signals (rank-aware)
+When you wrap your iteration with `trace_step()`, TraceML tracks step-scoped signals and summarizes them across ranks:
 - **Dataloader fetch time**
-- **Training step time** (**GPU-aware** via CUDA events)
-- **Step GPU memory** (allocated + peak)
+- **Step time** (GPU-aware via CUDA events without sync)
+- **GPU memory** (allocated + peak)
 
 Across ranks, TraceML reports:
-- **Median rank** (typical behavior)
-- **Worst rank** (straggler / bottleneck)
+- **Median** (typical behavior)
+- **Worst** (the slowest / highest-memory rank)
 
-This makes it easy to catch cases like “8 GPUs slower than 1” *as it happens*, and understand whether you’re bottlenecked by input pipeline, compute, or rank-level stragglers.
+This helps you spot **rank imbalance / straggler-like behavior** early.
 
-### Failure attribution
-- **OOM attribution** (Deep-Dive mode): surface the layer most likely responsible during forward/backward
+### Lightweight failure attribution (Deep-Dive)
+In Deep-Dive mode, TraceML installs **model hooks** to give more context around failures:
+- Show per-layer memory and timing usage (worst across all ranks) 
+- Helps identify **where** an OOM/crash happened (forward/backward region and the most suspicious layer signals)
+- Experimental and evolving — meant to be a practical debugging aid, not a formal profiler
 
 ---
 
-## What TraceML Is Not
+## What TraceML is Not
 
-TraceML is **not** an auto-tuner or a profiler replacement.
+TraceML is **not** a profiler replacement or an auto-tuner.
 
-- It does not automatically optimize your batch size
-- It does not always “find a problem”
-- It does not replace Nsight or PyTorch Profiler
-
-Instead, TraceML answers a more basic question:
-
-> “Which part of my training step is responsible for what I’m seeing — or is everything behaving normally?”
-
-If your run is healthy, TraceML will tell you that explicitly.
+- It does not replace Nsight / PyTorch Profiler
+- It does not automatically fix batch size or optimizer settings
+- It will not always “find a problem”
 
 ---
 
 ## Views
 
-TraceML supports two ways to consume runtime signals:
+TraceML currently supports:
 
-- 🖥️ **Terminal dashboard** — live updates in your console
-- 🌐 **Web dashboard** — local browser at `http://localhost:8765`
+- 🖥️ **Terminal dashboard** — live updates in your console (Rich UI)
+- 🌐 **Web dashboard** — local browser UI at `http://localhost:8765`
 
-Note: Notebook is temporarily disabled in alpha 
+> Notebook view is temporarily disabled.
 
 ---
 
 ## Tracking Profiles
 
-TraceML provides two tracking profiles so you can choose the right trade-off between insight and overhead.
+TraceML provides two profiles so you can choose insight vs overhead.
 
-### ESSENTIAL mode (always-on runtime signals)
-Designed for day-to-day training and long-running jobs.
+### ESSENTIAL (basic)
+Designed for continuous usage during real training.
 
 Tracks:
 - Dataloader fetch time
-- Training step time (GPU-aware)
-- Step-level GPU memory (allocated and peak)
-- System metrics (CPU, RAM, GPU)
-- Basic failure signals
+- Step time (GPU-aware)
+- Step GPU memory (allocated + peak)
+- System metrics (CPU/RAM/GPU)
 
-This mode is intended to run **continuously during real training**.
+### DEEP-DIVE (diagnostic)
+Designed for investigating slowdowns and failures.
 
-### DEEP-DIVE mode (diagnostic)
-Designed for performance pathology debugging and OOM investigations.
-
-Includes everything in **ESSENTIAL**, plus:
-- Per-layer memory (parameters, activations, gradients)
-- Per-layer forward and backward compute time
-- OOM layer attribution (forward/backward)
+Includes everything in ESSENTIAL, plus:
+- Per-layer memory signals
+- Per-layer forward/backward timing signals
+- Lightweight failure attribution via hooks (experimental)
 
 ---
 
@@ -122,8 +143,8 @@ pre-commit install
 ```
 
 **Requirements:** Python 3.9–3.13, PyTorch 1.12+  
-**Platform support:** macOS (Intel/ARM), Linux  
-**Training support:** Single GPU and **single-node DDP (alpha)**
+**Platform:** macOS (Intel/ARM), Linux  
+**Training support:** Single GPU + **single-node DDP **
 
 ---
 
@@ -131,7 +152,7 @@ pre-commit install
 
 ### 1) Step-level tracking (required)
 
-TraceML computes step timing / memory only inside a `trace_step()` scope.
+TraceML’s core signals are computed inside `trace_step()`.
 
 ```python
 from traceml.decorators import trace_step
@@ -148,33 +169,11 @@ for batch in dataloader:
 Without `trace_step()`:
 - Step timing is not computed
 - Step memory is not recorded
-- Live dashboards will not update
+- Live dashboards won’t update meaningfully
 
 ---
 
-### 2) Optional: Time specific code regions
-
-Use `@trace_time` to time specific functions.  
-This works in **all modes** and is designed to have **low overhead**.
-
-```python
-from traceml.decorators import trace_time
-
-@trace_time("backward", use_gpu=True)
-def backward_pass(loss):
-    loss.backward()
-```
-
-Notes:
-- `use_gpu=True` uses CUDA events (correct for async GPU work)
-- `use_gpu=False` uses CPU wall-clock time
-
-#### Deprecation (Breaking change)
-- `@trace_timestep` is deprecated — use `@trace_time` instead
-
----
-
-### 3) Deep-Dive: model registration (only for Deep-Dive)
+### 2) Deep-Dive: model registration (optional, only for Deep-Dive)
 
 ```python
 from traceml.decorators import trace_model_instance
@@ -182,9 +181,12 @@ from traceml.decorators import trace_model_instance
 trace_model_instance(model)
 ```
 
-Enables forward/backward hooks required for:
-- per-layer memory and timing (layerwise worst across ranks)
-- OOM layer attribution (experimental, work-in-progress)
+Use this **together with** `trace_step(model)` to enable hook-based deep signals:
+- layer-level memory/timing
+- experimental failure attribution
+
+> `@trace_time` / region user timers is removed for now.  
+> TraceML is focusing on step-level semantics + optional Deep-Dive hooks.
 
 ---
 
@@ -194,12 +196,10 @@ Enables forward/backward hooks required for:
 traceml run train.py --nproc-per-node=2
 ```
 
-You’ll see a live terminal dashboard tracking:
-- System resources (CPU, RAM, GPU)
+You’ll see a live terminal dashboard showing:
+- System resources (CPU/RAM/GPU)
 - Dataloader fetch time, step time, step GPU memory
-- (Deep-Dive only) per-layer memory + compute time
-
-> Tip: for **DDP**, run TraceML on rank 0 and collect rank signals via the TraceML runtime.
+- (Deep-Dive) per-layer signals + failure attribution hints
 
 ---
 
@@ -209,26 +209,30 @@ You’ll see a live terminal dashboard tracking:
 traceml run train.py --nproc-per-node=2 --mode=dashboard
 ```
 
-Opens `http://localhost:8765` with interactive charts and real-time updates.
+Opens `http://localhost:8765` with interactive charts and live updates.
 
 ---
 
 ## Roadmap
 
-TraceML prioritizes **clear attribution and low overhead** over exhaustive tracing.
-
 Near-term:
-- **Optimize single-node DDP**: reduce overhead, improve rank synchronization accuracy, improve comm + GIL behavior
-- **Broaden workload coverage**: validated examples + benchmarks for representative workloads:
-  - CV (e.g., ResNet / ViT)
-  - NLP / LLM fine-tuning (e.g., BERT / small decoder models)
-  - Diffusion / vision-language (as time permits)
-- **Documentation improvements**: clearer docs + examples (targeting beta)
+- **Single-node DDP hardening**: reduce overhead, improve step alignment accuracy, improve collector/UI performance
+- **Run logging to disk**: per-run artifacts + compact run summaries
+- **Compatibility & failure modes**: validate behavior for common training patterns:
+  - gradient accumulation
+  - `torch.compile`
+  - cases that bypass typical hooks / patch points
+- **Documentation**: clearer docs, examples, and “known limitations” page
+- Accelerate / Lightning wrappers
 
 Next:
-- **Multi-node distributed support** (DDP → FSDP)
-- Integrations: PyTorch Lightning / Hugging Face Accelerate (as optional wrappers)
-- Advanced diagnostics: leak detection, regression attribution, and automated “why is my step slower?” summaries
+- **Multi-node DDP**
+- **FSDP**: shard-aware aggregation + imbalance signals (initial support)
+
+Later:
+- **TP / PP**: multi-process-group + mesh/stage-aware attribution
+
+
 
 ---
 
@@ -241,33 +245,33 @@ Contributions are welcome.
 3. 💡 Request features / workloads you want supported
 4. 🔧 Submit PRs (small focused PRs are ideal)
 
-If you hit an issue, please open a GitHub Issue with:
+When opening an issue, please include:
 - minimal repro script
 - hardware + CUDA + PyTorch versions
-- whether you used ESSENTIAL or DEEP-DIVE
+- ESSENTIAL vs DEEP-DIVE
 - single GPU vs DDP
-
-We’ll try to respond and resolve quickly.
 
 ---
 
 ## Community & Support
 
 - 📧 Email: abhinav@traceopt.ai
-- 🐙 LinkedIn:  [Abhinav Srivastav](https://www.linkedin.com/in/abhinavsriva/)
-- 📋 User Survey: Help shape the roadmap (2 minutes) https://forms.gle/KwPSLaPmJnJjoVXSA
-- Stars help the project grow and makes it easier for other to find our work.🌟
+- 🐙 LinkedIn: [Abhinav Srivastav](https://www.linkedin.com/in/abhinavsriva/)
+- 📋 User Survey (2 min): https://forms.gle/KwPSLaPmJnJjoVXSA
+
+Stars help more teams find the project. 🌟
 
 <a href="https://www.star-history.com/#traceopt-ai/traceml&type=date&legend=top-left">
   <img src="https://api.star-history.com/svg?repos=traceopt-ai/traceml&type=date&legend=top-left" width="50%">
 </a>
+
 ---
 
 ## License
 
-TraceML is released under the **Apache 2.0**
+TraceML is released under the **Apache 2.0**.
 
-See [LICENSE](./LICENSE) for full details.  
+See [LICENSE](./LICENSE) for details.
 
 ---
 
@@ -287,8 +291,6 @@ If TraceML helps your research, please cite:
 ---
 
 <div align="center">
-
-**TraceML — Stop guessing. Start attributing.**
 
 Made with ❤️ by TraceOpt AI
 

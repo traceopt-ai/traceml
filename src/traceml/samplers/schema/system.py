@@ -1,5 +1,5 @@
 """
-System telemetry schema for TraceML.
+System telemetry schema for.
 
 This module defines the canonical data structures used to represent
 system-level metrics (CPU, RAM, GPU) inside TraceML.
@@ -15,7 +15,7 @@ Design principles
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 # ---------------------------------------------------------------------------
 # GPU metrics

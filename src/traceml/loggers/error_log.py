@@ -2,8 +2,8 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from traceml.config import config
-from traceml.distributed import get_ddp_info
+from traceml.runtime.config import config
+from traceml.transport.distributed import get_ddp_info
 
 
 def setup_error_logger() -> logging.Logger:

@@ -3,14 +3,13 @@ import random
 
 import torch
 import torch.distributed as dist
+from datasets import load_dataset
+from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
-from torch.optim import AdamW
-
-from datasets import load_dataset
 from transformers import (
-    AutoTokenizer,
     AutoModelForSequenceClassification,
+    AutoTokenizer,
     DataCollatorWithPadding,
     get_linear_schedule_with_warmup,
 )
@@ -24,11 +23,11 @@ from transformers import (
 #   Defines a training-step boundary (flushes TraceML buffers at step end)
 # trace_time:
 #   Optional fine-grained timers for user-defined code sections
-from traceml.decorators import trace_model_instance, trace_step, trace_time
+from traceml.decorators import trace_model_instance, trace_step
 
 
 SEED = 42
-MODEL_NAME = "bert-base-uncased"
+MODEL_NAME = "distilbert-base-uncased"
 # MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
@@ -51,7 +50,9 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def accuracy_from_logits(
+    logits: torch.Tensor, labels: torch.Tensor
+) -> torch.Tensor:
     """
     Simple per-batch accuracy (rank-local).
     """
@@ -65,11 +66,14 @@ def prepare_data(rank: int, world_size: int):
       - each rank sees a unique shard of the dataset
       - all samples are seen exactly once per epoch
     """
+    raw = load_dataset("fancyzhx/ag_news")
 
-    raw = load_dataset("fancyzhx/ag_news", revision="main")
-
-    train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
-    val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
+    train_raw = raw["train"].select(
+        range(min(MAX_TRAIN_EXAMPLES, len(raw["train"])))
+    )
+    val_raw = raw["test"].select(
+        range(min(MAX_VAL_EXAMPLES, len(raw["test"])))
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
@@ -117,7 +121,6 @@ def prepare_data(rank: int, world_size: int):
 # They add extra visibility into specific code regions.
 
 
-# @trace_time("data_transfer", use_gpu=False)
 def load_batch_to_device(batch, device):
     """
     Measure CPU → GPU transfer time.
@@ -125,7 +128,6 @@ def load_batch_to_device(batch, device):
     return {k: v.to(device, non_blocking=True) for k, v in batch.items()}
 
 
-# @trace_time("forward", use_gpu=True)
 def forward_pass(model, batch, dtype):
     """
     Measure forward pass time (with AMP).
@@ -135,7 +137,6 @@ def forward_pass(model, batch, dtype):
         return model(**batch)
 
 
-# @trace_time("backward", use_gpu=True)
 def backward_pass(loss, scaler):
     """
     Measure backward pass time.
@@ -143,7 +144,6 @@ def backward_pass(loss, scaler):
     scaler.scale(loss).backward()
 
 
-# @trace_time("optimizer_step", use_gpu=True)
 def optimizer_step(scaler, optimizer, scheduler):
     """
     Measure optimizer + scheduler step.
@@ -164,7 +164,9 @@ def main():
     # torchrun sets these OS environment variables per process
     rank = int(os.environ.get("RANK", 0))  # global rank
     local_rank = int(os.environ.get("LOCAL_RANK", 0))  # GPU index on this node
-    world_size = int(os.environ.get("WORLD_SIZE", 1))  # total number of processes
+    world_size = int(
+        os.environ.get("WORLD_SIZE", 1)
+    )  # total number of processes
 
     # --------------------------------------------------------
     # Initialize distributed communication
@@ -195,7 +197,9 @@ def main():
     # --------------------------------------------------------
     # Data
     # --------------------------------------------------------
-    tokenizer, train_loader, val_loader, train_sampler = prepare_data(rank, world_size)
+    tokenizer, train_loader, val_loader, train_sampler = prepare_data(
+        rank, world_size
+    )
 
     # --------------------------------------------------------
     # Model
@@ -208,7 +212,7 @@ def main():
     # TraceML: attach hooks to the *real* model
     # --------------------------------------------------------
     # Do this BEFORE wrapping with DistributedDataParallel
-    # trace_model_instance(model)
+    trace_model_instance(model)
 
     # Wrap model with DDP
     if use_cuda:

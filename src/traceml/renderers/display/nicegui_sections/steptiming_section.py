@@ -29,8 +29,8 @@ Semantics:
 from typing import Any, Dict, List, Optional
 
 from nicegui import ui
-from traceml.renderers.utils import fmt_time_run
 
+from traceml.renderers.utils import fmt_time_run
 
 # -----------------------------
 # Styling (match your dashboard)
@@ -82,7 +82,9 @@ def build_step_timing_table_section():
     with card:
         # Header row: title + small hint
         with ui.row().classes("w-full items-center justify-between"):
-            ui.label("Trace Timers").classes("text-l font-bold mb-2").style(TITLE_STYLE)
+            ui.label("Trace Timers").classes("text-l font-bold mb-2").style(
+                TITLE_STYLE
+            )
             ui.html(
                 "stats: <b>worst-rank</b> over last 100",
                 sanitize=False,

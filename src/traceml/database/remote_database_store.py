@@ -2,6 +2,7 @@ import time
 from typing import Dict, Optional
 
 from traceml.loggers.error_log import get_error_logger
+
 from .database import Database
 
 
@@ -117,11 +118,6 @@ class RemoteDBStore:
         rank = message.get("rank")
         sampler_name = message.get("sampler")
 
-        # Basic validation to avoid corrupt internal state
-        if rank is None or sampler_name is None:
-            self.logger.warning("Invalid remote DB message: missing rank or sampler")
-            return
-
         try:
             rank = int(rank)
         except Exception:
@@ -129,6 +125,8 @@ class RemoteDBStore:
             return
 
         tables = message.get("tables", {})
+        # self.logger.error(
+        #     f"Rank {rank} sampler_name {sampler_name}, {tables.keys()}")
 
         # Track last time we received telemetry from this rank
         self._last_seen[rank] = time.time()

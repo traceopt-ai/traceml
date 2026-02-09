@@ -1,76 +1,92 @@
+from __future__ import annotations
+
+from itertools import islice
+from typing import Any, List, Dict, Optional
+
+from IPython.display import HTML
 from rich.panel import Panel
 from rich.text import Text
-from IPython.display import HTML
-from itertools import islice
 
+from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.cli_display_manager import STDOUT_STDERR_LAYOUT
-from traceml.database.database import Database
+from traceml.renderers.display.managers.cli_display_manager import (
+    STDOUT_STDERR_LAYOUT,
+)
 
 
 class StdoutStderrRenderer(BaseRenderer):
     """
     Renderer for stdout/stderr lines stored by StdoutStderrSampler.
-    Rank-0 only.
+
+    Rank-0 display only:
+    - Reads ONLY from RemoteDBStore (which itself only lives on rank0).
+    - Shows only rank 0 logs by default.
     """
 
     def __init__(
         self,
-        database: Database,
-        display_lines: int = 5,
-    ):
+        remote_store: RemoteDBStore,
+        display_lines: int = 50,
+        rank: int = 0,
+        sampler_name: str = "Stdout/Stderr",
+        table_name: str = "stdout_stderr",
+    ) -> None:
         super().__init__(
             name="Stdout/Stderr",
             layout_section_name=STDOUT_STDERR_LAYOUT,
         )
-        self.db = database
-        self.display_lines = display_lines
-        self._table = self.db.create_or_get_table("stdout_stderr")
+        self._store = remote_store
+        self._display_lines = int(display_lines)
+        self._rank = int(rank)
+        self._sampler_name = str(sampler_name)
+        self._table_name = str(table_name)
 
     @staticmethod
-    def _tail(dq, n):
-        if not dq:
+    def _tail_rows(rows: Any, n: int) -> List[Dict[str, Any]]:
+        """
+        Tail helper that works with your Database table (likely a deque/list).
+        """
+        if not rows or n <= 0:
             return []
-        return list(islice(dq, max(0, len(dq) - n), len(dq)))
+        # rows is expected to be sized (deque/list). islice works fine.
+        start = max(0, len(rows) - n)
+        return list(islice(rows, start, len(rows)))
 
     def get_panel_renderable(self) -> Panel:
-        rows = self._tail(self._table, self.display_lines)
+        db = self._store.get_db(
+            rank=self._rank, sampler_name=self._sampler_name
+        )
+        table = (
+            None if db is None else db.create_or_get_table(self._table_name)
+        )
 
-        if not rows:
+        tail = (
+            self._tail_rows(table, self._display_lines)
+            if table is not None
+            else []
+        )
+
+        if not tail:
             content = Text(
                 "Waiting for stdout/stderr...", style="dim", justify="center"
             )
         else:
-            lines = [Text(r["line"], style="white") for r in rows]
-            content = Text("\n").join(lines)
+            # render as one block for speed + simpler wrapping behavior
+            text_block = "\n".join(
+                str(r.get("line", "")) for r in tail if r.get("line")
+            )
+            content = Text(text_block)
 
         return Panel(
             content,
-            title="[bold cyan]STDOUT / STDERR (RANK 0)[/bold cyan]",
+            title=f"[bold cyan]STDOUT / STDERR (RANK {self._rank})[/bold cyan]",
             border_style="cyan",
         )
 
     def get_notebook_renderable(self) -> HTML:
-        rows = self._tail(self._table, self.display_lines)
+        return HTML(
+            "<pre>Stdout/Stderr renderer disabled in notebook mode.</pre>"
+        )
 
-        if not rows:
-            html = "<div style='opacity:0.6;'>Waiting for stdout/stderr…</div>"
-        else:
-            escaped = "<br>".join(r["line"] for r in rows)
-            html = f"""
-                <div style="
-                    font-family:monospace;
-                    white-space:pre-wrap;
-                    background:#111;
-                    color:#eee;
-                    padding:8px;
-                    border-radius:6px;
-                ">
-                    {escaped}
-                </div>
-            """
-
-        return HTML(html)
-
-    def log_summary(self, path) -> None:
+    def log_summary(self, path: str) -> None:
         pass

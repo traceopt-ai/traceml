@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 class BaseRenderer:
@@ -12,7 +12,9 @@ class BaseRenderer:
         self.layout_section_name = layout_section_name
         self._latest_data: Dict[str, Any] = {}
 
-    def get_panel_renderable(self) -> Any:  # This will be implemented by subclasses
+    def get_panel_renderable(
+        self,
+    ) -> Any:  # This will be implemented by subclasses
         """
         Abstract method: Subclasses must implement this to return a Rich Renderable
         (e.g., Panel, Table, Text) based on their `_latest_data`.
@@ -27,11 +29,15 @@ class BaseRenderer:
         (IPython.display.HTML) based on `get_data()`.
         Used in Jupyter/Notebook display.
         """
-        raise NotImplementedError("Subclasses must implement get_notebook_renderable()")
+        raise NotImplementedError(
+            "Subclasses must implement get_notebook_renderable()"
+        )
 
     def log_summary(self, path):
         """
         Abstract method: Subclasses must implement to log a final summary.
         This will typically be called after the main display is stopped.
         """
-        raise NotImplementedError("Subclasses must implement log_summary method.")
+        raise NotImplementedError(
+            "Subclasses must implement log_summary method."
+        )
