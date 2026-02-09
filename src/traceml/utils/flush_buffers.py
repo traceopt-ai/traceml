@@ -13,7 +13,9 @@ from traceml.utils.hooks.layer_forward_time_hooks import (
     flush_layer_forward_time_buffers,
 )
 
-from traceml.utils.hooks.model_forward_memory_hook import flush_model_forward_memory_buffers
+from traceml.utils.hooks.model_forward_memory_hook import (
+    flush_model_forward_memory_buffers,
+)
 from .step_memory import flush_step_memory_buffer
 from .timing import flush_step_time_buffer
 

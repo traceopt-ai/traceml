@@ -239,7 +239,7 @@ class TraceMLAggregator:
             StepCombinedRenderer(remote_store=remote_store),
             StepMemoryRenderer(remote_store=remote_store),
         ]
-        if self.mode == "cli" :
+        if self.mode == "cli":
             renderers.append(StdoutStderrRenderer(remote_store=remote_store))
         return renderers
 
@@ -447,7 +447,7 @@ class TraceMLRuntime:
         2) start aggregator (rank0) so TCP server is listening
         3) start sampler thread
         """
-        if self.mode == 'cli':
+        if self.mode == "cli":
             _safe(
                 self._logger,
                 "Stdout/stderr capture enable failed",
@@ -487,7 +487,7 @@ class TraceMLRuntime:
         _safe(self._logger, "TCPClient.close failed", self._tcp_client.close)
 
         # restore stdout/stderr
-        if self.mode == 'cli':
+        if self.mode == "cli":
             _safe(
                 self._logger,
                 "Stdout/stderr restore failed",

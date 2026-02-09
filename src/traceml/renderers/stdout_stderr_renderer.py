@@ -53,10 +53,18 @@ class StdoutStderrRenderer(BaseRenderer):
         return list(islice(rows, start, len(rows)))
 
     def get_panel_renderable(self) -> Panel:
-        db = self._store.get_db(rank=self._rank, sampler_name=self._sampler_name)
-        table = None if db is None else db.create_or_get_table(self._table_name)
+        db = self._store.get_db(
+            rank=self._rank, sampler_name=self._sampler_name
+        )
+        table = (
+            None if db is None else db.create_or_get_table(self._table_name)
+        )
 
-        tail = self._tail_rows(table, self._display_lines) if table is not None else []
+        tail = (
+            self._tail_rows(table, self._display_lines)
+            if table is not None
+            else []
+        )
 
         if not tail:
             content = Text(
@@ -64,7 +72,9 @@ class StdoutStderrRenderer(BaseRenderer):
             )
         else:
             # render as one block for speed + simpler wrapping behavior
-            text_block = "\n".join(str(r.get("line", "")) for r in tail if r.get("line"))
+            text_block = "\n".join(
+                str(r.get("line", "")) for r in tail if r.get("line")
+            )
             content = Text(text_block)
 
         return Panel(
@@ -74,7 +84,9 @@ class StdoutStderrRenderer(BaseRenderer):
         )
 
     def get_notebook_renderable(self) -> HTML:
-        return HTML("<pre>Stdout/Stderr renderer disabled in notebook mode.</pre>")
+        return HTML(
+            "<pre>Stdout/Stderr renderer disabled in notebook mode.</pre>"
+        )
 
     def log_summary(self, path: str) -> None:
         pass

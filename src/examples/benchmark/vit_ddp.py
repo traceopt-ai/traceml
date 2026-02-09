@@ -108,15 +108,12 @@ def forward_pass(model, images):
     return model(images)
 
 
-
 def compute_loss(logits, labels):
     return torch.nn.functional.cross_entropy(logits, labels)
 
 
-
 def backward_pass(loss, scaler: GradScaler):
     scaler.scale(loss).backward()
-
 
 
 def optimizer_step(

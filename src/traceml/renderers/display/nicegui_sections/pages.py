@@ -23,10 +23,14 @@ from .model_combined_section import (
     update_model_combined_section,
 )
 from .process_section import build_process_section, update_process_section
-from .step_memory_section import build_step_memory_section, update_step_memory_section
+from .step_memory_section import (
+    build_step_memory_section,
+    update_step_memory_section,
+)
 from .system_section import build_system_section, update_system_section
 
 import pandas as pd
+
 
 def build_top_tabs(active: str):
     """
