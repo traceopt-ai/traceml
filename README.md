@@ -121,7 +121,7 @@ pre-commit install
 
 **Requirements:** Python 3.9–3.13, PyTorch 1.12+  
 **Platform:** macOS (Intel/ARM), Linux  
-**Training support:** Single GPU + **single-node DDP (Alpha)**
+**Training support:** Single GPU + **single-node DDP **
 
 ---
 
