@@ -154,6 +154,7 @@ class TraceMLAggregator:
         self._logger = logger
         self._stop_event = stop_event
         self._settings = settings
+        self.mode = settings.mode
 
         # Unified telemetry store
         self._store = RemoteDBStore(max_rows=int(settings.remote_max_rows))
@@ -169,7 +170,6 @@ class TraceMLAggregator:
 
         # Renderers: MUST read ONLY from RemoteDBStore
         self._renderers = self._build_renderers(
-            mode=settings.mode,
             num_display_layers=settings.num_display_layers,
             remote_store=self._store,
         )
@@ -218,9 +218,8 @@ class TraceMLAggregator:
         )
         _safe(self._logger, "TCPServer.stop failed", self._tcp_server.stop)
 
-    @staticmethod
     def _build_renderers(
-        mode: str,
+        self,
         num_display_layers: int,
         remote_store: RemoteDBStore,
     ) -> List[BaseRenderer]:
@@ -240,7 +239,7 @@ class TraceMLAggregator:
             StepCombinedRenderer(remote_store=remote_store),
             StepMemoryRenderer(remote_store=remote_store),
         ]
-        if mode == "cli" :
+        if self.mode == "cli" :
             renderers.append(StdoutStderrRenderer(remote_store=remote_store))
         return renderers
 
@@ -319,6 +318,7 @@ class TraceMLRuntime:
         config.enable_logging = bool(self._settings.enable_logging)
         config.logs_dir = str(self._settings.logs_dir)
         config.session_id = self._settings.session_id or get_session_id()
+        self.mode = settings.mode
 
         setup_error_logger()
         self._logger = get_error_logger("TraceMLRuntime")
@@ -447,11 +447,12 @@ class TraceMLRuntime:
         2) start aggregator (rank0) so TCP server is listening
         3) start sampler thread
         """
-        _safe(
-            self._logger,
-            "Stdout/stderr capture enable failed",
-            StreamCapture.redirect_to_capture,
-        )
+        if self.mode == 'cli':
+            _safe(
+                self._logger,
+                "Stdout/stderr capture enable failed",
+                StreamCapture.redirect_to_capture,
+            )
 
         if self._aggregator is not None:
             self._aggregator.start()
@@ -486,11 +487,12 @@ class TraceMLRuntime:
         _safe(self._logger, "TCPClient.close failed", self._tcp_client.close)
 
         # restore stdout/stderr
-        _safe(
-            self._logger,
-            "Stdout/stderr restore failed",
-            StreamCapture.redirect_to_original,
-        )
+        if self.mode == 'cli':
+            _safe(
+                self._logger,
+                "Stdout/stderr restore failed",
+                StreamCapture.redirect_to_original,
+            )
 
     def log_summaries(self, path: Optional[str] = None) -> None:
         """

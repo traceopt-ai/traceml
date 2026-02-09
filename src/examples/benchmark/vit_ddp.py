@@ -15,7 +15,7 @@ from torchvision.models import vit_b_16
 # ============================================================
 # TraceML imports
 # ============================================================
-from traceml.decorators import trace_step, trace_time
+from traceml.decorators import trace_step
 
 # ============================================================
 # CONFIG
@@ -97,7 +97,6 @@ def prepare_dataloader(rank: int, world_size: int):
     return loader, sampler
 
 
-@trace_time("data_transfer", use_gpu=False)
 def load_batch_to_device(batch: Dict, device: torch.device):
     return {
         "images": batch["pixel_values"].to(device, non_blocking=True),
@@ -105,22 +104,21 @@ def load_batch_to_device(batch: Dict, device: torch.device):
     }
 
 
-@trace_time("forward", use_gpu=True)
 def forward_pass(model, images):
     return model(images)
 
 
-@trace_time("loss", use_gpu=True)
+
 def compute_loss(logits, labels):
     return torch.nn.functional.cross_entropy(logits, labels)
 
 
-@trace_time("backward", use_gpu=True)
+
 def backward_pass(loss, scaler: GradScaler):
     scaler.scale(loss).backward()
 
 
-@trace_time("optimizer_step", use_gpu=True)
+
 def optimizer_step(
     optimizer: torch.optim.Optimizer,
     scaler: GradScaler,

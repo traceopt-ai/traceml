@@ -47,7 +47,7 @@ def main():
 
     model = SimpleCNN().to(device)
 
-    # Attach model-level hooks (lightweight by default)
+    # Attach model-level hooks
     trace_model_instance(model)
 
     criterion = nn.CrossEntropyLoss()
