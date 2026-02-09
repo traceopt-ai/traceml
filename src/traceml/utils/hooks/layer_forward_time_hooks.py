@@ -35,6 +35,11 @@ from traceml.utils.shared_utils import get_hookable_modules
 # Shared queue (consumer-facing)
 layer_forward_time_queue: Queue = Queue(maxsize=4096)
 
+
+def get_layer_forward_time_queue() -> Queue:
+    return layer_forward_time_queue
+
+
 # Prevent double hook attachment
 _layer_forward_time_hook_registry: Dict[int, bool] = {}
 
@@ -196,7 +201,6 @@ class LayerForwardTimePostHook:
                 cpu_duration_ms=cpu_duration_ms,
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
-                step=-1,
             )
             _layer_forward_time_event_buffer.setdefault(
                 self.model_id, []
