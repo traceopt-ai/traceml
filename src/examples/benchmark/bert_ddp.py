@@ -25,8 +25,14 @@ from transformers import (
 #   Optional fine-grained timers for user-defined code sections
 from traceml.decorators import trace_model_instance, trace_step
 
+
+os.environ.setdefault("HF_HOME", "/tmp/hf")
+os.environ.setdefault("HF_DATASETS_CACHE", "/tmp/hf/datasets")
+os.environ.setdefault("TRANSFORMERS_CACHE", "/tmp/hf/transformers")
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
 SEED = 42
-MODEL_NAME = "bert-base-uncased"
+MODEL_NAME = "distilbert-base-uncased"
 # MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
@@ -65,8 +71,7 @@ def prepare_data(rank: int, world_size: int):
       - each rank sees a unique shard of the dataset
       - all samples are seen exactly once per epoch
     """
-
-    raw = load_dataset("fancyzhx/ag_news", revision="main")
+    raw = load_dataset("fancyzhx/ag_news")
 
     train_raw = raw["train"].select(
         range(min(MAX_TRAIN_EXAMPLES, len(raw["train"])))
@@ -180,6 +185,11 @@ def main():
         world_size=world_size,
     )
 
+    if rank == 0:
+        _ = load_dataset("fancyzhx/ag_news")  # no need revision="main"
+        _ = AutoTokenizer.from_pretrained(MODEL_NAME)
+        _ = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=4)
+    dist.barrier()
     # --------------------------------------------------------
     # Bind this process to ONE GPU
     # --------------------------------------------------------
