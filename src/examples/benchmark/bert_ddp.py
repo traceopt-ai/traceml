@@ -26,11 +26,11 @@ from transformers import (
 from traceml.decorators import trace_model_instance, trace_step
 
 SEED = 42
-# MODEL_NAME = "bert-base-uncased"
-MODEL_NAME = "prajjwal1/bert-mini"
+MODEL_NAME = "bert-base-uncased"
+# MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
-MAX_TRAIN_EXAMPLES = 1000
+MAX_TRAIN_EXAMPLES = 100000
 MAX_VAL_EXAMPLES = 0
 
 BATCH_SIZE = 16
