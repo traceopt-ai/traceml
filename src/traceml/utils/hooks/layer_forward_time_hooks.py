@@ -28,19 +28,12 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
-
-from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 from traceml.utils.shared_utils import model_is_on_cuda
+from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+from traceml.utils.shared_utils import get_hookable_modules
 
 # Shared queue (consumer-facing)
 layer_forward_time_queue: Queue = Queue(maxsize=4096)
-
-
-def get_layer_forward_time_queue() -> Queue:
-    return layer_forward_time_queue
-
-
-# Internal registries & buffers
 
 # Prevent double hook attachment
 _layer_forward_time_hook_registry: Dict[int, bool] = {}
@@ -103,7 +96,6 @@ class LayerForwardTimeEvent:
             self.gpu_start = None
             self.gpu_end = None
             self.resolved = True
-
         return self.resolved
 
 
@@ -204,6 +196,7 @@ class LayerForwardTimePostHook:
                 cpu_duration_ms=cpu_duration_ms,
                 gpu_start=gpu_start,
                 gpu_end=gpu_end,
+                step=-1,
             )
             _layer_forward_time_event_buffer.setdefault(
                 self.model_id, []
@@ -245,7 +238,12 @@ def flush_layer_forward_time_buffers(model: nn.Module, step: int) -> None:
         pass
 
 
-def attach_layer_forward_time_hooks(model: nn.Module):
+def attach_layer_forward_time_hooks(
+    model: nn.Module,
+    include_names=None,
+    exclude_names=None,
+    leaf_only=True
+):
     """
     Attach pre and post hooks for timing.
     """
@@ -255,9 +253,7 @@ def attach_layer_forward_time_hooks(model: nn.Module):
         return
 
     on_gpu = model_is_on_cuda(model)
-    for name, module in model.named_modules():
-        if any(module.children()):
-            continue
+    for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
 
         module.register_forward_pre_hook(
             LayerForwardTimePreHook(model_id, name, on_gpu=on_gpu)

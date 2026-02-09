@@ -17,8 +17,10 @@ Design principles
 
 import sys
 from dataclasses import dataclass
-from queue import Full, Queue
+from queue import Queue, Full
 from typing import Any, Dict, List, Tuple
+from traceml.utils.shared_utils import get_hookable_modules
+
 
 import torch
 import torch.nn as nn
@@ -186,7 +188,12 @@ def flush_layer_backward_memory_buffers(model: nn.Module, step: int) -> None:
         pass
 
 
-def attach_layer_backward_memory_hooks(model: nn.Module) -> None:
+def attach_layer_backward_memory_hooks(
+    model: nn.Module,
+    include_names=None,
+    exclude_names=None,
+    leaf_only=True
+) -> None:
     """
     Attach backward hooks to all leaf modules of a model.
 
@@ -203,10 +210,7 @@ def attach_layer_backward_memory_hooks(model: nn.Module) -> None:
         return
 
     try:
-        for name, module in model.named_modules():
-            # Only attach to leaf modules
-            if any(module.children()):
-                continue
+        for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
             # full backward hook works on module outputs
             module.register_full_backward_hook(
                 LayerBackwardModuleHook(model_id, name)

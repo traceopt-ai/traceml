@@ -1,8 +1,8 @@
 import functools
 import sys
 from contextlib import contextmanager
-from typing import Callable
 
+from typing import Callable, Optional, List
 import torch.nn as nn
 
 from traceml.utils.entry_hook import attach_execution_entry_hooks
@@ -115,6 +115,9 @@ def trace_model_instance(
     trace_layer_forward_time: bool = True,
     trace_layer_backward_time: bool = True,
     trace_execution: bool = True,
+    include_names: Optional[List[str]] = None,
+    exclude_names: Optional[List[str]] = None,
+    leaf_only: bool = True
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).
@@ -132,20 +135,43 @@ def trace_model_instance(
         if not isinstance(model, nn.Module):
             raise TypeError("trace_model_instance expects an nn.Module.")
         if sample_layer_memory:
+            model._traceml_include_names = include_names
+            model._traceml_exclude_names = exclude_names
+            model._traceml_leaf_only = leaf_only
             layer_memory = collect_layer_parameter_memory(model)
             model_queue.put(layer_memory)
 
         if trace_layer_forward_memory:
-            attach_layer_forward_memory_hooks(model)
+            attach_layer_forward_memory_hooks(
+                model,
+                include_names=include_names,
+                exclude_names=exclude_names,
+                leaf_only=leaf_only,
+            )
 
         if trace_layer_backward_memory:
-            attach_layer_backward_memory_hooks(model)
+            attach_layer_backward_memory_hooks(
+                model,
+                include_names=include_names,
+                exclude_names=exclude_names,
+                leaf_only=leaf_only,
+            )
 
         if trace_layer_forward_time:
-            attach_layer_forward_time_hooks(model)
+            attach_layer_forward_time_hooks(
+                model,
+                include_names=include_names,
+                exclude_names=exclude_names,
+                leaf_only=leaf_only,
+            )
 
         if trace_layer_backward_time:
-            attach_layer_backward_time_hooks(model)
+            attach_layer_backward_time_hooks(
+                model,
+                include_names=include_names,
+                exclude_names=exclude_names,
+                leaf_only=leaf_only,
+            )
 
         if trace_execution:
             attach_execution_entry_hooks(model)
