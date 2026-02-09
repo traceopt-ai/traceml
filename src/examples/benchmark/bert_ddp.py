@@ -26,11 +26,6 @@ from transformers import (
 from traceml.decorators import trace_model_instance, trace_step
 
 
-os.environ.setdefault("HF_HOME", "/tmp/hf")
-os.environ.setdefault("HF_DATASETS_CACHE", "/tmp/hf/datasets")
-os.environ.setdefault("TRANSFORMERS_CACHE", "/tmp/hf/transformers")
-os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
-
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
 # MODEL_NAME = "prajjwal1/bert-mini"
