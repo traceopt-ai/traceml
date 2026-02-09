@@ -179,12 +179,7 @@ def main():
         rank=rank,
         world_size=world_size,
     )
-
-    if rank == 0:
-        _ = load_dataset("fancyzhx/ag_news")  # no need revision="main"
-        _ = AutoTokenizer.from_pretrained(MODEL_NAME)
-        _ = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, num_labels=4)
-    dist.barrier()
+s
     # --------------------------------------------------------
     # Bind this process to ONE GPU
     # --------------------------------------------------------
