@@ -1,7 +1,7 @@
 import time
 
 from traceml.loggers.error_log import get_error_logger
-from traceml.utils.model_forward_memory_hook import (
+from traceml.utils.hooks.model_forward_memory_hook import (
     get_model_forward_memory_queue,
 )
 
