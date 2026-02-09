@@ -17,11 +17,34 @@ It surfaces **step-level, rank-aware** signals *while your job runs*, without tu
 
 If your run is healthy, TraceML should say so.
 
+---
 
-> **Status:
-> Focus: **single-node DDP** correctness, stable signals, and low overhead.  
-> Multi-node (DDP/FSDP) is planned.
+### Terminal dashboard (default)
 
+
+![TraceML terminal dashboard](cli_demo_v1.png)
+
+The terminal view updates **continuously during training** and shows:
+- Step time, dataloader fetch time, and GPU memory
+- Median vs worst rank (to spot imbalance / stragglers)
+- System signals (CPU, RAM, GPU) alongside training signals
+
+This is the primary interface, designed to stay open next to your training logs.
+
+### Web dashboard (optional)
+
+
+![TraceML web dashboard](web_demo_v1.png)
+
+The web dashboard mirrors the same signals in a browser:
+- Interactive charts over recent steps
+- Rank-aware comparisons
+- Useful for exploration and longer-running jobs
+
+The web UI is **read-only** and reflects exactly what TraceML computes during training.
+
+*Both views are driven by the same runtime signals and update live, step by step.*
+ 
 ---
 
 ## Why TraceML
@@ -34,7 +57,7 @@ Typical pain:
 - **OOMs and crashes** with little context for “where did it happen?”
 - Full profilers are powerful, but often too intrusive to keep enabled in real training
 
-TraceML is designed to be **always-on**: show the *minimum useful* truth during real runs.
+TraceML is designed to be **live**: show the *minimum useful* truth during real runs.
 
 ---
 
@@ -85,7 +108,7 @@ TraceML currently supports:
 
 TraceML provides two profiles so you can choose insight vs overhead.
 
-### ESSENTIAL (always-on)
+### ESSENTIAL (basic)
 Designed for continuous usage during real training.
 
 Tracks:
@@ -269,7 +292,6 @@ If TraceML helps your research, please cite:
 
 <div align="center">
 
-**TraceML — Stop guessing. Start attributing.**  
 Made with ❤️ by TraceOpt AI
 
 </div>
