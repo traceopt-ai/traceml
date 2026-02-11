@@ -63,6 +63,15 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
                     else:
                         _model = model
 
+                    logger.info(
+                        f"[TraceML] Attaching hooks to model type: {type(_model)}"
+                    )
+                    # debug: check named modules count
+                    count = len(list(_model.named_modules()))
+                    logger.info(
+                        f"[TraceML] Unwrapped model has {count} modules."
+                    )
+
                     trace_model_instance(_model, **self.traceml_kwargs)
                     self._traceml_hooks_attached = True
                     logger.info(
