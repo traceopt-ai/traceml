@@ -52,7 +52,6 @@ def test_hf_trainer_integration():
             )
 
         tokenized_datasets = dataset.map(tokenize_function, batched=True)
-        # Rename label column for HG compatibility if needed, though ag_news has 'label' which HF Trainer handles
 
         training_args = TrainingArguments(
             output_dir=str(output_dir),
