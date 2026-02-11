@@ -69,11 +69,11 @@ def test_hf_trainer_integration():
             traceml_enabled=True,
         )
 
-        # Capture stdout/stderr/logs? Or just check if it runs without error.
+        # Capture stdout/stderr/logs Or just check if it runs without error.
         # For now, just ensuring it completes without error is the primary goal.
         trainer.train()
 
-        # Verification: Check if TraceState.step incremented?
+        # Verification: Check if TraceState.step incremented
         # We can import TraceState to check global state
         from traceml.decorators import TraceState
 
