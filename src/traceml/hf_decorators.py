@@ -1,5 +1,4 @@
 import logging
-import sys
 from typing import Any, Dict, Optional
 
 from traceml.decorators import trace_model_instance, trace_step
@@ -64,31 +63,14 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
                     else:
                         _model = model
 
-                    print(
-                        f"[TraceML] Attaching hooks to model type: {type(_model)}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                    # debug: check named modules count
-                    count = len(list(_model.named_modules()))
-                    print(
-                        f"[TraceML] Unwrapped model has {count} modules.",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-
                     trace_model_instance(_model, **self.traceml_kwargs)
                     self._traceml_hooks_attached = True
-                    print(
-                        "[TraceML] Deep-Dive model tracing initialized (lazy).",
-                        file=sys.stderr,
-                        flush=True,
+                    logger.info(
+                        "[TraceML] Deep-Dive model tracing initialized (lazy)."
                     )
                 except Exception as e:
-                    print(
-                        f"[TraceML] Failed to initialize model tracing: {e}",
-                        file=sys.stderr,
-                        flush=True,
+                    logger.error(
+                        f"[TraceML] Failed to initialize model tracing: {e}"
                     )
 
             with trace_step(model):

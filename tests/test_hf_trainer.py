@@ -36,7 +36,7 @@ def test_hf_trainer_integration():
 
         # Load model and tokenizer
         model = AutoModelForSequenceClassification.from_pretrained(
-            model_name, num_labels=2
+            model_name, num_labels=4
         )
         tokenizer = AutoTokenizer.from_pretrained(model_name)
 
