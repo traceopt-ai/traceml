@@ -85,8 +85,10 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
                         flush=True,
                     )
                 except Exception as e:
-                    logger.error(
-                        f"[TraceML] Failed to initialize model tracing: {e}"
+                    print(
+                        f"[TraceML] Failed to initialize model tracing: {e}",
+                        file=sys.stderr,
+                        flush=True,
                     )
 
             with trace_step(model):
