@@ -40,6 +40,9 @@ dev = [
     "datasets",
     "transformers",
 ]
+hf = [
+    "transformers",
+]
 
 [tool.isort]
 profile = "black"
