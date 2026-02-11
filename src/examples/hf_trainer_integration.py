@@ -17,9 +17,9 @@ def main():
     # Configuration
     model_name = "prajjwal1/bert-mini"
     dataset_name = "ag_news"
-    batch_size = 8
-    num_train_epochs = 1
-    max_steps = 100  # Run longer to see live updates
+    batch_size = 32
+    num_train_epochs = 3
+    # max_steps = 100  # Let epochs control duration
 
     output_dir = "./hf_trainer_output"
     os.makedirs(output_dir, exist_ok=True)
@@ -38,8 +38,8 @@ def main():
     # Load Dataset
     print(f"Loading dataset: {dataset_name}")
     raw_dataset = load_dataset(
-        dataset_name, split="train[:500]"
-    )  # Larger subset
+        dataset_name, split="train[:2000]"
+    )  # Larger subset for multi-epoch run
 
     def tokenize_function(examples):
         return tokenizer(
@@ -57,8 +57,7 @@ def main():
         output_dir=output_dir,
         per_device_train_batch_size=batch_size,
         num_train_epochs=num_train_epochs,
-        max_steps=max_steps,
-        logging_steps=5,
+        logging_steps=10,
         save_strategy="no",
         use_cpu=(device == "cpu"),
         report_to="none",  # Disable wandb etc for this demo
