@@ -49,12 +49,12 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
                     f"[TraceML] Failed to initialize model tracing: {e}"
                 )
 
-    def training_step(self, model, inputs) -> Any:
+    def training_step(self, model, inputs, *args, **kwargs) -> Any:
         """
         Overridden training step to include TraceML instrumentation.
         """
         if self.traceml_enabled:
             with trace_step(model):
-                return super().training_step(model, inputs)
+                return super().training_step(model, inputs, *args, **kwargs)
 
-        return super().training_step(model, inputs)
+        return super().training_step(model, inputs, *args, **kwargs)
