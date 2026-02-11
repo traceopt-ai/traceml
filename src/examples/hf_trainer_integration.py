@@ -19,7 +19,7 @@ def main():
     dataset_name = "ag_news"
     batch_size = 8
     num_train_epochs = 1
-    max_steps = 20  # Keep it short for demo
+    max_steps = 100  # Run longer to see live updates
 
     output_dir = "./hf_trainer_output"
     os.makedirs(output_dir, exist_ok=True)
@@ -38,8 +38,8 @@ def main():
     # Load Dataset
     print(f"Loading dataset: {dataset_name}")
     raw_dataset = load_dataset(
-        dataset_name, split="train[:100]"
-    )  # Small subset
+        dataset_name, split="train[:500]"
+    )  # Larger subset
 
     def tokenize_function(examples):
         return tokenizer(
@@ -65,12 +65,17 @@ def main():
     )
 
     # Initialize TraceMLTrainer
-    print("Initializing TraceMLTrainer...")
+    print("Initializing TraceMLTrainer with Deep-Dive enabled...")
     trainer = TraceMLTrainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset,
         traceml_enabled=True,
+        traceml_kwargs={
+            "trace_layer_memory": True,
+            "trace_layer_forward_time": True,
+            "trace_layer_backward_time": True,
+        },
     )
 
     # Train
