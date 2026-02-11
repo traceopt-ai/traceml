@@ -133,6 +133,12 @@ Includes everything in ESSENTIAL, plus:
 pip install traceml-ai
 ```
 
+To include Hugging Face integration:
+
+```bash
+pip install "traceml-ai[hf]"
+```
+
 For development:
 
 ```bash
