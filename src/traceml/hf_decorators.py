@@ -55,7 +55,15 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
                 and self.traceml_kwargs is not None
             ):
                 try:
-                    trace_model_instance(model, **self.traceml_kwargs)
+                    # Unwrap model to ensure clean layer names and avoid DDP/FSDP wrapping issues
+                    if HAS_TRANSFORMERS:
+                        from transformers.modeling_utils import unwrap_model
+
+                        _model = unwrap_model(model)
+                    else:
+                        _model = model
+
+                    trace_model_instance(_model, **self.traceml_kwargs)
                     self._traceml_hooks_attached = True
                     logger.info(
                         "[TraceML] Deep-Dive model tracing initialized "
