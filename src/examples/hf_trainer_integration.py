@@ -21,7 +21,7 @@ def main():
     num_train_epochs = 3
     # max_steps = 100  # Let epochs control duration
 
-    output_dir = "./hf_trainer_output"
+    output_dir = "./logs/hf_trainer_output"
     os.makedirs(output_dir, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

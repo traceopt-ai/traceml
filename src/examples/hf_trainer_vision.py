@@ -27,7 +27,7 @@ def main():
     batch_size = 16  # ViT is heavier
     num_train_epochs = 1
 
-    output_dir = "./hf_trainer_vision_output"
+    output_dir = "./logs/hf_trainer_vision_output"
     os.makedirs(output_dir, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -90,14 +90,6 @@ def main():
         train_dataset=dataset,
         data_collator=DefaultDataCollator(),
         traceml_enabled=True,
-        traceml_kwargs={
-            "sample_layer_memory": True,
-            "trace_layer_forward_memory": True,
-            "trace_layer_forward_time": True,
-            "trace_layer_backward_time": True,
-            # Explicitly include layer names to be sure?
-            # "include_names": ["vit.encoder.layer"],
-        },
     )
 
     # Train
