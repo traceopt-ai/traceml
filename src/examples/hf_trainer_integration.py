@@ -72,7 +72,8 @@ def main():
         train_dataset=tokenized_dataset,
         traceml_enabled=True,
         traceml_kwargs={
-            "trace_layer_memory": True,
+            "sample_layer_memory": True,
+            "trace_layer_forward_memory": True,
             "trace_layer_forward_time": True,
             "trace_layer_backward_time": True,
         },
