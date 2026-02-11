@@ -61,6 +61,7 @@ def main():
         save_strategy="no",
         use_cpu=(device == "cpu"),
         report_to="none",  # Disable wandb etc for this demo
+        disable_tqdm=True,  # Disable TQDM to allow TraceML dashboard to own the terminal
     )
 
     # Initialize TraceMLTrainer
