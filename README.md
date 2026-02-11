@@ -255,7 +255,7 @@ trainer = TraceMLTrainer(
     eval_dataset=eval_ds,
     traceml_enabled=True,          # optional (default True)
     # optional: deep-dive model instrumentation
-    traceml_kwargs={"trace_layer_memory": True}
+    traceml_kwargs={"sample_layer_memory": True}
 )
 
 trainer.train()
