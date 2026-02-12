@@ -50,20 +50,13 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         if self.traceml_enabled:
             # Lazily attach hooks on the first step to ensure we catch the
             # final wrapped/moved model (e.g. DDP, Accelerator)
-            if (
+            if self.traceml_kwargs is not None and (
                 not self._traceml_hooks_attached
-                and self.traceml_kwargs is not None
+                or id(model) != getattr(self, "_attached_model_id", None)
             ):
                 try:
-                    # Unwrap model to ensure clean layer names and avoid DDP/FSDP wrapping issues
-                    if HAS_TRANSFORMERS:
-                        from transformers.modeling_utils import unwrap_model
-
-                        _model = unwrap_model(model)
-                    else:
-                        _model = model
-
-                    trace_model_instance(_model, **self.traceml_kwargs)
+                    trace_model_instance(model, **self.traceml_kwargs)
+                    self._attached_model_id = id(model)
                     self._traceml_hooks_attached = True
                     logger.info(
                         "[TraceML] Deep-Dive model tracing initialized (lazy)."

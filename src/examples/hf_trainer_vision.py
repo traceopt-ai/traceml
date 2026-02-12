@@ -95,8 +95,6 @@ def main():
             "trace_layer_forward_memory": True,
             "trace_layer_forward_time": True,
             "trace_layer_backward_time": True,
-            # Explicitly include layer names to be sure?
-            # "include_names": ["vit.encoder.layer"],
         },
     )
 
