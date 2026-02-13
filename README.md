@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 
 TraceML is a lightweight **runtime observability** tool for **PyTorch DDP training** (currently on **single-node Multi-GPU)**.
-It surfaces **step-level, rank-aware** signals *while your job runs*, without turning on heavy profilers. It answers 
+It surfaces **step-level, rank-aware** signals *while your job runs*, without turning on heavy profilers. It answers
 
 > “What’s happening inside my training step right now — and is a particular rank behaving worse than the rest?”
 
@@ -44,7 +44,7 @@ The web dashboard mirrors the same signals in a browser:
 The web UI is **read-only** and reflects exactly what TraceML computes during training.
 
 *Both views are driven by the same runtime signals and update live, step by step.*
- 
+
 ---
 
 ## Why TraceML
@@ -77,7 +77,7 @@ This helps you spot **rank imbalance / straggler-like behavior** early.
 
 ### Lightweight failure attribution (Deep-Dive)
 In Deep-Dive mode, TraceML installs **model hooks** to give more context around failures:
-- Show per-layer memory and timing usage (worst across all ranks) 
+- Show per-layer memory and timing usage (worst across all ranks)
 - Helps identify **where** an OOM/crash happened (forward/backward region and the most suspicious layer signals)
 - Experimental and evolving — meant to be a practical debugging aid, not a formal profiler
 
@@ -133,6 +133,12 @@ Includes everything in ESSENTIAL, plus:
 pip install traceml-ai
 ```
 
+To include Hugging Face integration:
+
+```bash
+pip install "traceml-ai[hf]"
+```
+
 For development:
 
 ```bash
@@ -142,8 +148,8 @@ pip install -e '.[dev]'
 pre-commit install
 ```
 
-**Requirements:** Python 3.9–3.13, PyTorch 1.12+  
-**Platform:** macOS (Intel/ARM), Linux  
+**Requirements:** Python 3.9–3.13, PyTorch 1.12+
+**Platform:** macOS (Intel/ARM), Linux
 **Training support:** Single GPU + **single-node DDP **
 
 ---
@@ -185,7 +191,7 @@ Use this **together with** `trace_step(model)` to enable hook-based deep signals
 - layer-level memory/timing
 - experimental failure attribution
 
-> `@trace_time` / region user timers is removed for now.  
+> `@trace_time` / region user timers is removed for now.
 > TraceML is focusing on step-level semantics + optional Deep-Dive hooks.
 
 ---
@@ -233,6 +239,35 @@ Later:
 - **TP / PP**: multi-process-group + mesh/stage-aware attribution
 
 
+
+
+---
+
+## Hugging Face Integration
+
+TraceML provides a seamless integration with Hugging Face `transformers` via `TraceMLTrainer`.
+
+### Usage
+
+Simply replace `transformers.Trainer` with `traceml.hf_decorators.TraceMLTrainer`.
+
+```python
+from traceml.hf_decorators import TraceMLTrainer
+
+trainer = TraceMLTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_ds,
+    eval_dataset=eval_ds,
+    traceml_enabled=True,          # optional (default True)
+    # optional: deep-dive model instrumentation
+    traceml_kwargs={"sample_layer_memory": True}
+)
+
+trainer.train()
+```
+
+This automatically wraps each training step with `trace_step()`, capturing all step-level signals without any manual loop modifications.
 
 ---
 
