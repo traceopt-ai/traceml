@@ -124,7 +124,7 @@ def main():
     model = torchvision.models.resnet50(num_classes=10).to(device)
 
     # Attach TraceML BEFORE DDP
-    trace_model_instance(model)
+    # trace_model_instance(model)
 
     model = torch.nn.parallel.DistributedDataParallel(
         model,
