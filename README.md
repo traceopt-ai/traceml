@@ -196,6 +196,35 @@ Use this **together with** `trace_step(model)` to enable hook-based deep signals
 
 ---
 
+## Hugging Face Integration
+
+TraceML provides a seamless integration with Hugging Face `transformers` via `TraceMLTrainer`.
+
+### Usage
+
+Simply replace `transformers.Trainer` with `traceml.hf_decorators.TraceMLTrainer`.
+
+```python
+from traceml.hf_decorators import TraceMLTrainer
+
+trainer = TraceMLTrainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_ds,
+    eval_dataset=eval_ds,
+    traceml_enabled=True,          # optional (default True)
+    # optional: deep-dive model instrumentation
+    traceml_kwargs={"sample_layer_memory": True}
+)
+
+trainer.train()
+```
+
+This automatically wraps each training step with `trace_step()`, capturing all step-level signals without any manual loop modifications.
+
+---
+
+
 ## Running TraceML
 
 ```bash
@@ -239,35 +268,6 @@ Later:
 - **TP / PP**: multi-process-group + mesh/stage-aware attribution
 
 
-
-
----
-
-## Hugging Face Integration
-
-TraceML provides a seamless integration with Hugging Face `transformers` via `TraceMLTrainer`.
-
-### Usage
-
-Simply replace `transformers.Trainer` with `traceml.hf_decorators.TraceMLTrainer`.
-
-```python
-from traceml.hf_decorators import TraceMLTrainer
-
-trainer = TraceMLTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_ds,
-    eval_dataset=eval_ds,
-    traceml_enabled=True,          # optional (default True)
-    # optional: deep-dive model instrumentation
-    traceml_kwargs={"sample_layer_memory": True}
-)
-
-trainer.train()
-```
-
-This automatically wraps each training step with `trace_step()`, capturing all step-level signals without any manual loop modifications.
 
 ---
 
