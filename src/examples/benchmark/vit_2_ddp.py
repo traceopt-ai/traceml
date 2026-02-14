@@ -15,7 +15,7 @@ from torchvision.models import vit_l_16  # <-- heavier model
 # ============================================================
 # TraceML imports
 # ============================================================
-from traceml.decorators import trace_step
+# from traceml.decorators import trace_step
 
 # ============================================================
 # CONFIG (TUNE THESE FOR MEMORY WALL)
@@ -179,16 +179,16 @@ def main():
             if global_step >= MAX_STEPS:
                 break
 
-            with trace_step(model.module):
+            # with trace_step(model.module):
 
-                batch = load_batch_to_device(batch, device)
+            batch = load_batch_to_device(batch, device)
 
-                with autocast(dtype=torch.float16):
-                    logits = forward_pass(model, batch["images"])
-                    loss = compute_loss(logits, batch["labels"])
+            with autocast(dtype=torch.float16):
+                logits = forward_pass(model, batch["images"])
+                loss = compute_loss(logits, batch["labels"])
 
-                backward_pass(loss, scaler)
-                optimizer_step(optimizer, scaler)
+            backward_pass(loss, scaler)
+            optimizer_step(optimizer, scaler)
 
             global_step += 1
 
