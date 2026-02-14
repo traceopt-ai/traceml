@@ -22,7 +22,7 @@ from traceml.decorators import trace_step
 # ============================================================
 SEED = 42
 
-IMAGE_SIZE = 224         # 224 → 384 → 448 (push this)
+IMAGE_SIZE = 384        # 224 → 384 → 448 (push this)
 PER_GPU_BATCH = 16        # increase until ~45GB peak
 NUM_WORKERS = 8
 
@@ -47,12 +47,12 @@ def set_seed(seed: int):
 # ============================================================
 def prepare_dataloader(rank: int, world_size: int):
 
-    if rank == 0:
-        load_dataset(
-            "ljnlonoljpiljm/places365-256px",
-            split="train[:20%]"
-        )
-    dist.barrier()
+    # if rank == 0:
+    #     load_dataset(
+    #         "ljnlonoljpiljm/places365-256px",
+    #         split="train[:20%]"
+    #     )
+    # dist.barrier()
 
     dataset = load_dataset(
         "ljnlonoljpiljm/places365-256px",
