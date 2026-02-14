@@ -111,7 +111,7 @@ def define_pages(cls):
                 )
 
         # background update loop
-        ui.timer(0.2, cls._ui_update_loop)
+        ui.timer(0.9, cls._ui_update_loop)
         cls._ui_ready = True
 
     @ui.page("/layers")
