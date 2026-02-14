@@ -24,7 +24,7 @@ SEED = 42
 
 IMAGE_SIZE = 384        # 224 → 384 → 448 (push this)
 PER_GPU_BATCH = 16        # increase until ~45GB peak
-NUM_WORKERS = 8
+NUM_WORKERS = 2
 
 LR = 3e-4
 WEIGHT_DECAY = 0.05
