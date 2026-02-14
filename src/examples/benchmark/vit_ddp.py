@@ -23,8 +23,8 @@ from traceml.decorators import trace_step
 SEED = 42
 IMAGE_SIZE = 224
 
-PER_GPU_BATCH = 192
-NUM_WORKERS = 2
+PER_GPU_BATCH = 256
+NUM_WORKERS = 4
 
 LR = 3e-4
 WEIGHT_DECAY = 0.05
@@ -55,18 +55,23 @@ def prepare_dataloader(rank: int, world_size: int):
         "ljnlonoljpiljm/places365-256px", split="train[:20%]"
     )
 
-    transform = transforms.Compose(
-        [
-            transforms.Resize(256),
-            transforms.RandomResizedCrop(IMAGE_SIZE),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=(0.485, 0.456, 0.406),
-                std=(0.229, 0.224, 0.225),
-            ),
-        ]
-    )
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.RandomResizedCrop(IMAGE_SIZE),
+        transforms.RandomHorizontalFlip(),
+
+        # heavy + variable-cost CPU ops
+        transforms.ColorJitter(0.4, 0.4, 0.4, 0.1),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.485, 0.456, 0.406),
+                             std=(0.229, 0.224, 0.225)),
+
+        # expensive sometimes
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3)),
+    ])
 
     def preprocess(batch):
         images = [transform(img.convert("RGB")) for img in batch["image"]]
