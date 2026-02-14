@@ -23,8 +23,8 @@ from traceml.decorators import trace_step
 SEED = 42
 IMAGE_SIZE = 224
 
-PER_GPU_BATCH = 256
-NUM_WORKERS = 4
+PER_GPU_BATCH = 64
+NUM_WORKERS = 8
 
 LR = 3e-4
 WEIGHT_DECAY = 0.05
