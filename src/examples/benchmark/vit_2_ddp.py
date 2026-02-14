@@ -22,7 +22,7 @@ from torchvision.models import vit_l_16  # <-- heavier model
 # ============================================================
 SEED = 42
 
-IMAGE_SIZE = 384        # 224 → 384 → 448 (push this)
+IMAGE_SIZE = 224     
 PER_GPU_BATCH = 16        # increase until ~45GB peak
 NUM_WORKERS = 2
 
