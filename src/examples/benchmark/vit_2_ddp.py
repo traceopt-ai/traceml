@@ -23,7 +23,7 @@ from traceml.decorators import trace_step
 SEED = 42
 
 IMAGE_SIZE = 224     
-PER_GPU_BATCH = 16        # increase until ~45GB peak
+PER_GPU_BATCH = 32        # increase until ~45GB peak
 NUM_WORKERS = 2
 
 LR = 3e-4
