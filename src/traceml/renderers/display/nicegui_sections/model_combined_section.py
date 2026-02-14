@@ -226,9 +226,11 @@ def _render_stats_block(
         opt.summary.skew_pct,
     )
 
+    step_median = step.summary.median_total or 0.0
+
     wait_share = (
-        wait.summary.median_total / step.summary.median_total
-        if step.summary.median_total > 0
+        wait.summary.median_total / step_median
+        if step_median > 0
         else 0.0
     )
 

@@ -106,7 +106,7 @@ def prepare_dataloader(rank: int, world_size: int):
 # ============================================================
 def load_batch_to_device(batch: Dict, device: torch.device):
     return {
-        "images": torch.stack(batch["pixel_values"]).to(device, non_blocking=True),
+        "images": batch["pixel_values"].to(device, non_blocking=True),
         "labels": torch.tensor(batch["labels"]).to(device, non_blocking=True),
     }
 
