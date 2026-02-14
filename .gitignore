@@ -8,3 +8,26 @@ env.bak/
 venv.bak/
 
 src/traceml_ai.egg-info/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Data / logs
+data/
+logs/
+dist/
+mnist/
+bert_agnews_ddp/
+distilbert_agnews_full/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+.DS_Store
+.idea/
