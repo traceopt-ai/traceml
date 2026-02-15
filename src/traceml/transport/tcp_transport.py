@@ -129,6 +129,8 @@ class TCPServer:
                     try:
                         msg = decoder.decode(payload)
                         self._queue.put_nowait(msg)
+                    except queue.Full:
+                        pass  # drop on overflow
                     except Exception:
                         continue  # corrupted frame
         finally:
