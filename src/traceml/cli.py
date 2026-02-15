@@ -1,9 +1,12 @@
 import argparse
+import json
 import os
 import signal
 import subprocess
 import sys
 from pathlib import Path
+
+import msgspec
 
 from traceml.runtime.session import get_session_id
 
@@ -115,6 +118,25 @@ def run_with_tracing(args):
     launch_tracer_process(script_path=script_path, args=args)
 
 
+def run_inspect(args):
+    """Decodes and prints binary logs for debugging."""
+    path = Path(args.file)
+    if not path.exists():
+        print(f"Error: File '{args.file}' not found.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(path, "rb") as f:
+        # read() the whole file or stream via msgspec.msgpack.decode_all
+        try:
+            data = f.read()
+            # Decodes multiple concatenated MessagePack messages into a list
+            records = msgspec.msgpack.decode_all(data)
+            for r in records:
+                print(json.dumps(r, indent=2))
+        except Exception as e:
+            print(f"Error decoding {path.name}: {e}", file=sys.stderr)
+
+
 def build_parser():
     parser = argparse.ArgumentParser("traceml")
 
@@ -162,6 +184,10 @@ def build_parser():
     )
 
     run_parser.add_argument("--args", nargs=argparse.REMAINDER)
+    inspect_parser = sub.add_parser(
+        "inspect", help="Inspect binary .msgpack logs"
+    )
+    inspect_parser.add_argument("file", help="Path to a .msgpack file")
 
     return parser
 
@@ -172,6 +198,8 @@ def main():
 
     if args.command == "run":
         run_with_tracing(args)
+    elif args.command == "inspect":
+        run_inspect(args)
     else:
         parser.print_help()
 

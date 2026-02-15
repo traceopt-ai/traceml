@@ -39,6 +39,7 @@ dev = [
     "pytest>=8.0.0",
     "datasets",
     "transformers",
+    "msgspec",
 ]
 hf = [
     "transformers",

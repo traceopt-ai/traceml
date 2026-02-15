@@ -1,6 +1,7 @@
-import json
 from pathlib import Path
 from typing import Any, Dict
+
+import msgspec
 
 from traceml.runtime.config import config
 from traceml.runtime.session import get_session_id
@@ -74,6 +75,7 @@ class DatabaseWriter:
         # Tracks the *last written record object* per table.
         # Used instead of positional offsets because deques may evict data.
         self._last_written_record: Dict[str, Any] = {}
+        self.encoder = msgspec.msgpack.Encoder()
 
     def flush(self):
         """
@@ -98,7 +100,7 @@ class DatabaseWriter:
             if not rows:
                 continue
 
-            path = self.logs_dir / f"{table_name}.jsonl"
+            path = self.logs_dir / f"{table_name}.msgpack"
             last_written = self._last_written_record.get(table_name)
 
             # Collect unseen rows by scanning from the tail backwards.
@@ -114,9 +116,9 @@ class DatabaseWriter:
             # Restore original order before writing
             new_rows.reverse()
 
-            with open(path, "a") as f:
+            with open(path, "ab") as f:
                 for r in new_rows:
-                    f.write(json.dumps(r) + "\n")
+                    f.write(self.encoder.encode(r))
 
             # Track the newest record we just wrote
             self._last_written_record[table_name] = new_rows[-1]
