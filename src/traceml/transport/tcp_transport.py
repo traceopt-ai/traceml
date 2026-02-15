@@ -1,10 +1,11 @@
-import pickle
 import queue
 import socket
 import struct
 import threading
 from dataclasses import dataclass
 from typing import Dict, Iterator, Optional
+
+import msgspec
 
 from traceml.loggers.error_log import get_error_logger
 
@@ -23,7 +24,7 @@ class TCPServer:
 
     Design:
       - One background thread handles accept + recv
-      - Messages are newline-delimited JSON (NDJSON)
+      - Messages are length-prefixed MessagePack frames
       - poll() is non-blocking and safe to call from runtime thread
     """
 
@@ -109,6 +110,7 @@ class TCPServer:
     def _handle_client(self, conn: socket.socket) -> None:
         buffer = b""
         expected: Optional[int] = None
+        decoder = msgspec.msgpack.Decoder()
 
         try:
             while not self._stop_event.is_set():
@@ -125,14 +127,12 @@ class TCPServer:
                 frames, buffer, expected = self._drain_frames(buffer, expected)
                 for payload in frames:
                     try:
-                        msg = pickle.loads(payload)
-                    except Exception:
-                        continue  # corrupted frame
-
-                    try:
+                        msg = decoder.decode(payload)
                         self._queue.put_nowait(msg)
                     except queue.Full:
                         pass  # drop on overflow
+                    except Exception:
+                        continue  # corrupted frame
         finally:
             try:
                 conn.close()
@@ -160,13 +160,12 @@ class TCPClient:
 
     def send(self, payload: Dict) -> None:
         """
-        Send a single JSON message (newline-delimited).
-
-        Best-effort: silently drops on failure.
+        Send a single message using msgspec.msgpack.
         """
         try:
             self._ensure_connected()
-            data = pickle.dumps(payload, protocol=pickle.HIGHEST_PROTOCOL)
+            # Encode dict to binary MessagePack
+            data = msgspec.msgpack.encode(payload)
             header = struct.pack("!I", len(data))
             with self._lock:
                 self._sock.sendall(header + data)
