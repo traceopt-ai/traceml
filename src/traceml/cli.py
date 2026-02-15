@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import signal
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -119,20 +120,29 @@ def run_with_tracing(args):
 
 
 def run_inspect(args):
-    """Decodes and prints binary logs for debugging."""
+    """Decodes and prints binary .msgpack logs for debugging."""
     path = Path(args.file)
     if not path.exists():
         print(f"Error: File '{args.file}' not found.", file=sys.stderr)
         sys.exit(1)
 
+    decoder = msgspec.msgpack.Decoder()
     with open(path, "rb") as f:
-        # read() the whole file or stream via msgspec.msgpack.decode_all
         try:
-            data = f.read()
-            # Decodes multiple concatenated MessagePack messages into a list
-            records = msgspec.msgpack.decode_all(data)
-            for r in records:
-                print(json.dumps(r, indent=2))
+            while True:
+                header = f.read(4)
+                if not header:
+                    break
+                if len(header) < 4:
+                    print("Warning: truncated frame header", file=sys.stderr)
+                    break
+                length = struct.unpack("!I", header)[0]
+                payload = f.read(length)
+                if len(payload) < length:
+                    print("Warning: truncated frame payload", file=sys.stderr)
+                    break
+                record = decoder.decode(payload)
+                print(json.dumps(record, indent=2))
         except Exception as e:
             print(f"Error decoding {path.name}: {e}", file=sys.stderr)
 

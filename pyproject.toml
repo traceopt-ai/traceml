@@ -24,8 +24,8 @@ dependencies = [
     "ipython>=7.0.0",
     "ipywidgets>=7.5.0",
     "nicegui",
-    "plotly"
-
+    "plotly",
+    "msgspec",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +39,6 @@ dev = [
     "pytest>=8.0.0",
     "datasets",
     "transformers",
-    "msgspec",
 ]
 hf = [
     "transformers",

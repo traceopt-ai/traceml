@@ -24,7 +24,7 @@ class TCPServer:
 
     Design:
       - One background thread handles accept + recv
-      - Messages are newline-delimited JSON (NDJSON)
+      - Messages are length-prefixed MessagePack frames
       - poll() is non-blocking and safe to call from runtime thread
     """
 

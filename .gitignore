@@ -1,10 +1,58 @@
-# Environments
-.env
-.venv
+
+# Virtual Environments
+
+.env/
+.venv/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
 
+
+# Python cache / compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+
+# Distribution / packaging
+
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
 src/traceml_ai.egg-info/
+
+
+# Test / coverage
+
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.tox/
+.mypy_cache/
+
+
+# IDE / Editor
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+
+# OS files
+
+.DS_Store
+Thumbs.db
+
+
+# Jupyter
+
+.ipynb_checkpoints/
