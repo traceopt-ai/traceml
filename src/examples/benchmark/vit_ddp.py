@@ -5,7 +5,7 @@ from typing import Dict
 
 import torch
 import torch.distributed as dist
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from torch.cuda.amp import GradScaler, autocast
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, DistributedSampler
@@ -44,16 +44,22 @@ def prepare_dataloader(rank: int, world_size: int):
     ImageWoof: public, ImageNet-derived, realistic.
     No auth required.
     """
-    if rank == 0:
-        dataset = load_dataset(
-            "ljnlonoljpiljm/places365-256px", split="train[:20%]"
-        )
-    dist.barrier()  # wait until download finishes
+    # if rank == 0:
+    #     dataset = load_dataset(
+    #         "ljnlonoljpiljm/places365-256px", split="train[:20%]"
+    #     )
+    #
+    #     dataset.save_to_disk("/workspace/traceml/data/places365_20pct")
+    #
+    # dist.barrier()  # wait until download finishes
+    #
+    # # now all ranks load from cache
+    # dataset = load_dataset(
+    #     "ljnlonoljpiljm/places365-256px", split="train[:20%]"
+    # )
 
-    # now all ranks load from cache
-    dataset = load_dataset(
-        "ljnlonoljpiljm/places365-256px", split="train[:20%]"
-    )
+    DATA_PATH = "/workspace/traceml/data/places365_20pct"
+    dataset = load_from_disk(DATA_PATH)
 
     transform = transforms.Compose([
         transforms.Resize(256),
@@ -63,14 +69,14 @@ def prepare_dataloader(rank: int, world_size: int):
         # heavy + variable-cost CPU ops
         transforms.ColorJitter(0.4, 0.4, 0.4, 0.1),
         transforms.RandomGrayscale(p=0.2),
-        transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+        # transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
 
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.485, 0.456, 0.406),
                              std=(0.229, 0.224, 0.225)),
 
-        # expensive sometimes
-        transforms.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3)),
+        # # expensive sometimes
+        # transforms.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3)),
     ])
 
     def preprocess(batch):
