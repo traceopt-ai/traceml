@@ -23,7 +23,7 @@ from traceml.decorators import trace_step
 SEED = 42
 IMAGE_SIZE = 224
 
-PER_GPU_BATCH = 256
+PER_GPU_BATCH = 64
 NUM_WORKERS = 4
 
 LR = 3e-4
@@ -102,7 +102,7 @@ def prepare_dataloader(rank: int, world_size: int):
         sampler=sampler,
         num_workers=NUM_WORKERS,
         pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=False,
     )
 
     return loader, sampler
