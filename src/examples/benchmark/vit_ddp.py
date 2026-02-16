@@ -44,22 +44,19 @@ def prepare_dataloader(rank: int, world_size: int):
     ImageWoof: public, ImageNet-derived, realistic.
     No auth required.
     """
-    # if rank == 0:
-    #     dataset = load_dataset(
-    #         "ljnlonoljpiljm/places365-256px", split="train[:20%]"
-    #     )
-    #
-    #     dataset.save_to_disk("/workspace/traceml/places365_20pct")
-    #
-    # dist.barrier()  # wait until download finishes
-    #
-    # # now all ranks load from cache
-    # dataset = load_dataset(
-    #     "ljnlonoljpiljm/places365-256px", split="train[:20%]"
-    # )
+    if rank == 0:
+        dataset = load_dataset(
+            "ljnlonoljpiljm/places365-256px", split="train[:20%]"
+        )
 
-    DATA_PATH = "/workspace/traceml/places365_20pct"
-    dataset = load_from_disk(DATA_PATH)
+        dataset.save_to_disk("/workspace/traceml/places365_20pct")
+
+    dist.barrier()  # wait until download finishes
+
+    # now all ranks load from cache
+    dataset = load_dataset(
+        "ljnlonoljpiljm/places365-256px", split="train[:20%]"
+    )
 
     transform = transforms.Compose([
         transforms.Resize(256),
@@ -196,7 +193,7 @@ def main():
             # TraceML: ONE logical training step
             # ------------------------------------------------
             with trace_step(model.module):
-
+                print("step", global_step)
                 batch = load_batch_to_device(batch, device)
 
                 with autocast(dtype=torch.float16):
