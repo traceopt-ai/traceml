@@ -58,7 +58,7 @@ def prepare_dataloader(rank: int, world_size: int):
     #     "ljnlonoljpiljm/places365-256px", split="train[:20%]"
     # )
 
-    DATA_PATH = "/workspace/traceml/data/places365_20pct"
+    DATA_PATH = "/workspace/traceml/places365_20pct"
     dataset = load_from_disk(DATA_PATH)
 
     transform = transforms.Compose([
