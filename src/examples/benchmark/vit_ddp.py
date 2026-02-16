@@ -144,7 +144,7 @@ def main():
     local_rank = int(os.environ["LOCAL_RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
 
-    torch.cuda.set_device(local_rank)
+    # torch.cuda.set_device(local_rank)
     device = torch.device("cuda", local_rank)
 
     dist.init_process_group("nccl")
