@@ -44,22 +44,22 @@ def prepare_dataloader(rank: int, world_size: int):
     ImageWoof: public, ImageNet-derived, realistic.
     No auth required.
     """
-    if rank == 0:
-        dataset = load_dataset(
-            "ljnlonoljpiljm/places365-256px", split="train[:20%]"
-        )
+    # if rank == 0:
+    #     dataset = load_dataset(
+    #         "ljnlonoljpiljm/places365-256px", split="train[:20%]"
+    #     )
+    #
+    #     dataset.save_to_disk("/workspace/traceml/places365_20pct")
+    #
+    # dist.barrier()  # wait until download finishes
+    #
+    # # now all ranks load from cache
+    # dataset = load_dataset(
+    #     "ljnlonoljpiljm/places365-256px", split="train[:20%]"
+    # )
 
-        dataset.save_to_disk("/workspace/traceml/places365_20pct")
-
-    dist.barrier()  # wait until download finishes
-
-    # now all ranks load from cache
-    dataset = load_dataset(
-        "ljnlonoljpiljm/places365-256px", split="train[:20%]"
-    )
-
-    # DATA_PATH = "/workspace/traceml/data/places365_20pct"
-    # dataset = load_from_disk(DATA_PATH)
+    DATA_PATH = "/workspace/traceml/data/places365_20pct"
+    dataset = load_from_disk(DATA_PATH)
 
     transform = transforms.Compose([
         transforms.Resize(256),
