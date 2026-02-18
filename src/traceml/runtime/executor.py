@@ -55,8 +55,6 @@ def read_traceml_env():
         "num_display_layers": int(
             os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
         ),
-        "enable_ddp_telemetry": os.environ.get("TRACEML_DDP_TELEMETRY", "1")
-        == "1",
         "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
         "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
         "remote_max_rows": int(
