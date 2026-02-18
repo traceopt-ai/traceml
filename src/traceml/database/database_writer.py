@@ -1,6 +1,8 @@
-import json
+import struct
 from pathlib import Path
 from typing import Any, Dict
+
+import msgspec
 
 from traceml.runtime.config import config
 from traceml.runtime.session import get_session_id
@@ -24,8 +26,8 @@ def _rank_suffix() -> str:
 
 
 class DatabaseWriter:
-    """ "
-    Incrementally writes Database tables to disk in JSONL format.
+    """
+    Incrementally writes Database tables to disk in length-prefixed MessagePack format.
 
     This writer is designed to work with bounded deques where old entries
     may be evicted at any time. As a result, we do NOT rely on positional
@@ -33,7 +35,7 @@ class DatabaseWriter:
 
     Design principles
     -----------------
-    - Append-only JSONL files (stream-friendly, crash-safe)
+    - Append-only MessagePack files (stream-friendly, crash-safe)
     - Delta writes only (no full table rewrites)
     - Safe under deque eviction
     - DDP-safe: each rank writes to its own directory
@@ -41,7 +43,7 @@ class DatabaseWriter:
 
     Directory layout
     ----------------
-        <logs_dir>/<session_id>/data/<rank_suffix>/<sampler_name>/<table>.jsonl
+        <logs_dir>/<session_id>/data/<rank_suffix>/<sampler_name>/<table>.msgpack
     """
 
     def __init__(self, db, sampler_name: str, flush_every: int = 100):
@@ -74,6 +76,7 @@ class DatabaseWriter:
         # Tracks the *last written record object* per table.
         # Used instead of positional offsets because deques may evict data.
         self._last_written_record: Dict[str, Any] = {}
+        self.encoder = msgspec.msgpack.Encoder()
 
     def flush(self):
         """
@@ -98,7 +101,7 @@ class DatabaseWriter:
             if not rows:
                 continue
 
-            path = self.logs_dir / f"{table_name}.jsonl"
+            path = self.logs_dir / f"{table_name}.msgpack"
             last_written = self._last_written_record.get(table_name)
 
             # Collect unseen rows by scanning from the tail backwards.
@@ -114,9 +117,11 @@ class DatabaseWriter:
             # Restore original order before writing
             new_rows.reverse()
 
-            with open(path, "a") as f:
+            with open(path, "ab") as f:
                 for r in new_rows:
-                    f.write(json.dumps(r) + "\n")
+                    payload = self.encoder.encode(r)
+                    f.write(struct.pack("!I", len(payload)))
+                    f.write(payload)
 
             # Track the newest record we just wrote
             self._last_written_record[table_name] = new_rows[-1]
