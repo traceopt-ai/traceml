@@ -57,19 +57,18 @@ class DBIncrementalSender:
         self.rank = rank
         self.max_rows_per_flush = int(max_rows_per_flush)
 
-        # Tracks the last successfully sent record per table:
-        #   table_name -> record (dict object)
-        #
-        # We rely on object identity to detect
-        # new records. Records are **assumed to be immutable** after insertion.
-        # This remains safe even with bounded deques, which only drop references
-        # without copying or mutating objects.
-        self._last_sent_record = {}
+        # Tracks the last successfully sent append-count per table.
+        # Used for O(1) new-row detection: compare db.get_append_count()
+        # against this value to determine how many new rows exist.
+        self._last_sent_seq: dict[str, int] = {}
         self.logger = get_error_logger("DBIncrementalSender")
 
     def flush(self) -> None:
         """
         Flush incremental updates to the sender.
+
+        Uses monotonic append counters for O(1) new-row detection
+        instead of scanning the deque.
 
         Payload format
         --------------
@@ -84,49 +83,32 @@ class DBIncrementalSender:
         """
         tables_payload = {}
 
-        # Iterate over all known tables in the database
         for table_name, rows in self.db.all_tables().items():
             if not rows:
                 continue
 
-            last_row = self._last_sent_record.get(table_name)
+            total = self.db.get_append_count(table_name)
+            last_seq = self._last_sent_seq.get(table_name, 0)
+            new_count = total - last_seq
 
-            # Collect new rows since last_row (exclusive), using identity.
-            new_rows = []
-            found_last = False
-
-            # Walk newest -> oldest
-            for r in reversed(rows):
-                if last_row is not None and r is last_row:
-                    found_last = True
-                    break
-                new_rows.append(r)
-
-                # If we are in "recent-only" mode, we only care about the latest N rows
-                if (
-                    self.max_rows_per_flush != -1
-                    and len(new_rows) >= self.max_rows_per_flush
-                ):
-                    break
-
-            if not new_rows:
+            # O(1) fast path: nothing new since last flush
+            if new_count <= 0:
                 continue
 
-            # If the cursor row wasn't found, it likely got evicted; that's fine.
-            # Our policy in that case is to send the freshest snapshot available:
-            # - N>0 : we already collected up to N newest rows
-            # - -1  : send the entire deque (best effort)
-            if last_row is not None and not found_last:
-                if self.max_rows_per_flush == -1:
-                    # send everything currently in the deque
-                    new_rows = list(rows)
-                # else: keep the collected newest <=N rows (already correct)
+            # Apply "recent-only" cap if configured
+            if self.max_rows_per_flush != -1:
+                new_count = min(new_count, self.max_rows_per_flush)
 
-            # Restore chronological order (oldest -> newest)
-            new_rows.reverse()
+            n = len(rows)
+            if new_count >= n:
+                # First flush or eviction happened — send entire deque
+                new_rows = list(rows)
+            else:
+                # Slice only the tail (new rows), via indexed access
+                new_rows = [rows[i] for i in range(n - new_count, n)]
 
             tables_payload[table_name] = new_rows
-            self._last_sent_record[table_name] = new_rows[-1]
+            self._last_sent_seq[table_name] = total
 
         if not tables_payload:
             return
