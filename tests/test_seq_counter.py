@@ -16,9 +16,7 @@ import pytest
 
 from traceml.database.database import Database
 
-# ---------------------------------------------------------------------------
 # Database.get_append_count() tests
-# ---------------------------------------------------------------------------
 
 
 class TestDatabaseAppendCount:
@@ -63,9 +61,7 @@ class TestDatabaseAppendCount:
         assert db.get_append_count("t2") == 1
 
 
-# ---------------------------------------------------------------------------
 # DBIncrementalSender tests
-# ---------------------------------------------------------------------------
 
 
 class TestDBIncrementalSender:
@@ -183,9 +179,7 @@ class TestDBIncrementalSender:
         assert len(payload["tables"]["t2"]) == 1
 
 
-# ---------------------------------------------------------------------------
 # DatabaseWriter tests
-# ---------------------------------------------------------------------------
 
 
 def _read_framed_records(path: Path) -> list:
