@@ -1,12 +1,12 @@
+import os
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from traceml.runtime.config import config
 from traceml.transport.distributed import get_ddp_info
 
 
-def setup_error_logger() -> logging.Logger:
+def setup_error_logger(is_aggregator=False) -> logging.Logger:
     """
     Configure and initialize the global TraceML error logger.
 
@@ -53,12 +53,18 @@ def setup_error_logger() -> logging.Logger:
     # File handler (ERROR+)
     # ----------------------------
     # Use local_rank to isolate log files between DDP processes
-    _, local_rank, _ = get_ddp_info()
-    session_id = config.session_id
+    if is_aggregator is False:
+        _, local_rank, _ = get_ddp_info()
+    else:
+        local_rank = "aggregator"
+
+    logs_dir = os.environ.get("TRACEML_LOGS_DIR")
+    session_id = os.environ.get("TRACEML_SESSION_ID")
 
     # Directory layout:
     #   <logs_dir>/<session_id>/<local_rank>/traceml_errors.log
-    errors_dir = Path(config.logs_dir) / session_id / str(local_rank)
+    errors_dir = Path(logs_dir) / session_id / str(local_rank)
+
     errors_dir.mkdir(parents=True, exist_ok=True)
 
     fh = RotatingFileHandler(

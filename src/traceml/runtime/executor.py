@@ -190,6 +190,13 @@ def report_crash(error):
     traceback.print_exception(type(error), error, error.__traceback__)
 
 
+def _coerce_exit_code(code) -> int:
+    if code is None:
+        return 0
+    if isinstance(code, int):
+        return code
+    return 1
+
 def main():
     """
     TraceML child process entrypoint.
@@ -219,7 +226,10 @@ def main():
         error = None
 
     except SystemExit as e:
-        exit_code = e.code
+        exit_code = _coerce_exit_code(e.code)
+        if exit_code != 0:
+            write_session_error_log(cfg, header=f"SystemExit (code={exit_code})", error=e)
+        error = None
 
     except Exception as e:
         error = e

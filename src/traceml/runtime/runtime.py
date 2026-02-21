@@ -231,6 +231,8 @@ class TraceMLRuntime:
         self._sampler_thread.join(
             timeout=float(self._settings.sampler_interval_sec) * 5.0
         )
+        _safe(self._logger, "final tick failed", self._tick)
+
         if self._sampler_thread.is_alive():
             self._logger.error("[TraceML] WARNING: sampler thread did not terminate")
 

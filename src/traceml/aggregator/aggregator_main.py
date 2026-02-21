@@ -54,7 +54,7 @@ def _install_signal_handlers(stop_event: threading.Event) -> None:
 
 
 def main() -> None:
-    setup_error_logger()
+    setup_error_logger(is_aggregator=True)
     logger = get_error_logger("TraceMLAggregatorMain")
 
     cfg = read_traceml_env()
