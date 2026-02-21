@@ -30,7 +30,7 @@ from traceml.renderers.system.renderer import SystemRenderer
 
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
 
-from traceml.runtime.runtime import TraceMLSettings  # reuse settings dataclass
+from traceml.runtime.settings import TraceMLSettings
 
 
 
@@ -149,7 +149,6 @@ class TraceMLAggregator:
             LayerCombinedTimeRenderer(
                 remote_store=remote_store, top_n_layers=num_display_layers
             ),
-            # UserTimeRenderer(remote_store=remote_store),
             StepCombinedRenderer(remote_store=remote_store),
             StepMemoryRenderer(remote_store=remote_store),
         ]

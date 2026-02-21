@@ -42,7 +42,6 @@ def terminate_process_group(p: subprocess.Popen, timeout_sec: float = 5.0) -> No
     try:
         os.killpg(p.pid, signal.SIGTERM)
     except Exception:
-        # Fallback: try terminating only the process
         try:
             p.terminate()
         except Exception:
@@ -62,6 +61,7 @@ def terminate_process_group(p: subprocess.Popen, timeout_sec: float = 5.0) -> No
         except Exception:
             pass
 
+
 def wait_for_tcp_listen(
     host: str,
     port: int,
@@ -78,7 +78,6 @@ def wait_for_tcp_listen(
     last_err = None
 
     while time.time() < deadline:
-        # If aggregator died, no point waiting.
         if proc.poll() is not None:
             return False
         try:
@@ -88,7 +87,6 @@ def wait_for_tcp_listen(
             last_err = e
             time.sleep(float(poll_interval_sec))
 
-    # Timed out
     if last_err is not None:
         print(
             f"[TraceML] Aggregator did not become ready on {host}:{port} "
@@ -98,42 +96,72 @@ def wait_for_tcp_listen(
     return False
 
 
-def start_aggregator_process(args, env: dict) -> subprocess.Popen:
+def install_shutdown_handlers(get_procs):
+    """
+    Install SIGINT/SIGTERM handlers that terminate child process groups.
+
+    Children are started with start_new_session=True, so they will NOT receive
+    Ctrl+C automatically; the parent must terminate them.
+    """
+    def _handler(_signum, _frame):
+        print("\n[TraceML] Signal received — terminating processes…", file=sys.stderr)
+        for p in get_procs():
+            if p is not None:
+                terminate_process_group(p, timeout_sec=5.0)
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, _handler)
+    signal.signal(signal.SIGTERM, _handler)
+
+
+def start_aggregator_process(env: dict) -> subprocess.Popen:
     """
     Start the TraceML aggregator as a separate process.
 
-    This assumes you have an entrypoint file/module (e.g. aggregator/aggregator_main.py)
-    that reads configuration from the same TRACEML_* environment variables.
+    IMPORTANT:
+    - Do NOT pipe stdout/stderr. The aggregator uses Rich to render to a TTY.
+    - We rely on the aggregator to print its own errors/tracebacks to screen.
     """
-    # Adjust this path to wherever you place your entrypoint.
-    # Keeping it relative is convenient during local dev.
-    aggregator_path = str(Path(__file__).parent / "aggregator" / "aggregator_main.py")
+    aggregator_path = Path(__file__).parent / "aggregator" / "aggregator_main.py"
+    if not aggregator_path.exists():
+        print(
+            f"[TraceML] Aggregator entrypoint not found: {aggregator_path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    cmd = [sys.executable, aggregator_path]
-    print("Launching TraceML aggregator:", " ".join(cmd))
-
-    # Start aggregator in a NEW process group (so we can killpg it cleanly)
+    cmd = [sys.executable, str(aggregator_path)]
+    print("[TraceML] Launching TraceML aggregator:", " ".join(cmd))
     return subprocess.Popen(cmd, env=env, start_new_session=True)
+
+
+def start_training_process(train_cmd: list[str], env: dict) -> subprocess.Popen:
+    """
+    Start torchrun in a new process group.
+
+    stdout/stderr are inherited so user errors/tracebacks remain visible.
+    """
+    print("[TraceML] Launching TraceML executor:", " ".join(train_cmd))
+    return subprocess.Popen(train_cmd, env=env, start_new_session=True)
 
 
 def launch_tracer_process(script_path, args):
     """
     Parent launcher.
 
-    This function:
-    1. Sets TraceML configuration via environment variables
-    2. Starts the TraceML aggregator as a *separate process* (when enabled)
-    3. Launches a *child Python process* via torchrun
-    4. Hands off execution to executor.py, which then runs the user script
-    5. Waits for training finish
-
-     Notes:
-    - Fail fast if the aggregator cannot start BEFORE training begins.
-    - If the aggregator exits DURING training, we warn and continue training
-      (telemetry becomes disabled for the rest of the run).
+    Flow:
+    1) Set TraceML env vars
+    2) Start aggregator process (TTY / Rich UI)
+    3) Wait for aggregator to listen on TCP
+    4) Start torchrun
+    5) Wait for training
+       - If aggregator dies mid-run: warn; training continues (fail-open)
+       - When training exits: terminate aggregator and exit with training code
+    6) On Ctrl+C / SIGTERM: terminate both process groups
     """
-
     env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"  # makes prints flush promptly in children
+
     env["TRACEML_SCRIPT_PATH"] = script_path
     env["TRACEML_MODE"] = args.mode
     env["TRACEML_INTERVAL"] = str(args.interval)
@@ -146,8 +174,8 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
 
-    script_args = args.args or []
     runner_path = str(Path(__file__).parent / "runtime/executor.py")
+    script_args = args.args or []
 
     if args.mode in ["cli", "dashboard"]:
         train_cmd = [
@@ -163,59 +191,57 @@ def launch_tracer_process(script_path, args):
     agg_proc = None
     train_proc = None
 
-    try:
-        agg_proc = start_aggregator_process(args=args, env=env)
+    # Ensure Ctrl+C kills both, even during readiness wait.
+    install_shutdown_handlers(lambda: (train_proc, agg_proc))
 
-        ok = wait_for_tcp_listen(
-            host=args.tcp_host,
-            port=int(args.tcp_port),
-            proc=agg_proc,
-            timeout_sec=10.0,
-        )
-        if not ok:
-            print(
-                "[TraceML] Aggregator failed to start; terminating.",
-                file=sys.stderr,
-            )
-            terminate_process_group(agg_proc, timeout_sec=3.0)
-            sys.exit(1)
+    # 1) Start aggregator and wait for it to be ready
+    print(f"[TraceML] Starting aggregator on {args.tcp_host}:{args.tcp_port} (mode={args.mode})")
+    agg_proc = start_aggregator_process(env=env)
+    print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
 
-        # 2) Start training (torchrun)
-        print("Launching TraceML executor:", " ".join(train_cmd))
-        train_proc = subprocess.Popen(train_cmd, env=env, start_new_session=True)
-
-        # 3) Wait: training is the primary target.
-        #    If aggregator dies mid-run, warn and continue training.
-        while True:
-            train_rc = train_proc.poll()
-            if train_rc is not None:
-                # training finished -> stop aggregator (best effort) and exit
-                if agg_proc is not None:
-                    terminate_process_group(agg_proc, timeout_sec=5.0)
-                sys.exit(train_rc)
-
-            if agg_proc is not None and agg_proc.poll() is not None:
-                agg_rc = agg_proc.returncode
-                print(
-                    f"[TraceML] WARNING: aggregator exited early (code={agg_rc}). "
-                    "Training will continue without TraceML telemetry.",
-                    file=sys.stderr,
-                )
-                # Fail-open: stop monitoring aggregator and continue training.
-                agg_proc = None
-
-            time.sleep(0.5)
-
-    except KeyboardInterrupt:
+    ok = wait_for_tcp_listen(
+        host=args.tcp_host,
+        port=int(args.tcp_port),
+        proc=agg_proc,
+        timeout_sec=5.0,
+    )
+    if not ok:
+        # Aggregator failed before training began: fail fast.
+        rc = agg_proc.poll()
         print(
-            "\n[TraceML] Interrupt received — terminating processes…",
+            f"[TraceML] Aggregator failed to start (exit={rc}). "
+            "See aggregator output above for details.",
             file=sys.stderr,
         )
-        if train_proc is not None:
-            terminate_process_group(train_proc, timeout_sec=5.0)
-        if agg_proc is not None:
-            terminate_process_group(agg_proc, timeout_sec=5.0)
-        sys.exit(0)
+        terminate_process_group(agg_proc, timeout_sec=3.0)
+        sys.exit(1)
+
+    print("[TraceML] Aggregator ready.")
+
+    # 2) Start training
+    train_proc = start_training_process(train_cmd=train_cmd, env=env)
+
+    # 3) Wait loop (training is primary)
+    while True:
+        train_rc = train_proc.poll()
+        if train_rc is not None:
+            # Training finished. Terminate aggregator first, then exit with training rc.
+            if agg_proc is not None:
+                print("[TraceML] Training finished — stopping aggregator…", file=sys.stderr)
+                terminate_process_group(agg_proc, timeout_sec=5.0)
+            sys.exit(train_rc)
+
+        # If aggregator died mid-run: warn, but do not affect training.
+        if agg_proc is not None and agg_proc.poll() is not None:
+            agg_rc = agg_proc.returncode
+            print(
+                f"[TraceML] WARNING: aggregator exited early (code={agg_rc}). "
+                "Training will continue without TraceML telemetry.",
+                file=sys.stderr,
+            )
+            agg_proc = None
+
+        time.sleep(0.2)
 
 
 def run_with_tracing(args):
@@ -223,7 +249,6 @@ def run_with_tracing(args):
     Entry point for `traceml run ...`
     """
     script_path = validate_script_path(args.script)
-
     launch_tracer_process(script_path=script_path, args=args)
 
 
@@ -257,12 +282,9 @@ def run_inspect(args):
 
 def build_parser():
     parser = argparse.ArgumentParser("traceml")
-
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = sub.add_parser(
-        "run", help="Run a script with TraceML enabled"
-    )
+    run_parser = sub.add_parser("run", help="Run a script with TraceML enabled")
     run_parser.add_argument("script")
     run_parser.add_argument("--mode", type=str, default="cli")
     run_parser.add_argument("--interval", type=float, default=2.0)
@@ -270,37 +292,14 @@ def build_parser():
     run_parser.add_argument("--logs-dir", type=str, default="./logs")
     run_parser.add_argument("--num-display-layers", type=int, default=5)
     run_parser.add_argument("--session-id", type=str, default="")
-    run_parser.add_argument(
-        "--tcp-host",
-        type=str,
-        default="127.0.0.1",
-        help="TCP host for TraceML rank-0 telemetry server",
-    )
-    run_parser.add_argument(
-        "--tcp-port",
-        type=int,
-        default=29765,
-        help="TCP port for TraceML rank-0 telemetry server",
-    )
-    run_parser.add_argument(
-        "--remote-max-rows",
-        type=int,
-        default=200,
-        help="Max rows kept per remote rank in TraceML",
-    )
-    run_parser.add_argument(
-        "--nproc-per-node",
-        type=int,
-        default=1,
-        help=("Number of processes to launch via torchrun."),
-    )
-
+    run_parser.add_argument("--tcp-host", type=str, default="127.0.0.1")
+    run_parser.add_argument("--tcp-port", type=int, default=29765)
+    run_parser.add_argument("--remote-max-rows", type=int, default=200)
+    run_parser.add_argument("--nproc-per-node", type=int, default=1)
     run_parser.add_argument("--args", nargs=argparse.REMAINDER)
-    inspect_parser = sub.add_parser(
-        "inspect", help="Inspect binary .msgpack logs"
-    )
-    inspect_parser.add_argument("file", help="Path to a .msgpack file")
 
+    inspect_parser = sub.add_parser("inspect", help="Inspect binary .msgpack logs")
+    inspect_parser.add_argument("file", help="Path to a .msgpack file")
     return parser
 
 

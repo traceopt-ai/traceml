@@ -18,13 +18,41 @@ import os
 import runpy
 import sys
 import traceback
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
 
-from traceml.runtime.runtime import (
-    TraceMLRuntime,
-    TraceMLSettings,
-    TraceMLTCPSettings,
-)
+from traceml.runtime.runtime import TraceMLRuntime
+from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
 from traceml.utils.shared_utils import EXECUTION_LAYER
+
+
+def write_session_error_log(cfg, header: str, error: Optional[BaseException] = None) -> None:
+    """
+    Append a crash/interrupt report to:
+        <logs_dir>/<session_id>/torchrun_error.log
+
+    Best-effort: never raises.
+    """
+    try:
+        logs_dir = Path(cfg.get("logs_dir", "./logs"))
+        session_id = cfg.get("session_id", "") or "no_session"
+        out_dir = logs_dir / session_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        path = out_dir / "torchrun_error.log"
+        with open(path, "a", encoding="utf-8", errors="replace") as f:
+            f.write("\n" + "=" * 80 + "\n")
+            f.write(f"{datetime.now().isoformat()}  {header}\n")
+            if getattr(EXECUTION_LAYER, "current", None) is not None:
+                f.write(f"[TraceML] Last execution point: {EXECUTION_LAYER.current}\n")
+            if error is not None:
+                traceback.print_exception(type(error), error, error.__traceback__, file=f)
+            f.flush()
+        print(f"[TraceML] Wrote error report to: {path}", file=sys.stderr, flush=True)
+    except Exception:
+        # Never break the user's run because logging failed
+        pass
 
 
 class NoOpRuntime:
@@ -93,12 +121,8 @@ def start_runtime(cfg):
         settings = TraceMLSettings(
             mode=cfg["mode"],
             sampler_interval_sec=cfg["interval"],
-            # you can keep render cadence same or slower; simplest:
-            render_interval_sec=cfg["interval"],
-            num_display_layers=cfg["num_display_layers"],
             enable_logging=cfg["enable_logging"],
             logs_dir=cfg["logs_dir"],
-            remote_max_rows=cfg["remote_max_rows"],
             session_id=cfg["session_id"],
             tcp=TraceMLTCPSettings(
                 host=cfg["tcp_host"],
@@ -112,7 +136,7 @@ def start_runtime(cfg):
         return runtime
     except Exception as e:
         print(
-            f"[TraceML] Failed to start TraceMLRuntime: {e}", file=sys.stderr
+            f"[TraceML] Failed to start TraceMLRuntime: {e}", file=sys.stderr, flush=True
         )
         traceback.print_exception(type(e), e, e.__traceback__)
         return NoOpRuntime()
@@ -188,12 +212,19 @@ def main():
     try:
         run_user_script(cfg["script_path"], script_args)
 
+    except KeyboardInterrupt as e:
+        print("\n[TraceML] KeyboardInterrupt received (Ctrl+C).", file=sys.stderr, flush=True)
+        write_session_error_log(cfg, header="KeyboardInterrupt (Ctrl+C)", error=e)
+        exit_code = 130
+        error = None
+
     except SystemExit as e:
         exit_code = e.code
 
     except Exception as e:
         error = e
         exit_code = 1
+        write_session_error_log(cfg, header="Unhandled exception in user script", error=e)
 
     finally:
         stop_runtime(runtime)

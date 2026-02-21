@@ -103,7 +103,7 @@ class CLIDisplayManager:
                 console=cls._console,
                 auto_refresh=False,
                 transient=False,
-                screen=True,
+                screen=False,
             )
             try:
                 cls._live_display.start()

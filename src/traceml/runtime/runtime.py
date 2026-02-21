@@ -25,7 +25,6 @@ logged and ignored. Training should proceed normally.
 """
 
 import threading
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
@@ -46,33 +45,7 @@ from traceml.transport.distributed import get_ddp_info
 from traceml.transport.tcp_transport import TCPClient, TCPConfig
 
 from .session import get_session_id
-
-
-@dataclass(frozen=True)
-class TraceMLTCPSettings:
-    """TCP configuration for TraceML telemetry transport."""
-
-    host: str = "127.0.0.1"
-    port: int = 29765
-
-
-@dataclass(frozen=True)
-class TraceMLSettings:
-    """
-    High-level TraceML runtime settings.
-
-    Notes:
-    - `sampler_interval_sec` controls sampling cadence (all ranks).
-    - `mode` affects stdout/stderr capture behavior (CLI mode only).
-    - TCP is always used for telemetry, including rank0 -> rank0
-    """
-
-    mode: str = "cli"  # "cli" | "dashboard"
-    sampler_interval_sec: float = 1.0
-    logs_dir: str = "./logs"
-    enable_logging: bool = False
-    tcp: TraceMLTCPSettings = TraceMLTCPSettings()
-    session_id: str = ""
+from .settings import TraceMLSettings
 
 
 def _safe(logger, label: str, fn: Callable[[], Any]) -> Any:
@@ -86,8 +59,9 @@ def _safe(logger, label: str, fn: Callable[[], Any]) -> Any:
 
 class TraceMLRuntime:
     """
-    Per-rank TraceML runtime.
+    Per-rank TraceML runtime (agent).
 
+    Responsibilities:
     - Creates samplers and runs them periodically.
     - Attaches DBIncrementalSender to sampler DBs that support sending.
     - Flushes senders every tick (rank0 sends to rank0 as well).
@@ -107,7 +81,7 @@ class TraceMLRuntime:
         # Global config
         config.enable_logging = bool(self._settings.enable_logging)
         config.logs_dir = str(self._settings.logs_dir)
-        config.session_id = self._settings.session_id or get_session_id()
+        config.session_id = self._settings.session_id
 
         self.mode = self._settings.mode
 
@@ -163,6 +137,7 @@ class TraceMLRuntime:
         ]
         return samplers
 
+
     def _attach_senders(self) -> None:
         """
         Attach DBIncrementalSender to sampler DBs that support sending.
@@ -176,6 +151,7 @@ class TraceMLRuntime:
             # sender has attributes: sender.sender (transport) and sender.rank
             sampler.sender.sender = self._tcp_client
             sampler.sender.rank = self.local_rank
+
 
     def _tick(self) -> None:
         """
@@ -194,11 +170,13 @@ class TraceMLRuntime:
                 sampler.sample,
             )
 
-            _safe(
-                self._logger,
-                f"{sampler.sampler_name}.writer.flush failed",
-                sampler.db.writer.flush,
-            )
+            db = getattr(sampler, "db", None)
+            if db is not None:
+                _safe(
+                    self._logger,
+                    f"{sampler.sampler_name}.writer.flush failed",
+                    db.writer.flush,
+                )
 
             sender = getattr(sampler, "sender", None) # stdout aggregation is unnecessary
             if sender is not None:
