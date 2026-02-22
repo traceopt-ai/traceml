@@ -60,7 +60,7 @@ from itertools import islice
 import plotly.graph_objects as go
 from nicegui import ui
 
-from traceml.renderers.display.nicegui_sections.helper import extract_x_axis
+from traceml.aggregator.display_drivers.nicegui_sections.helper import extract_x_axis
 from traceml.utils.formatting import fmt_mem_new
 
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"

@@ -20,7 +20,7 @@ from traceml.runtime.settings import TraceMLSettings
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.renderers.base_renderer import BaseRenderer
 
-from traceml.renderers.display.layout import (
+from traceml.aggregator.display_drivers.layout import (
     ROOT_LAYOUT,
     SYSTEM_LAYOUT,
     PROCESS_LAYOUT,

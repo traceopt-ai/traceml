@@ -7,7 +7,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.layout import (
+from traceml.aggregator.display_drivers.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
 )
 from traceml.renderers.layer_combined_memory.compute import (

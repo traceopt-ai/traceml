@@ -1,4 +1,4 @@
-from traceml.renderers.display.layout import (
+from traceml.aggregator.display_drivers.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,

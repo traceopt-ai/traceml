@@ -11,7 +11,7 @@ from rich.table import Table
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.layout import (
+from traceml.aggregator.display_drivers.layout import (
     STEPTIMER_LAYOUT,
 )
 from traceml.renderers.utils import fmt_time_run

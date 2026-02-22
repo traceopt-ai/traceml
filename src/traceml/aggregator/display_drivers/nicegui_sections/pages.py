@@ -1,11 +1,10 @@
 from nicegui import ui
 
-from traceml.renderers.display.layout import (
+from traceml.aggregator.display_drivers.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
     PROCESS_LAYOUT,
-    STEPTIMER_LAYOUT,
     SYSTEM_LAYOUT,
     MODEL_MEMORY_LAYOUT,
 )
@@ -28,8 +27,6 @@ from .step_memory_section import (
     update_step_memory_section,
 )
 from .system_section import build_system_section, update_system_section
-
-import pandas as pd
 
 
 def build_top_tabs(active: str):
