@@ -1,8 +1,6 @@
 """
-NiceGUI display driver for TraceML Aggregator (merged driver + manager).
+NiceGUI display driver for TraceML Aggregator.
 
-This keeps backward-compatible attribute/method names that define_pages(...)
-likely expects from the old NiceGUIDisplayManager:
 
 - _ui_started, _ui_ready
 - _latest_data_lock
@@ -15,8 +13,6 @@ Aggregator contract (required by trace_aggregator):
 - tick()
 - stop()
 """
-
-from __future__ import annotations
 
 import threading
 import time
@@ -156,9 +152,6 @@ class NiceGUIDisplayDriver:
             self._logger.error(traceback.format_exc())
             self._ui_ready = False
 
-    # -------------------------
-    # Old "manager" API kept
-    # -------------------------
 
     def _ui_update_loop(self) -> None:
         """
@@ -209,9 +202,6 @@ class NiceGUIDisplayDriver:
 
         self._registered = False
 
-    # -------------------------
-    # Driver renderer wiring
-    # -------------------------
 
     def _register_once(self) -> None:
         """Register layout -> renderer callback exactly once."""
