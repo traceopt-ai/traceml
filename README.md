@@ -123,7 +123,33 @@ Designed for investigating slowdowns and failures.
 Includes everything in ESSENTIAL, plus:
 - Per-layer memory signals
 - Per-layer forward/backward timing signals
-- Lightweight failure attribution via hooks (experimental)
+- Lightweight- OOM layer attribution (experimental, work-in-progress)
+
+---
+
+### 4) PyTorch Lightning (zero-code integration)
+
+TraceML automatically integrates with PyTorch Lightning. Just import TraceML and use `trace_model_instance()` — no manual `trace_step()` needed:
+
+```python
+import lightning as L
+from traceml.decorators import trace_model_instance
+
+class MyLightningModule(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.model = ...
+        trace_model_instance(self)  # Enable deep-dive instrumentation
+
+    def training_step(self, batch, batch_idx):
+        # TraceML automatically captures step timing here
+        ...
+```
+
+TraceML injects a callback that captures:
+- Forward, backward, and optimizer step timing
+- Per-layer memory and compute (with `trace_model_instance`)
+- Step-level GPU memory
 
 ---
 
@@ -133,24 +159,31 @@ Includes everything in ESSENTIAL, plus:
 pip install traceml-ai
 ```
 
-To include Hugging Face integration:
+For PyTorch Lightning support:
+```bash
+pip install "traceml-ai[lightning]"
+```
 
+For Hugging Face support:
 ```bash
 pip install "traceml-ai[hf]"
 ```
 
 For development:
-
 ```bash
 git clone https://github.com/traceopt-ai/traceml.git
 cd traceml
-pip install -e '.[dev]'
-pre-commit install
+
+# Dev only
+pip install -e ".[dev]"
+
+# Dev with all integrations
+pip install -e ".[dev,hf,lightning]"
 ```
 
 **Requirements:** Python 3.9–3.13, PyTorch 1.12+
 **Platform:** macOS (Intel/ARM), Linux
-**Training support:** Single GPU + **single-node DDP **
+**Training support:** Single GPU + **single-node DDP (alpha)** + **PyTorch Lightning** + **Hugging Face Accelerate**
 
 ---
 
@@ -263,6 +296,7 @@ Near-term:
 Next:
 - **Multi-node DDP**
 - **FSDP**: shard-aware aggregation + imbalance signals (initial support)
+- PyTorch Lightning integration ✅ **Done!**
 
 Later:
 - **TP / PP**: multi-process-group + mesh/stage-aware attribution
