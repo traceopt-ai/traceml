@@ -37,10 +37,6 @@ class TraceLightningModule(L.LightningModule):
         self.model = MNISTCNN()
         self.loss_fn = nn.CrossEntropyLoss()
 
-        # ⚠️ Deep instrumentation (use only for detailed debugging / profiling)
-        # Enables per-layer memory + timing hooks.
-        # Can add overhead in long training runs.
-        # Recommended for short runs, diagnosis, or one-off investigations.
         trace_model_instance(
             self,
             trace_layer_forward_memory=True,
@@ -53,7 +49,6 @@ class TraceLightningModule(L.LightningModule):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        # We don't need manual trace_time/trace_step decorators here!
         # The TraceMLCallback automatically wraps standard operations
         # (forward, backward, optimizer) based on Lightning's lifecycle hooks.
 
