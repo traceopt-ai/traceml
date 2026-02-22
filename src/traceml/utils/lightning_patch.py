@@ -37,6 +37,12 @@ def patch_lightning():
             from traceml.utils.step_memory import StepMemoryTracker
             from traceml.utils.timing import timed_region
 
+            # Start overall step timing
+            self._traceml_step_ctx = timed_region(
+                "_traceml_internal:step_time", scope="step", use_gpu=False
+            )
+            self._traceml_step_ctx.__enter__()
+
             # Reset step memory
             try:
                 mem_tracker = StepMemoryTracker(pl_module)
@@ -47,7 +53,9 @@ def patch_lightning():
                 self._mem_tracker = None
 
             # Start timing the forward pass (ends in on_before_backward)
-            self._forward_ctx = timed_region("forward", scope="step")
+            self._forward_ctx = timed_region(
+                "_traceml_internal:forward_time", scope="step"
+            )
             self._forward_ctx.__enter__()
 
         def on_before_backward(self, trainer, pl_module, loss):
@@ -62,7 +70,9 @@ def patch_lightning():
                 self._forward_ctx = None
 
             # Start backward timing
-            self._backward_ctx = timed_region("backward", scope="step")
+            self._backward_ctx = timed_region(
+                "_traceml_internal:backward_time", scope="step"
+            )
             self._backward_ctx.__enter__()
 
         def on_after_backward(self, trainer, pl_module):
@@ -78,7 +88,9 @@ def patch_lightning():
             from traceml.utils.timing import timed_region
 
             # Start optimizer step timing
-            self._optimizer_ctx = timed_region("optimizer_step", scope="step")
+            self._optimizer_ctx = timed_region(
+                "_traceml_internal:optimizer_step", scope="step"
+            )
             self._optimizer_ctx.__enter__()
 
         def on_before_zero_grad(self, trainer, pl_module, optimizer):
@@ -103,6 +115,7 @@ def patch_lightning():
                 "_forward_ctx",
                 "_backward_ctx",
                 "_optimizer_ctx",
+                "_traceml_step_ctx",
             ):
                 ctx = getattr(self, ctx_attr, None)
                 if ctx is not None:
