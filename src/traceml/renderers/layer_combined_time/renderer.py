@@ -8,7 +8,7 @@ from rich.table import Table
 
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.managers.cli_display_manager import (
+from traceml.renderers.display.layout import (
     LAYER_COMBINED_TIMER_LAYOUT,
 )
 from traceml.renderers.layer_combined_time.compute import (

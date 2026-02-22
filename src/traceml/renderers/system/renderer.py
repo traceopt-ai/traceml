@@ -21,7 +21,7 @@ from rich.table import Table
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.managers.cli_display_manager import (
+from traceml.renderers.display.layout import (
     SYSTEM_LAYOUT,
 )
 from traceml.utils.formatting import fmt_mem_new, fmt_percent

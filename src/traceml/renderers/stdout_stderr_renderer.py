@@ -9,7 +9,7 @@ from rich.text import Text
 
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.renderers.display.managers.cli_display_manager import (
+from traceml.renderers.display.layout import (
     STDOUT_STDERR_LAYOUT,
 )
 
