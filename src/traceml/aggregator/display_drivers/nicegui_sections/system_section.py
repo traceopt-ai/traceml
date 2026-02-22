@@ -25,8 +25,6 @@ Expected payload schema (from SystemRenderer.get_dashboard_renderable()):
 }
 """
 
-from __future__ import annotations
-
 import plotly.graph_objects as go
 from nicegui import ui
 

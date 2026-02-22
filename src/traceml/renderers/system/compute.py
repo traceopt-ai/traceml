@@ -18,7 +18,6 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 
 
-
 @dataclass(frozen=True)
 class SystemCLISnapshot:
     """

@@ -9,8 +9,6 @@ Presentation logic for system-level telemetry:
 All metric computation is delegated to SystemMetricsComputer.
 """
 
-from __future__ import annotations
-
 import shutil
 from typing import Any, Dict, Optional
 
