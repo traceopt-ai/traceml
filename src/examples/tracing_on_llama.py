@@ -159,7 +159,7 @@ def prepare_data():
 # Model (QLoRA)
 # =========================
 def build_model():
-    # QLoRA: load base model in 4-bit, train LoRA adapters
+    # QLoRA: load base.py model in 4-bit, train LoRA adapters
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
@@ -220,7 +220,7 @@ def main():
         # trace_execution=False,
     )
 
-    # Optimizer sees only trainable params (LoRA) because base weights are frozen
+    # Optimizer sees only trainable params (LoRA) because base.py weights are frozen
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=LR,

@@ -6,7 +6,7 @@ from traceml.database.database_sender import DBIncrementalSender
 
 class BaseSampler(ABC):
     """
-    Abstract base class for samplers that monitor runtime metrics,
+    Abstract base.py class for samplers that monitor runtime metrics,
     such as CPU usage, tensor allocations, or custom events.
 
     Samplers may be stateful and are typically polled periodically.

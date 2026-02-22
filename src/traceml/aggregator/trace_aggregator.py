@@ -14,6 +14,7 @@ Key invariants:
 import threading
 from typing import Any, Callable, Dict, Type
 
+from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
@@ -36,7 +37,7 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
         return None
 
 
-_DISPLAY_DRIVERS: Dict[str, Type[Any]] = {
+_DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
     "cli": CLIDisplayDriver,
     "dashboard": NiceGUIDisplayDriver,
 }

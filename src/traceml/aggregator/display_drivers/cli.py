@@ -15,6 +15,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
+from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.runtime.stdout_stderr_capture import StreamCapture
@@ -58,7 +59,7 @@ class _SectionBinding:
     render_fn: Callable[[], Any]
 
 
-class CLIDisplayDriver:
+class CLIDisplayDriver(BaseDisplayDriver):
     """
     Rich Live CLI driver.
 

@@ -25,7 +25,7 @@ from transformers import (
 from traceml.decorators import trace_model_instance, trace_step
 
 SEED = 42
-# MODEL_NAME = "bert-base-uncased"
+# MODEL_NAME = "bert-base.py-uncased"
 MODEL_NAME = "prajjwal1/bert-mini"
 
 

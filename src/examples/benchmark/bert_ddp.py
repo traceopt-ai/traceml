@@ -27,7 +27,7 @@ from traceml.decorators import trace_model_instance, trace_step
 
 
 SEED = 42
-MODEL_NAME = "distilbert-base-uncased"
+MODEL_NAME = "distilbert-base.py-uncased"
 # MODEL_NAME = "prajjwal1/bert-mini"
 
 # Increase these to generate a LOT of profiling data
