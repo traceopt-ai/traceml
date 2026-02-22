@@ -19,7 +19,7 @@ import traceback
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 
 from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
-from traceml.aggregator.aggregator import TraceMLAggregator
+from traceml.aggregator.trace_aggregator import TraceMLAggregator
 
 
 def read_traceml_env() -> dict:
