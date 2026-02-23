@@ -65,14 +65,14 @@ def build_system_section() -> dict:
                 ):
                     ui.markdown(
                         """
-**System Metrics (node-local)**
-
-- **CPU**: host stats over rolling window.
-- **RAM**: host stats over rolling window.
-- **GPU Util**: average across GPUs visible on this node; skew = max − min.
-- **GPU Mem**: worst GPU (max mem across local GPUs).
-- **Temp**: max GPU temperature on this node.
-"""
+                        **System Metrics (node-local)**
+                        
+                        - **CPU**: host stats over rolling window.
+                        - **RAM**: host stats over rolling window.
+                        - **GPU Util**: average across GPUs visible on this node; skew = max − min.
+                        - **GPU Mem**: worst GPU (max mem across local GPUs).
+                        - **Temp**: max GPU temperature on this node.
+                        """
                     )
             window_text = ui.html("window: –", sanitize=False).classes("text-xs text-gray-500 mr-1")
 

@@ -1,34 +1,10 @@
-"""
-Renderer-facing schema for step combined.
-
-This schema represents a *capacity / tail-latency oriented* view of
-step-level execution time aggregated across DDP ranks.
-
-Design goals
-------------
-- Renderer/UI consumes ONLY these dataclasses
-- No mixed-clock ambiguity (CPU vs GPU is explicit)
-"""
-
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
 
 @dataclass(frozen=True)
 class StepCombinedTimeSeries:
-    """
-    Per-metric time series (renderer-facing).
-
-    Semantics
-    ---------
-    - Values are aggregated across ranks per step
-    - `median` = typical rank
-    - `worst`  = gating / tail rank
-    - `sum`    = sum across ranks (cluster-wide proxy)
-    """
-
     steps: List[int]
-
     median: List[float]
     worst: List[float]
     sum: List[float]
@@ -36,65 +12,72 @@ class StepCombinedTimeSeries:
 
 @dataclass(frozen=True)
 class StepCombinedTimeSummary:
-    """
-    Window-level summary over last N complete steps.
-    """
-
     window_size: int
     steps_used: int
-
     median_total: float
     worst_total: float
-
     worst_rank: Optional[int]
-
     skew_ratio: float
     skew_pct: float
 
 
 @dataclass(frozen=True)
 class StepCombinedTimeCoverage:
-    """
-    Coverage / health information for this metric.
-    """
-
     expected_steps: int
     steps_used: int
-    completed_step: Optional[int]
-
+    completed_step: int
     world_size: int
     ranks_present: int
-
     incomplete: bool
 
 
 @dataclass(frozen=True)
 class StepCombinedTimeMetric:
-    """
-    Renderer-ready payload for ONE step combined time metric.
-
-    Example metrics:
-    - dataloader_fetch_cpu_ms
-    - forward_gpu_ms
-    - backward_cpu_ms
-    - optimizer_gpu_ms
-    """
-
-    metric: str  # metric key / name
-    clock: str  # "cpu" or "gpu"
-
-    series: StepCombinedTimeSeries
+    metric: str
+    clock: str  # "cpu" | "gpu" | "mixed"
+    series: Optional[StepCombinedTimeSeries]
     summary: StepCombinedTimeSummary
     coverage: StepCombinedTimeCoverage
 
 
+# -----------------------------
+# New: dashboard rank heatmap data
+# -----------------------------
+
+@dataclass(frozen=True)
+class StepCombinedRankRow:
+    """
+    One row in the rank heatmap table.
+
+    All values are window sums over the last K fully-common steps.
+    """
+    rank: int
+    sums_ms: Dict[str, float]  # metric_key -> window sum in ms
+
+
+@dataclass(frozen=True)
+class StepCombinedRankHeatmap:
+    """
+    Rank x Metric heatmap payload (dashboard-oriented).
+
+    - rows are ranks
+    - columns are metrics (metric_keys)
+    - each cell is sum over last K fully-common steps
+
+    Sorting:
+    - rows are sorted by (step_time_ms desc, dataloader_fetch desc) by default
+    """
+    window_size: int
+    steps_used: int
+    metric_keys: List[str]
+    rows: List[StepCombinedRankRow]
+    sort_by: List[str] = field(default_factory=lambda: ["step_time_ms", "dataloader_fetch"])
+
+
 @dataclass(frozen=True)
 class StepCombinedTimeResult:
-    """
-    Final renderer-facing payload.
-
-    This is the ONLY object UI layers should consume.
-    """
-
     metrics: List[StepCombinedTimeMetric]
-    status_message: str
+    status_message: str = "OK"
+
+    # Optional dashboard payload (safe for older consumers)
+    rank_heatmap: Optional[StepCombinedRankHeatmap] = None

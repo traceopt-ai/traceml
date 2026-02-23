@@ -19,7 +19,7 @@ from traceml.aggregator.display_drivers.layout import SYSTEM_LAYOUT
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.utils.formatting import fmt_mem_new, fmt_percent
+from traceml.utils.formatting import fmt_mem_new, fmt_percent, fmt_mem_ratio
 
 from .compute import SystemMetricsComputer
 
@@ -72,9 +72,9 @@ class SystemRenderer(BaseRenderer):
         """Return a Rich Panel for CLI display (latest sample)."""
         data = self._compute_cli()
 
-        grid = Table.grid(padding=(0, 2))
-        grid.add_column(justify="left", style="white")
-        grid.add_column(justify="left", style="white")
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(justify="left", style="bright_white", no_wrap=True)
+        grid.add_column(justify="left", style="bright_white", no_wrap=True)
 
         # CPU + RAM row
         ram_pct_str = ""
@@ -85,17 +85,18 @@ class SystemRenderer(BaseRenderer):
         grid.add_row(
             f"[bold green]CPU[/bold green] {fmt_percent(data['cpu'])}",
             f"[bold green]RAM[/bold green] "
-            f"{fmt_mem_new(data['ram_used'])}/{fmt_mem_new(data['ram_total'])}{ram_pct_str}",
+            f"{fmt_mem_ratio(data['ram_used'], data['ram_total'])}{ram_pct_str}",
         )
 
         # GPU rows
         if not data["gpu_available"]:
             grid.add_row("[bold green]GPU[/bold green]", "[red]Not available[/red]")
         else:
+            avg = data["gpu_util_total"] / max(data["gpu_count"], 1)
             grid.add_row(
-                f"[bold green]GPU UTIL[/bold green] {fmt_percent(data['gpu_util_total'])}",
+                f"[bold green]GPU UTIL[/bold green] {fmt_percent(avg)}",
                 f"[bold green]GPU MEM[/bold green] "
-                f"{fmt_mem_new(data['gpu_mem_used'])}/{fmt_mem_new(data['gpu_mem_total'])}",
+                f"{fmt_mem_ratio(data['gpu_mem_used'], data['gpu_mem_total'])}",
             )
 
             temp = data.get("gpu_temp_max")
@@ -103,14 +104,14 @@ class SystemRenderer(BaseRenderer):
             pl = data.get("gpu_power_limit")
 
             temp_str = (
-                f"[bold green]GPU TEMP[/bold green] {temp:.1f}°C"
+                f"[bold green]GPU TMP[/bold green] {temp:.1f}°C"
                 if temp is not None
-                else "[bold green]GPU TEMP[/bold green] N/A"
+                else "[bold green]GPU TMP[/bold green] N/A"
             )
             power_str = (
-                f"[bold green]GPU POWER[/bold green] {pu:.1f}W / {pl:.1f}W"
+                f"[bold green]GPU PWR[/bold green] {pu:.1f}/{pl:.1f}W"
                 if pu is not None and pl is not None
-                else "[bold green]GPU POWER[/bold green] N/A"
+                else "[bold green]GPU PWR[/bold green] N/A"
             )
             grid.add_row(temp_str, power_str)
 

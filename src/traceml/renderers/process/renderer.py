@@ -27,7 +27,7 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.aggregator.display_drivers.layout import (
     PROCESS_LAYOUT,
 )
-from traceml.utils.formatting import fmt_mem_new, fmt_percent
+from traceml.utils.formatting import fmt_mem_new, fmt_percent, fmt_mem_triple
 
 from .compute import ProcessMetricsComputer
 
@@ -51,8 +51,9 @@ class ProcessRenderer(BaseRenderer):
         snap = self._computer.compute_live_snapshot()
 
         table = Table.grid(padding=(0, 2))
-        table.add_column(justify="left")
-        table.add_column(justify="left")
+        table.add_column(justify="left", style="bright_white", no_wrap=True)
+        table.add_column(justify="right",style="bright_white", no_wrap=True)
+        table.add_column(justify="left", style="bright_white", no_wrap=True)
 
         table.add_row(
             "[bold green]CPU (worst rank)[/bold green] "
@@ -62,9 +63,7 @@ class ProcessRenderer(BaseRenderer):
 
         if snap.get("gpu_total") is not None:
             gpu_str = (
-                f"{fmt_mem_new(snap['gpu_used'])}/"
-                f"{fmt_mem_new(snap['gpu_reserved'])}/"
-                f"{fmt_mem_new(snap['gpu_total'])}"
+                f"{fmt_mem_triple(snap['gpu_used'], snap['gpu_reserved'], snap['gpu_total'])}"
                 f" [dim](rank {snap.get('gpu_rank')})[/dim]"
             )
         else:
