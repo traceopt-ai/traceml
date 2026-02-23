@@ -30,86 +30,68 @@ from .system_section import build_system_section, update_system_section
 
 
 def build_top_tabs(active: str):
-    """
-    Shared top navigation tabs.
-    `active` ∈ {"overview", "layers"}
-    """
+    """Shared top navigation tabs. `active` ∈ {"overview", "layers"}."""
     with ui.row().classes("w-full px-4 pt-2"):
         with ui.tabs().classes("text-lg") as tabs:
             overview = ui.tab("Overview")
             layers = ui.tab("Layer-wise")
 
-        if active == "overview":
-            tabs.value = overview
-        else:
-            tabs.value = layers
-
+        tabs.value = overview if active == "overview" else layers
         overview.on("click", lambda: ui.navigate.to("/"))
         layers.on("click", lambda: ui.navigate.to("/layers"))
 
 
 def define_pages(cls):
-    """Attach the NiceGUI main page to the UI server."""
+    """Attach the NiceGUI pages to the UI server."""
 
     @ui.page("/")
     def main_page():
-
-        # ----- GLOBAL PAGE STYLES -----
         ui.add_head_html(
             """
-        <style>
-            body, .nicegui-content {
-                width: 100% !important;
-                max-width: 100% !important;
-                padding: 0 !important;
-                margin: 0 !important;
-            }
-            body {
-                background-color: #fff7f0 !important;
-                background-image: none !important;
-            }
-        </style>
-        """
+            <style>
+                body, .nicegui-content {
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                }
+                body {
+                    background-color: #fff7f0 !important;
+                    background-image: none !important;
+                }
+            </style>
+            """
         )
-        # ----- PAGE LAYOUT -----
+
         ui.label("TraceML").classes(
             "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
         ).style("color:#d47a00;")
 
         build_top_tabs(active="overview")
 
-        with ui.row().classes(
-            "mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"
-        ):
+        with ui.row().classes("mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"):
 
-            # System (left column)
             with ui.column().classes("w-[36%]"):
-                cls.cards[SYSTEM_LAYOUT] = build_system_section()
-                cls.update_funcs[SYSTEM_LAYOUT] = update_system_section
+                cards = build_system_section()
+                cls.subscribe_layout(SYSTEM_LAYOUT, cards, update_system_section)
 
-            # Process (middle column)
             with ui.column().classes("w-[30%]"):
-                cls.cards[PROCESS_LAYOUT] = build_process_section()
-                cls.update_funcs[PROCESS_LAYOUT] = update_process_section
+                cards = build_process_section()
+                cls.subscribe_layout(PROCESS_LAYOUT, cards, update_process_section)
 
             with ui.column().classes("w-[33]"):
-                cls.cards[MODEL_MEMORY_LAYOUT] = build_step_memory_section()
-                cls.update_funcs[MODEL_MEMORY_LAYOUT] = (
-                    update_step_memory_section
-                )
+                cards = build_step_memory_section()
+                cls.subscribe_layout(MODEL_MEMORY_LAYOUT, cards, update_step_memory_section)
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
             with ui.column().classes("w-[99%]"):
-                cls.cards[MODEL_COMBINED_LAYOUT] = (
-                    build_model_combined_section()
-                )
-                cls.update_funcs[MODEL_COMBINED_LAYOUT] = (
-                    update_model_combined_section
-                )
+                cards = build_model_combined_section()
+                cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_model_combined_section)
 
-        # background update loop
-        ui.timer(0.75, cls._ui_update_loop)
-        cls._ui_ready = True
+        cls.ensure_ui_timer(0.25)
+
+        if not cls._ui_ready:
+            cls._ui_ready = True
 
     @ui.page("/layers")
     def layer_page():
@@ -121,19 +103,25 @@ def define_pages(cls):
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
             with ui.column().classes("w-[54%]"):
-                cls.cards[LAYER_COMBINED_MEMORY_LAYOUT] = (
-                    build_layer_memory_table_section()
-                )
-                cls.update_funcs[LAYER_COMBINED_MEMORY_LAYOUT] = (
-                    update_layer_memory_table_section
+                cards = build_layer_memory_table_section()
+                cls.subscribe_layout(
+                    LAYER_COMBINED_MEMORY_LAYOUT,
+                    cards,
+                    update_layer_memory_table_section,
                 )
 
             with ui.column().classes("w-[44%]"):
-                cls.cards[LAYER_COMBINED_TIMER_LAYOUT] = (
-                    build_layer_timer_table_section()
-                )
-                cls.update_funcs[LAYER_COMBINED_TIMER_LAYOUT] = (
-                    update_layer_timer_table_section
+                cards = build_layer_timer_table_section()
+                cls.subscribe_layout(
+                    LAYER_COMBINED_TIMER_LAYOUT,
+                    cards,
+                    update_layer_timer_table_section,
                 )
 
-        ui.timer(0.75, cls._ui_update_loop)
+        # Optional:
+        # If you want /layers to work when opened directly (without visiting / first),
+        # keep this. Otherwise remove it.
+        cls.ensure_ui_timer(0.25)
+
+        if not cls._ui_ready:
+            cls._ui_ready = True

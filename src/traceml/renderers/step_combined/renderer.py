@@ -55,7 +55,7 @@ class StepCombinedRenderer(BaseRenderer):
             )
 
         metrics = payload.metrics
-        step_metric = next((m for m in metrics if m.metric == "step_time_ms"), None)
+        step_metric = next((m for m in metrics if m.metric == "step_time"), None)
         wait_metric = next((m for m in metrics if m.metric == "wait_proxy"), None)
 
         # Put wait_proxy last
