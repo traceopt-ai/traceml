@@ -29,6 +29,9 @@ from .step_memory_section import (
 from .system_section import build_system_section, update_system_section
 
 
+from .helper import build_fake_section, update_fake_section
+
+
 def build_top_tabs(active: str):
     """Shared top navigation tabs. `active` ∈ {"overview", "layers"}."""
     with ui.row().classes("w-full px-4 pt-2"):
@@ -82,13 +85,17 @@ def define_pages(cls):
             with ui.column().classes("w-[33]"):
                 cards = build_step_memory_section()
                 cls.subscribe_layout(MODEL_MEMORY_LAYOUT, cards, update_step_memory_section)
+                # cards = build_fake_section()
+                # cls.subscribe_layout(MODEL_MEMORY_LAYOUT, cards, update_fake_section)
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
             with ui.column().classes("w-[99%]"):
-                cards = build_model_combined_section()
-                cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_model_combined_section)
+                # cards = build_model_combined_section()
+                # cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_model_combined_section)
+                cards = build_fake_section()
+                cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_fake_section)
 
-        cls.ensure_ui_timer(0.25)
+        cls.ensure_ui_timer(0.5)
 
         if not cls._ui_ready:
             cls._ui_ready = True
@@ -121,7 +128,7 @@ def define_pages(cls):
         # Optional:
         # If you want /layers to work when opened directly (without visiting / first),
         # keep this. Otherwise remove it.
-        cls.ensure_ui_timer(0.25)
+        cls.ensure_ui_timer(0.5)
 
         if not cls._ui_ready:
             cls._ui_ready = True
