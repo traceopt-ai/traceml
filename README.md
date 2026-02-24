@@ -203,7 +203,7 @@ If TraceML helps your research, please cite:
 
 ```bibtex
 @software{traceml2024,
-  author = {TraceOpt AI},
+  author = {TraceOpt},
   title = {TraceML: Real-time Training Observability for PyTorch},
   year = {2024},
   url = {https://github.com/traceopt-ai/traceml}
@@ -214,6 +214,6 @@ If TraceML helps your research, please cite:
 
 <div align="center">
 
-Made with ❤️ by TraceOpt AI
+Made with ❤️ by TraceOpt
 
 </div>

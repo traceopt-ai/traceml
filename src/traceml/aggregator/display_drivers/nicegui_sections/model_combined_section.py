@@ -182,8 +182,8 @@ def update_model_combined_section(
     cache: Dict[str, Any] = panel.get("_cache", {})
 
     # Build arrays in fixed order (cheap)
-    median_vals = tuple(metrics[k].summary.median_total for _, k in _ORDER)
-    worst_vals = tuple(metrics[k].summary.worst_total for _, k in _ORDER)
+    median_vals = tuple(round(metrics[k].summary.median_total, 3) for _, k in _ORDER)
+    worst_vals = tuple(round(metrics[k].summary.worst_total, 3) for _, k in _ORDER)
 
     step = metrics["step_time"]
     worst_rank = step.summary.worst_rank
