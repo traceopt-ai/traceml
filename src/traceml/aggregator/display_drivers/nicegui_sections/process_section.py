@@ -213,7 +213,7 @@ def _update_graph(panel, window):
               isinstance(r, dict) and r.get("ram_total") is not None and r.get("ram_used_max") is not None]
     if not window:
         return
-    
+
     x = list(range(len(window)))
 
     ram_total = max(window[-1]["ram_total"], 1.0)

@@ -302,15 +302,27 @@ def _common_suffix_steps_fast(
       then take sorted(common)[-window_size:].
 
     Faster: walk backward from completed_step and collect the top-K common steps.
+
+    Stability guard:
+      - cap backward scan to avoid pathological sparse-step hangs
+        (still returns best-effort common suffix if found).
     """
     maps = list(per_rank_steps.values())
-    if not maps:
+    if not maps or window_size <= 0 or completed_step < 0:
         return []
-    ref = maps[0]
 
+    ref = maps[0]
     out_rev: List[int] = []
+
     st = completed_step
+    scan_cap = max(window_size * 20, window_size + 1)  # conservative cap
+    scanned = 0
+
     while st >= 0 and len(out_rev) < window_size:
+        scanned += 1
+        if scanned > scan_cap:
+            break
+
         if st in ref:
             ok = True
             for m in maps[1:]:
@@ -319,6 +331,7 @@ def _common_suffix_steps_fast(
                     break
             if ok:
                 out_rev.append(st)
+
         st -= 1
 
     if not out_rev:

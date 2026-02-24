@@ -337,10 +337,18 @@ def _normalize_metric(m: Any) -> Optional[StepMemoryMetricView]:
     if not steps or (not worst_b and not median_b):
         return None
 
-    n = min(len(steps), len(worst_b) if worst_b else len(steps), len(median_b) if median_b else len(steps))
-    steps = [int(s) for s in steps[:n]]
+    # Compute safe aligned length
+    n_steps = len(steps)
+    n_w = len(worst_b) if worst_b else n_steps
+    n_m = len(median_b) if median_b else n_steps
+    n = min(n_steps, n_w, n_m)
+    if n <= 0:
+        return None
 
-    # bytes -> float bytes
+    # Safe step conversion (never throws)
+    steps = [int(_safe_float(s, 0.0)) for s in steps[:n]]
+
+    # bytes -> float bytes (never throws)
     worst_b = [_safe_float(v) for v in (worst_b[:n] if worst_b else [0.0] * n)]
     median_b = [_safe_float(v) for v in (median_b[:n] if median_b else [0.0] * n)]
 
@@ -363,7 +371,7 @@ def _normalize_metric(m: Any) -> Optional[StepMemoryMetricView]:
         worst_stats=_compute_series_stats(worst_y),
         median_stats=_compute_series_stats(median_y),
         skew_pct=float(skew_pct),
-        worst_rank=worst_rank if worst_rank is None else int(worst_rank),
+        worst_rank=worst_rank if worst_rank is None else int(_safe_float(worst_rank, 0.0)),
     )
 
 
@@ -417,24 +425,9 @@ def update_step_memory_section(
     """
     Robust update:
     - if anything fails, keep last-good view instead of blanking
+    - avoids "silent break until refresh"
     """
-    try:
-        m = _select_metric(payload, preferred=prefer_metric)
-        view = _normalize_metric(m)
-
-        if view is None:
-            # fallback to last-good view if available
-            last = panel.get("_last_ok_view")
-            if last is None:
-                panel["empty"].content = (
-                    "<div style='text-align:center; padding:12px; color:#888; font-style:italic;'>"
-                    "No step memory data detected.</div>"
-                )
-                return
-            view = last  # keep showing old data
-        else:
-            panel["_last_ok_view"] = view  # update last-good cache
-
+    def _render_view(view: StepMemoryMetricView) -> None:
         panel["empty"].content = ""
 
         title = "Step Memory (Peak Allocated)" if view.metric == "peak_allocated" else "Step Memory (Peak Reserved)"
@@ -443,17 +436,44 @@ def update_step_memory_section(
         try:
             _update_graph(panel["graph"], view.steps, view.worst_y, view.median_y, title=title)
         except Exception:
-            # don't break UI loop
             pass
 
-        panel["stats_html"].content = _stats_table_html_dual(
-            worst=view.worst_stats,
-            median=view.median_stats,
-            skew_pct=view.skew_pct,
-            worst_rank=view.worst_rank,
-            show_median_trend=False,
-        )
+        # Stats HTML should not be allowed to break the loop
+        try:
+            panel["stats_html"].content = _stats_table_html_dual(
+                worst=view.worst_stats,
+                median=view.median_stats,
+                skew_pct=view.skew_pct,
+                worst_rank=view.worst_rank,
+                show_median_trend=False,
+            )
+        except Exception:
+            pass
+
+    try:
+        m = _select_metric(payload, preferred=prefer_metric)
+        view = _normalize_metric(m)
+
+        if view is None:
+            last = panel.get("_last_ok_view")
+            if last is None:
+                panel["empty"].content = (
+                    "<div style='text-align:center; padding:12px; color:#888; font-style:italic;'>"
+                    "No step memory data detected.</div>"
+                )
+                return
+            _render_view(last)
+            return
+
+        panel["_last_ok_view"] = view
+        _render_view(view)
 
     except Exception:
-        # Any unexpected error: keep UI alive, do not blank
+        # Any unexpected error: show last-good if available; never blank/freeze.
+        last = panel.get("_last_ok_view")
+        if last is not None:
+            try:
+                _render_view(last)
+            except Exception:
+                pass
         return
