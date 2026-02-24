@@ -105,21 +105,34 @@ def build_system_section() -> dict:
 
 
 def update_system_section(panel: dict, payload: dict) -> None:
-    """
-    Update the System Metrics dashboard card with the latest computed payload.
-    """
-    payload = payload or {}
-    window_len = int(payload.get("window_len", 0) or 0)
-    roll = payload.get("rollups") or {}
-    series = payload.get("series") or {}
+    try:
+        payload = payload or {}
+        window_len = int(payload.get("window_len", 0) or 0)
+        roll = payload.get("rollups") or {}
+        series = payload.get("series") or {}
 
-    if window_len <= 0 or not roll:
-        panel["window_text"].content = "window: –"
+        if window_len <= 0 or not roll:
+            panel["window_text"].content = "window: –"
+            return
+
+        panel["window_text"].content = f"window: last {window_len} samples"
+
+        # If GPU is unavailable, proactively clear temp subtitle to avoid stale status text.
+        if not roll.get("gpu_available", False):
+            try:
+                panel["temp_s"].content = ""
+            except Exception:
+                pass
+
+        _update_tiles(panel, roll)
+        _update_graph(panel, series)
+
+    except Exception:
+        try:
+            panel["window_text"].content = "window: –"
+        except Exception:
+            pass
         return
-
-    panel["window_text"].content = f"window: last {window_len} samples"
-    _update_tiles(panel, roll)
-    _update_graph(panel, series)
 
 
 def _build_graph():
@@ -159,11 +172,13 @@ def _tile(title: str):
 
 
 def _update_tiles(panel: dict, roll: dict) -> None:
-    """Update all metric tiles from rollups (semantics unchanged)."""
-    cpu = roll["cpu"]
+    cpu = roll.get("cpu")
+    ram = roll.get("ram")
+    if not isinstance(cpu, dict) or not isinstance(ram, dict):
+        return  # payload incomplete; keep previous values rather than crash
+
     panel["cpu_v"].content = f"<b>{cpu['now']:.0f}%</b> / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
 
-    ram = roll["ram"]
     if ram["total"] > 0:
         panel["ram_v"].content = (
             f"<b>{fmt_mem_new(ram['now'])}</b>/"
@@ -176,45 +191,43 @@ def _update_tiles(panel: dict, roll: dict) -> None:
     if not roll.get("gpu_available", False):
         for k in ("gpu_v", "imb_v", "gmem_v", "temp_v"):
             panel[k].content = "Not available"
+        panel["temp_s"].content = ""  # prevent stale "Status: ..." when GPU disappears
         return
 
-    gpu = roll["gpu_util"]
+    gpu = roll.get("gpu_util")
+    imb = roll.get("gpu_delta")
+    gmem = roll.get("gpu_mem")
+    temp = roll.get("temp")
+    if not all(isinstance(x, dict) for x in (gpu, imb, gmem, temp)):
+        return  # incomplete GPU payload; don't crash
+
     panel["gpu_v"].content = f"<b>{gpu['now']:.0f}%</b> / {gpu['p50']:.0f}% / {gpu['p95']:.0f}%"
-
-    imb = roll["gpu_delta"]
     panel["imb_v"].content = f"{imb['now']:.0f}% / {imb['p95']:.0f}%"
-
-    gmem = roll["gpu_mem"]
     panel["gmem_v"].content = f"<b>{fmt_mem_new(gmem['now'])}</b>/{fmt_mem_new(gmem['p95'])}"
 
-    temp = roll["temp"]
     panel["temp_v"].content = f"{temp['now']:.0f}°C · p95 {temp['p95']:.0f}°C"
     panel["temp_s"].content = f"Status: {temp['status']}"
 
 
 def _update_graph(panel: dict, series: dict) -> None:
-    """
-    Rebuild and update the CPU/GPU utilization time series graph.
-
-    We keep the x-axis behavior consistent with your current implementation:
-    - if extract_x_axis() returns a valid axis matching series length, use it
-    - else fallback to [0..N-1]
-    """
     cpu_hist = list(series.get("cpu") or [])
     gpu_hist = list(series.get("gpu_avg") or [])
 
     if not cpu_hist:
+        # clear graph explicitly
+        fig = go.Figure()
+        fig.update_layout(panel["graph"].figure.layout)
+        panel["graph"].update_figure(fig)
         return
 
-    # We no longer have raw window records here; x-axis helper may not work.
-    # If you need true time-axis, include timestamps in series (easy extension).
     x = list(range(len(cpu_hist)))
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=x, y=cpu_hist, mode="lines", line=dict(color="#4caf50"), yaxis="y"))
 
     if gpu_hist:
-        fig.add_trace(go.Scatter(x=x, y=gpu_hist, mode="lines", line=dict(color="#ff9800"), yaxis="y2"))
+        m = min(len(cpu_hist), len(gpu_hist))
+        fig.add_trace(go.Scatter(x=x[:m], y=gpu_hist[:m], mode="lines", line=dict(color="#ff9800"), yaxis="y2"))
 
     fig.update_layout(panel["graph"].figure.layout)
     panel["graph"].update_figure(fig)

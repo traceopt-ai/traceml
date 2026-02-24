@@ -1,6 +1,6 @@
 # TraceML
 
-**Always-on, live observability for Multi-GPU PyTorch training (DDP)**
+**Know what’s slowing your PyTorch training, while it runs**
 
 📋 **User Survey (2 min):** https://forms.gle/KwPSLaPmJnJjoVXSA
 
@@ -10,12 +10,19 @@
 [![Python 3.9-3.13](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 
-TraceML is a lightweight **runtime observability** tool for **PyTorch DDP training** (currently on **single-node Multi-GPU)**.
-It surfaces **step-level, rank-aware** signals *while your job runs*, without turning on heavy profilers. It answers
+TraceML shows a **live breakdown of your training step** so you can immediately see:
+- how much time is in **DataLoader vs compute vs optimizer**
+- how much time is **waiting / unaccounted** (stalls, sync, hidden overhead)
+- whether performance is **stable or drifting** over time
 
-> “What’s happening inside my training step right now — and is a particular rank behaving worse than the rest?”
 
-If your run is healthy, TraceML should say so.
+It breaks each step into:
+**dataloader → forward → backward → optimizer → (wait/unaccounted)**
+
+When running multi-GPU (e.g., **DDP**), TraceML also highlights **stragglers**:
+**median rank vs worst rank**, the **worst rank id**, and **skew (%)**.
+
+If your run is healthy, TraceML should clearly say so.
 
 ---
 
