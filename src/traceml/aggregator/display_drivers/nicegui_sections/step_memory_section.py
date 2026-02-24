@@ -424,21 +424,33 @@ def update_step_memory_section(
 ) -> None:
     """
     Robust update:
-    - if anything fails, keep last-good view instead of blanking
-    - avoids "silent break until refresh"
+    - never blanks the card on transient failures
+    - always falls back to last-good view if anything goes wrong
     """
+
+    def _show_waiting(msg: str) -> None:
+        try:
+            panel["empty"].content = (
+                "<div style='text-align:center; padding:12px; color:#888; font-style:italic;'>"
+                f"{msg}</div>"
+            )
+        except Exception:
+            pass
+
     def _render_view(view: StepMemoryMetricView) -> None:
-        panel["empty"].content = ""
+        # only now hide the empty hint
+        try:
+            panel["empty"].content = ""
+        except Exception:
+            pass
 
         title = "Step Memory (Peak Allocated)" if view.metric == "peak_allocated" else "Step Memory (Peak Reserved)"
 
-        # Plotly update can occasionally throw; if it does, keep old figure
         try:
             _update_graph(panel["graph"], view.steps, view.worst_y, view.median_y, title=title)
         except Exception:
             pass
 
-        # Stats HTML should not be allowed to break the loop
         try:
             panel["stats_html"].content = _stats_table_html_dual(
                 worst=view.worst_stats,
@@ -451,29 +463,31 @@ def update_step_memory_section(
             pass
 
     try:
+        # Try to compute a fresh view
         m = _select_metric(payload, preferred=prefer_metric)
         view = _normalize_metric(m)
 
-        if view is None:
-            last = panel.get("_last_ok_view")
-            if last is None:
-                panel["empty"].content = (
-                    "<div style='text-align:center; padding:12px; color:#888; font-style:italic;'>"
-                    "No step memory data detected.</div>"
-                )
-                return
-            _render_view(last)
+        if view is not None:
+            panel["_last_ok_view"] = view
+            _render_view(view)
             return
 
-        panel["_last_ok_view"] = view
-        _render_view(view)
+        # Fresh view unavailable -> fall back
+        last = panel.get("_last_ok_view")
+        if last is not None:
+            _render_view(last)
+        else:
+            _show_waiting("Waiting for memory samples…")
+        return
 
     except Exception:
-        # Any unexpected error: show last-good if available; never blank/freeze.
+        # On ANY exception: render last-good if available; otherwise show waiting message
         last = panel.get("_last_ok_view")
         if last is not None:
             try:
                 _render_view(last)
             except Exception:
                 pass
+        else:
+            _show_waiting("Waiting for memory samples…")
         return
