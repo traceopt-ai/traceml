@@ -90,10 +90,10 @@ def define_pages(cls):
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
             with ui.column().classes("w-[99%]"):
-                # cards = build_model_combined_section()
-                # cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_model_combined_section)
-                cards = build_fake_section()
-                cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_fake_section)
+                cards = build_model_combined_section()
+                cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_model_combined_section)
+                # cards = build_fake_section()
+                # cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_fake_section)
 
         cls.ensure_ui_timer(0.5)
 
