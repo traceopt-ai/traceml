@@ -84,7 +84,7 @@ def build_system_section() -> dict:
             _, imb_v, imb_s = _tile("GPU Util Skew (now/p95)")
             _, ram_v, ram_s = _tile("RAM (now/p95/total)")
             _, gmem_v, gmem_s = _tile("GPU Mem (now/p95)")
-            _, temp_v, temp_s = _tile("Temp (max GPU)")
+            _, temp_v, temp_s = _tile("GPU Temp (max)")
 
     return {
         "window_text": window_text,
@@ -177,11 +177,11 @@ def _update_tiles(panel: dict, roll: dict) -> None:
     if not isinstance(cpu, dict) or not isinstance(ram, dict):
         return  # payload incomplete; keep previous values rather than crash
 
-    panel["cpu_v"].content = f"<b>{cpu['now']:.0f}%</b> / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
+    panel["cpu_v"].content = f"{cpu['now']:.0f}% / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
 
     if ram["total"] > 0:
         panel["ram_v"].content = (
-            f"<b>{fmt_mem_new(ram['now'])}</b>/"
+            f"{fmt_mem_new(ram['now'])}/"
             f"{fmt_mem_new(ram['p95'])}/"
             f"({fmt_mem_new(ram['total'])})"
         )
@@ -201,11 +201,11 @@ def _update_tiles(panel: dict, roll: dict) -> None:
     if not all(isinstance(x, dict) for x in (gpu, imb, gmem, temp)):
         return  # incomplete GPU payload; don't crash
 
-    panel["gpu_v"].content = f"<b>{gpu['now']:.0f}%</b> / {gpu['p50']:.0f}% / {gpu['p95']:.0f}%"
+    panel["gpu_v"].content = f"{gpu['now']:.0f}% / {gpu['p50']:.0f}% / {gpu['p95']:.0f}%"
     panel["imb_v"].content = f"{imb['now']:.0f}% / {imb['p95']:.0f}%"
-    panel["gmem_v"].content = f"<b>{fmt_mem_new(gmem['now'])}</b>/{fmt_mem_new(gmem['p95'])}"
+    panel["gmem_v"].content = f"{fmt_mem_new(gmem['now'])}/{fmt_mem_new(gmem['p95'])}"
 
-    panel["temp_v"].content = f"{temp['now']:.0f}°C · p95 {temp['p95']:.0f}°C"
+    panel["temp_v"].content = f"{temp['now']:.0f}°C"
     panel["temp_s"].content = f"Status: {temp['status']}"
 
 
