@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 from nicegui import ui
 import plotly.graph_objects as go
 
+from traceml.loggers.error_log import get_error_logger
 
 # -----------------------------
 # Styling (match your dashboard)
@@ -42,15 +43,10 @@ METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 METRIC_TEXT = "text-sm leading-normal text-gray-700"
 
 
-# -----------------------------
-# Units
-# -----------------------------
+
 BYTES_PER_GB = 1e9  # decimal GB (matches "GB" label)
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
 def _safe_float(v: Any, default: float = 0.0) -> float:
     try:
         return float(v)
@@ -195,45 +191,18 @@ def _make_empty_figure(title: str) -> go.Figure:
     return fig
 
 
-def _update_graph(plotly_ui, x: List[int], y_worst: List[float], y_median: List[float], title: str) -> None:
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y_worst,
-            mode="lines",
-            name="Worst",
-            line=dict(width=2),
-            hovertemplate="step=%{x}<br>worst=%{y:.2f} GB<extra></extra>",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y_median,
-            mode="lines",
-            name="Median",
-            line=dict(width=1, dash="dash"),
-            hovertemplate="step=%{x}<br>median=%{y:.2f} GB<extra></extra>",
-        )
-    )
-    fig.update_layout(
-        height=160,
-        margin=dict(l=10, r=10, t=4, b=18),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0.05)",
-        showlegend=True,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1.0,
-            font=dict(size=9),
-        ),
-        xaxis=dict(showgrid=False, title="Training Step", tickfont=dict(size=9)),
-        yaxis=dict(title="Memory (GB)", tickfont=dict(size=9)),
-    )
+def _update_graph(plotly_ui, fig: go.Figure, x: List[int], y_worst: List[float], y_median: List[float]) -> None:
+    """
+    Update existing figure in-place (fast).
+    Assumes fig already has 2 traces: Worst (0) and Median (1).
+    """
+    # update traces (no new figure)
+    fig.data[0].x = x
+    fig.data[0].y = y_worst
+    fig.data[1].x = x
+    fig.data[1].y = y_median
+
+    # push update (same fig object)
     plotly_ui.update_figure(fig)
 
 
@@ -392,10 +361,33 @@ def build_step_memory_section(*, title: str = "Step Memory (Peak Allocated)") ->
         """
     )
 
+    # Build ONCE
+    fig = _make_empty_figure(title)
+    fig.add_trace(
+        go.Scatter(
+            x=[],
+            y=[],
+            mode="lines",
+            name="Worst",
+            line=dict(width=2),
+            hovertemplate="step=%{x}<br>worst=%{y:.2f} GB<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[],
+            y=[],
+            mode="lines",
+            name="Median",
+            line=dict(width=1, dash="dash"),
+            hovertemplate="step=%{x}<br>median=%{y:.2f} GB<extra></extra>",
+        )
+    )
+
     with card:
         ui.label(title).classes(METRIC_TITLE).style(TITLE_STYLE)
 
-        plotly_ui = ui.plotly(_make_empty_figure(title)).classes("w-full")
+        plotly_ui = ui.plotly(fig).classes("w-full")
         plotly_ui.style("max-width: 100%; overflow-x: hidden;")
 
         stats_html = ui.html("", sanitize=False).classes(METRIC_TEXT).style("color:#333")
@@ -411,10 +403,9 @@ def build_step_memory_section(*, title: str = "Step Memory (Peak Allocated)") ->
         "graph": plotly_ui,
         "stats_html": stats_html,
         "empty": empty_hint,
-        # last-good cache for UI stability
         "_last_ok_view": None,
+        "_fig": fig,
     }
-
 
 def update_step_memory_section(
     panel: Dict[str, Any],
@@ -447,7 +438,7 @@ def update_step_memory_section(
         title = "Step Memory (Peak Allocated)" if view.metric == "peak_allocated" else "Step Memory (Peak Reserved)"
 
         try:
-            _update_graph(panel["graph"], view.steps, view.worst_y, view.median_y, title=title)
+            _update_graph(panel["graph"], panel["_fig"], view.steps, view.worst_y, view.median_y)
         except Exception:
             pass
 
