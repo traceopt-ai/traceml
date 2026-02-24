@@ -107,6 +107,8 @@ def build_process_section():
         "ram_v": ram_v,
         "gmem_v": gmem_v,
         "imb_v": imb_v,
+        "_last_ok_data": None,
+        "_last_ok_window": None,
     }
 
 
@@ -145,33 +147,39 @@ def _tile(title):
 
 
 def update_process_section(panel, data, window_n=100):
-    """
-    Update Process Metrics dashboard.
+    try:
+        if data and (data.get("history") or []):
+            history = data["history"]
+            window = history[-window_n:]
+            if window:
+                panel["_last_ok_data"] = data
+                panel["_last_ok_window"] = window
+        else:
+            # fallback to last good (prevents flicker)
+            data = panel.get("_last_ok_data") or {}
+            window = panel.get("_last_ok_window") or []
 
-    Parameters
-    ----------
-    panel : dict
-        UI handles returned by build_process_section
-    data : dict
-        Output of ProcessRenderer.get_dashboard_renderable()
-    window_n : int
-        Rolling window size
-    """
-    if not data:
-        panel["window_text"].content = "window: –"
+        if not window:
+            panel["window_text"].content = "window: –"
+            return
+
+        panel["window_text"].content = f"window: last {len(window)} samples"
+        roll = _compute_rollups(window)
+        _update_tiles(panel, roll, data)
+        _update_graph(panel, window)
+
+    except Exception:
+        # never crash/freeze the update loop
+        try:
+            data = panel.get("_last_ok_data") or {}
+            window = panel.get("_last_ok_window") or []
+            if window:
+                roll = _compute_rollups(window)
+                _update_tiles(panel, roll, data)
+                _update_graph(panel, window)
+        except Exception:
+            pass
         return
-
-    history = data.get("history", [])
-    if not history:
-        panel["window_text"].content = "window: –"
-        return
-
-    window = history[-window_n:]
-    panel["window_text"].content = f"window: last {len(window)} samples"
-
-    roll = _compute_rollups(window)
-    _update_tiles(panel, roll, data)
-    _update_graph(panel, window)
 
 
 def _update_tiles(panel, roll, snap):
@@ -194,13 +202,18 @@ def _update_tiles(panel, roll, snap):
         panel["gmem_v"].content = "Not available"
 
     panel["imb_v"].content = (
-        fmt_mem_new(snap["gpu_used_imbalance"])
+        fmt_mem_new(snap.get("gpu_used_imbalance"))
         if snap.get("gpu_used_imbalance") is not None
         else "–"
     )
 
 
 def _update_graph(panel, window):
+    window = [r for r in window if
+              isinstance(r, dict) and r.get("ram_total") is not None and r.get("ram_used_max") is not None]
+    if not window:
+        return
+    
     x = list(range(len(window)))
 
     ram_total = max(window[-1]["ram_total"], 1.0)
