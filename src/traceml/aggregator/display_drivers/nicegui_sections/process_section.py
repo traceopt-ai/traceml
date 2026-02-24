@@ -208,18 +208,18 @@ def update_process_section(panel, data, window_n=100):
 def _update_tiles(panel, roll, snap):
     cpu = roll["cpu"]
     panel["cpu_v"].content = (
-        f"<b>{cpu['now']:.0f}%</b> / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
+        f"{cpu['now']:.0f}%/ {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
     )
     ram = roll["ram"]
     panel["ram_v"].content = (
-        f"<b>{fmt_mem_new(ram['now'])}</b>/"
+        f"{fmt_mem_new(ram['now'])}/"
         f"{fmt_mem_new(ram['p95'])}/"
         f"{fmt_mem_new(ram['total'])}"
     )
     if roll["gpu_available"]:
         g = roll["gpu"]
         panel["gmem_v"].content = (
-            f"<b>{fmt_mem_new(g['now'])}</b>/" f"{fmt_mem_new(g['p95'])}"
+            f"{fmt_mem_new(g['now'])}/" f"{fmt_mem_new(g['p95'])}"
         )
     else:
         panel["gmem_v"].content = "Not available"

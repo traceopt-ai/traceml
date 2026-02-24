@@ -136,8 +136,33 @@ def update_system_section(panel: dict, payload: dict) -> None:
 
 
 def _build_graph():
-    """Create an empty Plotly graph with fixed layout (same as your current config)."""
+    """Create a Plotly graph ONCE with fixed layout and persistent traces."""
     fig = go.Figure()
+
+    # Create the traces once (keep colors/axes exactly as before)
+    fig.add_trace(
+        go.Scatter(
+            x=[],
+            y=[],
+            mode="lines",
+            line=dict(color="#4caf50"),
+            yaxis="y",
+            name="CPU",
+            showlegend=False,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[],
+            y=[],
+            mode="lines",
+            line=dict(color="#ff9800"),
+            yaxis="y2",
+            name="GPU",
+            showlegend=False,
+        )
+    )
+
     fig.update_layout(
         height=150,
         margin=dict(l=10, r=10, t=2, b=24),
@@ -158,6 +183,7 @@ def _build_graph():
             tickfont=dict(color="#ff9800"),
         ),
     )
+
     return ui.plotly(fig).classes("w-full")
 
 
@@ -210,24 +236,45 @@ def _update_tiles(panel: dict, roll: dict) -> None:
 
 
 def _update_graph(panel: dict, series: dict) -> None:
+    """Update ONLY trace data (no new Figure() each tick)."""
     cpu_hist = list(series.get("cpu") or [])
     gpu_hist = list(series.get("gpu_avg") or [])
 
+    plot = panel["graph"]
+    fig = plot.figure  # existing persistent figure
+
+    # Ensure traces exist (in case something rebuilt the figure elsewhere)
+    if len(fig.data) < 2:
+        # fallback: rebuild once (rare)
+        new_plot = _build_graph()
+        panel["graph"] = new_plot
+        plot = new_plot
+        fig = plot.figure
+
+    # No CPU history => clear both traces
     if not cpu_hist:
-        # clear graph explicitly
-        fig = go.Figure()
-        fig.update_layout(panel["graph"].figure.layout)
-        panel["graph"].update_figure(fig)
+        fig.data[0].x, fig.data[0].y = [], []
+        fig.data[1].x, fig.data[1].y = [], []
+        # prefer lightweight update
+        if hasattr(plot, "update"):
+            plot.update()
+        else:
+            plot.update_figure(fig)
         return
 
-    x = list(range(len(cpu_hist)))
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=x, y=cpu_hist, mode="lines", line=dict(color="#4caf50"), yaxis="y"))
+    x_cpu = list(range(len(cpu_hist)))
+    fig.data[0].x = x_cpu
+    fig.data[0].y = cpu_hist
 
     if gpu_hist:
         m = min(len(cpu_hist), len(gpu_hist))
-        fig.add_trace(go.Scatter(x=x[:m], y=gpu_hist[:m], mode="lines", line=dict(color="#ff9800"), yaxis="y2"))
+        x_gpu = x_cpu[:m]
+        fig.data[1].x = x_gpu
+        fig.data[1].y = gpu_hist[:m]
+    else:
+        fig.data[1].x, fig.data[1].y = [], []
 
-    fig.update_layout(panel["graph"].figure.layout)
-    panel["graph"].update_figure(fig)
+    if hasattr(plot, "update"):
+        plot.update()
+    else:
+        plot.update_figure(fig)
