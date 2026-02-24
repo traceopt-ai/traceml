@@ -95,7 +95,7 @@ def define_pages(cls):
                 # cards = build_fake_section()
                 # cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_fake_section)
 
-        cls.ensure_ui_timer(0.5)
+        cls.ensure_ui_timer(1.0)
 
         if not cls._ui_ready:
             cls._ui_ready = True
@@ -128,7 +128,7 @@ def define_pages(cls):
         # Optional:
         # If you want /layers to work when opened directly (without visiting / first),
         # keep this. Otherwise remove it.
-        cls.ensure_ui_timer(0.5)
+        cls.ensure_ui_timer(1.0)
 
         if not cls._ui_ready:
             cls._ui_ready = True

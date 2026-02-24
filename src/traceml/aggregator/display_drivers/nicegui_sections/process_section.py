@@ -92,7 +92,7 @@ def build_process_section():
                 "text-xs text-gray-500 mr-1"
             )
 
-        graph = _build_graph()
+        graph, fig = _build_graph()
 
         with ui.grid(columns=3).classes("w-full gap-1 mt-1"):
             _, cpu_v, _ = _tile("CPU (now/p50/p95)")
@@ -109,12 +109,15 @@ def build_process_section():
         "imb_v": imb_v,
         "_last_ok_data": None,
         "_last_ok_window": None,
+        "_fig": fig
     }
 
 
 def _build_graph():
-    """Create an empty RAM/GPU memory graph."""
     fig = go.Figure()
+    fig.add_trace(go.Scatter(x=[], y=[], mode="lines", yaxis="y", name="RAM"))
+    fig.add_trace(go.Scatter(x=[], y=[], mode="lines", yaxis="y2", name="GPU"))
+
     fig.update_layout(
         height=150,
         margin=dict(l=10, r=10, t=2, b=24),
@@ -122,20 +125,11 @@ def _build_graph():
         plot_bgcolor="rgba(0,0,0,0.05)",
         showlegend=False,
         xaxis=dict(showgrid=False),
-        yaxis=dict(
-            range=[0, 100],
-            title=dict(text="RAM (%)", font=dict(color="#4caf50")),
-            tickfont=dict(color="#4caf50"),
-        ),
-        yaxis2=dict(
-            range=[0, 100],
-            overlaying="y",
-            side="right",
-            title=dict(text="GPU Mem (%)", font=dict(color="#ff9800")),
-            tickfont=dict(color="#ff9800"),
-        ),
+        yaxis=dict(range=[0, 100], title=dict(text="RAM (%)"), tickfont=dict()),
+        yaxis2=dict(range=[0, 100], overlaying="y", side="right", title=dict(text="GPU Mem (%)"), tickfont=dict()),
     )
-    return ui.plotly(fig).classes("w-full")
+    plot = ui.plotly(fig).classes("w-full")
+    return plot, fig
 
 
 def _tile(title):
@@ -209,46 +203,38 @@ def _update_tiles(panel, roll, snap):
 
 
 def _update_graph(panel, window):
-    window = [r for r in window if
-              isinstance(r, dict) and r.get("ram_total") is not None and r.get("ram_used_max") is not None]
+    window = [
+        r for r in window
+        if isinstance(r, dict) and r.get("ram_total") is not None and r.get("ram_used_max") is not None
+    ]
     if not window:
         return
+
+    fig = panel["_fig"]
 
     x = list(range(len(window)))
 
     ram_total = max(window[-1]["ram_total"], 1.0)
     ram_pct = [(r["ram_used_max"] / ram_total) * 100.0 for r in window]
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=ram_pct,
-            mode="lines",
-            yaxis="y",
-            line=dict(color="#4caf50"),
-        )
-    )
+    # trace 0 = RAM
+    fig.data[0].x = x
+    fig.data[0].y = ram_pct
 
+    # trace 1 = GPU (may be empty if not available)
     if window[-1].get("gpu_used") is not None:
-        gpu_total = max(window[-1]["gpu_total"], 1.0)
+        gpu_total = max(window[-1].get("gpu_total", 1.0), 1.0)
         gpu_pct = [
             (r["gpu_used"] / gpu_total) * 100.0
             for r in window
             if r.get("gpu_used") is not None
         ]
+        fig.data[1].x = list(range(len(gpu_pct)))
+        fig.data[1].y = gpu_pct
+    else:
+        fig.data[1].x = []
+        fig.data[1].y = []
 
-        fig.add_trace(
-            go.Scatter(
-                x=list(range(len(gpu_pct))),
-                y=gpu_pct,
-                mode="lines",
-                yaxis="y2",
-                line=dict(color="#ff9800"),
-            )
-        )
-
-    fig.update_layout(panel["graph"].figure.layout)
     panel["graph"].update_figure(fig)
 
 
