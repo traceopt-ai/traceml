@@ -131,7 +131,7 @@ def start_runtime(cfg):
         )
         runtime = TraceMLRuntime(settings=settings)
 
-        print("[TraceML] Starting Runtime")
+        print(f"[TraceML] Starting Runtime with Client port at {cfg['tcp_host']}:{cfg['tcp_port']}")
         runtime.start()
         return runtime
     except Exception as e:
