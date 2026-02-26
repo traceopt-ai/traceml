@@ -12,6 +12,12 @@
 TraceML provides step-level training visibility for PyTorch workloads. It shows where time and memory go inside each training step so you can
 quickly understand performance behavior across single-GPU and  single-node DDP runs.
 
+**Current support**
+- ✅ Single GPU
+- ✅ Single-node multi-GPU (**DDP**)
+- ❌ Multi-node DDP (not yet)
+- ❌ FSDP / TP / PP (not yet)
+
 ---
 
 ## What You See in Minutes
