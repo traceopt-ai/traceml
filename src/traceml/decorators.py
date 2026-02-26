@@ -49,7 +49,7 @@ patch_backward()
 
 
 try:
-    from traceml.utils.lightning_patch import patch_lightning
+    from traceml.lightning_callback import patch_lightning
 
     patch_lightning()
 except Exception:
