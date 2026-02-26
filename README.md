@@ -126,6 +126,9 @@ training runs.
 -   Single GPU
 -   Single-node DDP
 
+**Known limitations**: With gradient accumulation enabled, 
+step-level metrics may be unreliable (micro-step vs optimizer-step). Fix in progress.
+
 ---
 
 ## Hugging Face Integration
