@@ -1,6 +1,6 @@
 # TraceML
 
-**Know what’s slowing your PyTorch training, while it runs**
+**Know what’s slowing your (PyTorch) training, while it runs**
 
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
@@ -176,6 +176,10 @@ PyTorch versions - ESSENTIAL vs DEEP-DIVE - Single GPU vs DDP
 ---
 
 ## Community & Support
+
+Founding Engineer / Co-Founder track (Berlin/Germany): We are looking 
+for a senior systems+ML builder to help grow TraceML into a sustainable AI 
+infra product. See the GitHub Discussion https://github.com/traceopt-ai/traceml/discussions/36
 
 - 📧 Email: abhinav@traceopt.ai
 - 🐙 LinkedIn: [Abhinav Srivastav](https://www.linkedin.com/in/abhinavsriva/)
