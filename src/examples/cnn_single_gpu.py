@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-from traceml.decorators import trace_model_instance, trace_step, trace_time
+from traceml.decorators import trace_model_instance, trace_step
 
 # -------------------------
 # Medium CNN for MNIST
@@ -37,29 +37,16 @@ class MNISTCNN(nn.Module):
 # TraceML wrappers
 # -------------------------
 
-
-@trace_time("forward")
 def forward_step(model, x):
     return model(x)
 
 
-@trace_time("backward")
 def backward_step(loss):
     loss.backward()
 
 
-@trace_time("optimizer_step")
 def optimizer_step(opt):
     opt.step()
-
-
-# def slow_op(x):
-#     # time.sleep(0.0005)  # 0.5ms per image
-#     # return x
-
-# -------------------------
-# Train
-# -------------------------
 
 
 def main():

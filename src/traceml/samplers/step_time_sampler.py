@@ -1,157 +1,178 @@
 """
-TimeSampler
+StepTimeSampler
 
 Step-level timing sampler for TraceML.
 
-Responsibilities
-----------------
-- Consume TimeEvent objects from the global timing queue
-- Resolve CPU events immediately
-- Resolve GPU events asynchronously in strict FIFO order
-- Persist resolved events into DB tables (one table per event name)
+Reads StepTimeBatch objects from the STEP timing queue, resolves GPU timings
+asynchronously (without blocking training), aggregates repeated regions within
+the same optimizer step (e.g., gradient accumulation), and persists one record
+per (step, event_name).
 
-This sampler is *clock-agnostic*:
-- CPU vs GPU timing is encoded via `is_gpu`
-- Duration is always stored in `duration_ms`
+Key semantics
+-------------
+- Input unit: StepTimeBatch(step, events=[TimeEvent...])
+- Correctness: a step is persisted only after *all* GPU events in that step
+  have resolved. Later steps are blocked until earlier steps resolve (FIFO).
+- Aggregation: durations are SUM'ed across repeated occurrences of the same
+  event name within a step; n_calls is counted.
 """
 
 from collections import deque
 from queue import Empty
-from typing import List, Optional
+from typing import Deque, Dict, List, Tuple
 
 from traceml.loggers.error_log import get_error_logger
 from traceml.samplers.schema.time_schema import TimeEventSample
-from traceml.utils.timing import TimeEvent, get_time_queue
+from traceml.utils.timing import StepTimeBatch, TimeEvent, get_step_time_queue
 
 from .base_sampler import BaseSampler
 
 
-class TimeSampler(BaseSampler):
+class StepTimeSampler(BaseSampler):
     """
-    Step-level timing sampler.
+    Sampler for STEP-scoped timing.
 
     Design
     ------
-    - One totally ordered timing stream per rank
-    - One DB table per event name (`evt.name`)
-    - CPU events never block GPU events
-    - GPU events resolve strictly FIFO
+    - Drains the shared STEP timing queue (batches) into a local FIFO buffer.
+    - Ensures strict step ordering: if the earliest step is unresolved, later
+      steps are not written.
+    - Resolves GPU timings using non-blocking queries.
+    - Aggregates repeated events within the same step (SUM + call count).
 
-    DB row schema
-    -------------
-    Uses TimeEventSample.to_wire()
+    Storage
+    -------
+    Persists into one DB table per event name (same as legacy TimeSampler),
+    but with aggregated per-step rows.
+
+    Notes
+    -----
+    - CPU events resolve immediately.
+    - GPU events resolve asynchronously; sampler never synchronizes the device.
+    - Failures are logged and never propagate into training.
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "TimeSampler"
+        self.sampler_name = "StepTimeSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
+
+        # Local FIFO buffer of pending step batches (order preserved).
+        self._local_steps: Deque[StepTimeBatch] = deque()
+
         self.sample_idx = 0
 
-        # Local FIFO queue for unresolved GPU events.
-        # Keeps ordering and avoids GPU events blocking CPU events in the shared queue.
-        self._local_gpu_q = deque()
-
-    def _drain_global_queue(self) -> List[TimeEvent]:
+    def _ingest_queue(self) -> None:
         """
-        Drain the shared queue completely.
-        - CPU-only events are appended to `ready` (they resolve immediately).
-        - GPU events are moved to the local GPU deque (no resolving here).
+        Drain shared STEP queue and append all batches into local FIFO buffer.
         """
-        q = get_time_queue()
-        ready: List[TimeEvent] = []
 
+        q = get_step_time_queue()
         while True:
             try:
-                evt = q.get_nowait()
+                batch = q.get_nowait()
             except Empty:
                 break
-
-            # CPU-only events, resolve immediately.
-            if evt.gpu_start is None or evt.gpu_end is None:
-                evt.try_resolve()  # marks resolved
-                ready.append(evt)
-            else:
-                # GPU events: keep FIFO in local queue; resolve later in order.
-                self._local_gpu_q.append(evt)
-
-        return ready
-
-    def _drain_local_gpu_queue(self) -> List[TimeEvent]:
-        """
-        Resolve GPU events in strict FIFO order.
-        We only attempt to resolve the *front*; if it isn't ready, stop.
-        """
-        ready: List[TimeEvent] = []
-
-        while self._local_gpu_q:
-            evt = self._local_gpu_q[0]  # peek front (preserves FIFO)
-            if evt.try_resolve():
-                self._local_gpu_q.popleft()
-                ready.append(evt)
-            else:
-                break
-
-        return ready
+            if batch is None:
+                continue
+            self._local_steps.append(batch)
 
     @staticmethod
     def _cpu_duration_ms(evt: TimeEvent) -> float:
-        """
-        Compute CPU wall duration in milliseconds.
-        """
         return (evt.cpu_end - evt.cpu_start) * 1000.0
 
-    def _event_to_sample(self, evt: TimeEvent) -> Optional[TimeEventSample]:
+    def _step_is_resolved(self, batch: StepTimeBatch) -> bool:
         """
-        Convert a resolved TimeEvent into a TimeEventSample.
+        Return True if *all* events in the batch are resolved.
+
+        CPU events resolve immediately. GPU events resolve only if the recorded
+        CUDA end event has completed (non-blocking).
         """
-        try:
+        for evt in batch.events:
+            if not evt.try_resolve():
+                return False
+        return True
+
+    def _aggregate_step(
+        self, batch: StepTimeBatch
+    ) -> List[Tuple[str, str, bool, float, int, float]]:
+        """
+        Aggregate all events within a step by (event name, device, is_gpu).
+
+        Returns a list of tuples:
+          (name, device, is_gpu, duration_ms_sum, n_calls, timestamp)
+
+        timestamp is the max cpu_end observed for that aggregated group.
+        """
+        agg: Dict[Tuple[str, str, bool], Dict[str, float]] = {}
+        calls: Dict[Tuple[str, str, bool], int] = {}
+        ts_max: Dict[Tuple[str, str, bool], float] = {}
+
+        for evt in batch.events:
             is_gpu = evt.gpu_time_ms is not None
-            duration_ms = (
-                float(evt.gpu_time_ms)
-                if is_gpu
-                else float(self._cpu_duration_ms(evt))
-            )
+            duration_ms = float(evt.gpu_time_ms) if is_gpu else float(self._cpu_duration_ms(evt))
+            key = (str(evt.name), str(evt.device), bool(is_gpu))
 
-            return TimeEventSample(
+            agg[key] = {"sum_ms": float(agg.get(key, {}).get("sum_ms", 0.0)) + duration_ms}
+            calls[key] = int(calls.get(key, 0) + 1)
+            ts_max[key] = float(max(ts_max.get(key, 0.0), float(evt.cpu_end)))
+
+        out: List[Tuple[str, str, bool, float, int, float]] = []
+        for (name, device, is_gpu), rec in agg.items():
+            out.append((name, device, is_gpu, float(rec["sum_ms"]), int(calls[(name, device, is_gpu)]), float(ts_max[(name, device, is_gpu)])))
+        return out
+
+    def _save_aggregates(
+        self,
+        step: int,
+        scope: str,
+        aggregates: List[Tuple[str, str, bool, float, int, float]],
+    ) -> None:
+        """
+        Persist aggregated step timings.
+
+        Keeps legacy behavior: one DB table per event name.
+        Adds aggregation awareness via `n_calls` encoded in sample_idx stream
+        (optionally extend schema later).
+        """
+        # NOTE: TimeEventSample currently doesn't include n_calls.
+        # If we later extend schema, add n_calls here.
+        for name, device, is_gpu, duration_ms, _n_calls, ts in aggregates:
+            sample = TimeEventSample(
                 sample_idx=self.sample_idx,
-                timestamp=float(evt.cpu_end),
-                step=int(evt.step),
-                scope=str(evt.scope),
-                device=str(evt.device),
+                timestamp=float(ts),
+                step=int(step),
+                scope=str(scope),
+                device=str(device),
                 is_gpu=bool(is_gpu),
-                duration_ms=duration_ms,
+                duration_ms=float(duration_ms),
             )
-        except Exception:
-            return None
-
-    def _save_events(self, events: List[TimeEvent]) -> None:
-        """
-        Persist resolved events into DB tables.
-
-        Table name = evt.name
-        Row schema = TimeEventSample.to_wire()
-        """
-        for evt in events:
-            sample = self._event_to_sample(evt)
-            if sample is None:
-                continue
-            self.db.add_record(evt.name, sample.to_wire())
+            self.logger.error(f"Ingesting batch {str(name)} {sample.to_wire()}")
+            self.db.add_record(str(name), sample.to_wire())
 
     def sample(self) -> None:
         """
-        Sampling loop:
-
-        1) Drain global timing queue
-           - CPU events resolved immediately
-           - GPU events staged locally
-        2) Resolve local GPU queue (FIFO)
-        3) Persist all newly resolved events
+        Ingest → resolve earliest step → aggregate → persist (FIFO).
         """
-        self.sample_idx += 1
         try:
-            ready_cpu = self._drain_global_queue()
-            ready_gpu = self._drain_local_gpu_queue()
-            self._save_events(ready_cpu + ready_gpu)
+            self._ingest_queue()
+
+            while self._local_steps:
+                batch = self._local_steps[0]
+
+                if not self._step_is_resolved(batch):
+                    break
+
+                # Earliest step fully resolved
+                self._local_steps.popleft()
+                self.sample_idx += 1
+
+                aggregates = self._aggregate_step(batch)
+                self._save_aggregates(
+                    step=int(batch.step),
+                    scope="step",
+                    aggregates=aggregates,
+                )
+
         except Exception as e:
-            self.logger.error(f"[TraceML] TimeSampler error: {e}")
+            self.logger.error(f"[TraceML] StepTimeSampler error: {e}")

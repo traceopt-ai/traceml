@@ -4,16 +4,21 @@ TraceML Timing Core
 This module defines the unified timing pipeline used by TraceML.
 It supports both step-scoped and global timing while preserving
 a single ordered event stream per rank.
+
+Updated:
+- Separate STEP and GLOBAL queues
+- STEP queue receives a StepTimeBatch (one per optimizer step)
+- GLOBAL queue receives TimeEvent directly (immediate enqueue)
 """
 
 import sys
 import time
 from collections import deque
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from queue import Full, Queue
-from typing import Deque, Optional
+from typing import Deque, List, Optional
 
 import torch
 
@@ -82,22 +87,55 @@ class TimeEvent:
         return self.resolved
 
 
-_TIME_QUEUE: Queue = Queue(maxsize=2048)
+@dataclass
+class StepTimeBatch:
+    """
+    One optimizer-step worth of timing events.
+
+    Notes
+    -----
+    - `events` may contain unresolved GPU events; sampler resolves them.
+    - `events[i].step` is set during flush for convenience / compatibility.
+    """
+
+    step: int
+    events: List[TimeEvent] = field(default_factory=list)
+
+
+_GLOBAL_TIME_QUEUE: Queue = Queue(maxsize=2048)
+_STEP_TIME_QUEUE: Queue = Queue(maxsize=2048)
+
 _STEP_BUFFER: Deque[TimeEvent] = deque()
 
 
-def get_time_queue() -> Queue:
-    """Return the shared timing queue."""
-    return _TIME_QUEUE
+def get_global_time_queue() -> Queue:
+    """Return the shared GLOBAL timing queue."""
+    return _GLOBAL_TIME_QUEUE
 
 
-def _enqueue(evt: TimeEvent) -> None:
-    """Best-effort enqueue without blocking."""
+def get_step_time_queue() -> Queue:
+    """Return the shared STEP timing queue (batches)."""
+    return _STEP_TIME_QUEUE
+
+
+def _enqueue_global(evt: TimeEvent) -> None:
+    """Best-effort enqueue GLOBAL event without blocking."""
     try:
-        _TIME_QUEUE.put_nowait(evt)
+        _GLOBAL_TIME_QUEUE.put_nowait(evt)
     except Full:
         print(
-            f"[TraceML:Timing] Queue full, dropping event '{evt.name}'",
+            f"[TraceML:Timing] Global queue full, dropping event '{evt.name}'",
+            file=sys.stderr,
+        )
+
+
+def _enqueue_step_batch(batch: StepTimeBatch) -> None:
+    """Best-effort enqueue STEP batch without blocking."""
+    try:
+        _STEP_TIME_QUEUE.put_nowait(batch)
+    except Full:
+        print(
+            f"[TraceML:Timing] Step queue full, dropping step batch {batch.step}",
             file=sys.stderr,
         )
 
@@ -112,17 +150,25 @@ def record_event(evt: TimeEvent) -> None:
     if evt.scope == TimeScope.STEP:
         _STEP_BUFFER.append(evt)
     else:
-        _enqueue(evt)
+        _enqueue_global(evt)
 
 
 def flush_step_time_buffer(step: int) -> None:
     """
-    Flush buffered step events and assign step index.
+    Flush buffered STEP events as a single StepTimeBatch.
+
+    Called once per optimizer step.
     """
+    if not _STEP_BUFFER:
+        return
+
+    events: List[TimeEvent] = []
     while _STEP_BUFFER:
         evt = _STEP_BUFFER.popleft()
-        evt.step = step
-        _enqueue(evt)
+        evt.step = step  # keep compatibility / make debugging easier
+        events.append(evt)
+
+    _enqueue_step_batch(StepTimeBatch(step=step, events=events))
 
 
 @contextmanager
@@ -142,9 +188,7 @@ def timed_region(
     """
 
     cpu_start = time.time()
-    evt = None
 
-    # Best-effort setup
     try:
         if use_gpu and torch.cuda.is_available():
             device = f"cuda:{torch.cuda.current_device()}"

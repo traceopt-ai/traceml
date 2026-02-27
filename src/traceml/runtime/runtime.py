@@ -40,7 +40,7 @@ from traceml.samplers.process_sampler import ProcessSampler
 from traceml.samplers.step_memory_sampler import StepMemorySampler
 from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
 from traceml.samplers.system_sampler import SystemSampler
-from traceml.samplers.step_time_sampler import TimeSampler
+from traceml.samplers.step_time_sampler import StepTimeSampler
 from traceml.transport.distributed import get_ddp_info
 from traceml.transport.tcp_transport import TCPClient, TCPConfig
 
@@ -131,7 +131,7 @@ class TraceMLRuntime:
             LayerBackwardMemorySampler(),
             LayerForwardTimeSampler(),
             LayerBackwardTimeSampler(),
-            TimeSampler(),
+            StepTimeSampler(),
             StepMemorySampler(),
             StdoutStderrSampler(),
         ]
