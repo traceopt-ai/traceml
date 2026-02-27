@@ -53,7 +53,7 @@ class StepTimeSampler(BaseSampler):
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "StepTimeSampler"
+        self.sampler_name = "TimeSampler"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
@@ -147,13 +147,13 @@ class StepTimeSampler(BaseSampler):
                 is_gpu=bool(is_gpu),
                 duration_ms=float(duration_ms),
             )
-            self.logger.error(f"Ingesting batch {str(name)} {sample.to_wire()}")
-            self.db.add_record(str(name), sample.to_wire())
+            self.db.add_record(name, sample.to_wire())
 
     def sample(self) -> None:
         """
         Ingest → resolve earliest step → aggregate → persist (FIFO).
         """
+        self.sample_idx += 1
         try:
             self._ingest_queue()
 
@@ -165,7 +165,6 @@ class StepTimeSampler(BaseSampler):
 
                 # Earliest step fully resolved
                 self._local_steps.popleft()
-                self.sample_idx += 1
 
                 aggregates = self._aggregate_step(batch)
                 self._save_aggregates(
