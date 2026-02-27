@@ -13,21 +13,18 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from traceml.decorators import trace_step  # optionally trace_model_instance
+from traceml.decorators import trace_step
 
-# =========================
-# CONFIG
-# =========================
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
 
 MAX_TRAIN_EXAMPLES = 10000
 MAX_VAL_EXAMPLES = 0
 
-BATCH_SIZE = 32          # micro-batch size (unchanged)
-GRAD_ACC_STEPS = 4       # accumulate 4 micro-batches -> effective batch = 128
-EPOCHS = 10
+BATCH_SIZE = 32
+GRAD_ACC_STEPS = 4
 
+EPOCHS = 10
 LR = 2e-5
 WARMUP_RATIO = 0.06
 
@@ -70,7 +67,6 @@ def prepare_data():
     val_loader = DataLoader(
         val_ds, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collator
     )
-
     return tokenizer, train_loader, val_loader
 
 
@@ -82,8 +78,8 @@ def main():
     set_seed()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     use_amp = torch.cuda.is_available()
+    dtype = torch.float16 if use_amp else torch.float32
 
     tokenizer, train_loader, _ = prepare_data()
 
@@ -94,7 +90,7 @@ def main():
 
     optimizer = AdamW(model.parameters(), lr=LR)
 
-    # IMPORTANT: scheduler should step per *optimizer step*, not per micro-batch.
+    # Scheduler should step per optimizer-step (not per micro-batch)
     opt_steps_per_epoch = math.ceil(len(train_loader) / GRAD_ACC_STEPS)
     total_opt_steps = EPOCHS * opt_steps_per_epoch
     warmup_steps = int(WARMUP_RATIO * total_opt_steps)
@@ -107,51 +103,74 @@ def main():
 
     scaler = torch.amp.GradScaler(device="cuda", enabled=use_amp)
 
-    global_step = 0  # counts optimizer steps (not micro-steps)
+    global_step = 0
 
-    optimizer.zero_grad(set_to_none=True)
-
+    # Turn DataLoader into an iterator so we can pull GRAD_ACC_STEPS micro-batches per optimizer step
     for epoch in range(EPOCHS):
         running_loss = 0.0
         running_acc = 0.0
 
-        for micro_step, batch in enumerate(train_loader):
-            batch = load_batch_to_device(batch, device)
+        dl_iter = iter(train_loader)
+        micro_seen = 0
 
-            # Accumulate grads: scale loss down so total grad matches non-accum run
-            with torch.cuda.amp.autocast(enabled=use_amp, dtype=dtype):
-                out = model(**batch)
-                loss = out.loss / GRAD_ACC_STEPS
-                logits = out.logits
+        while True:
+            # Try to build one optimizer step from up to GRAD_ACC_STEPS micro-batches
+            micro_batches = []
+            for _ in range(GRAD_ACC_STEPS):
+                try:
+                    micro_batches.append(next(dl_iter))
+                except StopIteration:
+                    break
 
-            scaler.scale(loss).backward()
+            if not micro_batches:
+                break  # epoch done
 
-            # Do we take an optimizer step on this micro-batch?
-            do_opt_step = ((micro_step + 1) % GRAD_ACC_STEPS == 0) or ((micro_step + 1) == len(train_loader))
+            optimizer.zero_grad(set_to_none=True)
 
-            if do_opt_step:
-                # Define TraceML step boundary at the optimizer step (the "real" step)
-                with trace_step(model):
-                    scaler.step(optimizer)
-                    scaler.update()
-                    scheduler.step()
-                    optimizer.zero_grad(set_to_none=True)
+            # ONE TraceML step == GRAD_ACC_STEPS micro-steps + optimizer step
+            with trace_step(model):
+                last_logits = None
+                last_labels = None
+                total_step_loss = 0.0
 
-                # For logging, report the unscaled loss
-                acc = accuracy_from_logits(logits.detach(), batch["labels"])
-                running_loss += (loss.detach() * GRAD_ACC_STEPS)
-                running_acc += acc.detach()
-                global_step += 1
+                for mb in micro_batches:
+                    mb = load_batch_to_device(mb, device)
 
-                if global_step % 50 == 0:
-                    avg_loss = (running_loss / 50).item()
-                    avg_acc = (running_acc / 50).item()
-                    print(
-                        f"[Train] epoch {epoch + 1} step {global_step} "
-                        f"| loss {avg_loss:.4f} | acc {avg_acc:.4f}"
-                    )
-                    running_loss.zero_()
-                    running_acc.zero_()
+                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=dtype):
+                        out = model(**mb)
+                        # scale loss down so accumulated grad matches non-accum
+                        loss = out.loss / GRAD_ACC_STEPS
+                        logits = out.logits
+
+                    scaler.scale(loss).backward()
+
+                    total_step_loss += loss.detach()
+                    last_logits = logits
+                    last_labels = mb["labels"]
+                    micro_seen += 1
+
+                scaler.step(optimizer)
+                scaler.update()
+                scheduler.step()
+
+            # Logging on optimizer steps (use last micro-batch logits/labels)
+            # Report unscaled loss (multiply back)
+            step_loss_unscaled = (total_step_loss * GRAD_ACC_STEPS).item()
+            acc = accuracy_from_logits(last_logits.detach(), last_labels).item()
+
+            running_loss += step_loss_unscaled
+            running_acc += acc
+            global_step += 1
+
+            if global_step % 50 == 0:
+                avg_loss = running_loss / 50
+                avg_acc = running_acc / 50
+                print(
+                    f"[Train] epoch {epoch+1} step {global_step} "
+                    f"| loss {avg_loss:.4f} | acc {avg_acc:.4f}"
+                )
+                running_loss = 0.0
+                running_acc = 0.0
 
         print(f"Finished epoch {epoch + 1}")
 
