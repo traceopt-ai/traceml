@@ -64,7 +64,7 @@ def prepare_data():
         range(min(MAX_VAL_EXAMPLES, len(raw["test"])))
     )
 
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
 
     def tok(examples):
         return tokenizer(examples["text"], truncation=True)
