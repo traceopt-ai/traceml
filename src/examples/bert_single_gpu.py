@@ -32,8 +32,8 @@ MODEL_NAME = "bert-base-uncased"
 # Increase these to generate a LOT of profiling data
 MAX_TRAIN_EXAMPLES = 10000
 MAX_VAL_EXAMPLES = 0
-BATCH_SIZE = 32
-EPOCHS = 1
+BATCH_SIZE =128
+EPOCHS = 10
 LR = 2e-5
 WARMUP_RATIO = 0.06
 
