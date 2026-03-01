@@ -25,6 +25,7 @@ Notes
 """
 
 import queue
+import sqlite3
 import threading
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -140,3 +141,86 @@ class SQLiteWriter:
             self._enqueued += 1
         except queue.Full:
             self._dropped += 1
+
+    def stop(self, timeout_sec: float = 0.5) -> None:
+        """
+        Stop the writer thread and flush pending messages.
+
+        Parameters
+        ----------
+        timeout_sec:
+            Join timeout. Writer is daemon thread; process will still exit
+            even if it can't stop cleanly, but we try.
+
+        Notes
+        -----
+        Should not block shutdown.
+        """
+        if not self._cfg.enabled:
+            return
+        self._stop.set()
+        if self._started:
+            self._thread.join(timeout=float(timeout_sec))
+
+    def stats(self) -> Dict[str, Any]:
+        """
+        Return simple counters for observability and debugging.
+        """
+        return {
+            "enabled": self._cfg.enabled,
+            "path": self._cfg.path,
+            "session_id": self._cfg.session_id,
+            "enqueued": self._enqueued,
+            "dropped": self._dropped,
+            "written": self._written,
+            "queue_size": self._q.qsize(),
+            "last_error": self._last_error,
+        }
+
+    def _log_warning(self, msg: str) -> None:
+        if self._logger is not None:
+            try:
+                self._logger.warning(msg)
+            except Exception:
+                pass
+
+    def _log_error(self, msg: str) -> None:
+        self._last_error = msg
+        if self._logger is not None:
+            try:
+                self._logger.error(msg)
+            except Exception:
+                pass
+
+    def _connect(self) -> sqlite3.Connection:
+        # check_same_thread=False because we only use this connection in the
+        # writer thread, but sqlite3 validates thread usage; set False anyway
+        # to avoid accidental issues if code evolves.
+        conn = sqlite3.connect(
+            self._cfg.path,
+            isolation_level=None,  # autocommit mode; we control transactions
+            check_same_thread=False,
+        )
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute(f"PRAGMA synchronous={self._cfg.synchronous};")
+        # Keep RAM usage small; negative is KB.
+        conn.execute("PRAGMA cache_size=-2000;")  # ~2MB
+        conn.execute("PRAGMA temp_store=MEMORY;")
+        conn.execute("PRAGMA foreign_keys=ON;")
+        return conn
+
+    def _init_schema(self, conn: sqlite3.Connection) -> None:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS raw_messages (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          TEXT NOT NULL,
+                recv_ts_ns          INTEGER NOT NULL,
+                payload_msgpack     BLOB NOT NULL
+            );
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_raw_messages_session_id_id "
+            "ON raw_messages(session_id, id);"
+        )
