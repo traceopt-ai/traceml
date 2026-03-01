@@ -19,7 +19,7 @@ from traceml.aggregator.display_drivers.layout import SYSTEM_LAYOUT
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.utils.formatting import fmt_mem_new, fmt_percent, fmt_mem_ratio
+from traceml.utils.formatting import fmt_mem_ratio, fmt_percent
 
 from .compute import SystemMetricsComputer
 
@@ -64,9 +64,9 @@ class SystemRenderer(BaseRenderer):
 
     def _compute_dashboard(self, window_n: int = 100) -> Dict[str, Any]:
         table = self._get_table() or []
-        return SystemMetricsComputer(table).compute_dashboard(window_n=window_n)
-
-
+        return SystemMetricsComputer(table).compute_dashboard(
+            window_n=window_n
+        )
 
     def get_panel_renderable(self) -> Panel:
         """Return a Rich Panel for CLI display (latest sample)."""
@@ -90,7 +90,9 @@ class SystemRenderer(BaseRenderer):
 
         # GPU rows
         if not data["gpu_available"]:
-            grid.add_row("[bold green]GPU[/bold green]", "[red]Not available[/red]")
+            grid.add_row(
+                "[bold green]GPU[/bold green]", "[red]Not available[/red]"
+            )
         else:
             avg = data["gpu_util_total"] / max(data["gpu_count"], 1)
             grid.add_row(

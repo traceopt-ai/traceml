@@ -55,7 +55,7 @@ line_length = 79
 
 [tool.black]
 line-length = 79
-target-version = ['py39']
+target-version = ['py310']
 
 [tool.ruff]
 line-length = 79

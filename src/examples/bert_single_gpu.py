@@ -22,7 +22,7 @@ from transformers import (
 #   Defines a training-step boundary (flushes TraceML buffers at step end)
 # trace_timestep:a
 #   Optional fine-grained timers for user-defined code sections
-from traceml.decorators import trace_model_instance, trace_step
+from traceml.decorators import trace_step
 
 SEED = 42
 MODEL_NAME = "bert-base-uncased"

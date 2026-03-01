@@ -11,6 +11,7 @@ This module defines the shared configuration dataclasses used by:
 
 from dataclasses import dataclass
 
+
 @dataclass(frozen=True)
 class TraceMLTCPSettings:
     """TCP configuration for TraceML telemetry transport."""
@@ -40,4 +41,3 @@ class TraceMLSettings:
     remote_max_rows: int = 200
     tcp: TraceMLTCPSettings = TraceMLTCPSettings()
     session_id: str = ""
-

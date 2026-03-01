@@ -2,10 +2,10 @@ import time
 from typing import Any, Optional
 
 from traceml.loggers.error_log import get_error_logger
+from traceml.samplers.schema.step_memory import StepMemorySample
 from traceml.utils.step_memory import step_memory_queue
 
 from .base_sampler import BaseSampler
-from traceml.samplers.schema.step_memory import StepMemorySample
 
 
 class StepMemorySampler(BaseSampler):

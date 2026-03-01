@@ -110,16 +110,32 @@ class StepTimeSampler(BaseSampler):
 
         for evt in batch.events:
             is_gpu = evt.gpu_time_ms is not None
-            duration_ms = float(evt.gpu_time_ms) if is_gpu else float(self._cpu_duration_ms(evt))
+            duration_ms = (
+                float(evt.gpu_time_ms)
+                if is_gpu
+                else float(self._cpu_duration_ms(evt))
+            )
             key = (str(evt.name), str(evt.device), bool(is_gpu))
 
-            agg[key] = {"sum_ms": float(agg.get(key, {}).get("sum_ms", 0.0)) + duration_ms}
+            agg[key] = {
+                "sum_ms": float(agg.get(key, {}).get("sum_ms", 0.0))
+                + duration_ms
+            }
             calls[key] = int(calls.get(key, 0) + 1)
             ts_max[key] = float(max(ts_max.get(key, 0.0), float(evt.cpu_end)))
 
         out: List[Tuple[str, str, bool, float, int, float]] = []
         for (name, device, is_gpu), rec in agg.items():
-            out.append((name, device, is_gpu, float(rec["sum_ms"]), int(calls[(name, device, is_gpu)]), float(ts_max[(name, device, is_gpu)])))
+            out.append(
+                (
+                    name,
+                    device,
+                    is_gpu,
+                    float(rec["sum_ms"]),
+                    int(calls[(name, device, is_gpu)]),
+                    float(ts_max[(name, device, is_gpu)]),
+                )
+            )
         return out
 
     def _save_aggregates(

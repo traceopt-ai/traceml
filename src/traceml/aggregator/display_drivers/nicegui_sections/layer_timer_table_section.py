@@ -1,6 +1,7 @@
+from dataclasses import asdict
+
 from nicegui import ui
 
-from dataclasses import asdict
 from traceml.utils.formatting import fmt_time_ms
 
 METRIC_TEXT = "text-sm leading-normal text-gray-700"

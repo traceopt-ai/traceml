@@ -63,7 +63,11 @@ class GlobalTimeSampler(BaseSampler):
     def _event_to_sample(self, evt: TimeEvent) -> Optional[TimeEventSample]:
         try:
             is_gpu = evt.gpu_time_ms is not None
-            duration_ms = float(evt.gpu_time_ms) if is_gpu else float(self._cpu_duration_ms(evt))
+            duration_ms = (
+                float(evt.gpu_time_ms)
+                if is_gpu
+                else float(self._cpu_duration_ms(evt))
+            )
             return TimeEventSample(
                 sample_idx=self.sample_idx,
                 timestamp=float(evt.cpu_end),

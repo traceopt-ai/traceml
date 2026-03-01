@@ -15,13 +15,11 @@ import threading
 from typing import Any, Callable, Dict, Type
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
+from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
+from traceml.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
-
-from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
-from traceml.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
-
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -103,8 +101,14 @@ class TraceMLAggregator:
         attempt to connect/flush.
         """
         _safe(self._logger, "TCPServer.start failed", self._tcp_server.start)
-        _safe(self._logger, "Display driver start failed", self._display_driver.start)
-        _safe(self._logger, "Aggregator thread start failed", self._thread.start)
+        _safe(
+            self._logger,
+            "Display driver start failed",
+            self._display_driver.start,
+        )
+        _safe(
+            self._logger, "Aggregator thread start failed", self._thread.start
+        )
 
     def stop(self, timeout_sec: float) -> None:
         """
@@ -116,9 +120,15 @@ class TraceMLAggregator:
         """
         self._thread.join(timeout=float(timeout_sec))
         if self._thread.is_alive():
-            self._logger.error("[TraceML] WARNING: aggregator thread did not terminate")
+            self._logger.error(
+                "[TraceML] WARNING: aggregator thread did not terminate"
+            )
 
-        _safe(self._logger, "Display driver stop failed", self._display_driver.stop)
+        _safe(
+            self._logger,
+            "Display driver stop failed",
+            self._display_driver.stop,
+        )
         _safe(self._logger, "TCPServer.stop failed", self._tcp_server.stop)
 
     def _drain_tcp(self) -> None:
@@ -144,9 +154,17 @@ class TraceMLAggregator:
 
         while not self._stop_event.is_set():
             self._drain_tcp()
-            _safe(self._logger, "Display driver tick failed", self._display_driver.tick)
+            _safe(
+                self._logger,
+                "Display driver tick failed",
+                self._display_driver.tick,
+            )
             self._stop_event.wait(interval_sec)
 
         # Final flush + final render tick
         self._drain_tcp()
-        _safe(self._logger, "Display driver tick failed", self._display_driver.tick)
+        _safe(
+            self._logger,
+            "Display driver tick failed",
+            self._display_driver.tick,
+        )

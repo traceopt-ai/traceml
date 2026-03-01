@@ -29,7 +29,14 @@ from traceml.renderers.step_combined.schema import (
 )
 
 # UI labels (fixed order)
-_LABELS: List[str] = ["Dataloader", "Forward", "Backward", "Optimizer", "WAIT*", "Step Time"]
+_LABELS: List[str] = [
+    "Dataloader",
+    "Forward",
+    "Backward",
+    "Optimizer",
+    "WAIT*",
+    "Step Time",
+]
 
 # Keep your existing palette (fine)
 _COLORS: Dict[str, str] = {
@@ -40,7 +47,7 @@ _COLORS: Dict[str, str] = {
     "WAIT*": "#f9a825",
     "Step Time": "#455a64",
 }
-_LABEL_COLORS: List[str] = [_COLORS.get(l, "#999999") for l in _LABELS]
+_LABEL_COLORS: List[str] = [_COLORS.get(label, "#999999") for label in _LABELS]
 
 _REQUIRED_KEYS = {
     "dataloader_fetch",
@@ -120,34 +127,38 @@ def build_model_combined_section() -> Dict[str, Any]:
         # -------- Card 1: Median --------
         median_card = ui.card().classes("p-3 flex-1").style(_card_style())
         with median_card:
-            ui.label("Median Step Breakdown").classes("text-sm font-bold mb-1").style(
-                "color:#2e7d32;"
-            )
+            ui.label("Median Step Breakdown").classes(
+                "text-sm font-bold mb-1"
+            ).style("color:#2e7d32;")
             median_plot = ui.plotly(_init_bar_figure()).classes("w-full")
 
         # -------- Card 2: Worst --------
         worst_card = ui.card().classes("p-3 flex-1").style(_card_style())
         with worst_card:
             # This title will be updated with the actual worst rank
-            worst_title = ui.label("Worst Rank Breakdown").classes("text-sm font-bold mb-1").style(
-                "color:#c62828;"
+            worst_title = (
+                ui.label("Worst Rank Breakdown")
+                .classes("text-sm font-bold mb-1")
+                .style("color:#c62828;")
             )
             worst_plot = ui.plotly(_init_bar_figure()).classes("w-full")
 
         # -------- Card 3: Summary --------
         stats_card = ui.card().classes("p-3 flex-1").style(_card_style())
         with stats_card:
-            ui.label("Summary & Interpretation").classes("text-sm font-bold mb-2").style(
-                "color:#455a64;"
+            ui.label("Summary & Interpretation").classes(
+                "text-sm font-bold mb-2"
+            ).style("color:#455a64;")
+            stats = ui.markdown("").classes(
+                "text-xs text-gray-700 leading-relaxed"
             )
-            stats = ui.markdown("").classes("text-xs text-gray-700 leading-relaxed")
 
     # Cache to avoid re-sending identical updates
     cache = {
-        "median_vals": None,      # Optional[Tuple[float, ...]]
-        "worst_vals": None,       # Optional[Tuple[float, ...]]
-        "worst_title": None,      # Optional[str]
-        "stats_md": None,         # Optional[str]
+        "median_vals": None,  # Optional[Tuple[float, ...]]
+        "worst_vals": None,  # Optional[Tuple[float, ...]]
+        "worst_title": None,  # Optional[str]
+        "stats_md": None,  # Optional[str]
     }
 
     return {
@@ -182,12 +193,20 @@ def update_model_combined_section(
     cache: Dict[str, Any] = panel.get("_cache", {})
 
     # Build arrays in fixed order (cheap)
-    median_vals = tuple(round(metrics[k].summary.median_total, 3) for _, k in _ORDER)
-    worst_vals = tuple(round(metrics[k].summary.worst_total, 3) for _, k in _ORDER)
+    median_vals = tuple(
+        round(metrics[k].summary.median_total, 3) for _, k in _ORDER
+    )
+    worst_vals = tuple(
+        round(metrics[k].summary.worst_total, 3) for _, k in _ORDER
+    )
 
     step = metrics["step_time"]
     worst_rank = step.summary.worst_rank
-    worst_title = f"Worst Rank Breakdown (r{worst_rank})" if worst_rank is not None else "Worst Rank Breakdown"
+    worst_title = (
+        f"Worst Rank Breakdown (r{worst_rank})"
+        if worst_rank is not None
+        else "Worst Rank Breakdown"
+    )
 
     # --- Median plot update ---
     if cache.get("median_vals") != median_vals:
@@ -217,7 +236,9 @@ def update_model_combined_section(
     panel["_cache"] = cache
 
 
-def _index_metrics(metrics: List[StepCombinedTimeMetric]) -> Dict[str, StepCombinedTimeMetric]:
+def _index_metrics(
+    metrics: List[StepCombinedTimeMetric],
+) -> Dict[str, StepCombinedTimeMetric]:
     """Index metrics by metric key."""
     return {m.metric: m for m in metrics}
 
@@ -247,13 +268,19 @@ def _render_stats_block(
     def share(x: float) -> float:
         return x / step_med
 
-    exec_med = fwd.summary.median_total + bwd.summary.median_total + opt.summary.median_total
+    exec_med = (
+        fwd.summary.median_total
+        + bwd.summary.median_total
+        + opt.summary.median_total
+    )
     exec_share = share(exec_med)
     dl_share = share(dl.summary.median_total)
     wait_share = share(wait.summary.median_total)
 
     step_skew = step.summary.skew_pct
-    exec_skew = max(fwd.summary.skew_pct, bwd.summary.skew_pct, opt.summary.skew_pct)
+    exec_skew = max(
+        fwd.summary.skew_pct, bwd.summary.skew_pct, opt.summary.skew_pct
+    )
     dl_skew = dl.summary.skew_pct
     wait_skew = wait.summary.skew_pct
 

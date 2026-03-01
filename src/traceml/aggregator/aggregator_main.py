@@ -16,10 +16,9 @@ import sys
 import threading
 import traceback
 
-from traceml.loggers.error_log import get_error_logger, setup_error_logger
-
-from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
 from traceml.aggregator.trace_aggregator import TraceMLAggregator
+from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
 
 
 def read_traceml_env() -> dict:
@@ -34,10 +33,14 @@ def read_traceml_env() -> dict:
         "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
-        "num_display_layers": int(os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")),
+        "num_display_layers": int(
+            os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
+        ),
         "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
         "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
-        "remote_max_rows": int(os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")),
+        "remote_max_rows": int(
+            os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
+        ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
     }
 
@@ -74,7 +77,9 @@ def main() -> None:
             tcp=TraceMLTCPSettings(host=cfg["tcp_host"], port=cfg["tcp_port"]),
         )
 
-        agg = TraceMLAggregator(logger=logger, stop_event=stop_event, settings=settings)
+        agg = TraceMLAggregator(
+            logger=logger, stop_event=stop_event, settings=settings
+        )
         logger.info("[TraceML] Starting Aggregator")
         agg.start()
 
@@ -93,13 +98,20 @@ def main() -> None:
                 pass
 
         if err is not None:
-            print("\n[TraceML] Aggregator exiting due to error:", file=sys.stderr, flush=True)
-            traceback.print_exception(type(err), err, err.__traceback__, file=sys.stderr)
+            print(
+                "\n[TraceML] Aggregator exiting due to error:",
+                file=sys.stderr,
+                flush=True,
+            )
+            traceback.print_exception(
+                type(err), err, err.__traceback__, file=sys.stderr
+            )
             sys.stderr.flush()
             sys.exit(1)
 
     print("\n[TraceML] Aggregator stopped.", file=sys.stderr, flush=True)
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()

@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 from itertools import islice
-from typing import Any, List, Dict
+from typing import Any, Dict, List
 
 from IPython.display import HTML
 from rich.panel import Panel
 from rich.text import Text
 
+from traceml.aggregator.display_drivers.layout import STDOUT_STDERR_LAYOUT
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.aggregator.display_drivers.layout import (
-    STDOUT_STDERR_LAYOUT,
-)
 
 
 class StdoutStderrRenderer(BaseRenderer):

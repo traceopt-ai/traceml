@@ -126,7 +126,9 @@ class ProcessMetricsComputer:
             return -1
 
     @staticmethod
-    def _build_seq_row_map_for_range(tbl, start_seq: int, end_seq: int) -> Dict[int, Dict[str, Any]]:
+    def _build_seq_row_map_for_range(
+        tbl, start_seq: int, end_seq: int
+    ) -> Dict[int, Dict[str, Any]]:
         """
         Build seq->row map for a contiguous seq range [start_seq, end_seq] from a deque.
 
@@ -212,7 +214,9 @@ class ProcessMetricsComputer:
                     return self._last_ok_snapshot or {}
                 last_seq_per_rank[rank] = self._last_seq_in_table(table)
 
-            committed_seq = min(last_seq_per_rank.values()) if last_seq_per_rank else -1
+            committed_seq = (
+                min(last_seq_per_rank.values()) if last_seq_per_rank else -1
+            )
             if committed_seq < 0:
                 return self._last_ok_snapshot or {}
 
@@ -253,7 +257,10 @@ class ProcessMetricsComputer:
             if gpu_total:
                 # headroom = total - reserved ; pick least headroom
                 # numpy argmin is fine; list sizes are small
-                headrooms = np.subtract(np.asarray(gpu_total, dtype=np.float64), np.asarray(gpu_reserved, dtype=np.float64))
+                headrooms = np.subtract(
+                    np.asarray(gpu_total, dtype=np.float64),
+                    np.asarray(gpu_reserved, dtype=np.float64),
+                )
                 idx = int(np.argmin(headrooms))
 
                 snapshot.update(
@@ -263,7 +270,9 @@ class ProcessMetricsComputer:
                         "gpu_total": float(gpu_total[idx]),
                         "gpu_rank": int(gpu_rank[idx]),
                         "gpu_used_imbalance": (
-                            float(max(gpu_used) - min(gpu_used)) if len(gpu_used) > 1 else 0.0
+                            float(max(gpu_used) - min(gpu_used))
+                            if len(gpu_used) > 1
+                            else 0.0
                         ),
                     }
                 )
@@ -305,7 +314,9 @@ class ProcessMetricsComputer:
                     return
                 last_seq_per_rank[rank] = self._last_seq_in_table(table)
 
-            committed_upto = min(last_seq_per_rank.values()) if last_seq_per_rank else -1
+            committed_upto = (
+                min(last_seq_per_rank.values()) if last_seq_per_rank else -1
+            )
             if committed_upto <= self._last_completed_seq:
                 return
 
@@ -316,7 +327,9 @@ class ProcessMetricsComputer:
             per_rank_maps: Dict[int, Dict[int, Dict[str, Any]]] = {}
             for rank, db in rank_dbs.items():
                 table = self._get_table_readonly(db, self.TABLE_NAME)
-                per_rank_maps[rank] = self._build_seq_row_map_for_range(table, start_seq, end_seq)
+                per_rank_maps[rank] = self._build_seq_row_map_for_range(
+                    table, start_seq, end_seq
+                )
 
             sf = self._safe_float
 
@@ -337,7 +350,9 @@ class ProcessMetricsComputer:
                 ram_total = 0.0
 
                 gpu_used_vals: List[float] = []
-                gpu_candidates: List[Tuple[float, int, float, float]] = []  # (headroom, rank, used, total)
+                gpu_candidates: List[Tuple[float, int, float, float]] = (
+                    []
+                )  # (headroom, rank, used, total)
 
                 for rank, row in rows_per_rank.items():
                     c = sf(row.get("cpu"))
@@ -358,7 +373,9 @@ class ProcessMetricsComputer:
                         reserved = sf(gpu.get("mem_reserved"))
                         total = sf(gpu.get("mem_total"))
                         gpu_used_vals.append(used)
-                        gpu_candidates.append((total - reserved, rank, used, total))
+                        gpu_candidates.append(
+                            (total - reserved, rank, used, total)
+                        )
 
                 entry: Dict[str, Any] = {
                     "seq": seq,
@@ -368,7 +385,9 @@ class ProcessMetricsComputer:
                 }
 
                 if gpu_candidates:
-                    headroom, rank_min, used_min, total_min = min(gpu_candidates, key=lambda x: x[0])
+                    headroom, rank_min, used_min, total_min = min(
+                        gpu_candidates, key=lambda x: x[0]
+                    )
                     entry.update(
                         {
                             "gpu_used": float(used_min),
@@ -376,7 +395,9 @@ class ProcessMetricsComputer:
                             "gpu_headroom": float(headroom),
                             "gpu_rank": int(rank_min),
                             "gpu_used_imbalance": (
-                                float(max(gpu_used_vals) - min(gpu_used_vals)) if len(gpu_used_vals) > 1 else 0.0
+                                float(max(gpu_used_vals) - min(gpu_used_vals))
+                                if len(gpu_used_vals) > 1
+                                else 0.0
                             ),
                         }
                     )
@@ -422,8 +443,12 @@ class ProcessMetricsComputer:
         sf = self._safe_float
 
         # numpy-friendly arrays (fast percentiles)
-        cpu_vals = np.fromiter((sf(r.get("cpu")) / 100.0 for r in table), dtype=np.float64)
-        ram_vals = np.fromiter((sf(r.get("ram_used")) for r in table), dtype=np.float64)
+        cpu_vals = np.fromiter(
+            (sf(r.get("cpu")) / 100.0 for r in table), dtype=np.float64
+        )
+        ram_vals = np.fromiter(
+            (sf(r.get("ram_used")) for r in table), dtype=np.float64
+        )
 
         gpu_used: List[float] = []
         gpu_reserved: List[float] = []
@@ -438,9 +463,15 @@ class ProcessMetricsComputer:
 
         summary: Dict[str, Any] = {
             "total_samples": int(len(table)),
-            "cpu_cores_p50": float(np.median(cpu_vals)) if cpu_vals.size else 0.0,
-            "cpu_cores_p95": float(np.percentile(cpu_vals, 95)) if cpu_vals.size else 0.0,
-            "ram_used_p95": float(np.percentile(ram_vals, 95)) if ram_vals.size else 0.0,
+            "cpu_cores_p50": (
+                float(np.median(cpu_vals)) if cpu_vals.size else 0.0
+            ),
+            "cpu_cores_p95": (
+                float(np.percentile(cpu_vals, 95)) if cpu_vals.size else 0.0
+            ),
+            "ram_used_p95": (
+                float(np.percentile(ram_vals, 95)) if ram_vals.size else 0.0
+            ),
             "ram_used_peak": float(np.max(ram_vals)) if ram_vals.size else 0.0,
             "ram_total": float(max(sf(r.get("ram_total")) for r in table)),
             "is_GPU_available": bool(gpu_used),
