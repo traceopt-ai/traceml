@@ -144,6 +144,12 @@ class TraceMLAggregator:
                 lambda m=msg: self._store.ingest(m),
             )
 
+            _safe(
+                self._logger,
+                "SQLiteSink.ingest failed",
+                lambda m=msg: self._sqlite_sink.ingest(m),
+            )
+
     def _loop(self) -> None:
         """
         Periodic drain + UI tick loop.
