@@ -185,6 +185,7 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_TCP_PORT"] = str(args.tcp_port)
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
+    env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
 
     runner_path = str(Path(__file__).parent / "runtime/executor.py")
     script_args = args.args or []
@@ -316,6 +317,11 @@ def build_parser():
     run_parser.add_argument("--remote-max-rows", type=int, default=200)
     run_parser.add_argument("--nproc-per-node", type=int, default=1)
     run_parser.add_argument("--args", nargs=argparse.REMAINDER)
+    run_parser.add_argument(
+        "--no-history",
+        action="store_true",
+        help="Disable history saving (live view only; summaries/comparisons unavailable).",
+    )
 
     inspect_parser = sub.add_parser(
         "inspect", help="Inspect binary .msgpack logs"

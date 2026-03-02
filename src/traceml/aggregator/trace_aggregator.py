@@ -12,11 +12,16 @@ Key invariants:
 """
 
 import threading
+import time
 from typing import Any, Callable, Dict, Type
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
+from traceml.aggregator.sqlite_writer import (
+    SQLiteWriterConfig,
+    SQLiteWriterSimple,
+)
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
@@ -69,6 +74,26 @@ class TraceMLAggregator:
             TCPConfig(host=settings.tcp.host, port=int(settings.tcp.port))
         )
 
+        db_path = getattr(settings, "db_path", None)
+        if not db_path:
+            # fallback: create a simple filename (you may want to put in a session folder)
+            db_path = f"traceml_session_{time.time_ns()}.db"
+
+        self._sqlite_writer = SQLiteWriterSimple(
+            SQLiteWriterConfig(
+                path=db_path,
+                enabled=settings.history_enabled,
+                max_queue=50_000,
+                flush_interval_sec=float(
+                    getattr(settings, "db_flush_interval_sec", 0.5)
+                ),
+                max_flush_items=int(
+                    getattr(settings, "db_max_flush_items", 20_000)
+                ),
+                synchronous=str(getattr(settings, "db_synchronous", "NORMAL")),
+            ),
+        )
+
         # UI driver (CLI / dashboard). Driver owns renderer selection and layout mapping.
         driver_cls = _DISPLAY_DRIVERS.get(settings.mode)
         if driver_cls is None:
@@ -103,6 +128,11 @@ class TraceMLAggregator:
         _safe(self._logger, "TCPServer.start failed", self._tcp_server.start)
         _safe(
             self._logger,
+            "SQLiteWriter.start failed",
+            self._sqlite_writer.start,
+        )
+        _safe(
+            self._logger,
             "Display driver start failed",
             self._display_driver.start,
         )
@@ -130,6 +160,9 @@ class TraceMLAggregator:
             self._display_driver.stop,
         )
         _safe(self._logger, "TCPServer.stop failed", self._tcp_server.stop)
+        _safe(
+            self._logger, "SQLiteWriter.stop failed", self._sqlite_writer.stop
+        )
 
     def _drain_tcp(self) -> None:
         """
@@ -146,8 +179,8 @@ class TraceMLAggregator:
 
             _safe(
                 self._logger,
-                "SQLiteSink.ingest failed",
-                lambda m=msg: self._sqlite_sink.ingest(m),
+                "SQLiteWriter.ingest failed",
+                lambda m=msg: self._sqlite_writer.ingest(m),
             )
 
     def _loop(self) -> None:

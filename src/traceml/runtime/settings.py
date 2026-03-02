@@ -41,3 +41,5 @@ class TraceMLSettings:
     remote_max_rows: int = 200
     tcp: TraceMLTCPSettings = TraceMLTCPSettings()
     session_id: str = ""
+    history_enabled: bool = True
+    db_path: str = ""

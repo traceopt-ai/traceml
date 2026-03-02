@@ -15,6 +15,7 @@ import signal
 import sys
 import threading
 import traceback
+from pathlib import Path
 
 from traceml.aggregator.trace_aggregator import TraceMLAggregator
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
@@ -42,6 +43,8 @@ def read_traceml_env() -> dict:
             os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
+        "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
+        == "1",
     }
 
 
@@ -61,6 +64,12 @@ def main() -> None:
     logger = get_error_logger("TraceMLAggregatorMain")
 
     cfg = read_traceml_env()
+
+    session_id = cfg["session_id"] or "default"
+    session_dir = Path(cfg["logs_dir"]).resolve() / session_id / "aggregator"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    db_path = session_dir / "telemetry.db"
+
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
 
@@ -74,7 +83,9 @@ def main() -> None:
             logs_dir=cfg["logs_dir"],
             remote_max_rows=cfg["remote_max_rows"],
             session_id=cfg["session_id"],
+            history_enabled=cfg["history_enabled"],
             tcp=TraceMLTCPSettings(host=cfg["tcp_host"], port=cfg["tcp_port"]),
+            db_path=db_path,
         )
 
         agg = TraceMLAggregator(

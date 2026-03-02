@@ -1,95 +1,117 @@
 """
-SQLite telemetry sink for TraceML.
+SQLite telemetry writer for TraceML (simple + sampler metadata).
 
-This module provides a small, production-friendly component that persists
-telemetry messages to a local SQLite database without slowing training or UI.
+This module provides an asynchronous, low-overhead SQLite writer intended for
+telemetry persistence in the TraceML aggregator process.
 
 Design goals
 -----------
 - Non-blocking ingestion: `ingest()` never blocks the caller.
-- Single-writer model: one background thread owns the sqlite connection.
-- Batching: amortize disk sync cost by committing in batches.
+- Simple timing model: writer wakes every `flush_interval_sec` and flushes.
+- Single-writer SQLite: one background thread owns the sqlite connection.
 - Bounded memory: internal queue is bounded; overflow is dropped (telemetry-first).
+- Minimal schema + filterability:
+  Store raw MessagePack payloads, but also persist rank + sampler columns so you
+  can query by sampler without decoding everything.
 
-Storage model (v0)
-------------------
-We store raw messages as MessagePack BLOBs so schema changes do not require
-DB migrations. We  compute summaries later by reading the DB and decoding
-the payloads.
+Storage
+-------
+One SQLite DB file per session (recommended path: session_id/<session>.db).
+
+Table: raw_messages
+- id         INTEGER PRIMARY KEY AUTOINCREMENT
+- recv_ts_ns INTEGER NOT NULL
+- rank       INTEGER NULL
+- sampler    TEXT NULL
+- payload_mp BLOB NOT NULL
+
+Index:
+- (sampler, rank, id) to support fast streaming reads per sampler/rank.
+
+Usage (Aggregator fan-out)
+--------------------------
+1) Create and start writer in the aggregator process:
+    writer = SQLiteWriterSimple(SQLiteWriterConfig(path=".../session.db"), logger=logger)
+    writer.start()
+
+2) In your aggregator drain loop (single reader of TCPServer queue):
+    for msg in tcp_server.poll():
+        store.ingest(msg)       # existing bounded in-memory store
+        writer.ingest(msg)      # enqueue for disk persistence (non-blocking)
+
+3) Stop on shutdown:
+    writer.stop()
 
 Notes
 -----
-- This is intentionally a "sink": it does not know about UI, RemoteDBStore, or TCP.
-- It is safe to call `ingest()` from any thread.
-- SQLiteWriter does not raise on ingest; it drops on overflow by default.
+- Best-effort: if disk falls behind, messages may be dropped (queue overflow).
+- This writer does not depend on UI/RemoteDBStore/TCP.
+- Depends only on stdlib sqlite3 + msgspec (already in your deps).
 """
+
+from __future__ import annotations
 
 import queue
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import msgspec
 
+from traceml.loggers.error_log import get_error_logger
+
 
 @dataclass(frozen=True)
 class SQLiteWriterConfig:
     """
-    Configuration for SQLiteWriter.
+    Configuration for SQLiteWriterSimple.
 
     Parameters
     ----------
     path:
-        File path to the SQLite database (e.g., "traceml_run.db").
-    session_id:
-        Logical run identifier. If you don't have one, pass a timestamp string
-        from the aggregator on startup.
+        Output SQLite DB path (one DB per session is recommended).
     enabled:
-        If False, writer becomes a no-op.
+        If False, this writer becomes a no-op.
     max_queue:
         Maximum number of pending messages buffered in RAM before dropping.
     flush_interval_sec:
-        Max time between commits. Lower => more durable, slightly more overhead.
-    batch_size:
-        Target number of rows to insert per transaction.
+        Writer wakes up every X seconds and flushes pending messages.
+    max_flush_items:
+        Upper bound on how many messages are written per wake-up.
     synchronous:
-        SQLite synchronous setting. "NORMAL" is a good balance for telemetry.
+        SQLite synchronous level. "NORMAL" is a good default for telemetry.
         Use "FULL" for strongest durability at higher overhead.
     """
 
     path: str
-    session_id: str
     enabled: bool = True
     max_queue: int = 50_000
-    flush_interval_sec: float = 0.2
-    batch_size: int = 5_000
+    flush_interval_sec: float = 0.5
+    max_flush_items: int = 20_000
     synchronous: str = "NORMAL"
 
 
-class SQLiteWriter:
+class SQLiteWriterSimple:
     """
-    Asynchronous SQLite writer for telemetry messages.
+    Asynchronous SQLite telemetry writer (sleep-based).
 
-    Public API
-    ----------
-    - start(): start background writer thread
-    - ingest(msg): non-blocking enqueue of a dict message
-    - stop(): request stop and flush
+    API
+    ---
+    - start(): start writer thread
+    - ingest(msg): enqueue a dict message (non-blocking)
+    - stop(): request stop and flush best-effort
 
-    Threading model
-    ---------------
+    Threading
+    ---------
     - Any thread may call ingest().
-    - A single background thread owns the sqlite connection and performs writes.
+    - The writer thread is the only thread that touches sqlite.
     """
 
-    def __init__(
-        self,
-        cfg: SQLiteWriterConfig,
-        logger: Optional[Any] = None,
-    ) -> None:
+    def __init__(self, cfg: SQLiteWriterConfig, logger: Optional[Any] = None):
         self._cfg = cfg
-        self._logger = logger
+        self._logger = get_error_logger("TraceML-SQLiteWriterSimple")
 
         self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue(
             maxsize=int(cfg.max_queue)
@@ -100,61 +122,44 @@ class SQLiteWriter:
             name="TraceML-SQLiteWriter",
             daemon=True,
         )
-
         self._started = False
 
-        # Stats (thread-safe enough for telemetry usage)
+        self._encoder = msgspec.msgpack.Encoder()
+
+        # Stats (best-effort; telemetry doesn't need perfect atomicity)
         self._enqueued = 0
         self._dropped = 0
         self._written = 0
         self._last_error: Optional[str] = None
 
-        # Local encoder (fast, no schema required)
-        self._encoder = msgspec.msgpack.Encoder()
+    # -------------------- public --------------------
 
     def start(self) -> None:
-        """Start the background writer thread (idempotent)."""
-        if not self._cfg.enabled:
-            return
-        if self._started:
+        """Start the writer thread (idempotent)."""
+        if not self._cfg.enabled or self._started:
             return
         self._started = True
         self._thread.start()
 
     def ingest(self, msg: Dict[str, Any]) -> None:
         """
-        Enqueue a message for persistence (non-blocking).
+        Enqueue one telemetry message (non-blocking).
 
-        Behavior
-        --------
-        - Never blocks the caller.
-        - If queue is full, message is dropped and a counter is incremented.
-        - Does not raise.
+        If the internal queue is full, the message is dropped.
         """
-        if not self._cfg.enabled:
+        if not self._cfg.enabled or msg is None:
             return
-        if msg is None:
-            return
-
         try:
             self._q.put_nowait(msg)
             self._enqueued += 1
         except queue.Full:
             self._dropped += 1
 
-    def stop(self, timeout_sec: float = 0.5) -> None:
+    def stop(self, timeout_sec: float = 2.0) -> None:
         """
-        Stop the writer thread and flush pending messages.
+        Request stop and flush best-effort.
 
-        Parameters
-        ----------
-        timeout_sec:
-            Join timeout. Writer is daemon thread; process will still exit
-            even if it can't stop cleanly, but we try.
-
-        Notes
-        -----
-        Should not block shutdown.
+        The writer thread is daemonized; shutdown should never hang the process.
         """
         if not self._cfg.enabled:
             return
@@ -163,13 +168,10 @@ class SQLiteWriter:
             self._thread.join(timeout=float(timeout_sec))
 
     def stats(self) -> Dict[str, Any]:
-        """
-        Return simple counters for observability and debugging.
-        """
+        """Return basic counters for debugging/observability."""
         return {
             "enabled": self._cfg.enabled,
             "path": self._cfg.path,
-            "session_id": self._cfg.session_id,
             "enqueued": self._enqueued,
             "dropped": self._dropped,
             "written": self._written,
@@ -177,12 +179,7 @@ class SQLiteWriter:
             "last_error": self._last_error,
         }
 
-    def _log_warning(self, msg: str) -> None:
-        if self._logger is not None:
-            try:
-                self._logger.warning(msg)
-            except Exception:
-                pass
+    # -------------------- internal --------------------
 
     def _log_error(self, msg: str) -> None:
         self._last_error = msg
@@ -193,19 +190,14 @@ class SQLiteWriter:
                 pass
 
     def _connect(self) -> sqlite3.Connection:
-        # check_same_thread=False because we only use this connection in the
-        # writer thread, but sqlite3 validates thread usage; set False anyway
-        # to avoid accidental issues if code evolves.
         conn = sqlite3.connect(
             self._cfg.path,
-            isolation_level=None,  # autocommit mode; we control transactions
+            isolation_level=None,  # autocommit; we manage BEGIN/COMMIT
             check_same_thread=False,
         )
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute(f"PRAGMA synchronous={self._cfg.synchronous};")
-        # Keep RAM usage small; negative is KB.
-        conn.execute("PRAGMA cache_size=-2000;")  # ~2MB
-        conn.execute("PRAGMA temp_store=MEMORY;")
+        conn.execute("PRAGMA cache_size=-2000;")  # ~2MB cache
         conn.execute("PRAGMA foreign_keys=ON;")
         return conn
 
@@ -213,14 +205,115 @@ class SQLiteWriter:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS raw_messages (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id          TEXT NOT NULL,
-                recv_ts_ns          INTEGER NOT NULL,
-                payload_msgpack     BLOB NOT NULL
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                recv_ts_ns INTEGER NOT NULL,
+                rank       INTEGER,
+                sampler    TEXT,
+                payload_mp BLOB NOT NULL
             );
             """
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_raw_messages_session_id_id "
-            "ON raw_messages(session_id, id);"
+            """
+            CREATE INDEX IF NOT EXISTS idx_raw_sampler_rank_id
+            ON raw_messages(sampler, rank, id);
+            """
         )
+
+    def _drain_nowait(self, max_items: int) -> list[Dict[str, Any]]:
+        items: list[Dict[str, Any]] = []
+        for _ in range(int(max_items)):
+            try:
+                items.append(self._q.get_nowait())
+            except queue.Empty:
+                break
+        return items
+
+    def _extract_rank_sampler(
+        self, msg: Dict[str, Any]
+    ) -> tuple[Optional[int], Optional[str]]:
+        # Your sender includes these keys.
+        rank_val = msg.get("rank", None)
+        sampler_val = msg.get("sampler", None)
+
+        rank: Optional[int]
+        try:
+            rank = int(rank_val) if rank_val is not None else None
+        except Exception:
+            rank = None
+
+        sampler: Optional[str]
+        try:
+            sampler = str(sampler_val) if sampler_val is not None else None
+        except Exception:
+            sampler = None
+
+        return rank, sampler
+
+    def _flush_once(self, conn: sqlite3.Connection) -> None:
+        """
+        Drain up to max_flush_items from the queue and write them to SQLite.
+        """
+        items = self._drain_nowait(self._cfg.max_flush_items)
+        if not items:
+            return
+
+        rows: list[tuple[int, Optional[int], Optional[str], bytes]] = []
+        for m in items:
+            try:
+                recv_ts_ns = time.time_ns()
+                rank, sampler = self._extract_rank_sampler(m)
+                payload = self._encoder.encode(m)
+                rows.append((recv_ts_ns, rank, sampler, payload))
+            except Exception:
+                # Skip malformed message; keep writer robust.
+                continue
+
+        if not rows:
+            return
+
+        try:
+            conn.execute("BEGIN;")
+            conn.executemany(
+                "INSERT INTO raw_messages(recv_ts_ns, rank, sampler, payload_mp) "
+                "VALUES (?, ?, ?, ?);",
+                rows,
+            )
+            conn.execute("COMMIT;")
+            self._written += len(rows)
+        except Exception as e:
+            try:
+                conn.execute("ROLLBACK;")
+            except Exception:
+                pass
+            self._log_error(f"[TraceML] SQLiteWriter flush failed: {e}")
+
+    def _run(self) -> None:
+        """
+        Writer thread loop:
+        - connect + init schema
+        - sleep for flush_interval
+        - flush pending messages
+        - on stop: flush a final time
+        """
+        try:
+            conn = self._connect()
+            self._init_schema(conn)
+        except Exception as e:
+            self._log_error(f"[TraceML] SQLiteWriter init failed: {e}")
+            return
+
+        interval = float(self._cfg.flush_interval_sec)
+
+        try:
+            while not self._stop.is_set():
+                time.sleep(interval)
+                self._flush_once(conn)
+
+            # Best-effort final flush on stop
+            self._flush_once(conn)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
