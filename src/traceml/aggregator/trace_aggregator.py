@@ -84,13 +84,9 @@ class TraceMLAggregator:
                 path=db_path,
                 enabled=settings.history_enabled,
                 max_queue=50_000,
-                flush_interval_sec=float(
-                    getattr(settings, "db_flush_interval_sec", 0.5)
-                ),
-                max_flush_items=int(
-                    getattr(settings, "db_max_flush_items", 20_000)
-                ),
-                synchronous=str(getattr(settings, "db_synchronous", "NORMAL")),
+                flush_interval_sec=0.5,
+                max_flush_items=20_000,
+                synchronous="NORMAL",
             ),
         )
 
