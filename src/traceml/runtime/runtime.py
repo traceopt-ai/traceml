@@ -160,11 +160,20 @@ class TraceMLRuntime:
         """
         Run all samplers once and flush local writers + telemetry senders.
 
-        Note:
-        - Local DB writes are temporary and can be removed as we migrate to a
-          store-only architecture.
-        - The telemetry sender flush is the primary pipeline.
-        - Sender failures should not break training (best-effort telemetry).
+        Phase 1 — Sample + local DB write
+        ----------------------------------
+        Each sampler collects its metrics and writes to the local DB.
+        This is identical to the previous behaviour.
+
+        Phase 2 — Batch TCP send
+        ------------------------
+        Instead of each sender calling ``TCPClient.send()`` independently
+        (N syscalls per tick), all ready payloads are collected first and
+        sent together with a single ``TCPClient.send_batch()`` call (1 syscall).
+
+        Samplers whose GPU events have not yet resolved return ``None`` from
+        ``collect_payload()`` and are silently skipped; their data is picked up
+        on the next tick — identical to the previous per-sender behaviour.
         """
         for sampler in self._samplers:
             _safe(
@@ -181,15 +190,26 @@ class TraceMLRuntime:
                     db.writer.flush,
                 )
 
-            sender = getattr(
-                sampler, "sender", None
-            )  # stdout aggregation is unnecessary
-            if sender is not None:
-                _safe(
-                    self._logger,
-                    f"{sampler.sampler_name}.sender.flush failed",
-                    sender.flush,
+        batch: list = []
+        for sampler in self._samplers:
+            sender = getattr(sampler, "sender", None)
+            if sender is None:
+                continue
+            try:
+                payload = sender.collect_payload()
+                if payload is not None:
+                    batch.append(payload)
+            except Exception as e:
+                self._logger.error(
+                    f"[TraceML] {sampler.sampler_name}.collect_payload failed: {e}"
                 )
+
+        if batch:
+            _safe(
+                self._logger,
+                "TCPClient.send_batch failed",
+                lambda: self._tcp_client.send_batch(batch),
+            )
 
     def _sampler_loop(self) -> None:
         """Sampler loop (all ranks)."""

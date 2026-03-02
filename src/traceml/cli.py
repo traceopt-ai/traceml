@@ -218,7 +218,7 @@ def launch_tracer_process(script_path, args):
         host=args.tcp_host,
         port=int(args.tcp_port),
         proc=agg_proc,
-        timeout_sec=5.0,
+        timeout_sec=15.0,  # cold-start (torch/pynvml import) can exceed 5 s
     )
     if not ok:
         # Aggregator failed before training began: fail fast.
