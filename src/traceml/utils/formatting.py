@@ -66,6 +66,7 @@ def fmt_time_ms(v: float) -> str:
 
 _MEMORY_UNITS = ["B", "KB", "MB", "GB", "TB"]
 
+
 def format_memory(num_bytes: Any) -> Tuple[float, str]:
     """
     Convert bytes to (value, unit) using binary units (1024 base).
@@ -75,7 +76,6 @@ def format_memory(num_bytes: Any) -> Tuple[float, str]:
         v = float(num_bytes)
     except (TypeError, ValueError):
         return 0.0, "B"
-
 
     idx = 0
 

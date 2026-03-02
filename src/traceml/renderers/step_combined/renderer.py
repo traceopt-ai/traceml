@@ -16,9 +16,9 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 
+from traceml.aggregator.display_drivers.layout import MODEL_COMBINED_LAYOUT
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.aggregator.display_drivers.layout import MODEL_COMBINED_LAYOUT
 from traceml.renderers.utils import fmt_time_run
 
 from .compute import StepCombinedComputer
@@ -31,7 +31,10 @@ class StepCombinedRenderer(BaseRenderer):
     """
 
     def __init__(self, remote_store: RemoteDBStore):
-        super().__init__(name="Model Step Summary", layout_section_name=MODEL_COMBINED_LAYOUT)
+        super().__init__(
+            name="Model Step Summary",
+            layout_section_name=MODEL_COMBINED_LAYOUT,
+        )
         self._computer = StepCombinedComputer(remote_store)
         self._cached: Optional[StepCombinedTimeResult] = None
 
@@ -55,8 +58,12 @@ class StepCombinedRenderer(BaseRenderer):
             )
 
         metrics = payload.metrics
-        step_metric = next((m for m in metrics if m.metric == "step_time"), None)
-        wait_metric = next((m for m in metrics if m.metric == "wait_proxy"), None)
+        step_metric = next(
+            (m for m in metrics if m.metric == "step_time"), None
+        )
+        wait_metric = next(
+            (m for m in metrics if m.metric == "wait_proxy"), None
+        )
 
         # Put wait_proxy last
         metrics = sorted(metrics, key=lambda m: (m.metric == "wait_proxy"))
@@ -67,19 +74,31 @@ class StepCombinedRenderer(BaseRenderer):
         ranks_present = metrics[0].coverage.ranks_present
         single_rank = (world_size <= 1) or (ranks_present <= 1)
 
-        table = Table(show_header=True, header_style="bold blue", box=None, expand=False)
+        table = Table(
+            show_header=True, header_style="bold blue", box=None, expand=False
+        )
         table.add_column("Metric", style="magenta")
 
         for m in metrics:
-            title = "Wait*" if m.metric == "wait_proxy" else m.metric.replace("_", " ").title()
+            title = (
+                "Wait*"
+                if m.metric == "wait_proxy"
+                else m.metric.replace("_", " ").title()
+            )
             table.add_column(title, justify="right")
 
-        subtitle = f"Summed over last {K} fully completed steps" if K > 0 else "Waiting for first fully completed step"
+        subtitle = (
+            f"Summed over last {K} fully completed steps"
+            if K > 0
+            else "Waiting for first fully completed step"
+        )
 
         if single_rank:
             table.add_row(
                 f"Sum (Σ {K})",
-                *[fmt_time_run(m.summary.worst_total) for m in metrics],  # worst_total==sum in single-rank mode
+                *[
+                    fmt_time_run(m.summary.worst_total) for m in metrics
+                ],  # worst_total==sum in single-rank mode
             )
         else:
             table.add_row(
@@ -92,7 +111,14 @@ class StepCombinedRenderer(BaseRenderer):
             )
             table.add_row(
                 "Worst Rank",
-                *[(f"r{m.summary.worst_rank}" if m.summary.worst_rank is not None else "—") for m in metrics],
+                *[
+                    (
+                        f"r{m.summary.worst_rank}"
+                        if m.summary.worst_rank is not None
+                        else "—"
+                    )
+                    for m in metrics
+                ],
             )
             table.add_row(
                 "Skew (%)",
@@ -102,12 +128,25 @@ class StepCombinedRenderer(BaseRenderer):
         # Optional WAIT share line (still meaningful in both modes)
         table.add_row("")
         if step_metric and wait_metric and step_metric.summary.worst_total > 0:
-            denom = step_metric.summary.median_total if not single_rank else step_metric.summary.worst_total
-            wait_share = wait_metric.summary.median_total / denom if denom > 0 else 0.0
+            denom = (
+                step_metric.summary.median_total
+                if not single_rank
+                else step_metric.summary.worst_total
+            )
+            wait_share = (
+                wait_metric.summary.median_total / denom if denom > 0 else 0.0
+            )
 
             table.add_row(
                 "WAIT Share (%)",
-                *[(f"[red]{wait_share * 100:.1f}%[/red]" if m.metric == "wait_proxy" else "") for m in metrics],
+                *[
+                    (
+                        f"[red]{wait_share * 100:.1f}%[/red]"
+                        if m.metric == "wait_proxy"
+                        else ""
+                    )
+                    for m in metrics
+                ],
             )
 
         cols, _ = shutil.get_terminal_size()

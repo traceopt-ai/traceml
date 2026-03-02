@@ -35,7 +35,9 @@ def set_seed(seed: int = SEED):
     torch.cuda.manual_seed_all(seed)
 
 
-def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def accuracy_from_logits(
+    logits: torch.Tensor, labels: torch.Tensor
+) -> torch.Tensor:
     preds = torch.argmax(logits, dim=-1)
     correct = (preds == labels).sum()
     total = labels.size(0)
@@ -45,8 +47,12 @@ def accuracy_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Te
 def prepare_data():
     raw = load_dataset("ag_news")
 
-    train_raw = raw["train"].select(range(min(MAX_TRAIN_EXAMPLES, len(raw["train"]))))
-    val_raw = raw["test"].select(range(min(MAX_VAL_EXAMPLES, len(raw["test"]))))
+    train_raw = raw["train"].select(
+        range(min(MAX_TRAIN_EXAMPLES, len(raw["train"])))
+    )
+    val_raw = raw["test"].select(
+        range(min(MAX_VAL_EXAMPLES, len(raw["test"])))
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, use_fast=False)
 
@@ -156,7 +162,9 @@ def main():
             # Logging on optimizer steps (use last micro-batch logits/labels)
             # Report unscaled loss (multiply back)
             step_loss_unscaled = (total_step_loss * GRAD_ACC_STEPS).item()
-            acc = accuracy_from_logits(last_logits.detach(), last_labels).item()
+            acc = accuracy_from_logits(
+                last_logits.detach(), last_labels
+            ).item()
 
             running_loss += step_loss_unscaled
             running_acc += acc

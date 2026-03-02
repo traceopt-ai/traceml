@@ -56,7 +56,6 @@ import numpy as np
 
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
-
 from traceml.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
@@ -87,7 +86,9 @@ class StepMemoryCombinedComputer:
         # last-good cache
         self._last_ok: Optional[StepMemoryCombinedResult] = None
         self._last_ok_ts: float = 0.0
-        self._stale_ttl_s: Optional[float] = float(stale_ttl_s) if stale_ttl_s is not None else None
+        self._stale_ttl_s: Optional[float] = (
+            float(stale_ttl_s) if stale_ttl_s is not None else None
+        )
 
     # ----------------------------
     # Public API (cached)
@@ -97,7 +98,9 @@ class StepMemoryCombinedComputer:
             res = self._compute_impl()
         except Exception as e:
             self.logger.exception("StepMemoryCombined compute failed")
-            return self._return_stale_or_empty(f"STALE (exception: {type(e).__name__})")
+            return self._return_stale_or_empty(
+                f"STALE (exception: {type(e).__name__})"
+            )
 
         if not res.metrics:
             return self._return_stale_or_empty("STALE (no metrics this tick)")
@@ -109,9 +112,16 @@ class StepMemoryCombinedComputer:
     def _return_stale_or_empty(self, msg: str) -> StepMemoryCombinedResult:
         now = time.time()
         if self._last_ok is not None:
-            if self._stale_ttl_s is None or (now - self._last_ok_ts) <= self._stale_ttl_s:
-                return StepMemoryCombinedResult(metrics=self._last_ok.metrics, status_message=msg)
-        return StepMemoryCombinedResult(metrics=[], status_message="No complete memory metrics available")
+            if (
+                self._stale_ttl_s is None
+                or (now - self._last_ok_ts) <= self._stale_ttl_s
+            ):
+                return StepMemoryCombinedResult(
+                    metrics=self._last_ok.metrics, status_message=msg
+                )
+        return StepMemoryCombinedResult(
+            metrics=[], status_message="No complete memory metrics available"
+        )
 
     # ----------------------------
     # Core compute
@@ -120,11 +130,15 @@ class StepMemoryCombinedComputer:
         ranks = list(self.store.ranks())
         world_size = len(ranks)
         if world_size == 0:
-            return StepMemoryCombinedResult(metrics=[], status_message="No ranks available")
+            return StepMemoryCombinedResult(
+                metrics=[], status_message="No ranks available"
+            )
 
         out: List[StepMemoryCombinedMetric] = []
         for metric_key in self._metrics:
-            m = self._compute_one(metric_key=metric_key, ranks=ranks, world_size=world_size)
+            m = self._compute_one(
+                metric_key=metric_key, ranks=ranks, world_size=world_size
+            )
             if m is not None:
                 out.append(m)
 
@@ -218,7 +232,11 @@ class StepMemoryCombinedComputer:
         worst_rank = int(ranks_list[int(np.argmax(peaks))])
 
         skew_ratio = worst_peak / median_peak if median_peak > 0 else 0.0
-        skew_pct = ((worst_peak - median_peak) / median_peak) if median_peak > 0 else 0.0
+        skew_pct = (
+            ((worst_peak - median_peak) / median_peak)
+            if median_peak > 0
+            else 0.0
+        )
 
         device = _majority_device(per_rank_device)
 
@@ -253,7 +271,9 @@ class StepMemoryCombinedComputer:
 # ----------------------------
 # Wire extraction (NO from_wire)
 # ----------------------------
-def _extract_wire_row(row: Any) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[str]]:
+def _extract_wire_row(
+    row: Any,
+) -> Tuple[Optional[int], Optional[float], Optional[float], Optional[str]]:
     """
     Extract from StepMemorySample.to_wire() dict:
       step, peak_alloc, peak_resv, device
@@ -340,7 +360,9 @@ def _common_suffix_steps_fast(
     return out_rev
 
 
-def _majority_device(per_rank_device: Dict[int, Optional[str]]) -> Optional[str]:
+def _majority_device(
+    per_rank_device: Dict[int, Optional[str]],
+) -> Optional[str]:
     devices = [d for d in per_rank_device.values() if d]
     if not devices:
         return None

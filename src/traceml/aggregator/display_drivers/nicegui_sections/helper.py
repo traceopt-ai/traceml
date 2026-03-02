@@ -1,5 +1,6 @@
 import time
 
+
 def choose_color(pct: float) -> str:
     """Return color based on standard dashboard thresholds."""
 

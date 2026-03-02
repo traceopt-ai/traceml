@@ -28,7 +28,6 @@ Expected payload schema (from SystemRenderer.get_dashboard_renderable()):
 import plotly.graph_objects as go
 from nicegui import ui
 
-from traceml.aggregator.display_drivers.nicegui_sections.helper import extract_x_axis
 from traceml.utils.formatting import fmt_mem_new
 
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
@@ -56,7 +55,9 @@ def build_system_section() -> dict:
 
     with card:
         with ui.row().classes("w-full items-center justify-between"):
-            ui.label("System Metrics").classes(METRIC_TITLE).style("color:#d47a00;")
+            ui.label("System Metrics").classes(METRIC_TITLE).style(
+                "color:#d47a00;"
+            )
             with ui.icon("info").classes("text-gray-400 cursor-pointer"):
                 with (
                     ui.menu()
@@ -66,7 +67,7 @@ def build_system_section() -> dict:
                     ui.markdown(
                         """
                         **System Metrics (node-local)**
-                        
+
                         - **CPU**: host stats over rolling window.
                         - **RAM**: host stats over rolling window.
                         - **GPU Util**: average across GPUs visible on this node; skew = max − min.
@@ -74,7 +75,9 @@ def build_system_section() -> dict:
                         - **Temp**: max GPU temperature on this node.
                         """
                     )
-            window_text = ui.html("window: –", sanitize=False).classes("text-xs text-gray-500 mr-1")
+            window_text = ui.html("window: –", sanitize=False).classes(
+                "text-xs text-gray-500 mr-1"
+            )
 
         graph = _build_graph()
 
@@ -203,7 +206,9 @@ def _update_tiles(panel: dict, roll: dict) -> None:
     if not isinstance(cpu, dict) or not isinstance(ram, dict):
         return  # payload incomplete; keep previous values rather than crash
 
-    panel["cpu_v"].content = f"{cpu['now']:.0f}% / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
+    panel["cpu_v"].content = (
+        f"{cpu['now']:.0f}% / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
+    )
 
     if ram["total"] > 0:
         panel["ram_v"].content = (
@@ -217,7 +222,9 @@ def _update_tiles(panel: dict, roll: dict) -> None:
     if not roll.get("gpu_available", False):
         for k in ("gpu_v", "imb_v", "gmem_v", "temp_v"):
             panel[k].content = "Not available"
-        panel["temp_s"].content = ""  # prevent stale "Status: ..." when GPU disappears
+        panel["temp_s"].content = (
+            ""  # prevent stale "Status: ..." when GPU disappears
+        )
         return
 
     gpu = roll.get("gpu_util")
@@ -227,9 +234,13 @@ def _update_tiles(panel: dict, roll: dict) -> None:
     if not all(isinstance(x, dict) for x in (gpu, imb, gmem, temp)):
         return  # incomplete GPU payload; don't crash
 
-    panel["gpu_v"].content = f"{gpu['now']:.0f}% / {gpu['p50']:.0f}% / {gpu['p95']:.0f}%"
+    panel["gpu_v"].content = (
+        f"{gpu['now']:.0f}% / {gpu['p50']:.0f}% / {gpu['p95']:.0f}%"
+    )
     panel["imb_v"].content = f"{imb['now']:.0f}% / {imb['p95']:.0f}%"
-    panel["gmem_v"].content = f"{fmt_mem_new(gmem['now'])}/{fmt_mem_new(gmem['p95'])}"
+    panel["gmem_v"].content = (
+        f"{fmt_mem_new(gmem['now'])}/{fmt_mem_new(gmem['p95'])}"
+    )
 
     panel["temp_v"].content = f"{temp['now']:.0f}°C"
     panel["temp_s"].content = f"Status: {temp['status']}"

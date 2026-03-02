@@ -37,6 +37,7 @@ class MNISTCNN(nn.Module):
 # TraceML wrappers
 # -------------------------
 
+
 def forward_step(model, x):
     return model(x)
 

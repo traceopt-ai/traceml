@@ -50,17 +50,22 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from nicegui import ui
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
-from traceml.aggregator.display_drivers.nicegui_sections.pages import define_pages
+from traceml.aggregator.display_drivers.nicegui_sections.pages import (
+    define_pages,
+)
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.runtime.settings import TraceMLSettings
-
-from traceml.renderers.layer_combined_memory.renderer import LayerCombinedMemoryRenderer
-from traceml.renderers.layer_combined_time.renderer import LayerCombinedTimeRenderer
+from traceml.renderers.layer_combined_memory.renderer import (
+    LayerCombinedMemoryRenderer,
+)
+from traceml.renderers.layer_combined_time.renderer import (
+    LayerCombinedTimeRenderer,
+)
 from traceml.renderers.process.renderer import ProcessRenderer
 from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 from traceml.renderers.step_memory.renderer import StepMemoryRenderer
 from traceml.renderers.system.renderer import SystemRenderer
+from traceml.runtime.settings import TraceMLSettings
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -74,7 +79,9 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
 
 
 # (client_id, cards, update_fn)
-Subscriber = Tuple[Optional[str], Dict[str, Any], Callable[[Dict[str, Any], Any], None]]
+Subscriber = Tuple[
+    Optional[str], Dict[str, Any], Callable[[Dict[str, Any], Any], None]
+]
 
 
 class NiceGUIDisplayDriver(BaseDisplayDriver):
@@ -86,7 +93,9 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
     - pages define "how to display" per layout via subscribe_layout(...)
     """
 
-    def __init__(self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings) -> None:
+    def __init__(
+        self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings
+    ) -> None:
         self._logger = logger
         self._store = store
         self._settings = settings
@@ -230,12 +239,15 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             with self._latest_data_lock:
                 data_snapshot = dict(self.latest_data)
                 subs_snapshot = {
-                    layout: list(subs) for layout, subs in self._layout_subscribers.items()
+                    layout: list(subs)
+                    for layout, subs in self._layout_subscribers.items()
                 }
 
             # Apply updates WITHOUT holding the lock
             for layout, data in data_snapshot.items():
-                for _client_id, cards, update_fn in subs_snapshot.get(layout, []):
+                for _client_id, cards, update_fn in subs_snapshot.get(
+                    layout, []
+                ):
                     try:
                         update_fn(cards, data)
                     except Exception:
@@ -252,7 +264,9 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
     # Registration & subscription
     # ---------------------------------------------------------------------
 
-    def register_layout_content(self, layout_section: str, content_fn: Callable[[], Any]) -> None:
+    def register_layout_content(
+        self, layout_section: str, content_fn: Callable[[], Any]
+    ) -> None:
         """
         Register a compute callback for a layout section.
 
@@ -351,6 +365,10 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
                     )
                 self.register_layout_content(rr.layout_section_name, fn)
 
-            _safe(self._logger, f"{r.__class__.__name__}.dashboard register failed", register)
+            _safe(
+                self._logger,
+                f"{r.__class__.__name__}.dashboard register failed",
+                register,
+            )
 
         self._registered = True

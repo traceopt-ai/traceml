@@ -22,10 +22,8 @@ Per metric:
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from nicegui import ui
 import plotly.graph_objects as go
-
-from traceml.loggers.error_log import get_error_logger
+from nicegui import ui
 
 # -----------------------------
 # Styling (match your dashboard)
@@ -41,7 +39,6 @@ box-shadow: 0 4px 12px rgba(0,0,0,0.12);
 TITLE_STYLE = "color:#d47a00;"
 METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
 METRIC_TEXT = "text-sm leading-normal text-gray-700"
-
 
 
 BYTES_PER_GB = 1e9  # decimal GB (matches "GB" label)
@@ -159,6 +156,7 @@ class StepMemoryMetricView:
 
     All values are GB (display units).
     """
+
     metric: str
     steps: List[int]
     worst_y: List[float]
@@ -185,13 +183,21 @@ def _make_empty_figure(title: str) -> go.Figure:
             x=1.0,
             font=dict(size=9),
         ),
-        xaxis=dict(showgrid=False, title="Training Step", tickfont=dict(size=9)),
+        xaxis=dict(
+            showgrid=False, title="Training Step", tickfont=dict(size=9)
+        ),
         yaxis=dict(title="Memory (GB)", tickfont=dict(size=9)),
     )
     return fig
 
 
-def _update_graph(plotly_ui, fig: go.Figure, x: List[int], y_worst: List[float], y_median: List[float]) -> None:
+def _update_graph(
+    plotly_ui,
+    fig: go.Figure,
+    x: List[int],
+    y_worst: List[float],
+    y_median: List[float],
+) -> None:
     """
     Update existing figure in-place (fast).
     Assumes fig already has 2 traces: Worst (0) and Median (1).
@@ -221,7 +227,9 @@ def _stats_table_html_dual(
             else "<span style='color:#888;'>—</span>"
         )
         imbalance = _fmt_pct(skew_pct) if show_skew else "—"
-        rank = f"r{worst_rank}" if (show_skew and worst_rank is not None) else "—"
+        rank = (
+            f"r{worst_rank}" if (show_skew and worst_rank is not None) else "—"
+        )
 
         return f"""
         <tr>
@@ -285,7 +293,11 @@ def _select_metric(payload: Any, preferred: str) -> Optional[Any]:
         return None
 
     for m in metrics:
-        key = getattr(m, "metric", None) if not isinstance(m, dict) else m.get("metric")
+        key = (
+            getattr(m, "metric", None)
+            if not isinstance(m, dict)
+            else m.get("metric")
+        )
         if key == preferred:
             return m
     return None
@@ -295,13 +307,37 @@ def _normalize_metric(m: Any) -> Optional[StepMemoryMetricView]:
     if m is None:
         return None
 
-    metric = getattr(m, "metric", None) if not isinstance(m, dict) else m.get("metric")
-    series = getattr(m, "series", None) if not isinstance(m, dict) else m.get("series", {})
-    summary = getattr(m, "summary", None) if not isinstance(m, dict) else m.get("summary", {})
+    metric = (
+        getattr(m, "metric", None)
+        if not isinstance(m, dict)
+        else m.get("metric")
+    )
+    series = (
+        getattr(m, "series", None)
+        if not isinstance(m, dict)
+        else m.get("series", {})
+    )
+    summary = (
+        getattr(m, "summary", None)
+        if not isinstance(m, dict)
+        else m.get("summary", {})
+    )
 
-    steps = _to_list(getattr(series, "steps", None) if not isinstance(series, dict) else series.get("steps"))
-    worst_b = _to_list(getattr(series, "worst", None) if not isinstance(series, dict) else series.get("worst"))
-    median_b = _to_list(getattr(series, "median", None) if not isinstance(series, dict) else series.get("median"))
+    steps = _to_list(
+        getattr(series, "steps", None)
+        if not isinstance(series, dict)
+        else series.get("steps")
+    )
+    worst_b = _to_list(
+        getattr(series, "worst", None)
+        if not isinstance(series, dict)
+        else series.get("worst")
+    )
+    median_b = _to_list(
+        getattr(series, "median", None)
+        if not isinstance(series, dict)
+        else series.get("median")
+    )
 
     if not steps or (not worst_b and not median_b):
         return None
@@ -319,7 +355,9 @@ def _normalize_metric(m: Any) -> Optional[StepMemoryMetricView]:
 
     # bytes -> float bytes (never throws)
     worst_b = [_safe_float(v) for v in (worst_b[:n] if worst_b else [0.0] * n)]
-    median_b = [_safe_float(v) for v in (median_b[:n] if median_b else [0.0] * n)]
+    median_b = [
+        _safe_float(v) for v in (median_b[:n] if median_b else [0.0] * n)
+    ]
 
     # CONVERT HERE: bytes -> GB for display
     worst_y = _bytes_to_gb_list(worst_b)
@@ -330,7 +368,11 @@ def _normalize_metric(m: Any) -> Optional[StepMemoryMetricView]:
         if not isinstance(summary, dict)
         else _safe_float(summary.get("skew_pct", 0.0))
     )
-    worst_rank = getattr(summary, "worst_rank", None) if not isinstance(summary, dict) else summary.get("worst_rank")
+    worst_rank = (
+        getattr(summary, "worst_rank", None)
+        if not isinstance(summary, dict)
+        else summary.get("worst_rank")
+    )
 
     return StepMemoryMetricView(
         metric=str(metric or ""),
@@ -340,14 +382,20 @@ def _normalize_metric(m: Any) -> Optional[StepMemoryMetricView]:
         worst_stats=_compute_series_stats(worst_y),
         median_stats=_compute_series_stats(median_y),
         skew_pct=float(skew_pct),
-        worst_rank=worst_rank if worst_rank is None else int(_safe_float(worst_rank, 0.0)),
+        worst_rank=(
+            worst_rank
+            if worst_rank is None
+            else int(_safe_float(worst_rank, 0.0))
+        ),
     )
 
 
 # -----------------------------
 # Public build/update
 # -----------------------------
-def build_step_memory_section(*, title: str = "Step Memory (Peak Allocated)") -> Dict[str, Any]:
+def build_step_memory_section(
+    *, title: str = "Step Memory (Peak Allocated)"
+) -> Dict[str, Any]:
     card = ui.card().classes("m-2 p-4 flex-1")
     card.style(
         f"""
@@ -390,7 +438,11 @@ def build_step_memory_section(*, title: str = "Step Memory (Peak Allocated)") ->
         plotly_ui = ui.plotly(fig).classes("w-full")
         plotly_ui.style("max-width: 100%; overflow-x: hidden;")
 
-        stats_html = ui.html("", sanitize=False).classes(METRIC_TEXT).style("color:#333")
+        stats_html = (
+            ui.html("", sanitize=False)
+            .classes(METRIC_TEXT)
+            .style("color:#333")
+        )
 
         empty_hint = ui.html(
             "<div style='text-align:center; padding:12px; color:#888; font-style:italic;'>"
@@ -406,6 +458,7 @@ def build_step_memory_section(*, title: str = "Step Memory (Peak Allocated)") ->
         "_last_ok_view": None,
         "_fig": fig,
     }
+
 
 def update_step_memory_section(
     panel: Dict[str, Any],
@@ -435,10 +488,14 @@ def update_step_memory_section(
         except Exception:
             pass
 
-        title = "Step Memory (Peak Allocated)" if view.metric == "peak_allocated" else "Step Memory (Peak Reserved)"
-
         try:
-            _update_graph(panel["graph"], panel["_fig"], view.steps, view.worst_y, view.median_y)
+            _update_graph(
+                panel["graph"],
+                panel["_fig"],
+                view.steps,
+                view.worst_y,
+                view.median_y,
+            )
         except Exception:
             pass
 

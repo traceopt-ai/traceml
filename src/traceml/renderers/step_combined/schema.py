@@ -44,6 +44,7 @@ class StepCombinedTimeMetric:
 # New: dashboard rank heatmap data
 # -----------------------------
 
+
 @dataclass(frozen=True)
 class StepCombinedRankRow:
     """
@@ -51,6 +52,7 @@ class StepCombinedRankRow:
 
     All values are window sums over the last K fully-common steps.
     """
+
     rank: int
     sums_ms: Dict[str, float]  # metric_key -> window sum in ms
 
@@ -67,11 +69,14 @@ class StepCombinedRankHeatmap:
     Sorting:
     - rows are sorted by (step_time_ms desc, dataloader_fetch desc) by default
     """
+
     window_size: int
     steps_used: int
     metric_keys: List[str]
     rows: List[StepCombinedRankRow]
-    sort_by: List[str] = field(default_factory=lambda: ["step_time_ms", "dataloader_fetch"])
+    sort_by: List[str] = field(
+        default_factory=lambda: ["step_time_ms", "dataloader_fetch"]
+    )
 
 
 @dataclass(frozen=True)

@@ -21,7 +21,9 @@ class BaseDisplayDriver(ABC):
       - stop()
     """
 
-    def __init__(self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings) -> None:
+    def __init__(
+        self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings
+    ) -> None:
         self._logger = logger
         self._store = store
         self._settings = settings

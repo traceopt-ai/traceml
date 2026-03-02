@@ -58,7 +58,7 @@ for batch in dataloader:
 Run with cli:
 
 ``` bash
-traceml run train.py 
+traceml run train.py
 ```
 
 The terminal dashboard opens alongside your logs.
@@ -150,7 +150,7 @@ trainer = TraceMLTrainer(
     args=training_args,
     train_dataset=train_ds,
     eval_dataset=eval_ds,
-    traceml_enabled=True,         
+    traceml_enabled=True,
 )
 ```
 
@@ -183,8 +183,8 @@ PyTorch versions - ESSENTIAL vs DEEP-DIVE - Single GPU vs DDP
 
 ## Community & Support
 
-Founding Engineer / Co-Founder track (Berlin/Germany): We are looking 
-for a senior systems+ML builder to help grow TraceML into a sustainable AI 
+Founding Engineer / Co-Founder track (Berlin/Germany): We are looking
+for a senior systems+ML builder to help grow TraceML into a sustainable AI
 infra product. See the GitHub Discussion https://github.com/traceopt-ai/traceml/discussions/36
 
 - 📧 Email: abhinav@traceopt.ai

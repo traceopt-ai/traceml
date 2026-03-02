@@ -21,13 +21,11 @@ from IPython.display import HTML
 from rich.panel import Panel
 from rich.table import Table
 
+from traceml.aggregator.display_drivers.layout import PROCESS_LAYOUT
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.aggregator.display_drivers.layout import (
-    PROCESS_LAYOUT,
-)
-from traceml.utils.formatting import fmt_mem_new, fmt_percent, fmt_mem_triple
+from traceml.utils.formatting import fmt_mem_new, fmt_mem_triple, fmt_percent
 
 from .compute import ProcessMetricsComputer
 
@@ -52,7 +50,7 @@ class ProcessRenderer(BaseRenderer):
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="bright_white", no_wrap=True)
-        table.add_column(justify="right",style="bright_white", no_wrap=True)
+        table.add_column(justify="right", style="bright_white", no_wrap=True)
         table.add_column(justify="left", style="bright_white", no_wrap=True)
 
         table.add_row(

@@ -32,11 +32,9 @@ from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
 
+from traceml.aggregator.display_drivers.layout import MODEL_MEMORY_LAYOUT
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.aggregator.display_drivers.layout import (
-    MODEL_MEMORY_LAYOUT,
-)
 from traceml.utils.formatting import fmt_mem_new
 
 from .compute import StepMemoryCombinedComputer

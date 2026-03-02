@@ -1,8 +1,8 @@
 import functools
 import sys
 from contextlib import contextmanager
+from typing import Callable, List, Optional
 
-from typing import Callable, Optional, List
 import torch.nn as nn
 
 from traceml.utils.entry_hook import attach_execution_entry_hooks
@@ -117,7 +117,7 @@ def trace_model_instance(
     trace_execution: bool = True,
     include_names: Optional[List[str]] = None,
     exclude_names: Optional[List[str]] = None,
-    leaf_only: bool = True
+    leaf_only: bool = True,
 ):
     """
     Manually trace a PyTorch model instance (useful for functional or sequential models).

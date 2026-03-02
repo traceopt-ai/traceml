@@ -30,10 +30,7 @@ import torch
 import torch.nn as nn
 
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
-from traceml.utils.shared_utils import model_is_on_cuda
-from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
-from traceml.utils.shared_utils import get_hookable_modules
-
+from traceml.utils.shared_utils import get_hookable_modules, model_is_on_cuda
 
 # Shared queue for backward timing events
 layer_backward_time_queue: Queue = Queue(maxsize=2048)
@@ -242,10 +239,7 @@ def flush_layer_backward_time_buffers(model: nn.Module, step: int) -> None:
 
 
 def attach_layer_backward_time_hooks(
-    model: nn.Module,
-    include_names=None,
-    exclude_names=None,
-    leaf_only=True
+    model: nn.Module, include_names=None, exclude_names=None, leaf_only=True
 ):
     """
     Attach backward pre/post hooks for backward timing.
@@ -256,7 +250,9 @@ def attach_layer_backward_time_hooks(
 
     on_gpu = model_is_on_cuda(model)
 
-    for name, module in get_hookable_modules(model, include_names, exclude_names, leaf_only):
+    for name, module in get_hookable_modules(
+        model, include_names, exclude_names, leaf_only
+    ):
 
         module.register_full_backward_pre_hook(
             LayerBackwardTimePreHook(model_id, name, on_gpu=on_gpu)

@@ -4,9 +4,9 @@ from traceml.aggregator.display_drivers.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
+    MODEL_MEMORY_LAYOUT,
     PROCESS_LAYOUT,
     SYSTEM_LAYOUT,
-    MODEL_MEMORY_LAYOUT,
 )
 
 from .layer_memory_table_section import (
@@ -27,9 +27,6 @@ from .step_memory_section import (
     update_step_memory_section,
 )
 from .system_section import build_system_section, update_system_section
-
-
-from .helper import build_fake_section, update_fake_section
 
 
 def build_top_tabs(active: str):
@@ -72,26 +69,36 @@ def define_pages(cls):
 
         build_top_tabs(active="overview")
 
-        with ui.row().classes("mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"):
+        with ui.row().classes(
+            "mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"
+        ):
 
             with ui.column().classes("w-[36%]"):
                 cards = build_system_section()
-                cls.subscribe_layout(SYSTEM_LAYOUT, cards, update_system_section)
+                cls.subscribe_layout(
+                    SYSTEM_LAYOUT, cards, update_system_section
+                )
 
             with ui.column().classes("w-[30%]"):
                 cards = build_process_section()
-                cls.subscribe_layout(PROCESS_LAYOUT, cards, update_process_section)
+                cls.subscribe_layout(
+                    PROCESS_LAYOUT, cards, update_process_section
+                )
 
             with ui.column().classes("w-[33]"):
                 cards = build_step_memory_section()
-                cls.subscribe_layout(MODEL_MEMORY_LAYOUT, cards, update_step_memory_section)
+                cls.subscribe_layout(
+                    MODEL_MEMORY_LAYOUT, cards, update_step_memory_section
+                )
                 # cards = build_fake_section()
                 # cls.subscribe_layout(MODEL_MEMORY_LAYOUT, cards, update_fake_section)
 
         with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
             with ui.column().classes("w-[99%]"):
                 cards = build_model_combined_section()
-                cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_model_combined_section)
+                cls.subscribe_layout(
+                    MODEL_COMBINED_LAYOUT, cards, update_model_combined_section
+                )
                 # cards = build_fake_section()
                 # cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_fake_section)
 

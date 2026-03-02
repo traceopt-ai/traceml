@@ -5,7 +5,6 @@ CLI display driver for TraceML (Rich Live dashboard).
 - Make CLI layout + renderer wiring a single, cohesive unit
 """
 
-
 from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
@@ -16,29 +15,31 @@ from rich.panel import Panel
 from rich.text import Text
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
-from traceml.database.remote_database_store import RemoteDBStore
-from traceml.runtime.settings import TraceMLSettings
-from traceml.runtime.stdout_stderr_capture import StreamCapture
-from traceml.renderers.base_renderer import BaseRenderer
-
 from traceml.aggregator.display_drivers.layout import (
-    ROOT_LAYOUT,
-    SYSTEM_LAYOUT,
-    PROCESS_LAYOUT,
     LAYER_COMBINED_MEMORY_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
     MODEL_MEMORY_LAYOUT,
+    PROCESS_LAYOUT,
+    ROOT_LAYOUT,
     STDOUT_STDERR_LAYOUT,
+    SYSTEM_LAYOUT,
 )
-
-from traceml.renderers.system.renderer import SystemRenderer
+from traceml.database.remote_database_store import RemoteDBStore
+from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.layer_combined_memory.renderer import (
+    LayerCombinedMemoryRenderer,
+)
+from traceml.renderers.layer_combined_time.renderer import (
+    LayerCombinedTimeRenderer,
+)
 from traceml.renderers.process.renderer import ProcessRenderer
-from traceml.renderers.layer_combined_memory.renderer import LayerCombinedMemoryRenderer
-from traceml.renderers.layer_combined_time.renderer import LayerCombinedTimeRenderer
+from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 from traceml.renderers.step_memory.renderer import StepMemoryRenderer
-from traceml.renderers.stdout_stderr_renderer import StdoutStderrRenderer
+from traceml.renderers.system.renderer import SystemRenderer
+from traceml.runtime.settings import TraceMLSettings
+from traceml.runtime.stdout_stderr_capture import StreamCapture
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -55,6 +56,7 @@ class _SectionBinding:
     """
     A binding from a CLI layout section name -> a callable returning a Rich renderable.
     """
+
     section: str
     render_fn: Callable[[], Any]
 
@@ -73,7 +75,9 @@ class CLIDisplayDriver(BaseDisplayDriver):
       - CLI driver expects renderers to implement get_panel_renderable().
     """
 
-    def __init__(self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings) -> None:
+    def __init__(
+        self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings
+    ) -> None:
         self._logger = logger
         self._store = store
         self._settings = settings
@@ -89,8 +93,12 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._renderers: List[BaseRenderer] = [
             SystemRenderer(remote_store=store),
             ProcessRenderer(remote_store=store),
-            LayerCombinedMemoryRenderer(remote_store=store, top_n_layers=settings.num_display_layers),
-            LayerCombinedTimeRenderer(remote_store=store, top_n_layers=settings.num_display_layers),
+            LayerCombinedMemoryRenderer(
+                remote_store=store, top_n_layers=settings.num_display_layers
+            ),
+            LayerCombinedTimeRenderer(
+                remote_store=store, top_n_layers=settings.num_display_layers
+            ),
             StepCombinedRenderer(remote_store=store),
             StepMemoryRenderer(remote_store=store),
             StdoutStderrRenderer(remote_store=store),  # CLI-only
@@ -182,11 +190,21 @@ class CLIDisplayDriver(BaseDisplayDriver):
         """Initialize the layout with placeholders so the UI is stable before data arrives."""
         dashboard = self._create_layout()
 
-        dashboard[SYSTEM_LAYOUT].update(Panel(Text("Waiting for System Metrics...", justify="center")))
-        dashboard[PROCESS_LAYOUT].update(Panel(Text("Waiting for Process Metrics...", justify="center")))
-        dashboard[LAYER_COMBINED_MEMORY_LAYOUT].update(Panel(Text("Waiting for Layer Memory...", justify="center")))
-        dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(Panel(Text("Waiting for Layer Timing...", justify="center")))
-        dashboard[MODEL_MEMORY_LAYOUT].update(Panel(Text("Waiting for Step Memory...", justify="center")))
+        dashboard[SYSTEM_LAYOUT].update(
+            Panel(Text("Waiting for System Metrics...", justify="center"))
+        )
+        dashboard[PROCESS_LAYOUT].update(
+            Panel(Text("Waiting for Process Metrics...", justify="center"))
+        )
+        dashboard[LAYER_COMBINED_MEMORY_LAYOUT].update(
+            Panel(Text("Waiting for Layer Memory...", justify="center"))
+        )
+        dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
+            Panel(Text("Waiting for Layer Timing...", justify="center"))
+        )
+        dashboard[MODEL_MEMORY_LAYOUT].update(
+            Panel(Text("Waiting for Step Memory...", justify="center"))
+        )
 
         self._layout[STDOUT_STDERR_LAYOUT].update(
             Panel(
@@ -228,7 +246,9 @@ class CLIDisplayDriver(BaseDisplayDriver):
                 )
                 continue
 
-            bindings.append(_SectionBinding(section=section, render_fn=render_fn))
+            bindings.append(
+                _SectionBinding(section=section, render_fn=render_fn)
+            )
 
         self._bindings = bindings
         self._registered = True
@@ -252,7 +272,9 @@ class CLIDisplayDriver(BaseDisplayDriver):
                         border_style="red",
                     )
                 )
-                self._logger.error(f"[TraceML] CLI render error in {b.section}: {e}")
+                self._logger.error(
+                    f"[TraceML] CLI render error in {b.section}: {e}"
+                )
 
     def _refresh(self) -> None:
         """

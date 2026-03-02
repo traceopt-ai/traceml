@@ -109,7 +109,7 @@ def build_process_section():
         "imb_v": imb_v,
         "_last_ok_data": None,
         "_last_ok_window": None,
-        "_fig": fig
+        "_fig": fig,
     }
 
 
@@ -233,7 +233,8 @@ def _update_tiles(panel, roll, snap):
 
 def _update_graph(panel, window):
     window = [
-        r for r in window
+        r
+        for r in window
         if isinstance(r, dict)
         and r.get("ram_total") is not None
         and r.get("ram_used_max") is not None
