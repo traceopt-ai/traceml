@@ -39,6 +39,7 @@ class TCPServer:
     def start(self) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self._sock.bind((self.cfg.host, self.cfg.port))
         self._sock.listen(self.cfg.backlog)
 
@@ -166,6 +167,35 @@ class TCPClient:
             self._ensure_connected()
             # Encode dict to binary MessagePack
             data = msgspec.msgpack.encode(payload)
+            header = struct.pack("!I", len(data))
+            with self._lock:
+                self._sock.sendall(header + data)
+        except Exception:
+            self._close()
+
+    def send_batch(self, payloads: list) -> None:
+        """
+        Send multiple payloads in a single TCP write.
+
+        All payloads are encoded together as a msgpack list and written
+        with one ``sendall()`` call, replacing N individual ``send()`` calls
+        with a single kernel syscall.
+
+        The aggregator's ``RemoteDBStore.ingest()`` detects the list envelope
+        and dispatches each item individually — fully backward compatible.
+
+        Notes
+        -----
+        - An empty ``payloads`` list is a no-op (no socket write).
+        - A failure to connect or send closes the socket; the next tick will
+          attempt to reconnect (same behaviour as :meth:`send`).
+        """
+        if not payloads:
+            return
+        try:
+            self._ensure_connected()
+            # Encode the whole list as one msgpack frame
+            data = msgspec.msgpack.encode(payloads)
             header = struct.pack("!I", len(data))
             with self._lock:
                 self._sock.sendall(header + data)

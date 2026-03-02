@@ -67,9 +67,14 @@ class DBIncrementalSender:
         self._last_sent_record = {}
         self.logger = get_error_logger("DBIncrementalSender")
 
-    def flush(self) -> None:
+    def collect_payload(self) -> "dict | None":
         """
-        Flush incremental updates to the sender.
+        Collect new rows since the last flush and return them as a ready-to-send
+        payload dict.  Returns ``None`` when there is nothing new to send.
+
+        This method advances the internal cursor (``_last_sent_record``) so that
+        a subsequent call to either :meth:`collect_payload` or :meth:`flush` will
+        not re-send the same rows.
 
         Payload format
         --------------
@@ -81,6 +86,8 @@ class DBIncrementalSender:
                 table_name: [row, row, ...]  # possibly multiple rows per table
             }
         }
+
+        The caller is responsible for actually transmitting the returned dict.
         """
         tables_payload = {}
 
@@ -129,17 +136,28 @@ class DBIncrementalSender:
             self._last_sent_record[table_name] = new_rows[-1]
 
         if not tables_payload:
-            return
+            return None
 
+        return {
+            "rank": self.rank,
+            "sampler": self.sampler_name,
+            "timestamp": time.time(),
+            "tables": tables_payload,
+        }
+
+    def flush(self) -> None:
+        """
+        Collect and immediately send incremental updates (single message).
+
+        This is a backward-compatible wrapper around :meth:`collect_payload`.
+        Callers that need batching should use :meth:`collect_payload` directly
+        and transmit the payload themselves via ``TCPClient.send_batch()``.
+        """
+        payload = self.collect_payload()
+        if payload is None:
+            return
         try:
-            self.sender.send(
-                {
-                    "rank": self.rank,
-                    "sampler": self.sampler_name,
-                    "timestamp": time.time(),
-                    "tables": tables_payload,
-                }
-            )
+            self.sender.send(payload)
         except Exception as e:
             self.logger.error(
                 f"[DBIncrementalSender] sending payload failed with exception {e}"

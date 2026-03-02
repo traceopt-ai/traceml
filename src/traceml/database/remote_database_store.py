@@ -87,12 +87,35 @@ class RemoteDBStore:
 
         return self._dbs[rank][sampler_name]
 
-    def ingest(self, message: dict) -> None:
+    def ingest(self, message) -> None:
         """
-        Ingest incremental telemetry rows from a remote worker.
+        Ingest telemetry from a remote worker.
 
-        This method is expected to be called only on rank-0. Remote workers
-        should never instantiate or mutate `RemoteDBStore`.
+        Accepts two formats:
+
+        **Batch format** (new — from ``TCPClient.send_batch()``):
+            A ``list`` of individual payload dicts.  Each item is ingested
+            independently, exactly as if it had been sent in a separate message.
+
+        **Single format** (legacy — from ``TCPClient.send()``):
+            A single ``dict`` with keys ``rank``, ``sampler``, ``tables``.
+
+        Both formats are fully supported.  The type check on ``message`` is the
+        only branching point; all ingestion logic lives in :meth:`_ingest_one`.
+        """
+        if message is None:
+            return
+        if isinstance(message, list):
+            # Batch envelope: one send_batch() → N logical messages
+            for item in message:
+                self._ingest_one(item)
+        else:
+            # Legacy single-dict format
+            self._ingest_one(message)
+
+    def _ingest_one(self, message: dict) -> None:
+        """
+        Ingest a single telemetry payload dict into the store.
 
         Expected payload format
         -----------------------
@@ -125,8 +148,6 @@ class RemoteDBStore:
             return
 
         tables = message.get("tables", {})
-        # self.logger.error(
-        #     f"Rank {rank} sampler_name {sampler_name}, {tables.keys()}")
 
         # Track last time we received telemetry from this rank
         self._last_seen[rank] = time.time()

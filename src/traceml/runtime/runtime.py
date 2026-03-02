@@ -25,26 +25,31 @@ logged and ignored. Training should proceed normally.
 """
 
 import threading
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, List, Optional
 
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.runtime.config import config
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.samplers.layer_backward_memory_sampler import LayerBackwardMemorySampler
-from traceml.samplers.layer_backward_time_sampler import LayerBackwardTimeSampler
-from traceml.samplers.layer_forward_memory_sampler import LayerForwardMemorySampler
+from traceml.samplers.layer_backward_memory_sampler import (
+    LayerBackwardMemorySampler,
+)
+from traceml.samplers.layer_backward_time_sampler import (
+    LayerBackwardTimeSampler,
+)
+from traceml.samplers.layer_forward_memory_sampler import (
+    LayerForwardMemorySampler,
+)
 from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
 from traceml.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml.samplers.process_sampler import ProcessSampler
-from traceml.samplers.step_memory_sampler import StepMemorySampler
 from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
-from traceml.samplers.system_sampler import SystemSampler
+from traceml.samplers.step_memory_sampler import StepMemorySampler
 from traceml.samplers.step_time_sampler import StepTimeSampler
+from traceml.samplers.system_sampler import SystemSampler
 from traceml.transport.distributed import get_ddp_info
 from traceml.transport.tcp_transport import TCPClient, TCPConfig
 
-from .session import get_session_id
 from .settings import TraceMLSettings
 
 
@@ -137,7 +142,6 @@ class TraceMLRuntime:
         ]
         return samplers
 
-
     def _attach_senders(self) -> None:
         """
         Attach DBIncrementalSender to sampler DBs that support sending.
@@ -152,16 +156,24 @@ class TraceMLRuntime:
             sampler.sender.sender = self._tcp_client
             sampler.sender.rank = self.local_rank
 
-
     def _tick(self) -> None:
         """
         Run all samplers once and flush local writers + telemetry senders.
 
-        Note:
-        - Local DB writes are temporary and can be removed as we migrate to a
-          store-only architecture.
-        - The telemetry sender flush is the primary pipeline.
-        - Sender failures should not break training (best-effort telemetry).
+        Phase 1 — Sample + local DB write
+        ----------------------------------
+        Each sampler collects its metrics and writes to the local DB.
+        This is identical to the previous behaviour.
+
+        Phase 2 — Batch TCP send
+        ------------------------
+        Instead of each sender calling ``TCPClient.send()`` independently
+        (N syscalls per tick), all ready payloads are collected first and
+        sent together with a single ``TCPClient.send_batch()`` call (1 syscall).
+
+        Samplers whose GPU events have not yet resolved return ``None`` from
+        ``collect_payload()`` and are silently skipped; their data is picked up
+        on the next tick — identical to the previous per-sender behaviour.
         """
         for sampler in self._samplers:
             _safe(
@@ -178,13 +190,26 @@ class TraceMLRuntime:
                     db.writer.flush,
                 )
 
-            sender = getattr(sampler, "sender", None) # stdout aggregation is unnecessary
-            if sender is not None:
-                _safe(
-                    self._logger,
-                    f"{sampler.sampler_name}.sender.flush failed",
-                    sender.flush,
+        batch: list = []
+        for sampler in self._samplers:
+            sender = getattr(sampler, "sender", None)
+            if sender is None:
+                continue
+            try:
+                payload = sender.collect_payload()
+                if payload is not None:
+                    batch.append(payload)
+            except Exception as e:
+                self._logger.error(
+                    f"[TraceML] {sampler.sampler_name}.collect_payload failed: {e}"
                 )
+
+        if batch:
+            _safe(
+                self._logger,
+                "TCPClient.send_batch failed",
+                lambda: self._tcp_client.send_batch(batch),
+            )
 
     def _sampler_loop(self) -> None:
         """Sampler loop (all ranks)."""
@@ -234,7 +259,9 @@ class TraceMLRuntime:
         _safe(self._logger, "final tick failed", self._tick)
 
         if self._sampler_thread.is_alive():
-            self._logger.error("[TraceML] WARNING: sampler thread did not terminate")
+            self._logger.error(
+                "[TraceML] WARNING: sampler thread did not terminate"
+            )
 
         # close client last
         _safe(self._logger, "TCPClient.close failed", self._tcp_client.close)
