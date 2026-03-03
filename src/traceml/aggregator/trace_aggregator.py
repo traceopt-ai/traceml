@@ -26,6 +26,8 @@ from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
 
+from .final_summary import generate_summary
+
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
     """
@@ -159,6 +161,13 @@ class TraceMLAggregator:
         _safe(
             self._logger, "SQLiteWriter.stop failed", self._sqlite_writer.stop
         )
+
+        if self._settings.history_enabled and self._settings.db_path:
+            _safe(
+                self._logger,
+                "Final summary failed",
+                lambda: generate_summary(str(self._settings.db_path)),
+            )
 
     def _drain_tcp(self) -> None:
         """
