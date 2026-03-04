@@ -59,6 +59,11 @@ class Database:
         #   table_name -> deque(records)
         self._tables: Dict[str, Deque[Any]] = {}
 
+        # Monotonic append counter per table.
+        # Incremented on every add_record(); used by sender/writer for O(1)
+        # new-row detection instead of scanning.
+        self._append_count: Dict[str, int] = {}
+
         # Writer handles persistence / export of database contents
         self.writer = DatabaseWriter(self, sampler_name=sampler_name)
 
@@ -86,6 +91,7 @@ class Database:
 
         # Use deque with fixed maxlen to enforce bounded memory
         self._tables[name] = deque(maxlen=self.max_rows)
+        self._append_count[name] = 0
         return self._tables[name]
 
     def create_or_get_table(self, name: str) -> Deque[Any]:
@@ -107,6 +113,7 @@ class Database:
         """
         if name not in self._tables:
             self._tables[name] = deque(maxlen=self.max_rows)
+            self._append_count[name] = 0
         return self._tables[name]
 
     def add_record(self, table: str, record: Any) -> None:
@@ -130,6 +137,7 @@ class Database:
 
         # O(1) append; eviction handled automatically by deque(maxlen)
         rows.append(record)
+        self._append_count[table] += 1
 
     def get_last_record(self, table: str) -> Optional[Any]:
         """
@@ -191,6 +199,17 @@ class Database:
         """
         return self._tables.get(name)
 
+    def get_append_count(self, table: str) -> int:
+        """
+        Return the total number of records ever appended to ``table``.
+
+        This is a monotonically increasing counter that survives deque
+        evictions, making it suitable for O(1) new-row detection.
+
+        Returns 0 for unknown tables.
+        """
+        return self._append_count.get(table, 0)
+
     def clear(self):
         """
         Remove all tables and records from the database.
@@ -199,3 +218,4 @@ class Database:
         affect the configured `max_rows` or attached writer.
         """
         self._tables.clear()
+        self._append_count.clear()
