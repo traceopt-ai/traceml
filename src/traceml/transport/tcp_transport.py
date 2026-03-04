@@ -109,7 +109,7 @@ class TCPServer:
         return frames, buffer, expected
 
     def _handle_client(self, conn: socket.socket) -> None:
-        buffer = bytearray()  # mutable — extend() is O(1) amortised, no copies
+        buffer = bytearray()  # mutable extend() is O(1) amortised, no copies
         expected: Optional[int] = None
         decoder = msgspec.msgpack.Decoder()
 
