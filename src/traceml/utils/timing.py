@@ -121,7 +121,9 @@ def get_step_time_queue() -> Queue:
 def _enqueue_global(evt: TimeEvent) -> None:
     """Best-effort enqueue GLOBAL event without blocking."""
     try:
-        _GLOBAL_TIME_QUEUE.put_nowait(evt)
+        pass
+        # TODO: implement sampler for it if required
+        # _GLOBAL_TIME_QUEUE.put_nowait(evt)
     except Full:
         print(
             f"[TraceML:Timing] Global queue full, dropping event '{evt.name}'",

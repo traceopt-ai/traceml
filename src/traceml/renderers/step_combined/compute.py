@@ -1,5 +1,4 @@
 import time
-from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -15,40 +14,30 @@ from traceml.renderers.step_combined.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
-from traceml.samplers.schema.time_schema import TimeEventSample
+from traceml.samplers.schema.step_time_schema import StepTimeEventSample
 
-
-@dataclass(frozen=True)
-class MetricSpec:
-    """
-    Table-driven metric specification.
-    """
-
-    metric_key: str
-    table: str
-    sampler: str = "TimeSampler"
-
-
-# ----------------------------
-# Configuration (edit here)
-# ----------------------------
-
-DEFAULT_METRIC_SPECS: List[MetricSpec] = [
-    MetricSpec(
-        metric_key="dataloader_fetch",
-        table="_traceml_internal:dataloader_next",
-    ),
-    MetricSpec(metric_key="forward", table="_traceml_internal:forward_time"),
-    MetricSpec(metric_key="backward", table="_traceml_internal:backward_time"),
-    MetricSpec(
-        metric_key="optimizer_step", table="_traceml_internal:optimizer_step"
-    ),
-    MetricSpec(metric_key="step_time", table="_traceml_internal:step_time"),
-]
+STEP_TIME_SAMPLER = "StepTimeSampler"
+STEP_TIME_TABLE = "StepTimeTable"
 
 WAIT_METRIC_KEY = "wait_proxy"
 WAIT_STEP_KEY = "step_time"
 WAIT_GPU_KEYS: Tuple[str, ...] = ("forward", "backward", "optimizer_step")
+
+EVENT_ALIASES = {
+    "dataloader_fetch": "_traceml_internal:dataloader_next",
+    "forward": "_traceml_internal:forward_time",
+    "backward": "_traceml_internal:backward_time",
+    "optimizer_step": "_traceml_internal:optimizer_step",
+    "step_time": "_traceml_internal:step_time",
+}
+
+DEFAULT_METRIC_KEYS: Tuple[str, ...] = (
+    "dataloader_fetch",
+    "forward",
+    "backward",
+    "optimizer_step",
+    "step_time",
+)
 
 DEFAULT_HEATMAP_KEYS: Tuple[str, ...] = (
     "dataloader_fetch",
@@ -62,11 +51,24 @@ DEFAULT_HEATMAP_KEYS: Tuple[str, ...] = (
 
 class StepCombinedComputer:
     """
-    Rank-agnostic computation of step combined time metrics.
+    Compute step-combined time metrics across ranks from StepTimeSampler output.
 
-    Adds stability cache:
-    - returns last good payload on transient failure/empty compute
-    - optional TTL to avoid showing stale forever
+    Data source (must match sampler):
+      sampler = "StepTimeSampler"
+      table   = "StepTimeTable"
+
+    Each row is StepTimeEventSample (one row per step). Its payload:
+      events[event_name][device] = {"duration_ms": float, "n_calls": int, "is_gpu": bool}
+
+    Metric value definition:
+      value(step, metric_key) = SUM(duration_ms over all devices for event_name == metric_key)
+
+    Semantics preserved:
+    - Uses the last K steps common across ranks (suffix intersection).
+    - Computes per-rank window sums, then median/worst/skew.
+    - WAIT proxy = step_time - (forward + backward + optimizer_step) (clamped at 0).
+    - Optional dashboard rank heatmap (uses per-rank window sums).
+    - Last-good cache + TTL to avoid blank UI on transient emptiness/failures.
     """
 
     def __init__(
@@ -74,29 +76,30 @@ class StepCombinedComputer:
         remote_store: RemoteDBStore,
         *,
         window_size: int = 100,
-        metric_specs: Optional[Sequence[MetricSpec]] = None,
+        metric_keys: Optional[Sequence[str]] = None,
         heatmap_keys: Optional[Sequence[str]] = None,
         stale_ttl_s: Optional[float] = 30.0,
-    ):
+        sampler: str = STEP_TIME_SAMPLER,
+        table: str = STEP_TIME_TABLE,
+    ) -> None:
         self.store = remote_store
         self.window_size = int(window_size)
-        self.logger = get_error_logger("StepCombinedComputer")
-
-        self._metric_specs: List[MetricSpec] = (
-            list(metric_specs)
-            if metric_specs is not None
-            else list(DEFAULT_METRIC_SPECS)
+        self.metric_keys = (
+            list(metric_keys)
+            if metric_keys is not None
+            else list(DEFAULT_METRIC_KEYS)
         )
-        self._heatmap_keys: List[str] = (
+        self.heatmap_keys = (
             list(heatmap_keys)
             if heatmap_keys is not None
             else list(DEFAULT_HEATMAP_KEYS)
         )
+        self.sampler = str(sampler)
+        self.table = str(table)
 
-        # constants for fast membership
-        self._wait_gpu_key_set = set(WAIT_GPU_KEYS)
+        self.logger = get_error_logger("StepCombinedComputer")
+        self._wait_gpu_set = set(WAIT_GPU_KEYS)
 
-        # last-good-result cache to avoid blank UI
         self._last_ok: Optional[StepCombinedTimeResult] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
@@ -109,15 +112,8 @@ class StepCombinedComputer:
     def compute_dashboard(self) -> StepCombinedTimeResult:
         return self._compute(include_series=False, include_rank_heatmap=True)
 
-    # ----------------------------
-    # Public wrapper with cache
-    # ----------------------------
-
     def _compute(
-        self,
-        *,
-        include_series: bool,
-        include_rank_heatmap: bool,
+        self, *, include_series: bool, include_rank_heatmap: bool
     ) -> StepCombinedTimeResult:
         try:
             res = self._compute_impl(
@@ -126,22 +122,19 @@ class StepCombinedComputer:
             )
         except Exception as e:
             self.logger.exception("StepCombined compute failed")
-            return self._return_stale_or_empty(
+            return self._stale_or_empty(
                 f"STALE (exception: {type(e).__name__})"
             )
 
-        # If transiently empty (no metrics), keep old data so UI doesn't blank
         if not res.metrics:
-            return self._return_stale_or_empty("STALE (no metrics this tick)")
+            return self._stale_or_empty("STALE (no metrics this tick)")
 
-        # Success: refresh cache
         self._last_ok = res
         self._last_ok_ts = time.time()
         return res
 
-    def _return_stale_or_empty(self, msg: str) -> StepCombinedTimeResult:
+    def _stale_or_empty(self, msg: str) -> StepCombinedTimeResult:
         now = time.time()
-
         if self._last_ok is not None:
             if (
                 self._stale_ttl_s is None
@@ -152,27 +145,17 @@ class StepCombinedComputer:
                     status_message=msg,
                     rank_heatmap=self._last_ok.rank_heatmap,
                 )
-
-        # cache missing or too old -> empty
         return StepCombinedTimeResult(
             metrics=[],
             status_message="No fresh step-combined data",
             rank_heatmap=None,
         )
 
-    # ----------------------------
-    # Actual compute implementation
-    # ----------------------------
-
     def _compute_impl(
-        self,
-        *,
-        include_series: bool,
-        include_rank_heatmap: bool,
+        self, *, include_series: bool, include_rank_heatmap: bool
     ) -> StepCombinedTimeResult:
         ranks = list(self.store.ranks())
         world_size = len(ranks)
-
         if world_size == 0:
             return StepCombinedTimeResult(
                 metrics=[],
@@ -180,35 +163,54 @@ class StepCombinedComputer:
                 rank_heatmap=None,
             )
 
+        per_rank_steps = self._load_last_steps(ranks)
+        if not per_rank_steps:
+            return StepCombinedTimeResult(
+                metrics=[],
+                status_message="No StepTime data available",
+                rank_heatmap=None,
+            )
+
+        ranks_present = len(per_rank_steps)
+        completed_step = min(max(m.keys()) for m in per_rank_steps.values())
+        steps = self._common_steps(
+            per_rank_steps, completed_step, self.window_size
+        )
+        if not steps:
+            return StepCombinedTimeResult(
+                metrics=[],
+                status_message="No common step window yet",
+                rank_heatmap=None,
+            )
+
+        coverage = StepCombinedTimeCoverage(
+            expected_steps=self.window_size,
+            steps_used=len(steps),
+            completed_step=int(completed_step),
+            world_size=int(world_size),
+            ranks_present=int(ranks_present),
+            incomplete=(ranks_present < world_size),
+        )
+
         computed: Dict[str, StepCombinedTimeMetric] = {}
         per_metric_rank_sums: Dict[str, Dict[int, float]] = {}
 
-        # 1) Base metrics
-        for spec in self._metric_specs:
-            metric, rank_sums = self._compute_one_metric(
-                table=spec.table,
-                sampler=spec.sampler,
-                metric_key=spec.metric_key,
-                ranks=ranks,
-                world_size=world_size,
+        # Compute base metrics directly from payloads (no intermediate projection maps)
+        for metric_key in self.metric_keys:
+            metric, rank_sums = self._metric_from_steps(
+                metric_key=metric_key,
+                per_rank_steps=per_rank_steps,
+                steps=steps,
+                coverage=coverage,
                 include_series=include_series,
             )
-            if metric is None:
-                continue
+            if metric is not None:
+                computed[metric_key] = metric
+                per_metric_rank_sums[metric_key] = rank_sums
 
-            computed[spec.metric_key] = metric
-            if rank_sums is not None:
-                per_metric_rank_sums[spec.metric_key] = rank_sums
-
-        # 2) Derived WAIT proxy
-        wait_metric, wait_rank_sums = self._derive_wait_proxy(
-            step_metric=computed.get(WAIT_STEP_KEY),
-            gpu_metrics={
-                k: v
-                for k, v in computed.items()
-                if k in self._wait_gpu_key_set
-            },
-            per_metric_rank_sums=per_metric_rank_sums,
+        # WAIT proxy (same semantics)
+        wait_metric, wait_rank_sums = self._wait_proxy(
+            computed, per_metric_rank_sums
         )
         if wait_metric is not None:
             computed[WAIT_METRIC_KEY] = wait_metric
@@ -219,12 +221,10 @@ class StepCombinedComputer:
 
         rank_heatmap = None
         if include_rank_heatmap and computed:
-            cov_metric = computed.get(WAIT_STEP_KEY) or next(
-                iter(computed.values())
-            )
-            rank_heatmap = self._build_rank_heatmap(
-                coverage=cov_metric.coverage,
-                per_metric_rank_sums=per_metric_rank_sums,
+            # pick a reference metric for coverage fields (same as before)
+            ref = computed.get(WAIT_STEP_KEY) or next(iter(computed.values()))
+            rank_heatmap = self._rank_heatmap(
+                ref.coverage, per_metric_rank_sums
             )
 
         return StepCombinedTimeResult(
@@ -233,96 +233,117 @@ class StepCombinedComputer:
             rank_heatmap=rank_heatmap,
         )
 
-    # ----------------------------
-    # Optimized per-metric compute
-    # ----------------------------
+    def _load_last_steps(self, ranks: List[int]) -> Dict[int, Dict[int, Dict]]:
+        """
+        Load last `window_size` step rows per rank.
 
-    def _compute_one_metric(
-        self,
-        *,
-        table: str,
-        sampler: str,
-        metric_key: str,
-        ranks: List[int],
-        world_size: int,
-        include_series: bool,
-    ) -> Tuple[Optional[StepCombinedTimeMetric], Optional[Dict[int, float]]]:
-        per_rank_steps: Dict[int, Dict[int, float]] = {}
-        per_rank_clocks: Dict[int, str] = {}
-        completed_steps: List[int] = []
-
-        store = self.store
+        Returns:
+          per_rank_steps[rank][step] = events_payload
+        """
+        out: Dict[int, Dict[int, Dict]] = {}
         ws = self.window_size
-        from_wire = TimeEventSample.from_wire  # local bind
+        from_wire = StepTimeEventSample.from_wire
 
-        for rank in ranks:
-            db = store.get_db(rank, sampler)
+        for r in ranks:
+            db = self.store.get_db(r, self.sampler)
             if not db:
                 continue
-
-            tbl = db.get_table(table)
+            tbl = db.get_table(self.table)
             if not tbl:
                 continue
 
-            step_map: Dict[int, float] = {}
-            clock: str = "cpu"
+            step_map: Dict[int, Dict] = {}
 
-            # Deque-backed table: fast reverse scan using indexing from right end.
-            # If tbl isn't indexable (should be deque), fallback to reversed().
             try:
                 n = len(tbl)
-                for i in range(n - 1, -1, -1):
-                    row = tbl[i]
-                    try:
-                        s = from_wire(row)
-                    except Exception:
-                        continue
-
-                    step_map[s.step] = float(s.duration_ms)
-                    clock = "gpu" if s.is_gpu else "cpu"
-
-                    if len(step_map) >= ws:
-                        break
+                it = (tbl[i] for i in range(n - 1, -1, -1))
             except Exception:
-                for row in reversed(tbl):
-                    try:
-                        s = from_wire(row)
-                    except Exception:
-                        continue
-                    step_map[s.step] = float(s.duration_ms)
-                    clock = "gpu" if s.is_gpu else "cpu"
-                    if len(step_map) >= ws:
-                        break
+                it = reversed(tbl)
+
+            for row in it:
+                try:
+                    s = from_wire(row)
+                except Exception:
+                    continue
+                step_map[int(s.step)] = s.events
+                if len(step_map) >= ws:
+                    break
 
             if step_map:
-                per_rank_steps[rank] = step_map
-                per_rank_clocks[rank] = clock
-                completed_steps.append(max(step_map.keys()))
+                out[int(r)] = step_map
 
-        if not per_rank_steps:
-            return None, None
+        return out
 
-        completed_step = min(completed_steps)
-        ranks_present = len(per_rank_steps)
+    @staticmethod
+    def _common_steps(
+        per_rank_steps: Dict[int, Dict[int, Dict]],
+        completed_step: int,
+        window_size: int,
+    ) -> List[int]:
+        """Common suffix of steps present for all ranks, ascending, limited to last K."""
+        maps = list(per_rank_steps.values())
+        if not maps:
+            return []
+        ref = maps[0]
 
-        # Same semantics as intersection-based:
-        # "largest suffix of steps common across ranks (up to completed_step)"
-        steps = self._common_window_steps_fast(
-            per_rank_steps, completed_step, ws
+        out_rev: List[int] = []
+        s = int(completed_step)
+        while s >= 0 and len(out_rev) < int(window_size):
+            if s in ref and all(s in m for m in maps[1:]):
+                out_rev.append(s)
+            s -= 1
+
+        out_rev.reverse()
+        return out_rev
+
+    @staticmethod
+    def _event_total_ms(events_payload: Dict, metric_key: str) -> float:
+        payload_key = EVENT_ALIASES.get(metric_key, metric_key)
+        ev = events_payload.get(payload_key)
+        if not ev:
+            return 0.0
+        return float(
+            sum(float(rec.get("duration_ms", 0.0)) for rec in ev.values())
         )
-        if not steps:
-            return None, None
 
-        sums_arr, ranks_list, per_rank_sum = self._rank_window_sums_fast(
-            per_rank_steps, steps
-        )
+    def _metric_from_steps(
+        self,
+        *,
+        metric_key: str,
+        per_rank_steps: Dict[int, Dict[int, Dict]],
+        steps: Sequence[int],
+        coverage: StepCombinedTimeCoverage,
+        include_series: bool,
+    ) -> Tuple[Optional[StepCombinedTimeMetric], Dict[int, float]]:
+        """
+        Compute one StepCombinedTimeMetric from step payloads.
+
+        Returns (metric_or_none, per_rank_window_sums_ms).
+        """
+        ranks = list(per_rank_steps.keys())
+        if not ranks:
+            return None, {}
+
+        # Per-rank window totals
+        per_rank_sum: Dict[int, float] = {}
+        sums_arr = np.empty(len(ranks), dtype=np.float64)
+
+        for i, r in enumerate(ranks):
+            step_map = per_rank_steps[r]
+            total = 0.0
+            for s in steps:
+                total += self._event_total_ms(
+                    step_map.get(int(s), {}), metric_key
+                )
+            per_rank_sum[int(r)] = float(total)
+            sums_arr[i] = total
 
         median_total = float(np.median(sums_arr))
         worst_idx = int(np.argmax(sums_arr))
         worst_total = float(sums_arr[worst_idx])
-        worst_rank = int(ranks_list[worst_idx])
+        worst_rank = int(ranks[worst_idx])
 
-        if ranks_present <= 1:
+        if coverage.ranks_present <= 1:
             skew_ratio = 0.0
             skew_pct = 0.0
             median_total = worst_total
@@ -334,29 +355,21 @@ class StepCombinedComputer:
                 skew_ratio = 0.0
                 skew_pct = 0.0
 
-        clocks = list(per_rank_clocks.values())
-        clock = max(set(clocks), key=clocks.count) if clocks else "cpu"
-
-        coverage = StepCombinedTimeCoverage(
-            expected_steps=ws,
-            steps_used=len(steps),
-            completed_step=completed_step,
-            world_size=world_size,
-            ranks_present=ranks_present,
-            incomplete=(ranks_present < world_size),
-        )
-
         series: Optional[StepCombinedTimeSeries] = None
         if include_series:
-            # Same semantics as original, but uses numpy reductions.
-            ranks_keys = list(per_rank_steps.keys())
+            # Per-step reductions across ranks
             median_y: List[float] = []
             worst_y: List[float] = []
             sum_y: List[float] = []
 
             for s in steps:
                 v = np.fromiter(
-                    (per_rank_steps[r][s] for r in ranks_keys),
+                    (
+                        self._event_total_ms(
+                            per_rank_steps[r].get(int(s), {}), metric_key
+                        )
+                        for r in ranks
+                    ),
                     dtype=np.float64,
                 )
                 median_y.append(float(np.median(v)))
@@ -364,22 +377,19 @@ class StepCombinedComputer:
                 sum_y.append(float(np.sum(v)))
 
             series = StepCombinedTimeSeries(
-                steps=steps,
-                median=median_y,
-                worst=worst_y,
-                sum=sum_y,
+                steps=list(steps), median=median_y, worst=worst_y, sum=sum_y
             )
 
         metric = StepCombinedTimeMetric(
-            metric=metric_key,
-            clock=clock,
+            metric=str(metric_key),
+            clock="mixed",  # payload can include CPU+GPU contributions per event
             series=series,
             summary=StepCombinedTimeSummary(
-                window_size=ws,
-                steps_used=len(steps),
-                median_total=median_total,
-                worst_total=worst_total,
-                worst_rank=worst_rank,
+                window_size=int(coverage.expected_steps),
+                steps_used=int(coverage.steps_used),
+                median_total=float(median_total),
+                worst_total=float(worst_total),
+                worst_rank=int(worst_rank),
                 skew_ratio=float(skew_ratio),
                 skew_pct=float(skew_pct),
             ),
@@ -387,78 +397,19 @@ class StepCombinedComputer:
         )
         return metric, per_rank_sum
 
-    @staticmethod
-    def _common_window_steps_fast(
-        per_rank_steps: Dict[int, Dict[int, float]],
-        completed_step: int,
-        window_size: int,
-    ) -> List[int]:
-        """
-        Faster version of:
-          intersect step indices across ranks (<= completed_step),
-          return last window_size common steps, ascending.
-
-        Walk backward from completed_step and test membership in all rank maps.
-        Equivalent output to intersection+sorted+slice for the "suffix of common steps".
-        """
-        if not per_rank_steps:
-            return []
-
-        maps = list(per_rank_steps.values())
-        ref = maps[0]
-
-        out_rev: List[int] = []
-        s = completed_step
-        while s >= 0 and len(out_rev) < window_size:
-            if s in ref:
-                ok = True
-                for m in maps[1:]:
-                    if s not in m:
-                        ok = False
-                        break
-                if ok:
-                    out_rev.append(s)
-            s -= 1
-
-        if not out_rev:
-            return []
-        out_rev.reverse()
-        return out_rev
-
-    @staticmethod
-    def _rank_window_sums_fast(
-        per_rank_steps: Dict[int, Dict[int, float]],
-        steps: Sequence[int],
-    ) -> Tuple[np.ndarray, List[int], Dict[int, float]]:
-        ranks_list = list(per_rank_steps.keys())
-        n = len(ranks_list)
-        sums_arr = np.empty(n, dtype=np.float64)
-        per_rank_sum: Dict[int, float] = {}
-
-        steps_local = steps
-        for i, r in enumerate(ranks_list):
-            smap = per_rank_steps[r]
-            get = smap.get
-            total = 0.0
-            for s in steps_local:
-                total += float(get(s, 0.0))
-            sums_arr[i] = total
-            per_rank_sum[r] = float(total)
-
-        return sums_arr, ranks_list, per_rank_sum
-
-    # ----------------------------
-    # WAIT proxy (same semantics)
-    # ----------------------------
-
-    def _derive_wait_proxy(
+    def _wait_proxy(
         self,
-        *,
-        step_metric: Optional[StepCombinedTimeMetric],
-        gpu_metrics: Dict[str, StepCombinedTimeMetric],
+        computed: Dict[str, StepCombinedTimeMetric],
         per_metric_rank_sums: Dict[str, Dict[int, float]],
     ) -> Tuple[Optional[StepCombinedTimeMetric], Optional[Dict[int, float]]]:
-        if step_metric is None or not gpu_metrics:
+        step_metric = computed.get(WAIT_STEP_KEY)
+        if step_metric is None:
+            return None, None
+
+        gpu_metrics = {
+            k: computed[k] for k in computed.keys() if k in self._wait_gpu_set
+        }
+        if not gpu_metrics:
             return None, None
 
         gpu_median = float(
@@ -496,8 +447,8 @@ class StepCombinedComputer:
             summary=StepCombinedTimeSummary(
                 window_size=step_metric.summary.window_size,
                 steps_used=step_metric.summary.steps_used,
-                median_total=wait_median_total,
-                worst_total=wait_worst_total,
+                median_total=float(wait_median_total),
+                worst_total=float(wait_worst_total),
                 worst_rank=step_metric.summary.worst_rank,
                 skew_ratio=float(skew_ratio),
                 skew_pct=float(skew_pct),
@@ -520,17 +471,12 @@ class StepCombinedComputer:
                 + bwd_sums.get(r, 0.0)
                 + opt_sums.get(r, 0.0)
             )
-            wait_rank_sums[r] = float(max(0.0, step_sum - gpu_sum))
+            wait_rank_sums[int(r)] = float(max(0.0, float(step_sum) - gpu_sum))
 
         return wait_metric, wait_rank_sums
 
-    # ----------------------------
-    # Heatmap build (same schema)
-    # ----------------------------
-
-    def _build_rank_heatmap(
+    def _rank_heatmap(
         self,
-        *,
         coverage: StepCombinedTimeCoverage,
         per_metric_rank_sums: Dict[str, Dict[int, float]],
     ) -> Optional[StepCombinedRankHeatmap]:
@@ -539,29 +485,32 @@ class StepCombinedComputer:
 
         keys = [
             k
-            for k in self._heatmap_keys
+            for k in self.heatmap_keys
             if (k in per_metric_rank_sums or k == WAIT_METRIC_KEY)
         ]
-
         ref = per_metric_rank_sums.get(WAIT_STEP_KEY) or next(
             iter(per_metric_rank_sums.values()), {}
         )
         ranks = list(ref.keys())
 
-        pmrs = per_metric_rank_sums
-        rows: List[StepCombinedRankRow] = []
-        for r in ranks:
-            sums_ms = {k: float(pmrs.get(k, {}).get(r, 0.0)) for k in keys}
-            rows.append(StepCombinedRankRow(rank=r, sums_ms=sums_ms))
-
-        def _sort_key(row: StepCombinedRankRow) -> Tuple[float, float]:
-            sm = row.sums_ms
-            return (
-                sm.get(WAIT_STEP_KEY, 0.0),
-                sm.get("dataloader_fetch", 0.0),
+        rows: List[StepCombinedRankRow] = [
+            StepCombinedRankRow(
+                rank=int(r),
+                sums_ms={
+                    k: float(per_metric_rank_sums.get(k, {}).get(r, 0.0))
+                    for k in keys
+                },
             )
+            for r in ranks
+        ]
 
-        rows.sort(key=_sort_key, reverse=True)
+        rows.sort(
+            key=lambda row: (
+                row.sums_ms.get(WAIT_STEP_KEY, 0.0),
+                row.sums_ms.get("dataloader_fetch", 0.0),
+            ),
+            reverse=True,
+        )
 
         return StepCombinedRankHeatmap(
             window_size=self.window_size,
