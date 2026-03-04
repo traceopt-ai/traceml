@@ -87,9 +87,9 @@ class TCPServer:
 
     def _drain_frames(
         self,
-        buffer: bytes,
+        buffer: bytearray,
         expected: Optional[int],
-    ) -> tuple[list[bytes], bytes, Optional[int]]:
+    ) -> tuple[list[bytes], bytearray, Optional[int]]:
         frames: list[bytes] = []
 
         while True:
@@ -109,7 +109,7 @@ class TCPServer:
         return frames, buffer, expected
 
     def _handle_client(self, conn: socket.socket) -> None:
-        buffer = b""
+        buffer = bytearray()  # mutable — extend() is O(1) amortised, no copies
         expected: Optional[int] = None
         decoder = msgspec.msgpack.Decoder()
 
@@ -124,7 +124,7 @@ class TCPServer:
                 except OSError:
                     break  # socket error
 
-                buffer += data
+                buffer.extend(data)
                 frames, buffer, expected = self._drain_frames(buffer, expected)
                 for payload in frames:
                     try:
