@@ -6,7 +6,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Downloads](https://static.pepy.tech/badge/traceml-ai)](https://pepy.tech/project/traceml-ai)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
-[![Python 3.9-3.13](https://img.shields.io/badge/python-3.9–3.13-blue)](https://www.python.org/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 
 TraceML provides step-level training visibility for PyTorch workloads. It shows where time and memory go inside each training step so you can
@@ -34,6 +34,8 @@ Healthy runs are clearly stable. Unstable runs reveal drift, imbalance, or memor
 
 ---
 ## Quick Start
+
+> **More detailed Quickstart:** [docs/quickstart.md](docs/quickstart.md) covers install, run modes, DDP, and troubleshooting.
 
 Install:
 
@@ -126,8 +128,8 @@ training runs.
 
 ## Supported Environments
 
--   Python 3.9--3.13
--   PyTorch 1.12+
+-   Python 3.10+
+-   PyTorch 2.5+
 -   macOS (Intel/ARM), Linux
 -   Single GPU
 -   Single-node DDP
@@ -153,6 +155,8 @@ trainer = TraceMLTrainer(
     traceml_enabled=True,
 )
 ```
+
+See the full [Hugging Face integration guide](docs/huggingface.md) for NLP, vision, DDP examples, and a complete `TraceMLTrainer` parameter reference.
 
 ---
 
