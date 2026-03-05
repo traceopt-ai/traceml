@@ -369,6 +369,7 @@ for step in range(num_steps):
 
 | Signal | Description |
 |--------|-------------|
+| Per-layer parameter memory | Static memory footprint of each layer's parameters (weights + biases) |
 | Per-layer forward time | How long each layer took during the forward pass |
 | Per-layer backward time | How long each layer took during the backward pass |
 | Per-layer forward memory | Activation memory used per layer (forward) |

@@ -397,19 +397,19 @@ trainer = TraceMLTrainer(
 
 ### `traceml_kwargs`
 
-All keys are optional and default to `True` if `traceml_kwargs` is provided.
+Each key maps directly to a parameter of `trace_model_instance` in `traceml/decorators.py`. All keys are optional.
 
-| Key | Type | Description |
-|-----|------|-------------|
-| `sample_layer_memory` | `bool` | Collect parameter memory per layer. |
-| `trace_layer_forward_memory` | `bool` | Capture activation memory during forward pass per layer. |
-| `trace_layer_backward_memory` | `bool` | Capture gradient memory during backward pass per layer. |
-| `trace_layer_forward_time` | `bool` | Time each layer during the forward pass. |
-| `trace_layer_backward_time` | `bool` | Time each layer during the backward pass. |
-| `trace_execution` | `bool` | Attach execution entry hooks to the model. |
-| `include_names` | `list[str] or None` | Only trace layers whose names are in this list. |
-| `exclude_names` | `list[str] or None` | Skip layers whose names are in this list. |
-| `leaf_only` | `bool` | If `True` (default), only trace leaf modules (no container layers). |
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `sample_layer_memory` | `bool` | `True` | Enqueue model for parameter memory sampling per layer. |
+| `trace_layer_forward_memory` | `bool` | `True` | Attach activation hooks to capture forward-pass memory per layer. |
+| `trace_layer_backward_memory` | `bool` | `True` | Attach gradient hooks to capture backward-pass memory per layer (module + param). |
+| `trace_layer_forward_time` | `bool` | `True` | Attach forward timing hooks (pre + post) per layer. |
+| `trace_layer_backward_time` | `bool` | `True` | Attach backward timing hooks (pre + post) per layer. |
+| `trace_execution` | `bool` | `True` | Attach execution entry hooks to the model. |
+| `include_names` | `list[str] or None` | `None` | If set, only trace layers whose names appear in this list. |
+| `exclude_names` | `list[str] or None` | `None` | If set, skip layers whose names appear in this list. |
+| `leaf_only` | `bool` | `True` | When `True`, hooks are attached only to leaf modules, not to container layers. |
 
 ---
 
