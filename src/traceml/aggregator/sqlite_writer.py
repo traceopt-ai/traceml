@@ -49,8 +49,6 @@ Notes
 - Depends only on stdlib sqlite3 + msgspec (already in your deps).
 """
 
-from __future__ import annotations
-
 import queue
 import sqlite3
 import threading
@@ -131,8 +129,6 @@ class SQLiteWriterSimple:
         self._dropped = 0
         self._written = 0
         self._last_error: Optional[str] = None
-
-    # -------------------- public --------------------
 
     def start(self) -> None:
         """Start the writer thread (idempotent)."""
@@ -232,7 +228,6 @@ class SQLiteWriterSimple:
     def _extract_rank_sampler(
         self, msg: Dict[str, Any]
     ) -> tuple[Optional[int], Optional[str]]:
-        # Your sender includes these keys.
         rank_val = msg.get("rank", None)
         sampler_val = msg.get("sampler", None)
 
@@ -250,6 +245,16 @@ class SQLiteWriterSimple:
 
         return rank, sampler
 
+    def _iter_payload_dicts(self, m: Any):
+        if m is None:
+            return
+        if isinstance(m, list):
+            for it in m:
+                if isinstance(it, dict):
+                    yield it
+        elif isinstance(m, dict):
+            yield m
+
     def _flush_once(self, conn: sqlite3.Connection) -> None:
         """
         Drain up to max_flush_items from the queue and write them to SQLite.
@@ -260,14 +265,14 @@ class SQLiteWriterSimple:
 
         rows: list[tuple[int, Optional[int], Optional[str], bytes]] = []
         for m in items:
-            try:
-                recv_ts_ns = time.time_ns()
-                rank, sampler = self._extract_rank_sampler(m)
-                payload = self._encoder.encode(m)
-                rows.append((recv_ts_ns, rank, sampler, payload))
-            except Exception:
-                # Skip malformed message; keep writer robust.
-                continue
+            for payload_dict in self._iter_payload_dicts(m):
+                try:
+                    recv_ts_ns = time.time_ns()
+                    rank, sampler = self._extract_rank_sampler(payload_dict)
+                    payload = self._encoder.encode(payload_dict)
+                    rows.append((recv_ts_ns, rank, sampler, payload))
+                except Exception:
+                    continue
 
         if not rows:
             return
@@ -314,6 +319,9 @@ class SQLiteWriterSimple:
             self._flush_once(conn)
         finally:
             try:
+                conn.execute(
+                    "PRAGMA wal_checkpoint(TRUNCATE);"
+                )  # merges + truncates WAL
                 conn.close()
             except Exception:
                 pass
