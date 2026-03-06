@@ -22,6 +22,31 @@ def drain_frames_current(buffer: bytearray, expected: Optional[int]):
     return frames, buffer, expected
 
 
+def drain_frames_optimized(buffer: bytearray, expected: Optional[int]):
+    frames = []
+    offset = 0
+    buf_len = len(buffer)
+
+    while True:
+        if expected is None:
+            if buf_len - offset < 4:
+                break
+            expected = struct.unpack("!I", buffer[offset : offset + 4])[0]
+            offset += 4
+
+        if buf_len - offset < expected:
+            break
+
+        frames.append(buffer[offset : offset + expected])
+        offset += expected
+        expected = None
+
+    if offset > 0:
+        del buffer[:offset]
+
+    return frames, buffer, expected
+
+
 def benchmark_drain():
     # Simulate a massive payload of telemetry frames from worker ranks to the aggregator.
     # We use 100,000 messages of 128 bytes each, which mimics a fast burst of
@@ -42,16 +67,35 @@ def benchmark_drain():
         f"Total simulated TCP buffer size: {len(huge_payload) / 1024 / 1024:.2f} MB"
     )
 
-    buffer = bytearray(huge_payload)
-
+    buffer_copy1 = bytearray(huge_payload)
     print("Benchmarking current O(N^2) implementation...")
-    start = time.perf_counter()
-    frames, remaining_buffer, expected = drain_frames_current(buffer, None)
-    end = time.perf_counter()
+    start1 = time.perf_counter()
+    frames1, remaining_buffer1, expected1 = drain_frames_current(
+        buffer_copy1, None
+    )
+    end1 = time.perf_counter()
 
-    duration = end - start
-    print(f"Extraction completed in {duration:.4f} seconds.")
-    print(f"Total frames extracted: {len(frames)}")
+    duration1 = end1 - start1
+    print(f"Extraction completed in {duration1:.4f} seconds.")
+    print(f"Total frames extracted: {len(frames1)}\n")
+
+    buffer_copy2 = bytearray(huge_payload)
+    print("Benchmarking OPTIMIZED O(N) implementation...")
+    start2 = time.perf_counter()
+    frames2, remaining_buffer2, expected2 = drain_frames_optimized(
+        buffer_copy2, None
+    )
+    end2 = time.perf_counter()
+
+    duration2 = end2 - start2
+    print(f"Extraction completed in {duration2:.4f} seconds.")
+    print(f"Total frames extracted: {len(frames2)}")
+    if duration2 > 0:
+        print(f"Speedup: {duration1 / duration2:.2f}x\n")
+
+    assert len(frames1) == len(frames2)
+    for f1, f2 in zip(frames1, frames2):
+        assert f1 == f2
 
 
 if __name__ == "__main__":
