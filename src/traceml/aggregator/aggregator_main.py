@@ -68,7 +68,7 @@ def main() -> None:
     session_id = cfg["session_id"] or "default"
     session_dir = Path(cfg["logs_dir"]).resolve() / session_id / "aggregator"
     session_dir.mkdir(parents=True, exist_ok=True)
-    db_path = session_dir / "telemetry.db"
+    db_path = session_dir / "telemetry"
 
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)

@@ -46,11 +46,11 @@ def generate_step_time_summary_card(
     max_steps: int = 5000,
 ) -> Dict[str, Any]:
     """
-    Appends a compact StepTime summary card beneath the existing System card.
+    Appends a shareable StepTime summary card beneath the existing SYSTEM card.
 
     Writes/updates:
-      - <db_path>.summary_card.txt   (APPEND)
-      - <db_path>.summary_card.json  (MERGE under key "step_time")
+      - <db_path>_summary_card.txt   (APPEND)
+      - <db_path>_summary_card.json  (MERGE under key "step_time")
     """
     conn = sqlite3.connect(db_path)
     dec = msgspec.msgpack.Decoder(type=dict)
@@ -60,7 +60,6 @@ def generate_step_time_summary_card(
         (step_sampler_name,),
     )
 
-    first_ts: Optional[float] = None
     steps_seen = 0
 
     # Step duration stats (ms)
@@ -86,12 +85,6 @@ def generate_step_time_summary_card(
             msg = dec.decode(blob)
         except Exception:
             continue
-
-        ts = msg.get("timestamp")  # envelope timestamp
-        if isinstance(ts, (int, float)):
-            ts = float(ts)
-            if first_ts is None:
-                first_ts = ts
 
         tables = msg.get("tables")
         if not isinstance(tables, dict):
@@ -129,11 +122,12 @@ def generate_step_time_summary_card(
                         continue
 
                     total_ms += evt_ms
-                    event_total_ms[str(evt_name)] = (
-                        event_total_ms.get(str(evt_name), 0.0) + evt_ms
+                    name = str(evt_name)
+                    event_total_ms[name] = (
+                        event_total_ms.get(name, 0.0) + evt_ms
                     )
 
-                    b = _event_bucket(str(evt_name))
+                    b = _event_bucket(name)
                     if b is not None:
                         bucket_sum[b] += evt_ms
                         bucket_present[b] = True
@@ -150,46 +144,60 @@ def generate_step_time_summary_card(
 
     avg_step_ms = (step_ms_sum / steps_seen) if steps_seen else None
 
-    # Shareable 2–3 line card
     def fmt(x: Optional[float], suf: str = "", n_d: int = 1) -> str:
         return "n/a" if x is None else f"{x:.{n_d}f}{suf}"
 
-    lines = []
-    lines.append("")  # spacer line
-    lines.append("StepTime Summary")
-    lines.append(
-        f"steps {steps_seen} | step avg/peak {fmt(avg_step_ms,'ms',1)}/{fmt(step_ms_max,'ms',1)}"
-    )
+    # Match SYSTEM card style: fixed-width separators + aligned layout
+    w = 72
+    sep = "-" * w
 
-    # Prefer canonical buckets if we saw any of them; else show top 3 events.
-    if any(bucket_present.values()) and steps_seen:
-        # Report as share-of-step (average) using sums/steps
-        parts = []
-        denom = step_ms_sum if step_ms_sum > 0 else 1.0
-        for k in ["dataloader", "forward", "backward", "optimizer"]:
-            if bucket_present[k]:
-                share = 100.0 * (bucket_sum[k] / denom)
-                parts.append(f"{k} {share:.0f}%")
-        if parts:
-            lines.append("breakdown: " + " | ".join(parts))
+    lines: list[str] = []
+    lines.append("")  # one clear spacer from the SYSTEM card
+    lines.append(sep)
+    lines.append("STEP TIME")
+    lines.append(sep)
+
+    if steps_seen == 0:
+        # Keep it clean and non-alarming for early-cancelled runs
+        lines.append("steps        : 0")
+        lines.append("step avg/peak : n/a / n/a")
+        lines.append("breakdown     : n/a")
     else:
-        # fallback: top 3 event names by total time
-        top = sorted(event_total_ms.items(), key=lambda x: x[1], reverse=True)[
-            :3
-        ]
-        if top and step_ms_sum > 0:
-            parts = [
-                f"{name} {100.0*(ms/step_ms_sum):.0f}%" for name, ms in top
-            ]
-            lines.append("top: " + " | ".join(parts))
+        lines.append(f"steps        : {steps_seen}")
+        lines.append(
+            f"step avg/peak : {fmt(avg_step_ms,'ms',1)} / {fmt(step_ms_max,'ms',1)}"
+        )
+
+        # Prefer canonical buckets if we saw any of them; else show top events.
+        if any(bucket_present.values()):
+            denom = step_ms_sum if step_ms_sum > 0 else 1.0
+            parts = []
+            for k in ["dataloader", "forward", "backward", "optimizer"]:
+                if bucket_present[k]:
+                    share = 100.0 * (bucket_sum[k] / denom)
+                    parts.append(f"{k} {share:.0f}%")
+            lines.append(
+                "breakdown     : " + (" | ".join(parts) if parts else "n/a")
+            )
+        else:
+            top = sorted(
+                event_total_ms.items(), key=lambda x: x[1], reverse=True
+            )[:3]
+            if top and step_ms_sum > 0:
+                parts = [
+                    f"{name} {100.0*(ms/step_ms_sum):.0f}%" for name, ms in top
+                ]
+                lines.append("top events    : " + " | ".join(parts))
+            else:
+                lines.append("top events    : n/a")
 
     card_text = "\n".join(lines).rstrip() + "\n"
 
-    # Append to text card file
-    _append_text(db_path + ".summary_card.txt", card_text)
+    # Append to text card file (note: your system card uses _summary_card.txt)
+    _append_text(db_path + "_summary_card.txt", card_text)
 
-    # Merge JSON
-    existing = _load_json_or_empty(db_path + ".summary_card.json")
+    # Merge JSON (keep your filename consistent: _summary_card.json)
+    existing = _load_json_or_empty(db_path + "_summary_card.json")
     existing["step_time"] = {
         "steps": steps_seen,
         "step_avg_ms": avg_step_ms,
@@ -223,6 +231,6 @@ def generate_step_time_summary_card(
             )
         ),
     }
-    _write_json(db_path + ".summary_card.json", existing)
+    _write_json(db_path + "_summary_card.json", existing)
 
     return existing["step_time"]

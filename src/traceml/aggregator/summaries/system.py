@@ -140,6 +140,16 @@ def _fmt(x: Optional[float], suf: str = "", n_d: int = 1) -> str:
 
 
 def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
+    """
+    Build a *shareable* runtime summary card (SYSTEM only).
+
+    Notes
+    -----
+    - This function intentionally emits ONLY the SYSTEM section.
+      Step-time / other cards are appended elsewhere.
+    - Output is formatted with clear boundaries and spacing for easy pasting
+      into Slack / GitHub / email.
+    """
     duration_s = None
     if (
         agg.first_ts is not None
@@ -149,6 +159,8 @@ def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
         duration_s = agg.last_ts - agg.first_ts
 
     cpu_avg = (agg.cpu_sum / agg.cpu_n) if agg.cpu_n else None
+    cpu_peak = agg.cpu_max if agg.cpu_n else None
+
     ram_avg_gb = (
         _b_to_gb(agg.ram_used_sum_b / agg.ram_n) if agg.ram_n else None
     )
@@ -160,6 +172,7 @@ def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
     gpu_util_avg = (
         (agg.gpu_util_sum / agg.gpu_util_n) if agg.gpu_util_n else None
     )
+    gpu_util_peak = agg.gpu_util_max if agg.gpu_util_n else None
     gpu0_util_avg = (
         (agg.gpu0_util_sum / agg.gpu0_util_n) if agg.gpu0_util_n else None
     )
@@ -181,59 +194,81 @@ def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
     )
     gpu_temp_peak = agg.gpu_temp_max if agg.gpu_temp_n else None
 
-    lines = []
-    lines.append(
-        f"TraceML System Summary | duration {_fmt(duration_s, 's', 1)} | samples {agg.system_rows}"
+    w = 72
+    sep = "-" * w
+
+    title = (
+        f"TraceML Runtime Summary Card | duration {_fmt(duration_s, 's', 1)}"
+        f" | samples {agg.system_rows}"
     )
-    lines.append(
-        f"CPU avg/peak {_fmt(cpu_avg, '%', 1)}/{_fmt(agg.cpu_max if agg.cpu_n else None, '%', 1)}"
-        f" | RAM avg/peak {_fmt(ram_avg_gb, 'GB', 1)}/{_fmt(ram_peak_gb, 'GB', 1)} (of {_fmt(ram_total_gb, 'GB', 1)})"
+
+    # Simple, aligned key/value rows (readable in monospace)
+    rows: list[tuple[str, str]] = []
+    rows.append(
+        ("CPU", f"avg {_fmt(cpu_avg, '%', 1)} | peak {_fmt(cpu_peak, '%', 1)}")
+    )
+    rows.append(
+        (
+            "RAM",
+            f"avg {_fmt(ram_avg_gb, 'GB', 1)} | peak {_fmt(ram_peak_gb, 'GB', 1)} | total {_fmt(ram_total_gb, 'GB', 1)}",
+        )
     )
 
     if agg.gpu_util_n > 0:
-        lines.append(
-            f"GPU util avg/peak {_fmt(gpu_util_avg, '%', 1)}/{_fmt(agg.gpu_util_max, '%', 1)}"
-            + (
-                f" | GPU0 avg {_fmt(gpu0_util_avg, '%', 1)}"
-                if agg.gpu0_util_n
-                else ""
-            )
+        gpu_util = f"avg {_fmt(gpu_util_avg, '%', 1)} | peak {_fmt(gpu_util_peak, '%', 1)}"
+        if agg.gpu0_util_n:
+            gpu_util += f" | GPU0 avg {_fmt(gpu0_util_avg, '%', 1)}"
+        rows.append(("GPU util", gpu_util))
+
+        gpu_mem = (
+            f"avg {_fmt(gpu_mem_avg_gb, 'GB', 1)} | peak {_fmt(gpu_mem_peak_gb, 'GB', 1)}"
+            f" | total {_fmt(gpu_mem_total_gb, 'GB', 1)}"
         )
-        lines.append(
-            f"GPU mem avg/peak {_fmt(gpu_mem_avg_gb, 'GB', 1)}/{_fmt(gpu_mem_peak_gb, 'GB', 1)} (of {_fmt(gpu_mem_total_gb, 'GB', 1)})"
-            + (
-                f" | temp avg/peak {_fmt(gpu_temp_avg, '°C', 1)}/{_fmt(gpu_temp_peak, '°C', 1)}"
-                if agg.gpu_temp_n
-                else ""
+        if agg.gpu_temp_n:
+            gpu_mem += (
+                f" | temp avg {_fmt(gpu_temp_avg, '°C', 1)}"
+                f" | peak {_fmt(gpu_temp_peak, '°C', 1)}"
             )
-        )
+        rows.append(("GPU mem", gpu_mem))
     else:
-        # concise + accurate
         if agg.gpu_available is False:
-            lines.append(
-                "GPU: unavailable (NVML init failed or no NVIDIA GPU)."
+            rows.append(
+                (
+                    "GPU",
+                    "unavailable (no NVIDIA GPU detected or NVML not accessible)",
+                )
             )
         elif (agg.gpu_count or 0) > 0:
-            lines.append(
-                "GPU: available but no per-GPU samples recorded (unexpected)."
+            rows.append(
+                ("GPU", "detected, but no per-GPU samples were recorded")
             )
         else:
-            lines.append("GPU: n/a")
+            rows.append(("GPU", "n/a"))
 
-    card = "\n".join(lines[:4])
+    key_w = max(len(k) for k, _ in rows)
+    system_lines = [f"{k:<{key_w}} : {v}" for k, v in rows]
+
+    # Final card (SYSTEM only; step timing appended elsewhere)
+    lines: list[str] = []
+    lines.append(title)
+    lines.append(sep)
+    lines.append("SYSTEM")
+    lines.append(sep)
+    lines.extend(system_lines)
+    card = "\n".join(lines)
 
     summary = {
         "duration_s": duration_s,
         "system_samples": agg.system_rows,
         "cpu_avg_percent": cpu_avg,
-        "cpu_peak_percent": agg.cpu_max if agg.cpu_n else None,
+        "cpu_peak_percent": cpu_peak,
         "ram_avg_gb": ram_avg_gb,
         "ram_peak_gb": ram_peak_gb,
         "ram_total_gb": ram_total_gb,
         "gpu_available": agg.gpu_available,
         "gpu_count": agg.gpu_count,
         "gpu_util_avg_percent": gpu_util_avg,
-        "gpu_util_peak_percent": agg.gpu_util_max if agg.gpu_util_n else None,
+        "gpu_util_peak_percent": gpu_util_peak,
         "gpu0_util_avg_percent": gpu0_util_avg,
         "gpu_mem_avg_gb": gpu_mem_avg_gb,
         "gpu_mem_peak_gb": gpu_mem_peak_gb,
@@ -284,10 +319,10 @@ def generate_system_summary_card(
 
     card, summary = _make_card(agg)
 
-    with open(db_path + ".summary_card.txt", "w", encoding="utf-8") as f:
+    with open(db_path + "_summary_card.txt", "w", encoding="utf-8") as f:
         f.write(card + "\n")
 
-    with open(db_path + ".summary_card.json", "w", encoding="utf-8") as f:
+    with open(db_path + "_summary_card.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
 
     return summary
