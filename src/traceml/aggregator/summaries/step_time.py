@@ -43,7 +43,8 @@ def _event_bucket(name: str) -> Optional[str]:
 def generate_step_time_summary_card(
     db_path: str,
     step_sampler_name: str = "StepTimeSampler",
-    max_steps: int = 5000,
+    max_rows: int = 50_000,
+    print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
     """
     Appends a shareable StepTime summary card beneath the existing SYSTEM card.
@@ -96,7 +97,7 @@ def generate_step_time_summary_card(
             for row in rows:
                 if not isinstance(row, dict):
                     continue
-                if steps_seen >= max_steps:
+                if steps_seen >= max_rows:
                     break
 
                 events = row.get("events")
@@ -137,7 +138,7 @@ def generate_step_time_summary_card(
                     step_ms_sum += total_ms
                     step_ms_max = max(step_ms_max, total_ms)
 
-        if steps_seen >= max_steps:
+        if steps_seen >= max_rows:
             break
 
     conn.close()
@@ -232,5 +233,8 @@ def generate_step_time_summary_card(
         ),
     }
     _write_json(db_path + "_summary_card.json", existing)
+
+    if print_to_stdout:
+        print(card_text, end="")  # card_text already ends with \n
 
     return existing["step_time"]

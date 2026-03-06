@@ -284,7 +284,29 @@ def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
 def generate_system_summary_card(
     db_path: str,
     system_sampler_name: str = "SystemSampler",
+    print_to_stdout: bool = True,
+    max_system_rows: int = 50_000,
 ) -> Dict[str, Any]:
+    """
+    Generate a shareable SYSTEM summary card from the local TraceML DB.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the SQLite DB file.
+    system_sampler_name:
+        Sampler name stored in `raw_messages.sampler` for system telemetry.
+    print_to_stdout:
+        If True, prints the generated card to stdout.
+    max_system_rows:
+        Safety cap on the number of system rows aggregated (prevents very large
+        DB scans from taking too long). Default: 50_000.
+
+    Returns
+    -------
+    Dict[str, Any]
+        Parsed summary JSON including the rendered `card` string.
+    """
     conn = sqlite3.connect(db_path)
     dec = msgspec.msgpack.Decoder(type=dict)
     agg = _Agg()
@@ -312,8 +334,20 @@ def generate_system_summary_card(
             if not isinstance(rows, list):
                 continue
             for row in rows:
-                if isinstance(row, dict):
-                    _update_from_system_row(agg, row)
+                if not isinstance(row, dict):
+                    continue
+
+                _update_from_system_row(agg, row)
+
+                # Safety cap: stop once we've aggregated enough rows.
+                if agg.system_rows >= max_system_rows:
+                    break
+
+            if agg.system_rows >= max_system_rows:
+                break
+
+        if agg.system_rows >= max_system_rows:
+            break
 
     conn.close()
 
@@ -324,5 +358,8 @@ def generate_system_summary_card(
 
     with open(db_path + "_summary_card.json", "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
+
+    if print_to_stdout:
+        print(card)
 
     return summary
