@@ -16,8 +16,6 @@ Expects canonical metric keys:
   dataloader_fetch, forward, backward, optimizer_step, wait_proxy, step_time
 """
 
-from __future__ import annotations
-
 from typing import Any, Dict, List, Optional, Tuple
 
 import plotly.graph_objects as go
