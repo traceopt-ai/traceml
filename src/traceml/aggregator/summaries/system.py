@@ -198,6 +198,7 @@ def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
     sep = "-" * w
 
     title = (
+        f"\n\n\n"
         f"TraceML Runtime Summary Card | duration {_fmt(duration_s, 's', 1)}"
         f" | samples {agg.system_rows}"
     )
@@ -285,7 +286,7 @@ def generate_system_summary_card(
     db_path: str,
     system_sampler_name: str = "SystemSampler",
     print_to_stdout: bool = True,
-    max_system_rows: int = 50_000,
+    max_system_rows: int = 5_000,
 ) -> Dict[str, Any]:
     """
     Generate a shareable SYSTEM summary card from the local TraceML DB.
@@ -300,7 +301,7 @@ def generate_system_summary_card(
         If True, prints the generated card to stdout.
     max_system_rows:
         Safety cap on the number of system rows aggregated (prevents very large
-        DB scans from taking too long). Default: 50_000.
+        DB scans from taking too long). Default: 5_000.
 
     Returns
     -------
