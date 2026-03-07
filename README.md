@@ -28,6 +28,7 @@ quickly understand performance behavior across single-GPU and  single-node DDP r
 -   Median vs worst rank (in case of DDP)
 -   Skew (%) to surface imbalance
 -   GPU memory (allocated + peak)
+- End-of-run summary card with straggler rank and step breakdown
 
 
 Healthy runs are clearly stable. Unstable runs reveal drift, imbalance, or memory creep early.
@@ -63,8 +64,9 @@ Run with cli:
 traceml run train.py
 ```
 
-The terminal dashboard opens alongside your logs.
+The terminal dashboard opens alongside your logs. At run end, TraceML also prints a compact runtime summary card for quick review and sharing.
 ![TraceML terminal dashboard](cli_demo_v1.png)
+
 
 
 
