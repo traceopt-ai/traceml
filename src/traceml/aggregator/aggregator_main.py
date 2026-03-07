@@ -66,7 +66,8 @@ def main() -> None:
     cfg = read_traceml_env()
 
     session_id = cfg["session_id"] or "default"
-    session_dir = Path(cfg["logs_dir"]).resolve() / session_id / "aggregator"
+    session_root = Path(cfg["logs_dir"]).resolve() / session_id
+    session_dir = session_root / "aggregator"
     session_dir.mkdir(parents=True, exist_ok=True)
     db_path = session_dir / "telemetry"
 
@@ -107,6 +108,12 @@ def main() -> None:
                 agg.stop(timeout_sec=5.0)
             except Exception:
                 pass
+
+        print(
+            f"[TraceML] Logs saved under: {session_root}",
+            file=sys.stderr,
+            flush=True,
+        )
 
         if err is not None:
             print(
