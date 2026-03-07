@@ -6,7 +6,7 @@ Step-level timing sampler for TraceML.
 Reads StepTimeBatch objects from the STEP timing queue, resolves GPU timings
 asynchronously (without blocking training), aggregates repeated regions within
 the same optimizer step (e.g., gradient accumulation), and persists one record
-per (step, event_name).
+per.
 
 Key semantics
 -------------
@@ -15,14 +15,16 @@ Key semantics
   have resolved. Later steps are blocked until earlier steps resolve (FIFO).
 - Aggregation: durations are SUM'ed across repeated occurrences of the same
   event name within a step; n_calls is counted.
+- Storage: one DB table (e.g. "step_time"), one row per step, with a nested
+  payload of all aggregated events for that step.
 """
 
-from collections import deque
+from collections import defaultdict, deque
 from queue import Empty
-from typing import Deque, Dict, List, Tuple
+from typing import Any, Deque, Dict, Tuple
 
 from traceml.loggers.error_log import get_error_logger
-from traceml.samplers.schema.time_schema import TimeEventSample
+from traceml.samplers.schema.step_time_schema import StepTimeEventSample
 from traceml.utils.timing import StepTimeBatch, TimeEvent, get_step_time_queue
 
 from .base_sampler import BaseSampler
@@ -42,8 +44,8 @@ class StepTimeSampler(BaseSampler):
 
     Storage
     -------
-    Persists into one DB table per event name (same as legacy TimeSampler),
-    but with aggregated per-step rows.
+    Writes a single DB record per step into a fixed table (default: "step_time").
+    Each record contains a nested map of aggregated event stats for the step.
 
     Notes
     -----
@@ -53,12 +55,14 @@ class StepTimeSampler(BaseSampler):
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "TimeSampler"
+        self.name = "StepTime"
+        self.sampler_name = self.name + "Sampler"
+        self.table_name = self.name + "Table"
         super().__init__(sampler_name=self.sampler_name)
         self.logger = get_error_logger(self.sampler_name)
 
         # Local FIFO buffer of pending step batches (order preserved).
-        self._local_steps: Deque[StepTimeBatch] = deque()
+        self._pending: Deque[StepTimeBatch] = deque()
 
         self.sample_idx = 0
 
@@ -75,7 +79,7 @@ class StepTimeSampler(BaseSampler):
                 break
             if batch is None:
                 continue
-            self._local_steps.append(batch)
+            self._pending.append(batch)
 
     @staticmethod
     def _cpu_duration_ms(evt: TimeEvent) -> float:
@@ -88,105 +92,109 @@ class StepTimeSampler(BaseSampler):
         CPU events resolve immediately. GPU events resolve only if the recorded
         CUDA end event has completed (non-blocking).
         """
-        for evt in batch.events:
-            if not evt.try_resolve():
-                return False
-        return True
+        return all(evt.try_resolve() for evt in batch.events)
 
-    def _aggregate_step(
+    def _build_step_payload(
         self, batch: StepTimeBatch
-    ) -> List[Tuple[str, str, bool, float, int, float]]:
+    ) -> Tuple[float, Dict[str, Dict[str, Dict[str, Any]]]]:
         """
-        Aggregate all events within a step by (event name, device, is_gpu).
+        Build a single per-step payload containing all aggregated event timings.
 
-        Returns a list of tuples:
-          (name, device, is_gpu, duration_ms_sum, n_calls, timestamp)
+        Returns
+        -------
+        (timestamp_s, events_payload)
 
-        timestamp is the max cpu_end observed for that aggregated group.
+        - timestamp_s: float
+            Step timestamp in seconds. Chosen as max cpu_end across all events
+            in the step (stable, monotonic-ish for UI ordering).
+        - events_payload: dict
+            Nested mapping:
+
+            events[event_name][device] = {
+                "is_gpu": bool,
+                "duration_ms": float,   # SUM across repeats in this step
+                "n_calls": int,         # count of repeats in this step
+            }
+
+        Aggregation key
+        ---------------
+        (event_name, device, is_gpu)
         """
-        agg: Dict[Tuple[str, str, bool], Dict[str, float]] = {}
-        calls: Dict[Tuple[str, str, bool], int] = {}
-        ts_max: Dict[Tuple[str, str, bool], float] = {}
+        # For each (name, device, is_gpu) accumulate totals.
+        sum_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
+        n_calls: Dict[Tuple[str, str, bool], int] = defaultdict(int)
+
+        ts_max = 0.0
 
         for evt in batch.events:
+            # Update step timestamp (seconds).
+            ts_max = float(max(ts_max, float(evt.cpu_end)))
+
             is_gpu = evt.gpu_time_ms is not None
             duration_ms = (
                 float(evt.gpu_time_ms)
                 if is_gpu
                 else float(self._cpu_duration_ms(evt))
             )
+
             key = (str(evt.name), str(evt.device), bool(is_gpu))
+            sum_ms[key] += duration_ms
+            n_calls[key] += 1
 
-            agg[key] = {
-                "sum_ms": float(agg.get(key, {}).get("sum_ms", 0.0))
-                + duration_ms
+        # Convert to nested payload grouped by event_name then device.
+        events: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+        for (name, device, is_gpu), total_ms in sum_ms.items():
+            events[name][device] = {
+                "is_gpu": bool(is_gpu),
+                "duration_ms": float(total_ms),
+                "n_calls": int(n_calls[(name, device, is_gpu)]),
             }
-            calls[key] = int(calls.get(key, 0) + 1)
-            ts_max[key] = float(max(ts_max.get(key, 0.0), float(evt.cpu_end)))
 
-        out: List[Tuple[str, str, bool, float, int, float]] = []
-        for (name, device, is_gpu), rec in agg.items():
-            out.append(
-                (
-                    name,
-                    device,
-                    is_gpu,
-                    float(rec["sum_ms"]),
-                    int(calls[(name, device, is_gpu)]),
-                    float(ts_max[(name, device, is_gpu)]),
-                )
-            )
-        return out
+        return float(ts_max), dict(events)
 
-    def _save_aggregates(
-        self,
-        step: int,
-        scope: str,
-        aggregates: List[Tuple[str, str, bool, float, int, float]],
+    def _save_step(
+        self, step: int, timestamp: float, events: Dict[str, Any]
     ) -> None:
         """
-        Persist aggregated step timings.
+        Persist one step-aligned record.
 
-        Keeps legacy behavior: one DB table per event name.
-        Adds aggregation awareness via `n_calls` encoded in sample_idx stream
-        (optionally extend schema later).
+        Storage format is defined by StepTimeEventSample (shared contract).
+        The DB layer is expected to serialize nested structures (e.g., JSON).
         """
-        # NOTE: TimeEventSample currently doesn't include n_calls.
-        # If we later extend schema, add n_calls here.
-        for name, device, is_gpu, duration_ms, _n_calls, ts in aggregates:
-            sample = TimeEventSample(
-                sample_idx=self.sample_idx,
-                timestamp=float(ts),
-                step=int(step),
-                scope=str(scope),
-                device=str(device),
-                is_gpu=bool(is_gpu),
-                duration_ms=float(duration_ms),
-            )
-            self.db.add_record(name, sample.to_wire())
+        sample = StepTimeEventSample(
+            seq=self.sample_idx,
+            timestamp=float(timestamp),
+            step=int(step),
+            events=events,
+        )
+        self.db.add_record(self.table_name, sample.to_wire())
 
     def sample(self) -> None:
         """
-        Ingest → resolve earliest step → aggregate → persist (FIFO).
+        Drain → resolve earliest step → aggregate → persist (FIFO).
+
+        Guarantees
+        ----------
+        - If the earliest pending step is not fully resolved, no later steps
+          are written (strict FIFO).
+        - GPU resolution is non-blocking; training is never synchronized.
         """
         self.sample_idx += 1
+
         try:
             self._ingest_queue()
 
-            while self._local_steps:
-                batch = self._local_steps[0]
-
+            # Write as many fully-resolved steps as possible (in order).
+            while self._pending:
+                batch = self._pending[0]
                 if not self._step_is_resolved(batch):
-                    break
+                    return
 
-                # Earliest step fully resolved
-                self._local_steps.popleft()
+                self._pending.popleft()
 
-                aggregates = self._aggregate_step(batch)
-                self._save_aggregates(
-                    step=int(batch.step),
-                    scope="step",
-                    aggregates=aggregates,
+                ts, events = self._build_step_payload(batch)
+                self._save_step(
+                    step=int(batch.step), timestamp=ts, events=events
                 )
 
         except Exception as e:
