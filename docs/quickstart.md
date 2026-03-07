@@ -1,6 +1,6 @@
 # TraceML Quickstart
 
-Get TraceML running in under 5 minutes. This guide covers everything from installation to DDP runs, and shows you exactly what to expect on screen at each step.
+Get TraceML running in under 5 minutes. This guide covers everything from installation to runs, and shows you exactly what to expect on screen at each step and end of summary card.
 
 > **New to TraceML?**
 > The [README](../README.md) gives you the one-minute overview. This page is the full getting-started guide.
@@ -164,6 +164,7 @@ Then the terminal dashboard appears alongside your training logs:
 
 > **Fail-open design:** If the aggregator crashes mid-run, training continues without interruption. You will see a warning message, but your model keeps training.
 
+
 ---
 
 ## 5. Run: Web dashboard
@@ -187,6 +188,12 @@ This starts the same training run but renders metrics in a browser-based UI inst
 - You want to share the live view with teammates (navigate to the URL on the same machine)
 - You prefer a visual, interactive layout over the terminal table
 - You are running on a machine with a display (headless servers need port-forwarding)
+
+---
+### End-of-run summary card
+
+At the end of a run, TraceML prints a compact text summary for quick review and sharing.
+It highlights the straggler rank, average total step time, dataloader share, and compute split.
 
 ---
 
