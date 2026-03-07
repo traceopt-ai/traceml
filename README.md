@@ -162,6 +162,34 @@ See the full [Hugging Face integration guide](docs/huggingface.md) for NLP, visi
 
 ---
 
+## PyTorch Lightning Integration
+
+TraceML offers official support for PyTorch Lightning models through `TraceMLCallback`.
+
+### Usage
+
+Simply pass the callback to your `Trainer`.
+
+```python
+import lightning as L
+from traceml.utils.lightning import TraceMLCallback
+from traceml.decorators import trace_model_instance
+
+class MyLightningModule(L.LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.model = ...
+        # Optional: enable deep-dive per-layer instrumentation
+        trace_model_instance(self)
+
+    def training_step(self, batch, batch_idx):
+        ...
+
+trainer = L.Trainer(callbacks=[TraceMLCallback()])
+```
+
+---
+
 ## Roadmap
 
 Near-term: - Single-node DDP hardening - Disk run logging -
