@@ -91,20 +91,25 @@ class TCPServer:
         expected: Optional[int],
     ) -> tuple[list[bytes], bytearray, Optional[int]]:
         frames: list[bytes] = []
+        offset = 0
+        buf_len = len(buffer)
 
         while True:
             if expected is None:
-                if len(buffer) < 4:
+                if buf_len - offset < 4:
                     break
-                expected = struct.unpack("!I", buffer[:4])[0]
-                buffer = buffer[4:]
+                expected = struct.unpack("!I", buffer[offset : offset + 4])[0]
+                offset += 4
 
-            if len(buffer) < expected:
+            if buf_len - offset < expected:
                 break
 
-            frames.append(buffer[:expected])
-            buffer = buffer[expected:]
+            frames.append(buffer[offset : offset + expected])
+            offset += expected
             expected = None
+
+        if offset > 0:
+            del buffer[:offset]
 
         return frames, buffer, expected
 
