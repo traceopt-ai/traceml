@@ -188,6 +188,8 @@ class MyLightningModule(L.LightningModule):
 trainer = L.Trainer(callbacks=[TraceMLCallback()])
 ```
 
+See the full [PyTorch Lightning integration guide](docs/lightning.md) for a complete MNIST example, deep-dive mode, and gradient accumulation tips.
+
 ---
 
 ## Roadmap
