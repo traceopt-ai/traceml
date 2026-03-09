@@ -34,9 +34,8 @@ def benchmark_encoding_overhead():
         f"Benchmarking MsgPack pipeline with {num_iterations:,} incoming payloads..."
     )
 
-    # ---------------------------------------------------------
     # Scenario 1: The Current "Full Decode & Re-encode" Pipeline
-    # ---------------------------------------------------------
+
     start_time_old = time.perf_counter()
     for _ in range(num_iterations):
         # 1. Receiver fully decodes
@@ -47,9 +46,7 @@ def benchmark_encoding_overhead():
 
     duration_old = time.perf_counter() - start_time_old
 
-    # ---------------------------------------------------------
     # Scenario 2: The Optimized "Bypass Re-encoding" Pipeline
-    # ---------------------------------------------------------
     start_time_new = time.perf_counter()
     for _ in range(num_iterations):
         # 1. Receiver fully decodes AND keeps the raw bytes
@@ -61,9 +58,6 @@ def benchmark_encoding_overhead():
 
     duration_new = time.perf_counter() - start_time_new
 
-    # ---------------------------------------------------------
-    # Results
-    # ---------------------------------------------------------
     print("\n=== Results ===")
     print(f"Current overhead (Decode + Re-encode): {duration_old:.4f} seconds")
     print(f"Optimized approach (Decode only):     {duration_new:.4f} seconds")
