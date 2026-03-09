@@ -19,7 +19,8 @@ Get TraceML running in under 5 minutes. This guide covers everything from instal
 8. [What TraceML shows you](#8-what-traceml-shows-you)
 9. [Deep-Dive mode](#9-deep-dive-mode)
 10. [Hugging Face Trainer](#10-hugging-face-trainer)
-11. [Troubleshooting](#11-troubleshooting)
+11. [PyTorch Lightning](#11-pytorch-lightning)
+12. [Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -435,7 +436,33 @@ traceml run fine_tune.py
 
 ---
 
-## 11. Troubleshooting
+## 11. PyTorch Lightning
+
+If you use PyTorch Lightning, TraceML provides an official callback.
+
+```python
+import lightning as L
+from traceml.utils.lightning import TraceMLCallback
+
+trainer = L.Trainer(
+    max_steps=500,
+    enable_progress_bar=False,  # Let TraceML own the terminal
+    callbacks=[TraceMLCallback()],
+)
+trainer.fit(model)
+```
+
+Launch the training script the same way as with plain PyTorch:
+
+```bash
+traceml run train.py
+```
+
+> **More details:** See the full [PyTorch Lightning integration guide](lightning.md) for a complete CNN example, deep-dive usage, and details on how it seamlessly supports gradient accumulation.
+
+---
+
+## 12. Troubleshooting
 
 ### "Aggregator failed to start"
 
@@ -507,5 +534,6 @@ Please [open an issue](https://github.com/traceopt-ai/traceml/issues) with the a
 
 - Browse the full example scripts in [`src/examples/`](../src/examples/)
 - Read the [Hugging Face integration guide](huggingface.md) for `TraceMLTrainer`, NLP and vision examples
+- Read the [PyTorch Lightning integration guide](lightning.md) for `TraceMLCallback`
 - Check the [architecture diagram](traceml_architecture_diagram.png) if you are curious about internals
 - Join the discussion: [GitHub Discussions](https://github.com/traceopt-ai/traceml/discussions)
