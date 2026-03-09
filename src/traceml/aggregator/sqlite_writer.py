@@ -264,15 +264,25 @@ class SQLiteWriterSimple:
             return
 
         rows: list[tuple[int, Optional[int], Optional[str], bytes]] = []
-        for m in items:
-            for payload_dict in self._iter_payload_dicts(m):
+        for m, raw_payload in items:
+            if isinstance(m, dict):
                 try:
                     recv_ts_ns = time.time_ns()
-                    rank, sampler = self._extract_rank_sampler(payload_dict)
-                    payload = self._encoder.encode(payload_dict)
-                    rows.append((recv_ts_ns, rank, sampler, payload))
+                    rank, sampler = self._extract_rank_sampler(m)
+                    rows.append((recv_ts_ns, rank, sampler, raw_payload))
                 except Exception:
                     continue
+            elif isinstance(m, list):
+                for payload_dict in self._iter_payload_dicts(m):
+                    try:
+                        recv_ts_ns = time.time_ns()
+                        rank, sampler = self._extract_rank_sampler(
+                            payload_dict
+                        )
+                        payload = self._encoder.encode(payload_dict)
+                        rows.append((recv_ts_ns, rank, sampler, payload))
+                    except Exception:
+                        continue
 
         if not rows:
             return

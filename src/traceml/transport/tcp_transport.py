@@ -134,7 +134,7 @@ class TCPServer:
                 for payload in frames:
                     try:
                         msg = decoder.decode(payload)
-                        self._queue.put_nowait(msg)
+                        self._queue.put_nowait((msg, payload))
                     except queue.Full:
                         pass  # drop on overflow
                     except Exception:

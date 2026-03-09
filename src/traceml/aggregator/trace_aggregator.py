@@ -175,7 +175,7 @@ class TraceMLAggregator:
 
         Each msg is expected to be a telemetry row (or batch) compatible with RemoteDBStore.ingest().
         """
-        for msg in self._tcp_server.poll():
+        for msg, raw_payload in self._tcp_server.poll():
             _safe(
                 self._logger,
                 "RemoteDBStore.ingest failed",
@@ -185,7 +185,7 @@ class TraceMLAggregator:
             _safe(
                 self._logger,
                 "SQLiteWriter.ingest failed",
-                lambda m=msg: self._sqlite_writer.ingest(m),
+                lambda m=(msg, raw_payload): self._sqlite_writer.ingest(m),
             )
 
     def _loop(self) -> None:
