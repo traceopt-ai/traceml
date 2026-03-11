@@ -58,12 +58,11 @@ from typing import Any, Dict, Optional
 
 import msgspec
 
+from traceml.aggregator.sqlite_writers import step_time as step_time_sql_writer
 from traceml.aggregator.sqlite_writers import system as system_sql_writer
 from traceml.loggers.error_log import get_error_logger
 
-_PROJECTION_WRITERS = [
-    system_sql_writer,
-]
+_PROJECTION_WRITERS = [system_sql_writer, step_time_sql_writer]
 
 
 @dataclass(frozen=True)
