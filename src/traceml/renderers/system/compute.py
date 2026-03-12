@@ -117,10 +117,6 @@ class SystemMetricsComputer:
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def compute_cli(self) -> Dict[str, Any]:
         """
         Compute the latest CLI snapshot.
