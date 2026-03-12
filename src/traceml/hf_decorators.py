@@ -1,10 +1,14 @@
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from traceml.decorators import trace_model_instance, trace_step
 
 # Setup logging
 logger = logging.getLogger(__name__)
+
+# Check for global disable flag
+TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 
 try:
     from transformers import Trainer
@@ -47,6 +51,14 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         """
         Overridden training step to include TraceML instrumentation.
         """
+        # BYPASS LOGIC:
+        # If the user launched the script with `--disable-traceml` (setting TRACEML_DISABLED="1")
+        # or if `traceml_enabled` is explicitly False, we short-circuit immediately.
+        # This completely skips any hook attachments, memory tracking, and timing regions,
+        # acting as a true zero-overhead no-op fallback.
+        if TRACEML_DISABLED or not self.traceml_enabled:
+            return super().training_step(model, inputs, *args, **kwargs)
+
         if self.traceml_enabled:
             # Lazily attach hooks on the first step to ensure we catch the
             # final wrapped/moved model (e.g. DDP, Accelerator)

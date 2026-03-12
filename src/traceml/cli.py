@@ -172,6 +172,9 @@ def launch_tracer_process(script_path, args):
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"  # makes prints flush promptly in children
 
+    env["TRACEML_DISABLED"] = (
+        "1" if getattr(args, "disable_traceml", False) else "0"
+    )
     env["TRACEML_SCRIPT_PATH"] = script_path
     env["TRACEML_MODE"] = args.mode
     env["TRACEML_INTERVAL"] = str(args.interval)
@@ -189,6 +192,20 @@ def launch_tracer_process(script_path, args):
 
     runner_path = str(Path(__file__).parent / "runtime/executor.py")
     script_args = args.args or []
+    if env["TRACEML_DISABLED"] == "1":
+        print(
+            "[TraceML] TraceML is disabled via --disable-traceml. Running natively."
+        )
+        train_cmd = [
+            "torchrun",
+            f"--nproc_per_node={args.nproc_per_node}",
+            str(script_path),
+            *script_args,
+        ]
+        train_proc = start_training_process(train_cmd=train_cmd, env=env)
+        install_shutdown_handlers(lambda: (train_proc, None))
+        train_proc.wait()
+        sys.exit(train_proc.returncode)
 
     if args.mode in ["cli", "dashboard"]:
         train_cmd = [
@@ -321,6 +338,11 @@ def build_parser():
         "--no-history",
         action="store_true",
         help="Disable history saving (live view only; summaries/comparisons unavailable).",
+    )
+    run_parser.add_argument(
+        "--disable-traceml",
+        action="store_true",
+        help="Disable TraceML telemetry and run the script natively.",
     )
 
     inspect_parser = sub.add_parser(

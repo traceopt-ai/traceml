@@ -99,6 +99,7 @@ def read_traceml_env():
             os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
+        "disable_traceml": os.environ.get("TRACEML_DISABLED", "0") == "1",
     }
 
 
@@ -127,6 +128,8 @@ def start_runtime(cfg):
     - start background samplers
     - capture early allocations
     """
+    if cfg.get("disable_traceml"):
+        return NoOpRuntime()
     try:
         settings = TraceMLSettings(
             mode=cfg["mode"],

@@ -1,3 +1,4 @@
+import os
 import sys
 
 from lightning.pytorch.callbacks import Callback
@@ -11,6 +12,8 @@ from traceml.utils.timing import (
     record_event,
     timed_region,
 )
+
+TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 
 
 class TraceMLCallback(Callback):
@@ -35,6 +38,8 @@ class TraceMLCallback(Callback):
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         # Start overall step timing
+        if TRACEML_DISABLED:
+            return
         self._traceml_step_ctx = timed_region(
             "_traceml_internal:step_time", scope="step", use_gpu=False
         )
@@ -59,6 +64,8 @@ class TraceMLCallback(Callback):
         self._forward_ctx.__enter__()
 
     def on_before_backward(self, trainer, pl_module, loss):
+        if TRACEML_DISABLED:
+            return
         # End forward timing
         if self._forward_ctx is not None:
             try:
@@ -74,6 +81,8 @@ class TraceMLCallback(Callback):
         self._backward_ctx.__enter__()
 
     def on_after_backward(self, trainer, pl_module):
+        if TRACEML_DISABLED:
+            return
         # End backward timing
         if self._backward_ctx is not None:
             try:
@@ -83,6 +92,8 @@ class TraceMLCallback(Callback):
             self._backward_ctx = None
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+        if TRACEML_DISABLED:
+            return
         self._opt_step_occurred = True
 
         # Start optimizer step timing
@@ -92,6 +103,8 @@ class TraceMLCallback(Callback):
         self._optimizer_ctx.__enter__()
 
     def on_before_zero_grad(self, trainer, pl_module, optimizer):
+        if TRACEML_DISABLED:
+            return
         # End optimizer step timing (zero_grad happens after step)
         if self._optimizer_ctx is not None:
             try:
@@ -103,6 +116,8 @@ class TraceMLCallback(Callback):
     def on_train_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx
     ):
+        if TRACEML_DISABLED:
+            return
         # Safety: end any active context managers (edge cases)
         for ctx_attr in (
             "_forward_ctx",
