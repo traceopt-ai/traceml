@@ -11,6 +11,7 @@ TraceML is a lightweight bottleneck finder for PyTorch training.
 It helps you catch input stalls, DDP rank imbalance, unstable step times, and memory drift while the run is still in progress.
 
 **Works today:** Single GPU, single-node DDP, Hugging Face Trainer, PyTorch Lightning
+
 **Not yet:** Multi-node DDP, FSDP / TP / PP
 
 ---
@@ -52,6 +53,7 @@ TraceML is designed for **real runs**, not only postmortem profiling.
 - something easy to paste into an issue or share with a teammate
 - a clearer starting point before using heavier profilers
 
+
 ---
 
 
@@ -86,10 +88,17 @@ traceml run train.py
 ```
 
 During training, TraceML opens a live terminal view alongside your logs.
+
+![TraceML terminal dashboard](cli_demo.png)
+
 At run end, it prints a compact summary.
 
+![TraceML summary](end-of-run-summary.png)
 
-![TraceML terminal dashboard](cli_demo_v1.png)
+If you want a richer view, TraceML also includes a local UI for reviewing runs and comparing them locally.
+
+![TraceML local UI](local_ui.png)
+
 
 See [docs/quickstart.md](docs/quickstart.md) for more setup details.
 
