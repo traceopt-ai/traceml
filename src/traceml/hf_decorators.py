@@ -54,8 +54,7 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         # BYPASS LOGIC:
         # If the user launched the script with `--disable-traceml` (setting TRACEML_DISABLED="1")
         # or if `traceml_enabled` is explicitly False, we short-circuit immediately.
-        # This completely skips any hook attachments, memory tracking, and timing regions,
-        # acting as a true zero-overhead no-op fallback.
+        # This completely skips any hook attachments, memory tracking, and timing regions
         if TRACEML_DISABLED or not self.traceml_enabled:
             return super().training_step(model, inputs, *args, **kwargs)
 
