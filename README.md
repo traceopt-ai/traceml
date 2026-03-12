@@ -196,7 +196,7 @@ See the full [PyTorch Lightning integration guide](docs/lightning.md) for a comp
 
 Near-term: - Single-node DDP hardening - Disk run logging -
 Compatibility validation (gradient accumulation, torch.compile) -
-Accelerate / Lightning wrappers
+Accelerate wrapper
 
 Next: - Multi-node DDP - Initial FSDP support
 
