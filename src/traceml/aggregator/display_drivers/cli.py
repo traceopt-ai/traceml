@@ -91,7 +91,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
 
         # CLI chooses its renderer set (can differ from dashboard)
         self._renderers: List[BaseRenderer] = [
-            SystemRenderer(remote_store=store),
+            SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(remote_store=store),
             LayerCombinedMemoryRenderer(
                 remote_store=store, top_n_layers=settings.num_display_layers

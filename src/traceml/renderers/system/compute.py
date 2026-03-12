@@ -1,7 +1,7 @@
+import sqlite3
 import time
 from dataclasses import dataclass
-from itertools import islice
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -57,20 +57,37 @@ class SystemDashboardPayload:
 
 class SystemMetricsComputer:
     """
-    Compute system-level metrics from the system telemetry table.
+    Compute system-level metrics directly from SQLite projection tables.
 
-    Stability:
-    - last-good cache: on exception or transient empty compute, return previous payload
-      with "STALE (...)" status embedded inside rollups (no schema change).
-    - optional TTL: after stale_ttl_s seconds without a successful compute, return empty.
+    Data source
+    -----------
+    Reads from:
+    - system_samples
+    - system_gpu_samples
 
-    NOTE: Output dict structure remains the same keys as your current code.
+    Output compatibility
+    --------------------
+    The output dict structure is intentionally kept identical to the previous
+    in-memory implementation so existing CLI/dashboard rendering code can be
+    reused without modification.
+
+    Stability
+    ---------
+    - On exception or transient empty compute, returns previous payload
+      if it is still within `stale_ttl_s`.
+    - If no cached payload is available, returns the same empty/default
+      payload shape as before.
     """
 
     def __init__(
-        self, table: Any, *, stale_ttl_s: Optional[float] = 30.0
+        self,
+        db_path: str,
+        rank: Optional[int] = None,
+        stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
-        self._table: Sequence[Any] = table or ()
+        self._db_path = str(db_path)
+        self._rank = rank
+
         self._last_ok_cli: Optional[Dict[str, Any]] = None
         self._last_ok_dash: Optional[Dict[str, Any]] = None
         self._last_ok_cli_ts: float = 0.0
@@ -78,10 +95,6 @@ class SystemMetricsComputer:
         self._stale_ttl_s: Optional[float] = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
-
-    # ---------
-    # CLI
-    # ---------
 
     def compute_cli(self) -> Dict[str, Any]:
         try:
@@ -91,7 +104,6 @@ class SystemMetricsComputer:
                 f"STALE (exception: {type(e).__name__})"
             )
 
-        # If output is a valid dict, accept as "ok"
         self._last_ok_cli = out
         self._last_ok_cli_ts = time.time()
         return out
@@ -103,9 +115,8 @@ class SystemMetricsComputer:
                 self._stale_ttl_s is None
                 or (now - self._last_ok_cli_ts) <= self._stale_ttl_s
             ):
-                # can't add new fields; return cached dict as-is
                 return self._last_ok_cli
-        # fallback: your original empty snapshot
+
         return SystemCLISnapshot(
             cpu=0.0,
             ram_used=0.0,
@@ -121,7 +132,8 @@ class SystemMetricsComputer:
         ).to_dict()
 
     def _compute_cli_impl(self) -> Dict[str, Any]:
-        if not self._table:
+        latest = self._fetch_latest_system_sample()
+        if latest is None:
             return SystemCLISnapshot(
                 cpu=0.0,
                 ram_used=0.0,
@@ -136,10 +148,13 @@ class SystemMetricsComputer:
                 gpu_power_limit=None,
             ).to_dict()
 
-        latest = self._table[-1]
-        gpus = _gpus_safe(latest)
+        gpu_rows = self._fetch_gpu_rows_for_sample(
+            rank=latest["rank"],
+            seq=latest["seq"],
+            sample_ts_s=latest["sample_ts_s"],
+        )
 
-        if gpus:
+        if gpu_rows:
             util_total = 0.0
             mem_used_total = 0.0
             mem_total_total = 0.0
@@ -147,24 +162,31 @@ class SystemMetricsComputer:
             power_total = 0.0
             power_limit_total = 0.0
 
-            for g in gpus:
-                util_total += g[0]
-                mem_used_total += g[1]
-                mem_total_total += g[2]
-                if g[3] > temp_max:
-                    temp_max = g[3]
-                power_total += g[4]
-                power_limit_total += g[5]
+            for g in gpu_rows:
+                util_total += float(g["util"] or 0.0)
+                mem_used_total += float(g["mem_used_bytes"] or 0.0)
+                mem_total_total += float(g["mem_total_bytes"] or 0.0)
+
+                temp_val = float(g["temperature_c"] or 0.0)
+                if temp_val > temp_max:
+                    temp_max = temp_val
+
+                power_total += float(g["power_usage_w"] or 0.0)
+                power_limit_total += float(g["power_limit_w"] or 0.0)
         else:
-            util_total = mem_used_total = mem_total_total = None
-            temp_max = power_total = power_limit_total = None
+            util_total = None
+            mem_used_total = None
+            mem_total_total = None
+            temp_max = None
+            power_total = None
+            power_limit_total = None
 
         snap = SystemCLISnapshot(
-            cpu=float(latest.get("cpu", 0.0) or 0.0),
-            ram_used=float(latest.get("ram_used", 0.0) or 0.0),
-            ram_total=float(latest.get("ram_total", 0.0) or 0.0),
-            gpu_available=bool(latest.get("gpu_available", False)),
-            gpu_count=int(latest.get("gpu_count", 0) or 0),
+            cpu=float(latest["cpu_percent"] or 0.0),
+            ram_used=float(latest["ram_used_bytes"] or 0.0),
+            ram_total=float(latest["ram_total_bytes"] or 0.0),
+            gpu_available=bool(latest["gpu_available"] or False),
+            gpu_count=int(latest["gpu_count"] or 0),
             gpu_util_total=util_total,
             gpu_mem_used=mem_used_total,
             gpu_mem_total=mem_total_total,
@@ -174,9 +196,9 @@ class SystemMetricsComputer:
         )
         return snap.to_dict()
 
-    # -------------
+    # ------------------------------------------------------------------
     # Dashboard
-    # -------------
+    # ------------------------------------------------------------------
 
     def compute_dashboard(self, window_n: int = 100) -> Dict[str, Any]:
         try:
@@ -186,7 +208,6 @@ class SystemMetricsComputer:
                 f"STALE (exception: {type(e).__name__})"
             )
 
-        # If transiently empty window, return stale so UI doesn't blank
         if out.get("window_len", 0) == 0 and self._last_ok_dash is not None:
             return self._return_stale_dash("STALE (empty window)")
 
@@ -201,12 +222,9 @@ class SystemMetricsComputer:
                 self._stale_ttl_s is None
                 or (now - self._last_ok_dash_ts) <= self._stale_ttl_s
             ):
-                # can't change schema, but we CAN safely annotate rollups with a status string
                 cached = self._last_ok_dash
                 rollups = dict(cached.get("rollups", {}))
-                rollups["status"] = (
-                    msg  # does not break existing keys; add is optional
-                )
+                rollups["status"] = msg
                 return {
                     "window_len": cached.get("window_len", 0),
                     "gpu_available": cached.get("gpu_available", False),
@@ -214,86 +232,74 @@ class SystemMetricsComputer:
                     "series": cached.get("series", {"cpu": [], "gpu_avg": []}),
                 }
 
-        # too stale or no cache
-        payload = SystemDashboardPayload(
+        return SystemDashboardPayload(
             window_len=0,
             gpu_available=False,
             rollups={"status": "No fresh system data"},
             series={"cpu": [], "gpu_avg": []},
-        )
-        return payload.to_dict()
+        ).to_dict()
 
     def _compute_dashboard_impl(self, window_n: int) -> Dict[str, Any]:
-        window = _last_n_fast(self._table, int(window_n))
-        if not window:
-            payload = SystemDashboardPayload(
+        samples = self._fetch_recent_system_samples(limit=int(window_n))
+        if not samples:
+            return SystemDashboardPayload(
                 window_len=0,
                 gpu_available=False,
                 rollups={},
                 series={"cpu": [], "gpu_avg": []},
-            )
-            return payload.to_dict()
+            ).to_dict()
 
-        last = window[-1]
-        gpu_available = bool(last.get("gpu_available", False))
+        last = samples[-1]
+        gpu_available = bool(last["gpu_available"] or False)
 
-        # Build histories using numpy arrays (faster percentiles)
-        cpu_hist = np.fromiter(
-            (float(r.get("cpu", 0.0) or 0.0) for r in window), dtype=np.float64
-        )
-        ram_used_hist = np.fromiter(
-            (float(r.get("ram_used", 0.0) or 0.0) for r in window),
+        cpu_hist = np.array(
+            [float(r["cpu_percent"] or 0.0) for r in samples],
             dtype=np.float64,
         )
-        ram_total = float(last.get("ram_total", 0.0) or 0.0)
+        ram_used_hist = np.array(
+            [float(r["ram_used_bytes"] or 0.0) for r in samples],
+            dtype=np.float64,
+        )
+        ram_total = float(last["ram_total_bytes"] or 0.0)
 
-        n = len(window)
+        n = len(samples)
         gpu_avg = np.zeros(n, dtype=np.float64)
         gpu_delta = np.zeros(n, dtype=np.float64)
         gpu_mem_worst = np.zeros(n, dtype=np.float64)
         temp_max = np.zeros(n, dtype=np.float64)
 
-        for i, r in enumerate(window):
-            gpus = _gpus_safe(r)
-            if gpus:
-                # util avg + util delta
-                utils = [g[0] for g in gpus]
-                umin = utils[0]
-                umax = utils[0]
-                usum = 0.0
-                for u in utils:
-                    usum += u
-                    if u < umin:
-                        umin = u
-                    if u > umax:
-                        umax = u
-                gpu_avg[i] = usum / float(len(utils))
-                gpu_delta[i] = umax - umin
+        max_gpu_capacity = 0.0
 
-                # worst mem_used
-                mmax = gpus[0][1]
-                tmax = gpus[0][3]
-                for g in gpus:
-                    if g[1] > mmax:
-                        mmax = g[1]
-                    if g[3] > tmax:
-                        tmax = g[3]
-                gpu_mem_worst[i] = mmax
-                temp_max[i] = tmax
+        for i, sample in enumerate(samples):
+            gpu_rows = self._fetch_gpu_rows_for_sample(
+                rank=sample["rank"],
+                seq=sample["seq"],
+                sample_ts_s=sample["sample_ts_s"],
+            )
+
+            if gpu_rows:
+                utils = [float(g["util"] or 0.0) for g in gpu_rows]
+                mem_useds = [
+                    float(g["mem_used_bytes"] or 0.0) for g in gpu_rows
+                ]
+                mem_totals = [
+                    float(g["mem_total_bytes"] or 0.0) for g in gpu_rows
+                ]
+                temps = [float(g["temperature_c"] or 0.0) for g in gpu_rows]
+
+                gpu_avg[i] = sum(utils) / float(len(utils))
+                gpu_delta[i] = max(utils) - min(utils)
+                gpu_mem_worst[i] = max(mem_useds)
+                temp_max[i] = max(temps)
+
+                if i == n - 1 and mem_totals:
+                    max_gpu_capacity = max(mem_totals)
             else:
                 gpu_avg[i] = 0.0
                 gpu_delta[i] = 0.0
                 gpu_mem_worst[i] = 0.0
                 temp_max[i] = 0.0
 
-        # capacity: latest sample max mem_total across GPUs
-        last_gpus = _gpus_safe(last)
-        max_gpu_capacity = 0.0
-        for g in last_gpus:
-            if g[2] > max_gpu_capacity:
-                max_gpu_capacity = g[2]
-
-        # percentiles (numpy)
         cpu_p50 = float(np.percentile(cpu_hist, 50)) if cpu_hist.size else 0.0
         cpu_p95 = float(np.percentile(cpu_hist, 95)) if cpu_hist.size else 0.0
 
@@ -340,7 +346,10 @@ class SystemMetricsComputer:
                 "p50": gpu_p50,
                 "p95": gpu_p95,
             },
-            "gpu_delta": {"now": float(gpu_delta[-1]), "p95": delta_p95},
+            "gpu_delta": {
+                "now": float(gpu_delta[-1]),
+                "p95": delta_p95,
+            },
             "gpu_mem": {
                 "now": float(gpu_mem_worst[-1]),
                 "p95": mem_p95,
@@ -348,11 +357,15 @@ class SystemMetricsComputer:
                     max_gpu_capacity - float(gpu_mem_worst[-1]), 0.0
                 ),
             },
-            "temp": {"now": temp_now, "p95": temp_p95, "status": temp_status},
+            "temp": {
+                "now": temp_now,
+                "p95": temp_p95,
+                "status": temp_status,
+            },
         }
 
-        payload = SystemDashboardPayload(
-            window_len=len(window),
+        return SystemDashboardPayload(
+            window_len=len(samples),
             gpu_available=gpu_available,
             rollups=rollups,
             series={
@@ -361,60 +374,96 @@ class SystemMetricsComputer:
                     gpu_avg.astype(float).tolist() if gpu_available else []
                 ),
             },
-        )
-        return payload.to_dict()
+        ).to_dict()
 
+    # ------------------------------------------------------------------
+    # SQLite helpers
+    # ------------------------------------------------------------------
 
-# ----------------------------
-# Helpers
-# ----------------------------
+    def _connect(self) -> sqlite3.Connection:
+        """
+        Open a short-lived read connection.
 
+        A fresh connection per compute call keeps the class simple and avoids
+        cross-thread SQLite issues.
+        """
+        conn = sqlite3.connect(self._db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
 
-def _last_n_fast(table: Sequence[Any], n: int) -> List[Any]:
-    """
-    Return last n records efficiently for list/deque-like sequences.
-    - For deque: reversed + islice is efficient.
-    - For list: slicing is fastest.
-    """
-    if not table or n <= 0:
-        return []
-    try:
-        # list path (fast slice)
-        if isinstance(table, list):
-            return table[-n:] if len(table) > n else table[:]
-        # deque/sequence path
-        return list(islice(reversed(table), n))[::-1]
-    except Exception:
-        # safest fallback
-        try:
-            return list(table[-n:]) if len(table) > n else list(table)
-        except Exception:
+    def _rank_filter(self) -> tuple[str, tuple]:
+        if self._rank is None:
+            return "", ()
+        return "WHERE rank = ?", (int(self._rank),)
+
+    def _fetch_latest_system_sample(self) -> Optional[sqlite3.Row]:
+        where_sql, params = self._rank_filter()
+        sql = f"""
+            SELECT *
+            FROM system_samples
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT 1;
+        """
+        with self._connect() as conn:
+            return conn.execute(sql, params).fetchone()
+
+    def _fetch_recent_system_samples(self, limit: int) -> List[sqlite3.Row]:
+        where_sql, params = self._rank_filter()
+        sql = f"""
+            SELECT *
+            FROM (
+                SELECT *
+                FROM system_samples
+                {where_sql}
+                ORDER BY id DESC
+                LIMIT ?
+            )
+            ORDER BY id ASC;
+        """
+        with self._connect() as conn:
+            return conn.execute(sql, (*params, int(limit))).fetchall()
+
+    def _fetch_gpu_rows_for_sample(
+        self,
+        *,
+        rank: Optional[int],
+        seq: Optional[int],
+        sample_ts_s: Optional[float],
+    ) -> List[sqlite3.Row]:
+        """
+        Fetch GPU rows for one exact system sample.
+
+        The system projection schema does not currently store a direct
+        foreign-key link from `system_gpu_samples` to `system_samples`, so
+        the sample identity is matched by:
+        - rank
+        - seq
+        - sample_ts_s
+        """
+        if seq is None or sample_ts_s is None:
             return []
 
+        if rank is None:
+            sql = """
+                SELECT *
+                FROM system_gpu_samples
+                WHERE rank IS NULL
+                  AND seq = ?
+                  AND sample_ts_s = ?
+                ORDER BY gpu_idx ASC;
+            """
+            params = (int(seq), float(sample_ts_s))
+        else:
+            sql = """
+                SELECT *
+                FROM system_gpu_samples
+                WHERE rank = ?
+                  AND seq = ?
+                  AND sample_ts_s = ?
+                ORDER BY gpu_idx ASC;
+            """
+            params = (int(rank), int(seq), float(sample_ts_s))
 
-def _gpus_safe(rec: Dict[str, Any]) -> List[List[float]]:
-    """
-    Defensive GPU extraction.
-    Ensures each GPU row has 6 numeric fields:
-      [util, mem_used, mem_total, temperature, power, power_limit]
-    Malformed entries are ignored.
-    """
-    raw = rec.get("gpus", []) or []
-    out: List[List[float]] = []
-    for g in raw:
-        if not g or not isinstance(g, (list, tuple)) or len(g) < 6:
-            continue
-        try:
-            out.append(
-                [
-                    float(g[0] or 0.0),
-                    float(g[1] or 0.0),
-                    float(g[2] or 0.0),
-                    float(g[3] or 0.0),
-                    float(g[4] or 0.0),
-                    float(g[5] or 0.0),
-                ]
-            )
-        except Exception:
-            continue
-    return out
+        with self._connect() as conn:
+            return conn.execute(sql, params).fetchall()
