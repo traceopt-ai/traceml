@@ -69,6 +69,7 @@ def main():
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
+            print(f"Epoch {epoch}, Step {step} | Loss: {loss.item():.4f}")
 
     model.eval()
     with torch.no_grad():
