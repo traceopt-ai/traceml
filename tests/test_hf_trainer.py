@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 
 try:
     import torch

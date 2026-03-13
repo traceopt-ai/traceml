@@ -65,7 +65,7 @@ traceml run train.py
 ```
 
 The terminal dashboard opens alongside your logs. At run end, TraceML also prints a compact runtime summary card for quick review and sharing.
-![TraceML terminal dashboard](cli_demo_v1.png)
+![TraceML terminal dashboard](docs/assets/cli_demo_v1.png)
 
 
 
@@ -76,7 +76,7 @@ Optional web UI:
 traceml run train.py --mode=dashboard
 ```
 
-![TraceML web dashboard](web_demo_v1.png)
+![TraceML web dashboard](docs/assets/web_demo_v1.png)
 
 ---
 
@@ -147,7 +147,7 @@ TraceML provides a seamless integration with Hugging Face `transformers` via `Tr
 Replace `transformers.Trainer` with `traceml.hf_decorators.TraceMLTrainer`.
 
 ```python
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 
 trainer = TraceMLTrainer(
     model=model,
@@ -172,7 +172,7 @@ Simply pass the callback to your `Trainer`.
 
 ```python
 import lightning as L
-from traceml.utils.lightning import TraceMLCallback
+from traceml.integrations.lightning import TraceMLCallback
 from traceml.decorators import trace_model_instance
 
 class MyLightningModule(L.LightningModule):

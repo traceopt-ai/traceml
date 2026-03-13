@@ -64,7 +64,7 @@ If `traceml_enabled=False`, the class becomes a transparent pass-through to the 
 Replace `Trainer` with `TraceMLTrainer`. Everything else stays the same.
 
 ```python
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 from transformers import TrainingArguments
 
 training_args = TrainingArguments(
@@ -148,7 +148,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 
 
 def main():
@@ -245,7 +245,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 
 
 def main():
