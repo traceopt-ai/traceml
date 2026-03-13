@@ -398,7 +398,7 @@ for step in range(num_steps):
 If you use `transformers.Trainer`, use `TraceMLTrainer` as a drop-in replacement. No changes to your training loop are needed.
 
 ```python
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 from transformers import TrainingArguments
 
 training_args = TrainingArguments(output_dir="./output", num_train_epochs=3)
@@ -442,7 +442,7 @@ If you use PyTorch Lightning, TraceML provides an official callback.
 
 ```python
 import lightning as L
-from traceml.utils.lightning import TraceMLCallback
+from traceml.integrations.lightning import TraceMLCallback
 
 trainer = L.Trainer(
     max_steps=500,

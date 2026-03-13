@@ -8,13 +8,16 @@ TraceML provides `TraceMLCallback`, an official callback for PyTorch Lightning t
 
 ## Table of Contents
 
-1. [Install](#1-install)
-2. [How it works](#2-how-it-works)
-3. [Basic usage](#3-basic-usage)
-4. [Enable Deep-Dive mode](#4-enable-deep-dive-mode)
-5. [Complete Example: MNIST CNN](#5-complete-example-mnist-cnn)
-6. [Gradient Accumulation](#6-gradient-accumulation)
-7. [Trainer tips](#7-trainer-tips)
+- [PyTorch Lightning Integration](#pytorch-lightning-integration)
+  - [Table of Contents](#table-of-contents)
+  - [1. Install](#1-install)
+  - [2. How it works](#2-how-it-works)
+  - [3. Basic usage](#3-basic-usage)
+  - [4. Enable Deep-Dive mode](#4-enable-deep-dive-mode)
+  - [5. Complete Example: MNIST CNN](#5-complete-example-mnist-cnn)
+  - [6. Gradient Accumulation](#6-gradient-accumulation)
+  - [7. Trainer tips](#7-trainer-tips)
+  - [Next steps](#next-steps)
 
 ---
 
@@ -42,7 +45,7 @@ Just import `TraceMLCallback` and add it to your `Trainer` callbacks list. Every
 
 ```python
 import lightning as L
-from traceml.utils.lightning import TraceMLCallback
+from traceml.integrations.lightning import TraceMLCallback
 
 model = MyLightningModule()
 
@@ -117,7 +120,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from traceml.decorators import trace_model_instance
-from traceml.utils.lightning import TraceMLCallback
+from traceml.integrations.lightning import TraceMLCallback
 
 
 class MNISTCNN(nn.Module):
