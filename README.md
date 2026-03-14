@@ -1,52 +1,75 @@
 # TraceML
 
-**Know what’s slowing your (PyTorch) training, while it runs**
-
+**Catch wasted GPU time during live PyTorch training**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
-[![Downloads](https://static.pepy.tech/badge/traceml-ai)](https://pepy.tech/project/traceml-ai)
-[![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-TraceML provides step-level training visibility for PyTorch workloads. It shows where time and memory go inside each training step so you can
-quickly understand performance behavior across single-GPU and  single-node DDP runs.
+TraceML is a lightweight bottleneck finder for PyTorch training.
+It helps you catch input stalls, DDP rank imbalance, unstable step times, and memory drift while the run is still in progress.
 
-**Current support**
-- ✅ Single GPU
-- ✅ Single-node multi-GPU (**DDP**)
-- ❌ Multi-node DDP (not yet)
-- ❌ FSDP / TP / PP (not yet)
+**Works today:** Single GPU, single-node DDP, Hugging Face Trainer, PyTorch Lightning
+
+**Not yet:** Multi-node DDP, FSDP / TP / PP
+
+---
+
+
+
+
+## Why TraceML
+
+When training feels slow, a wall-clock timer tells you **that** it is slow.
+TraceML helps show **where the time is going** and **what looks wrong while the job is still running**.
+
+Use it to answer:
+
+- Is the input pipeline starving the GPU?
+- Are step times drifting or jittering?
+- Is one DDP rank lagging behind the others?
+- Is memory creeping up over time?
+- How much time is going into forward, backward, optimizer, and overhead?
+
+TraceML is designed for **real runs**, not only postmortem profiling.
 
 ---
 
-## What You See in Minutes
+## What TraceML gives you
 
--   System signals (CPU, RAM, GPU)
--   Breakdown of each training step:
-    -   `dataloader → forward → backward → optimizer → overhead`
--   Median vs worst rank (in case of DDP)
--   Skew (%) to surface imbalance
--   GPU memory (allocated + peak)
-- End-of-run summary card with straggler rank and step breakdown
+### Live during training
 
+- step-time breakdown
+- dataloader / input wait visibility
+- forward / backward / optimizer / overhead timing
+- step jitter and drift
+- GPU memory trend
+- CPU / RAM / GPU signals
 
-Healthy runs are clearly stable. Unstable runs reveal drift, imbalance, or memory creep early.
+### At the end of the run
+
+- a compact summary you can review quickly
+- something easy to paste into an issue or share with a teammate
+- a clearer starting point before using heavier profilers
+
 
 ---
+
+
+
+
 ## Quick Start
-
-> **More detailed Quickstart:** [docs/quickstart.md](docs/quickstart.md) covers install, run modes, DDP, and troubleshooting.
 
 Install:
 
-``` bash
+```bash
 pip install traceml-ai
 ```
 
 Wrap your training step:
 
-``` python
+```python
 from traceml.decorators import trace_step
 
 for batch in dataloader:
@@ -58,96 +81,61 @@ for batch in dataloader:
         optimizer.zero_grad(set_to_none=True)
 ```
 
-Run with cli:
+Run your script through TraceML:
 
-``` bash
+```bash
 traceml run train.py
 ```
 
-The terminal dashboard opens alongside your logs. At run end, TraceML also prints a compact runtime summary card for quick review and sharing.
-![TraceML terminal dashboard](docs/assets/cli_demo_v1.png)
+During training, TraceML opens a live terminal view alongside your logs.
+
+![TraceML terminal dashboard](docs/assets/cli_demo.png)
+
+At run end, it prints a compact summary.
+
+![TraceML summary](docs/assets/end-of-run-summary.png)
+
+If you want a richer view, TraceML also includes a local UI for reviewing runs and comparing them locally.
+
+![TraceML local UI](docs/assets/local_ui.png)
 
 
+See [docs/quickstart.md](docs/quickstart.md) for more setup details.
 
-
-Optional web UI:
-
-``` bash
-traceml run train.py --mode=dashboard
-```
-
-![TraceML web dashboard](docs/assets/web_demo_v1.png)
 
 ---
 
-## What TraceML Surfaces
 
-### Step-Level Signals
 
--   Dataloader fetch time
--   Step time (low-overhead, GPU-aware)
--   Step GPU memory (allocated + peak)
+## Why not just use timers?
 
-Across ranks:
+Simple timers are useful, but they usually do not show:
 
--   Median (typical behavior)
--   Worst rank (slowest / highest memory)
--   Skew (% difference)
+- which part of the training step is growing
+- whether the slowdown is coming from input, compute, optimizer, or overhead
+- whether one DDP rank is slower than the others
+- whether memory is drifting over time
+- what the run looked like before it fully finished
 
-This makes rank imbalance and straggler behavior immediately visible.
+TraceML is built to make those patterns visible with minimal code changes.
 
 ---
 
-## Deep-Dive Mode (Optional)
 
-Enable model-level hooks for diagnostic context:
 
-``` python
-from traceml.decorators import trace_model_instance
-trace_model_instance(model)
-```
 
-Use together with `trace_step(model)` to enable:
+## Works with your training stack
 
--   Per-layer memory signals
--   Per-layer forward/backward timing
--   Lightweight failure attribution (experimental)
+### Plain PyTorch
 
-If not enabled, ESSENTIAL signals remain unchanged.
+Use `trace_step(model)` around your training step.
 
----
+### Hugging Face Trainer
 
-## What It Is Not
-
--   Not a replacement for PyTorch Profiler or Nsight
--   Not an auto-tuner
--   Not a kernel-level tracer
-
-TraceML focuses on step-level visibility that is practical during real
-training runs.
-
----
-
-## Supported Environments
-
--   Python 3.10+
--   PyTorch 2.5+
--   macOS (Intel/ARM), Linux
--   Single GPU
--   Single-node DDP
-
----
-
-## Hugging Face Integration
-
-TraceML provides a seamless integration with Hugging Face `transformers` via `TraceMLTrainer`.
-
-### Usage
-
-Replace `transformers.Trainer` with `traceml.hf_decorators.TraceMLTrainer`.
+Replace `Trainer` with `TraceMLTrainer`:
 
 ```python
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml.hf_decorators import TraceMLTrainer
 
 trainer = TraceMLTrainer(
     model=model,
@@ -158,108 +146,125 @@ trainer = TraceMLTrainer(
 )
 ```
 
-See the full [Hugging Face integration guide](docs/huggingface.md) for NLP, vision, DDP examples, and a complete `TraceMLTrainer` parameter reference.
+See [docs/huggingface.md](docs/huggingface.md).
 
----
+### PyTorch Lightning
 
-## PyTorch Lightning Integration
-
-TraceML offers official support for PyTorch Lightning models through `TraceMLCallback`.
-
-### Usage
-
-Simply pass the callback to your `Trainer`.
+Add `TraceMLCallback()` to your trainer:
 
 ```python
 import lightning as L
-from traceml.integrations.lightning import TraceMLCallback
-from traceml.decorators import trace_model_instance
-
-class MyLightningModule(L.LightningModule):
-    def __init__(self):
-        super().__init__()
-        self.model = ...
-        # Optional: enable deep-dive per-layer instrumentation
-        trace_model_instance(self)
-
-    def training_step(self, batch, batch_idx):
-        ...
+from traceml.utils.lightning import TraceMLCallback
 
 trainer = L.Trainer(callbacks=[TraceMLCallback()])
 ```
 
-See the full [PyTorch Lightning integration guide](docs/lightning.md) for a complete MNIST example, deep-dive mode, and gradient accumulation tips.
+See the Lightning docs for the full setup.
 
 ---
 
-## Roadmap
-
-Near-term: - Single-node DDP hardening - Disk run logging -
-Compatibility validation (gradient accumulation, torch.compile) -
-Accelerate / Lightning wrappers
-
-Next: - Multi-node DDP - Initial FSDP support
-
-Later: - Tensor / Pipeline parallel awareness
 
 
 
+
+## What TraceML surfaces
+
+### Step-level breakdown
+
+TraceML tracks:
+
+- `dataloader -> forward -> backward -> optimizer -> overhead`
+- step time
+- GPU memory (allocated + peak)
+- CPU / RAM / GPU signals
+
+### DDP imbalance
+
+In single-node DDP, TraceML surfaces:
+
+- median rank
+- worst rank
+- skew (%)
+
+This makes stragglers easier to spot without extra instrumentation.
+
+### Optional model-level hooks
+
+If you want extra model-level context, enable lightweight hooks:
+
+```python
+from traceml.decorators import trace_model_instance
+
+trace_model_instance(model)
+```
+
+Use this together with `trace_step(model)` to add optional per-layer timing and memory signals.
+The core step-level view works without it.
+
+---
+
+## Scope
+
+TraceML focuses on lightweight diagnosis during real PyTorch training runs.
+
+It is **not**:
+
+- a kernel-level tracer
+- an auto-tuner
+- a replacement for deep profiling tools
+- a full observability platform
+
+---
+
+## Safe to try on real runs
+
+TraceML is built for practical training workflows:
+
+- lightweight enough to use during real runs
+- compact terminal output during training
+- end-of-run summary for quick review and sharing
+- fail-open behavior so instrumentation does not become the center of your training script
+
+---
+
+## Start with examples
+
+If you want to see what TraceML is good at, start with example cases such as:
+
+- input / dataloader stall
+- DDP straggler / rank skew
+- memory drift over time
+
+See the examples folder for runnable cases and expected output.
+
+---
+
+## Feedback
+
+If TraceML caught a slowdown for you, please open an issue and include:
+
+- hardware / CUDA / PyTorch versions
+- single GPU or DDP
+- whether you used core step tracing only or model hooks
+- the TraceML end-of-run summary
+- a minimal repro if possible
+
+Useful bug reports, slowdown cases, and integration feedback are especially valuable right now.
+
+- 📧 Email: abhinav@traceopt.ai
+- 📋 User Survey: https://forms.gle/KwPSLaPmJnJjoVXSA
 
 ---
 
 ## Contributing
 
-
 Contributions are welcome.
 
-When opening issues, include: - Minimal repro script - Hardware + CUDA +
-PyTorch versions - ESSENTIAL vs DEEP-DIVE - Single GPU vs DDP
-
----
-
-## Community & Support
-
-Founding Engineer / Co-Founder track (Berlin/Germany): We are looking
-for a senior systems+ML builder to help grow TraceML into a sustainable AI
-infra product. See the GitHub Discussion https://github.com/traceopt-ai/traceml/discussions/36
-
-- 📧 Email: abhinav@traceopt.ai
-- 🐙 LinkedIn: [Abhinav Srivastav](https://www.linkedin.com/in/abhinavsriva/)
-- 📋 User Survey (2 min): https://forms.gle/KwPSLaPmJnJjoVXSA
-
-Stars help more teams find the project. 🌟
-
-<a href="https://www.star-history.com/#traceopt-ai/traceml&type=date&legend=top-left">
-  <img src="https://api.star-history.com/svg?repos=traceopt-ai/traceml&type=date&legend=top-left" width="50%">
-</a>
+Examples, reproducible slowdown cases, integration feedback, and bug reports are especially helpful.
 
 ---
 
 ## License
 
 TraceML is released under the **Apache 2.0**.
-
 See [LICENSE](./LICENSE) for details.
-
----
-
-## Citation
-
-If TraceML helps your research, please cite:
-
-```bibtex
-@software{traceml2024,
-  author = {TraceOpt},
-  title = {TraceML: Real-time Training Observability for PyTorch},
-  year = {2024},
-  url = {https://github.com/traceopt-ai/traceml}
-}
-```
-
----
-
-<div align="center">
-
-Made with ❤️ by TraceOpt
-
-</div>

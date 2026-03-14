@@ -62,8 +62,8 @@ from traceml.renderers.layer_combined_time.renderer import (
     LayerCombinedTimeRenderer,
 )
 from traceml.renderers.process.renderer import ProcessRenderer
-from traceml.renderers.step_combined.renderer import StepCombinedRenderer
 from traceml.renderers.step_memory.renderer import StepMemoryRenderer
+from traceml.renderers.step_time.renderer import StepCombinedRenderer
 from traceml.renderers.system.renderer import SystemRenderer
 from traceml.runtime.settings import TraceMLSettings
 
@@ -122,7 +122,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
 
         # ---- Renderers ----
         self._renderers: List[BaseRenderer] = [
-            SystemRenderer(remote_store=store),
+            SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(remote_store=store),
             LayerCombinedMemoryRenderer(
                 remote_store=store, top_n_layers=settings.num_display_layers
@@ -130,7 +130,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             LayerCombinedTimeRenderer(
                 remote_store=store, top_n_layers=settings.num_display_layers
             ),
-            StepCombinedRenderer(remote_store=store),
+            StepCombinedRenderer(db_path=self._settings.db_path),
             StepMemoryRenderer(remote_store=store),
         ]
 

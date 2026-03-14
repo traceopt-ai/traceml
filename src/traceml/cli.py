@@ -7,11 +7,122 @@ import struct
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import msgspec
 
 from traceml.runtime.session import get_session_id
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def write_run_manifest(
+    session_root: Path,
+    session_id: str,
+    script_path: str,
+    mode: str,
+    logs_dir: str,
+    tcp_host: str,
+    tcp_port: int,
+    nproc_per_node: int,
+    history_enabled: bool,
+    status: str,
+    aggregator_dir: Optional[Path] = None,
+    db_path: Optional[Path] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """
+    Write or overwrite a small run manifest.json under session_root.
+
+    Parameters
+    ----------
+    session_root:
+        Run/session root directory.
+    status:
+        Example values: "starting", "running", "completed", "failed", "interrupted"
+    extra:
+        Optional extra fields to merge at top level.
+    """
+    session_root = Path(session_root).resolve()
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = session_root / "manifest.json"
+
+    manifest: Dict[str, Any] = {
+        "schema_version": 1,
+        "session_id": str(session_id),
+        "status": str(status),
+        "created_at": _utc_now_iso(),
+        "host": {
+            "hostname": socket.gethostname(),
+        },
+        "launch": {
+            "script_path": str(Path(script_path).resolve()),
+            "mode": str(mode),
+            "logs_dir": str(Path(logs_dir).resolve()),
+            "tcp_host": str(tcp_host),
+            "tcp_port": int(tcp_port),
+            "nproc_per_node": int(nproc_per_node),
+            "history_enabled": bool(history_enabled),
+        },
+        "paths": {
+            "session_root": str(session_root),
+            "aggregator_dir": (
+                str(aggregator_dir.resolve())
+                if aggregator_dir is not None
+                else None
+            ),
+            "db_path": str(db_path.resolve()) if db_path is not None else None,
+        },
+        "artifacts": {},
+    }
+
+    if extra:
+        manifest.update(extra)
+
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+    return manifest_path
+
+
+def update_run_manifest(
+    manifest_path: Path,
+    *,
+    status: Optional[str] = None,
+    artifacts: Optional[Dict[str, Any]] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Path:
+    """
+    Update an existing manifest.json in place.
+    """
+    manifest_path = Path(manifest_path).resolve()
+
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception:
+        manifest = {}
+
+    if status is not None:
+        manifest["status"] = str(status)
+
+    manifest["updated_at"] = _utc_now_iso()
+
+    if artifacts:
+        manifest.setdefault("artifacts", {}).update(artifacts)
+
+    if extra:
+        manifest.update(extra)
+
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+    return manifest_path
 
 
 def validate_script_path(script_path: str) -> str:
@@ -98,7 +209,7 @@ def wait_for_tcp_listen(
     return False
 
 
-def install_shutdown_handlers(get_procs):
+def install_shutdown_handlers(get_procs, manifest_path=None):
     """
     Install SIGINT/SIGTERM handlers that terminate child process groups.
 
@@ -111,9 +222,17 @@ def install_shutdown_handlers(get_procs):
             "\n[TraceML] Signal received — terminating processes…",
             file=sys.stderr,
         )
+
+        if manifest_path is not None:
+            try:
+                update_run_manifest(manifest_path, status="interrupted")
+            except Exception:
+                pass
+
         for p in get_procs():
             if p is not None:
                 terminate_process_group(p, timeout_sec=5.0)
+
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, _handler)
@@ -187,6 +306,26 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
 
+    session_id = args.session_id if args.session_id else get_session_id()
+    session_root = Path(args.logs_dir).resolve() / session_id
+    aggregator_dir = session_root / "aggregator"
+    db_path = aggregator_dir / "telemetry"
+
+    manifest_path = write_run_manifest(
+        session_root=session_root,
+        session_id=session_id,
+        script_path=script_path,
+        mode=args.mode,
+        logs_dir=args.logs_dir,
+        tcp_host=args.tcp_host,
+        tcp_port=args.tcp_port,
+        nproc_per_node=args.nproc_per_node,
+        history_enabled=not args.no_history,
+        status="starting",
+        aggregator_dir=aggregator_dir,
+        db_path=db_path,
+    )
+
     runner_path = str(Path(__file__).parent / "runtime/executor.py")
     script_args = args.args or []
 
@@ -205,7 +344,9 @@ def launch_tracer_process(script_path, args):
     train_proc = None
 
     # Ensure Ctrl+C kills both, even during readiness wait.
-    install_shutdown_handlers(lambda: (train_proc, agg_proc))
+    install_shutdown_handlers(
+        lambda: (train_proc, agg_proc), manifest_path=manifest_path
+    )
 
     # 1) Start aggregator and wait for it to be ready
     print(
@@ -229,9 +370,11 @@ def launch_tracer_process(script_path, args):
             file=sys.stderr,
         )
         terminate_process_group(agg_proc, timeout_sec=3.0)
+        update_run_manifest(manifest_path, status="failed")
         sys.exit(1)
 
     print("[TraceML] Aggregator ready.")
+    update_run_manifest(manifest_path, status="running")
 
     # 2) Start training
     train_proc = start_training_process(train_cmd=train_cmd, env=env)
@@ -247,6 +390,16 @@ def launch_tracer_process(script_path, args):
                     file=sys.stderr,
                 )
                 terminate_process_group(agg_proc, timeout_sec=5.0)
+            final_status = "completed" if train_rc == 0 else "failed"
+            update_run_manifest(
+                manifest_path,
+                status=final_status,
+                artifacts={
+                    "db": str(db_path),
+                    "summary_card_json": str(db_path) + ".summary_card.json",
+                    "summary_card_txt": str(db_path) + ".summary_card.txt",
+                },
+            )
             sys.exit(train_rc)
 
         # If aggregator died mid-run: warn, but do not affect training.
@@ -257,9 +410,16 @@ def launch_tracer_process(script_path, args):
                 "Training will continue without TraceML telemetry.",
                 file=sys.stderr,
             )
+            update_run_manifest(
+                manifest_path,
+                extra={
+                    "aggregator_exited_early": True,
+                    "aggregator_exit_code": agg_rc,
+                },
+            )
             agg_proc = None
 
-        time.sleep(0.2)
+        time.sleep(1)
 
 
 def run_with_tracing(args):

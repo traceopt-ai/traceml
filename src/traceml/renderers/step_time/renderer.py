@@ -17,7 +17,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import MODEL_COMBINED_LAYOUT
-from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.utils import fmt_time_run
 
@@ -30,12 +29,12 @@ class StepCombinedRenderer(BaseRenderer):
     CLI renderer for step combined time summary.
     """
 
-    def __init__(self, remote_store: RemoteDBStore):
+    def __init__(self, db_path):
         super().__init__(
             name="Model Step Summary",
             layout_section_name=MODEL_COMBINED_LAYOUT,
         )
-        self._computer = StepCombinedComputer(remote_store)
+        self._computer = StepCombinedComputer(db_path=db_path)
         self._cached: Optional[StepCombinedTimeResult] = None
 
     def _payload(self) -> Optional[StepCombinedTimeResult]:
