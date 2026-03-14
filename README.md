@@ -93,7 +93,7 @@ During training, TraceML opens a live terminal view alongside your logs.
 
 At run end, it prints a compact summary.
 
-![TraceML summary](end-of-run-summary.png)
+![TraceML summary](docs/assets/end-of-run-summary.png)
 
 If you want a richer view, TraceML also includes a local UI for reviewing runs and comparing them locally.
 
