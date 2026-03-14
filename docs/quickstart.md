@@ -126,7 +126,7 @@ traceml run train.py
 
 During training, TraceML opens a live terminal view alongside your logs.
 
-![TraceML terminal view](../cli_demo.png)
+![TraceML terminal view](assets/cli_demo.png)
 
 At the end of the run, it prints a compact summary you can review or share.
 
@@ -158,7 +158,7 @@ traceml run train.py --mode=dashboard
 
 The UI runs locally at `http://localhost:8765`.
 
-![TraceML local UI](../local_ui.png)
+![TraceML local UI](assets/local_ui.png)
 
 Use the local UI when you want:
 

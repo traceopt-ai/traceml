@@ -89,7 +89,7 @@ traceml run train.py
 
 During training, TraceML opens a live terminal view alongside your logs.
 
-![TraceML terminal dashboard](cli_demo.png)
+![TraceML terminal dashboard](docs/assets/cli_demo.png)
 
 At run end, it prints a compact summary.
 
@@ -97,7 +97,7 @@ At run end, it prints a compact summary.
 
 If you want a richer view, TraceML also includes a local UI for reviewing runs and comparing them locally.
 
-![TraceML local UI](local_ui.png)
+![TraceML local UI](docs/assets/local_ui.png)
 
 
 See [docs/quickstart.md](docs/quickstart.md) for more setup details.
