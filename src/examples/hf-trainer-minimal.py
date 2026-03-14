@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 from transformers import TrainerCallback, TrainingArguments
 
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 
 SEED = 42
 INPUT_DIM = 1024
