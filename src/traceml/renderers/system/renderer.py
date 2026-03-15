@@ -133,10 +133,3 @@ class SystemRenderer(BaseRenderer):
         avoids shipping the raw system table to the UI.
         """
         return self._compute_dashboard(window_n=100)
-
-    def log_summary(self, path) -> None:
-        """
-        Optional: write a run summary (p95/avg over full run).
-        You can implement later by adding compute_summary() back if needed.
-        """
-        pass

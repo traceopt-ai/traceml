@@ -27,7 +27,6 @@ Per-step volatility belongs in plots, not summaries.
 import shutil
 from typing import Optional
 
-from ipywidgets import HTML
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -208,9 +207,3 @@ class StepMemoryRenderer(BaseRenderer):
         Return the typed compute result directly to dashboard consumers.
         """
         return self._payload()
-
-    def get_notebook_renderable(self) -> HTML:
-        pass
-
-    def log_summary(self, path: Optional[str] = None) -> None:
-        pass
