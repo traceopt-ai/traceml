@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import plotly.graph_objects as go
 from nicegui import ui
 
-from traceml.renderers.step_combined.schema import (
+from traceml.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeResult,
 )

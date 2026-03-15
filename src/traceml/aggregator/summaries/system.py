@@ -3,152 +3,165 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-import msgspec
-
 
 @dataclass
-class _Agg:
-    # envelope time
+class SystemSummaryAgg:
+    """
+    Aggregated system metrics loaded from `system_samples`.
+
+    All memory fields remain in raw bytes while aggregating and are converted
+    to GB only at formatting/output time.
+    """
+
     first_ts: Optional[float] = None
     last_ts: Optional[float] = None
-    system_rows: int = 0
+    system_samples: int = 0
 
-    # CPU
-    cpu_sum: float = 0.0
-    cpu_max: float = 0.0
-    cpu_n: int = 0
+    cpu_avg_percent: Optional[float] = None
+    cpu_peak_percent: Optional[float] = None
 
-    # RAM
-    ram_used_sum_b: float = 0.0
-    ram_used_max_b: float = 0.0
-    ram_total_max_b: float = 0.0
-    ram_n: int = 0
+    ram_avg_bytes: Optional[float] = None
+    ram_peak_bytes: Optional[float] = None
+    ram_total_bytes: Optional[float] = None
 
-    # GPU availability
     gpu_available: Optional[bool] = None
     gpu_count: Optional[int] = None
 
-    # GPU util
-    gpu_util_sum: float = 0.0
-    gpu_util_max: float = 0.0
-    gpu_util_n: int = 0
+    gpu_util_avg_percent: Optional[float] = None
+    gpu_util_peak_percent: Optional[float] = None
 
-    gpu0_util_sum: float = 0.0
-    gpu0_util_max: float = 0.0
-    gpu0_util_n: int = 0
+    gpu_mem_avg_bytes: Optional[float] = None
+    gpu_mem_peak_bytes: Optional[float] = None
 
-    # GPU memory
-    gpu_mem_used_sum_b: float = 0.0
-    gpu_mem_used_max_b: float = 0.0
-    gpu_mem_used_n: int = 0
-    gpu_mem_total_max_b: float = 0.0
+    gpu_temp_avg_c: Optional[float] = None
+    gpu_temp_peak_c: Optional[float] = None
 
-    # GPU temperature
-    gpu_temp_sum: float = 0.0
-    gpu_temp_max: float = 0.0
-    gpu_temp_n: int = 0
+    gpu_power_avg_w: Optional[float] = None
+    gpu_power_peak_w: Optional[float] = None
 
 
-def _b_to_gb(x: float) -> float:
-    return x / 1e9  # GB
+def _b_to_gb(x: Optional[float]) -> Optional[float]:
+    """Convert bytes to decimal GB for display."""
+    if x is None:
+        return None
+    return float(x) / 1e9
 
 
-def _update_envelope_ts(agg: _Agg, msg: Dict[str, Any]) -> None:
-    ts = msg.get("timestamp")
-    if isinstance(ts, (int, float)):
-        ts = float(ts)
-        if agg.first_ts is None:
-            agg.first_ts = ts
-        agg.last_ts = ts
+def _fmt(x: Optional[float], suffix: str = "", ndigits: int = 1) -> str:
+    """Format optional numeric values for card output."""
+    return "n/a" if x is None else f"{x:.{ndigits}f}{suffix}"
 
 
-def _update_from_system_row(agg: _Agg, row: Dict[str, Any]) -> None:
+def _load_system_summary_agg(
+    conn: sqlite3.Connection,
+    *,
+    rank: Optional[int] = None,
+    max_system_rows: int = 5_000,
+) -> SystemSummaryAgg:
     """
-    Wire format per your schema:
-      row["cpu"], row["ram_used"], row["ram_total"], row["gpu_available"], row["gpu_count"],
-      row["gpus"] = [[util, mem_used, mem_total, temp, power, power_limit], ...]
+    Load aggregated system metrics directly from `system_samples`.
+
+    Parameters
+    ----------
+    conn:
+        Open SQLite connection.
+    rank:
+        Optional rank filter. If None, aggregates across all ranks.
+    max_system_rows:
+        Safety cap on rows included in aggregation.
+
+    Returns
+    -------
+    SystemSummaryAgg
+        Aggregated summary values ready for formatting.
     """
-    agg.system_rows += 1
+    where_clause = ""
+    params: list[Any] = []
+    if rank is not None:
+        where_clause = "WHERE rank = ?"
+        params.append(int(rank))
 
-    cpu = row.get("cpu")
-    if isinstance(cpu, (int, float)):
-        c = float(cpu)
-        agg.cpu_sum += c
-        agg.cpu_max = max(agg.cpu_max, c)
-        agg.cpu_n += 1
-
-    ram_used = row.get("ram_used")
-    if isinstance(ram_used, (int, float)):
-        u = float(ram_used)
-        agg.ram_used_sum_b += u
-        agg.ram_used_max_b = max(agg.ram_used_max_b, u)
-        agg.ram_n += 1
-
-    ram_total = row.get("ram_total")
-    if isinstance(ram_total, (int, float)):
-        agg.ram_total_max_b = max(agg.ram_total_max_b, float(ram_total))
-
-    ga = row.get("gpu_available")
-    if isinstance(ga, bool):
-        agg.gpu_available = ga
-
-    gc = row.get("gpu_count")
-    if isinstance(gc, int):
-        agg.gpu_count = gc
-
-    gpus = row.get("gpus")
-    if not isinstance(gpus, list) or not gpus:
-        return
-
-    for gi, g in enumerate(gpus):
-        if not (isinstance(g, list) and len(g) >= 3):
-            continue
-        util, mem_used, mem_total = g[0], g[1], g[2]
-        temp = g[3] if len(g) >= 4 else None
-
-        if isinstance(util, (int, float)):
-            u = float(util)
-            agg.gpu_util_sum += u
-            agg.gpu_util_max = max(agg.gpu_util_max, u)
-            agg.gpu_util_n += 1
-
-            if gi == 0:
-                agg.gpu0_util_sum += u
-                agg.gpu0_util_max = max(agg.gpu0_util_max, u)
-                agg.gpu0_util_n += 1
-
-        if isinstance(mem_used, (int, float)):
-            mu = float(mem_used)
-            agg.gpu_mem_used_sum_b += mu
-            agg.gpu_mem_used_max_b = max(agg.gpu_mem_used_max_b, mu)
-            agg.gpu_mem_used_n += 1
-
-        if isinstance(mem_total, (int, float)):
-            agg.gpu_mem_total_max_b = max(
-                agg.gpu_mem_total_max_b, float(mem_total)
-            )
-
-        if isinstance(temp, (int, float)):
-            t = float(temp)
-            agg.gpu_temp_sum += t
-            agg.gpu_temp_max = max(agg.gpu_temp_max, t)
-            agg.gpu_temp_n += 1
-
-
-def _fmt(x: Optional[float], suf: str = "", n_d: int = 1) -> str:
-    return "n/a" if x is None else f"{x:.{n_d}f}{suf}"
-
-
-def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
+    count_sql = f"""
+        SELECT
+            COUNT(*),
+            MIN(sample_ts_s),
+            MAX(sample_ts_s)
+        FROM (
+            SELECT sample_ts_s
+            FROM system_samples
+            {where_clause}
+            ORDER BY id ASC
+            LIMIT ?
+        );
     """
-    Build a *shareable* runtime summary card (SYSTEM only).
+    count_row = conn.execute(
+        count_sql, (*params, int(max_system_rows))
+    ).fetchone()
+    n_rows = int(count_row[0] or 0)
+    first_ts = float(count_row[1]) if count_row[1] is not None else None
+    last_ts = float(count_row[2]) if count_row[2] is not None else None
 
-    Notes
-    -----
-    - This function intentionally emits ONLY the SYSTEM section.
-      Step-time / other cards are appended elsewhere.
-    - Output is formatted with clear boundaries and spacing for easy pasting
-      into Slack / GitHub / email.
+    agg_sql = f"""
+        SELECT
+            AVG(cpu_percent),
+            MAX(cpu_percent),
+
+            AVG(ram_used_bytes),
+            MAX(ram_used_bytes),
+            MAX(ram_total_bytes),
+
+            MAX(gpu_available),
+            MAX(gpu_count),
+
+            AVG(gpu_util_avg),
+            MAX(gpu_util_peak),
+
+            AVG(gpu_mem_used_avg_bytes),
+            MAX(gpu_mem_used_peak_bytes),
+
+            AVG(gpu_temp_avg_c),
+            MAX(gpu_temp_peak_c),
+
+            AVG(gpu_power_avg_w),
+            MAX(gpu_power_peak_w)
+        FROM (
+            SELECT *
+            FROM system_samples
+            {where_clause}
+            ORDER BY id ASC
+            LIMIT ?
+        );
+    """
+    row = conn.execute(agg_sql, (*params, int(max_system_rows))).fetchone()
+
+    return SystemSummaryAgg(
+        first_ts=first_ts,
+        last_ts=last_ts,
+        system_samples=n_rows,
+        cpu_avg_percent=float(row[0]) if row[0] is not None else None,
+        cpu_peak_percent=float(row[1]) if row[1] is not None else None,
+        ram_avg_bytes=float(row[2]) if row[2] is not None else None,
+        ram_peak_bytes=float(row[3]) if row[3] is not None else None,
+        ram_total_bytes=float(row[4]) if row[4] is not None else None,
+        gpu_available=bool(row[5]) if row[5] is not None else None,
+        gpu_count=int(row[6]) if row[6] is not None else None,
+        gpu_util_avg_percent=float(row[7]) if row[7] is not None else None,
+        gpu_util_peak_percent=float(row[8]) if row[8] is not None else None,
+        gpu_mem_avg_bytes=float(row[9]) if row[9] is not None else None,
+        gpu_mem_peak_bytes=float(row[10]) if row[10] is not None else None,
+        gpu_temp_avg_c=float(row[11]) if row[11] is not None else None,
+        gpu_temp_peak_c=float(row[12]) if row[12] is not None else None,
+        gpu_power_avg_w=float(row[13]) if row[13] is not None else None,
+        gpu_power_peak_w=float(row[14]) if row[14] is not None else None,
+    )
+
+
+def _build_system_card(agg: SystemSummaryAgg) -> tuple[str, Dict[str, Any]]:
+    """
+    Build a clean, shareable SYSTEM summary card.
+
+    Output is plain text with fixed-width boundaries so it renders cleanly in
+    terminal, logs, Slack code blocks, GitHub comments, and saved text files.
     """
     duration_s = None
     if (
@@ -158,125 +171,107 @@ def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
     ):
         duration_s = agg.last_ts - agg.first_ts
 
-    cpu_avg = (agg.cpu_sum / agg.cpu_n) if agg.cpu_n else None
-    cpu_peak = agg.cpu_max if agg.cpu_n else None
+    ram_avg_gb = _b_to_gb(agg.ram_avg_bytes)
+    ram_peak_gb = _b_to_gb(agg.ram_peak_bytes)
+    ram_total_gb = _b_to_gb(agg.ram_total_bytes)
 
-    ram_avg_gb = (
-        _b_to_gb(agg.ram_used_sum_b / agg.ram_n) if agg.ram_n else None
-    )
-    ram_peak_gb = _b_to_gb(agg.ram_used_max_b) if agg.ram_n else None
-    ram_total_gb = (
-        _b_to_gb(agg.ram_total_max_b) if agg.ram_total_max_b else None
-    )
+    gpu_mem_avg_gb = _b_to_gb(agg.gpu_mem_avg_bytes)
+    gpu_mem_peak_gb = _b_to_gb(agg.gpu_mem_peak_bytes)
 
-    gpu_util_avg = (
-        (agg.gpu_util_sum / agg.gpu_util_n) if agg.gpu_util_n else None
-    )
-    gpu_util_peak = agg.gpu_util_max if agg.gpu_util_n else None
-    gpu0_util_avg = (
-        (agg.gpu0_util_sum / agg.gpu0_util_n) if agg.gpu0_util_n else None
-    )
+    width = 78
+    inner_width = width - 4
 
-    gpu_mem_avg_gb = (
-        _b_to_gb(agg.gpu_mem_used_sum_b / agg.gpu_mem_used_n)
-        if agg.gpu_mem_used_n
-        else None
-    )
-    gpu_mem_peak_gb = (
-        _b_to_gb(agg.gpu_mem_used_max_b) if agg.gpu_mem_used_n else None
-    )
-    gpu_mem_total_gb = (
-        _b_to_gb(agg.gpu_mem_total_max_b) if agg.gpu_mem_total_max_b else None
+    def border() -> str:
+        return "+" + "-" * (width - 2) + "+"
+
+    def row(text: str = "") -> str:
+        return f"|  {text:<{inner_width}}|"
+
+    header = (
+        f"TraceML System Summary | duration {_fmt(duration_s, 's', 1)}"
+        f" | samples {agg.system_samples}"
     )
 
-    gpu_temp_avg = (
-        (agg.gpu_temp_sum / agg.gpu_temp_n) if agg.gpu_temp_n else None
-    )
-    gpu_temp_peak = agg.gpu_temp_max if agg.gpu_temp_n else None
+    lines: list[str] = [
+        border(),
+        row(header),
+        border(),
+        row("SYSTEM"),
+        row(),
+        row(
+            f"CPU       avg {_fmt(agg.cpu_avg_percent, '%', 1)}   "
+            f"peak {_fmt(agg.cpu_peak_percent, '%', 1)}"
+        ),
+        row(
+            f"RAM       avg {_fmt(ram_avg_gb, ' GB', 1)}   "
+            f"peak {_fmt(ram_peak_gb, ' GB', 1)}   "
+            f"total {_fmt(ram_total_gb, ' GB', 1)}"
+        ),
+    ]
 
-    w = 72
-    sep = "-" * w
-
-    title = (
-        f"\n\n\n"
-        f"TraceML Runtime Summary Card | duration {_fmt(duration_s, 's', 1)}"
-        f" | samples {agg.system_rows}"
-    )
-
-    # Simple, aligned key/value rows (readable in monospace)
-    rows: list[tuple[str, str]] = []
-    rows.append(
-        ("CPU", f"avg {_fmt(cpu_avg, '%', 1)} | peak {_fmt(cpu_peak, '%', 1)}")
-    )
-    rows.append(
-        (
-            "RAM",
-            f"avg {_fmt(ram_avg_gb, 'GB', 1)} | peak {_fmt(ram_peak_gb, 'GB', 1)} | total {_fmt(ram_total_gb, 'GB', 1)}",
-        )
-    )
-
-    if agg.gpu_util_n > 0:
-        gpu_util = f"avg {_fmt(gpu_util_avg, '%', 1)} | peak {_fmt(gpu_util_peak, '%', 1)}"
-        if agg.gpu0_util_n:
-            gpu_util += f" | GPU0 avg {_fmt(gpu0_util_avg, '%', 1)}"
-        rows.append(("GPU util", gpu_util))
-
-        gpu_mem = (
-            f"avg {_fmt(gpu_mem_avg_gb, 'GB', 1)} | peak {_fmt(gpu_mem_peak_gb, 'GB', 1)}"
-            f" | total {_fmt(gpu_mem_total_gb, 'GB', 1)}"
-        )
-        if agg.gpu_temp_n:
-            gpu_mem += (
-                f" | temp avg {_fmt(gpu_temp_avg, '°C', 1)}"
-                f" | peak {_fmt(gpu_temp_peak, '°C', 1)}"
+    if agg.gpu_util_avg_percent is not None:
+        lines.append(
+            row(
+                f"GPU util  avg {_fmt(agg.gpu_util_avg_percent, '%', 1)}   "
+                f"peak {_fmt(agg.gpu_util_peak_percent, '%', 1)}"
             )
-        rows.append(("GPU mem", gpu_mem))
+        )
+        lines.append(
+            row(
+                f"GPU mem   avg {_fmt(gpu_mem_avg_gb, ' GB', 1)}   "
+                f"peak {_fmt(gpu_mem_peak_gb, ' GB', 1)}"
+            )
+        )
+        lines.append(
+            row(
+                f"GPU temp  avg {_fmt(agg.gpu_temp_avg_c, ' C', 1)}   "
+                f"peak {_fmt(agg.gpu_temp_peak_c, ' C', 1)}"
+            )
+        )
+        lines.append(
+            row(
+                f"GPU power avg {_fmt(agg.gpu_power_avg_w, ' W', 1)}   "
+                f"peak {_fmt(agg.gpu_power_peak_w, ' W', 1)}"
+            )
+        )
     else:
         if agg.gpu_available is False:
-            rows.append(
-                (
-                    "GPU",
-                    "unavailable (no NVIDIA GPU detected or NVML not accessible)",
-                )
+            gpu_msg = (
+                "unavailable (no NVIDIA GPU detected or NVML inaccessible)"
             )
         elif (agg.gpu_count or 0) > 0:
-            rows.append(
-                ("GPU", "detected, but no per-GPU samples were recorded")
-            )
+            gpu_msg = "detected, but no per-GPU samples were recorded"
         else:
-            rows.append(("GPU", "n/a"))
+            gpu_msg = "n/a"
+        lines.append(row(f"GPU       {gpu_msg}"))
 
-    key_w = max(len(k) for k, _ in rows)
-    system_lines = [f"{k:<{key_w}} : {v}" for k, v in rows]
-
-    # Final card (SYSTEM only; step timing appended elsewhere)
-    lines: list[str] = []
-    lines.append(title)
-    lines.append(sep)
-    lines.append("SYSTEM")
-    lines.append(sep)
-    lines.extend(system_lines)
+    lines.append(border())
     card = "\n".join(lines)
 
     summary = {
         "duration_s": duration_s,
-        "system_samples": agg.system_rows,
-        "cpu_avg_percent": cpu_avg,
-        "cpu_peak_percent": cpu_peak,
+        "system_samples": agg.system_samples,
+        "cpu_avg_percent": agg.cpu_avg_percent,
+        "cpu_peak_percent": agg.cpu_peak_percent,
         "ram_avg_gb": ram_avg_gb,
         "ram_peak_gb": ram_peak_gb,
         "ram_total_gb": ram_total_gb,
         "gpu_available": agg.gpu_available,
         "gpu_count": agg.gpu_count,
-        "gpu_util_avg_percent": gpu_util_avg,
-        "gpu_util_peak_percent": gpu_util_peak,
-        "gpu0_util_avg_percent": gpu0_util_avg,
+        "gpu_util_avg_percent": agg.gpu_util_avg_percent,
+        "gpu_util_peak_percent": agg.gpu_util_peak_percent,
         "gpu_mem_avg_gb": gpu_mem_avg_gb,
         "gpu_mem_peak_gb": gpu_mem_peak_gb,
-        "gpu_mem_total_gb": gpu_mem_total_gb,
-        "gpu_temp_avg_c": gpu_temp_avg,
-        "gpu_temp_peak_c": gpu_temp_peak,
-        "units": {"memory": "GB", "temp": "C", "util": "%"},
+        "gpu_temp_avg_c": agg.gpu_temp_avg_c,
+        "gpu_temp_peak_c": agg.gpu_temp_peak_c,
+        "gpu_power_avg_w": agg.gpu_power_avg_w,
+        "gpu_power_peak_w": agg.gpu_power_peak_w,
+        "units": {
+            "memory": "GB",
+            "temperature": "C",
+            "power": "W",
+            "util": "%",
+        },
         "card": card,
     }
     return card, summary
@@ -284,75 +279,41 @@ def _make_card(agg: _Agg) -> tuple[str, Dict[str, Any]]:
 
 def generate_system_summary_card(
     db_path: str,
-    system_sampler_name: str = "SystemSampler",
+    *,
+    rank: Optional[int] = None,
     print_to_stdout: bool = True,
     max_system_rows: int = 5_000,
 ) -> Dict[str, Any]:
     """
-    Generate a shareable SYSTEM summary card from the local TraceML DB.
+    Generate a shareable SYSTEM summary card from SQL projection tables.
 
     Parameters
     ----------
     db_path:
         Path to the SQLite DB file.
-    system_sampler_name:
-        Sampler name stored in `raw_messages.sampler` for system telemetry.
+    rank:
+        Optional rank filter. If None, summarizes across all ranks.
     print_to_stdout:
-        If True, prints the generated card to stdout.
+        If True, print the rendered card.
     max_system_rows:
-        Safety cap on the number of system rows aggregated (prevents very large
-        DB scans from taking too long). Default: 5_000.
+        Safety cap on rows included in aggregation.
 
     Returns
     -------
     Dict[str, Any]
-        Parsed summary JSON including the rendered `card` string.
+        Structured summary JSON including the rendered `card`.
     """
     conn = sqlite3.connect(db_path)
-    dec = msgspec.msgpack.Decoder(type=dict)
-    agg = _Agg()
+    try:
+        agg = _load_system_summary_agg(
+            conn,
+            rank=rank,
+            max_system_rows=max_system_rows,
+        )
+    finally:
+        conn.close()
 
-    cur = conn.execute(
-        "SELECT payload_mp FROM raw_messages WHERE sampler = ? ORDER BY id ASC;",
-        (system_sampler_name,),
-    )
-
-    for (blob,) in cur:
-        if not blob:
-            continue
-        try:
-            msg = dec.decode(blob)
-        except Exception:
-            continue
-
-        _update_envelope_ts(agg, msg)
-
-        tables = msg.get("tables")
-        if not isinstance(tables, dict):
-            continue
-
-        for rows in tables.values():
-            if not isinstance(rows, list):
-                continue
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-
-                _update_from_system_row(agg, row)
-
-                # Safety cap: stop once we've aggregated enough rows.
-                if agg.system_rows >= max_system_rows:
-                    break
-
-            if agg.system_rows >= max_system_rows:
-                break
-
-        if agg.system_rows >= max_system_rows:
-            break
-
-    conn.close()
-
-    card, summary = _make_card(agg)
+    card, summary = _build_system_card(agg)
 
     with open(db_path + "_summary_card.txt", "w", encoding="utf-8") as f:
         f.write(card + "\n")

@@ -15,7 +15,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 
 
 def main():

@@ -58,7 +58,11 @@ from typing import Any, Dict, Optional
 
 import msgspec
 
+from traceml.aggregator.sqlite_writers import step_time as step_time_sql_writer
+from traceml.aggregator.sqlite_writers import system as system_sql_writer
 from traceml.loggers.error_log import get_error_logger
+
+_PROJECTION_WRITERS = [system_sql_writer, step_time_sql_writer]
 
 
 @dataclass(frozen=True)
@@ -175,8 +179,6 @@ class SQLiteWriterSimple:
             "last_error": self._last_error,
         }
 
-    # -------------------- internal --------------------
-
     def _log_error(self, msg: str) -> None:
         self._last_error = msg
         if self._logger is not None:
@@ -255,6 +257,75 @@ class SQLiteWriterSimple:
         elif isinstance(m, dict):
             yield m
 
+    def _collect_flush_rows(
+        self,
+        items: list[Dict[str, Any]],
+    ) -> tuple[
+        list[tuple[int, Optional[int], Optional[str], bytes]],
+        dict[Any, dict[str, list[tuple]]],
+    ]:
+        """
+        Convert queued payloads into raw SQLite rows + projection rows.
+        """
+        raw_rows: list[tuple[int, Optional[int], Optional[str], bytes]] = []
+        projection_rows: dict[Any, dict[str, list[tuple]]] = {
+            writer: {} for writer in _PROJECTION_WRITERS
+        }
+
+        for m in items:
+            for payload_dict in self._iter_payload_dicts(m):
+                try:
+                    recv_ts_ns = time.time_ns()
+                    rank, sampler = self._extract_rank_sampler(payload_dict)
+                    payload = self._encoder.encode(payload_dict)
+                    raw_rows.append((recv_ts_ns, rank, sampler, payload))
+
+                    for writer in _PROJECTION_WRITERS:
+                        if not writer.accepts_sampler(sampler):
+                            continue
+
+                        rows_by_table = writer.build_rows(
+                            payload_dict=payload_dict,
+                            recv_ts_ns=recv_ts_ns,
+                        )
+                        for table_name, rows in rows_by_table.items():
+                            if not rows:
+                                continue
+                            projection_rows[writer].setdefault(
+                                table_name, []
+                            ).extend(rows)
+
+                except Exception:
+                    continue
+
+        return raw_rows, projection_rows
+
+    def _write_flush_rows(
+        self,
+        conn: sqlite3.Connection,
+        raw_rows: list[tuple[int, Optional[int], Optional[str], bytes]],
+        projection_rows: dict[Any, dict[str, list[tuple]]],
+    ) -> None:
+        """
+        Write prepared raw rows + projection rows in one SQLite transaction.
+        """
+        if not raw_rows:
+            return
+
+        conn.execute("BEGIN;")
+
+        conn.executemany(
+            "INSERT INTO raw_messages(recv_ts_ns, rank, sampler, payload_mp) "
+            "VALUES (?, ?, ?, ?);",
+            raw_rows,
+        )
+
+        for writer in _PROJECTION_WRITERS:
+            writer.insert_rows(conn, projection_rows[writer])
+
+        conn.execute("COMMIT;")
+        self._written += len(raw_rows)
+
     def _flush_once(self, conn: sqlite3.Connection) -> None:
         """
         Drain up to max_flush_items from the queue and write them to SQLite.
@@ -263,29 +334,12 @@ class SQLiteWriterSimple:
         if not items:
             return
 
-        rows: list[tuple[int, Optional[int], Optional[str], bytes]] = []
-        for m in items:
-            for payload_dict in self._iter_payload_dicts(m):
-                try:
-                    recv_ts_ns = time.time_ns()
-                    rank, sampler = self._extract_rank_sampler(payload_dict)
-                    payload = self._encoder.encode(payload_dict)
-                    rows.append((recv_ts_ns, rank, sampler, payload))
-                except Exception:
-                    continue
-
-        if not rows:
+        raw_rows, projection_rows = self._collect_flush_rows(items)
+        if not raw_rows:
             return
 
         try:
-            conn.execute("BEGIN;")
-            conn.executemany(
-                "INSERT INTO raw_messages(recv_ts_ns, rank, sampler, payload_mp) "
-                "VALUES (?, ?, ?, ?);",
-                rows,
-            )
-            conn.execute("COMMIT;")
-            self._written += len(rows)
+            self._write_flush_rows(conn, raw_rows, projection_rows)
         except Exception as e:
             try:
                 conn.execute("ROLLBACK;")
@@ -304,6 +358,8 @@ class SQLiteWriterSimple:
         try:
             conn = self._connect()
             self._init_schema(conn)
+            for writer in _PROJECTION_WRITERS:
+                writer.init_schema(conn)
         except Exception as e:
             self._log_error(f"[TraceML] SQLiteWriter init failed: {e}")
             return

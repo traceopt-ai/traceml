@@ -16,7 +16,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import SYSTEM_LAYOUT
-from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.utils.formatting import fmt_mem_ratio, fmt_percent
@@ -35,9 +34,9 @@ class SystemRenderer(BaseRenderer):
 
     NAME = "System"
 
-    def __init__(self, remote_store: RemoteDBStore) -> None:
+    def __init__(self, db_path) -> None:
         super().__init__(name=self.NAME, layout_section_name=SYSTEM_LAYOUT)
-        self._store = remote_store
+        self.db_path = db_path
         self._logger = get_error_logger(self.NAME + "Renderer")
 
     def _get_table(self) -> Optional[Any]:
@@ -59,12 +58,10 @@ class SystemRenderer(BaseRenderer):
             return None
 
     def _compute_cli(self) -> Dict[str, Any]:
-        table = self._get_table() or []
-        return SystemMetricsComputer(table).compute_cli()
+        return SystemMetricsComputer(self.db_path).compute_cli()
 
     def _compute_dashboard(self, window_n: int = 100) -> Dict[str, Any]:
-        table = self._get_table() or []
-        return SystemMetricsComputer(table).compute_dashboard(
+        return SystemMetricsComputer(self.db_path).compute_dashboard(
             window_n=window_n
         )
 

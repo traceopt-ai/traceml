@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from traceml.decorators import trace_model_instance
-from traceml.utils.lightning import TraceMLCallback
+from traceml.integrations.lightning import TraceMLCallback
 
 
 class MNISTCNN(nn.Module):

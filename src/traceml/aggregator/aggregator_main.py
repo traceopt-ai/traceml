@@ -83,7 +83,7 @@ def main() -> None:
             enable_logging=cfg["enable_logging"],
             logs_dir=cfg["logs_dir"],
             remote_max_rows=cfg["remote_max_rows"],
-            session_id=cfg["session_id"],
+            session_id=session_id,
             history_enabled=cfg["history_enabled"],
             tcp=TraceMLTCPSettings(host=cfg["tcp_host"], port=cfg["tcp_port"]),
             db_path=db_path,
