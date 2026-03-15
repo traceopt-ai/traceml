@@ -1,3 +1,4 @@
+import os
 import sys
 from dataclasses import dataclass
 from queue import Full, Queue
@@ -9,6 +10,8 @@ import torch.nn as nn
 step_memory_queue: Queue = Queue(maxsize=2048)
 
 _temp_step_memory_buffer: Dict = {}
+
+TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 
 
 @dataclass
@@ -30,6 +33,9 @@ class StepMemoryTracker:
     """
 
     def __init__(self, model: nn.Module):
+        if TRACEML_DISABLED:
+            return  # BYPASS: Do not attach any trackers
+
         self.model = model
         self.model_id = id(model)
 
@@ -44,6 +50,9 @@ class StepMemoryTracker:
         """
         Reset CUDA peak memory counters at step start.
         """
+        if TRACEML_DISABLED:
+            return
+
         if self.device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(self.device)
 
@@ -56,6 +65,9 @@ class StepMemoryTracker:
         - Non-CUDA: emit a sentinel event with 0 values
           (means: step memory not applicable on this device)
         """
+        if TRACEML_DISABLED:
+            return
+
         if self.device.type == "cuda":
             peak_allocated = torch.cuda.max_memory_allocated(self.device)
             peak_reserved = torch.cuda.max_memory_reserved(self.device)
@@ -74,6 +86,9 @@ class StepMemoryTracker:
 
 
 def flush_step_memory_buffer(model: nn.Module, step: int) -> None:
+    if TRACEML_DISABLED:
+        return
+
     model_id = id(model)
 
     evt = _temp_step_memory_buffer.pop(model_id, None)

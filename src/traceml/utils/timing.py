@@ -11,6 +11,7 @@ Updated:
 - GLOBAL queue receives TimeEvent directly (immediate enqueue)
 """
 
+import os
 import sys
 import time
 from collections import deque
@@ -23,6 +24,8 @@ from typing import Deque, List, Optional
 import torch
 
 from traceml.utils.cuda_event_pool import get_cuda_event, return_cuda_event
+
+TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 
 
 class TimeScope(str, Enum):
@@ -149,6 +152,8 @@ def record_event(evt: TimeEvent) -> None:
     STEP events are buffered until flush.
     GLOBAL events are enqueued immediately.
     """
+    if TRACEML_DISABLED:
+        return
     if evt.scope == TimeScope.STEP:
         _STEP_BUFFER.append(evt)
     else:
@@ -161,6 +166,8 @@ def flush_step_time_buffer(step: int) -> None:
 
     Called once per optimizer step.
     """
+    if TRACEML_DISABLED:
+        return
     if not _STEP_BUFFER:
         return
 
@@ -188,6 +195,9 @@ def timed_region(
     - Timing is best-effort
     - User exceptions are never swallowed
     """
+    if TRACEML_DISABLED:
+        yield
+        return
 
     cpu_start = time.time()
 

@@ -1,4 +1,5 @@
 import functools
+import os
 import sys
 from contextlib import contextmanager
 from typing import Callable, List, Optional
@@ -38,14 +39,16 @@ from traceml.utils.patches.forward_auto_timer_patch import (
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.timing import timed_region
 
+TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
 # This is a lightweight, observational patch used to infer batch metadata and,
 # dataloader fetch time.It is idempotent and safe to import multiple times.
 
-patch_dataloader()
-patch_forward()
-patch_backward()
+if not TRACEML_DISABLED:
+    patch_dataloader()
+    patch_forward()
+    patch_backward()
 
 
 class TraceState:
@@ -73,6 +76,9 @@ def trace_step(model: nn.Module):
 
     """
 
+    if TRACEML_DISABLED:
+        yield
+        return
     mem_tracker = StepMemoryTracker(model)
     step_completed = False
 
@@ -131,6 +137,8 @@ def trace_model_instance(
         trace_layer_backward_time: attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
     """
+    if TRACEML_DISABLED:
+        return
     try:
         if not isinstance(model, nn.Module):
             raise TypeError("trace_model_instance expects an nn.Module.")
@@ -199,6 +207,12 @@ def trace_time(
     use_gpu : bool, optional
         If True, records CUDA timing when available.
     """
+    if TRACEML_DISABLED:
+
+        def decorator(func: Callable):
+            return func
+
+        return decorator
     if scope not in ("step", "global"):
         raise ValueError(
             f"Invalid scope '{scope}'. " "Expected 'step' or 'global'."
