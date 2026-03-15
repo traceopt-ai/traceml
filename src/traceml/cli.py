@@ -306,7 +306,7 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
 
-    session_id = args.session_id if args.session_id else get_session_id()
+    session_id = env["TRACEML_SESSION_ID"]
     session_root = Path(args.logs_dir).resolve() / session_id
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"

@@ -17,7 +17,6 @@ All aggregation and synchronization logic is delegated to
 import shutil
 from typing import Any, Dict, Optional
 
-from IPython.display import HTML
 from rich.panel import Panel
 from rich.table import Table
 
@@ -94,10 +93,3 @@ class ProcessRenderer(BaseRenderer):
         snap = self._computer.compute_live_snapshot()
         snap["history"] = self._computer.get_dashboard_history()
         return snap
-
-    # Notebook rendering
-    def get_notebook_renderable(self) -> HTML:
-        pass
-
-    def log_summary(self, path=None) -> None:
-        pass

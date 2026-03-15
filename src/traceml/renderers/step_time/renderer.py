@@ -11,7 +11,6 @@ Behavior:
 import shutil
 from typing import Optional
 
-from ipywidgets import HTML
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -21,6 +20,7 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.utils import fmt_time_run
 
 from .compute import StepCombinedComputer
+from .diagnostics import build_step_diagnosis, format_cli_diagnosis
 from .schema import StepCombinedTimeResult
 
 
@@ -57,6 +57,9 @@ class StepCombinedRenderer(BaseRenderer):
             )
 
         metrics = payload.metrics
+        diag = build_step_diagnosis(metrics)
+        diag_text = format_cli_diagnosis(diag)
+
         step_metric = next(
             (m for m in metrics if m.metric == "step_time"), None
         )
@@ -153,7 +156,7 @@ class StepCombinedRenderer(BaseRenderer):
 
         footer = "\n\n[dim]* WAIT = step time − model execution (mixed CPU/GPU proxy)[/dim]"
         return Panel(
-            Group(table, footer),
+            Group(diag_text, "", table, footer),
             title=f"Model Step Summary ({subtitle})",
             border_style="cyan",
             width=width,
@@ -164,9 +167,3 @@ class StepCombinedRenderer(BaseRenderer):
         Dashboard gets a richer payload (cheap summaries + rank heatmap).
         """
         return self._computer.compute_dashboard()
-
-    def get_notebook_renderable(self) -> HTML:
-        raise NotImplementedError
-
-    def log_summary(self, path: Optional[str] = None) -> None:
-        raise NotImplementedError
