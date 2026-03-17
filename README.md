@@ -26,7 +26,8 @@ without jumping straight to heavyweight profiling.
 
 **The gap it fills:** system dashboards show utilization over time. TraceML shows what happened **per training step** and, in DDP, **which rank is slowing the run down**.
 
-**Works today:** Plain PyTorch, Hugging Face Trainer, PyTorch Lightning, single GPU, single-node DDP
+**Works today:** Single GPU, Single-node DDP
+
 **Not yet:** Multi-node DDP, FSDP, TP, PP
 
 ```bash
