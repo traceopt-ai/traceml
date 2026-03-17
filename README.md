@@ -105,6 +105,17 @@ See [docs/quickstart.md](docs/quickstart.md) for more setup details.
 
 ---
 
+## Run Modes
+
+- `traceml run train.py`
+  Core bottleneck mode (system + step-level diagnosis).
+
+- `traceml deep train.py`
+  Deep-dive mode (adds per-layer memory/timing signals).
+
+Use `run` by default. Use `deep` only when you need layer-level root cause.
+
+---
 
 
 ## Why not just use timers?
@@ -162,7 +173,6 @@ trainer = L.Trainer(callbacks=[TraceMLCallback()])
 See the Lightning docs for the full setup.
 
 ---
-
 
 
 

@@ -32,6 +32,7 @@ class TraceMLSettings:
     - TCP is used for telemetry transport (including rank0 -> rank0 loopback).
     """
 
+    profile: str = "run"  # "deep"
     mode: str = "cli"
     sampler_interval_sec: float = 1.0
     render_interval_sec: float = 1.0

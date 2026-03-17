@@ -294,6 +294,7 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_DISABLED"] = (
         "1" if getattr(args, "disable_traceml", False) else "0"
     )
+    env["TRACEML_PROFILE"] = getattr(args, "profile", "run")
     env["TRACEML_SCRIPT_PATH"] = script_path
     env["TRACEML_MODE"] = args.mode
     env["TRACEML_INTERVAL"] = str(args.interval)
@@ -327,6 +328,7 @@ def launch_tracer_process(script_path, args):
         status="starting",
         aggregator_dir=aggregator_dir,
         db_path=db_path,
+        extra={"profile": env["TRACEML_PROFILE"]},
     )
 
     runner_path = str(Path(__file__).parent / "runtime/executor.py")
@@ -439,10 +441,11 @@ def launch_tracer_process(script_path, args):
         time.sleep(1)
 
 
-def run_with_tracing(args):
+def run_with_tracing(args, profile: str):
     """
-    Entry point for `traceml run ...`
+    Entry point for `traceml run ...` / `traceml deep ...`
     """
+    args.profile = profile
     script_path = validate_script_path(args.script)
     launch_tracer_process(script_path=script_path, args=args)
 
@@ -475,35 +478,44 @@ def run_inspect(args):
             print(f"Error decoding {path.name}: {e}", file=sys.stderr)
 
 
+def _add_launch_args(p):
+    p.add_argument("script")
+    p.add_argument("--mode", type=str, default="cli")
+    p.add_argument("--interval", type=float, default=2.0)
+    p.add_argument("--enable-logging", action="store_true")
+    p.add_argument("--logs-dir", type=str, default="./logs")
+    p.add_argument("--num-display-layers", type=int, default=5)
+    p.add_argument("--session-id", type=str, default="")
+    p.add_argument("--tcp-host", type=str, default="127.0.0.1")
+    p.add_argument("--tcp-port", type=int, default=29765)
+    p.add_argument("--remote-max-rows", type=int, default=200)
+    p.add_argument("--nproc-per-node", type=int, default=1)
+    p.add_argument("--args", nargs=argparse.REMAINDER)
+    p.add_argument(
+        "--no-history",
+        action="store_true",
+        help="Disable history saving (live view only; summaries/comparisons unavailable).",
+    )
+    p.add_argument(
+        "--disable-traceml",
+        action="store_true",
+        help="Disable TraceML telemetry and run the script natively.",
+    )
+
+
 def build_parser():
     parser = argparse.ArgumentParser("traceml")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run_parser = sub.add_parser(
-        "run", help="Run a script with TraceML enabled"
+        "run", help="Run a script with TraceML bottleneck instrumentation"
     )
-    run_parser.add_argument("script")
-    run_parser.add_argument("--mode", type=str, default="cli")
-    run_parser.add_argument("--interval", type=float, default=2.0)
-    run_parser.add_argument("--enable-logging", action="store_true")
-    run_parser.add_argument("--logs-dir", type=str, default="./logs")
-    run_parser.add_argument("--num-display-layers", type=int, default=5)
-    run_parser.add_argument("--session-id", type=str, default="")
-    run_parser.add_argument("--tcp-host", type=str, default="127.0.0.1")
-    run_parser.add_argument("--tcp-port", type=int, default=29765)
-    run_parser.add_argument("--remote-max-rows", type=int, default=200)
-    run_parser.add_argument("--nproc-per-node", type=int, default=1)
-    run_parser.add_argument("--args", nargs=argparse.REMAINDER)
-    run_parser.add_argument(
-        "--no-history",
-        action="store_true",
-        help="Disable history saving (live view only; summaries/comparisons unavailable).",
+    _add_launch_args(run_parser)
+
+    deep_parser = sub.add_parser(
+        "deep", help="Run a script with TraceML deep layerwise instrumentation"
     )
-    run_parser.add_argument(
-        "--disable-traceml",
-        action="store_true",
-        help="Disable TraceML telemetry and run the script natively.",
-    )
+    _add_launch_args(deep_parser)
 
     inspect_parser = sub.add_parser(
         "inspect", help="Inspect binary .msgpack logs"
@@ -517,7 +529,9 @@ def main():
     args = parser.parse_args()
 
     if args.command == "run":
-        run_with_tracing(args)
+        run_with_tracing(args, profile="run")
+    elif args.command == "deep":
+        run_with_tracing(args, profile="deep")
     elif args.command == "inspect":
         run_inspect(args)
     else:

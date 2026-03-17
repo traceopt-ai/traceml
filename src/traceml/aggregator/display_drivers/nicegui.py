@@ -99,6 +99,9 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._logger = logger
         self._store = store
         self._settings = settings
+        self._deep_profile = (
+            getattr(self._settings, "profile", "run") == "deep"
+        )
 
         # ---- UI lifecycle ----
         self._ui_started: bool = False
@@ -124,15 +127,21 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._renderers: List[BaseRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(remote_store=store),
-            LayerCombinedMemoryRenderer(
-                remote_store=store, top_n_layers=settings.num_display_layers
-            ),
-            LayerCombinedTimeRenderer(
-                remote_store=store, top_n_layers=settings.num_display_layers
-            ),
             StepCombinedRenderer(db_path=self._settings.db_path),
             StepMemoryRenderer(remote_store=store),
         ]
+
+        if self._deep_profile:
+            self._renderers += [
+                LayerCombinedMemoryRenderer(
+                    remote_store=store,
+                    top_n_layers=settings.num_display_layers,
+                ),
+                LayerCombinedTimeRenderer(
+                    remote_store=store,
+                    top_n_layers=settings.num_display_layers,
+                ),
+            ]
 
         # ---- UI server config ----
         self._port: int = 8765
