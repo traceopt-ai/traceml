@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/assets/traceopt_logo.png" alt="TraceML Logo" width="300" />
-
 # TraceML
 
 **Catch wasted GPU time during live PyTorch training.**
