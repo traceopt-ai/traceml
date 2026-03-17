@@ -451,6 +451,17 @@ traceml run fine_tune_nlp.py --nproc-per-node=4
 
 ---
 
+### Running without TraceML instrumentation
+
+To run your script natively (bypassing all TraceML telemetry for a baseline comparison), use the `--disable-traceml` flag:
+
+```bash
+traceml run fine_tune_nlp.py --disable-traceml
+```
+
+
+---
+
 ## Next steps
 
 - Read the [Quickstart](quickstart.md) for plain PyTorch training loops
