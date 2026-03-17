@@ -136,10 +136,10 @@ See the Lightning docs for the full setup.
 
 ## Run modes
 
-### `traceml run train.py`
+#### `traceml run train.py`
 Default mode for live bottleneck diagnosis.
 
-### `traceml deep train.py`
+#### `traceml deep train.py`
 Adds per-layer timing and memory signals for deeper inspection.
 
 Use `run` by default. Use `deep` only when you need layer-level root cause.
@@ -194,6 +194,7 @@ If TraceML caught a slowdown for you, please open an issue and include:
 - a minimal repro if possible
 
 📧 Email: abhinav@traceopt.ai
+
 📋 User Survey: https://forms.gle/KwPSLaPmJnJjoVXSA
 
 ---
