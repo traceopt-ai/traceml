@@ -31,6 +31,7 @@ def read_traceml_env() -> dict:
     """
     return {
         "mode": os.environ.get("TRACEML_MODE", "cli"),
+        "profile": os.environ.get("TRACEML_PROFILE", "run"),
         "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
@@ -78,6 +79,7 @@ def main() -> None:
     try:
         settings = TraceMLSettings(
             mode=cfg["mode"],
+            profile=cfg["profile"],
             render_interval_sec=cfg["interval"],
             num_display_layers=cfg["num_display_layers"],
             enable_logging=cfg["enable_logging"],

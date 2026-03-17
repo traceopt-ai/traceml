@@ -18,7 +18,7 @@ from rich.table import Table
 from traceml.aggregator.display_drivers.layout import SYSTEM_LAYOUT
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.utils.formatting import fmt_mem_ratio, fmt_percent
+from traceml.utils.formatting import fmt_mem_new, fmt_mem_ratio, fmt_percent
 
 from .compute import SystemMetricsComputer
 
@@ -91,28 +91,40 @@ class SystemRenderer(BaseRenderer):
                 "[bold green]GPU[/bold green]", "[red]Not available[/red]"
             )
         else:
-            avg = data["gpu_util_total"] / max(data["gpu_count"], 1)
+            util_total = data.get("gpu_util_total")
+            avg = (
+                util_total / max(data["gpu_count"], 1)
+                if util_total is not None
+                else None
+            )
+            util_str = fmt_percent(avg) if avg is not None else "N/A"
+
+            skew = data.get("gpu_util_skew")
+            if skew is not None:
+                util_str = f"{util_str} (Δ {skew:.1f}%)"
+
             grid.add_row(
-                f"[bold green]GPU UTIL[/bold green] {fmt_percent(avg)}",
+                f"[bold green]GPU UTIL[/bold green] {util_str}",
                 f"[bold green]GPU MEM[/bold green] "
                 f"{fmt_mem_ratio(data['gpu_mem_used'], data['gpu_mem_total'])}",
             )
 
             temp = data.get("gpu_temp_max")
-            pu = data.get("gpu_power_usage")
-            pl = data.get("gpu_power_limit")
-
             temp_str = (
                 f"[bold green]GPU TMP[/bold green] {temp:.1f}°C"
                 if temp is not None
                 else "[bold green]GPU TMP[/bold green] N/A"
             )
-            power_str = (
-                f"[bold green]GPU PWR[/bold green] {pu:.1f}/{pl:.1f}W"
-                if pu is not None and pl is not None
-                else "[bold green]GPU PWR[/bold green] N/A"
+
+            headroom = data.get("gpu_mem_headroom_min")
+            headroom_idx = data.get("gpu_mem_headroom_min_idx")
+            headroom_str = (
+                f"[bold green]GPU HDRM[/bold green] "
+                f"gpu{headroom_idx}: {fmt_mem_new(headroom)}"
+                if headroom is not None and headroom_idx is not None
+                else "[bold green]GPU HDRM[/bold green] N/A"
             )
-            grid.add_row(temp_str, power_str)
+            grid.add_row(temp_str, headroom_str)
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 100)

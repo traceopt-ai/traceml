@@ -39,13 +39,22 @@ from traceml.utils.patches.forward_auto_timer_patch import (
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.timing import timed_region
 
-TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
+
+def _traceml_disabled() -> bool:
+    return os.environ.get("TRACEML_DISABLED", "0") == "1"
+
+
+def _traceml_profile() -> str:
+    return (os.environ.get("TRACEML_PROFILE", "run") or "run").strip().lower()
+
+
 # NOTE:
 # We intentionally patch torch.utils.data.DataLoader.__iter__ at import time.
 # This is a lightweight, observational patch used to infer batch metadata and,
 # dataloader fetch time.It is idempotent and safe to import multiple times.
 
-if not TRACEML_DISABLED:
+
+if not _traceml_disabled():
     patch_dataloader()
     patch_forward()
     patch_backward()
@@ -76,9 +85,10 @@ def trace_step(model: nn.Module):
 
     """
 
-    if TRACEML_DISABLED:
+    if _traceml_disabled():
         yield
         return
+
     mem_tracker = StepMemoryTracker(model)
     step_completed = False
 
@@ -137,8 +147,9 @@ def trace_model_instance(
         trace_layer_backward_time: attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
     """
-    if TRACEML_DISABLED:
+    if _traceml_disabled() or _traceml_profile() != "deep":
         return
+
     try:
         if not isinstance(model, nn.Module):
             raise TypeError("trace_model_instance expects an nn.Module.")
@@ -207,12 +218,9 @@ def trace_time(
     use_gpu : bool, optional
         If True, records CUDA timing when available.
     """
-    if TRACEML_DISABLED:
+    if _traceml_disabled():
+        return lambda func: func
 
-        def decorator(func: Callable):
-            return func
-
-        return decorator
     if scope not in ("step", "global"):
         raise ValueError(
             f"Invalid scope '{scope}'. " "Expected 'step' or 'global'."

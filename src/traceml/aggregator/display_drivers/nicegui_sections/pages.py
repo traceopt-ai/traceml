@@ -29,20 +29,25 @@ from .step_memory_section import (
 from .system_section import build_system_section, update_system_section
 
 
-def build_top_tabs(active: str):
+def build_top_tabs(active: str, show_layers: bool):
     """Shared top navigation tabs. `active` ∈ {"overview", "layers"}."""
     with ui.row().classes("w-full px-4 pt-2"):
         with ui.tabs().classes("text-lg") as tabs:
             overview = ui.tab("Overview")
-            layers = ui.tab("Layer-wise")
+            layers = ui.tab("Layer-wise") if show_layers else None
 
-        tabs.value = overview if active == "overview" else layers
+        tabs.value = (
+            overview if active != "layers" or not show_layers else layers
+        )
         overview.on("click", lambda: ui.navigate.to("/"))
-        layers.on("click", lambda: ui.navigate.to("/layers"))
+        if show_layers and layers is not None:
+            layers.on("click", lambda: ui.navigate.to("/layers"))
 
 
 def define_pages(cls):
     """Attach the NiceGUI pages to the UI server."""
+
+    deep_enabled = getattr(cls._settings, "profile", "run") == "deep"
 
     @ui.page("/")
     def main_page():
@@ -67,7 +72,7 @@ def define_pages(cls):
             "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
         ).style("color:#d47a00;")
 
-        build_top_tabs(active="overview")
+        build_top_tabs(active="overview", show_layers=deep_enabled)
 
         with ui.row().classes(
             "mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"
@@ -107,35 +112,43 @@ def define_pages(cls):
         if not cls._ui_ready:
             cls._ui_ready = True
 
-    @ui.page("/layers")
-    def layer_page():
-        ui.label("TraceML").classes(
-            "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
-        ).style("color:#d47a00;")
+    if deep_enabled:
 
-        build_top_tabs(active="layers")
+        @ui.page("/layers")
+        def layer_page():
+            ui.label("TraceML").classes(
+                "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
+            ).style("color:#d47a00;")
 
-        with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
-            with ui.column().classes("w-[54%]"):
-                cards = build_layer_memory_table_section()
-                cls.subscribe_layout(
-                    LAYER_COMBINED_MEMORY_LAYOUT,
-                    cards,
-                    update_layer_memory_table_section,
-                )
+            build_top_tabs(active="layers", show_layers=True)
 
-            with ui.column().classes("w-[44%]"):
-                cards = build_layer_timer_table_section()
-                cls.subscribe_layout(
-                    LAYER_COMBINED_TIMER_LAYOUT,
-                    cards,
-                    update_layer_timer_table_section,
-                )
+            with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
+                with ui.column().classes("w-[54%]"):
+                    cards = build_layer_memory_table_section()
+                    cls.subscribe_layout(
+                        LAYER_COMBINED_MEMORY_LAYOUT,
+                        cards,
+                        update_layer_memory_table_section,
+                    )
 
-        # Optional:
-        # If you want /layers to work when opened directly (without visiting / first),
-        # keep this. Otherwise remove it.
-        cls.ensure_ui_timer(1.0)
+                with ui.column().classes("w-[44%]"):
+                    cards = build_layer_timer_table_section()
+                    cls.subscribe_layout(
+                        LAYER_COMBINED_TIMER_LAYOUT,
+                        cards,
+                        update_layer_timer_table_section,
+                    )
 
-        if not cls._ui_ready:
-            cls._ui_ready = True
+            # Optional:
+            # If you want /layers to work when opened directly (without visiting / first),
+            # keep this. Otherwise remove it.
+            cls.ensure_ui_timer(1.0)
+
+            if not cls._ui_ready:
+                cls._ui_ready = True
+
+    else:
+
+        @ui.page("/layers")
+        def layer_page_disabled():
+            ui.navigate.to("/")

@@ -23,8 +23,11 @@ class SystemCLISnapshot:
     gpu_count: int
 
     gpu_util_total: Optional[float]
+    gpu_util_skew: Optional[float]
     gpu_mem_used: Optional[float]
     gpu_mem_total: Optional[float]
+    gpu_mem_headroom_min: Optional[float]
+    gpu_mem_headroom_min_idx: Optional[int]
 
     gpu_temp_max: Optional[float]
     gpu_power_usage: Optional[float]
@@ -43,6 +46,9 @@ class SystemCLISnapshot:
             "gpu_temp_max": self.gpu_temp_max,
             "gpu_power_usage": self.gpu_power_usage,
             "gpu_power_limit": self.gpu_power_limit,
+            "gpu_util_skew": self.gpu_util_skew,
+            "gpu_mem_headroom_min": self.gpu_mem_headroom_min,
+            "gpu_mem_headroom_min_idx": self.gpu_mem_headroom_min_idx,
         }
 
 
@@ -182,10 +188,32 @@ class SystemMetricsComputer:
             power_total = 0.0
             power_limit_total = 0.0
 
-            for g in gpu_rows:
-                util_total += float(g["util"] or 0.0)
-                mem_used_total += float(g["mem_used_bytes"] or 0.0)
-                mem_total_total += float(g["mem_total_bytes"] or 0.0)
+            util_min: Optional[float] = None
+            util_max: Optional[float] = None
+            headroom_min: Optional[float] = None
+            headroom_min_idx: Optional[int] = None
+
+            for idx, g in enumerate(gpu_rows):
+                util = float(g["util"] or 0.0)
+                mem_used = float(g["mem_used_bytes"] or 0.0)
+                mem_total = float(g["mem_total_bytes"] or 0.0)
+
+                util_total += util
+                mem_used_total += mem_used
+                mem_total_total += mem_total
+
+                util_min = util if util_min is None else min(util_min, util)
+                util_max = util if util_max is None else max(util_max, util)
+
+                if mem_total > 0.0:
+                    headroom = max(mem_total - mem_used, 0.0)
+                    if headroom_min is None or headroom < headroom_min:
+                        headroom_min = headroom
+                        headroom_min_idx = (
+                            int(g["gpu_idx"])
+                            if g["gpu_idx"] is not None
+                            else idx
+                        )
 
                 temp_val = float(g["temperature_c"] or 0.0)
                 if temp_val > temp_max:
@@ -193,6 +221,12 @@ class SystemMetricsComputer:
 
                 power_total += float(g["power_usage_w"] or 0.0)
                 power_limit_total += float(g["power_limit_w"] or 0.0)
+
+            gpu_util_skew = (
+                util_max - util_min
+                if util_min is not None and util_max is not None
+                else None
+            )
         else:
             util_total = None
             mem_used_total = None
@@ -200,6 +234,9 @@ class SystemMetricsComputer:
             temp_max = None
             power_total = None
             power_limit_total = None
+            gpu_util_skew = None
+            headroom_min = None
+            headroom_min_idx = None
 
         return SystemCLISnapshot(
             cpu=float(latest["cpu_percent"] or 0.0),
@@ -208,8 +245,11 @@ class SystemMetricsComputer:
             gpu_available=bool(latest["gpu_available"] or False),
             gpu_count=int(latest["gpu_count"] or 0),
             gpu_util_total=util_total,
+            gpu_util_skew=gpu_util_skew,
             gpu_mem_used=mem_used_total,
             gpu_mem_total=mem_total_total,
+            gpu_mem_headroom_min=headroom_min,
+            gpu_mem_headroom_min_idx=headroom_min_idx,
             gpu_temp_max=temp_max,
             gpu_power_usage=power_total,
             gpu_power_limit=power_limit_total,
@@ -233,8 +273,11 @@ class SystemMetricsComputer:
             gpu_available=False,
             gpu_count=0,
             gpu_util_total=None,
+            gpu_util_skew=None,
             gpu_mem_used=None,
             gpu_mem_total=None,
+            gpu_mem_headroom_min=None,
+            gpu_mem_headroom_min_idx=None,
             gpu_temp_max=None,
             gpu_power_usage=None,
             gpu_power_limit=None,
@@ -281,9 +324,8 @@ class SystemMetricsComputer:
         gpu_avg = np.zeros(n, dtype=np.float64)
         gpu_delta = np.zeros(n, dtype=np.float64)
         gpu_mem_worst = np.zeros(n, dtype=np.float64)
+        gpu_mem_headroom_min = np.zeros(n, dtype=np.float64)
         temp_max = np.zeros(n, dtype=np.float64)
-
-        max_gpu_capacity = 0.0
 
         for i, sample in enumerate(samples):
             key = (sample["rank"], sample["seq"])
@@ -300,12 +342,17 @@ class SystemMetricsComputer:
                 gpu_mem_worst[i] = max(mem_useds)
                 temp_max[i] = max(temps)
 
-                if i == n - 1 and mem_totals:
-                    max_gpu_capacity = max(mem_totals)
+                headrooms = [
+                    max(mt - mu, 0.0)
+                    for mu, mt in zip(mem_useds, mem_totals)
+                    if mt > 0.0
+                ]
+                gpu_mem_headroom_min[i] = min(headrooms) if headrooms else 0.0
             else:
                 gpu_avg[i] = 0.0
                 gpu_delta[i] = 0.0
                 gpu_mem_worst[i] = 0.0
+                gpu_mem_headroom_min[i] = 0.0
                 temp_max[i] = 0.0
 
         cpu_p50 = float(np.percentile(cpu_hist, 50)) if cpu_hist.size else 0.0
@@ -361,9 +408,7 @@ class SystemMetricsComputer:
             "gpu_mem": {
                 "now": float(gpu_mem_worst[-1]),
                 "p95": mem_p95,
-                "headroom": max(
-                    max_gpu_capacity - float(gpu_mem_worst[-1]), 0.0
-                ),
+                "headroom": float(gpu_mem_headroom_min[-1]),
             },
             "temp": {
                 "now": temp_now,

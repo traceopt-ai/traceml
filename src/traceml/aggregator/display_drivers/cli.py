@@ -81,6 +81,9 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._logger = logger
         self._store = store
         self._settings = settings
+        self._deep_profile = (
+            getattr(self._settings, "profile", "run") == "deep"
+        )
 
         self._console = Console()
         self._layout = Layout(name=ROOT_LAYOUT)
@@ -93,16 +96,22 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._renderers: List[BaseRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(remote_store=store),
-            LayerCombinedMemoryRenderer(
-                remote_store=store, top_n_layers=settings.num_display_layers
-            ),
-            LayerCombinedTimeRenderer(
-                remote_store=store, top_n_layers=settings.num_display_layers
-            ),
             StepCombinedRenderer(db_path=self._settings.db_path),
             StepMemoryRenderer(remote_store=store),
-            StdoutStderrRenderer(remote_store=store),  # CLI-only
+            StdoutStderrRenderer(remote_store=store),
         ]
+
+        if self._deep_profile:
+            self._renderers += [
+                LayerCombinedMemoryRenderer(
+                    remote_store=store,
+                    top_n_layers=settings.num_display_layers,
+                ),
+                LayerCombinedTimeRenderer(
+                    remote_store=store,
+                    top_n_layers=settings.num_display_layers,
+                ),
+            ]
 
     # -------------------------
     # Lifecycle
@@ -163,20 +172,26 @@ class CLIDisplayDriver(BaseDisplayDriver):
         )
 
         dashboard = self._layout["dashboard"]
-        dashboard.split_column(
-            Layout(name="upper_row", ratio=3),
-            Layout(name="middle_row", ratio=6),
-            Layout(name="layer_row", ratio=5),
-        )
+
+        if self._deep_profile:
+            dashboard.split_column(
+                Layout(name="upper_row", ratio=3),
+                Layout(name="middle_row", ratio=6),
+                Layout(name="layer_row", ratio=5),
+            )
+            dashboard["layer_row"].split_row(
+                Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=8),
+                Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
+            )
+        else:
+            dashboard.split_column(
+                Layout(name="upper_row", ratio=3),
+                Layout(name="middle_row", ratio=6),
+            )
 
         dashboard["upper_row"].split_row(
             Layout(name=SYSTEM_LAYOUT, ratio=4),
             Layout(name=PROCESS_LAYOUT, ratio=5),
-        )
-
-        dashboard["layer_row"].split_row(
-            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=8),
-            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
         )
 
         dashboard["middle_row"].split_row(
@@ -196,15 +211,16 @@ class CLIDisplayDriver(BaseDisplayDriver):
         dashboard[PROCESS_LAYOUT].update(
             Panel(Text("Waiting for Process Metrics...", justify="center"))
         )
-        dashboard[LAYER_COMBINED_MEMORY_LAYOUT].update(
-            Panel(Text("Waiting for Layer Memory...", justify="center"))
-        )
-        dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
-            Panel(Text("Waiting for Layer Timing...", justify="center"))
-        )
         dashboard[MODEL_MEMORY_LAYOUT].update(
             Panel(Text("Waiting for Step Memory...", justify="center"))
         )
+        if self._deep_profile:
+            dashboard[LAYER_COMBINED_MEMORY_LAYOUT].update(
+                Panel(Text("Waiting for Layer Memory...", justify="center"))
+            )
+            dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
+                Panel(Text("Waiting for Layer Timing...", justify="center"))
+            )
 
         self._layout[STDOUT_STDERR_LAYOUT].update(
             Panel(

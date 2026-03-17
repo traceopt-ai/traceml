@@ -89,6 +89,7 @@ class TraceMLRuntime:
         config.session_id = self._settings.session_id
 
         self.mode = self._settings.mode
+        self.profile = getattr(self._settings, "profile", "run")
 
         setup_error_logger()
         self._logger = get_error_logger("TraceMLRuntime")
@@ -119,27 +120,35 @@ class TraceMLRuntime:
 
     def _build_samplers(self) -> List[BaseSampler]:
         """
-        Build default samplers for this rank.
-
-        SystemSampler only runs on rank0 to avoid duplicating host-level metrics.
+        Build samplers for this rank based on profile.
+        - run: system + process + step + stdout/stderr
+        - deep: run + layerwise memory/time samplers
         """
         is_ddp, local_rank, _ = get_ddp_info()
         samplers: List[BaseSampler] = []
 
+        # Host/system metrics only once (rank 0) in DDP
         if not (is_ddp and local_rank != 0):
             samplers.append(SystemSampler())
 
+        # Core bottleneck profile
         samplers += [
             ProcessSampler(),
-            LayerMemorySampler(),
-            LayerForwardMemorySampler(),
-            LayerBackwardMemorySampler(),
-            LayerForwardTimeSampler(),
-            LayerBackwardTimeSampler(),
             StepTimeSampler(),
             StepMemorySampler(),
             StdoutStderrSampler(),
         ]
+
+        # Deep profile adds layerwise telemetry
+        if self.profile == "deep":
+            samplers += [
+                LayerMemorySampler(),
+                LayerForwardMemorySampler(),
+                LayerBackwardMemorySampler(),
+                LayerForwardTimeSampler(),
+                LayerBackwardTimeSampler(),
+            ]
+
         return samplers
 
     def _attach_senders(self) -> None:

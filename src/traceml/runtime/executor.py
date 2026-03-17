@@ -86,6 +86,7 @@ def read_traceml_env():
     """
     return {
         "script_path": os.environ["TRACEML_SCRIPT_PATH"],
+        "profile": os.environ.get("TRACEML_PROFILE", "run"),
         "mode": os.environ.get("TRACEML_MODE", "cli"),
         "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "") == "1",
@@ -133,6 +134,7 @@ def start_runtime(cfg):
     try:
         settings = TraceMLSettings(
             mode=cfg["mode"],
+            profile=cfg["profile"],
             sampler_interval_sec=cfg["interval"],
             enable_logging=cfg["enable_logging"],
             logs_dir=cfg["logs_dir"],

@@ -34,7 +34,7 @@ Check that the CLI is available:
 traceml --help
 ```
 
-You should see the `run` command.
+You should see the `run` and `deep` command.
 
 ### Optional extras
 
@@ -126,17 +126,8 @@ traceml run train.py
 
 During training, TraceML opens a live terminal view alongside your logs.
 
-![TraceML terminal view](assets/cli_demo.png)
-
 At the end of the run, it prints a compact summary you can review or share.
 
-```text
-Suspected bottleneck: input stall
-Median step time: 412 ms
-Step-time drift: +9.8%
-Worst-rank skew: 14%
-Memory trend: +1.2 GB over run
-```
 
 ### What TraceML helps you spot
 
@@ -158,7 +149,6 @@ traceml run train.py --mode=dashboard
 
 The UI runs locally at `http://localhost:8765`.
 
-![TraceML local UI](assets/local_ui.png)
 
 Use the local UI when you want:
 
@@ -242,7 +232,6 @@ def main():
         device = torch.device("cpu")
 
     model = MyModel().to(device)
-    trace_model_instance(model)  # optional
 
     model = torch.nn.parallel.DistributedDataParallel(
         model,
@@ -317,14 +306,20 @@ For full details, see [huggingface.md](huggingface.md).
 
 ---
 
-## 8) Optional: model-level hooks
+## 8) Deep mode (optional): model-level hooks
 
-If you want additional model-level timing and memory context, enable lightweight hooks:
+Use model-level hooks only for deep per-layer analysis.
 
 ```python
 from traceml.decorators import trace_model_instance
 
 trace_model_instance(model)
+```
+
+Launch deep mode when using these hooks:
+
+```bash
+traceml deep train.py
 ```
 
 Use this together with `trace_step(model)`.
