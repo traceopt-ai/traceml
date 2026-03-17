@@ -109,7 +109,7 @@ Use `trace_step(model)` around your training step.
 
 ### Hugging Face Trainer
 ```python
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 
 trainer = TraceMLTrainer(
     model=model,
@@ -125,12 +125,12 @@ See [`docs/huggingface.md`](docs/huggingface.md).
 ### PyTorch Lightning
 ```python
 import lightning as L
-from traceml.utils.lightning import TraceMLCallback
+from traceml.integrations.lightning import TraceMLCallback
 
 trainer = L.Trainer(callbacks=[TraceMLCallback()])
 ```
 
-See the Lightning docs for the full setup.
+See [docs/lightning.md](docs/lightning.md) for the full setup.
 
 ---
 

@@ -229,9 +229,20 @@ A few `Trainer` settings interact with TraceML.
 | `enable_model_summary=False`| Optional | You can disable Lightning's textual model summary to keep terminal output cleaner. |
 | `logger=False` | Yes (for local debug) | Disables TensorBoard/CSV loggers if you only need TraceML. |
 
+### Bypass instrumentation for a baseline run
+
+To run without TraceML telemetry (e.g., for benchmarking overhead), use the `--disable-traceml` flag:
+
+```bash
+traceml run train_lightning.py --disable-traceml
+```
+
+This runs your script natively via `torchrun`, with zero TraceML overhead.
+
 ---
 
 ## Next steps
 
 - Read the [Quickstart](quickstart.md) for plain PyTorch training loops
+- Read [huggingface.md](huggingface.md) for the Hugging Face Trainer integration
 - [Open an issue](https://github.com/traceopt-ai/traceml/issues) if you hit a problem not covered here

@@ -280,7 +280,7 @@ You will see:
 If you use `transformers.Trainer`, replace it with `TraceMLTrainer`.
 
 ```python
-from traceml.hf_decorators import TraceMLTrainer
+from traceml.integrations.huggingface import TraceMLTrainer
 from transformers import TrainingArguments
 
 training_args = TrainingArguments(output_dir="./output", num_train_epochs=3)
@@ -335,6 +335,8 @@ Use model-level hooks when:
 
 ## 9) Useful CLI flags
 
+### `traceml run` flags
+
 | Flag | Default | Description |
 |---|---|---|
 | `--mode` | `cli` | `cli` for terminal view, `dashboard` for local UI |
@@ -344,11 +346,21 @@ Use model-level hooks when:
 | `--logs-dir` | `./logs` | Directory for saved logs |
 | `--num-display-layers` | `5` | Number of layers to show with model hooks |
 | `--no-history` | off | Disable run history |
+| `--disable-traceml` | off | Bypass TraceML and run the script natively via `torchrun` |
+
+### `traceml inspect`
+
+Decode and print binary `.msgpack` telemetry log files for debugging:
+
+```bash
+traceml inspect path/to/telemetry.msgpack
+```
 
 Full reference:
 
 ```bash
 traceml run --help
+traceml inspect --help
 ```
 
 ---
