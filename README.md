@@ -1,20 +1,22 @@
+<div align="center">
+
+<img src="docs/assets/traceopt_logo.png" alt="TraceML Logo" width="300" />
+
 # TraceML
 
-**Catch wasted GPU time during live PyTorch training**
+**Catch wasted GPU time during live PyTorch training.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
+[![GitHub issues](https://img.shields.io/github/issues/traceopt-ai/traceml)](https://github.com/traceopt-ai/traceml/issues)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
-TraceML is a lightweight bottleneck finder for PyTorch training.
-It helps you catch input stalls, DDP rank imbalance, unstable step times, and memory drift while the run is still in progress.
+[**Quickstart**](docs/quickstart.md) • [**Examples**](src/examples)  • [**Contributing**](#contributing)
 
-**Works today:** Single GPU, single-node DDP, Hugging Face Trainer, PyTorch Lightning
+</div>
 
-**Not yet:** Multi-node DDP, FSDP / TP / PP
-
----
 
 
 
