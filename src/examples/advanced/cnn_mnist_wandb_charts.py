@@ -2,25 +2,28 @@
 CNN-MNIST with TraceML + W&B: Summary *and* Charts
 ====================================================
 
-Extends ``cnn_mnist_wandb.py`` with ``log_as_charts=True`` so TraceML
-metrics appear in **two places** in the W&B UI:
+Shows the **correct** way to push TraceML metrics to W&B when using
+``traceml run``.
 
-  - **Overview → Summary panel** (scalar values, queryable across runs)
-  - **Charts tab** (visual panels, comparable side-by-side in Reports)
+Why ``TRACEML_WANDB_AUTO=1`` does not work for charts
+-------------------------------------------------------
+``traceml run`` launches two **separate processes**:
 
-Both destinations are populated from the same ``*_summary_card.json``.
-The difference is just one extra keyword argument.
+* **Executor** (your script, this process) — ``wandb.run`` is active here.
+* **Aggregator** (separate subprocess) — collects telemetry via TCP.
+  ``wandb.run`` is *always* ``None`` in the aggregator process; setting
+  ``TRACEML_WANDB_AUTO=1`` cannot reach it.
 
-Where to look in W&B
----------------------
-After the run completes:
+The fix: call ``upload_traceml_summary()`` from inside your script (the
+executor process), BEFORE ``wandb.finish()``.  It reads the session DB the
+aggregator has been writing, generates the summary cards, and uploads them
+while the W&B run is still active.
 
-1. **Charts tab** → scroll past ``train/`` section → look for a
-   ``traceml/`` section with panels like ``traceml/system/cpu_avg_percent``,
-   ``traceml/step_time/worst_avg_step_ms``, etc.
-2. **Overview tab → Summary** → all ``traceml/`` keys listed as scalars.
-3. **Artifacts tab** (left sidebar) → ``traceml_summary`` artifact →
-   open ``traceml_summary.json`` for the full per-rank breakdown.
+Where to look in W&B after the run
+------------------------------------
+1. **Charts tab** — a ``traceml/`` section with panels for each metric.
+2. **Overview → Summary** — the same keys as queryable scalars.
+3. **Artifacts tab** — ``traceml_summary`` artifact with full JSON.
 
 Prerequisites
 -------------
@@ -33,42 +36,21 @@ Run
 ---
 ::
 
-    # Standalone (no live TraceML dashboard):
-    TRACEML_SUMMARY_JSON=<path>_summary_card.json \\
-        python src/examples/advanced/cnn_mnist_wandb_charts.py
-
-    # Full TraceML live dashboard + W&B:
-    TRACEML_WANDB_AUTO=1 \\
-        traceml run src/examples/advanced/cnn_mnist_wandb_charts.py
+    traceml run src/examples/advanced/cnn_mnist_wandb_charts.py
 """
-
-import os
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import wandb
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from traceml.decorators import trace_model_instance, trace_step
-
-# ── Optional W&B import ────────────────────────────────────────────────────
-try:
-    import wandb
-
-    from traceml.integrations.wandb import log_traceml_summary_to_wandb
-
-    HAS_WANDB = True
-except ImportError:
-    HAS_WANDB = False
-    print(
-        "[example] wandb not installed — skipping W&B upload.\n"
-        "          Install with: pip install 'traceml-ai[wandb]'"
-    )
-
+from traceml.integrations.wandb import upload_traceml_summary
 
 # ---------------------------------------------------------------------------
-# Model (same as cnn_mnist.py)
+# Model
 # ---------------------------------------------------------------------------
 
 
@@ -101,19 +83,18 @@ class MNISTCNN(nn.Module):
 
 def main():
     # ── W&B init ─────────────────────────────────────────────────────────────
-    wandb_run = None
-    if HAS_WANDB:
-        wandb_run = wandb.init(
-            project="traceml-examples",
-            name="cnn-mnist-traceml-charts",
-            config={
-                "architecture": "MNISTCNN",
-                "dataset": "MNIST",
-                "batch_size": 64,
-                "optimizer": "Adam",
-                "lr": 1e-3,
-            },
-        )
+    # Must be called BEFORE training so the run is active when we upload.
+    wandb_run = wandb.init(
+        project="traceml-examples",
+        name="cnn-mnist-traceml-charts",
+        config={
+            "architecture": "MNISTCNN",
+            "dataset": "MNIST",
+            "batch_size": 64,
+            "optimizer": "Adam",
+            "lr": 1e-3,
+        },
+    )
 
     # ── Dataset & model ───────────────────────────────────────────────────────
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -151,48 +132,39 @@ def main():
 
         if step % 50 == 0:
             print(f"Step {step}, loss={loss.item():.4f}")
-
-            # Live training loss → Charts tab (time series)
-            if wandb_run is not None:
-                wandb.log({"train/loss": loss.item()}, step=step)
+            # Live loss → Charts tab (time series, one point per step)
+            wandb.log({"train/loss": loss.item()}, step=step)
 
         if step == 500:
             break
 
-    # ── W&B summary export — BOTH summary panel AND charts ───────────────────
-    if HAS_WANDB and wandb_run is not None:
-        summary_path = os.environ.get("TRACEML_SUMMARY_JSON", "")
+    # ── Upload TraceML summary to W&B ─────────────────────────────────────────
+    # Call BEFORE wandb.finish() while the run is still active.
+    #
+    # upload_traceml_summary():
+    #   - Reads the session DB written by the TraceML aggregator
+    #   - Generates summary cards in this process (where wandb.run is alive)
+    #   - Updates run.summary  → visible in Overview tab
+    #   - Calls wandb.log()    → visible in Charts tab  (log_as_charts=True)
+    #   - Uploads full JSON as a W&B Artifact
+    success = upload_traceml_summary(
+        run=wandb_run,
+        log_as_charts=True,
+    )
 
-        if summary_path:
-            success = log_traceml_summary_to_wandb(
-                summary_json_path=summary_path,
-                run=wandb_run,
-                log_as_charts=True,  # ← THIS is the new bit vs cnn_mnist_wandb.py
-                #
-                # log_as_charts=True does two things:
-                #   1. run.summary.update(flat)   → Overview tab  (always done)
-                #   2. run.log(flat, commit=True)  → Charts tab   (new)
-                #
-                # After the run finishes, go to the Charts tab and look for a
-                # "traceml/" section with bars/columns for each metric.
-            )
-            if success:
-                print(
-                    "[example] TraceML summary uploaded to W&B ✓\n"
-                    "          → Charts tab: look for 'traceml/' section\n"
-                    "          → Overview tab: Summary panel has all keys\n"
-                    "          → Artifacts tab: full JSON in 'traceml_summary'"
-                )
-            else:
-                print("[example] W&B upload skipped (see logs above).")
-        else:
-            print(
-                "[example] Set TRACEML_SUMMARY_JSON=<path>_summary_card.json\n"
-                "          to upload the TraceML summary to W&B.\n"
-                "          Or use: TRACEML_WANDB_AUTO=1 traceml run <script>"
-            )
+    if success:
+        print(
+            "[example] TraceML summary uploaded to W&B ✓\n"
+            "          → Charts tab: look for 'traceml/' metric section\n"
+            "          → Overview tab: Summary panel lists all keys\n"
+            "          → Artifacts: 'traceml_summary' contains full JSON"
+        )
+    else:
+        print(
+            "[example] TraceML W&B upload skipped or failed — see logs above."
+        )
 
-        wandb.finish()
+    wandb.finish()
 
 
 if __name__ == "__main__":

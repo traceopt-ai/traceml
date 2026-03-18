@@ -58,7 +58,7 @@ See ``docs/wandb.md`` for the full reference table.
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -358,6 +358,181 @@ def log_traceml_summary_to_wandb(
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             f"[TraceML] W&B export failed (training is unaffected): {exc}",
+            exc_info=True,
+        )
+        return False
+
+
+# ---------------------------------------------------------------------------
+# In-process upload  (use this when running via `traceml run`)
+# ---------------------------------------------------------------------------
+
+
+def upload_traceml_summary(
+    run: Any = None,
+    *,
+    log_as_charts: bool = False,
+    artifact_name: str = "traceml_summary",
+    artifact_type: str = "traceml",
+    logs_dir: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> bool:
+    """
+    Generate **and** upload the TraceML end-of-run summary to W&B from inside
+    the training script.
+
+    This is the **recommended API when using** ``traceml run``.  Call it after
+    your training loop and before ``wandb.finish()``.
+
+    Why this is needed
+    ------------------
+    ``traceml run`` launches two separate processes:
+
+    * **Executor** (your script, this process) — ``wandb.run`` is active here.
+    * **Aggregator** — collects telemetry via TCP, generates summary at shutdown.
+      ``wandb.run`` is *always* ``None`` in the aggregator, so
+      ``TRACEML_WANDB_AUTO=1`` cannot work from there.
+
+    ``upload_traceml_summary()`` reads the session DB that the aggregator has
+    been writing to, generates the summary cards **in-process**, and immediately
+    uploads them to the active W&B run — all without touching the aggregator.
+
+    Parameters
+    ----------
+    run:
+        Active ``wandb.Run`` object.  Defaults to ``wandb.run``.
+    log_as_charts:
+        If ``True``, also call ``wandb.log()`` so metrics appear as panels in
+        the **Charts** tab.  See ``WandbSummaryExporter.export`` for details.
+    artifact_name:
+        W&B Artifact name (default: ``\"traceml_summary\"``).
+    artifact_type:
+        W&B Artifact type (default: ``\"traceml\"``).
+    logs_dir:
+        Override the logs directory.  Defaults to the ``TRACEML_LOGS_DIR``
+        environment variable (set automatically by ``traceml run``).
+    session_id:
+        Override the session ID.  Defaults to ``TRACEML_SESSION_ID``
+        (set automatically by ``traceml run``).
+
+    Returns
+    -------
+    bool
+        ``True`` on success, ``False`` on any failure (never raises).
+
+    Example — inside your training script
+    --------------------------------------
+    ::
+
+        import wandb
+        from traceml.integrations.wandb import upload_traceml_summary
+
+        wandb.init(project=\"my-project\")
+
+        # ... training loop with trace_step(model) ...
+
+        # Call this BEFORE wandb.finish() so the run is still active.
+        upload_traceml_summary(log_as_charts=True)
+
+        wandb.finish()
+
+    Then run with::
+
+        traceml run train.py
+
+    Notes
+    -----
+    - The aggregator writes continuously to the session SQLite DB.  This
+      function reads that DB at the moment it is called — metrics from steps
+      completed before this call are captured; later steps are not.
+    - Safe to call even if TraceML is disabled or the DB does not exist yet:
+      failures are logged as warnings and return ``False``.
+    """
+    import os as _os  # noqa: PLC0415
+
+    try:
+        from traceml.aggregator.final_summary import (  # noqa: PLC0415
+            generate_summary,
+        )
+    except ImportError as exc:
+        logger.warning(
+            f"[TraceML] upload_traceml_summary: could not import "
+            f"generate_summary: {exc}"
+        )
+        return False
+
+    try:
+        # ── Resolve the session DB path from env vars ──────────────────────
+        _logs_dir = logs_dir or _os.environ.get("TRACEML_LOGS_DIR", "./logs")
+        _session_id = session_id or _os.environ.get("TRACEML_SESSION_ID", "")
+
+        if not _session_id:
+            logger.warning(
+                "[TraceML] upload_traceml_summary: TRACEML_SESSION_ID is not "
+                "set.  Are you running via `traceml run`?  If running the "
+                "script directly with `python`, call "
+                "log_traceml_summary_to_wandb() instead and pass the JSON path "
+                "explicitly."
+            )
+            return False
+
+        db_path = (
+            Path(_logs_dir).resolve()
+            / _session_id
+            / "aggregator"
+            / "telemetry"
+        )
+
+        if not db_path.parent.exists():
+            logger.warning(
+                f"[TraceML] upload_traceml_summary: aggregator directory not "
+                f"found at '{db_path.parent}'.  Has the aggregator started?"
+            )
+            return False
+
+        # ── Resolve the active W&B run ─────────────────────────────────────
+        _run = run
+        if _run is None:
+            try:
+                import wandb as _wandb  # noqa: PLC0415
+
+                _run = _wandb.run
+            except ImportError:
+                pass
+
+        if _run is None:
+            logger.warning(
+                "[TraceML] upload_traceml_summary: no active wandb.Run.  "
+                "Call wandb.init() before training."
+            )
+            return False
+
+        # ── Generate summary cards from the live DB, then upload ──────────
+        # generate_summary() writes the JSON card to disk AND (via log_as_charts
+        # / artifact) uploads to W&B in one shot.
+        generate_summary(
+            str(db_path),
+            wandb_run=_run,
+        )
+
+        # If the caller also wants charts, run the upload again with
+        # log_as_charts=True using the already-written JSON.
+        if log_as_charts:
+            summary_json = str(db_path) + "_summary_card.json"
+            if Path(summary_json).is_file():
+                log_traceml_summary_to_wandb(
+                    summary_json_path=summary_json,
+                    run=_run,
+                    log_as_charts=True,
+                    artifact_name=artifact_name,
+                    artifact_type=artifact_type,
+                )
+
+        return True
+
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            f"[TraceML] upload_traceml_summary failed (run unaffected): {exc}",
             exc_info=True,
         )
         return False
