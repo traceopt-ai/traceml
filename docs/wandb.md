@@ -10,15 +10,90 @@ Ship TraceML end-of-run summaries into your existing Weights & Biases experiment
 pip install "traceml-ai[wandb]"
 ```
 
-This pulls in `wandb>=0.16.0` as an optional dependency.  TraceML's core continues to work without it.
+This pulls in `wandb>=0.16.0` as an optional dependency. TraceML's core works without it.
+
+---
+
+## How it works
+
+`traceml run` launches **two separate processes**:
+
+- **Executor** — runs your training script (this is where `wandb.run` lives)
+- **Aggregator** — collects telemetry via TCP, maintains the session SQLite DB
+
+Because the aggregator is a separate subprocess, `wandb.run` is always `None` there. The W&B upload **must happen inside your script** (the executor process), before `wandb.finish()`.
+
+```
+traceml run train.py
+  ├─ Aggregator subprocess  ← writes telemetry DB continuously
+  └─ Executor subprocess    ← your script runs here, wandb.run is active ✓
+                               call upload_traceml_summary() here
+```
+
+---
+
+## Usage
+
+### Recommended — `upload_traceml_summary()` (works with `traceml run`)
+
+Call this inside your script, **after training, before `wandb.finish()`**:
+
+```python
+import wandb
+from traceml.integrations.wandb import upload_traceml_summary
+
+wandb.init(project="my-project", name="my-run")
+
+# ... training loop with trace_step(model) ...
+
+# Upload TraceML summary BEFORE wandb.finish()
+upload_traceml_summary(log_as_charts=True)
+
+wandb.finish()
+```
+
+Run with:
+
+```bash
+traceml run train.py
+```
+
+`upload_traceml_summary()` reads the session DB (path derived automatically from `TRACEML_LOGS_DIR` / `TRACEML_SESSION_ID` env vars set by `traceml run`), generates the summary in-process, and pushes to W&B.
+
+---
+
+### `log_as_charts` — control where metrics appear
+
+| `log_as_charts` | Where metrics appear |
+|---|---|
+| `False` (default) | **Overview → Summary** (scalar values, runs table, sweep comparison) |
+| `True` | **Overview → Summary** + **Charts tab** (dot per run, useful for cross-run comparison) |
+
+Charts tab dots are end-of-run aggregates — one dot per run. Compare them with W&B bar charts across multiple experiment runs.
+
+---
+
+### Alternative — explicitly from a JSON file
+
+If you have an existing `*_summary_card.json` (e.g. from a previous run):
+
+```python
+import wandb
+from traceml.integrations.wandb import log_traceml_summary_to_wandb
+
+with wandb.init(project="my-project") as run:
+    log_traceml_summary_to_wandb(
+        summary_json_path="./logs/<session>/aggregator/telemetry_summary_card.json",
+        run=run,
+        log_as_charts=True,
+    )
+```
 
 ---
 
 ## What gets logged
 
 ### Flat metrics → `run.summary`
-
-Every metric is logged to [`run.summary`](https://docs.wandb.ai/guides/track/log/log-summary/) so it is **queryable and comparable across runs** in the W&B UI.
 
 | W&B metric key | Units | Description |
 |---|---|---|
@@ -31,7 +106,7 @@ Every metric is logged to [`run.summary`](https://docs.wandb.ai/guides/track/log
 | `traceml/system/gpu_available` | bool | GPU detected |
 | `traceml/system/gpu_count` | int | Number of GPUs |
 | `traceml/system/gpu_util_avg_percent` | % | Avg GPU utilisation |
-| `traceml/system/gpu_util_peak_percent`| % | Peak GPU utilisation |
+| `traceml/system/gpu_util_peak_percent` | % | Peak GPU utilisation |
 | `traceml/system/gpu_mem_avg_gb` | GB | Avg GPU memory used |
 | `traceml/system/gpu_mem_peak_gb` | GB | Peak GPU memory used |
 | `traceml/system/gpu_temp_avg_c` | °C | Avg GPU temperature |
@@ -41,114 +116,57 @@ Every metric is logged to [`run.summary`](https://docs.wandb.ai/guides/track/log
 | `traceml/step_time/training_steps` | int | Total training steps |
 | `traceml/step_time/ranks_seen` | int | DDP ranks observed |
 | `traceml/step_time/worst_avg_step_ms` | ms | Slowest rank avg step time |
-| `traceml/step_time/median_avg_step_ms`| ms | Median rank avg step time |
-| `traceml/step_time/worst_vs_median_pct`| % | Straggler gap (worst vs median) |
+| `traceml/step_time/median_avg_step_ms` | ms | Median rank avg step time |
+| `traceml/step_time/worst_vs_median_pct` | % | Straggler gap (worst vs median) |
 | `traceml/step_time/median_dataloader_ms` | ms | Median rank: dataloader time |
 | `traceml/step_time/median_forward_ms` | ms | Median rank: forward time |
-| `traceml/step_time/median_backward_ms`| ms | Median rank: backward time |
-| `traceml/step_time/median_optimizer_ms`| ms | Median rank: optimizer time |
-| `traceml/step_time/worst_dataloader_ms`| ms | Worst rank: dataloader time |
+| `traceml/step_time/median_backward_ms` | ms | Median rank: backward time |
+| `traceml/step_time/median_optimizer_ms` | ms | Median rank: optimizer time |
+| `traceml/step_time/worst_dataloader_ms` | ms | Worst rank: dataloader time |
 | `traceml/step_time/worst_forward_ms` | ms | Worst rank: forward time |
 | `traceml/step_time/worst_backward_ms` | ms | Worst rank: backward time |
-| `traceml/step_time/worst_optimizer_ms`| ms | Worst rank: optimizer time |
+| `traceml/step_time/worst_optimizer_ms` | ms | Worst rank: optimizer time |
 
-Keys with `None` values (e.g. GPU metrics on a CPU-only machine) are silently omitted.
+Keys with `None` values (e.g. GPU metrics on CPU-only machines) are silently omitted.
 
 ### Full JSON artifact
 
-The complete `*_summary_card.json` file (including per-rank breakdowns) is uploaded as a **W&B Artifact** named `traceml_summary` with type `"traceml"`.  You can browse it in the **Artifacts** tab of your W&B run.
-
----
-
-## Usage
-
-### Option A — Automatic (recommended with `traceml run`)
-
-Set `TRACEML_WANDB_AUTO=1` and call `wandb.init()` before training.  TraceML will pick up the active run and export the summary automatically at shutdown.
-
-```bash
-TRACEML_WANDB_AUTO=1 traceml run train.py
-```
-
-```python
-# train.py
-import wandb
-
-wandb.init(project="my-project", name="my-run")
-
-# ... your training loop with trace_step(model) ...
-
-wandb.finish()
-```
-
-No other changes to your code are needed.
-
----
-
-### Option B — Explicit API
-
-Call `generate_summary()` with `wandb_run` after training:
-
-```python
-import wandb
-from traceml.aggregator.final_summary import generate_summary
-
-wandb.init(project="my-project")
-
-# ... training ...
-
-generate_summary(
-    db_path="./logs/session_xyz.db",
-    wandb_run=wandb.run,
-)
-wandb.finish()
-```
-
----
-
-### Option C — Post-run, from file
-
-If you already have a `*_summary_card.json` file, upload it to any W&B run:
-
-```python
-import wandb
-from traceml.integrations.wandb import log_traceml_summary_to_wandb
-
-with wandb.init(project="my-project", name="post-hoc-upload") as run:
-    log_traceml_summary_to_wandb(
-        summary_json_path="./logs/session_xyz.db_summary_card.json",
-        run=run,
-    )
-```
+The full `*_summary_card.json` is uploaded as a W&B Artifact named `traceml_summary` (type `"traceml"`). Browse it in the **Artifacts** tab.
 
 ---
 
 ## Graceful failure
 
-The W&B integration is **fully optional** and **never crashes your run**:
+The integration is fully optional and **never crashes your run**:
 
-- If `wandb` is not installed → warning is printed, training continues normally.
-- If no active W&B run is found → warning is printed, nothing is uploaded.
-- If any W&B API call raises → exception is caught, logged as a warning, `False` is returned.
+- `wandb` not installed → warning logged, training continues
+- No active W&B run → warning logged, upload skipped
+- Any W&B API error → caught, logged as warning, returns `False`
 
 ---
 
-## Example
+## Examples
 
-See [`src/examples/advanced/cnn_mnist_wandb.py`](../src/examples/advanced/cnn_mnist_wandb.py) for a complete example combining TraceML step profiling with live W&B loss logging and end-of-run summary upload.
+| File | Description |
+|---|---|
+| [`cnn_mnist_wandb.py`](../src/examples/advanced/cnn_mnist_wandb.py) | Summary metrics only (Overview tab) |
+| [`cnn_mnist_wandb_charts.py`](../src/examples/advanced/cnn_mnist_wandb_charts.py) | Summary + Charts tab panels |
 
 ---
 
 ## FAQ
 
-**Does TraceML auto-upload to W&B without me doing anything?**
-No.  You must either set `TRACEML_WANDB_AUTO=1` (and call `wandb.init()` in your script) or call `log_traceml_summary_to_wandb()` / pass `wandb_run=` to `generate_summary()` explicitly.
+**Why does `TRACEML_WANDB_AUTO=1` not work?**
+The auto path runs in the aggregator subprocess, which has no `wandb.run`. Use `upload_traceml_summary()` in your script instead.
+
+**The metrics show as dots, not lines — is that right?**
+Yes. These are end-of-run aggregates — one value per run. W&B draws a line for time-series data; one run = one dot. Run multiple experiments and compare them in a bar chart or the runs table for a richer view.
 
 **Will this slow down training?**
-No.  The export happens only at shutdown, after the training loop finishes.
-
-**Can I rename the metrics?**
-The metric names are intentionally stable for cross-run comparison.  If you need custom names, call `wandb.run.summary.update({...})` with your preferred keys after `log_traceml_summary_to_wandb()`.
+No. The upload happens after the training loop exits, before `wandb.finish()`.
 
 **Does this work with DDP / multi-GPU?**
-Yes.  TraceML's summary already aggregates across ranks.  The W&B export runs only on the process that calls `generate_summary()` (rank 0 in normal operation).
+Yes. TraceML's summary aggregates across all ranks. Call `upload_traceml_summary()` once on rank 0.
+
+**Can I rename the `traceml/` metric keys?**
+The keys are intentionally stable for cross-run comparison. Call `wandb.run.summary.update({...})` with custom keys after `upload_traceml_summary()` if you need aliases.

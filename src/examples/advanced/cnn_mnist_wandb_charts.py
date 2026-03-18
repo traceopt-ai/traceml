@@ -96,7 +96,7 @@ def main():
         },
     )
 
-    # ── Dataset & model ───────────────────────────────────────────────────────
+    # Dataset & model
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     transform = transforms.Compose(
@@ -119,7 +119,7 @@ def main():
     opt = optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
 
-    # ── Training loop ─────────────────────────────────────────────────────────
+    # Training loop
     print("Starting training...")
     for step, (xb, yb) in enumerate(loader):
         with trace_step(model):
@@ -138,7 +138,7 @@ def main():
         if step == 500:
             break
 
-    # ── Upload TraceML summary to W&B ─────────────────────────────────────────
+    # Upload TraceML summary to W&B
     # Call BEFORE wandb.finish() while the run is still active.
     #
     # upload_traceml_summary():
