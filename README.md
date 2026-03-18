@@ -136,23 +136,20 @@ See [docs/lightning.md](docs/lightning.md) for the full setup.
 
 ```python
 import wandb
-from traceml.integrations.wandb import log_traceml_summary_to_wandb
+from traceml.integrations.wandb import upload_traceml_summary
 
 wandb.init(project="my-project", name="my-run")
 # ... training loop with trace_step(model) ...
 
-# Export end-of-run summary to W&B (metrics + artifact)
-log_traceml_summary_to_wandb(
-    summary_json_path="./logs/session.db_summary_card.json",
-    run=wandb.run,
-)
+# Call BEFORE wandb.finish() — reads the session DB and uploads to W&B
+upload_traceml_summary(log_as_charts=True)
 wandb.finish()
 ```
 
-Or set `TRACEML_WANDB_AUTO=1` to export automatically when using `traceml run`:
+Run with:
 
 ```bash
-TRACEML_WANDB_AUTO=1 traceml run train.py
+traceml run train.py
 ```
 
 See [`docs/wandb.md`](docs/wandb.md) for the full setup and metric schema.
