@@ -1,5 +1,4 @@
 import logging
-import os
 from typing import Any, Optional
 
 from traceml.aggregator.summaries.step_time import (
@@ -31,9 +30,9 @@ def generate_summary(
         logged to W&B as metrics (``run.summary``) and uploaded as an
         Artifact.  Defaults to ``None`` (no W&B export).
 
-        You can also set the environment variable ``TRACEML_WANDB_AUTO=1``
-        to automatically pick up the global ``wandb.run`` without passing it
-        explicitly here.
+        Use ``upload_traceml_summary()`` from
+        ``traceml.integrations.wandb`` as the recommended way to trigger
+        W&B export from inside your training script.
 
     Notes
     -----
@@ -46,34 +45,20 @@ def generate_summary(
     generate_system_summary_card(db_path)
     generate_step_time_summary_card(db_path)
 
-    # ── Optional W&B export ────────────────────────────────────────────────
-    # Triggered if the caller passes a run object, or if TRACEML_WANDB_AUTO=1
-    # and wandb has an active run (e.g. the user called wandb.init() earlier).
-    _wandb_run = wandb_run
-
-    if _wandb_run is None and os.environ.get("TRACEML_WANDB_AUTO") == "1":
-        try:
-            import wandb as _wandb  # noqa: PLC0415
-
-            _wandb_run = _wandb.run
-        except ImportError:
-            pass
-
-    if _wandb_run is not None:
+    # Optional W&B export
+    # Only triggered when the caller explicitly passes a wandb_run object.
+    # Use upload_traceml_summary() from traceml.integrations.wandb
+    # to trigger W&B export from inside a training script.
+    if wandb_run is not None:
         try:
             from traceml.integrations.wandb import (  # noqa: PLC0415
                 log_traceml_summary_to_wandb,
             )
 
-            # TRACEML_WANDB_CHARTS=1 → also call wandb.log() so metrics appear
-            # as chart panels in the W&B Charts tab (in addition to Overview).
-            _log_as_charts = os.environ.get("TRACEML_WANDB_CHARTS") == "1"
-
             summary_json_path = db_path + "_summary_card.json"
             log_traceml_summary_to_wandb(
                 summary_json_path=summary_json_path,
-                run=_wandb_run,
-                log_as_charts=_log_as_charts,
+                run=wandb_run,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(

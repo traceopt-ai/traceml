@@ -338,33 +338,3 @@ def test_generate_summary_no_wandb_run(tmp_path):
         generate_summary(db_path)
 
         mock_upload.assert_not_called()
-
-
-def test_generate_summary_wandb_auto_env(tmp_path, monkeypatch):
-    """
-    TRACEML_WANDB_AUTO=1 + active wandb.run triggers export automatically.
-
-    os.environ is read at call time inside generate_summary(), so no reload()
-    is needed — monkeypatch.setenv() is sufficient.
-    """
-    monkeypatch.setenv("TRACEML_WANDB_AUTO", "1")
-
-    mock_run = _make_mock_run()
-    mock_wandb = MagicMock()
-    mock_wandb.run = mock_run
-
-    with (
-        patch("traceml.aggregator.final_summary.generate_system_summary_card"),
-        patch(
-            "traceml.aggregator.final_summary.generate_step_time_summary_card"
-        ),
-        patch(
-            "traceml.integrations.wandb.log_traceml_summary_to_wandb"
-        ) as mock_upload,
-        patch.dict("sys.modules", {"wandb": mock_wandb}),
-    ):
-        from traceml.aggregator.final_summary import generate_summary
-
-        generate_summary(str(tmp_path / "session.db"))
-
-        mock_upload.assert_called_once()
