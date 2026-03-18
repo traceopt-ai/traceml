@@ -174,6 +174,7 @@ class WandbSummaryExporter:
         artifact_name: str = "traceml_summary",
         artifact_type: str = "traceml",
         json_filename: str = "traceml_summary.json",
+        log_as_charts: bool = False,
     ) -> bool:
         """
         Log flat summary metrics to the W&B run summary panel and upload the
@@ -194,6 +195,15 @@ class WandbSummaryExporter:
             W&B Artifact type tag (used for filtering in the UI).
         json_filename:
             Filename used inside the artifact.
+        log_as_charts:
+            If ``True``, also call ``wandb.log(flat_metrics, commit=True)`` so
+            the TraceML metrics appear as panels in the W&B **Charts** tab
+            (in addition to appearing in the **Overview → Summary** panel).
+
+            Use this when you want per-run bars/columns or to compare values
+            visually across runs in a W&B Report.  When ``False`` (default),
+            only ``run.summary`` is updated, which is sufficient for the
+            runs table and sweep comparisons.
 
         Returns
         -------
@@ -219,14 +229,26 @@ class WandbSummaryExporter:
                 )
                 return False
 
-            # ── 1. Log flat scalar metrics to run.summary ──────────────────
             flat = _flatten_summary(summary)
+
+            # ── 1. Always update run.summary (Overview tab) ────────────────
             active_run.summary.update(flat)
             logger.info(
                 f"[TraceML] Logged {len(flat)} metric(s) to W&B run summary."
             )
 
-            # ── 2. Upload full JSON as artifact ────────────────────────────
+            # ── 2. Optionally also emit via wandb.log (Charts tab) ─────────
+            # wandb.log() with commit=True adds a single point visible in the
+            # Charts tab.  We use the active run's log method so it is scoped
+            # correctly even in multi-run scripts.
+            if log_as_charts:
+                active_run.log(flat, commit=True)
+                logger.info(
+                    "[TraceML] Logged TraceML metrics via wandb.log() "
+                    "(Charts tab)."
+                )
+
+            # ── 3. Upload full JSON as artifact ────────────────────────────
             artifact = wandb.Artifact(
                 name=artifact_name,
                 type=artifact_type,
@@ -234,7 +256,6 @@ class WandbSummaryExporter:
                 metadata={"source": "traceml"},
             )
 
-            # Write summary JSON to a temp path inside the artifact
             import tempfile  # noqa: PLC0415
 
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -270,6 +291,7 @@ def log_traceml_summary_to_wandb(
     *,
     artifact_name: str = "traceml_summary",
     artifact_type: str = "traceml",
+    log_as_charts: bool = False,
 ) -> bool:
     """
     Read a TraceML ``*_summary_card.json`` file and log it to W&B.
@@ -289,6 +311,10 @@ def log_traceml_summary_to_wandb(
         Name for the W&B Artifact (default: ``"traceml_summary"``).
     artifact_type:
         W&B Artifact type (default: ``"traceml"``).
+    log_as_charts:
+        If ``True``, also call ``wandb.log()`` so metrics appear as panels in
+        the W&B **Charts** tab in addition to the **Overview → Summary** panel.
+        See ``WandbSummaryExporter.export`` for details.
 
     Returns
     -------
@@ -304,7 +330,10 @@ def log_traceml_summary_to_wandb(
 
         wandb.init(project="my-project")
         # ... training ...
-        log_traceml_summary_to_wandb("./logs/session_summary_card.json")
+        log_traceml_summary_to_wandb(
+            "./logs/session_summary_card.json",
+            log_as_charts=True,   # also show in Charts tab
+        )
         wandb.finish()
     """
     try:
@@ -323,6 +352,7 @@ def log_traceml_summary_to_wandb(
             run=run,
             artifact_name=artifact_name,
             artifact_type=artifact_type,
+            log_as_charts=log_as_charts,
         )
 
     except Exception as exc:  # noqa: BLE001
