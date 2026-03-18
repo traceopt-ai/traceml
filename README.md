@@ -132,6 +132,32 @@ trainer = L.Trainer(callbacks=[TraceMLCallback()])
 
 See [docs/lightning.md](docs/lightning.md) for the full setup.
 
+### Weights & Biases
+
+```python
+import wandb
+from traceml.integrations.wandb import log_traceml_summary_to_wandb
+
+wandb.init(project="my-project", name="my-run")
+# ... training loop with trace_step(model) ...
+
+# Export end-of-run summary to W&B (metrics + artifact)
+log_traceml_summary_to_wandb(
+    summary_json_path="./logs/session.db_summary_card.json",
+    run=wandb.run,
+)
+wandb.finish()
+```
+
+Or set `TRACEML_WANDB_AUTO=1` to export automatically when using `traceml run`:
+
+```bash
+TRACEML_WANDB_AUTO=1 traceml run train.py
+```
+
+See [`docs/wandb.md`](docs/wandb.md) for the full setup and metric schema.
+
+
 ---
 
 ## Run modes

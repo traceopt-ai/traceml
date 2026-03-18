@@ -52,6 +52,10 @@ lightning = [
     "lightning>=2.6.0",
 ]
 
+wandb = [
+    "wandb>=0.16.0",
+]
+
 
 [tool.isort]
 profile = "black"
