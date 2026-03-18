@@ -294,14 +294,16 @@ def test_generate_summary_triggers_wandb_export(tmp_path):
     generate_summary(db_path, wandb_run=...) should call
     log_traceml_summary_to_wandb after writing the JSON card.
     """
-    # We patch the SQLite-based summary generators to avoid needing a real DB
+    # We patch the SQLite-based summary generators to avoid needing a real DB.
+    # log_traceml_summary_to_wandb is imported lazily inside generate_summary(),
+    # so we patch it at its definition site in traceml.integrations.wandb.
     with (
         patch("traceml.aggregator.final_summary.generate_system_summary_card"),
         patch(
             "traceml.aggregator.final_summary.generate_step_time_summary_card"
         ),
         patch(
-            "traceml.aggregator.final_summary.log_traceml_summary_to_wandb"
+            "traceml.integrations.wandb.log_traceml_summary_to_wandb"
         ) as mock_upload,
     ):
         from traceml.aggregator.final_summary import generate_summary
@@ -327,7 +329,7 @@ def test_generate_summary_no_wandb_run(tmp_path):
             "traceml.aggregator.final_summary.generate_step_time_summary_card"
         ),
         patch(
-            "traceml.aggregator.final_summary.log_traceml_summary_to_wandb"
+            "traceml.integrations.wandb.log_traceml_summary_to_wandb"
         ) as mock_upload,
     ):
         from traceml.aggregator.final_summary import generate_summary
@@ -341,6 +343,9 @@ def test_generate_summary_no_wandb_run(tmp_path):
 def test_generate_summary_wandb_auto_env(tmp_path, monkeypatch):
     """
     TRACEML_WANDB_AUTO=1 + active wandb.run triggers export automatically.
+
+    os.environ is read at call time inside generate_summary(), so no reload()
+    is needed — monkeypatch.setenv() is sufficient.
     """
     monkeypatch.setenv("TRACEML_WANDB_AUTO", "1")
 
@@ -354,15 +359,12 @@ def test_generate_summary_wandb_auto_env(tmp_path, monkeypatch):
             "traceml.aggregator.final_summary.generate_step_time_summary_card"
         ),
         patch(
-            "traceml.aggregator.final_summary.log_traceml_summary_to_wandb"
+            "traceml.integrations.wandb.log_traceml_summary_to_wandb"
         ) as mock_upload,
         patch.dict("sys.modules", {"wandb": mock_wandb}),
     ):
-        from importlib import reload
+        from traceml.aggregator.final_summary import generate_summary
 
-        import traceml.aggregator.final_summary as fs_module
-
-        reload(fs_module)  # re-import so env var is picked up
-        fs_module.generate_summary(str(tmp_path / "session.db"))
+        generate_summary(str(tmp_path / "session.db"))
 
         mock_upload.assert_called_once()
