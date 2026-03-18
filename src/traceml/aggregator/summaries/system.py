@@ -339,10 +339,10 @@ def generate_system_summary_card(
 
     card, summary = _build_system_card(agg)
 
-    # ── Write text card (prepend so step_time appends after) ───────────────
+    # Write text card (prepend so step_time appends after)
     _append_text(db_path + "_summary_card.txt", card)
 
-    # ── Merge into shared JSON under the "system" key ──────────────────────
+    # Merge into shared JSON under the "system" key
     # step_time uses the same pattern: load → update key → write.
     # Never blindly overwrite so both sections co-exist in the same file.
     existing = _load_json_or_empty(db_path + "_summary_card.json")
