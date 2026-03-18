@@ -4,6 +4,30 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 
+def _load_json_or_empty(path: str) -> Dict[str, Any]:
+    """Load JSON if present; otherwise return an empty dict."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _write_json(path: str, obj: Dict[str, Any]) -> None:
+    """Write JSON with indentation."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2)
+
+
+def _append_text(path: str, text: str) -> None:
+    """Write text to a file, prepending a blank line if file already exists."""
+    with open(path, "a+", encoding="utf-8") as f:
+        f.seek(0, 2)
+        if f.tell() > 0:
+            f.write("\n")
+        f.write(text.rstrip() + "\n")
+
+
 @dataclass
 class SystemSummaryAgg:
     """
@@ -315,11 +339,15 @@ def generate_system_summary_card(
 
     card, summary = _build_system_card(agg)
 
-    with open(db_path + "_summary_card.txt", "w", encoding="utf-8") as f:
-        f.write(card + "\n")
+    # ── Write text card (prepend so step_time appends after) ───────────────
+    _append_text(db_path + "_summary_card.txt", card)
 
-    with open(db_path + "_summary_card.json", "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    # ── Merge into shared JSON under the "system" key ──────────────────────
+    # step_time uses the same pattern: load → update key → write.
+    # Never blindly overwrite so both sections co-exist in the same file.
+    existing = _load_json_or_empty(db_path + "_summary_card.json")
+    existing["system"] = summary
+    _write_json(db_path + "_summary_card.json", existing)
 
     if print_to_stdout:
         print(card)
