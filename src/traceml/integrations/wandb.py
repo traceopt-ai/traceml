@@ -63,9 +63,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # Stable metric keys (never rename these — breaks cross-run comparisons)
-# ---------------------------------------------------------------------------
 
 
 def _flatten_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -98,7 +96,7 @@ def _flatten_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(value, (int, float, bool)):
             out[key] = value
 
-    # ── system summary ──────────────────────────────────────────────────────
+    # system summary
     sys = summary.get("system", {}) or {}
     _put("traceml/system/duration_s", sys.get("duration_s"))
     _put("traceml/system/cpu_avg_percent", sys.get("cpu_avg_percent"))
@@ -122,7 +120,7 @@ def _flatten_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
     _put("traceml/system/gpu_power_avg_w", sys.get("gpu_power_avg_w"))
     _put("traceml/system/gpu_power_peak_w", sys.get("gpu_power_peak_w"))
 
-    # ── step-time summary ───────────────────────────────────────────────────
+    # step-time summary
     st = summary.get("step_time", {}) or {}
     _put("traceml/step_time/training_steps", st.get("training_steps"))
     _put("traceml/step_time/ranks_seen", st.get("ranks_seen"))
@@ -147,9 +145,7 @@ def _flatten_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-# ---------------------------------------------------------------------------
 # Main exporter class
-# ---------------------------------------------------------------------------
 
 
 class WandbSummaryExporter:
@@ -230,13 +226,13 @@ class WandbSummaryExporter:
 
             flat = _flatten_summary(summary)
 
-            # ── 1. Always update run.summary (Overview tab) ────────────────
+            # 1. Always update run.summary (Overview tab)
             active_run.summary.update(flat)
             logger.info(
                 f"[TraceML] Logged {len(flat)} metric(s) to W&B run summary."
             )
 
-            # ── 2. Optionally also emit via wandb.log (Charts tab) ─────────
+            # 2. Optionally also emit via wandb.log (Charts tab)
             # Problem without this fix: wandb.log() inherits the current global
             # step counter (e.g. 500 from train/loss logging), so all traceml
             # dots appear at x=500 instead of a meaningful position.
@@ -257,7 +253,7 @@ class WandbSummaryExporter:
                     "(Charts tab, x-axis=traceml_summary_step)."
                 )
 
-            # ── 3. Upload full JSON as artifact ────────────────────────────
+            # 3. Upload full JSON as artifact
             artifact = wandb.Artifact(
                 name=artifact_name,
                 type=artifact_type,
@@ -289,9 +285,7 @@ class WandbSummaryExporter:
             return False
 
 
-# ---------------------------------------------------------------------------
 # Convenience top-level function
-# ---------------------------------------------------------------------------
 
 
 def log_traceml_summary_to_wandb(
@@ -372,9 +366,7 @@ def log_traceml_summary_to_wandb(
         return False
 
 
-# ---------------------------------------------------------------------------
 # In-process upload  (use this when running via `traceml run`)
-# ---------------------------------------------------------------------------
 
 
 def upload_traceml_summary(
@@ -471,7 +463,7 @@ def upload_traceml_summary(
         return False
 
     try:
-        # ── Resolve the session DB path from env vars ──────────────────────
+        # Resolve the session DB path from env vars
         _logs_dir = logs_dir or _os.environ.get("TRACEML_LOGS_DIR", "./logs")
         _session_id = session_id or _os.environ.get("TRACEML_SESSION_ID", "")
 
@@ -499,7 +491,7 @@ def upload_traceml_summary(
             )
             return False
 
-        # ── Resolve the active W&B run ─────────────────────────────────────
+        # Resolve the active W&B run
         _run = run
         if _run is None:
             try:
@@ -516,7 +508,7 @@ def upload_traceml_summary(
             )
             return False
 
-        # ── Generate summary cards from the live DB, then upload ──────────
+        # Generate summary cards from the live DB, then upload
         # generate_summary() writes the JSON card to disk AND (via log_as_charts
         # / artifact) uploads to W&B in one shot.
         generate_summary(
