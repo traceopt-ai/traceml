@@ -224,8 +224,7 @@ class WandbSummaryExporter:
             if active_run is None:
                 logger.warning(
                     "[TraceML] W&B integration skipped: no active wandb.Run. "
-                    "Call wandb.init() before training and pass the run, or "
-                    "set TRACEML_WANDB_AUTO=1 (see docs/wandb.md)."
+                    "Call wandb.init() before training (see docs/wandb.md)."
                 )
                 return False
 
@@ -238,14 +237,24 @@ class WandbSummaryExporter:
             )
 
             # ── 2. Optionally also emit via wandb.log (Charts tab) ─────────
-            # wandb.log() with commit=True adds a single point visible in the
-            # Charts tab.  We use the active run's log method so it is scoped
-            # correctly even in multi-run scripts.
+            # Problem without this fix: wandb.log() inherits the current global
+            # step counter (e.g. 500 from train/loss logging), so all traceml
+            # dots appear at x=500 instead of a meaningful position.
+            #
+            # Fix: define a custom x-axis "traceml_summary_step" for every
+            # traceml/* key so they are completely decoupled from the training
+            # step counter.  We always log at traceml_summary_step=1, giving a
+            # clean single dot at x=1 on its own axis.
             if log_as_charts:
-                active_run.log(flat, commit=True)
+                for key in flat:
+                    wandb.define_metric(
+                        key, step_metric="traceml_summary_step"
+                    )
+                chart_payload = {**flat, "traceml_summary_step": 1}
+                active_run.log(chart_payload, commit=True)
                 logger.info(
                     "[TraceML] Logged TraceML metrics via wandb.log() "
-                    "(Charts tab)."
+                    "(Charts tab, x-axis=traceml_summary_step)."
                 )
 
             # ── 3. Upload full JSON as artifact ────────────────────────────

@@ -67,9 +67,12 @@ traceml run train.py
 | `log_as_charts` | Where metrics appear |
 |---|---|
 | `False` (default) | **Overview → Summary** (scalar values, runs table, sweep comparison) |
-| `True` | **Overview → Summary** + **Charts tab** (dot per run, useful for cross-run comparison) |
+| `True` | **Overview → Summary** + **Charts tab** (dot at `traceml_summary_step=1`) |
 
-Charts tab dots are end-of-run aggregates — one dot per run. Compare them with W&B bar charts across multiple experiment runs.
+When `log_as_charts=True`:
+- TraceML calls `wandb.define_metric("traceml/*", step_metric="traceml_summary_step")` so the metrics use their **own x-axis**, completely decoupled from the training step counter.
+- All dots appear at `traceml_summary_step=1` (x=1), not at the last training step.
+- Compare runs side-by-side by selecting multiple runs in the workspace — each run's dot shows its end-of-run value.
 
 ---
 
@@ -129,6 +132,8 @@ with wandb.init(project="my-project") as run:
 
 Keys with `None` values (e.g. GPU metrics on CPU-only machines) are silently omitted.
 
+When `log_as_charts=True`, a hidden `traceml_summary_step` key is also logged as the x-axis for all `traceml/*` panels. It is always `1` and can be ignored.
+
 ### Full JSON artifact
 
 The full `*_summary_card.json` is uploaded as a W&B Artifact named `traceml_summary` (type `"traceml"`). Browse it in the **Artifacts** tab.
@@ -156,11 +161,11 @@ The integration is fully optional and **never crashes your run**:
 
 ## FAQ
 
-**Why does `TRACEML_WANDB_AUTO=1` not work?**
-The auto path runs in the aggregator subprocess, which has no `wandb.run`. Use `upload_traceml_summary()` in your script instead.
-
 **The metrics show as dots, not lines — is that right?**
 Yes. These are end-of-run aggregates — one value per run. W&B draws a line for time-series data; one run = one dot. Run multiple experiments and compare them in a bar chart or the runs table for a richer view.
+
+**Why does the Charts tab x-axis say `traceml_summary_step` instead of `Step`?**
+`traceml/*` metrics are decoupled from the training step counter via `wandb.define_metric()`. They always appear at `traceml_summary_step=1` on their own axis, avoiding the confusing placement at the last training step (e.g. x=500).
 
 **Will this slow down training?**
 No. The upload happens after the training loop exits, before `wandb.finish()`.
