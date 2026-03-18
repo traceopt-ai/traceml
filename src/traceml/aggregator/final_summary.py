@@ -65,10 +65,15 @@ def generate_summary(
                 log_traceml_summary_to_wandb,
             )
 
+            # TRACEML_WANDB_CHARTS=1 → also call wandb.log() so metrics appear
+            # as chart panels in the W&B Charts tab (in addition to Overview).
+            _log_as_charts = os.environ.get("TRACEML_WANDB_CHARTS") == "1"
+
             summary_json_path = db_path + "_summary_card.json"
             log_traceml_summary_to_wandb(
                 summary_json_path=summary_json_path,
                 run=_wandb_run,
+                log_as_charts=_log_as_charts,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
