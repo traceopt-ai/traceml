@@ -344,8 +344,12 @@ def launch_tracer_process(script_path, args):
             *script_args,
         ]
         train_proc = start_training_process(train_cmd=train_cmd, env=env)
-        install_shutdown_handlers(lambda: (train_proc, None))
+        install_shutdown_handlers(
+            lambda: (train_proc, None), manifest_path=manifest_path
+        )
         train_proc.wait()
+        final_status = "completed" if train_proc.returncode == 0 else "failed"
+        update_run_manifest(manifest_path, status=final_status)
         sys.exit(train_proc.returncode)
 
     if args.mode in ["cli", "dashboard"]:
@@ -443,7 +447,7 @@ def launch_tracer_process(script_path, args):
 
 def run_with_tracing(args, profile: str):
     """
-    Entry point for `traceml run ...` / `traceml deep ...`
+    Entry point for `traceml watch ...` / `traceml run ...` / `traceml deep ...`
     """
     args.profile = profile
     script_path = validate_script_path(args.script)
@@ -507,6 +511,12 @@ def build_parser():
     parser = argparse.ArgumentParser("traceml")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    watch_parser = sub.add_parser(
+        "watch",
+        help="Run a script in lightweight watch mode (system + process telemetry only)",
+    )
+    _add_launch_args(watch_parser)
+
     run_parser = sub.add_parser(
         "run", help="Run a script with TraceML bottleneck instrumentation"
     )
@@ -521,6 +531,7 @@ def build_parser():
         "inspect", help="Inspect binary .msgpack logs"
     )
     inspect_parser.add_argument("file", help="Path to a .msgpack file")
+
     return parser
 
 
@@ -528,7 +539,9 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
-    if args.command == "run":
+    if args.command == "watch":
+        run_with_tracing(args, profile="watch")
+    elif args.command == "run":
         run_with_tracing(args, profile="run")
     elif args.command == "deep":
         run_with_tracing(args, profile="deep")

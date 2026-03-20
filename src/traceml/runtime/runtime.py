@@ -70,7 +70,6 @@ class TraceMLRuntime:
     - Creates samplers and runs them periodically.
     - Attaches DBIncrementalSender to sampler DBs that support sending.
     - Flushes senders every tick (rank0 sends to rank0 as well).
-    - On rank0, starts a TraceMLAggregator thread that owns store + renderers.
 
     This runtime intentionally does not share data structures with the
     aggregator. The aggregator is an out-of-process component that receives
@@ -121,9 +120,11 @@ class TraceMLRuntime:
     def _build_samplers(self) -> List[BaseSampler]:
         """
         Build samplers for this rank based on profile.
-        - run: system + process + step + stdout/stderr
+        - watch: system + process only
+        - run: watch + step + stdout/stderr
         - deep: run + layerwise memory/time samplers
         """
+
         is_ddp, local_rank, _ = get_ddp_info()
         samplers: List[BaseSampler] = []
 
@@ -131,13 +132,14 @@ class TraceMLRuntime:
         if not (is_ddp and local_rank != 0):
             samplers.append(SystemSampler())
 
+        samplers += [ProcessSampler(), StdoutStderrSampler()]
+
         # Core bottleneck profile
-        samplers += [
-            ProcessSampler(),
-            StepTimeSampler(),
-            StepMemorySampler(),
-            StdoutStderrSampler(),
-        ]
+        if self.profile in ["run", "deep"]:
+            samplers += [
+                StepTimeSampler(),
+                StepMemorySampler(),
+            ]
 
         # Deep profile adds layerwise telemetry
         if self.profile == "deep":
