@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find why PyTorch training got slow — while the run is still live.**
+**Find training bottlenecks live, while the run is still running.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
@@ -15,7 +15,7 @@
 
 </div>
 
-TraceML is a lightweight, step-aware bottleneck finder for PyTorch training. It helps you catch:
+TraceML is a lightweight bottleneck finder for PyTorch training. It helps you catch:
 
 - input stalls
 - unstable or drifting step times
@@ -24,15 +24,17 @@ TraceML is a lightweight, step-aware bottleneck finder for PyTorch training. It 
 
 without jumping straight to heavyweight profiling.
 
-**The gap it fills:** system dashboards show utilization over time. TraceML shows what happened **per training step** and, in DDP, **which rank is slowing the run down**.
+**The gap it fills:** system dashboards show utilization over time. TraceML shows what happened **during training steps** and, in DDP, **which rank is slowing the run down**.
 
 **Works today:** Single GPU, Single-node DDP
 
 **Not yet:** Multi-node DDP, FSDP, TP, PP
 
+Minimal setup with system and process behaviour during training
+
 ```bash
 pip install traceml-ai
-traceml run train.py
+traceml watch train.py
 ```
 
 ---
@@ -46,11 +48,21 @@ Use it when training feels:
 - imbalanced across DDP ranks
 - stable in dashboards but still underperforming
 
-Start with TraceML when you need a fast answer. Reach for `torch.profiler` after you know where to dig.
+Start with TraceML when you need a fast answer in the terminal. Reach for `torch.profiler` after you know where to dig.
 
 ---
 
 ## Quick start
+
+### Zero-code first look
+
+```bash
+traceml watch train.py
+```
+
+Use `watch` for a zero-code live view of system and process behavior during training.
+
+### Step-aware bottleneck diagnosis
 
 Wrap your training step:
 
@@ -72,19 +84,30 @@ Run through TraceML:
 traceml run train.py
 ```
 
-During training, TraceML opens a live terminal view alongside your logs.
+During training, TraceML opens a live CLI view alongside your logs.
 
-![TraceML terminal dashboard](docs/assets/cli_demo.png)
+![TraceML terminal dashboard](docs/assets/cli_demo_v1.png)
 
 At the end of the run, it prints a compact summary.
 
 ![TraceML summary](docs/assets/end-of-run-summary.png)
 
-For local review and comparison, TraceML also includes a local UI.
+For local review and comparison, TraceML also includes a local UI. See [`docs/quickstart.md`](docs/quickstart.md) for setup details.
 
-![TraceML local UI](docs/assets/local_ui.png)
+---
 
-See [`docs/quickstart.md`](docs/quickstart.md) for setup details.
+## Run modes
+
+#### `traceml watch train.py`
+Zero-code live visibility for system and process behavior.
+
+#### `traceml run train.py`
+Default mode for live bottleneck diagnosis.
+
+#### `traceml deep train.py`
+Adds per-layer timing and memory signals for deeper inspection.
+
+Start with `watch` for fast visibility. Use `run` when you need step-aware diagnosis. Use `deep` only when you need layer-level root cause.
 
 ---
 
@@ -130,19 +153,7 @@ from traceml.integrations.lightning import TraceMLCallback
 trainer = L.Trainer(callbacks=[TraceMLCallback()])
 ```
 
-See [docs/lightning.md](docs/lightning.md) for the full setup.
-
----
-
-## Run modes
-
-#### `traceml run train.py`
-Default mode for live bottleneck diagnosis.
-
-#### `traceml deep train.py`
-Adds per-layer timing and memory signals for deeper inspection.
-
-Use `run` by default. Use `deep` only when you need layer-level root cause.
+See [`docs/lightning.md`](docs/lightning.md) for the full setup.
 
 ---
 
@@ -189,11 +200,12 @@ If TraceML caught a slowdown for you, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
 - single GPU or DDP
+- whether you used `watch`, `run`, or `deep`
 - whether you used core tracing only or model hooks
 - the end-of-run summary
 - a minimal repro if possible
 
-📧 Email: abhinav@traceopt.ai
+📧 Email: support@traceopt.ai
 
 📋 User Survey: https://forms.gle/KwPSLaPmJnJjoVXSA
 
