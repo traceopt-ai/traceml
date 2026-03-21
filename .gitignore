@@ -46,6 +46,9 @@ htmlcov/
 *.swp
 *.swo
 
+# Claude Code (machine-specific settings)
+.claude/settings.local.json
+
 
 # OS files
 
