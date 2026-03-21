@@ -88,6 +88,14 @@ pip install "traceml-ai[hf]"        # Hugging Face Trainer (transformers, accele
 pip install "traceml-ai[lightning]"  # PyTorch Lightning
 ```
 
+#### Development (editable install from source)
+
+```bash
+git clone https://github.com/traceopt-ai/traceml.git
+cd traceml
+pip install -e ".[dev,torch]"
+```
+
 #### Verify
 
 ```bash
