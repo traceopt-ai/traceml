@@ -111,9 +111,7 @@ class ProcessSampler(BaseSampler):
         self.rank = int(os.environ.get("RANK", "-1"))
 
         # "Intended DDP" if launcher indicates multiple processes.
-        self.is_ddp_intended = (
-            self.world_size > 1 or self.local_rank != -1 or self.rank != -1
-        )
+        self.is_ddp_intended = self.world_size > 1
 
         # Normalize local_rank for common cases.
         if self.is_ddp_intended and self.local_rank == -1:

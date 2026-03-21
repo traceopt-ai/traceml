@@ -81,9 +81,10 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._logger = logger
         self._store = store
         self._settings = settings
-        self._deep_profile = (
-            getattr(self._settings, "profile", "run") == "deep"
-        )
+
+        self._profile = getattr(self._settings, "profile", "run")
+        self._watch_profile = self._profile == "watch"
+        self._deep_profile = self._profile == "deep"
 
         self._console = Console()
         self._layout = Layout(name=ROOT_LAYOUT)
@@ -93,14 +94,21 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._bindings: List[_SectionBinding] = []
 
         # CLI chooses its renderer set (can differ from dashboard)
+        # Watch profile
         self._renderers: List[BaseRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(remote_store=store),
-            StepCombinedRenderer(db_path=self._settings.db_path),
-            StepMemoryRenderer(remote_store=store),
             StdoutStderrRenderer(remote_store=store),
         ]
 
+        # Run profile
+        if not self._watch_profile:
+            self._renderers += [
+                StepCombinedRenderer(db_path=self._settings.db_path),
+                StepMemoryRenderer(remote_store=store),
+            ]
+
+        # Deep Profile
         if self._deep_profile:
             self._renderers += [
                 LayerCombinedMemoryRenderer(
@@ -112,10 +120,6 @@ class CLIDisplayDriver(BaseDisplayDriver):
                     top_n_layers=settings.num_display_layers,
                 ),
             ]
-
-    # -------------------------
-    # Lifecycle
-    # -------------------------
 
     def start(self) -> None:
         """Initialize layout and start Rich Live."""
@@ -135,7 +139,6 @@ class CLIDisplayDriver(BaseDisplayDriver):
             return
         try:
             self._live.stop()
-            StreamCapture.redirect_to_original()
         except Exception as e:
             self._logger.error(f"[TraceML] CLI Live.stop failed: {e}")
         finally:
@@ -164,71 +167,121 @@ class CLIDisplayDriver(BaseDisplayDriver):
     def _create_layout(self) -> Layout:
         """
         Create the Rich layout tree.
-        Section names are CLI-specific and defined here.
+        Each profile builds its own full layout (outer + inner).
         """
-        self._layout.split_column(
-            Layout(name="dashboard", ratio=3),
-            Layout(name=STDOUT_STDERR_LAYOUT, ratio=1),
-        )
-
-        dashboard = self._layout["dashboard"]
-
+        if self._watch_profile:
+            return self._create_watch_layout()
         if self._deep_profile:
-            dashboard.split_column(
-                Layout(name="upper_row", ratio=3),
-                Layout(name="middle_row", ratio=6),
-                Layout(name="layer_row", ratio=5),
-            )
-            dashboard["layer_row"].split_row(
-                Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=8),
-                Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
-            )
-        else:
-            dashboard.split_column(
-                Layout(name="upper_row", ratio=3),
-                Layout(name="middle_row", ratio=6),
-            )
+            return self._create_deep_layout()
+        return self._create_run_layout()
 
-        dashboard["upper_row"].split_row(
-            Layout(name=SYSTEM_LAYOUT, ratio=4),
+    def _create_watch_layout(self) -> Layout:
+        # You can tune these independently for watch
+        self._layout.split_column(
+            Layout(name="dashboard", ratio=2),
+            Layout(name=STDOUT_STDERR_LAYOUT, ratio=6),
+        )
+        dashboard = self._layout["dashboard"]
+        dashboard.split_row(
+            Layout(name=SYSTEM_LAYOUT, ratio=3),
             Layout(name=PROCESS_LAYOUT, ratio=5),
         )
+        return dashboard
 
+    def _create_run_layout(self) -> Layout:
+        self._layout.split_column(
+            Layout(name="dashboard", ratio=7),
+            Layout(name=STDOUT_STDERR_LAYOUT, ratio=2),
+        )
+        dashboard = self._layout["dashboard"]
+        dashboard.split_column(
+            Layout(name="upper_row", ratio=3),
+            Layout(name="middle_row", ratio=4),
+        )
+        dashboard["upper_row"].split_row(
+            Layout(name=SYSTEM_LAYOUT, ratio=3),
+            Layout(name=PROCESS_LAYOUT, ratio=5),
+        )
         dashboard["middle_row"].split_row(
             Layout(name=MODEL_COMBINED_LAYOUT, ratio=3),
             Layout(name=MODEL_MEMORY_LAYOUT, ratio=2),
         )
-
         return dashboard
 
-    def _create_initial_layout(self) -> None:
-        """Initialize the layout with placeholders so the UI is stable before data arrives."""
-        dashboard = self._create_layout()
+    def _create_deep_layout(self) -> Layout:
+        # You can tune these independently for deep
+        self._layout.split_column(
+            Layout(name="dashboard", ratio=8),
+            Layout(name=STDOUT_STDERR_LAYOUT, ratio=2),
+        )
+        dashboard = self._layout["dashboard"]
+        dashboard.split_column(
+            Layout(name="upper_row", ratio=3),
+            Layout(name="middle_row", ratio=6),
+            Layout(name="layer_row", ratio=5),
+        )
+        dashboard["upper_row"].split_row(
+            Layout(name=SYSTEM_LAYOUT, ratio=4),
+            Layout(name=PROCESS_LAYOUT, ratio=5),
+        )
+        dashboard["middle_row"].split_row(
+            Layout(name=MODEL_COMBINED_LAYOUT, ratio=3),
+            Layout(name=MODEL_MEMORY_LAYOUT, ratio=2),
+        )
+        dashboard["layer_row"].split_row(
+            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=8),
+            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
+        )
+        return dashboard
 
-        dashboard[SYSTEM_LAYOUT].update(
-            Panel(Text("Waiting for System Metrics...", justify="center"))
-        )
-        dashboard[PROCESS_LAYOUT].update(
-            Panel(Text("Waiting for Process Metrics...", justify="center"))
-        )
-        dashboard[MODEL_MEMORY_LAYOUT].update(
-            Panel(Text("Waiting for Step Memory...", justify="center"))
-        )
-        if self._deep_profile:
-            dashboard[LAYER_COMBINED_MEMORY_LAYOUT].update(
+    def _has_section(self, name: str) -> bool:
+        try:
+            self._layout[name]
+            return True
+        except Exception:
+            return False
+
+    def _create_initial_layout(self) -> None:
+        self._create_layout()
+
+        if self._has_section(SYSTEM_LAYOUT):
+            self._layout[SYSTEM_LAYOUT].update(
+                Panel(Text("Waiting for System Metrics...", justify="center"))
+            )
+
+        if self._has_section(PROCESS_LAYOUT):
+            self._layout[PROCESS_LAYOUT].update(
+                Panel(Text("Waiting for Process Metrics...", justify="center"))
+            )
+
+        if self._has_section(MODEL_COMBINED_LAYOUT):
+            self._layout[MODEL_COMBINED_LAYOUT].update(
+                Panel(Text("Waiting for Step Timing...", justify="center"))
+            )
+
+        if self._has_section(MODEL_MEMORY_LAYOUT):
+            self._layout[MODEL_MEMORY_LAYOUT].update(
+                Panel(Text("Waiting for Step Memory...", justify="center"))
+            )
+
+        if self._has_section(LAYER_COMBINED_MEMORY_LAYOUT):
+            self._layout[LAYER_COMBINED_MEMORY_LAYOUT].update(
                 Panel(Text("Waiting for Layer Memory...", justify="center"))
             )
-            dashboard[LAYER_COMBINED_TIMER_LAYOUT].update(
+
+        if self._has_section(LAYER_COMBINED_TIMER_LAYOUT):
+            self._layout[LAYER_COMBINED_TIMER_LAYOUT].update(
                 Panel(Text("Waiting for Layer Timing...", justify="center"))
             )
 
-        self._layout[STDOUT_STDERR_LAYOUT].update(
-            Panel(
-                Text("Waiting for Stdout/Stderr...", justify="center"),
-                title="Logs",
-                border_style="cyan",
+        if self._has_section(STDOUT_STDERR_LAYOUT):
+            self._layout[STDOUT_STDERR_LAYOUT].update(
+                Panel(
+                    Text("Waiting for Stdout/Stderr...", justify="center"),
+                    title="Logs",
+                    border_style="cyan",
+                )
             )
-        )
 
     def _register_once(self) -> None:
         """
@@ -255,7 +308,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
                 continue
 
             # Validate layout contains the section
-            if self._layout.get(section) is None:
+            if not self._has_section(section):
                 self._logger.error(
                     f"[TraceML] CLI layout section not found: {section!r} "
                     f"(renderer={r.__class__.__name__})"
