@@ -33,7 +33,7 @@ without jumping straight to heavyweight profiling.
 Minimal setup with system and process behaviour during training
 
 ```bash
-pip install traceml-ai
+pip install "traceml-ai[torch]"
 traceml watch train.py
 ```
 
@@ -53,6 +53,45 @@ Start with TraceML when you need a fast answer in the terminal. Reach for `torch
 ---
 
 ## Quick start
+
+### Prerequisites
+
+| Requirement | Version | Notes |
+|---|---|---|
+| Python | 3.10+ | |
+| PyTorch | 2.5+ | [Install guide](https://pytorch.org/get-started/locally/) |
+| CUDA toolkit | optional | For GPU support |
+
+### Install
+
+```bash
+# Create a virtual environment (recommended)
+python -m venv .venv && source .venv/bin/activate
+# or: conda create -n traceml python=3.10 && conda activate traceml
+
+# Install TraceML with PyTorch
+pip install "traceml-ai[torch]"
+```
+
+If PyTorch 2.5+ is already installed in your environment:
+
+```bash
+pip install traceml-ai
+```
+
+#### Optional extras
+
+```bash
+pip install "traceml-ai[hf]"        # Hugging Face Trainer (transformers, accelerate)
+pip install "traceml-ai[lightning]"  # PyTorch Lightning
+```
+
+#### Verify
+
+```bash
+traceml --help
+python -c "import traceml; import torch; print('Ready')"
+```
 
 ### Zero-code first look
 
