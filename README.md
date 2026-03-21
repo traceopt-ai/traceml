@@ -24,6 +24,8 @@ TraceML is a lightweight bottleneck finder for PyTorch training. It helps you ca
 
 without jumping straight to heavyweight profiling.
 
+Think of it as **`htop` for GPU training** — always-on, lightweight, and focused on what's slowing you down.
+
 **The gap it fills:** system dashboards show utilization over time. TraceML shows what happened **during training steps** and, in DDP, **which rank is slowing the run down**.
 
 **Works today:** Single GPU, Single-node DDP
@@ -133,6 +135,8 @@ At the end of the run, it prints a compact summary.
 
 For local review and comparison, TraceML also includes a local UI. See [`docs/quickstart.md`](docs/quickstart.md) for setup details.
 
+![TraceML local UI](docs/assets/local_ui.png)
+
 ---
 
 ## Run modes
@@ -150,17 +154,29 @@ Start with `watch` for fast visibility. Use `run` when you need step-aware diagn
 
 ---
 
-## What TraceML shows
+## Features
 
-- step time and its breakdown
-- dataloader / input wait
-- forward / backward / optimizer / overhead timing
-- step jitter and drift
-- GPU memory trend
-- CPU / RAM / GPU signals
-- in single-node DDP: worst-rank vs median-rank timing and skew
+| Feature | `watch` | `run` | `deep` |
+|---|:---:|:---:|:---:|
+| CPU / RAM / GPU utilization | &#x2705; | &#x2705; | &#x2705; |
+| Step time breakdown | | &#x2705; | &#x2705; |
+| Dataloader / input stall detection | | &#x2705; | &#x2705; |
+| Forward / backward / optimizer timing | | &#x2705; | &#x2705; |
+| Step jitter and drift | | &#x2705; | &#x2705; |
+| GPU memory trend | | &#x2705; | &#x2705; |
+| DDP rank imbalance (single-node) | | &#x2705; | &#x2705; |
+| Per-layer timing and memory | | | &#x2705; |
+| End-of-run summary | | &#x2705; | &#x2705; |
+| Local UI dashboard | | &#x2705; | &#x2705; |
 
-This helps you tell whether the slowdown is coming from input, compute, optimizer work, or rank imbalance.
+| Integration | Status |
+|---|:---:|
+| Single GPU | &#x2705; |
+| Single-node DDP | &#x2705; |
+| Hugging Face Trainer | &#x2705; |
+| PyTorch Lightning | &#x2705; |
+| Multi-node DDP | planned |
+| FSDP / TP / PP | planned |
 
 ---
 
@@ -208,28 +224,37 @@ Use this with `trace_step(model)` when you want optional per-layer timing and me
 
 ---
 
-## Scope
+## TraceML vs alternatives
 
-TraceML is for lightweight diagnosis during real PyTorch training runs.
+| Capability | TraceML | W&B / Neptune | TensorBoard Profiler |
+|---|:---:|:---:|:---:|
+| Step phase breakdown (fwd/bwd/opt) | Auto | Manual logging | Manual logging |
+| Dataloader stall detection | Auto | Not available | Not available |
+| DDP rank imbalance | Auto | Not available | Not available |
+| Per-layer timing and memory | Auto | Not available | Via profiler plugin |
+| CPU / RAM / GPU utilization | Auto | Auto | Not available |
+| Runs fully offline, no account | &#x2705; | &#x274C; | &#x2705; |
+| Live terminal view (~1s latency) | &#x2705; | &#x274C; | &#x274C; |
+| Safe for full training runs | &#x2705; | &#x2705; | &#x274C; (heavy) |
+| Experiment tracking & comparison | &#x274C; | &#x2705; | &#x2705; |
+| Hyperparameter sweeps | &#x274C; | &#x2705; | &#x274C; |
+| Team collaboration | &#x274C; | &#x2705; | &#x274C; |
 
-It is **not**:
-
-- a kernel-level tracer
-- an auto-tuner
-- a replacement for deep profilers
-- a full observability platform
+**TraceML is not a replacement for W&B or Neptune** — it's a complement. Use TraceML to find where training time is wasted. Use W&B/Neptune to track experiments and collaborate.
 
 ---
 
-## Example cases
+## Examples
 
-Start with examples such as:
+| Example | Requires | Description |
+|---|---|---|
+| [`basic_example.py`](src/examples/basic_example.py) | `traceml-ai[torch]` | Single GPU, minimal setup |
+| [`input-stall.py`](src/examples/input-stall.py) | `traceml-ai[torch]` | Detect dataloader bottlenecks |
+| [`ddp_example.py`](src/examples/ddp_example.py) | `traceml-ai[torch]` | Single-node DDP |
+| [`straggler_ddp_example.py`](src/examples/straggler_ddp_example.py) | `traceml-ai[torch]` | DDP rank imbalance |
+| [`hf-trainer-minimal.py`](src/examples/hf-trainer-minimal.py) | `traceml-ai[hf]` | Hugging Face Trainer integration |
 
-- basic example
-- input / dataloader stall
-- DDP straggler / rank skew
-
-See [**Examples**](src/examples) for runnable cases.
+See [`src/examples/advanced/`](src/examples/advanced) for more (BERT, ViT, LLaMA fine-tuning, Lightning, etc.).
 
 ---
 
@@ -250,6 +275,42 @@ If TraceML caught a slowdown for you, please open an issue and include:
 
 ---
 
+## Troubleshooting
+
+### `ModuleNotFoundError: No module named 'torch'`
+
+PyTorch is not included with the base `traceml-ai` install. Install with extras:
+
+```bash
+pip install "traceml-ai[torch]"
+```
+
+### `ModuleNotFoundError: No module named 'transformers'`
+
+Install the Hugging Face extras:
+
+```bash
+pip install "traceml-ai[hf]"
+```
+
+### `torchrun: command not found`
+
+Check if `torchrun` is available via module:
+
+```bash
+python -m torch.distributed.run --help
+```
+
+If that works but `torchrun` does not, fix your PATH or reinstall PyTorch.
+
+### No GPU detected
+
+TraceML works on CPU too. GPU memory signals will show `N/A`, but step timing still works.
+
+See [`docs/quickstart.md`](docs/quickstart.md) for more troubleshooting tips.
+
+---
+
 ## Contributing
 
 Contributions are welcome, especially:
@@ -258,6 +319,8 @@ Contributions are welcome, especially:
 - integrations
 - bug reports
 - examples
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for guidelines.
 
 ---
 
