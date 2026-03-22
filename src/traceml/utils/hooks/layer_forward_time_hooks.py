@@ -135,6 +135,9 @@ class LayerForwardTimePreHook:
         self.model_id = model_id
         self.layer_name = layer_name
         self.on_gpu = on_gpu
+        self.layer_q = _layer_forward_time_start_buffer.setdefault(
+            self.model_id, {}
+        ).setdefault(self.layer_name, deque())
 
     def __call__(self, module, inputs):
         try:
@@ -145,11 +148,7 @@ class LayerForwardTimePreHook:
                 gpu_start = get_cuda_event()
                 gpu_start.record()
 
-            model_buf = _layer_forward_time_start_buffer.setdefault(
-                self.model_id, {}
-            )
-            layer_q = model_buf.setdefault(self.layer_name, deque())
-            layer_q.append(
+            self.layer_q.append(
                 {
                     "cpu_start": cpu_start,
                     "gpu_start": gpu_start,
@@ -172,18 +171,18 @@ class LayerForwardTimePostHook:
         self.model_id = model_id
         self.layer_name = layer_name
         self.on_gpu = on_gpu
+        self.layer_q = _layer_forward_time_start_buffer.setdefault(
+            self.model_id, {}
+        ).setdefault(self.layer_name, deque())
 
     def __call__(self, module, inputs, output):
         try:
             cpu_end = time.perf_counter()
 
-            layer_q = _layer_forward_time_start_buffer.get(
-                self.model_id, {}
-            ).get(self.layer_name)
-            if not layer_q:
+            if not self.layer_q:
                 return  # No start recorded
 
-            start_record = layer_q.popleft()  # FIFO match
+            start_record = self.layer_q.popleft()  # FIFO match
             cpu_start = start_record["cpu_start"]
             cpu_duration_ms = (cpu_end - cpu_start) * 1000
 
