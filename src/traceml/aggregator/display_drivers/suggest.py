@@ -41,23 +41,32 @@ class SuggestDisplayDriver(BaseDisplayDriver):
         time.sleep(1.0)
 
         # Pull data
-        layer_mem = self._store.get_all("layer_memory")
-        step_mem = self._store.get_all("step_memory")
+        layer_db = self._store.get_db(
+            rank=0, sampler_name="LayerMemorySampler"
+        )
+        step_db = self._store.get_db(rank=0, sampler_name="StepMemorySampler")
 
-        if not layer_mem or not len(step_mem) >= 2:
+        if not layer_db or not step_db:
             self._console.print(
                 "[bold red]Failed to collect enough telemetry (need more steps/model). Make sure you run at least 3 steps.[/bold red]"
             )
             return
 
+        last_layer = layer_db.get_last_record("LayerMemoryTable")
+        last_step = step_db.get_last_record("step_memory")
+
+        if not last_layer or not last_step:
+            self._console.print(
+                "[bold red]No records found in sampler tables. Did the script run any steps?[/bold red]"
+            )
+            return
+
         # Get parameter memory
-        last_layer = layer_mem[-1]
         param_bytes = last_layer.get("total_param_bytes", 0)
 
         # Get peak memory (exclude first step warmup if possible)
-        last_step = step_mem[-1]
         peak_allocated = (
-            last_step.get("peak_allocated", 0) * 1024 * 1024
+            last_step.get("peak_alloc", 0) * 1024 * 1024
         )  # MegaBytes -> Bytes
 
         # Math

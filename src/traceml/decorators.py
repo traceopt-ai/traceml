@@ -89,6 +89,11 @@ def trace_step(model: nn.Module):
         yield
         return
 
+    if _traceml_profile() == "suggest" and TraceState.step == 0:
+        if not getattr(model, "_traceml_suggest_instrumented", False):
+            trace_model_instance(model)
+            model._traceml_suggest_instrumented = True
+
     mem_tracker = StepMemoryTracker(model)
     step_completed = False
 
