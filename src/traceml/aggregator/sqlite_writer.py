@@ -11,42 +11,21 @@ Design goals
 - Single-writer SQLite: one background thread owns the sqlite connection.
 - Bounded memory: internal queue is bounded; overflow is dropped (telemetry-first).
 - Minimal schema + filterability:
-  Store raw MessagePack payloads, but also persist rank + sampler columns so you
+  Store raw MessagePack payloads, and also persist rank + sampler columns so you
   can query by sampler without decoding everything.
 
-Storage
--------
-One SQLite DB file per session (recommended path: session_id/<session>.db).
-
-Table: raw_messages
-- id         INTEGER PRIMARY KEY AUTOINCREMENT
-- recv_ts_ns INTEGER NOT NULL
-- rank       INTEGER NULL
-- sampler    TEXT NULL
-- payload_mp BLOB NOT NULL
-
-Index:
-- (sampler, rank, id) to support fast streaming reads per sampler/rank.
-
-Usage (Aggregator fan-out)
---------------------------
-1) Create and start writer in the aggregator process:
-    writer = SQLiteWriterSimple(SQLiteWriterConfig(path=".../session.db"), logger=logger)
-    writer.start()
-
-2) In your aggregator drain loop (single reader of TCPServer queue):
-    for msg in tcp_server.poll():
-        store.ingest(msg)       # existing bounded in-memory store
-        writer.ingest(msg)      # enqueue for disk persistence (non-blocking)
-
-3) Stop on shutdown:
-    writer.stop()
+Storage model
+-------------
+- All incoming telemetry messages are persisted to `raw_messages` as raw
+  MessagePack payloads.
+- A selected subset of samplers is also projected into structured SQLite tables
+  for faster query patterns and gradual migration away from raw decoding.
 
 Notes
 -----
 - Best-effort: if disk falls behind, messages may be dropped (queue overflow).
 - This writer does not depend on UI/RemoteDBStore/TCP.
-- Depends only on stdlib sqlite3 + msgspec (already in your deps).
+- Depends only on stdlib sqlite3 + msgspec.
 """
 
 import queue
@@ -54,7 +33,8 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Iterator, Optional
 
 import msgspec
 
@@ -111,9 +91,11 @@ class SQLiteWriterSimple:
     - The writer thread is the only thread that touches sqlite.
     """
 
-    def __init__(self, cfg: SQLiteWriterConfig, logger: Optional[Any] = None):
+    def __init__(
+        self, cfg: SQLiteWriterConfig, logger: Optional[Any] = None
+    ) -> None:
         self._cfg = cfg
-        self._logger = get_error_logger("TraceML-SQLiteWriterSimple")
+        self._logger = logger or get_error_logger("TraceML-SQLiteWriterSimple")
 
         self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue(
             maxsize=int(cfg.max_queue)
@@ -163,9 +145,15 @@ class SQLiteWriterSimple:
         """
         if not self._cfg.enabled:
             return
+
         self._stop.set()
+
         if self._started:
             self._thread.join(timeout=float(timeout_sec))
+            if self._thread.is_alive():
+                self._log_error(
+                    "[TraceML] SQLiteWriter thread did not terminate cleanly"
+                )
 
     def stats(self) -> Dict[str, Any]:
         """Return basic counters for debugging/observability."""
@@ -180,6 +168,7 @@ class SQLiteWriterSimple:
         }
 
     def _log_error(self, msg: str) -> None:
+        """Log an internal writer error without raising."""
         self._last_error = msg
         if self._logger is not None:
             try:
@@ -188,6 +177,9 @@ class SQLiteWriterSimple:
                 pass
 
     def _connect(self) -> sqlite3.Connection:
+        """Open and configure the SQLite connection used by the writer thread."""
+        Path(self._cfg.path).parent.mkdir(parents=True, exist_ok=True)
+
         conn = sqlite3.connect(
             self._cfg.path,
             isolation_level=None,  # autocommit; we manage BEGIN/COMMIT
@@ -200,6 +192,7 @@ class SQLiteWriterSimple:
         return conn
 
     def _init_schema(self, conn: sqlite3.Connection) -> None:
+        """Create the base raw message schema and indexes if needed."""
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS raw_messages (
@@ -219,6 +212,7 @@ class SQLiteWriterSimple:
         )
 
     def _drain_nowait(self, max_items: int) -> list[Dict[str, Any]]:
+        """Drain up to ``max_items`` messages from the in-memory queue."""
         items: list[Dict[str, Any]] = []
         for _ in range(int(max_items)):
             try:
@@ -230,6 +224,7 @@ class SQLiteWriterSimple:
     def _extract_rank_sampler(
         self, msg: Dict[str, Any]
     ) -> tuple[Optional[int], Optional[str]]:
+        """Extract best-effort ``rank`` and ``sampler`` metadata from a message."""
         rank_val = msg.get("rank", None)
         sampler_val = msg.get("sampler", None)
 
@@ -247,15 +242,23 @@ class SQLiteWriterSimple:
 
         return rank, sampler
 
-    def _iter_payload_dicts(self, m: Any):
-        if m is None:
+    def _iter_payload_dicts(self, msg: Any) -> Iterator[Dict[str, Any]]:
+        """
+        Yield payload dicts from a single message or batch.
+
+        Accepted forms:
+        - dict
+        - list[dict]
+        """
+        if msg is None:
             return
-        if isinstance(m, list):
-            for it in m:
-                if isinstance(it, dict):
-                    yield it
-        elif isinstance(m, dict):
-            yield m
+
+        if isinstance(msg, list):
+            for item in msg:
+                if isinstance(item, dict):
+                    yield item
+        elif isinstance(msg, dict):
+            yield msg
 
     def _collect_flush_rows(
         self,
@@ -265,15 +268,18 @@ class SQLiteWriterSimple:
         dict[Any, dict[str, list[tuple]]],
     ]:
         """
-        Convert queued payloads into raw SQLite rows + projection rows.
+        Convert queued payloads into raw SQLite rows and projection rows.
+
+        All decodable payloads are preserved in ``raw_messages``. A selected
+        subset of samplers is also expanded into structured projection tables.
         """
         raw_rows: list[tuple[int, Optional[int], Optional[str], bytes]] = []
         projection_rows: dict[Any, dict[str, list[tuple]]] = {
             writer: {} for writer in _PROJECTION_WRITERS
         }
 
-        for m in items:
-            for payload_dict in self._iter_payload_dicts(m):
+        for item in items:
+            for payload_dict in self._iter_payload_dicts(item):
                 try:
                     recv_ts_ns = time.time_ns()
                     rank, sampler = self._extract_rank_sampler(payload_dict)
@@ -296,6 +302,7 @@ class SQLiteWriterSimple:
                             ).extend(rows)
 
                 except Exception:
+                    # Best-effort persistence: skip malformed payloads and continue.
                     continue
 
         return raw_rows, projection_rows
@@ -307,7 +314,7 @@ class SQLiteWriterSimple:
         projection_rows: dict[Any, dict[str, list[tuple]]],
     ) -> None:
         """
-        Write prepared raw rows + projection rows in one SQLite transaction.
+        Write prepared raw rows and projection rows in one SQLite transaction.
         """
         if not raw_rows:
             return
@@ -328,7 +335,7 @@ class SQLiteWriterSimple:
 
     def _flush_once(self, conn: sqlite3.Connection) -> None:
         """
-        Drain up to max_flush_items from the queue and write them to SQLite.
+        Drain up to ``max_flush_items`` from the queue and write them to SQLite.
         """
         items = self._drain_nowait(self._cfg.max_flush_items)
         if not items:
@@ -340,28 +347,32 @@ class SQLiteWriterSimple:
 
         try:
             self._write_flush_rows(conn, raw_rows, projection_rows)
-        except Exception as e:
+        except Exception as exc:
             try:
                 conn.execute("ROLLBACK;")
             except Exception:
                 pass
-            self._log_error(f"[TraceML] SQLiteWriter flush failed: {e}")
+            self._log_error(f"[TraceML] SQLiteWriter flush failed: {exc}")
 
     def _run(self) -> None:
         """
-        Writer thread loop:
-        - connect + init schema
-        - sleep for flush_interval
-        - flush pending messages
-        - on stop: flush a final time
+        Writer thread loop.
+
+        Flow
+        ----
+        - Open and configure SQLite
+        - Initialize raw + projection schemas
+        - Sleep for ``flush_interval_sec``
+        - Flush pending messages
+        - On stop: perform one final best-effort flush
         """
         try:
             conn = self._connect()
             self._init_schema(conn)
             for writer in _PROJECTION_WRITERS:
                 writer.init_schema(conn)
-        except Exception as e:
-            self._log_error(f"[TraceML] SQLiteWriter init failed: {e}")
+        except Exception as exc:
+            self._log_error(f"[TraceML] SQLiteWriter init failed: {exc}")
             return
 
         interval = float(self._cfg.flush_interval_sec)
@@ -371,13 +382,11 @@ class SQLiteWriterSimple:
                 time.sleep(interval)
                 self._flush_once(conn)
 
-            # Best-effort final flush on stop
+            # Best-effort final flush on stop.
             self._flush_once(conn)
         finally:
             try:
-                conn.execute(
-                    "PRAGMA wal_checkpoint(TRUNCATE);"
-                )  # merges + truncates WAL
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
                 conn.close()
             except Exception:
                 pass
