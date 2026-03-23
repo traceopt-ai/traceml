@@ -97,21 +97,80 @@ def _estimate_from_registry(
 # ---------------------------------------------------------------------------
 
 
-def _get_int_arg(node: ast.Call, pos: int, name: str) -> Optional[int]:
-    """Get an integer from a positional or keyword arg of a Call node."""
+def _collect_module_constants(tree: ast.AST) -> dict:
+    """Scan top-level assignments of the form NAME = <integer or arithmetic>.
+
+    Handles common patterns:
+        INPUT_DIM = 1024
+        HIDDEN = INPUT_DIM * 2   (if INPUT_DIM already resolved)
+
+    Returns a dict of {name: int_value}.
+    """
+    consts: dict = {}
+    # Two passes: first literals, then expressions that reference prior names.
+    for _pass in range(2):
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            # Only simple name targets at module level
+            if len(node.targets) != 1 or not isinstance(
+                node.targets[0], ast.Name
+            ):
+                continue
+            name = node.targets[0].id
+            if name in consts:
+                continue
+            val = _eval_const_expr(node.value, consts)
+            if isinstance(val, int):
+                consts[name] = val
+    return consts
+
+
+def _eval_const_expr(node: ast.AST, consts: dict):
+    """Recursively evaluate a simple constant arithmetic AST expression.
+
+    Handles: int literals, Name lookups, BinOp (+, -, *, //, /).
+    Returns int or None.
+    """
+    if isinstance(node, ast.Constant) and isinstance(node.value, int):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in consts:
+        return consts[node.id]
+    if isinstance(node, ast.BinOp):
+        left = _eval_const_expr(node.left, consts)
+        right = _eval_const_expr(node.right, consts)
+        if left is None or right is None:
+            return None
+        try:
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, (ast.Div, ast.FloorDiv)):
+                return left // right
+        except Exception:
+            return None
+    return None
+
+
+def _get_int_arg(
+    node: ast.Call, pos: int, name: str, consts: dict
+) -> int | None:
+    """Get an integer from a positional or keyword arg, resolving named constants."""
     # positional
     if pos < len(node.args):
         a = node.args[pos]
-        if isinstance(a, ast.Constant) and isinstance(a.value, int):
-            return a.value
+        val = _eval_const_expr(a, consts)
+        if isinstance(val, int):
+            return val
     # keyword
     for kw in node.keywords:
-        if (
-            kw.arg == name
-            and isinstance(kw.value, ast.Constant)
-            and isinstance(kw.value.value, int)
-        ):
-            return kw.value.value
+        if kw.arg == name:
+            val = _eval_const_expr(kw.value, consts)
+            if isinstance(val, int):
+                return val
     return None
 
 
@@ -125,29 +184,26 @@ def _get_bool_kwarg(node: ast.Call, name: str, default: bool = True) -> bool:
     return default
 
 
-def _kernel_size(node: ast.Call, pos: int = 2) -> int:
-    """Return kernel_size as int (handles single int or tuple like (3,3))."""
+def _kernel_size(node: ast.Call, consts: dict, pos: int = 2) -> int:
+    """Return kernel_size as int (handles single int, named const, or tuple)."""
     if pos < len(node.args):
         a = node.args[pos]
-        if isinstance(a, ast.Constant) and isinstance(a.value, int):
-            return a.value
+        val = _eval_const_expr(a, consts)
+        if isinstance(val, int):
+            return val
         if isinstance(a, ast.Tuple) and a.elts:
-            first = a.elts[0]
-            if isinstance(first, ast.Constant) and isinstance(
-                first.value, int
-            ):
-                return first.value
+            val = _eval_const_expr(a.elts[0], consts)
+            if isinstance(val, int):
+                return val
     for kw in node.keywords:
         if kw.arg == "kernel_size":
-            v = kw.value
-            if isinstance(v, ast.Constant) and isinstance(v.value, int):
-                return v.value
-            if isinstance(v, ast.Tuple) and v.elts:
-                first = v.elts[0]
-                if isinstance(first, ast.Constant) and isinstance(
-                    first.value, int
-                ):
-                    return first.value
+            val = _eval_const_expr(kw.value, consts)
+            if isinstance(val, int):
+                return val
+            if isinstance(kw.value, ast.Tuple) and kw.value.elts:
+                val = _eval_const_expr(kw.value.elts[0], consts)
+                if isinstance(val, int):
+                    return val
     return 3  # safe fallback
 
 
@@ -160,6 +216,9 @@ def _count_params_from_layers(script_path: str) -> int:
     except Exception:
         return 0
 
+    # Pre-collect module-level constants (INPUT_DIM = 1024, etc.)
+    consts = _collect_module_constants(tree)
+
     total = 0
 
     for node in ast.walk(tree):
@@ -168,7 +227,7 @@ def _count_params_from_layers(script_path: str) -> int:
         func = node.func
 
         # Resolve the leaf class name (e.g., "Linear" from "nn.Linear")
-        class_name: Optional[str] = None
+        class_name: None | str = None
         if isinstance(func, ast.Attribute):
             class_name = func.attr
         elif isinstance(func, ast.Name):
@@ -179,8 +238,8 @@ def _count_params_from_layers(script_path: str) -> int:
 
         try:
             if class_name == "Linear":
-                in_f = _get_int_arg(node, 0, "in_features")
-                out_f = _get_int_arg(node, 1, "out_features")
+                in_f = _get_int_arg(node, 0, "in_features", consts)
+                out_f = _get_int_arg(node, 1, "out_features", consts)
                 bias = _get_bool_kwarg(node, "bias", True)
                 if in_f and out_f:
                     total += in_f * out_f
@@ -188,15 +247,15 @@ def _count_params_from_layers(script_path: str) -> int:
                         total += out_f
 
             elif class_name == "Embedding":
-                num = _get_int_arg(node, 0, "num_embeddings")
-                dim = _get_int_arg(node, 1, "embedding_dim")
+                num = _get_int_arg(node, 0, "num_embeddings", consts)
+                dim = _get_int_arg(node, 1, "embedding_dim", consts)
                 if num and dim:
                     total += num * dim
 
             elif class_name in ("Conv2d", "ConvTranspose2d"):
-                c_in = _get_int_arg(node, 0, "in_channels")
-                c_out = _get_int_arg(node, 1, "out_channels")
-                k = _kernel_size(node)
+                c_in = _get_int_arg(node, 0, "in_channels", consts)
+                c_out = _get_int_arg(node, 1, "out_channels", consts)
+                k = _kernel_size(node, consts)
                 bias = _get_bool_kwarg(node, "bias", True)
                 if c_in and c_out:
                     total += c_in * c_out * k * k
@@ -204,9 +263,9 @@ def _count_params_from_layers(script_path: str) -> int:
                         total += c_out
 
             elif class_name == "Conv1d":
-                c_in = _get_int_arg(node, 0, "in_channels")
-                c_out = _get_int_arg(node, 1, "out_channels")
-                k = _kernel_size(node)
+                c_in = _get_int_arg(node, 0, "in_channels", consts)
+                c_out = _get_int_arg(node, 1, "out_channels", consts)
+                k = _kernel_size(node, consts)
                 bias = _get_bool_kwarg(node, "bias", True)
                 if c_in and c_out:
                     total += c_in * c_out * k
@@ -214,9 +273,9 @@ def _count_params_from_layers(script_path: str) -> int:
                         total += c_out
 
             elif class_name == "Conv3d":
-                c_in = _get_int_arg(node, 0, "in_channels")
-                c_out = _get_int_arg(node, 1, "out_channels")
-                k = _kernel_size(node)
+                c_in = _get_int_arg(node, 0, "in_channels", consts)
+                c_out = _get_int_arg(node, 1, "out_channels", consts)
+                k = _kernel_size(node, consts)
                 bias = _get_bool_kwarg(node, "bias", True)
                 if c_in and c_out:
                     total += c_in * c_out * k * k * k
@@ -224,19 +283,16 @@ def _count_params_from_layers(script_path: str) -> int:
                         total += c_out
 
             elif class_name in ("LayerNorm",):
-                # normalized_shape: int or tuple — take first element
                 if node.args:
                     a = node.args[0]
-                    dim = None
-                    if isinstance(a, ast.Constant) and isinstance(
-                        a.value, int
+                    dim = _eval_const_expr(a, consts)
+                    if (
+                        not isinstance(dim, int)
+                        and isinstance(a, ast.Tuple)
+                        and a.elts
                     ):
-                        dim = a.value
-                    elif isinstance(a, ast.Tuple) and a.elts:
-                        first = a.elts[-1]  # last dim
-                        if isinstance(first, ast.Constant):
-                            dim = first.value
-                    if dim:
+                        dim = _eval_const_expr(a.elts[-1], consts)
+                    if isinstance(dim, int) and dim:
                         total += 2 * dim  # weight + bias
 
             elif class_name in (
@@ -245,33 +301,32 @@ def _count_params_from_layers(script_path: str) -> int:
                 "BatchNorm3d",
                 "GroupNorm",
             ):
-                num = _get_int_arg(node, 0, "num_features") or _get_int_arg(
-                    node, 1, "num_channels"
-                )
+                num = _get_int_arg(
+                    node, 0, "num_features", consts
+                ) or _get_int_arg(node, 1, "num_channels", consts)
                 if num:
                     total += 2 * num  # weight + bias
 
             elif class_name == "MultiheadAttention":
-                embed_dim = _get_int_arg(node, 0, "embed_dim")
+                embed_dim = _get_int_arg(node, 0, "embed_dim", consts)
                 if embed_dim:
-                    # Q, K, V projections + output projection (each embed_dim x embed_dim)
                     total += 4 * embed_dim * embed_dim + 4 * embed_dim
 
             elif class_name == "GRU":
-                in_f = _get_int_arg(node, 0, "input_size")
-                hid = _get_int_arg(node, 1, "hidden_size")
+                in_f = _get_int_arg(node, 0, "input_size", consts)
+                hid = _get_int_arg(node, 1, "hidden_size", consts)
                 if in_f and hid:
                     total += 3 * (in_f * hid + hid * hid + 2 * hid)
 
             elif class_name == "LSTM":
-                in_f = _get_int_arg(node, 0, "input_size")
-                hid = _get_int_arg(node, 1, "hidden_size")
+                in_f = _get_int_arg(node, 0, "input_size", consts)
+                hid = _get_int_arg(node, 1, "hidden_size", consts)
                 if in_f and hid:
                     total += 4 * (in_f * hid + hid * hid + 2 * hid)
 
             elif class_name == "RNN":
-                in_f = _get_int_arg(node, 0, "input_size")
-                hid = _get_int_arg(node, 1, "hidden_size")
+                in_f = _get_int_arg(node, 0, "input_size", consts)
+                hid = _get_int_arg(node, 1, "hidden_size", consts)
                 if in_f and hid:
                     total += in_f * hid + hid * hid + 2 * hid
 
