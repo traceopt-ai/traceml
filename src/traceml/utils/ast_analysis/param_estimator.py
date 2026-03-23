@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from traceml.utils.ast_analysis.model_registry import ModelSpec, lookup_model
-from traceml.utils.ast_scanner import CodeFindings
+from traceml.utils.ast_analysis.scanner import CodeFindings
 
 
 @dataclass

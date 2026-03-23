@@ -1,3 +1,8 @@
+"""Known GPU hardware specifications and recommendation logic.
+
+Maps VRAM requirements to the smallest viable GPU configuration.
+"""
+
 from dataclasses import dataclass
 from typing import Dict
 

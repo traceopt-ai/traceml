@@ -19,7 +19,7 @@ from traceml.utils.ast_analysis.param_estimator import (
     ParamEstimate,
     estimate_params,
 )
-from traceml.utils.ast_scanner import (
+from traceml.utils.ast_analysis.scanner import (
     CodeFindings,
     DataLoaderFinding,
     DistributedFinding,

@@ -25,7 +25,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from traceml.aggregator.hardware_catalog import recommend_hardware
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.utils.ast_analysis import (
@@ -33,12 +32,25 @@ from traceml.utils.ast_analysis import (
     analyze_script,
     estimate_params,
 )
+from traceml.utils.ast_analysis.hardware_catalog import recommend_hardware
 
 # ---------------------------------------------------------------------------
 # Optimizer VRAM multipliers (multiples of param memory)
 # ---------------------------------------------------------------------------
+#
+# KEY: Adam/AdamW always store optimizer states in FP32 (m + v tensors),
+#      regardless of the model's dtype. So for a fp16 model:
+#        optimizer_bytes = 8 bytes/param  (2 × fp32 tensors)
+#        param_gb        = 2 bytes/param
+#        → multiplier = 4.0
+#      For a fp32 model:
+#        optimizer_bytes = 8 bytes/param
+#        param_gb        = 4 bytes/param
+#        → multiplier = 2.0
 
-_OPTIMIZER_STATE_MULTIPLIERS = {
+# Base multiplier assumes fp32 model (AdamW = 2×).
+# For fp16/bf16, _optimizer_state_multiplier() doubles the relevant entries.
+_OPTIMIZER_STATE_MULTIPLIERS_FP32 = {
     "adam": 2.0,
     "adamw": 2.0,
     "fusedadam": 2.0,
@@ -47,17 +59,38 @@ _OPTIMIZER_STATE_MULTIPLIERS = {
     "adafactor": 0.5,  # only second moment (approx)
     "adam8bit": 0.25,  # 8-bit quantised states
     "adamw8bit": 0.25,
-    "lion": 1.0,  # one momentum term
+    "lion": 1.0,  # one momentum term, fp32
     "rmsprop": 1.0,
     "adagrad": 1.0,
-    "sgdm": 1.0,  # SGD with momentum
+    "sgdm": 1.0,  # SGD with momentum — fp32 state
     "sgd": 0.0,  # vanilla SGD — no state
     "lbfgs": 0.0,
 }
 
+# Optimizers that keep fp32 states regardless of model dtype
+# (true for Adam/AdamW variants; not true for 8-bit or Adafactor)
+_FP32_STATE_OPTIMIZERS = {
+    "adam",
+    "adamw",
+    "fusedadam",
+    "deepspeedcpuadam",
+    "fused lamb",
+}
 
-def _optimizer_state_multiplier(opt_type: str) -> float:
-    return _OPTIMIZER_STATE_MULTIPLIERS.get(opt_type.lower(), 2.0)
+
+def _optimizer_state_multiplier(opt_type: str, bytes_per_param: int) -> float:
+    """Return optimizer VRAM as a multiple of param VRAM.
+
+    Adam/AdamW always stores states in fp32 (8 bytes/param).
+    For fp16 params (2 bytes/param) that's a 4× multiplier.
+    For fp32 params (4 bytes/param) that's a 2× multiplier.
+    """
+    base = _OPTIMIZER_STATE_MULTIPLIERS_FP32.get(opt_type.lower(), 2.0)
+    # Scale fp32-state optimizers by the inverse of param dtype ratio
+    if opt_type.lower() in _FP32_STATE_OPTIMIZERS and bytes_per_param < 4:
+        # fp32 states vs fp16/bf16 params → multiply by (4 / bytes_per_param)
+        return base * (4 / bytes_per_param)
+    return base
 
 
 def _nice_optimizer_name(opt_type: str) -> str:
@@ -90,11 +123,19 @@ def _activation_heuristic(
     param_estimate: ParamEstimate,
     target_batch_size: int,
 ) -> float:
-    """Conservative heuristic for activation memory (GB).
+    """Estimated activation memory (GB) for the target batch size.
 
-    Transformer / LLM:  activations ≈ param_bytes × 2 per sample
-    CNN:                activations ≈ param_bytes × 0.5 per sample
-    Unknown:            activations ≈ param_bytes × 1.5 per sample
+    Activations scale linearly with batch size but NOT with param count the
+    same way gradients do. Rule of thumb from empirical profiling:
+
+      Transformer / LLM:  ~0.3 × param_gb per sample
+                          (roughly 2 × hidden_dim × seq_len × num_layers,
+                          expressed relative to param size)
+      CNN:                ~0.15 × param_gb per sample
+      Unknown:            ~0.25 × param_gb per sample
+
+    These are conservative estimates; gradient checkpointing reduces this
+    further but we don't account for it here (pessimistic = safer).
     """
 
     is_cnn = any("Conv" in str(m) for m in findings.models)
@@ -103,13 +144,13 @@ def _activation_heuristic(
     param_gb = param_estimate.total_gb
 
     if is_cnn and not is_transformer:
-        multiplier = 0.5
+        per_sample = 0.15
     elif is_transformer or param_estimate.source == "registry":
-        multiplier = 2.0
+        per_sample = 0.30
     else:
-        multiplier = 1.5
+        per_sample = 0.25
 
-    return param_gb * multiplier * target_batch_size
+    return param_gb * per_sample * target_batch_size
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +244,9 @@ class SuggestDisplayDriver:
         param_gb = param_est.total_gb
         grad_gb = param_gb  # same dtype as params
 
-        opt_mult = _optimizer_state_multiplier(opt_type)
+        opt_mult = _optimizer_state_multiplier(
+            opt_type, param_est.bytes_per_param
+        )
         optimizer_gb = param_gb * opt_mult
 
         activation_gb = _activation_heuristic(

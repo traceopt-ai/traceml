@@ -316,7 +316,7 @@ def launch_tracer_process(script_path, args):
     optimizer_choice = getattr(args, "optimizer", "auto")
     if optimizer_choice.lower() == "auto":
         try:
-            from traceml.utils.ast_scanner import scan_for_optimizer
+            from traceml.utils.ast_analysis.scanner import scan_for_optimizer
 
             scanned_opt = scan_for_optimizer(script_path)
             if scanned_opt:
