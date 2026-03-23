@@ -64,10 +64,8 @@ class SuggestDisplayDriver(BaseDisplayDriver):
         # Get parameter memory
         param_bytes = last_layer.get("total_param_bytes", 0)
 
-        # Get peak memory (exclude first step warmup if possible)
-        peak_allocated = (
-            last_step.get("peak_alloc", 0) * 1024 * 1024
-        )  # MegaBytes -> Bytes
+        # Get peak memory (already in bytes, not MB!)
+        peak_allocated = last_step.get("peak_alloc", 0)
 
         # Math
         param_gb = param_bytes / (1024**3)
