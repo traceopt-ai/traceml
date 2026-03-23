@@ -1,13 +1,22 @@
-"""AST-based code analyzer — extract ML patterns from Python training scripts.
+"""TraceML script inspector — static extraction of ML patterns from Python source.
 
-Walks Python AST to find:
-  - DataLoader instantiations with kwargs (num_workers, pin_memory, etc.)
-  - Optimizer usage (Adam, AdamW, SGD)
-  - Precision patterns (autocast, .half(), GradScaler)
-  - Distributed patterns (DDP, FSDP, init_process_group, torch.compile)
-  - Model patterns (from_pretrained, gradient_checkpointing, cudnn.benchmark)
+Parses a training script's AST to surface:
+  - DataLoader configuration (batch_size, num_workers, pin_memory, …)
+  - Optimizer choice and hyperparameters
+  - Mixed-precision usage (autocast, GradScaler, .half())
+  - Parallelism strategy (DDP, FSDP, DeepSpeed, Lightning, Accelerate)
+  - Model provenance (HuggingFace from_pretrained, gradient checkpointing)
+  - Fine-tuning adapters (LoRA, QLoRA, PEFT variants)
 
-Never crashes. Returns empty CodeFindings on parse errors.
+Design principles
+-----------------
+* Zero-crash guarantee — every public entry point wraps failures; callers
+  always receive a valid result object even for unparsable files.
+* Single-pass import resolution — a pre-pass builds a flat alias→fqn map
+  so individual detectors need no import-walking of their own.
+* Visitor-based detection — the ``_PatternVisitor`` class subclasses
+  ``ast.NodeVisitor`` and accumulates all findings in one tree walk,
+  avoiding repeated ``ast.walk`` calls for different concerns.
 """
 
 from __future__ import annotations
@@ -15,20 +24,26 @@ from __future__ import annotations
 import ast
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
+
+# ---------------------------------------------------------------------------
+# Public result types
+# ---------------------------------------------------------------------------
 
 
 @dataclass
-class SourceLocation:
+class ScriptLocation:
+    """Points to the exact line in the source file where a pattern was found."""
+
     file_path: str
-    line_number: int
-    col_offset: int
-    source_line: str
+    line: int
+    col: int
+    text: str  # the raw source line (may be empty)
 
 
 @dataclass
 class DataLoaderFinding:
-    location: SourceLocation
+    location: ScriptLocation
     batch_size: Optional[int]
     num_workers: Optional[int]
     pin_memory: Optional[bool]
@@ -39,7 +54,7 @@ class DataLoaderFinding:
 
 @dataclass
 class OptimizerFinding:
-    location: SourceLocation
+    location: ScriptLocation
     optimizer_type: str
     learning_rate: Optional[float]
     weight_decay: Optional[float]
@@ -47,35 +62,40 @@ class OptimizerFinding:
 
 @dataclass
 class PrecisionFinding:
-    location: SourceLocation
-    kind: str
+    location: ScriptLocation
+    kind: str  # "autocast" | "grad_scaler" | "half" | "bfloat16"
     dtype_str: Optional[str]
     is_deprecated_api: bool
 
 
 @dataclass
 class DistributedFinding:
-    location: SourceLocation
-    kind: str
+    location: ScriptLocation
+    kind: str  # "ddp" | "fsdp" | "deepspeed" | "data_parallel" |
+    #                      "accelerate" | "lightning" | "hf_trainer" |
+    #                      "init_process_group" | "torch_compile"
     backend: Optional[str]
 
 
 @dataclass
 class ModelFinding:
-    location: SourceLocation
-    kind: str
+    location: ScriptLocation
+    kind: str  # "from_pretrained" | "gradient_checkpointing" |
+    #                      "cudnn_benchmark" | "float32_matmul_precision"
     model_name: Optional[str]
 
 
 @dataclass
 class FineTuningFinding:
-    location: SourceLocation
-    method: str  # "lora", "qlora", "peft_generic", "adapter"
+    location: ScriptLocation
+    method: str  # "lora" | "qlora" | "peft_generic" | "adapter"
     details: Dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class CodeFindings:
+    """All ML patterns found in a single script (or an empty result on error)."""
+
     script_path: str
     dataloaders: List[DataLoaderFinding] = field(default_factory=list)
     optimizers: List[OptimizerFinding] = field(default_factory=list)
@@ -90,156 +110,181 @@ class CodeFindings:
     parse_errors: List[str] = field(default_factory=list)
 
 
-def analyze_script(script_path: str) -> CodeFindings:
-    """Analyze a Python script and return structured ML pattern findings.
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
-    Never crashes — returns CodeFindings with parse_errors on failure.
+
+def analyze_script(script_path: str) -> CodeFindings:
+    """Return ML pattern findings for *script_path*.
+
+    Never raises — on any failure returns a ``CodeFindings`` with
+    ``parse_errors`` populated.
     """
-    findings = CodeFindings(script_path=script_path)
+    result = CodeFindings(script_path=script_path)
 
     if not os.path.isfile(script_path):
-        findings.parse_errors.append(f"File not found: {script_path}")
-        return findings
+        result.parse_errors.append(f"File not found: {script_path}")
+        return result
 
     try:
-        with open(script_path, "r", encoding="utf-8") as f:
-            source = f.read()
+        with open(script_path, "r", encoding="utf-8") as fh:
+            source = fh.read()
         lines = source.splitlines()
         tree = ast.parse(source, filename=script_path)
-    except SyntaxError as e:
-        findings.parse_errors.append(f"Syntax error: {e}")
-        return findings
-    except OSError as e:
-        findings.parse_errors.append(f"Read error: {e}")
-        return findings
+    except SyntaxError as exc:
+        result.parse_errors.append(f"Syntax error: {exc}")
+        return result
+    except OSError as exc:
+        result.parse_errors.append(f"Cannot read file: {exc}")
+        return result
 
-    findings.imports = _walk_imports(tree)
-    findings.dataloaders = _find_dataloaders(
-        tree, findings.imports, lines, script_path
+    result.imports = _build_import_map(tree)
+
+    # String constants at module level (MODEL_NAME = "some/model")
+    str_consts = _collect_string_constants(tree)
+
+    visitor = _PatternVisitor(
+        script_path=script_path,
+        lines=lines,
+        imports=result.imports,
+        str_consts=str_consts,
     )
-    findings.optimizers = _find_optimizers(
-        tree, findings.imports, lines, script_path
-    )
-    findings.precision = _find_precision(
-        tree, findings.imports, lines, script_path
-    )
-    findings.distributed = _find_distributed(
-        tree, findings.imports, lines, script_path
-    )
-    findings.models = _find_models(tree, findings.imports, lines, script_path)
-    findings.fine_tuning = _find_fine_tuning(
-        tree, findings.imports, lines, script_path
-    )
-    _extract_training_args(tree, findings, lines, script_path)
-    findings.has_training_loop = _detect_training_loop(tree, findings)
-    findings.has_gradient_checkpointing = any(
-        m.kind == "gradient_checkpointing" for m in findings.models
+    visitor.visit(tree)
+
+    result.dataloaders = visitor.dataloaders
+    result.optimizers = visitor.optimizers
+    result.precision = visitor.precision
+    result.distributed = visitor.distributed
+    result.models = visitor.models
+    result.fine_tuning = visitor.fine_tuning
+    result.gradient_accumulation_steps = visitor.gradient_accumulation_steps
+
+    _apply_qlora_upgrade(result)
+    _absorb_hf_training_args(tree, result, lines, script_path)
+
+    result.has_training_loop = _has_training_loop(tree, result)
+    result.has_gradient_checkpointing = any(
+        m.kind == "gradient_checkpointing" for m in result.models
     )
 
-    # Follow local imports one level deep
-    _follow_local_imports(tree, findings, script_path)
-
-    return findings
+    _ingest_local_imports(tree, result, script_path)
+    return result
 
 
 def detect_strategy_hint(script_path: str) -> Optional[str]:
-    """Lightweight AST check: return strategy kind if detectable, else None.
+    """Quick check: return the distributed strategy used, or ``None``.
 
-    Returns one of: 'fsdp', 'ddp', 'deepspeed', 'data_parallel', or None.
-    Never crashes — returns None on any error.
+    Returns one of ``'fsdp'``, ``'deepspeed'``, ``'ddp'``, or ``None``.
+    Never raises.
     """
     try:
-        if not os.path.isfile(script_path):
-            return None
-        with open(script_path, "r", encoding="utf-8") as f:
-            source = f.read()
-        tree = ast.parse(source, filename=script_path)
-        imports = _walk_imports(tree)
-        distributed = _find_distributed(
-            tree, imports, source.splitlines(), script_path
-        )
-        # Priority: fsdp > deepspeed > ddp
-        # data_parallel is single-process (not a distributed strategy) — ignored.
-        kinds = {d.kind for d in distributed}
-        if "fsdp" in kinds:
-            return "fsdp"
-        if "deepspeed" in kinds:
-            return "deepspeed"
-        if "ddp" in kinds:
-            return "ddp"
+        findings = analyze_script(script_path)
+        kinds: Set[str] = {d.kind for d in findings.distributed}
+        for strategy in ("fsdp", "deepspeed", "ddp"):
+            if strategy in kinds:
+                return strategy
         return None
     except Exception:
         return None
 
 
-# Import resolution
+def scan_for_optimizer(script_path: str) -> Optional[str]:
+    """Return the first optimizer type found in *script_path*, or ``None``."""
+    findings = analyze_script(script_path)
+    if findings.optimizers:
+        return findings.optimizers[0].optimizer_type
+    return None
 
 
-def _walk_imports(tree: ast.AST) -> Dict[str, str]:
-    """Build alias -> full module path map from import statements."""
-    imports = {}  # type: Dict[str, str]
+# ---------------------------------------------------------------------------
+# Import map construction
+# ---------------------------------------------------------------------------
+
+
+def _build_import_map(tree: ast.AST) -> Dict[str, str]:
+    """Return a mapping of local name → fully-qualified module path.
+
+    Examples::
+
+        import torch                      → {"torch": "torch"}
+        from torch.utils.data import DataLoader  → {"DataLoader": "torch.utils.data.DataLoader"}
+        from torch import nn as neural    → {"neural": "torch.nn"}
+    """
+    mapping: Dict[str, str] = {}
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                name = alias.asname or alias.name
-                imports[name] = alias.name
+                local = alias.asname if alias.asname else alias.name
+                mapping[local] = alias.name
+
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
             for alias in node.names:
-                name = alias.asname or alias.name
-                full = f"{module}.{alias.name}" if module else alias.name
-                imports[name] = full
-    return imports
+                local = alias.asname if alias.asname else alias.name
+                fqn = f"{module}.{alias.name}" if module else alias.name
+                mapping[local] = fqn
+
+    return mapping
 
 
-# Helper: resolve a call node to a fully-qualified name
+def _collect_string_constants(tree: ast.AST) -> Dict[str, str]:
+    """Return top-level ``NAME = "string"`` assignments."""
+    consts: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            consts[node.targets[0].id] = node.value.value
+    return consts
 
 
-def _resolve_call_name(
-    node: ast.Call, imports: Dict[str, str]
-) -> Optional[str]:
-    """Resolve a Call node's function to a fully-qualified name using imports."""
-    func = node.func
+# ---------------------------------------------------------------------------
+# Name resolution helpers
+# ---------------------------------------------------------------------------
 
-    # Simple name: DataLoader(...)
+
+def _fqn(call: ast.Call, imports: Dict[str, str]) -> Optional[str]:
+    """Resolve an ``ast.Call``'s function to a fully-qualified name string."""
+    func = call.func
+
     if isinstance(func, ast.Name):
         return imports.get(func.id, func.id)
 
-    # Attribute chain: torch.utils.data.DataLoader(...) or data.DataLoader(...)
     if isinstance(func, ast.Attribute):
-        parts = []
-        current = func
-        while isinstance(current, ast.Attribute):
-            parts.append(current.attr)
-            current = current.value
-        if isinstance(current, ast.Name):
-            parts.append(current.id)
-            parts.reverse()
-            # Resolve the root name through imports
-            root = parts[0]
-            resolved_root = imports.get(root, root)
-            return (
-                resolved_root + "." + ".".join(parts[1:])
-                if len(parts) > 1
-                else resolved_root
-            )
+        chain: List[str] = []
+        cur = func
+        while isinstance(cur, ast.Attribute):
+            chain.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name):
+            chain.append(cur.id)
+            chain.reverse()
+            root_resolved = imports.get(chain[0], chain[0])
+            tail = ".".join(chain[1:])
+            return f"{root_resolved}.{tail}" if tail else root_resolved
 
     return None
 
 
-def _get_kwarg_constant(node: ast.Call, name: str):
-    """Extract a constant keyword argument value from a Call node. Returns None if not found or dynamic."""
-    for kw in node.keywords:
+def _kw_const(call: ast.Call, name: str):
+    """Return the constant value of keyword argument *name*, or ``None``."""
+    for kw in call.keywords:
         if kw.arg == name:
-            if isinstance(kw.value, ast.Constant):
-                return kw.value.value
-            return None
+            return (
+                kw.value.value if isinstance(kw.value, ast.Constant) else None
+            )
     return None
 
 
-def _get_kwarg_str(node: ast.Call, name: str) -> Optional[str]:
-    """Extract string representation of a keyword argument for raw_kwargs."""
-    for kw in node.keywords:
+def _kw_repr(call: ast.Call, name: str) -> Optional[str]:
+    """Return a string representation of keyword argument *name* for display."""
+    for kw in call.keywords:
         if kw.arg == name:
             if isinstance(kw.value, ast.Constant):
                 return repr(kw.value.value)
@@ -249,633 +294,90 @@ def _get_kwarg_str(node: ast.Call, name: str) -> Optional[str]:
     return None
 
 
-def _has_kwarg(node: ast.Call, name: str) -> bool:
-    """Check if a keyword argument is present."""
-    return any(kw.arg == name for kw in node.keywords)
+def _has_kw(call: ast.Call, name: str) -> bool:
+    return any(kw.arg == name for kw in call.keywords)
 
 
-def _source_line(lines: List[str], lineno: int) -> str:
-    """Get source line (1-indexed), returning empty string if out of range."""
-    if 1 <= lineno <= len(lines):
-        return lines[lineno - 1]
-    return ""
+def _src_line(lines: List[str], lineno: int) -> str:
+    return lines[lineno - 1] if 1 <= lineno <= len(lines) else ""
 
 
-def _loc(script_path: str, node: ast.AST, lines: List[str]) -> SourceLocation:
-    """Build a SourceLocation from an AST node."""
-    lineno = getattr(node, "lineno", 0)
+def _location(path: str, node: ast.AST, lines: List[str]) -> ScriptLocation:
+    ln = getattr(node, "lineno", 0)
     col = getattr(node, "col_offset", 0)
-    return SourceLocation(
-        file_path=script_path,
-        line_number=lineno,
-        col_offset=col,
-        source_line=_source_line(lines, lineno),
+    return ScriptLocation(
+        file_path=path, line=ln, col=col, text=_src_line(lines, ln)
     )
 
 
-# DataLoader detection
-
-_DATALOADER_NAMES = {
-    "torch.utils.data.DataLoader",
-    "torch.utils.data.dataloader.DataLoader",
-}
-
-
-def _is_dataloader_call(fqn: Optional[str]) -> bool:
-    """Check if a fully-qualified name matches DataLoader."""
-    if fqn is None:
-        return False
-    return fqn in _DATALOADER_NAMES or fqn.endswith(".DataLoader")
+def _safe_int(val) -> Optional[int]:
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
 
 
-def _find_dataloaders(
-    tree: ast.AST,
-    imports: Dict[str, str],
-    lines: List[str],
-    script_path: str,
-) -> List[DataLoaderFinding]:
-    results = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fqn = _resolve_call_name(node, imports)
-        if not _is_dataloader_call(fqn):
-            continue
-
-        num_workers = _get_kwarg_constant(node, "num_workers")
-        if num_workers is not None:
-            try:
-                num_workers = int(num_workers)
-            except (ValueError, TypeError):
-                num_workers = None
-
-        batch_size = _get_kwarg_constant(node, "batch_size")
-        if batch_size is not None:
-            try:
-                batch_size = int(batch_size)
-            except (ValueError, TypeError):
-                batch_size = None
-
-        pin_memory = _get_kwarg_constant(node, "pin_memory")
-        if pin_memory is not None:
-            pin_memory = bool(pin_memory)
-
-        persistent_workers = _get_kwarg_constant(node, "persistent_workers")
-        if persistent_workers is not None:
-            persistent_workers = bool(persistent_workers)
-
-        prefetch_factor = _get_kwarg_constant(node, "prefetch_factor")
-        if prefetch_factor is not None:
-            try:
-                prefetch_factor = int(prefetch_factor)
-            except (ValueError, TypeError):
-                prefetch_factor = None
-
-        raw_kwargs = {}  # type: Dict[str, str]
-        for kw_name in (
-            "num_workers",
-            "batch_size",
-            "pin_memory",
-            "persistent_workers",
-            "prefetch_factor",
-        ):
-            val = _get_kwarg_str(node, kw_name)
-            if val is not None:
-                raw_kwargs[kw_name] = val
-
-        results.append(
-            DataLoaderFinding(
-                location=_loc(script_path, node, lines),
-                batch_size=batch_size,
-                num_workers=num_workers,
-                pin_memory=pin_memory,
-                persistent_workers=persistent_workers,
-                prefetch_factor=prefetch_factor,
-                raw_kwargs=raw_kwargs,
-            )
-        )
-
-    return results
+def _safe_float(val) -> Optional[float]:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
 
 
-# Optimizer detection
+# ---------------------------------------------------------------------------
+# Known patterns
+# ---------------------------------------------------------------------------
 
-_OPTIMIZER_NAMES = {
+_DATALOADER_SUFFIXES = {"DataLoader", "dataloader.DataLoader"}
+
+_KNOWN_OPTIMIZERS: Dict[str, str] = {
+    # PyTorch built-ins
     "torch.optim.Adam": "Adam",
     "torch.optim.AdamW": "AdamW",
     "torch.optim.SGD": "SGD",
     "torch.optim.RMSprop": "RMSprop",
     "torch.optim.Adagrad": "Adagrad",
-    # Extended optimizer detection
-    "lion_pytorch.Lion": "Lion",
-    "transformers.optimization.Adafactor": "Adafactor",
     "torch.optim.LBFGS": "LBFGS",
+    # Third-party
     "bitsandbytes.optim.Adam8bit": "Adam8bit",
     "bitsandbytes.optim.AdamW8bit": "AdamW8bit",
     "apex.optimizers.FusedAdam": "FusedAdam",
     "apex.optimizers.FusedLAMB": "FusedLAMB",
     "deepspeed.ops.adam.FusedAdam": "FusedAdam",
     "deepspeed.ops.adam.DeepSpeedCPUAdam": "DeepSpeedCPUAdam",
+    "lion_pytorch.Lion": "Lion",
+    "transformers.optimization.Adafactor": "Adafactor",
 }
 
-
-def _find_optimizers(
-    tree: ast.AST,
-    imports: Dict[str, str],
-    lines: List[str],
-    script_path: str,
-) -> List[OptimizerFinding]:
-    results = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fqn = _resolve_call_name(node, imports)
-        if fqn is None:
-            continue
-
-        opt_type = None
-        for known_fqn, name in _OPTIMIZER_NAMES.items():
-            if fqn == known_fqn or fqn.endswith(f".{name}") or fqn == name:
-                opt_type = name
-                break
-
-        if opt_type is None:
-            continue
-
-        lr = _get_kwarg_constant(node, "lr")
-        if lr is not None:
-            try:
-                lr = float(lr)
-            except (ValueError, TypeError):
-                lr = None
-
-        wd = _get_kwarg_constant(node, "weight_decay")
-        if wd is not None:
-            try:
-                wd = float(wd)
-            except (ValueError, TypeError):
-                wd = None
-
-        results.append(
-            OptimizerFinding(
-                location=_loc(script_path, node, lines),
-                optimizer_type=opt_type,
-                learning_rate=lr,
-                weight_decay=wd,
-            )
-        )
-
-    return results
-
-
-# Precision detection
-
-
-def _find_precision(
-    tree: ast.AST,
-    imports: Dict[str, str],
-    lines: List[str],
-    script_path: str,
-) -> List[PrecisionFinding]:
-    results = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fqn = _resolve_call_name(node, imports)
-        if fqn is None:
-            continue
-
-        # autocast patterns
-        if "autocast" in fqn:
-            is_deprecated = "cuda.amp.autocast" in fqn
-            dtype_str = _extract_dtype_arg(node)
-            results.append(
-                PrecisionFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="autocast",
-                    dtype_str=dtype_str,
-                    is_deprecated_api=is_deprecated,
-                )
-            )
-            continue
-
-        # GradScaler
-        if "GradScaler" in fqn:
-            results.append(
-                PrecisionFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="grad_scaler",
-                    dtype_str=None,
-                    is_deprecated_api="cuda.amp.GradScaler" in fqn,
-                )
-            )
-            continue
-
-    # Also check for .half() and .bfloat16() method calls
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        if isinstance(func, ast.Attribute):
-            if func.attr == "half":
-                results.append(
-                    PrecisionFinding(
-                        location=_loc(script_path, node, lines),
-                        kind="half",
-                        dtype_str="float16",
-                        is_deprecated_api=False,
-                    )
-                )
-            elif func.attr == "bfloat16":
-                results.append(
-                    PrecisionFinding(
-                        location=_loc(script_path, node, lines),
-                        kind="bfloat16",
-                        dtype_str="bfloat16",
-                        is_deprecated_api=False,
-                    )
-                )
-
-    return results
-
-
-def _extract_dtype_arg(node: ast.Call) -> Optional[str]:
-    """Extract dtype argument from autocast() call."""
-    for kw in node.keywords:
-        if kw.arg == "dtype":
-            return _dtype_node_to_str(kw.value)
-    if len(node.args) >= 2:
-        return _dtype_node_to_str(node.args[1])
-    return None
-
-
-def _dtype_node_to_str(node: ast.AST) -> Optional[str]:
-    if isinstance(node, ast.Attribute):
-        return node.attr
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
-# Distributed detection
-
-
-def _find_distributed(
-    tree: ast.AST,
-    imports: Dict[str, str],
-    lines: List[str],
-    script_path: str,
-) -> List[DistributedFinding]:
-    results = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fqn = _resolve_call_name(node, imports)
-        if fqn is None:
-            continue
-
-        if "DistributedDataParallel" in fqn or fqn.endswith(".DDP"):
-            results.append(
-                DistributedFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="ddp",
-                    backend=None,
-                )
-            )
-            continue
-
-        if (
-            fqn
-            and "DataParallel" in fqn
-            and "Distributed" not in fqn
-            and "FullyShard" not in fqn
-        ):
-            results.append(
-                DistributedFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="data_parallel",
-                    backend=None,
-                )
-            )
-            continue
-
-        if "FullyShardedDataParallel" in fqn or fqn.endswith(".FSDP"):
-            results.append(
-                DistributedFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="fsdp",
-                    backend=None,
-                )
-            )
-            continue
-
-        if "init_process_group" in fqn:
-            backend = None
-            if (
-                node.args
-                and isinstance(node.args[0], ast.Constant)
-                and isinstance(node.args[0].value, str)
-            ):
-                backend = node.args[0].value
-            else:
-                backend_val = _get_kwarg_constant(node, "backend")
-                if isinstance(backend_val, str):
-                    backend = backend_val
-            results.append(
-                DistributedFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="init_process_group",
-                    backend=backend,
-                )
-            )
-            continue
-
-        if fqn == "torch.compile" or (
-            fqn.endswith(".compile") and "torch" in fqn
-        ):
-            results.append(
-                DistributedFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="torch_compile",
-                    backend=None,
-                )
-            )
-            continue
-
-        if "deepspeed" in fqn and "initialize" in fqn:
-            results.append(
-                DistributedFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="deepspeed",
-                    backend=None,
-                )
-            )
-            continue
-
-        if (
-            fqn
-            and ("Accelerator" in fqn)
-            and "accelerate" in imports.get(fqn.split(".")[0], fqn).lower()
-        ):
-            results.append(
-                DistributedFinding(
-                    location=_loc(script_path, node, lines),
-                    kind="accelerate",
-                    backend=None,
-                )
-            )
-            continue
-
-    _lightning_prefixes = (
-        "pytorch_lightning",
-        "lightning.pytorch",
-        "lightning",
-    )
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fqn = _resolve_call_name(node, imports)
-        if fqn is None:
-            continue
-        if (
-            any(fqn.startswith(pfx) for pfx in _lightning_prefixes)
-            and "Trainer" in fqn
-        ):
-            if not any(d.kind == "lightning" for d in results):
-                results.append(
-                    DistributedFinding(
-                        location=_loc(script_path, node, lines),
-                        kind="lightning",
-                        backend=None,
-                    )
-                )
-            break
-        if fqn == "Trainer" or fqn.endswith(".Trainer"):
-            src = imports.get("Trainer", "")
-            if any(src.startswith(pfx) for pfx in _lightning_prefixes):
-                if not any(d.kind == "lightning" for d in results):
-                    results.append(
-                        DistributedFinding(
-                            location=_loc(script_path, node, lines),
-                            kind="lightning",
-                            backend=None,
-                        )
-                    )
-                break
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
-            continue
-        for base in node.bases:
-            base_name = None
-            if isinstance(base, ast.Name):
-                base_name = base.id
-            elif isinstance(base, ast.Attribute):
-                base_name = base.attr
-            if base_name == "LightningModule":
-                src = imports.get("LightningModule", "")
-                if not src or any(
-                    src.startswith(pfx) for pfx in _lightning_prefixes
-                ):
-                    if not any(d.kind == "lightning" for d in results):
-                        results.append(
-                            DistributedFinding(
-                                location=_loc(script_path, node, lines),
-                                kind="lightning",
-                                backend=None,
-                            )
-                        )
-                    break
-
-    return results
-
-
-# Model detection
-
-
-def _find_models(
-    tree: ast.AST,
-    imports: Dict[str, str],
-    lines: List[str],
-    script_path: str,
-) -> List[ModelFinding]:
-    # Pre-scan module-level string constants: MODEL_NAME = "some/model"
-    string_consts: Dict[str, str] = {}
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Assign):
-            continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        if isinstance(node.value, ast.Constant) and isinstance(
-            node.value.value, str
-        ):
-            string_consts[node.targets[0].id] = node.value.value
-
-    results = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            fqn = _resolve_call_name(node, imports)
-            if fqn and "from_pretrained" in fqn:
-                model_name = None
-                if node.args:
-                    arg0 = node.args[0]
-                    if isinstance(arg0, ast.Constant) and isinstance(
-                        arg0.value, str
-                    ):
-                        # Literal string: from_pretrained("bert-base-uncased")
-                        model_name = arg0.value
-                    elif (
-                        isinstance(arg0, ast.Name) and arg0.id in string_consts
-                    ):
-                        # Variable reference: from_pretrained(MODEL_NAME)
-                        model_name = string_consts[arg0.id]
-                results.append(
-                    ModelFinding(
-                        location=_loc(script_path, node, lines),
-                        kind="from_pretrained",
-                        model_name=model_name,
-                    )
-                )
-                continue
-
-            if fqn and "gradient_checkpointing_enable" in fqn:
-                results.append(
-                    ModelFinding(
-                        location=_loc(script_path, node, lines),
-                        kind="gradient_checkpointing",
-                        model_name=None,
-                    )
-                )
-                continue
-
-            if fqn and "set_float32_matmul_precision" in fqn:
-                results.append(
-                    ModelFinding(
-                        location=_loc(script_path, node, lines),
-                        kind="float32_matmul_precision",
-                        model_name=None,
-                    )
-                )
-                continue
-
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if (
-                    isinstance(target, ast.Attribute)
-                    and target.attr == "benchmark"
-                ):
-                    if _is_cudnn_benchmark(target):
-                        results.append(
-                            ModelFinding(
-                                location=_loc(script_path, node, lines),
-                                kind="cudnn_benchmark",
-                                model_name=None,
-                            )
-                        )
-
-    return results
-
-
-def _is_cudnn_benchmark(node: ast.Attribute) -> bool:
-    parts = [node.attr]
-    current = node.value
-    while isinstance(current, ast.Attribute):
-        parts.append(current.attr)
-        current = current.value
-    if isinstance(current, ast.Name):
-        parts.append(current.id)
-    parts.reverse()
-    full = ".".join(parts)
-    return "cudnn" in full and "benchmark" in full
-
-
-# Fine-tuning / PEFT detection
-
-_PEFT_LORA_NAMES = {
-    "peft.LoraConfig": "lora",
+_PEFT_METHODS: Dict[str, str] = {
     "LoraConfig": "lora",
-    "peft.get_peft_model": "peft_generic",
-    "get_peft_model": "peft_generic",
-    "peft.AdaLoraConfig": "lora",
+    "peft.LoraConfig": "lora",
     "AdaLoraConfig": "lora",
-    "peft.IA3Config": "peft_generic",
+    "peft.AdaLoraConfig": "lora",
+    "get_peft_model": "peft_generic",
+    "peft.get_peft_model": "peft_generic",
     "IA3Config": "peft_generic",
-    "peft.PrefixTuningConfig": "adapter",
+    "peft.IA3Config": "peft_generic",
     "PrefixTuningConfig": "adapter",
-    "peft.PromptTuningConfig": "adapter",
+    "peft.PrefixTuningConfig": "adapter",
     "PromptTuningConfig": "adapter",
+    "peft.PromptTuningConfig": "adapter",
 }
 
-_QLORA_MARKERS = {
-    "prepare_model_for_kbit_training",
-    "BitsAndBytesConfig",
-}
+_QLORA_SIGNALS = {"prepare_model_for_kbit_training", "BitsAndBytesConfig"}
 
-
-def _find_fine_tuning(
-    tree: ast.AST,
-    imports: Dict[str, str],
-    lines: List[str],
-    script_path: str,
-) -> List[FineTuningFinding]:
-    results = []
-    has_qlora_marker = False
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fqn = _resolve_call_name(node, imports)
-        if fqn is None:
-            continue
-
-        for known_fqn, method in _PEFT_LORA_NAMES.items():
-            if fqn == known_fqn or fqn.endswith(
-                f".{known_fqn.split('.')[-1]}"
-            ):
-                details = {}
-                r_val = _get_kwarg_constant(node, "r")
-                if r_val is not None:
-                    details["rank"] = str(r_val)
-                lora_alpha = _get_kwarg_constant(node, "lora_alpha")
-                if lora_alpha is not None:
-                    details["lora_alpha"] = str(lora_alpha)
-                results.append(
-                    FineTuningFinding(
-                        location=_loc(script_path, node, lines),
-                        method=method,
-                        details=details,
-                    )
-                )
-                break
-
-        for marker in _QLORA_MARKERS:
-            if fqn and (fqn == marker or fqn.endswith(f".{marker}")):
-                has_qlora_marker = True
-                break
-
-    if has_qlora_marker:
-        for ft in results:
-            if ft.method == "lora":
-                ft.method = "qlora"
-
-    return results
-
-
-# HuggingFace TrainingArguments extraction
-
-
-_TRAINING_ARGS_NAMES = {
-    "transformers.TrainingArguments",
-    "transformers.Seq2SeqTrainingArguments",
+_HF_TRAINING_ARG_CLASSES = {
     "TrainingArguments",
     "Seq2SeqTrainingArguments",
+    "transformers.TrainingArguments",
+    "transformers.Seq2SeqTrainingArguments",
 }
 
-_HF_TRAINER_NAMES = {
-    "transformers.Trainer",
-    "transformers.Seq2SeqTrainer",
+_HF_TRAINER_CLASSES = {
     "Trainer",
     "Seq2SeqTrainer",
+    "transformers.Trainer",
+    "transformers.Seq2SeqTrainer",
     "trl.SFTTrainer",
     "trl.DPOTrainer",
     "trl.PPOTrainer",
@@ -886,219 +388,572 @@ _HF_TRAINER_NAMES = {
     "RewardTrainer",
 }
 
+_LIGHTNING_PREFIXES = ("pytorch_lightning", "lightning.pytorch", "lightning")
 
-def _extract_training_args(
-    tree: ast.AST,
-    findings: CodeFindings,
-    lines: List[str],
-    script_path: str,
-) -> None:
-    imports = findings.imports
 
+# ---------------------------------------------------------------------------
+# Visitor — single pass over the AST
+# ---------------------------------------------------------------------------
+
+
+class _PatternVisitor(ast.NodeVisitor):
+    """Accumulates all ML pattern findings in a single AST traversal."""
+
+    def __init__(
+        self,
+        script_path: str,
+        lines: List[str],
+        imports: Dict[str, str],
+        str_consts: Dict[str, str],
+    ) -> None:
+        self._path = script_path
+        self._lines = lines
+        self._imports = imports
+        self._str_consts = str_consts
+
+        self.dataloaders: List[DataLoaderFinding] = []
+        self.optimizers: List[OptimizerFinding] = []
+        self.precision: List[PrecisionFinding] = []
+        self.distributed: List[DistributedFinding] = []
+        self.models: List[ModelFinding] = []
+        self.fine_tuning: List[FineTuningFinding] = []
+        self.gradient_accumulation_steps: Optional[int] = None
+
+        # Dedup guards
+        self._seen_lightning = False
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _loc(self, node: ast.AST) -> ScriptLocation:
+        return _location(self._path, node, self._lines)
+
+    def _resolve(self, call: ast.Call) -> Optional[str]:
+        return _fqn(call, self._imports)
+
+    def _add_dist(
+        self, node: ast.AST, kind: str, backend: Optional[str] = None
+    ) -> None:
+        self.distributed.append(
+            DistributedFinding(
+                location=self._loc(node), kind=kind, backend=backend
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Call node — the main dispatch point
+    # ------------------------------------------------------------------
+
+    def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+        name = self._resolve(node)
+        if name is not None:
+            self._check_dataloader(node, name)
+            self._check_optimizer(node, name)
+            self._check_precision_call(node, name)
+            self._check_distributed(node, name)
+            self._check_model(node, name)
+            self._check_peft(node, name)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+        # .half() / .bfloat16() appear as method calls but also as assignments
+        # Check for cudnn.benchmark = True
+        for target in node.targets:
+            if (
+                isinstance(target, ast.Attribute)
+                and target.attr == "benchmark"
+            ):
+                if _is_cudnn_attr(target):
+                    self.models.append(
+                        ModelFinding(
+                            location=self._loc(node),
+                            kind="cudnn_benchmark",
+                            model_name=None,
+                        )
+                    )
+        self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        # Detect LightningModule subclasses
+        if not self._seen_lightning:
+            for base in node.bases:
+                bname = (
+                    base.id
+                    if isinstance(base, ast.Name)
+                    else base.attr if isinstance(base, ast.Attribute) else None
+                )
+                if bname == "LightningModule":
+                    src = self._imports.get("LightningModule", "")
+                    if not src or any(
+                        src.startswith(p) for p in _LIGHTNING_PREFIXES
+                    ):
+                        self._seen_lightning = True
+                        self._add_dist(node, "lightning")
+                        break
+        self.generic_visit(node)
+
+    # ------------------------------------------------------------------
+    # Per-pattern checks (called from visit_Call)
+    # ------------------------------------------------------------------
+
+    def _check_dataloader(self, node: ast.Call, name: str) -> None:
+        if not (name.endswith(".DataLoader") or name in _DATALOADER_SUFFIXES):
+            return
+
+        raw: Dict[str, str] = {}
+        for kw_name in (
+            "batch_size",
+            "num_workers",
+            "pin_memory",
+            "persistent_workers",
+            "prefetch_factor",
+        ):
+            v = _kw_repr(node, kw_name)
+            if v is not None:
+                raw[kw_name] = v
+
+        bs = _safe_int(_kw_const(node, "batch_size"))
+        nw = _safe_int(_kw_const(node, "num_workers"))
+        pm_raw = _kw_const(node, "pin_memory")
+        pm = bool(pm_raw) if pm_raw is not None else None
+        pw_raw = _kw_const(node, "persistent_workers")
+        pw = bool(pw_raw) if pw_raw is not None else None
+        pf = _safe_int(_kw_const(node, "prefetch_factor"))
+
+        self.dataloaders.append(
+            DataLoaderFinding(
+                location=self._loc(node),
+                batch_size=bs,
+                num_workers=nw,
+                pin_memory=pm,
+                persistent_workers=pw,
+                prefetch_factor=pf,
+                raw_kwargs=raw,
+            )
+        )
+
+    def _check_optimizer(self, node: ast.Call, name: str) -> None:
+        opt_type: Optional[str] = None
+        for fqn_key, label in _KNOWN_OPTIMIZERS.items():
+            leaf = fqn_key.rsplit(".", 1)[-1]
+            if name == fqn_key or name == leaf or name.endswith(f".{leaf}"):
+                opt_type = label
+                break
+        if opt_type is None:
+            return
+
+        self.optimizers.append(
+            OptimizerFinding(
+                location=self._loc(node),
+                optimizer_type=opt_type,
+                learning_rate=_safe_float(_kw_const(node, "lr")),
+                weight_decay=_safe_float(_kw_const(node, "weight_decay")),
+            )
+        )
+
+    def _check_precision_call(self, node: ast.Call, name: str) -> None:
+        if "autocast" in name:
+            dtype_str = _extract_autocast_dtype(node)
+            self.precision.append(
+                PrecisionFinding(
+                    location=self._loc(node),
+                    kind="autocast",
+                    dtype_str=dtype_str,
+                    is_deprecated_api="cuda.amp.autocast" in name,
+                )
+            )
+            return
+
+        if "GradScaler" in name:
+            self.precision.append(
+                PrecisionFinding(
+                    location=self._loc(node),
+                    kind="grad_scaler",
+                    dtype_str=None,
+                    is_deprecated_api="cuda.amp.GradScaler" in name,
+                )
+            )
+            return
+
+        # .half() / .bfloat16() method calls
+        if isinstance(node.func, ast.Attribute):
+            meth = node.func.attr
+            if meth == "half":
+                self.precision.append(
+                    PrecisionFinding(
+                        location=self._loc(node),
+                        kind="half",
+                        dtype_str="float16",
+                        is_deprecated_api=False,
+                    )
+                )
+            elif meth == "bfloat16":
+                self.precision.append(
+                    PrecisionFinding(
+                        location=self._loc(node),
+                        kind="bfloat16",
+                        dtype_str="bfloat16",
+                        is_deprecated_api=False,
+                    )
+                )
+
+    def _check_distributed(self, node: ast.Call, name: str) -> None:
+        if "DistributedDataParallel" in name or name.endswith(".DDP"):
+            self._add_dist(node, "ddp")
+            return
+
+        if (
+            "DataParallel" in name
+            and "Distributed" not in name
+            and "FullyShard" not in name
+        ):
+            self._add_dist(node, "data_parallel")
+            return
+
+        if "FullyShardedDataParallel" in name or name.endswith(".FSDP"):
+            self._add_dist(node, "fsdp")
+            return
+
+        if "init_process_group" in name:
+            backend: Optional[str] = None
+            if node.args and isinstance(node.args[0], ast.Constant):
+                backend = str(node.args[0].value)
+            else:
+                raw = _kw_const(node, "backend")
+                if isinstance(raw, str):
+                    backend = raw
+            self._add_dist(node, "init_process_group", backend)
+            return
+
+        if (
+            name == "torch.compile" or name.endswith(".compile")
+        ) and "torch" in name:
+            self._add_dist(node, "torch_compile")
+            return
+
+        if "deepspeed" in name and "initialize" in name:
+            self._add_dist(node, "deepspeed")
+            return
+
+        if (
+            "Accelerator" in name
+            and "accelerate"
+            in self._imports.get(name.split(".")[0], name).lower()
+        ):
+            self._add_dist(node, "accelerate")
+            return
+
+        # Lightning Trainer (not a class def — instantiation)
+        if not self._seen_lightning:
+            if (
+                any(name.startswith(p) for p in _LIGHTNING_PREFIXES)
+                and "Trainer" in name
+            ):
+                self._seen_lightning = True
+                self._add_dist(node, "lightning")
+                return
+            if name == "Trainer" or name.endswith(".Trainer"):
+                src = self._imports.get("Trainer", "")
+                if any(src.startswith(p) for p in _LIGHTNING_PREFIXES):
+                    self._seen_lightning = True
+                    self._add_dist(node, "lightning")
+                    return
+
+    def _check_model(self, node: ast.Call, name: str) -> None:
+        if "from_pretrained" in name:
+            model_id: Optional[str] = None
+            if node.args:
+                arg0 = node.args[0]
+                if isinstance(arg0, ast.Constant) and isinstance(
+                    arg0.value, str
+                ):
+                    model_id = arg0.value
+                elif (
+                    isinstance(arg0, ast.Name) and arg0.id in self._str_consts
+                ):
+                    model_id = self._str_consts[arg0.id]
+            self.models.append(
+                ModelFinding(
+                    location=self._loc(node),
+                    kind="from_pretrained",
+                    model_name=model_id,
+                )
+            )
+            return
+
+        if "gradient_checkpointing_enable" in name:
+            self.models.append(
+                ModelFinding(
+                    location=self._loc(node),
+                    kind="gradient_checkpointing",
+                    model_name=None,
+                )
+            )
+            return
+
+        if "set_float32_matmul_precision" in name:
+            self.models.append(
+                ModelFinding(
+                    location=self._loc(node),
+                    kind="float32_matmul_precision",
+                    model_name=None,
+                )
+            )
+
+    def _check_peft(self, node: ast.Call, name: str) -> None:
+        for key, method in _PEFT_METHODS.items():
+            leaf = key.rsplit(".", 1)[-1]
+            if name == key or name == leaf or name.endswith(f".{leaf}"):
+                details: Dict[str, str] = {}
+                r = _kw_const(node, "r")
+                if r is not None:
+                    details["rank"] = str(r)
+                alpha = _kw_const(node, "lora_alpha")
+                if alpha is not None:
+                    details["lora_alpha"] = str(alpha)
+                self.fine_tuning.append(
+                    FineTuningFinding(
+                        location=self._loc(node),
+                        method=method,
+                        details=details,
+                    )
+                )
+                return
+
+        # QLoRA signals (not PEFT configs themselves but mark the run as QLoRA)
+        leaf = name.rsplit(".", 1)[-1]
+        if leaf in _QLORA_SIGNALS or name in _QLORA_SIGNALS:
+            # Recorded via _apply_qlora_upgrade; nothing to append here.
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Post-processing passes
+# ---------------------------------------------------------------------------
+
+
+def _apply_qlora_upgrade(result: CodeFindings) -> None:
+    """Upgrade LoRA findings to QLoRA when k-bit quantisation signals are present."""
+    src = result.script_path
+    try:
+        with open(src, "r", encoding="utf-8") as fh:
+            source = fh.read()
+        tree = ast.parse(source)
+    except Exception:
+        return
+
+    has_signal = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        fqn = _resolve_call_name(node, imports)
-        if fqn is None:
+        func_name = ""
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            func_name = node.func.attr
+        if func_name in _QLORA_SIGNALS:
+            has_signal = True
+            break
+
+    if has_signal:
+        for ft in result.fine_tuning:
+            if ft.method == "lora":
+                ft.method = "qlora"
+
+
+def _absorb_hf_training_args(
+    tree: ast.AST,
+    result: CodeFindings,
+    lines: List[str],
+    script_path: str,
+) -> None:
+    """Extract precision and grad-accum from HuggingFace TrainingArguments."""
+    imports = result.imports
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
+        name = _fqn(node, imports)
+        if name is None:
+            continue
+        leaf = name.rsplit(".", 1)[-1]
 
-        is_training_args = False
-        for ta_name in _TRAINING_ARGS_NAMES:
-            if fqn == ta_name or fqn.endswith(f".{ta_name.split('.')[-1]}"):
-                is_training_args = True
-                break
-
-        if not is_training_args:
-            is_trainer = False
-            for t_name in _HF_TRAINER_NAMES:
-                if fqn == t_name or fqn.endswith(f".{t_name.split('.')[-1]}"):
-                    is_trainer = True
-                    break
-            if is_trainer:
-                findings.distributed.append(
+        # HF Trainer → mark as hf_trainer distributed strategy
+        if name in _HF_TRAINER_CLASSES or leaf in {
+            n.rsplit(".", 1)[-1] for n in _HF_TRAINER_CLASSES
+        }:
+            if not any(d.kind == "hf_trainer" for d in result.distributed):
+                result.distributed.append(
                     DistributedFinding(
-                        location=_loc(script_path, node, lines),
+                        location=_location(script_path, node, lines),
                         kind="hf_trainer",
                         backend=None,
                     )
                 )
             continue
 
-        fp16 = _get_kwarg_constant(node, "fp16")
-        bf16 = _get_kwarg_constant(node, "bf16")
-        grad_accum = _get_kwarg_constant(node, "gradient_accumulation_steps")
-        deepspeed_arg = _has_kwarg(node, "deepspeed")
+        # TrainingArguments → extract fp16/bf16/grad_accum/deepspeed
+        if name not in _HF_TRAINING_ARG_CLASSES and leaf not in {
+            n.rsplit(".", 1)[-1] for n in _HF_TRAINING_ARG_CLASSES
+        }:
+            continue
 
-        if fp16 is True:
-            findings.precision.append(
+        loc = _location(script_path, node, lines)
+        if _kw_const(node, "fp16") is True:
+            result.precision.append(
                 PrecisionFinding(
-                    location=_loc(script_path, node, lines),
+                    location=loc,
                     kind="autocast",
                     dtype_str="float16",
                     is_deprecated_api=False,
                 )
             )
-
-        if bf16 is True:
-            findings.precision.append(
+        if _kw_const(node, "bf16") is True:
+            result.precision.append(
                 PrecisionFinding(
-                    location=_loc(script_path, node, lines),
+                    location=loc,
                     kind="autocast",
                     dtype_str="bfloat16",
                     is_deprecated_api=False,
                 )
             )
-
-        if grad_accum is not None:
-            try:
-                findings.gradient_accumulation_steps = int(grad_accum)
-            except (ValueError, TypeError):
-                pass
-
-        if deepspeed_arg:
-            if not any(d.kind == "deepspeed" for d in findings.distributed):
-                findings.distributed.append(
-                    DistributedFinding(
-                        location=_loc(script_path, node, lines),
-                        kind="deepspeed",
-                        backend=None,
-                    )
+        ga = _kw_const(node, "gradient_accumulation_steps")
+        if ga is not None and result.gradient_accumulation_steps is None:
+            result.gradient_accumulation_steps = _safe_int(ga)
+        if _has_kw(node, "deepspeed") and not any(
+            d.kind == "deepspeed" for d in result.distributed
+        ):
+            result.distributed.append(
+                DistributedFinding(
+                    location=loc, kind="deepspeed", backend=None
                 )
+            )
 
 
-# Training loop detection
-
-
-def _detect_training_loop(
-    tree: ast.AST, findings: Optional[CodeFindings] = None
-) -> bool:
-    if findings and any(d.kind == "hf_trainer" for d in findings.distributed):
+def _has_training_loop(tree: ast.AST, result: CodeFindings) -> bool:
+    """Heuristic: True when the script contains a recognisable backward pass."""
+    if any(d.kind == "hf_trainer" for d in result.distributed):
         return True
 
-    has_backward = False
-    has_step = False
-    has_for_loop = False
-    has_train_call = False
-
+    saw_backward = saw_step = saw_loop = saw_train = False
     for node in ast.walk(tree):
+        if isinstance(node, ast.For):
+            saw_loop = True
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             attr = node.func.attr
             if attr == "backward":
-                has_backward = True
+                saw_backward = True
             elif attr == "step":
-                has_step = True
+                saw_step = True
             elif attr == "train":
-                has_train_call = True
+                saw_train = True
 
-        if isinstance(node, ast.For):
-            has_for_loop = True
-
-    if has_backward and has_step:
-        return True
-
-    if has_for_loop and has_train_call:
-        return True
-
-    return False
+    return (saw_backward and saw_step) or (saw_loop and saw_train)
 
 
-# Multi-file import following (1-level deep)
+# ---------------------------------------------------------------------------
+# Multi-file: follow relative imports one level deep
+# ---------------------------------------------------------------------------
 
 
-def _follow_local_imports(
+def _ingest_local_imports(
     tree: ast.AST,
-    findings: CodeFindings,
+    result: CodeFindings,
     script_path: str,
 ) -> None:
-    script_dir = os.path.dirname(os.path.abspath(script_path))
-    followed = set()  # type: set
+    """Scan sibling .py files referenced by ``import X`` / ``from X import ...``."""
+    base_dir = os.path.dirname(os.path.abspath(script_path))
+    visited: Set[str] = set()
 
     for node in ast.walk(tree):
-        if not isinstance(node, (ast.Import, ast.ImportFrom)):
-            continue
+        candidates: List[str] = []
 
         if isinstance(node, ast.ImportFrom):
-            module_name = node.module
-            if module_name is None:
-                continue
-            if "." in module_name:
-                continue
-            candidate = os.path.join(script_dir, module_name + ".py")
+            mod = node.module or ""
+            if mod and "." not in mod:
+                candidates.append(os.path.join(base_dir, mod + ".py"))
+
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                name = alias.name
-                if "." in name:
-                    continue
-                candidate = os.path.join(script_dir, name + ".py")
-                if os.path.isfile(candidate) and candidate not in followed:
-                    followed.add(candidate)
-                    _merge_imported_findings(candidate, findings)
-            continue
-        else:
-            continue
+                if "." not in alias.name:
+                    candidates.append(
+                        os.path.join(base_dir, alias.name + ".py")
+                    )
 
-        if not os.path.isfile(candidate):
-            continue
-        if candidate in followed:
-            continue
-
-        followed.add(candidate)
-        _merge_imported_findings(candidate, findings)
+        for cand in candidates:
+            if not os.path.isfile(cand) or cand in visited:
+                continue
+            visited.add(cand)
+            _merge_file_into(cand, result)
 
 
-def _merge_imported_findings(
-    imported_path: str,
-    main_findings: CodeFindings,
-) -> None:
+def _merge_file_into(path: str, result: CodeFindings) -> None:
+    """Parse *path* and append its findings into *result* (models, precision, etc.)."""
     try:
-        with open(imported_path, "r", encoding="utf-8") as f:
-            source = f.read()
+        with open(path, "r", encoding="utf-8") as fh:
+            source = fh.read()
         lines = source.splitlines()
-        tree = ast.parse(source, filename=imported_path)
+        tree = ast.parse(source, filename=path)
     except (SyntaxError, OSError):
         return
 
-    imports = _walk_imports(tree)
+    imports = _build_import_map(tree)
+    str_consts = _collect_string_constants(tree)
+    visitor = _PatternVisitor(
+        script_path=path,
+        lines=lines,
+        imports=imports,
+        str_consts=str_consts,
+    )
+    visitor.visit(tree)
 
-    for model in _find_models(tree, imports, lines, imported_path):
-        main_findings.models.append(model)
-
-    for dist in _find_distributed(tree, imports, lines, imported_path):
-        main_findings.distributed.append(dist)
-
-    for prec in _find_precision(tree, imports, lines, imported_path):
-        main_findings.precision.append(prec)
-
-    for opt in _find_optimizers(tree, imports, lines, imported_path):
-        main_findings.optimizers.append(opt)
-
-    for ft in _find_fine_tuning(tree, imports, lines, imported_path):
-        main_findings.fine_tuning.append(ft)
-
-    sub_findings = CodeFindings(script_path=imported_path)
-    sub_findings.imports = imports
-    sub_findings.distributed = list(main_findings.distributed)
-    _extract_training_args(tree, sub_findings, lines, imported_path)
-
-    for prec in sub_findings.precision:
-        if prec not in main_findings.precision:
-            main_findings.precision.append(prec)
+    result.models.extend(visitor.models)
+    result.distributed.extend(visitor.distributed)
+    result.precision.extend(visitor.precision)
+    result.optimizers.extend(visitor.optimizers)
+    result.fine_tuning.extend(visitor.fine_tuning)
 
     if (
-        sub_findings.gradient_accumulation_steps is not None
-        and main_findings.gradient_accumulation_steps is None
+        visitor.gradient_accumulation_steps is not None
+        and result.gradient_accumulation_steps is None
     ):
-        main_findings.gradient_accumulation_steps = (
-            sub_findings.gradient_accumulation_steps
+        result.gradient_accumulation_steps = (
+            visitor.gradient_accumulation_steps
         )
 
 
-# Added Adapter
+# ---------------------------------------------------------------------------
+# Misc helpers
+# ---------------------------------------------------------------------------
 
 
-def scan_for_optimizer(script_path: str) -> Optional[str]:
-    """Adapter for traceml suggest-gpu."""
-    findings = analyze_script(script_path)
-    if findings.optimizers:
-        return findings.optimizers[0].optimizer_type
+def _extract_autocast_dtype(node: ast.Call) -> Optional[str]:
+    """Pull the dtype name from an ``autocast(dtype=...)`` call."""
+    for kw in node.keywords:
+        if kw.arg == "dtype":
+            return _dtype_attr_to_str(kw.value)
+    if len(node.args) >= 2:
+        return _dtype_attr_to_str(node.args[1])
     return None
+
+
+def _dtype_attr_to_str(node: ast.AST) -> Optional[str]:
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
+
+
+def _is_cudnn_attr(node: ast.Attribute) -> bool:
+    """Return True if *node* is ``torch.backends.cudnn.benchmark``."""
+    parts: List[str] = [node.attr]
+    cur = node.value
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+    parts.reverse()
+    joined = ".".join(parts)
+    return "cudnn" in joined and "benchmark" in joined

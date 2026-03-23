@@ -27,7 +27,7 @@ from traceml.utils.ast_analysis.scanner import (
     ModelFinding,
     OptimizerFinding,
     PrecisionFinding,
-    SourceLocation,
+    ScriptLocation,
     analyze_script,
     detect_strategy_hint,
     scan_for_optimizer,
@@ -49,7 +49,7 @@ __all__ = [
     "PrecisionFinding",
     "ParamEstimate",
     "ModelSpec",
-    "SourceLocation",
+    "ScriptLocation",
     # Registry helpers
     "lookup_model",
     "list_known_models",
