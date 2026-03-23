@@ -260,11 +260,19 @@ def main():
         error = None
 
     except Exception as e:
-        error = e
-        exit_code = 1
-        write_session_error_log(
-            cfg, header="Unhandled exception in user script", error=e
-        )
+        # Graceful exit for suggest-gpu
+        from traceml.runtime.exceptions import TraceMLSuggestComplete
+
+        if isinstance(e, TraceMLSuggestComplete):
+            print(f"[TraceML] {e}", file=sys.stderr)
+            exit_code = 0
+            error = None
+        else:
+            error = e
+            exit_code = 1
+            write_session_error_log(
+                cfg, header="Unhandled exception in user script", error=e
+            )
 
     finally:
         stop_runtime(runtime)

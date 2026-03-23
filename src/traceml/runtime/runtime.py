@@ -135,14 +135,14 @@ class TraceMLRuntime:
         samplers += [ProcessSampler(), StdoutStderrSampler()]
 
         # Core bottleneck profile
-        if self.profile in ["run", "deep"]:
+        if self.profile in ["run", "deep", "suggest"]:
             samplers += [
                 StepTimeSampler(),
                 StepMemorySampler(),
             ]
 
         # Deep profile adds layerwise telemetry
-        if self.profile == "deep":
+        if self.profile in ["deep", "suggest"]:
             samplers += [
                 LayerMemorySampler(),
                 LayerForwardMemorySampler(),

@@ -122,6 +122,11 @@ def trace_step(model: nn.Module):
         except Exception as e:
             print(f"[TraceML] flush failed: {e}", file=sys.stderr)
 
+        if _traceml_profile() == "suggest" and TraceState.step >= 3:
+            from traceml.runtime.exceptions import TraceMLSuggestComplete
+
+            raise TraceMLSuggestComplete("Suggest-GPU profiling complete.")
+
 
 def trace_model_instance(
     model: nn.Module,
@@ -147,7 +152,7 @@ def trace_model_instance(
         trace_layer_backward_time: attach backward *time* hooks (pre + post).
         trace_execution: attach execution hooks.
     """
-    if _traceml_disabled() or _traceml_profile() != "deep":
+    if _traceml_disabled() or _traceml_profile() not in ["deep", "suggest"]:
         return
 
     try:

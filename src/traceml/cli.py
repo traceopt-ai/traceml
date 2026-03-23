@@ -309,6 +309,9 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
+    env["TRACEML_TARGET_BATCH_SIZE"] = str(
+        getattr(args, "target_batch_size", 1)
+    )
 
     session_id = env["TRACEML_SESSION_ID"]
     session_root = Path(args.logs_dir).resolve() / session_id
@@ -527,6 +530,18 @@ def build_parser():
     )
     _add_launch_args(deep_parser)
 
+    suggest_parser = sub.add_parser(
+        "suggest-gpu",
+        help="Estimate VRAM and hardware requirements for a training script",
+    )
+    suggest_parser.add_argument(
+        "--target-batch-size",
+        type=int,
+        default=1,
+        help="Target batch size to extrapolate to",
+    )
+    _add_launch_args(suggest_parser)
+
     inspect_parser = sub.add_parser(
         "inspect", help="Inspect binary .msgpack logs"
     )
@@ -545,6 +560,8 @@ def main():
         run_with_tracing(args, profile="run")
     elif args.command == "deep":
         run_with_tracing(args, profile="deep")
+    elif args.command == "suggest-gpu":
+        run_with_tracing(args, profile="suggest")
     elif args.command == "inspect":
         run_inspect(args)
     else:
