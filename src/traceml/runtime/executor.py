@@ -28,7 +28,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from traceml.runtime.runtime import TraceMLRuntime
 from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
@@ -275,7 +275,7 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
     )
 
 
-def start_runtime(cfg: Dict[str, Any]) -> TraceMLRuntime | NoOpRuntime:
+def start_runtime(cfg: Dict[str, Any]) -> Union[TraceMLRuntime, NoOpRuntime]:
     """
     Initialize and start the TraceML runtime.
 
@@ -313,7 +313,7 @@ def start_runtime(cfg: Dict[str, Any]) -> TraceMLRuntime | NoOpRuntime:
 
 
 def stop_runtime(
-    runtime: TraceMLRuntime | NoOpRuntime,
+    runtime: Union[TraceMLRuntime, NoOpRuntime],
     cfg: Dict[str, Any],
 ) -> None:
     """
