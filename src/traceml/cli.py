@@ -309,9 +309,10 @@ def launch_tracer_process(script_path, args):
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
-    env["TRACEML_TARGET_BATCH_SIZE"] = str(
-        getattr(args, "target_batch_size", 1)
-    )
+    # Pass explicit batch size only when user provided --target-batch-size;
+    # empty string lets SuggestDisplayDriver auto-detect from DataLoader findings.
+    _bs = getattr(args, "target_batch_size", None)
+    env["TRACEML_TARGET_BATCH_SIZE"] = str(_bs) if _bs and _bs != 1 else ""
 
     optimizer_choice = getattr(args, "optimizer", "auto")
     if optimizer_choice.lower() == "auto":
@@ -619,8 +620,11 @@ def run_suggest_gpu_static(args) -> None:
 
     # Propagate env vars that SuggestDisplayDriver reads
     os.environ["TRACEML_SUGGEST_OPTIMIZER"] = optimizer_choice
-    os.environ["TRACEML_TARGET_BATCH_SIZE"] = str(
-        getattr(args, "target_batch_size", 1)
+    # Pass explicit batch size only when user provided --target-batch-size;
+    # empty string lets SuggestDisplayDriver auto-detect from DataLoader findings.
+    _bs = getattr(args, "target_batch_size", None)
+    os.environ["TRACEML_TARGET_BATCH_SIZE"] = (
+        str(_bs) if _bs and _bs != 1 else ""
     )
     os.environ["TRACEML_SCRIPT_PATH"] = script_path
 

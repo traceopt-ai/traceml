@@ -164,6 +164,7 @@ class StaticAnalysisResult:
     param_estimate: "ParamEstimate"
     optimizer_gb: float
     activation_gb: float
+    cuda_overhead_gb: float
     total_gb: float
     target_batch_size: int
 
@@ -181,9 +182,15 @@ class SuggestDisplayDriver:
         self._store = store
         self._settings = settings
         self._console = Console()
-        self._target_batch_size = int(
-            os.environ.get("TRACEML_TARGET_BATCH_SIZE", "1")
+        self._target_batch_size: Optional[int] = (
+            None  # None = auto-detect from script
         )
+        _explicit_bs = os.environ.get("TRACEML_TARGET_BATCH_SIZE", "")
+        if _explicit_bs.strip():
+            try:
+                self._target_batch_size = int(_explicit_bs)
+            except ValueError:
+                pass
         self._script_path: Optional[str] = os.environ.get(
             "TRACEML_SCRIPT_PATH", ""
         )
@@ -240,7 +247,18 @@ class SuggestDisplayDriver:
         # Step 3 — parameter estimate
         param_est = estimate_params(script_path, findings)
 
-        # Step 4 — VRAM math
+        # Step 4 — auto-detect batch size from DataLoader if not explicitly set
+        target_bs = self._target_batch_size
+        if target_bs is None:
+            # Try to find a DataLoader batch_size in the script
+            for dl in findings.dataloaders:
+                if dl.batch_size and dl.batch_size > 0:
+                    target_bs = dl.batch_size
+                    break
+            if target_bs is None:
+                target_bs = 1  # conservative fallback
+
+        # Step 5 — VRAM math
         param_gb = param_est.total_gb
         grad_gb = param_gb  # same dtype as params
 
@@ -249,30 +267,51 @@ class SuggestDisplayDriver:
         )
         optimizer_gb = param_gb * opt_mult
 
-        activation_gb = _activation_heuristic(
-            findings, param_est, self._target_batch_size
-        )
+        activation_gb = _activation_heuristic(findings, param_est, target_bs)
 
-        total_gb = param_gb + grad_gb + optimizer_gb + activation_gb
+        # Step 6 — CUDA / PyTorch / cuDNN framework overhead
+        # Scales with model size: larger models need bigger cuDNN workspaces,
+        # scratch buffers, and NCCL comms. Floor of 0.5 GB covers the minimum
+        # CUDA context + PyTorch runtime regardless of model size.
+        cuda_overhead_gb = max(0.5, 0.1 * param_gb)
+
+        total_gb = (
+            param_gb
+            + grad_gb
+            + optimizer_gb
+            + activation_gb
+            + cuda_overhead_gb
+        )
 
         return StaticAnalysisResult(
             optimizer=opt_type,
             param_estimate=param_est,
             optimizer_gb=optimizer_gb,
             activation_gb=activation_gb,
+            cuda_overhead_gb=cuda_overhead_gb,
             total_gb=total_gb,
-            target_batch_size=self._target_batch_size,
+            target_batch_size=target_bs,
         )
 
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _fmt(gb: float) -> str:
+        """Adaptive number format: MB for tiny models, GB with 4dp for medium, 2dp for large."""
+        if gb < 0.001:
+            return f"{gb * 1024:.1f} MB"
+        if gb < 1.0:
+            return f"{gb:.4f}"
+        return f"{gb:.2f}"
+
     def _render(self, r: StaticAnalysisResult) -> None:
         param_est = r.param_estimate
         param_gb = param_est.total_gb
         grad_gb = param_gb
         opt_label = _nice_optimizer_name(r.optimizer)
+        fmt = self._fmt
 
         table = Table(
             title=f"Hardware Recommendation (Target Batch Size: {r.target_batch_size})"
@@ -284,21 +323,20 @@ class SuggestDisplayDriver:
         if param_est.model_description and param_est.source == "registry":
             table.add_row(
                 f"Model — {param_est.model_description}",
-                f"{param_gb:.2f}",
+                fmt(param_gb),
             )
         else:
-            table.add_row("Model Parameters", f"{param_gb:.2f}")
+            table.add_row("Model Parameters", fmt(param_gb))
 
-        table.add_row("Gradients", f"{grad_gb:.2f}")
-        table.add_row(
-            f"Optimizer States ({opt_label})", f"{r.optimizer_gb:.2f}"
-        )
+        table.add_row("Gradients", fmt(grad_gb))
+        table.add_row(f"Optimizer States ({opt_label})", fmt(r.optimizer_gb))
 
-        act_label = f"Activations (×{r.target_batch_size}, {'heuristic'})"
-        table.add_row(act_label, f"{r.activation_gb:.2f}")
+        act_label = f"Activations (×{r.target_batch_size}, heuristic)"
+        table.add_row(act_label, fmt(r.activation_gb))
+        table.add_row("PyTorch / CUDA Overhead", fmt(r.cuda_overhead_gb))
         table.add_row(
             "Total Estimated VRAM",
-            f"{r.total_gb:.2f}",
+            fmt(r.total_gb),
             style="bold yellow",
         )
 
