@@ -68,9 +68,21 @@ class SuggestDisplayDriver(BaseDisplayDriver):
         peak_allocated = last_step.get("peak_alloc", 0)
 
         # Math
+        optimizer_type = os.environ.get(
+            "TRACEML_SUGGEST_OPTIMIZER", "Adam"
+        ).lower()
+
         param_gb = param_bytes / (1024**3)
         grad_gb = param_gb
-        optimizer_gb = param_gb * 2  # Assume Adam
+
+        if optimizer_type in ["adam", "adamw"]:
+            optimizer_gb = param_gb * 2
+        elif optimizer_type == "sgd":
+            optimizer_gb = 0  # Basic SGD has no state
+        elif optimizer_type in ["sgdm", "rmsprop", "adagrad"]:
+            optimizer_gb = param_gb
+        else:
+            optimizer_gb = param_gb * 2  # Default conservative
 
         base_mem_gb = param_gb + grad_gb + optimizer_gb
 
@@ -95,7 +107,16 @@ class SuggestDisplayDriver(BaseDisplayDriver):
 
         table.add_row("Model Parameters", f"{param_gb:.2f}")
         table.add_row("Gradients", f"{grad_gb:.2f}")
-        table.add_row("Optimizer States (Adam)", f"{optimizer_gb:.2f}")
+
+        opt_display_name = (
+            optimizer_type.upper() if optimizer_type != "adamw" else "AdamW"
+        )
+        if optimizer_type == "adam":
+            opt_display_name = "Adam"
+
+        table.add_row(
+            f"Optimizer States ({opt_display_name})", f"{optimizer_gb:.2f}"
+        )
         table.add_row(
             f"Activations (Extrapolated x{self._target_batch_size})",
             f"{extrapolated_activations:.2f}",
@@ -116,5 +137,5 @@ class SuggestDisplayDriver(BaseDisplayDriver):
             f"\n[bold green]Recommended Hardware:[/bold green] {recommendation}"
         )
         self._console.print(
-            "[dim]Note: This assumes Adam optimizer and runs local script as baseline (usually bs=1).[/dim]\n"
+            f"[dim]Note: This assumes {opt_display_name} optimizer and runs local script as baseline (usually bs=1).[/dim]\n"
         )

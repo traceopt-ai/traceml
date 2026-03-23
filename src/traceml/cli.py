@@ -313,6 +313,27 @@ def launch_tracer_process(script_path, args):
         getattr(args, "target_batch_size", 1)
     )
 
+    optimizer_choice = getattr(args, "optimizer", "auto")
+    if optimizer_choice.lower() == "auto":
+        try:
+            from traceml.utils.ast_scanner import scan_for_optimizer
+
+            scanned_opt = scan_for_optimizer(script_path)
+            if scanned_opt:
+                optimizer_choice = scanned_opt
+                print(
+                    f"[TraceML] Auto-detected optimizer from script: {optimizer_choice}"
+                )
+            else:
+                optimizer_choice = "Adam"
+                print(
+                    f"[TraceML] Could not auto-detect optimizer. Defaulting to conservative: {optimizer_choice}"
+                )
+        except Exception:
+            optimizer_choice = "Adam"
+
+    env["TRACEML_SUGGEST_OPTIMIZER"] = str(optimizer_choice)
+
     session_id = env["TRACEML_SESSION_ID"]
     session_root = Path(args.logs_dir).resolve() / session_id
     aggregator_dir = session_root / "aggregator"
@@ -539,6 +560,12 @@ def build_parser():
         type=int,
         default=1,
         help="Target batch size to extrapolate to",
+    )
+    suggest_parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="auto",
+        help="Optimizer type to simulate state VRAM (auto, Adam, SGD, SGDM, RMSprop, AdaGrad)",
     )
     _add_launch_args(suggest_parser)
 
