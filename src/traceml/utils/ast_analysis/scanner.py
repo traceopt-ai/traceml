@@ -230,7 +230,12 @@ def _build_import_map(tree: ast.AST) -> Dict[str, str]:
 
 
 def _collect_string_constants(tree: ast.AST) -> Dict[str, str]:
-    """Return top-level ``NAME = "string"`` assignments."""
+    """Return all ``NAME = "string"`` assignments found anywhere in the file.
+
+    Scans all scopes (module, function bodies, class methods) so that patterns
+    like ``model_name = "bert-base"`` inside a ``main()`` function are still
+    resolved when passed to ``from_pretrained(model_name)``.
+    """
     consts: Dict[str, str] = {}
     for node in ast.walk(tree):
         if (
@@ -240,6 +245,7 @@ def _collect_string_constants(tree: ast.AST) -> Dict[str, str]:
             and isinstance(node.value, ast.Constant)
             and isinstance(node.value.value, str)
         ):
+            # Last assignment wins (later definitions override earlier ones)
             consts[node.targets[0].id] = node.value.value
     return consts
 

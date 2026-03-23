@@ -99,6 +99,22 @@ _REGISTRY: Dict[str, ModelSpec] = {
     # ------------------------------------------------------------------ DistilBERT
     "distilbert-base-uncased": ModelSpec(66_000_000, 4, "DistilBERT Base"),
     "distilbert-base-cased": ModelSpec(66_000_000, 4, "DistilBERT Base Cased"),
+    # ------------------------------------------------------------------ Compact BERT variants (prajjwal1)
+    "prajjwal1/bert-tiny": ModelSpec(4_400_000, 4, "BERT Tiny"),
+    "prajjwal1/bert-mini": ModelSpec(11_300_000, 4, "BERT Mini"),
+    "prajjwal1/bert-small": ModelSpec(29_100_000, 4, "BERT Small"),
+    "prajjwal1/bert-medium": ModelSpec(41_700_000, 4, "BERT Medium"),
+    # ------------------------------------------------------------------ MiniLM
+    "microsoft/MiniLM-L12-H384-uncased": ModelSpec(
+        33_000_000, 4, "MiniLM L12"
+    ),
+    "microsoft/MiniLM-L6-H384-uncased": ModelSpec(22_000_000, 4, "MiniLM L6"),
+    "sentence-transformers/all-MiniLM-L6-v2": ModelSpec(
+        22_000_000, 4, "all-MiniLM-L6"
+    ),
+    "sentence-transformers/all-MiniLM-L12-v2": ModelSpec(
+        33_000_000, 4, "all-MiniLM-L12"
+    ),
     # ------------------------------------------------------------------ BART
     "facebook/bart-base": ModelSpec(139_000_000, 4, "BART Base"),
     "facebook/bart-large": ModelSpec(406_000_000, 4, "BART Large"),
