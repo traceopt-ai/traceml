@@ -94,6 +94,14 @@ def trace_step(model: nn.Module):
             trace_model_instance(model)
             model._traceml_suggest_instrumented = True
 
+            # Zero-Execution mode intercept
+            if os.environ.get("TRACEML_STATIC_ESTIMATE", "0") == "1":
+                from traceml.runtime.exceptions import TraceMLStaticComplete
+
+                raise TraceMLStaticComplete(
+                    "Static topology intercepted successfully. Exiting before step execution."
+                )
+
     mem_tracker = StepMemoryTracker(model)
     step_completed = False
 

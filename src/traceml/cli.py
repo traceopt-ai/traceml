@@ -333,6 +333,9 @@ def launch_tracer_process(script_path, args):
             optimizer_choice = "Adam"
 
     env["TRACEML_SUGGEST_OPTIMIZER"] = str(optimizer_choice)
+    env["TRACEML_STATIC_ESTIMATE"] = (
+        "1" if getattr(args, "static_estimate", False) else "0"
+    )
 
     session_id = env["TRACEML_SESSION_ID"]
     session_root = Path(args.logs_dir).resolve() / session_id
@@ -553,21 +556,24 @@ def build_parser():
 
     suggest_parser = sub.add_parser(
         "suggest-gpu",
-        help="Estimate VRAM and hardware requirements for a training script",
+        help="Estimate VRAM and hardware requirements for a training script (zero-execution, AST-based)",
+    )
+    suggest_parser.add_argument(
+        "script",
+        help="Path to the training script to analyse",
     )
     suggest_parser.add_argument(
         "--target-batch-size",
         type=int,
         default=1,
-        help="Target batch size to extrapolate to",
+        help="Target batch size to extrapolate VRAM to (default: 1)",
     )
     suggest_parser.add_argument(
         "--optimizer",
         type=str,
         default="auto",
-        help="Optimizer type to simulate state VRAM (auto, Adam, SGD, SGDM, RMSprop, AdaGrad)",
+        help="Override optimizer type (auto, Adam, AdamW, SGD, RMSprop, …). Default: auto-detect from script.",
     )
-    _add_launch_args(suggest_parser)
 
     inspect_parser = sub.add_parser(
         "inspect", help="Inspect binary .msgpack logs"
@@ -575,6 +581,64 @@ def build_parser():
     inspect_parser.add_argument("file", help="Path to a .msgpack file")
 
     return parser
+
+
+def run_suggest_gpu_static(args) -> None:
+    """Pure-AST static VRAM estimator — no torchrun, no GPU required.
+
+    Resolves optimizer and param estimate entirely from the script AST,
+    then renders the Hardware Recommendation Card inline.
+    """
+    import logging
+
+    from traceml.aggregator.display_drivers.suggest import SuggestDisplayDriver
+    from traceml.database.remote_database_store import RemoteDBStore
+    from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
+    from traceml.utils.ast_analysis import scan_for_optimizer
+
+    script_path = str(Path(args.script).resolve())
+    if not Path(script_path).is_file():
+        print(f"[TraceML] Script not found: {script_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Detect optimizer
+    optimizer_choice = getattr(args, "optimizer", "auto")
+    if optimizer_choice.lower() == "auto":
+        try:
+            scanned = scan_for_optimizer(script_path)
+            if scanned:
+                optimizer_choice = scanned
+                print(f"[TraceML] Auto-detected optimizer: {optimizer_choice}")
+            else:
+                optimizer_choice = "Adam"
+                print(
+                    "[TraceML] Could not auto-detect optimizer — using Adam (conservative)."
+                )
+        except Exception:
+            optimizer_choice = "Adam"
+
+    # Propagate env vars that SuggestDisplayDriver reads
+    os.environ["TRACEML_SUGGEST_OPTIMIZER"] = optimizer_choice
+    os.environ["TRACEML_TARGET_BATCH_SIZE"] = str(
+        getattr(args, "target_batch_size", 1)
+    )
+    os.environ["TRACEML_SCRIPT_PATH"] = script_path
+
+    # Build minimal settings (TCPServer is unused in static mode)
+    settings = TraceMLSettings(
+        mode="cli",
+        profile="suggest",
+        tcp=TraceMLTCPSettings(host="127.0.0.1", port=0),
+    )
+
+    logger = logging.getLogger("traceml.suggest")
+    store = RemoteDBStore(max_rows=1)
+
+    driver = SuggestDisplayDriver(
+        logger=logger, store=store, settings=settings
+    )
+    driver.start()  # runs analysis
+    driver.stop()  # renders card
 
 
 def main():
@@ -588,7 +652,7 @@ def main():
     elif args.command == "deep":
         run_with_tracing(args, profile="deep")
     elif args.command == "suggest-gpu":
-        run_with_tracing(args, profile="suggest")
+        run_suggest_gpu_static(args)
     elif args.command == "inspect":
         run_inspect(args)
     else:
