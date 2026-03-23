@@ -154,6 +154,32 @@ _REGISTRY: Dict[str, ModelSpec] = {
     "deepseek-ai/deepseek-coder-33b-base": ModelSpec(
         33_000_000_000, 2, "DeepSeek Coder 33B"
     ),
+    # ------------------------------------------------------------------ TinyLlama
+    "TinyLlama/TinyLlama-1.1B-Chat-v1.0": ModelSpec(
+        1_100_000_000, 2, "TinyLlama 1.1B"
+    ),
+    "TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T": ModelSpec(
+        1_100_000_000, 2, "TinyLlama 1.1B"
+    ),
+    # ------------------------------------------------------------------ StableLM
+    "stabilityai/stablelm-3b-4e1t": ModelSpec(3_000_000_000, 2, "StableLM 3B"),
+    "stabilityai/stablelm-tuned-alpha-7b": ModelSpec(
+        7_000_000_000, 2, "StableLM 7B"
+    ),
+    # ------------------------------------------------------------------ MPT
+    "mosaicml/mpt-7b": ModelSpec(7_000_000_000, 2, "MPT 7B"),
+    "mosaicml/mpt-30b": ModelSpec(30_000_000_000, 2, "MPT 30B"),
+    # ------------------------------------------------------------------ Yi
+    "01-ai/Yi-6B": ModelSpec(6_000_000_000, 2, "Yi 6B"),
+    "01-ai/Yi-34B": ModelSpec(34_000_000_000, 2, "Yi 34B"),
+    # ------------------------------------------------------------------ Zephyr / Mistral derivatives
+    "HuggingFaceH4/zephyr-7b-beta": ModelSpec(7_000_000_000, 2, "Zephyr 7B"),
+    # ------------------------------------------------------------------ OLMo
+    "allenai/OLMo-7B": ModelSpec(7_000_000_000, 2, "OLMo 7B"),
+    # ------------------------------------------------------------------ SmolLM
+    "HuggingFaceTB/SmolLM-135M": ModelSpec(135_000_000, 4, "SmolLM 135M"),
+    "HuggingFaceTB/SmolLM-360M": ModelSpec(360_000_000, 4, "SmolLM 360M"),
+    "HuggingFaceTB/SmolLM-1.7B": ModelSpec(1_700_000_000, 2, "SmolLM 1.7B"),
 }
 
 

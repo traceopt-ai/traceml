@@ -699,18 +699,36 @@ def _find_models(
     lines: List[str],
     script_path: str,
 ) -> List[ModelFinding]:
+    # Pre-scan module-level string constants: MODEL_NAME = "some/model"
+    string_consts: Dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(
+            node.value.value, str
+        ):
+            string_consts[node.targets[0].id] = node.value.value
+
     results = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             fqn = _resolve_call_name(node, imports)
             if fqn and "from_pretrained" in fqn:
                 model_name = None
-                if (
-                    node.args
-                    and isinstance(node.args[0], ast.Constant)
-                    and isinstance(node.args[0].value, str)
-                ):
-                    model_name = node.args[0].value
+                if node.args:
+                    arg0 = node.args[0]
+                    if isinstance(arg0, ast.Constant) and isinstance(
+                        arg0.value, str
+                    ):
+                        # Literal string: from_pretrained("bert-base-uncased")
+                        model_name = arg0.value
+                    elif (
+                        isinstance(arg0, ast.Name) and arg0.id in string_consts
+                    ):
+                        # Variable reference: from_pretrained(MODEL_NAME)
+                        model_name = string_consts[arg0.id]
                 results.append(
                     ModelFinding(
                         location=_loc(script_path, node, lines),
