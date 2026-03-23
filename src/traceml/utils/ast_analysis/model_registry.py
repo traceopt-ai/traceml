@@ -26,7 +26,7 @@ class ModelSpec:
 # ---------------------------------------------------------------------------
 
 _REGISTRY: Dict[str, ModelSpec] = {
-    # ------------------------------------------------------------------ BERT
+    # -------------------------------------------------------------- BERT
     "bert-base-uncased": ModelSpec(110_000_000, 4, "BERT Base"),
     "bert-large-uncased": ModelSpec(340_000_000, 4, "BERT Large"),
     "bert-base-cased": ModelSpec(110_000_000, 4, "BERT Base Cased"),
@@ -224,6 +224,77 @@ def lookup_model(model_name: str) -> Optional[ModelSpec]:
             return spec
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Torchvision factory function registry
+# ---------------------------------------------------------------------------
+# Maps the torchvision.models function name (e.g. "vit_b_16") -> ModelSpec.
+# These are called as model = vit_b_16(pretrained=True) or vit_b_16(num_classes=N)
+# rather than via from_pretrained(), so they need a separate lookup path.
+_TORCHVISION_FACTORIES: Dict[str, ModelSpec] = {
+    # Vision Transformers
+    "vit_b_16": ModelSpec(86_600_000, 4, "ViT-B/16"),
+    "vit_b_32": ModelSpec(88_200_000, 4, "ViT-B/32"),
+    "vit_l_16": ModelSpec(307_000_000, 4, "ViT-L/16"),
+    "vit_l_32": ModelSpec(307_000_000, 4, "ViT-L/32"),
+    "vit_h_14": ModelSpec(632_000_000, 4, "ViT-H/14"),
+    # ResNets
+    "resnet18": ModelSpec(11_700_000, 4, "ResNet-18"),
+    "resnet34": ModelSpec(21_800_000, 4, "ResNet-34"),
+    "resnet50": ModelSpec(25_600_000, 4, "ResNet-50"),
+    "resnet101": ModelSpec(44_500_000, 4, "ResNet-101"),
+    "resnet152": ModelSpec(60_200_000, 4, "ResNet-152"),
+    "wide_resnet50_2": ModelSpec(68_900_000, 4, "Wide ResNet-50-2"),
+    "wide_resnet101_2": ModelSpec(126_900_000, 4, "Wide ResNet-101-2"),
+    # EfficientNet
+    "efficientnet_b0": ModelSpec(5_300_000, 4, "EfficientNet-B0"),
+    "efficientnet_b1": ModelSpec(7_800_000, 4, "EfficientNet-B1"),
+    "efficientnet_b4": ModelSpec(19_300_000, 4, "EfficientNet-B4"),
+    "efficientnet_b7": ModelSpec(66_300_000, 4, "EfficientNet-B7"),
+    "efficientnet_v2_s": ModelSpec(21_500_000, 4, "EfficientNet-V2-S"),
+    "efficientnet_v2_m": ModelSpec(54_100_000, 4, "EfficientNet-V2-M"),
+    "efficientnet_v2_l": ModelSpec(118_500_000, 4, "EfficientNet-V2-L"),
+    # ConvNeXt
+    "convnext_tiny": ModelSpec(28_600_000, 4, "ConvNeXt-Tiny"),
+    "convnext_small": ModelSpec(50_200_000, 4, "ConvNeXt-Small"),
+    "convnext_base": ModelSpec(88_600_000, 4, "ConvNeXt-Base"),
+    "convnext_large": ModelSpec(197_800_000, 4, "ConvNeXt-Large"),
+    # DenseNet
+    "densenet121": ModelSpec(8_000_000, 4, "DenseNet-121"),
+    "densenet169": ModelSpec(14_100_000, 4, "DenseNet-169"),
+    "densenet201": ModelSpec(20_000_000, 4, "DenseNet-201"),
+    # MobileNet
+    "mobilenet_v2": ModelSpec(3_500_000, 4, "MobileNet-V2"),
+    "mobilenet_v3_small": ModelSpec(2_500_000, 4, "MobileNet-V3-Small"),
+    "mobilenet_v3_large": ModelSpec(5_500_000, 4, "MobileNet-V3-Large"),
+    # Swin Transformer
+    "swin_t": ModelSpec(28_300_000, 4, "Swin-T"),
+    "swin_s": ModelSpec(49_600_000, 4, "Swin-S"),
+    "swin_b": ModelSpec(87_800_000, 4, "Swin-B"),
+    "swin_v2_t": ModelSpec(28_400_000, 4, "Swin-V2-T"),
+    "swin_v2_b": ModelSpec(87_900_000, 4, "Swin-V2-B"),
+    # RegNet
+    "regnet_y_8gf": ModelSpec(39_200_000, 4, "RegNet-Y-8GF"),
+    "regnet_y_16gf": ModelSpec(83_600_000, 4, "RegNet-Y-16GF"),
+    "regnet_y_32gf": ModelSpec(145_000_000, 4, "RegNet-Y-32GF"),
+    # CLIP (OpenAI)
+    "vit_b_16_clip": ModelSpec(149_600_000, 4, "CLIP ViT-B/16"),
+}
+
+
+def lookup_torchvision_factory(func_name: str) -> Optional[ModelSpec]:
+    """Look up a torchvision.models factory function by its bare name.
+
+    Handles calls like::
+
+        model = vit_b_16(num_classes=365)
+        model = torchvision.models.resnet50(pretrained=True)
+
+    The *func_name* should be the leaf function name (e.g. ``"vit_b_16"``),
+    not the fully-qualified path. Returns ``None`` when not found.
+    """
+    return _TORCHVISION_FACTORIES.get(func_name)
 
 
 def list_known_models() -> Dict[str, ModelSpec]:
