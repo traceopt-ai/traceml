@@ -15,8 +15,15 @@ The sampler is designed to be:
 - Cheap enough to run continuously
 """
 
+import json
+import os
+import platform
+import socket
+import sys
+import tempfile
 import time
-from typing import List
+from pathlib import Path
+from typing import Any, Dict, List
 
 import psutil
 from pynvml import (
@@ -25,10 +32,12 @@ from pynvml import (
     nvmlDeviceGetCount,
     nvmlDeviceGetHandleByIndex,
     nvmlDeviceGetMemoryInfo,
+    nvmlDeviceGetName,
     nvmlDeviceGetPowerManagementLimit,
     nvmlDeviceGetPowerUsage,
     nvmlDeviceGetTemperature,
     nvmlDeviceGetUtilizationRates,
+    nvmlDeviceGetUUID,
     nvmlInit,
 )
 
@@ -76,6 +85,7 @@ class SystemSampler(BaseSampler):
         self._init_cpu()
         self._init_ram()
         self._init_gpu()
+        self._write_system_manifest()
 
     # ------------------------------------------------------------------
     # Initialization helpers
@@ -256,4 +266,203 @@ class SystemSampler(BaseSampler):
             # Absolute safety net: this should never crash the runtime
             self.logger.error(
                 f"[TraceML] SystemSampler failed to collect sample: {e}"
+            )
+
+    def _safe_call(self, fn, default=None):
+        try:
+            return fn()
+        except Exception:
+            return default
+
+    def _write_json_atomic(self, path: Path, payload: Dict[str, Any]) -> None:
+        """
+        Atomically write JSON to disk to avoid partial writes.
+        """
+        path = Path(path).resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            delete=False,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as tmp:
+            json.dump(payload, tmp, indent=2, sort_keys=True)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+            tmp_path = Path(tmp.name)
+
+        os.replace(tmp_path, path)
+
+    def _build_system_manifest(self) -> Dict[str, Any]:
+        """
+        Build a one-time backend-side system manifest.
+
+        This reflects the actual machine where SystemSampler is running.
+        Never raises.
+        """
+        vm = self._safe_call(psutil.virtual_memory)
+
+        manifest: Dict[str, Any] = {
+            "schema_version": 1,
+            "created_at_unix": float(time.time()),
+            "host": {
+                "hostname": self._safe_call(socket.gethostname, ""),
+                "fqdn": self._safe_call(socket.getfqdn, ""),
+            },
+            "platform": {
+                "system": self._safe_call(platform.system, ""),
+                "release": self._safe_call(platform.release, ""),
+                "version": self._safe_call(platform.version, ""),
+                "machine": self._safe_call(platform.machine, ""),
+                "processor": self._safe_call(platform.processor, ""),
+                "platform": self._safe_call(platform.platform, ""),
+            },
+            "python": {
+                "executable": sys.executable,
+                "version": sys.version,
+                "version_info": {
+                    "major": int(sys.version_info.major),
+                    "minor": int(sys.version_info.minor),
+                    "micro": int(sys.version_info.micro),
+                },
+            },
+            "process": {
+                "pid": int(os.getpid()),
+                "ppid": int(os.getppid()),
+                "cwd": str(Path.cwd()),
+            },
+            "cpu": {
+                "logical_core_count": int(self.cpu_logical_core_count or 0),
+                "physical_core_count": int(
+                    self._safe_call(lambda: psutil.cpu_count(logical=False), 0)
+                    or 0
+                ),
+                "current_freq_mhz": self._safe_call(
+                    lambda: (
+                        float(psutil.cpu_freq().current)
+                        if psutil.cpu_freq() is not None
+                        else None
+                    ),
+                    None,
+                ),
+                "max_freq_mhz": self._safe_call(
+                    lambda: (
+                        float(psutil.cpu_freq().max)
+                        if psutil.cpu_freq() is not None
+                        else None
+                    ),
+                    None,
+                ),
+            },
+            "memory": {
+                "ram_total_bytes": float(self.ram_total_memory or 0.0),
+                "ram_available_bytes": (
+                    float(vm.available) if vm is not None else 0.0
+                ),
+            },
+            "environment": {
+                "cuda_visible_devices": os.environ.get(
+                    "CUDA_VISIBLE_DEVICES", ""
+                ),
+                "pythonpath": os.environ.get("PYTHONPATH", ""),
+                "omp_num_threads": os.environ.get("OMP_NUM_THREADS", ""),
+                "mkl_num_threads": os.environ.get("MKL_NUM_THREADS", ""),
+                "world_size": os.environ.get("WORLD_SIZE", ""),
+                "rank": os.environ.get("RANK", ""),
+                "local_rank": os.environ.get("LOCAL_RANK", ""),
+                "master_addr": os.environ.get("MASTER_ADDR", ""),
+                "master_port": os.environ.get("MASTER_PORT", ""),
+                "traceml_session_id": os.environ.get("TRACEML_SESSION_ID", ""),
+                "traceml_logs_dir": os.environ.get("TRACEML_LOGS_DIR", ""),
+                "traceml_profile": os.environ.get("TRACEML_PROFILE", ""),
+                "traceml_ui_mode": os.environ.get("TRACEML_UI_MODE", ""),
+            },
+            "gpu": {
+                "available": bool(self.gpu_available),
+                "count": int(self.gpu_count or 0),
+                "devices": [],
+            },
+        }
+
+        if self.gpu_available and self.gpu_count > 0:
+            devices: List[Dict[str, Any]] = []
+            for gpu_id in range(self.gpu_count):
+                try:
+                    handle = nvmlDeviceGetHandleByIndex(gpu_id)
+                    mem = nvmlDeviceGetMemoryInfo(handle)
+
+                    name = self._safe_call(
+                        lambda: nvmlDeviceGetName(handle), ""
+                    )
+                    uuid = self._safe_call(
+                        lambda: nvmlDeviceGetUUID(handle), ""
+                    )
+
+                    if isinstance(name, bytes):
+                        name = name.decode("utf-8", errors="replace")
+                    if isinstance(uuid, bytes):
+                        uuid = uuid.decode("utf-8", errors="replace")
+
+                    devices.append(
+                        {
+                            "index": int(gpu_id),
+                            "name": str(name),
+                            "uuid": str(uuid),
+                            "memory_total_bytes": float(mem.total),
+                        }
+                    )
+                except Exception as e:
+                    self.logger.error(
+                        f"[TraceML] GPU {gpu_id} manifest probe failed: {e}"
+                    )
+                    devices.append(
+                        {
+                            "index": int(gpu_id),
+                            "name": "",
+                            "uuid": "",
+                            "memory_total_bytes": 0.0,
+                        }
+                    )
+
+            manifest["gpu"]["devices"] = devices
+
+        return manifest
+
+    def _write_system_manifest(self) -> None:
+        """
+        Write backend-side system manifest once per session.
+
+        Output path:
+            <TRACEML_LOGS_DIR>/<TRACEML_SESSION_ID>/system_manifest.json
+
+        Safe behavior:
+        - never raises
+        - does nothing if session env is missing
+        - does not overwrite an existing manifest
+        """
+        try:
+            logs_dir = os.environ.get("TRACEML_LOGS_DIR", "").strip()
+            session_id = os.environ.get("TRACEML_SESSION_ID", "").strip()
+
+            if not logs_dir or not session_id:
+                self.logger.error(
+                    "[TraceML] System manifest skipped: missing TRACEML_LOGS_DIR or TRACEML_SESSION_ID"
+                )
+                return
+
+            session_root = Path(logs_dir).resolve() / session_id
+            manifest_path = session_root / "system_manifest.json"
+
+            if manifest_path.exists():
+                return
+
+            payload = self._build_system_manifest()
+            self._write_json_atomic(manifest_path, payload)
+
+        except Exception as e:
+            self.logger.error(
+                f"[TraceML] Failed to write system manifest: {e}"
             )
