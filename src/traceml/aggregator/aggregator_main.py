@@ -10,12 +10,17 @@ Expected usage (via CLI):
 - Then start torchrun workers that run traceml/runtime/executor.py
 """
 
+import json
 import os
+import platform
 import signal
 import sys
 import threading
 import traceback
 from pathlib import Path
+
+import psutil
+import pynvml
 
 from traceml.aggregator.trace_aggregator import TraceMLAggregator
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
@@ -60,6 +65,68 @@ def _install_signal_handlers(stop_event: threading.Event) -> None:
     signal.signal(signal.SIGTERM, _handler)
 
 
+def collect_cpu_info():
+    return {
+        "architecture": platform.machine(),
+        "physical_cores": psutil.cpu_count(logical=False),
+        "logical_cores": psutil.cpu_count(logical=True),
+        "cpu_usage_percent": psutil.cpu_percent(interval=0.1),
+    }
+
+
+def save_cpu_info(path: Path):
+    with open(path, "w") as f:
+        json.dump(collect_cpu_info(), f, indent=2)
+
+
+def collect_gpu_info():
+    gpus = []
+
+    try:
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+
+        for i in range(count):
+            h = pynvml.nvmlDeviceGetHandleByIndex(i)
+
+            util = pynvml.nvmlDeviceGetUtilizationRates(h)
+            mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+
+            gpus.append(
+                {
+                    "index": i,
+                    "name": pynvml.nvmlDeviceGetName(h).decode(),
+                    "memory_total_mb": mem.total // 1024**2,
+                    "memory_used_mb": mem.used // 1024**2,
+                    "gpu_util_percent": util.gpu,
+                    "mem_util_percent": util.memory,
+                    "temperature_c": pynvml.nvmlDeviceGetTemperature(
+                        h, pynvml.NVML_TEMPERATURE_GPU
+                    ),
+                    "power_w": pynvml.nvmlDeviceGetPowerUsage(h) / 1000,
+                    "sm_clock_mhz": pynvml.nvmlDeviceGetClockInfo(
+                        h, pynvml.NVML_CLOCK_SM
+                    ),
+                    "mem_clock_mhz": pynvml.nvmlDeviceGetClockInfo(
+                        h, pynvml.NVML_CLOCK_MEM
+                    ),
+                    "perf_state": pynvml.nvmlDeviceGetPerformanceState(h),
+                }
+            )
+
+        pynvml.nvmlShutdown()
+
+    except Exception as e:
+        return {"error": str(e)}
+
+    return gpus
+
+
+def save_gpu_info(path: Path):
+    with open(path, "w") as f:
+        json.dump(collect_gpu_info(), f, indent=2)
+
+
 def main() -> None:
     setup_error_logger(is_aggregator=True)
     logger = get_error_logger("TraceMLAggregatorMain")
@@ -71,7 +138,8 @@ def main() -> None:
     session_dir = session_root / "aggregator"
     session_dir.mkdir(parents=True, exist_ok=True)
     db_path = session_dir / "telemetry"
-
+    save_cpu_info(session_dir / "cpu_info.json")
+    save_gpu_info(session_dir / "gpu_info.json")
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
 
