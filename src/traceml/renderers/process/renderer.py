@@ -24,7 +24,7 @@ from traceml.aggregator.display_drivers.layout import PROCESS_LAYOUT
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.utils.formatting import fmt_mem_new, fmt_mem_triple, fmt_percent
+from traceml.utils.formatting import fmt_mem_new, fmt_mem_triple
 
 from .compute import ProcessMetricsComputer
 
@@ -52,10 +52,10 @@ class ProcessRenderer(BaseRenderer):
         table.add_column(justify="right", style="bright_white", no_wrap=True)
         table.add_column(justify="left", style="bright_white", no_wrap=True)
 
+        cpu_cores = snap.get("cpu_used", 0.0) / 100.0
         table.add_row(
-            "[bold green]CPU (worst rank)[/bold green] "
-            f"{fmt_percent(snap.get('cpu_used', 0.0))}",
-            "",
+            "[bold green]CPU (worst rank)[/bold green]",
+            f"{cpu_cores:.2f} cores",
         )
 
         if snap.get("gpu_total") is not None:
