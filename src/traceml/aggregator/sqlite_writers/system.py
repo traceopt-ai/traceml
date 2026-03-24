@@ -29,12 +29,6 @@ This projection stores raw values wherever possible.
 - power_usage_w          : watts
 - power_limit_w          : watts
 
-Why raw units?
---------------
-SQLite should keep canonical, lossless values. Unit conversion (e.g. bytes -> GB)
-is a presentation concern and should happen in summaries / APIs / frontend code,
-not in storage.
-
 Expected payload shape
 ----------------------
 Envelope:

@@ -6,25 +6,130 @@ import socket
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Iterable, Optional
 
 import msgspec
 
 from traceml.runtime.session import get_session_id
 
+DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
+DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
+INTERRUPTED_EXIT_CODE = 130
+
 
 def _utc_now_iso() -> str:
+    """Return the current UTC timestamp as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
+    """Write JSON atomically to avoid partially written files on interruption.
+
+    The file is first written to a temporary file in the same directory and then
+    replaced atomically.
+    """
+    path = Path(path).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=str(path.parent),
+        delete=False,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    ) as tmp:
+        json.dump(payload, tmp, indent=2)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+
+    os.replace(tmp_path, path)
+
+
+def _load_json_or_warn(path: Path) -> Dict[str, Any]:
+    """Load JSON from disk.
+
+    Returns an empty dict if the file does not exist. If the file exists but is
+    unreadable or malformed, preserves the original file as a `.corrupt` copy
+    and returns an empty dict.
+    """
+    path = Path(path).resolve()
+
+    if not path.exists():
+        return {}
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as exc:
+        corrupt_path = path.with_suffix(path.suffix + ".corrupt")
+        try:
+            corrupt_path.write_text(
+                path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+        except Exception:
+            pass
+        print(
+            f"[TraceML] WARNING: manifest is malformed and will be rebuilt: {path} ({exc})",
+            file=sys.stderr,
+        )
+        return {}
+    except OSError as exc:
+        print(
+            f"[TraceML] WARNING: manifest could not be read and will be rebuilt: {path} ({exc})",
+            file=sys.stderr,
+        )
+        return {}
+
+
+def _resolve_existing_script_path(script_path: str) -> str:
+    """Resolve and validate the target training script path.
+
+    Raises:
+        FileNotFoundError: if the path does not exist.
+        IsADirectoryError: if the path exists but is not a file.
+    """
+    path = Path(script_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Script not found: {script_path}")
+    if not path.is_file():
+        raise IsADirectoryError(f"Script path is not a file: {script_path}")
+    return str(path.resolve())
+
+
+def _build_torchrun_base_cmd(nproc_per_node: int) -> list[str]:
+    """Build a torchrun command using the current Python interpreter."""
+    return [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        f"--nproc_per_node={int(nproc_per_node)}",
+    ]
+
+
+def _collect_existing_artifacts(db_path: Path) -> Dict[str, str]:
+    """Return only artifacts that exist on disk."""
+    candidates = {
+        "db": db_path,
+        "summary_card_json": Path(str(db_path) + ".summary_card.json"),
+        "summary_card_txt": Path(str(db_path) + ".summary_card.txt"),
+    }
+    return {
+        name: str(path) for name, path in candidates.items() if path.exists()
+    }
 
 
 def write_run_manifest(
     session_root: Path,
     session_id: str,
     script_path: str,
-    mode: str,
+    profile: str,
+    ui_mode: str,
     logs_dir: str,
     tcp_host: str,
     tcp_port: int,
@@ -35,34 +140,30 @@ def write_run_manifest(
     db_path: Optional[Path] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """
-    Write or overwrite a small run manifest.json under session_root.
+    """Write or overwrite the run manifest under ``session_root``.
 
     Parameters
     ----------
-    session_root:
-        Run/session root directory.
     status:
-        Example values: "starting", "running", "completed", "failed", "interrupted"
+        Expected values include ``starting``, ``running``, ``completed``,
+        ``failed``, and ``interrupted``.
     extra:
-        Optional extra fields to merge at top level.
+        Optional non-reserved fields to merge into the top-level manifest.
     """
     session_root = Path(session_root).resolve()
     session_root.mkdir(parents=True, exist_ok=True)
 
     manifest_path = session_root / "manifest.json"
-
     manifest: Dict[str, Any] = {
         "schema_version": 1,
         "session_id": str(session_id),
         "status": str(status),
         "created_at": _utc_now_iso(),
-        "host": {
-            "hostname": socket.gethostname(),
-        },
+        "host": {"hostname": socket.gethostname()},
         "launch": {
             "script_path": str(Path(script_path).resolve()),
-            "mode": str(mode),
+            "profile": str(profile),
+            "ui_mode": str(ui_mode),
             "logs_dir": str(Path(logs_dir).resolve()),
             "tcp_host": str(tcp_host),
             "tcp_port": int(tcp_port),
@@ -72,11 +173,9 @@ def write_run_manifest(
         "paths": {
             "session_root": str(session_root),
             "aggregator_dir": (
-                str(aggregator_dir.resolve())
-                if aggregator_dir is not None
-                else None
+                str(aggregator_dir.resolve()) if aggregator_dir else None
             ),
-            "db_path": str(db_path.resolve()) if db_path is not None else None,
+            "db_path": str(db_path.resolve()) if db_path else None,
         },
         "artifacts": {},
     }
@@ -84,9 +183,7 @@ def write_run_manifest(
     if extra:
         manifest.update(extra)
 
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-
+    _write_json_atomic(manifest_path, manifest)
     return manifest_path
 
 
@@ -97,16 +194,9 @@ def update_run_manifest(
     artifacts: Optional[Dict[str, Any]] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Path:
-    """
-    Update an existing manifest.json in place.
-    """
+    """Update an existing manifest in place using an atomic rewrite."""
     manifest_path = Path(manifest_path).resolve()
-
-    try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
-    except Exception:
-        manifest = {}
+    manifest = _load_json_or_warn(manifest_path)
 
     if status is not None:
         manifest["status"] = str(status)
@@ -119,58 +209,43 @@ def update_run_manifest(
     if extra:
         manifest.update(extra)
 
-    with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(manifest, f, indent=2)
-
+    _write_json_atomic(manifest_path, manifest)
     return manifest_path
 
 
-def validate_script_path(script_path: str) -> str:
-    """
-    Validate that the target training script exists.
-    We resolve the absolute path so downstream subprocesses
-    always receive a stable, unambiguous path.
-    """
-    p = Path(script_path)
-    if not p.exists():
-        print(f"Error: Script '{script_path}' not found.", file=sys.stderr)
-        sys.exit(1)
-    return str(p.resolve())
-
-
 def terminate_process_group(
-    p: subprocess.Popen, timeout_sec: float = 5.0
+    proc: Optional[subprocess.Popen],
+    timeout_sec: float = DEFAULT_SHUTDOWN_TIMEOUT_SEC,
 ) -> None:
-    """
-    Best-effort termination for a subprocess started with start_new_session=True.
+    """Best-effort termination for a subprocess started with ``start_new_session=True``.
 
-    - Sends SIGTERM to the whole process group
-    - Escalates to SIGKILL if it doesn't exit within timeout_sec
+    Termination order:
+    1. SIGTERM the whole process group
+    2. Wait up to ``timeout_sec``
+    3. SIGKILL if still alive
     """
-    if p is None:
-        return
-    if p.poll() is not None:
+    if proc is None or proc.poll() is not None:
         return
 
     try:
-        os.killpg(p.pid, signal.SIGTERM)
+        os.killpg(proc.pid, signal.SIGTERM)
     except Exception:
         try:
-            p.terminate()
+            proc.terminate()
         except Exception:
             pass
 
     try:
-        p.wait(timeout=timeout_sec)
+        proc.wait(timeout=timeout_sec)
         return
     except Exception:
         pass
 
     try:
-        os.killpg(p.pid, signal.SIGKILL)
+        os.killpg(proc.pid, signal.SIGKILL)
     except Exception:
         try:
-            p.kill()
+            proc.kill()
         except Exception:
             pass
 
@@ -179,16 +254,15 @@ def wait_for_tcp_listen(
     host: str,
     port: int,
     proc: subprocess.Popen,
-    timeout_sec: float = 10.0,
+    timeout_sec: float = DEFAULT_TCP_READY_TIMEOUT_SEC,
     poll_interval_sec: float = 0.05,
 ) -> bool:
-    """
-    Wait until (host, port) is accepting TCP connections.
+    """Wait until ``(host, port)`` starts accepting TCP connections.
 
-    Also fails fast if `proc` exits while waiting.
+    Returns ``False`` early if ``proc`` exits while waiting.
     """
     deadline = time.time() + float(timeout_sec)
-    last_err = None
+    last_err: Optional[Exception] = None
 
     while time.time() < deadline:
         if proc.poll() is not None:
@@ -196,8 +270,8 @@ def wait_for_tcp_listen(
         try:
             with socket.create_connection((host, int(port)), timeout=0.25):
                 return True
-        except Exception as e:
-            last_err = e
+        except Exception as exc:
+            last_err = exc
             time.sleep(float(poll_interval_sec))
 
     if last_err is not None:
@@ -209,17 +283,24 @@ def wait_for_tcp_listen(
     return False
 
 
-def install_shutdown_handlers(get_procs, manifest_path=None):
-    """
-    Install SIGINT/SIGTERM handlers that terminate child process groups.
+def install_shutdown_handlers(
+    get_procs: Callable[[], Iterable[Optional[subprocess.Popen]]],
+    manifest_path: Optional[Path] = None,
+) -> None:
+    """Install SIGINT/SIGTERM handlers that terminate child process groups.
 
-    Children are started with start_new_session=True, so they will NOT receive
-    Ctrl+C automatically; the parent must terminate them.
+    Child processes are started with ``start_new_session=True`` and therefore do
+    not receive Ctrl+C automatically from the parent shell.
     """
+    already_handled = {"value": False}
 
-    def _handler(_signum, _frame):
+    def _handler(signum: int, _frame: Any) -> None:
+        if already_handled["value"]:
+            raise SystemExit(INTERRUPTED_EXIT_CODE)
+        already_handled["value"] = True
+
         print(
-            "\n[TraceML] Signal received — terminating processes…",
+            f"\n[TraceML] Signal {signum} received — terminating processes…",
             file=sys.stderr,
         )
 
@@ -229,33 +310,29 @@ def install_shutdown_handlers(get_procs, manifest_path=None):
             except Exception:
                 pass
 
-        for p in get_procs():
-            if p is not None:
-                terminate_process_group(p, timeout_sec=5.0)
+        for proc in get_procs():
+            terminate_process_group(
+                proc, timeout_sec=DEFAULT_SHUTDOWN_TIMEOUT_SEC
+            )
 
-        raise SystemExit(0)
+        raise SystemExit(INTERRUPTED_EXIT_CODE)
 
     signal.signal(signal.SIGINT, _handler)
     signal.signal(signal.SIGTERM, _handler)
 
 
-def start_aggregator_process(env: dict) -> subprocess.Popen:
-    """
-    Start the TraceML aggregator as a separate process.
+def start_aggregator_process(env: Dict[str, str]) -> subprocess.Popen:
+    """Start the TraceML aggregator as a separate process.
 
-    IMPORTANT:
-    - Do NOT pipe stdout/stderr. The aggregator uses Rich to render to a TTY.
-    - We rely on the aggregator to print its own errors/tracebacks to screen.
+    Stdout/stderr are inherited so Rich output and tracebacks remain visible.
     """
     aggregator_path = (
         Path(__file__).parent / "aggregator" / "aggregator_main.py"
     )
     if not aggregator_path.exists():
-        print(
-            f"[TraceML] Aggregator entrypoint not found: {aggregator_path}",
-            file=sys.stderr,
+        raise FileNotFoundError(
+            f"Aggregator entrypoint not found: {aggregator_path}"
         )
-        sys.exit(1)
 
     cmd = [sys.executable, str(aggregator_path)]
     print("[TraceML] Launching TraceML aggregator:", " ".join(cmd))
@@ -263,40 +340,37 @@ def start_aggregator_process(env: dict) -> subprocess.Popen:
 
 
 def start_training_process(
-    train_cmd: list[str], env: dict
+    train_cmd: list[str], env: Dict[str, str]
 ) -> subprocess.Popen:
-    """
-    Start torchrun in a new process group.
+    """Start the training process in a new process group.
 
-    stdout/stderr are inherited so user errors/tracebacks remain visible.
+    Stdout/stderr are inherited so user logs and tracebacks remain visible.
     """
     print("[TraceML] Launching TraceML executor:", " ".join(train_cmd))
     return subprocess.Popen(train_cmd, env=env, start_new_session=True)
 
 
-def launch_tracer_process(script_path, args):
-    """
-    Parent launcher.
+def launch_process(script_path: str, args: argparse.Namespace) -> None:
+    """Launch the TraceML aggregator and the target training process.
 
-    Flow:
-    1) Set TraceML env vars
-    2) Start aggregator process (TTY / Rich UI)
-    3) Wait for aggregator to listen on TCP
-    4) Start torchrun
-    5) Wait for training
-       - If aggregator dies mid-run: warn; training continues (fail-open)
-       - When training exits: terminate aggregator and exit with training code
-    6) On Ctrl+C / SIGTERM: terminate both process groups
+    Flow
+    ----
+    1. Prepare TraceML environment variables
+    2. Start aggregator process
+    3. Wait for aggregator TCP readiness
+    4. Start training process
+    5. Keep training as the primary process; aggregator may fail open
+    6. On shutdown, terminate child process groups and update the manifest
     """
     env = os.environ.copy()
-    env["PYTHONUNBUFFERED"] = "1"  # makes prints flush promptly in children
+    env["PYTHONUNBUFFERED"] = "1"
 
     env["TRACEML_DISABLED"] = (
         "1" if getattr(args, "disable_traceml", False) else "0"
     )
-    env["TRACEML_PROFILE"] = getattr(args, "profile", "run")
+    env["TRACEML_PROFILE"] = getattr(args, "profile", "watch")
     env["TRACEML_SCRIPT_PATH"] = script_path
-    env["TRACEML_MODE"] = args.mode
+    env["TRACEML_UI_MODE"] = args.ui_mode
     env["TRACEML_INTERVAL"] = str(args.interval)
     env["TRACEML_ENABLE_LOGGING"] = "1" if args.enable_logging else "0"
     env["TRACEML_LOGS_DIR"] = args.logs_dir
@@ -319,7 +393,8 @@ def launch_tracer_process(script_path, args):
         session_root=session_root,
         session_id=session_id,
         script_path=script_path,
-        mode=args.mode,
+        profile=env["TRACEML_PROFILE"],
+        ui_mode=args.ui_mode,
         logs_dir=args.logs_dir,
         tcp_host=args.tcp_host,
         tcp_port=args.tcp_port,
@@ -328,18 +403,17 @@ def launch_tracer_process(script_path, args):
         status="starting",
         aggregator_dir=aggregator_dir,
         db_path=db_path,
-        extra={"profile": env["TRACEML_PROFILE"]},
     )
 
-    runner_path = str(Path(__file__).parent / "runtime/executor.py")
+    runner_path = str(Path(__file__).parent / "runtime" / "executor.py")
     script_args = args.args or []
+
     if env["TRACEML_DISABLED"] == "1":
         print(
             "[TraceML] TraceML is disabled via --disable-traceml. Running natively."
         )
         train_cmd = [
-            "torchrun",
-            f"--nproc_per_node={args.nproc_per_node}",
+            *_build_torchrun_base_cmd(args.nproc_per_node),
             str(script_path),
             *script_args,
         ]
@@ -350,82 +424,80 @@ def launch_tracer_process(script_path, args):
         train_proc.wait()
         final_status = "completed" if train_proc.returncode == 0 else "failed"
         update_run_manifest(manifest_path, status=final_status)
-        sys.exit(train_proc.returncode)
+        raise SystemExit(train_proc.returncode)
 
-    if args.mode in ["cli", "dashboard"]:
-        train_cmd = [
-            "torchrun",
-            f"--nproc_per_node={args.nproc_per_node}",
-            runner_path,
-            "--",
-            *script_args,
-        ]
-    else:
-        raise ValueError(f"Invalid mode '{args.mode}'")
+    if args.ui_mode not in ["cli", "dashboard"]:
+        raise ValueError(f"Invalid ui mode '{args.ui_mode}'")
 
-    agg_proc = None
-    train_proc = None
+    train_cmd = [
+        *_build_torchrun_base_cmd(args.nproc_per_node),
+        runner_path,
+        "--",
+        *script_args,
+    ]
 
-    # Ensure Ctrl+C kills both, even during readiness wait.
+    agg_proc: Optional[subprocess.Popen] = None
+    train_proc: Optional[subprocess.Popen] = None
+
     install_shutdown_handlers(
         lambda: (train_proc, agg_proc), manifest_path=manifest_path
     )
 
-    # 1) Start aggregator and wait for it to be ready
     print(
-        f"[TraceML] Starting aggregator on {args.tcp_host}:{args.tcp_port} (mode={args.mode})"
+        f"[TraceML] Starting aggregator on {args.tcp_host}:{args.tcp_port} "
+        f"(ui={args.ui_mode}, profile={env['TRACEML_PROFILE']})"
     )
-    agg_proc = start_aggregator_process(env=env)
+    try:
+        agg_proc = start_aggregator_process(env=env)
+    except FileNotFoundError as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        update_run_manifest(manifest_path, status="failed")
+        raise SystemExit(1)
+
     print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
 
-    ok = wait_for_tcp_listen(
+    ready = wait_for_tcp_listen(
         host=args.tcp_host,
         port=int(args.tcp_port),
         proc=agg_proc,
-        timeout_sec=15.0,  # cold-start (torch/pynvml import) can exceed 5 s
+        timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
     )
-    if not ok:
-        # Aggregator failed before training began: fail fast.
+    if not ready:
         rc = agg_proc.poll()
         print(
-            f"[TraceML] Aggregator failed to start (exit={rc}). "
-            "See aggregator output above for details.",
+            f"[TraceML] ERROR: aggregator failed to start or bind on "
+            f"{args.tcp_host}:{args.tcp_port} (exit={rc}). See output above for details.",
             file=sys.stderr,
         )
         terminate_process_group(agg_proc, timeout_sec=3.0)
         update_run_manifest(manifest_path, status="failed")
-        sys.exit(1)
+        raise SystemExit(1)
 
     print("[TraceML] Aggregator ready.")
     update_run_manifest(manifest_path, status="running")
 
-    # 2) Start training
     train_proc = start_training_process(train_cmd=train_cmd, env=env)
 
-    # 3) Wait loop (training is primary)
     while True:
         train_rc = train_proc.poll()
         if train_rc is not None:
-            # Training finished. Terminate aggregator first, then exit with training rc.
             if agg_proc is not None:
                 print(
                     "[TraceML] Training finished — stopping aggregator…",
                     file=sys.stderr,
                 )
-                terminate_process_group(agg_proc, timeout_sec=5.0)
+                terminate_process_group(
+                    agg_proc, timeout_sec=DEFAULT_SHUTDOWN_TIMEOUT_SEC
+                )
+
             final_status = "completed" if train_rc == 0 else "failed"
             update_run_manifest(
                 manifest_path,
                 status=final_status,
-                artifacts={
-                    "db": str(db_path),
-                    "summary_card_json": str(db_path) + ".summary_card.json",
-                    "summary_card_txt": str(db_path) + ".summary_card.txt",
-                },
+                artifacts=_collect_existing_artifacts(db_path),
             )
-            sys.exit(train_rc)
+            raise SystemExit(train_rc)
 
-        # If aggregator died mid-run: warn, but do not affect training.
         if agg_proc is not None and agg_proc.poll() is not None:
             agg_rc = agg_proc.returncode
             print(
@@ -436,30 +508,33 @@ def launch_tracer_process(script_path, args):
             update_run_manifest(
                 manifest_path,
                 extra={
+                    "telemetry_status": "degraded",
                     "aggregator_exited_early": True,
                     "aggregator_exit_code": agg_rc,
                 },
             )
             agg_proc = None
 
-        time.sleep(1)
+        time.sleep(1.0)
 
 
-def run_with_tracing(args, profile: str):
-    """
-    Entry point for `traceml watch ...` / `traceml run ...` / `traceml deep ...`
-    """
+def run_with_tracing(args: argparse.Namespace, profile: str) -> None:
+    """Entry point for ``traceml watch``, ``traceml run``, and ``traceml deep``."""
     args.profile = profile
-    script_path = validate_script_path(args.script)
-    launch_tracer_process(script_path=script_path, args=args)
+    try:
+        script_path = _resolve_existing_script_path(args.script)
+    except (FileNotFoundError, IsADirectoryError) as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    launch_process(script_path=script_path, args=args)
 
 
-def run_inspect(args):
-    """Decodes and prints binary .msgpack logs for debugging."""
+def run_inspect(args: argparse.Namespace) -> None:
+    """Decode and print binary msgpack logs for debugging."""
     path = Path(args.file)
-    if not path.exists():
-        print(f"Error: File '{args.file}' not found.", file=sys.stderr)
-        sys.exit(1)
+    if not path.exists() or not path.is_file():
+        print(f"[TraceML] ERROR: file not found: {args.file}", file=sys.stderr)
+        raise SystemExit(1)
 
     decoder = msgspec.msgpack.Decoder()
     with open(path, "rb") as f:
@@ -469,73 +544,154 @@ def run_inspect(args):
                 if not header:
                     break
                 if len(header) < 4:
-                    print("Warning: truncated frame header", file=sys.stderr)
+                    print(
+                        "[TraceML] WARNING: truncated frame header",
+                        file=sys.stderr,
+                    )
                     break
                 length = struct.unpack("!I", header)[0]
                 payload = f.read(length)
                 if len(payload) < length:
-                    print("Warning: truncated frame payload", file=sys.stderr)
+                    print(
+                        "[TraceML] WARNING: truncated frame payload",
+                        file=sys.stderr,
+                    )
                     break
                 record = decoder.decode(payload)
                 print(json.dumps(record, indent=2))
-        except Exception as e:
-            print(f"Error decoding {path.name}: {e}", file=sys.stderr)
+        except Exception as exc:
+            print(
+                f"[TraceML] ERROR: decoding failed for {path.name}: {exc}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
 
 
-def _add_launch_args(p):
-    p.add_argument("script")
-    p.add_argument("--mode", type=str, default="cli")
-    p.add_argument("--interval", type=float, default=2.0)
-    p.add_argument("--enable-logging", action="store_true")
-    p.add_argument("--logs-dir", type=str, default="./logs")
-    p.add_argument("--num-display-layers", type=int, default=5)
-    p.add_argument("--session-id", type=str, default="")
-    p.add_argument("--tcp-host", type=str, default="127.0.0.1")
-    p.add_argument("--tcp-port", type=int, default=29765)
-    p.add_argument("--remote-max-rows", type=int, default=200)
-    p.add_argument("--nproc-per-node", type=int, default=1)
-    p.add_argument("--args", nargs=argparse.REMAINDER)
-    p.add_argument(
+def _add_launch_args(parser: argparse.ArgumentParser) -> None:
+    """Add shared launch arguments for TraceML run commands."""
+    parser.add_argument(
+        "script", help="Path to the target Python training script."
+    )
+    parser.add_argument(
+        "--ui-mode",
+        type=str,
+        default="cli",
+        choices=["cli", "dashboard"],
+        help="TraceML frontend to launch. Default: cli.",
+    )
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=2.0,
+        help="Polling interval in seconds.",
+    )
+    parser.add_argument(
+        "--enable-logging",
+        action="store_true",
+        help="Enable TraceML logging output.",
+    )
+    parser.add_argument(
+        "--logs-dir",
+        type=str,
+        default="./logs",
+        help="Directory for TraceML session logs.",
+    )
+    parser.add_argument(
+        "--num-display-layers",
+        type=int,
+        default=5,
+        help="Maximum number of model layers to display in the live UI.",
+    )
+    parser.add_argument(
+        "--session-id",
+        type=str,
+        default="",
+        help="Optional explicit session id.",
+    )
+    parser.add_argument(
+        "--tcp-host",
+        type=str,
+        default="127.0.0.1",
+        help="Aggregator bind host.",
+    )
+    parser.add_argument(
+        "--tcp-port", type=int, default=29765, help="Aggregator bind port."
+    )
+    parser.add_argument(
+        "--remote-max-rows",
+        type=int,
+        default=200,
+        help="Maximum number of rows returned by remote telemetry queries.",
+    )
+    parser.add_argument(
+        "--nproc-per-node",
+        type=int,
+        default=1,
+        help="torchrun nproc_per_node value.",
+    )
+    parser.add_argument(
+        "--args",
+        nargs=argparse.REMAINDER,
+        help=(
+            "Arguments forwarded to the target training script. "
+            "Usage: traceml <watch|run|deep> <script> --args -- <script args>"
+        ),
+    )
+    parser.add_argument(
         "--no-history",
         action="store_true",
-        help="Disable history saving (live view only; summaries/comparisons unavailable).",
+        help="Disable history saving (live view only; summaries and comparisons unavailable).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--disable-traceml",
         action="store_true",
-        help="Disable TraceML telemetry and run the script natively.",
+        help="Disable TraceML telemetry and run the script natively via torchrun.",
     )
 
 
-def build_parser():
-    parser = argparse.ArgumentParser("traceml")
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level TraceML CLI parser."""
+    parser = argparse.ArgumentParser(
+        "traceml",
+        description=(
+            "Run TraceML around a training script.\n\n"
+            "Examples:\n"
+            "  traceml watch train.py\n"
+            "  traceml run train.py --args -- --epochs 10 --lr 1e-3\n"
+            "  traceml deep train.py --args -- --config config.yaml"
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     watch_parser = sub.add_parser(
         "watch",
-        help="Run a script in lightweight watch mode (system + process telemetry only)",
+        help="Run a script in lightweight watch mode (system and process telemetry only).",
     )
     _add_launch_args(watch_parser)
 
     run_parser = sub.add_parser(
-        "run", help="Run a script with TraceML bottleneck instrumentation"
+        "run",
+        help="Run a script with TraceML bottleneck instrumentation.",
     )
     _add_launch_args(run_parser)
 
     deep_parser = sub.add_parser(
-        "deep", help="Run a script with TraceML deep layerwise instrumentation"
+        "deep",
+        help="Run a script with TraceML deep layerwise instrumentation.",
     )
     _add_launch_args(deep_parser)
 
     inspect_parser = sub.add_parser(
-        "inspect", help="Inspect binary .msgpack logs"
+        "inspect", help="Inspect binary .msgpack logs."
     )
-    inspect_parser.add_argument("file", help="Path to a .msgpack file")
+    inspect_parser.add_argument("file", help="Path to a .msgpack file.")
 
     return parser
 
 
-def main():
+def main() -> None:
+    """CLI entrypoint for the TraceML launcher."""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -549,6 +705,7 @@ def main():
         run_inspect(args)
     else:
         parser.print_help()
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
