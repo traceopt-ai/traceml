@@ -18,7 +18,6 @@ from typing import Any, Callable, Dict, Type
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
-from traceml.aggregator.display_drivers.suggest import SuggestDisplayDriver
 from traceml.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
@@ -94,10 +93,7 @@ class TraceMLAggregator:
         )
 
         # UI driver (CLI / dashboard). Driver owns renderer selection and layout mapping.
-        if getattr(settings, "profile", "") == "suggest":
-            driver_cls = SuggestDisplayDriver
-        else:
-            driver_cls = _DISPLAY_DRIVERS.get(settings.mode)
+        driver_cls = _DISPLAY_DRIVERS.get(settings.mode)
 
         if driver_cls is None:
             raise ValueError(
