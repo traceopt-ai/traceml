@@ -119,20 +119,24 @@ class TraceMLRuntime:
 
     def _build_samplers(self) -> List[BaseSampler]:
         """
-        Build samplers for this rank based on profile.
-        - watch: system + process only
-        - run: watch + step + stdout/stderr
+        Build samplers for this rank based on profile and UI mode.
+
+        Profiles
+        --------
+        - watch: system + process (+ stdout/stderr in CLI mode)
+        - run: watch + step samplers
         - deep: run + layerwise memory/time samplers
         """
-
-        is_ddp, local_rank, _ = get_ddp_info()
         samplers: List[BaseSampler] = []
 
         # Host/system metrics only once (rank 0) in DDP
-        if not (is_ddp and local_rank != 0):
+        if not (self.is_ddp and self.local_rank != 0):
             samplers.append(SystemSampler())
 
-        samplers += [ProcessSampler(), StdoutStderrSampler()]
+        samplers.append(ProcessSampler())
+
+        if self.mode == "cli":
+            samplers.append(StdoutStderrSampler())
 
         # Core bottleneck profile
         if self.profile in ["run", "deep"]:
@@ -201,7 +205,7 @@ class TraceMLRuntime:
                     db.writer.flush,
                 )
 
-        batch: list = []
+        batch: List[Any] = []
         for sampler in self._samplers:
             sender = getattr(sampler, "sender", None)
             if sender is None:
@@ -246,11 +250,11 @@ class TraceMLRuntime:
                 StreamCapture.redirect_to_capture,
             )
 
-        _safe(
-            self._logger,
-            "Sampler thread start failed",
-            self._sampler_thread.start,
-        )
+        try:
+            self._sampler_thread.start()
+        except Exception as e:
+            self._logger.exception("[TraceML] Sampler thread start failed")
+            raise RuntimeError("Failed to start TraceML sampler thread") from e
 
     def stop(self) -> None:
         """
@@ -267,7 +271,6 @@ class TraceMLRuntime:
         self._sampler_thread.join(
             timeout=float(self._settings.sampler_interval_sec) * 5.0
         )
-        _safe(self._logger, "final tick failed", self._tick)
 
         if self._sampler_thread.is_alive():
             self._logger.error(

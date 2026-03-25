@@ -1,14 +1,20 @@
 """
 TraceML Aggregator (out-of-process telemetry server + UI driver).
 
-Responsibilities:
+Responsibilities
+----------------
 - Receive telemetry rows from all ranks over TCP
 - Ingest rows into a unified RemoteDBStore
-- Drive a display driver (CLI / NiceGUI) that owns renderers + view layout
+- Optionally persist telemetry to SQLite history
+- Drive a display driver (CLI / NiceGUI) that owns renderers and view layout
 
-Key invariants:
-- Renderers MUST read ONLY from RemoteDBStore.
-- Aggregator MUST NOT know about UI sections, layouts, or renderer methods.
+
+Key invariants
+--------------
+- Renderers currently read from RemoteDBStore and, in some cases, SQLite-backed
+  history during the storage transition.
+- Over time, SQLite-backed history may replace parts of the RemoteDBStore read path.
+- The aggregator MUST NOT know about UI sections, layouts, or renderer methods.
 """
 
 import threading
@@ -31,14 +37,16 @@ from .final_summary import generate_summary
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
     """
-    Execute fn() and never raise.
-    Intended for cleanup paths and UI rendering where errors should be logged
-    but not crash training/aggregation.
+    Execute ``fn()`` and never raise.
+
+    This helper is intended for cleanup paths, UI ticking, and telemetry
+    ingestion paths where failures should be logged but should not crash the
+    already-running aggregator process.
     """
     try:
         return fn()
-    except Exception as e:
-        logger.error(f"[TraceML] {label}: {e}")
+    except Exception:
+        logger.exception(f"[TraceML] {label}")
         return None
 
 
@@ -52,10 +60,12 @@ class TraceMLAggregator:
     """
     Telemetry aggregator process.
 
-    Owns:
+    Owns
+    ----
     - TCPServer: receives messages from training ranks
     - RemoteDBStore: unified telemetry store (single source of truth)
-    - Display driver: backend-specific driver that owns renderers + UI updates
+    - SQLiteWriterSimple: optional history persistence
+    - Display driver: backend-specific driver that owns renderers and UI updates
     """
 
     def __init__(
@@ -68,23 +78,25 @@ class TraceMLAggregator:
         self._stop_event = stop_event
         self._settings = settings
 
-        # Unified telemetry store: renderers read ONLY from here
+        # Unified telemetry store: renderers read only from here.
         self._store = RemoteDBStore(max_rows=int(settings.remote_max_rows))
 
-        # TCP server: aggregator listens on rank0
+        # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
-            TCPConfig(host=settings.tcp.host, port=int(settings.tcp.port))
+            TCPConfig(
+                host=str(settings.tcp.host),
+                port=int(settings.tcp.port),
+            )
         )
 
         db_path = getattr(settings, "db_path", None)
         if not db_path:
-            # fallback: create a simple filename (you may want to put in a session folder)
             db_path = f"traceml_session_{time.time_ns()}.db"
 
         self._sqlite_writer = SQLiteWriterSimple(
             SQLiteWriterConfig(
-                path=db_path,
-                enabled=settings.history_enabled,
+                path=str(db_path),
+                enabled=bool(settings.history_enabled),
                 max_queue=50_000,
                 flush_interval_sec=0.5,
                 max_flush_items=20_000,
@@ -92,7 +104,7 @@ class TraceMLAggregator:
             ),
         )
 
-        # UI driver (CLI / dashboard). Driver owns renderer selection and layout mapping.
+        # Display driver owns renderer selection and layout mapping.
         driver_cls = _DISPLAY_DRIVERS.get(settings.mode)
 
         if driver_cls is None:
@@ -100,6 +112,7 @@ class TraceMLAggregator:
                 f"[TraceML] Unknown display mode: {settings.mode!r}. "
                 f"Supported: {sorted(_DISPLAY_DRIVERS.keys())}"
             )
+
         self._display_driver = driver_cls(
             logger=self._logger,
             store=self._store,
@@ -114,40 +127,46 @@ class TraceMLAggregator:
 
     @property
     def store(self) -> RemoteDBStore:
-        """Expose store for tests (read-only usage)."""
+        """Expose the store for tests and read-only inspection."""
         return self._store
 
     def start(self) -> None:
         """
-        Start server + UI driver + aggregator loop.
+        Start the aggregator server, persistence layer, UI driver, and loop.
 
-        Start order matters: the server must be listening before training ranks
-        attempt to connect/flush.
+        Start order matters:
+        1. TCP server must start first so workers can connect.
+        2. SQLite writer starts before ingestion begins.
+        3. Display driver starts before periodic ticks.
+        4. Aggregator loop thread starts last.
+
+        Startup failures should propagate so the launcher can fail fast rather
+        than running in a partially initialized state.
         """
-        _safe(self._logger, "TCPServer.start failed", self._tcp_server.start)
-        _safe(
-            self._logger,
-            "SQLiteWriter.start failed",
-            self._sqlite_writer.start,
-        )
-        _safe(
-            self._logger,
-            "Display driver start failed",
-            self._display_driver.start,
-        )
-        _safe(
-            self._logger, "Aggregator thread start failed", self._thread.start
-        )
+        self._tcp_server.start()
+        self._sqlite_writer.start()
+        self._display_driver.start()
+
+        try:
+            self._thread.start()
+        except Exception:
+            self._logger.exception("[TraceML] Aggregator thread start failed")
+            raise
 
     def stop(self, timeout_sec: float) -> None:
         """
-        Stop aggregator loop and release UI/server resources (best effort).
+        Stop the aggregator loop and release resources.
 
-        Notes:
-        - Aggregator loop exits when stop_event is set.
-        - We join with timeout; if it doesn't stop, log a warning and continue cleanup.
+        Notes
+        -----
+        - The loop exits when ``stop_event`` is set by the process entrypoint.
+        - Cleanup is best-effort once shutdown begins.
+        - Final summary generation runs only when history is enabled and a
+          database path is configured.
         """
-        self._thread.join(timeout=float(timeout_sec))
+        if self._thread.is_alive():
+            self._thread.join(timeout=float(timeout_sec))
+
         if self._thread.is_alive():
             self._logger.error(
                 "[TraceML] WARNING: aggregator thread did not terminate"
@@ -158,9 +177,15 @@ class TraceMLAggregator:
             "Display driver stop failed",
             self._display_driver.stop,
         )
-        _safe(self._logger, "TCPServer.stop failed", self._tcp_server.stop)
         _safe(
-            self._logger, "SQLiteWriter.stop failed", self._sqlite_writer.stop
+            self._logger,
+            "TCPServer.stop failed",
+            self._tcp_server.stop,
+        )
+        _safe(
+            self._logger,
+            "SQLiteWriter.stop failed",
+            self._sqlite_writer.stop,
         )
 
         if self._settings.history_enabled and self._settings.db_path:
@@ -172,9 +197,10 @@ class TraceMLAggregator:
 
     def _drain_tcp(self) -> None:
         """
-        Drain server messages and ingest them into the store.
+        Drain pending TCP messages and ingest them into the store and history.
 
-        Each msg is expected to be a telemetry row (or batch) compatible with RemoteDBStore.ingest().
+        Each message is expected to be a telemetry row or batch compatible with
+        ``RemoteDBStore.ingest()`` and ``SQLiteWriterSimple.ingest()``.
         """
         for msg in self._tcp_server.poll():
             _safe(
@@ -182,7 +208,6 @@ class TraceMLAggregator:
                 "RemoteDBStore.ingest failed",
                 lambda m=msg: self._store.ingest(m),
             )
-
             _safe(
                 self._logger,
                 "SQLiteWriter.ingest failed",
@@ -191,9 +216,10 @@ class TraceMLAggregator:
 
     def _loop(self) -> None:
         """
-        Periodic drain + UI tick loop.
+        Run the periodic drain and display tick loop.
 
-        Aggregator does not render; it delegates to the display driver.
+        The aggregator does not render directly. Rendering is delegated to the
+        configured display driver.
         """
         interval_sec = float(self._settings.render_interval_sec)
 
@@ -206,7 +232,7 @@ class TraceMLAggregator:
             )
             self._stop_event.wait(interval_sec)
 
-        # Final flush + final render tick
+        # Final drain and final display tick on shutdown.
         self._drain_tcp()
         _safe(
             self._logger,
