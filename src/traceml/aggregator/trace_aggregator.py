@@ -160,12 +160,12 @@ class TraceMLAggregator:
         """
         self._tcp_server.start()
         self._sqlite_writer.start()
-        self._display_driver.start()
         _safe(
             self._logger,
             "CodeHintsRenderer.start failed",
             self._hints_renderer.start,
         )
+        self._display_driver.start()
 
         try:
             self._thread.start()
