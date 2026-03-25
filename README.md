@@ -98,9 +98,6 @@ TraceML also includes a local UI. See [`docs/quickstart.md`](docs/quickstart.md)
 
 ## Run modes
 
-#### `traceml suggest-gpu train.py --target-batch-size N`
-Dynamically profiles memory in ~3 steps and recommends hardware (single/multi-GPU + FSDP strategies) required for `N` batch size.
-
 #### `traceml watch train.py`
 Zero-code live visibility for system and process behavior.
 
