@@ -26,9 +26,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-# ---------------------------------------------------------------------------
 # Public result types
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -109,10 +107,31 @@ class CodeFindings:
     gradient_accumulation_steps: Optional[int] = None
     parse_errors: List[str] = field(default_factory=list)
 
+    # Sync-forcing calls inside training loop body
+    sync_calls_item: int = 0
+    sync_calls_cpu: int = 0
+    sync_calls_numpy: int = 0
+    sync_calls_cuda_synchronize: int = 0
 
-# ---------------------------------------------------------------------------
+    # Device transfer patterns
+    to_device_detected: bool = False
+    non_blocking_used: bool = False
+
+    # Granular train-loop flags
+    zero_grad_detected: bool = False
+    backward_detected: bool = False
+    optimizer_step_detected: bool = False
+    logging_in_loop: bool = False
+    checkpoint_in_loop: bool = False
+    validation_in_loop: bool = False
+
+    # Dataloader extras
+    distributed_sampler_used: bool = False
+    set_epoch_called: bool = False
+    prefetch_factor_set: bool = False
+
+
 # Public API
-# ---------------------------------------------------------------------------
 
 
 def analyze_script(script_path: str) -> CodeFindings:
@@ -140,15 +159,15 @@ def analyze_script(script_path: str) -> CodeFindings:
         return result
 
     result.imports = _build_import_map(tree)
-
-    # String constants at module level (MODEL_NAME = "some/model")
     str_consts = _collect_string_constants(tree)
+    parent_map = _build_parent_map(tree)
 
     visitor = _PatternVisitor(
         script_path=script_path,
         lines=lines,
         imports=result.imports,
         str_consts=str_consts,
+        parent_map=parent_map,
     )
     visitor.visit(tree)
 
@@ -159,6 +178,22 @@ def analyze_script(script_path: str) -> CodeFindings:
     result.models = visitor.models
     result.fine_tuning = visitor.fine_tuning
     result.gradient_accumulation_steps = visitor.gradient_accumulation_steps
+
+    result.sync_calls_item = visitor.sync_calls_item
+    result.sync_calls_cpu = visitor.sync_calls_cpu
+    result.sync_calls_numpy = visitor.sync_calls_numpy
+    result.sync_calls_cuda_synchronize = visitor.sync_calls_cuda_synchronize
+    result.to_device_detected = visitor.to_device_detected
+    result.non_blocking_used = visitor.non_blocking_used
+    result.zero_grad_detected = visitor.zero_grad_detected
+    result.backward_detected = visitor.backward_detected
+    result.optimizer_step_detected = visitor.optimizer_step_detected
+    result.logging_in_loop = visitor.logging_in_loop
+    result.checkpoint_in_loop = visitor.checkpoint_in_loop
+    result.validation_in_loop = visitor.validation_in_loop
+    result.distributed_sampler_used = visitor.distributed_sampler_used
+    result.set_epoch_called = visitor.set_epoch_called
+    result.prefetch_factor_set = visitor.prefetch_factor_set
 
     _apply_qlora_upgrade(result)
     _absorb_hf_training_args(tree, result, lines, script_path)
@@ -197,9 +232,7 @@ def scan_for_optimizer(script_path: str) -> Optional[str]:
     return None
 
 
-# ---------------------------------------------------------------------------
 # Import map construction
-# ---------------------------------------------------------------------------
 
 
 def _build_import_map(tree: ast.AST) -> Dict[str, str]:
@@ -250,9 +283,7 @@ def _collect_string_constants(tree: ast.AST) -> Dict[str, str]:
     return consts
 
 
-# ---------------------------------------------------------------------------
 # Name resolution helpers
-# ---------------------------------------------------------------------------
 
 
 def _fqn(call: ast.Call, imports: Dict[str, str]) -> Optional[str]:
@@ -330,9 +361,35 @@ def _safe_float(val) -> Optional[float]:
         return None
 
 
-# ---------------------------------------------------------------------------
+def _build_parent_map(tree: ast.AST) -> Dict[int, ast.AST]:
+    """Map each node id to its parent node for ancestor-chain lookups."""
+    parents: Dict[int, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+    return parents
+
+
+def _is_in_training_loop(
+    node: ast.AST, parent_map: Dict[int, ast.AST]
+) -> bool:
+    """Walk ancestor chain; return True when node sits inside a For/While that
+    contains a .backward() call (heuristic for the training loop body)."""
+    cur = parent_map.get(id(node))
+    while cur is not None:
+        if isinstance(cur, (ast.For, ast.While)):
+            for child in ast.walk(cur):
+                if (
+                    isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "backward"
+                ):
+                    return True
+        cur = parent_map.get(id(cur))
+    return False
+
+
 # Known patterns
-# ---------------------------------------------------------------------------
 
 _DATALOADER_SUFFIXES = {"DataLoader", "dataloader.DataLoader"}
 
@@ -397,9 +454,7 @@ _HF_TRAINER_CLASSES = {
 _LIGHTNING_PREFIXES = ("pytorch_lightning", "lightning.pytorch", "lightning")
 
 
-# ---------------------------------------------------------------------------
 # Visitor — single pass over the AST
-# ---------------------------------------------------------------------------
 
 
 class _PatternVisitor(ast.NodeVisitor):
@@ -411,11 +466,13 @@ class _PatternVisitor(ast.NodeVisitor):
         lines: List[str],
         imports: Dict[str, str],
         str_consts: Dict[str, str],
+        parent_map: Optional[Dict[int, ast.AST]] = None,
     ) -> None:
         self._path = script_path
         self._lines = lines
         self._imports = imports
         self._str_consts = str_consts
+        self._parent_map: Dict[int, ast.AST] = parent_map or {}
 
         self.dataloaders: List[DataLoaderFinding] = []
         self.optimizers: List[OptimizerFinding] = []
@@ -425,12 +482,32 @@ class _PatternVisitor(ast.NodeVisitor):
         self.fine_tuning: List[FineTuningFinding] = []
         self.gradient_accumulation_steps: Optional[int] = None
 
-        # Dedup guards
         self._seen_lightning = False
 
-    # ------------------------------------------------------------------
+        # Sync-call counters (training-loop scoped)
+        self.sync_calls_item: int = 0
+        self.sync_calls_cpu: int = 0
+        self.sync_calls_numpy: int = 0
+        self.sync_calls_cuda_synchronize: int = 0
+
+        # Device transfer
+        self.to_device_detected: bool = False
+        self.non_blocking_used: bool = False
+
+        # Train-loop flags
+        self.zero_grad_detected: bool = False
+        self.backward_detected: bool = False
+        self.optimizer_step_detected: bool = False
+        self.logging_in_loop: bool = False
+        self.checkpoint_in_loop: bool = False
+        self.validation_in_loop: bool = False
+
+        # Dataloader extras
+        self.distributed_sampler_used: bool = False
+        self.set_epoch_called: bool = False
+        self.prefetch_factor_set: bool = False
+
     # Helpers
-    # ------------------------------------------------------------------
 
     def _loc(self, node: ast.AST) -> ScriptLocation:
         return _location(self._path, node, self._lines)
@@ -447,9 +524,7 @@ class _PatternVisitor(ast.NodeVisitor):
             )
         )
 
-    # ------------------------------------------------------------------
     # Call node — the main dispatch point
-    # ------------------------------------------------------------------
 
     def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
         name = self._resolve(node)
@@ -460,6 +535,11 @@ class _PatternVisitor(ast.NodeVisitor):
             self._check_distributed(node, name)
             self._check_model(node, name)
             self._check_peft(node, name)
+            self._check_sync_calls(node, name)
+            self._check_device_transfer(node, name)
+            self._check_train_loop_flags(node, name)
+            self._check_distributed_sampler(node, name)
+            self._check_set_epoch(node, name)
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
@@ -499,9 +579,7 @@ class _PatternVisitor(ast.NodeVisitor):
                         break
         self.generic_visit(node)
 
-    # ------------------------------------------------------------------
     # Per-pattern checks (called from visit_Call)
-    # ------------------------------------------------------------------
 
     def _check_dataloader(self, node: ast.Call, name: str) -> None:
         if not (name.endswith(".DataLoader") or name in _DATALOADER_SUFFIXES):
@@ -527,6 +605,9 @@ class _PatternVisitor(ast.NodeVisitor):
         pw = bool(pw_raw) if pw_raw is not None else None
         pf = _safe_int(_kw_const(node, "prefetch_factor"))
 
+        if pf is not None:
+            self.prefetch_factor_set = True
+
         self.dataloaders.append(
             DataLoaderFinding(
                 location=self._loc(node),
@@ -538,6 +619,75 @@ class _PatternVisitor(ast.NodeVisitor):
                 raw_kwargs=raw,
             )
         )
+
+    def _check_sync_calls(self, node: ast.Call, name: str) -> None:
+        """Count CPU-sync-forcing calls; sync calls are attributed to the training loop."""
+        if not isinstance(node.func, ast.Attribute):
+            return
+        attr = node.func.attr
+        in_loop = _is_in_training_loop(node, self._parent_map)
+        if attr == "item" and in_loop:
+            self.sync_calls_item += 1
+        elif attr == "cpu" and in_loop:
+            self.sync_calls_cpu += 1
+        elif attr == "numpy" and in_loop:
+            self.sync_calls_numpy += 1
+        elif (
+            "cuda" in name and "synchronize" in name
+        ) or attr == "synchronize":
+            self.sync_calls_cuda_synchronize += 1
+
+    def _check_device_transfer(self, node: ast.Call, name: str) -> None:
+        """Detect .to(device) / .cuda() and whether non_blocking is set."""
+        if not isinstance(node.func, ast.Attribute):
+            return
+        if node.func.attr not in ("to", "cuda"):
+            return
+        self.to_device_detected = True
+        if _kw_const(node, "non_blocking") is True:
+            self.non_blocking_used = True
+
+    def _check_train_loop_flags(self, node: ast.Call, name: str) -> None:
+        """Detect granular training-loop pattern flags from method/function names."""
+        in_loop = _is_in_training_loop(node, self._parent_map)
+
+        if isinstance(node.func, ast.Attribute):
+            attr = node.func.attr
+            if attr == "zero_grad":
+                self.zero_grad_detected = True
+            elif attr == "backward":
+                self.backward_detected = True
+            elif attr == "step":
+                self.optimizer_step_detected = True
+            elif (
+                attr in ("save", "save_checkpoint", "save_pretrained")
+                and in_loop
+            ):
+                self.checkpoint_in_loop = True
+            elif attr == "eval" and in_loop:
+                self.validation_in_loop = True
+            elif attr == "no_grad" and in_loop:
+                self.validation_in_loop = True
+            elif attr in ("log", "add_scalar") and in_loop:
+                self.logging_in_loop = True
+        elif isinstance(node.func, ast.Name):
+            fn = node.func.id
+            if fn in ("no_grad", "inference_mode") and in_loop:
+                self.validation_in_loop = True
+            elif fn == "print" and in_loop:
+                self.logging_in_loop = True
+
+    def _check_distributed_sampler(self, node: ast.Call, name: str) -> None:
+        leaf = name.rsplit(".", 1)[-1]
+        if leaf == "DistributedSampler":
+            self.distributed_sampler_used = True
+
+    def _check_set_epoch(self, node: ast.Call, name: str) -> None:
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "set_epoch"
+        ):
+            self.set_epoch_called = True
 
     def _check_optimizer(self, node: ast.Call, name: str) -> None:
         opt_type: Optional[str] = None
@@ -734,9 +884,7 @@ class _PatternVisitor(ast.NodeVisitor):
             pass
 
 
-# ---------------------------------------------------------------------------
 # Post-processing passes
-# ---------------------------------------------------------------------------
 
 
 def _apply_qlora_upgrade(result: CodeFindings) -> None:
@@ -857,9 +1005,7 @@ def _has_training_loop(tree: ast.AST, result: CodeFindings) -> bool:
     return (saw_backward and saw_step) or (saw_loop and saw_train)
 
 
-# ---------------------------------------------------------------------------
 # Multi-file: follow relative imports one level deep
-# ---------------------------------------------------------------------------
 
 
 def _ingest_local_imports(
@@ -928,9 +1074,7 @@ def _merge_file_into(path: str, result: CodeFindings) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
 # Misc helpers
-# ---------------------------------------------------------------------------
 
 
 def _extract_autocast_dtype(node: ast.Call) -> Optional[str]:

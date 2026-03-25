@@ -15,6 +15,8 @@ from typing import Any, Callable, Dict, Iterable, Optional
 import msgspec
 
 from traceml.runtime.session import get_session_id
+from traceml.utils.ast_analysis.code_manifest import build_code_manifest
+from traceml.utils.ast_analysis.scanner import analyze_script
 
 DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
@@ -118,10 +120,30 @@ def _collect_existing_artifacts(db_path: Path) -> Dict[str, str]:
         "db": db_path,
         "summary_card_json": Path(str(db_path) + ".summary_card.json"),
         "summary_card_txt": Path(str(db_path) + ".summary_card.txt"),
+        "code_manifest": db_path.parent.parent / "code_manifest.json",
+        "recommendations": db_path.parent / "recommendations.json",
     }
     return {
         name: str(path) for name, path in candidates.items() if path.exists()
     }
+
+
+def _generate_code_manifest(script_path: str, dest_path: Path) -> None:
+    """Run AST analysis on *script_path* and write code_manifest.json atomically.
+
+    Fail-open: if analysis raises, writes a minimal error manifest so downstream
+    components still have a parseable file.
+    """
+    try:
+        findings = analyze_script(script_path)
+        payload = build_code_manifest(findings)
+    except Exception as exc:  # noqa: BLE001
+        payload = {
+            "schema_version": 1,
+            "error": str(exc),
+            "script_path": script_path,
+        }
+    _write_json_atomic(dest_path, payload)
 
 
 def write_run_manifest(
@@ -403,6 +425,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         aggregator_dir=aggregator_dir,
         db_path=db_path,
     )
+
+    code_manifest_path = session_root / "code_manifest.json"
+    _generate_code_manifest(script_path, code_manifest_path)
+    env["TRACEML_CODE_MANIFEST_PATH"] = str(code_manifest_path)
 
     runner_path = str(Path(__file__).parent / "runtime" / "executor.py")
     script_args = args.args or []
