@@ -22,8 +22,6 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Type
 
-from rich.console import Console
-
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
@@ -123,16 +121,8 @@ class TraceMLAggregator:
             settings=self._settings,
         )
 
-        # Code hints renderer reads manifests from disk; uses the display driver's
-        # console if available, otherwise a plain fallback console.
-        console: Console = getattr(
-            self._display_driver, "console", None
-        ) or Console(stderr=True)
         aggregator_dir = Path(str(db_path)).parent
-        self._hints_renderer = CodeHintsRenderer(
-            aggregator_dir=aggregator_dir,
-            console=console,
-        )
+        self._hints_renderer = CodeHintsRenderer(aggregator_dir=aggregator_dir)
 
         self._thread = threading.Thread(
             target=self._loop,

@@ -1,8 +1,8 @@
-"""Script Hints renderer — surfaces heuristic recommendations from code_manifest.json.
+"""Script Hints renderer — surfaces heuristic recommendations at end of run.
 
-Reads code_manifest.json and system_manifest.json at startup, runs the
-heuristics engine once, renders a 'Script Hints' Rich panel in the CLI output,
-and writes recommendations.json to the aggregator directory at shutdown.
+Reads code_manifest.json and system_manifest.json once at startup, runs the
+heuristics engine, then prints a plain-text card (matching the +---+ style of
+the system/process/step summary cards) after the Live display exits.
 """
 
 from __future__ import annotations
@@ -12,18 +12,12 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.text import Text
-
 from traceml.heuristics._types import Recommendation
 from traceml.heuristics.engine import build_recommendations
 
-_SEVERITY_STYLE = {
-    "crit": ("bold red", "✖"),
-    "warn": ("bold yellow", "⚠"),
-    "info": ("bold blue", "●"),
-}
+_WIDTH = 78
+_INNER = _WIDTH - 4
+_SEVERITY_PREFIX = {"crit": "[CRIT]", "warn": "[WARN]", "info": "[INFO]"}
 
 
 def _load_json(path: Optional[str]) -> Dict[str, Any]:
@@ -36,25 +30,51 @@ def _load_json(path: Optional[str]) -> Dict[str, Any]:
         return {}
 
 
-def _render_hints_panel(recs: List[Recommendation], console: Console) -> None:
-    if not recs:
-        return
+def _border() -> str:
+    return "+" + "-" * (_WIDTH - 2) + "+"
 
-    body = Text()
-    for rec in recs:
-        style, icon = _SEVERITY_STYLE.get(rec.severity, ("", "•"))
-        body.append(f"{icon} [{rec.kind}] ", style=style)
-        body.append(f"{rec.reason}\n", style="")
-        body.append(f"  → {rec.action}\n\n", style="dim")
 
-    console.print(
-        Panel(
-            body,
-            title="[bold]Script Hints[/bold]",
-            border_style="blue",
-            padding=(0, 1),
-        )
-    )
+def _row(text: str = "") -> str:
+    return f"|  {text:<{_INNER}}|"
+
+
+def _wrap(text: str, indent: int = 0) -> List[str]:
+    """Word-wrap text to fit inside the card inner width."""
+    available = _INNER - indent
+    words = text.split()
+    lines: List[str] = []
+    current = ""
+    for word in words:
+        if current and len(current) + 1 + len(word) > available:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".lstrip()
+    if current:
+        lines.append(current)
+    prefix = " " * indent
+    return [f"{prefix}{line}" for line in lines]
+
+
+def _print_hints_card(recs: List[Recommendation]) -> None:
+    header = f"TraceML Script Hints | {len(recs)} recommendation{'s' if len(recs) != 1 else ''}"
+    lines = [_border(), _row(header), _border(), _row("HINTS"), _row()]
+
+    for i, rec in enumerate(recs):
+        prefix = _SEVERITY_PREFIX.get(rec.severity, "[INFO]")
+        # Reason line(s)
+        reason_lines = _wrap(f"{prefix} {rec.reason}")
+        for j, line in enumerate(reason_lines):
+            lines.append(_row(line))
+        # Action line(s) indented with arrow
+        action_lines = _wrap(f"→ {rec.action}", indent=2)
+        for line in action_lines:
+            lines.append(_row(line))
+        if i < len(recs) - 1:
+            lines.append(_row())
+
+    lines += [_border()]
+    print("\n".join(lines))
 
 
 def _write_recommendations_json(
@@ -79,18 +99,14 @@ def _write_recommendations_json(
 
 
 class CodeHintsRenderer:
-    """Loads manifests, runs heuristics once, renders the Script Hints panel.
+    """Loads manifests, runs heuristics once, prints the Script Hints card.
 
-    Lifecycle: call ``start()`` after aggregator startup, ``stop()`` before shutdown.
+    Lifecycle: ``start()`` computes recommendations; ``stop()`` prints the
+    card (after Live exits) and writes recommendations.json.
     """
 
-    def __init__(
-        self,
-        aggregator_dir: Path,
-        console: Console,
-    ) -> None:
+    def __init__(self, aggregator_dir: Path) -> None:
         self._aggregator_dir = Path(aggregator_dir)
-        self._console = console
         self._recs: List[Recommendation] = []
 
     def start(self) -> None:
@@ -98,23 +114,17 @@ class CodeHintsRenderer:
         system_manifest_path = str(
             self._aggregator_dir / "system_manifest.json"
         )
-
         code_manifest = _load_json(code_manifest_path)
         system_manifest = _load_json(system_manifest_path)
-
         if code_manifest.get("error"):
-            return  # AST parse failed — skip hints silently
-
+            return
         self._recs = build_recommendations(code_manifest, system_manifest)
 
     def stop(self) -> None:
-        """Print the hints panel after the Live display exits and write JSON."""
+        """Print the card to stdout after Live exits, then persist JSON."""
         if not self._recs:
             return
-        # Create a fresh console pointing to stdout — Live is already stopped
-        # so we can write directly to the terminal without conflict.
-        console = Console()
-        _render_hints_panel(self._recs, console)
+        _print_hints_card(self._recs)
         _write_recommendations_json(
             self._recs, self._aggregator_dir / "recommendations.json"
         )

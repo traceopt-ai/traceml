@@ -32,14 +32,14 @@ def check_train_loop(
                 severity="info",
                 category="train_loop",
                 reason=(
-                    "Logging is detected inside the training loop alongside sync "
-                    "calls; reading tensor values for logging forces a GPU-CPU sync "
-                    "at every logged step"
+                    f"{total_sync} CPU-sync call(s) (e.g. .item()) inside the "
+                    "training loop cause a GPU pipeline drain on every step where "
+                    "logging fires"
                 ),
                 action=(
-                    "Log only every N steps (e.g. if step % 10 == 0). "
-                    "Accumulate scalar tensors and reduce with .item() "
-                    "at the log boundary, not every step"
+                    "Accumulate loss as a tensor; call .item() only at the log "
+                    "boundary. Use torch.no_grad() and avoid .item() inside the "
+                    "hot path to keep the GPU pipeline unblocked"
                 ),
             )
         )
