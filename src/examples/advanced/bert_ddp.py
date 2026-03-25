@@ -21,8 +21,6 @@ from transformers import (
 #   Attaches model-level hooks (forward pass, backward pass, timings, etc.)
 # trace_step:
 #   Defines a training-step boundary (flushes TraceML buffers at step end)
-# trace_time:
-#   Optional fine-grained timers for user-defined code sections
 from traceml.decorators import trace_model_instance, trace_step
 
 SEED = 42
