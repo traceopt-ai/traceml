@@ -149,12 +149,16 @@ def collect_gpu_info() -> list:
         count = pynvml.nvmlDeviceGetCount()
         for i in range(count):
             h = pynvml.nvmlDeviceGetHandleByIndex(i)
+            name_val = pynvml.nvmlDeviceGetName(h)
+            name_str = (
+                name_val.decode() if isinstance(name_val, bytes) else name_val
+            )
             util = pynvml.nvmlDeviceGetUtilizationRates(h)
             mem = pynvml.nvmlDeviceGetMemoryInfo(h)
             gpus.append(
                 {
                     "index": i,
-                    "name": pynvml.nvmlDeviceGetName(h).decode(),
+                    "name": name_str,
                     "memory_total_mb": mem.total // 1024**2,
                     "memory_used_mb": mem.used // 1024**2,
                     "gpu_util_percent": util.gpu,
@@ -194,6 +198,10 @@ def collect_system_manifest(nproc_per_node: int = 1) -> dict:
         count = pynvml.nvmlDeviceGetCount()
         for i in range(count):
             h = pynvml.nvmlDeviceGetHandleByIndex(i)
+            name_val = pynvml.nvmlDeviceGetName(h)
+            name_str = (
+                name_val.decode() if isinstance(name_val, bytes) else name_val
+            )
             mem = pynvml.nvmlDeviceGetMemoryInfo(h)
             sm_clock = pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_SM)
             mem_clock = pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_MEM)
@@ -205,7 +213,7 @@ def collect_system_manifest(nproc_per_node: int = 1) -> dict:
             gpus.append(
                 {
                     "index": i,
-                    "name": pynvml.nvmlDeviceGetName(h).decode(),
+                    "name": name_str,
                     "memory_total_gb": round(mem.total / 1024**3, 2),
                     "memory_used_gb": round(mem.used / 1024**3, 2),
                     "compute_capability": compute_capability,

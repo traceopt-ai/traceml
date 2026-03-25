@@ -374,17 +374,21 @@ def _is_in_training_loop(
     node: ast.AST, parent_map: Dict[int, ast.AST]
 ) -> bool:
     """Walk ancestor chain; return True when node sits inside a For/While that
-    contains a .backward() call (heuristic for the training loop body)."""
+    contains a .backward(), .zero_grad(), .step() call, or similar helper function (heuristic for the training loop body).
+    """
     cur = parent_map.get(id(node))
     while cur is not None:
         if isinstance(cur, (ast.For, ast.While)):
             for child in ast.walk(cur):
-                if (
-                    isinstance(child, ast.Call)
-                    and isinstance(child.func, ast.Attribute)
-                    and child.func.attr == "backward"
-                ):
-                    return True
+                if isinstance(child, ast.Call):
+                    if isinstance(child.func, ast.Attribute):
+                        attr = child.func.attr
+                        if attr in ("backward", "zero_grad", "step"):
+                            return True
+                    elif isinstance(child.func, ast.Name):
+                        fn_name = child.func.id.lower()
+                        if "backward" in fn_name or "optim" in fn_name:
+                            return True
         cur = parent_map.get(id(cur))
     return False
 
