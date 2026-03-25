@@ -411,3 +411,43 @@ def _styled_status(status: str, severity: Severity) -> str:
         "info": "bold green",
     }.get(severity, "bold")
     return f"[{style}]{status}[/{style}]"
+
+
+def enrich_input_bound_action(
+    code_manifest: dict,
+    system_manifest: dict,
+) -> str:
+    """Return a data-backed INPUT_BOUND action string using code and system manifests.
+
+    Falls back to the generic message when manifests are empty or incomplete.
+    The function is pure (no I/O); callers are responsible for loading the dicts.
+    """
+    dl = code_manifest.get("dataloader", {})
+    cpu = system_manifest.get("cpu", {})
+
+    num_workers = dl.get("num_workers")
+    pin_memory = dl.get("pin_memory")
+    logical_cores = cpu.get("logical_cores") or 0
+    recommended = max(logical_cores // 4, 2) if logical_cores else None
+
+    parts: list[str] = []
+
+    if num_workers == 0:
+        fix = (
+            f"set num_workers={recommended} (cores ÷ 4)"
+            if recommended
+            else "increase num_workers (currently 0)"
+        )
+        parts.append(f"num_workers=0 → {fix}")
+    elif num_workers is not None and recommended and num_workers < recommended:
+        parts.append(
+            f"num_workers={num_workers} is low → try num_workers={recommended}"
+        )
+
+    if pin_memory is False:
+        parts.append("enable pin_memory=True")
+
+    if not parts:
+        return "Increase workers, prefetch, or storage throughput."
+
+    return "; ".join(parts) + "."
