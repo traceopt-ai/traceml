@@ -106,10 +106,15 @@ class CodeHintsRenderer:
             return  # AST parse failed — skip hints silently
 
         self._recs = build_recommendations(code_manifest, system_manifest)
-        _render_hints_panel(self._recs, self._console)
 
     def stop(self) -> None:
-        if self._recs:
-            _write_recommendations_json(
-                self._recs, self._aggregator_dir / "recommendations.json"
-            )
+        """Print the hints panel after the Live display exits and write JSON."""
+        if not self._recs:
+            return
+        # Create a fresh console pointing to stdout — Live is already stopped
+        # so we can write directly to the terminal without conflict.
+        console = Console()
+        _render_hints_panel(self._recs, console)
+        _write_recommendations_json(
+            self._recs, self._aggregator_dir / "recommendations.json"
+        )

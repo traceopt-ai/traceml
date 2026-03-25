@@ -88,7 +88,7 @@ def check_sync_transfer(
             )
         )
 
-    if to_device and non_blocking and not pin_memory:
+    if to_device and non_blocking and pin_memory is False:
         recs.append(
             Recommendation(
                 kind="NON_BLOCKING_WITHOUT_PIN_MEMORY",
