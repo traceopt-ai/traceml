@@ -20,7 +20,7 @@ from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.utils.formatting import fmt_mem_new, fmt_mem_ratio, fmt_percent
 
-from .compute import SystemMetricsComputer
+from .computer import SystemMetricsComputer
 
 
 class SystemRenderer(BaseRenderer):
