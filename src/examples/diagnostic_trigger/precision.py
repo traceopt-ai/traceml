@@ -1,5 +1,3 @@
-import time
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -12,9 +10,9 @@ INPUT_DIM = 1024
 HIDDEN_DIM = 2048
 NUM_CLASSES = 10
 
-BATCH_SIZE = 128
-NUM_SAMPLES = 6000
-NUM_EPOCHS = 2
+BATCH_SIZE = 512
+NUM_SAMPLES = 60000
+NUM_EPOCHS = 10
 
 # 🚨 TRIGGERS CUDNN_BENCHMARK_MISSING
 # (Notice we don't have torch.backends.cudnn.benchmark = True anywhere)
@@ -30,7 +28,6 @@ class DummyDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
-        time.sleep(0.01)  # slow it down so TraceML UI has time to render
         x = torch.randn(self.input_dim)
         y = torch.randint(0, self.num_classes, (1,), dtype=torch.long).item()
         return x, y
@@ -67,6 +64,9 @@ def main():
         dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        persistent_workers=True,
         drop_last=True,
     )
 

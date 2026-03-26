@@ -432,13 +432,14 @@ def enrich_input_bound_action(
 
     parts: list[str] = []
 
-    if num_workers == 0:
+    if num_workers == 0 or num_workers is None:
         fix = (
             f"set num_workers={recommended} (cores ÷ 4)"
             if recommended
             else "increase num_workers (currently 0)"
         )
-        parts.append(f"num_workers=0 → {fix}")
+        val = 0 if num_workers is None else num_workers
+        parts.append(f"num_workers={val} → {fix}")
     elif num_workers is not None and recommended and num_workers < recommended:
         parts.append(
             f"num_workers={num_workers} is low → try num_workers={recommended}"
