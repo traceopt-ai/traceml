@@ -452,3 +452,67 @@ def enrich_input_bound_action(
         return "Increase workers, prefetch, or storage throughput."
 
     return "; ".join(parts) + "."
+
+
+def enrich_wait_heavy_action(
+    code_manifest: dict,
+    system_manifest: dict,  # noqa: ARG001
+) -> str:
+    """Return a data-backed WAIT_HEAVY action string using the code manifest.
+
+    WAIT* (step_time minus forward+backward+optimizer) inflates when the CPU
+    and GPU are not overlapping. The most common causes are detectable from the
+    AST: explicit cuda.synchronize() calls, .item()/.cpu()/.numpy() in the hot
+    path, or H2D transfers without non_blocking=True despite pin_memory being set.
+
+    Falls back to the generic message when no signals are found.
+    The function is pure (no I/O); callers are responsible for loading the dicts.
+    """
+    sync = code_manifest.get("sync_calls_in_train_loop", {})
+    transfer = code_manifest.get("device_transfer", {})
+    dl = code_manifest.get("dataloader", {})
+
+    cuda_sync = sync.get("cuda_synchronize_calls", 0) or 0
+    item_calls = sync.get("item_calls", 0) or 0
+    cpu_calls = sync.get("cpu_calls", 0) or 0
+    numpy_calls = sync.get("numpy_calls", 0) or 0
+    total_sync = item_calls + cpu_calls + numpy_calls
+
+    non_blocking = transfer.get("non_blocking_used", False)
+    to_device = transfer.get("to_device_detected", False)
+    pin_memory = dl.get("pin_memory", False)
+
+    parts: list[str] = []
+
+    if cuda_sync >= 1:
+        parts.append(
+            f"remove torch.cuda.synchronize() from the training loop "
+            f"({cuda_sync} call{'s' if cuda_sync > 1 else ''} detected)"
+        )
+
+    if total_sync >= 1:
+        calls_desc = []
+        if item_calls:
+            calls_desc.append(f"{item_calls}x .item()")
+        if cpu_calls:
+            calls_desc.append(f"{cpu_calls}x .cpu()")
+        if numpy_calls:
+            calls_desc.append(f"{numpy_calls}x .numpy()")
+        parts.append(
+            f"move CPU-sync calls outside the step ({', '.join(calls_desc)})"
+        )
+
+    if to_device and not non_blocking and pin_memory:
+        parts.append(
+            "use .to(device, non_blocking=True) to overlap H2D with compute"
+        )
+
+    if non_blocking and not pin_memory:
+        parts.append(
+            "enable pin_memory=True so non_blocking=True transfers are genuinely async"
+        )
+
+    if not parts:
+        return "Inspect sync points, CPU stalls, and H2D copies."
+
+    return "; ".join(parts) + "."

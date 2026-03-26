@@ -26,9 +26,18 @@ from .compute import StepCombinedComputer
 from .diagnostics import (
     build_step_diagnosis,
     enrich_input_bound_action,
+    enrich_wait_heavy_action,
     format_cli_diagnosis,
 )
 from .schema import StepCombinedTimeResult
+
+# Maps a DiagnosisKind to a manifest-aware enricher for its action string.
+# Add an entry here to enrich additional bottleneck kinds without modifying
+# get_panel_renderable.
+_ENRICHERS = {
+    "INPUT_BOUND": enrich_input_bound_action,
+    "WAIT_HEAVY": enrich_wait_heavy_action,
+}
 
 
 class StepCombinedRenderer(BaseRenderer):
@@ -89,13 +98,15 @@ class StepCombinedRenderer(BaseRenderer):
         metrics = payload.metrics
         diag = build_step_diagnosis(metrics)
 
-        if diag.kind == "INPUT_BOUND":
+        enricher = _ENRICHERS.get(diag.kind)
+        if enricher:
             self._load_manifests_once()
-            enriched_action = enrich_input_bound_action(
-                self._code_manifest or {},
-                self._system_manifest or {},
+            diag = dc_replace(
+                diag,
+                action=enricher(
+                    self._code_manifest or {}, self._system_manifest or {}
+                ),
             )
-            diag = dc_replace(diag, action=enriched_action)
 
         diag_text = format_cli_diagnosis(diag)
 

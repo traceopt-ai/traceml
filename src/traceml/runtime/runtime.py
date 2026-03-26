@@ -146,7 +146,7 @@ class TraceMLRuntime:
             ]
 
         # Deep profile adds layerwise telemetry
-        if self.profile in ["deep"]:
+        if self.profile == "deep":
             samplers += [
                 LayerMemorySampler(),
                 LayerForwardMemorySampler(),
