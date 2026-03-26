@@ -96,7 +96,7 @@ def main():
                 # 3 syncs in the loop per step
                 l_val = loss.item()  # 1 # noqa: F841
                 x_cpu = batch_x.cpu()  # 2 # noqa: F841
-                y_np = batch_y.numpy()  # 3 # noqa: F841
+                y_np = batch_y.cpu().numpy()  # 3 # noqa: F841
 
                 # TRIGGERS: CUDA_SYNCHRONIZE_IN_LOOP
                 if torch.cuda.is_available():
