@@ -25,7 +25,7 @@ def check_train_loop(
         + sync.get("numpy_calls", 0)
     )
 
-    if logging_in_loop and total_sync >= 1:
+    if logging_in_loop and 1 <= total_sync < 3:
         recs.append(
             Recommendation(
                 kind="LOGGING_SYNC_IN_LOOP",
