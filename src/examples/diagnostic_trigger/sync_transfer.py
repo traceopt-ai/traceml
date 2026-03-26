@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -25,6 +27,7 @@ class DummyDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, idx):
+        time.sleep(0.01)  # slow it down so TraceML UI has time to render
         x = torch.randn(self.input_dim)
         y = torch.randint(0, self.num_classes, (1,), dtype=torch.long).item()
         return x, y
