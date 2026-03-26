@@ -137,11 +137,6 @@ def collect_cpu_info() -> dict:
     }
 
 
-def save_cpu_info(path: Path) -> None:
-    with open(path, "w") as f:
-        json.dump(collect_cpu_info(), f, indent=2)
-
-
 def collect_gpu_info() -> list:
     gpus = []
     try:
@@ -180,11 +175,6 @@ def collect_gpu_info() -> list:
     except Exception as e:
         return {"error": str(e)}
     return gpus
-
-
-def save_gpu_info(path: Path) -> None:
-    with open(path, "w") as f:
-        json.dump(collect_gpu_info(), f, indent=2)
 
 
 def collect_system_manifest(nproc_per_node: int = 1) -> dict:
@@ -272,8 +262,6 @@ def main() -> None:
     session_dir.mkdir(parents=True, exist_ok=True)
     db_path = session_dir / "telemetry"
     nproc_per_node = int(os.environ.get("TRACEML_NPROC_PER_NODE", "1"))
-    save_cpu_info(session_dir / "cpu_info.json")
-    save_gpu_info(session_dir / "gpu_info.json")
     save_system_manifest(session_dir / "system_manifest.json", nproc_per_node)
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
