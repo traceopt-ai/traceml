@@ -9,10 +9,13 @@ Design goals
 - Keep compute fast with bounded reads over a recent window
 - Bulk-fetch all GPU rows for the window once, then group in Python
 - Preserve stale-cache behavior to avoid UI flicker or blanking
-- Keep output schema unchanged for existing renderers
+- Keep output schema stable for existing renderers
 """
 
+from __future__ import annotations
+
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -71,6 +74,15 @@ class SystemDashboardComputer:
         return out
 
     def _compute_impl(self, conn, window_n: int) -> Dict[str, Any]:
+        """
+        Compute the dashboard payload from recent SQLite rows.
+
+        Notes
+        -----
+        - `sample_ts_s` is used as the canonical sample timestamp.
+        - `x_time` is emitted as ISO-8601 UTC strings so the UI can plot a
+          real time axis instead of sample indices or relative negative values.
+        """
         samples = self._db.fetch_recent_system_samples(conn, limit=window_n)
         if not samples:
             return self._empty_payload()
@@ -78,6 +90,10 @@ class SystemDashboardComputer:
         last = samples[-1]
         gpu_available = bool(last["gpu_available"] or False)
 
+        ts_hist = np.array(
+            [float(r["sample_ts_s"] or 0.0) for r in samples],
+            dtype=np.float64,
+        )
         cpu_hist = np.array(
             [float(r["cpu_percent"] or 0.0) for r in samples],
             dtype=np.float64,
@@ -195,11 +211,14 @@ class SystemDashboardComputer:
             },
         }
 
+        x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]
+
         return SystemDashboardPayload(
             window_len=len(samples),
             gpu_available=gpu_available,
             rollups=rollups,
             series={
+                "x_time": x_time,
                 "cpu": cpu_hist.astype(float).tolist(),
                 "gpu_avg": (
                     gpu_avg.astype(float).tolist() if gpu_available else []
@@ -207,7 +226,27 @@ class SystemDashboardComputer:
             },
         ).to_dict()
 
+    def _format_time_iso(self, ts_s: float) -> str:
+        """
+        Convert one UNIX timestamp in seconds to an ISO-8601 UTC string.
+
+        Returns an empty string on invalid input so callers can safely degrade.
+        """
+        try:
+            if ts_s <= 0.0:
+                return ""
+            return datetime.fromtimestamp(
+                float(ts_s), tz=timezone.utc
+            ).isoformat()
+        except Exception:
+            return ""
+
     def _return_stale(self, msg: str) -> Dict[str, Any]:
+        """
+        Return the last known good payload when it is still within TTL.
+
+        Adds a human-readable status string into `rollups["status"]`.
+        """
         now = time.time()
         if self._last_ok is not None:
             if (
@@ -221,20 +260,26 @@ class SystemDashboardComputer:
                     "window_len": cached.get("window_len", 0),
                     "gpu_available": cached.get("gpu_available", False),
                     "rollups": rollups,
-                    "series": cached.get("series", {"cpu": [], "gpu_avg": []}),
+                    "series": cached.get(
+                        "series",
+                        {"x_time": [], "cpu": [], "gpu_avg": []},
+                    ),
                 }
 
         return {
             "window_len": 0,
             "gpu_available": False,
             "rollups": {"status": "No fresh system data"},
-            "series": {"cpu": [], "gpu_avg": []},
+            "series": {"x_time": [], "cpu": [], "gpu_avg": []},
         }
 
     def _empty_payload(self) -> Dict[str, Any]:
+        """
+        Return an empty dashboard payload with the full expected schema.
+        """
         return SystemDashboardPayload(
             window_len=0,
             gpu_available=False,
             rollups={},
-            series={"cpu": [], "gpu_avg": []},
+            series={"x_time": [], "cpu": [], "gpu_avg": []},
         ).to_dict()

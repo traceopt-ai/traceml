@@ -10,7 +10,7 @@ All metric computation is delegated to SystemMetricsComputer.
 """
 
 import shutil
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from rich.panel import Panel
 from rich.table import Table
@@ -38,24 +38,6 @@ class SystemRenderer(BaseRenderer):
         super().__init__(name=self.NAME, layout_section_name=SYSTEM_LAYOUT)
         self.db_path = db_path
         self._logger = get_error_logger(self.NAME + "Renderer")
-
-    def _get_table(self) -> Optional[Any]:
-        """
-        Fetch the system table from RemoteDBStore.
-
-        Returns None if:
-        - DB doesn't exist yet
-        - table isn't created yet
-        - store read fails
-        """
-        try:
-            db = self._store.get_db(rank=0, sampler_name=self.NAME + "Sampler")
-            if db is None:
-                return None
-            return db.get_table(self.NAME + "Table")
-        except Exception as e:
-            self._logger.error(f"[TraceML] Failed to fetch system table: {e}")
-            return None
 
     def _compute_cli(self) -> Dict[str, Any]:
         return SystemMetricsComputer(self.db_path).compute_cli()
