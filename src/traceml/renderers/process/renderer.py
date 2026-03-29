@@ -2,16 +2,6 @@
 Process renderer.
 
 This module contains all presentation logic for process-level telemetry.
-
-Responsibilities
-----------------
-- CLI rendering (Rich)
-- Notebook rendering (HTML)
-- Dashboard payload adaptation
-- Summary logging
-
-All aggregation and synchronization logic is delegated to
-`ProcessMetricsComputer`.
 """
 
 import shutil
@@ -35,32 +25,46 @@ class ProcessRenderer(BaseRenderer):
 
     NAME = "Process"
 
-    def __init__(self, db_path):
+    def __init__(self, db_path: str):
         super().__init__(name=self.NAME, layout_section_name=PROCESS_LAYOUT)
 
         self._computer = ProcessMetricsComputer(db_path=db_path)
         self._logger = get_error_logger("ProcessRenderer")
 
-    # CLI rendering
     def get_panel_renderable(self) -> Panel:
+        """
+        Build the Rich panel for process telemetry.
+
+        The snapshot is already aggregated by ProcessMetricsComputer:
+        - CPU is worst-rank CPU at latest committed seq
+        - GPU memory is taken from the least-headroom rank
+        """
         snap = self._computer.compute_cli()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="bright_white", no_wrap=True)
         table.add_column(justify="right", style="bright_white", no_wrap=True)
-        table.add_column(justify="left", style="bright_white", no_wrap=True)
 
-        cpu_cores = snap.get("cpu_used", 0.0) / 100.0
+        cpu_used = float(snap.get("cpu_used") or 0.0)
+        cpu_cores = cpu_used / 100.0
         table.add_row(
             "[bold green]CPU (worst rank)[/bold green]",
             f"{cpu_cores:.2f} cores",
         )
 
-        if snap.get("gpu_total") is not None:
-            gpu_str = (
-                f"{fmt_mem_triple(snap['gpu_used'], snap['gpu_reserved'], snap['gpu_total'])}"
-                f" [dim](rank {snap.get('gpu_rank')})[/dim]"
-            )
+        gpu_used = snap.get("gpu_used")
+        gpu_reserved = snap.get("gpu_reserved")
+        gpu_total = snap.get("gpu_total")
+        gpu_rank = snap.get("gpu_rank")
+
+        if (
+            gpu_used is not None
+            and gpu_reserved is not None
+            and gpu_total is not None
+        ):
+            gpu_str = fmt_mem_triple(gpu_used, gpu_reserved, gpu_total)
+            if gpu_rank is not None:
+                gpu_str += f" [dim](rank {gpu_rank})[/dim]"
         else:
             gpu_str = "[red]Not available[/red]"
 
@@ -86,7 +90,8 @@ class ProcessRenderer(BaseRenderer):
             width=width,
         )
 
-    # Dashboard payload
     def get_dashboard_renderable(self) -> Dict[str, Any]:
-        snap = self._computer.compute_dashboard()
-        return snap
+        """
+        Return the dashboard/UI payload.
+        """
+        return self._computer.compute_dashboard()

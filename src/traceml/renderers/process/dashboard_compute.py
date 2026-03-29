@@ -93,6 +93,11 @@ class ProcessDashboardComputer:
         for row in rows:
             entry: Dict[str, Any] = {
                 "seq": int(row["seq"]),
+                "ts": (
+                    float(row["sample_ts_s"])
+                    if row["sample_ts_s"] is not None
+                    else None
+                ),
                 "cpu_max": float(row["cpu_max"] or 0.0),
                 "ram_used_max": float(row["ram_used_max"] or 0.0),
                 "ram_total": float(row["ram_total"] or 0.0),

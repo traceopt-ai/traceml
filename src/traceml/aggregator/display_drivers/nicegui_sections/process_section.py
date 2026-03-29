@@ -244,7 +244,10 @@ def _update_graph(panel, window):
 
     fig = panel["_fig"]
 
-    x = list(range(len(window)))
+    x = [
+        r.get("ts") if r.get("ts") is not None else i
+        for i, r in enumerate(window)
+    ]
 
     ram_total = max(window[-1]["ram_total"], 1.0)
     ram_pct = [(r["ram_used_max"] / ram_total) * 100.0 for r in window]
@@ -261,7 +264,11 @@ def _update_graph(panel, window):
             for r in window
             if r.get("gpu_used") is not None
         ]
-        fig.data[1].x = list(range(len(gpu_pct)))
+        gpu_window = [r for r in window if r.get("gpu_used") is not None]
+        fig.data[1].x = [
+            r.get("ts") if r.get("ts") is not None else i
+            for i, r in enumerate(gpu_window)
+        ]
         fig.data[1].y = gpu_pct
     else:
         fig.data[1].x = []

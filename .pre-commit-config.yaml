@@ -17,11 +17,15 @@ repos:
       - id: detect-private-key
       - id: debug-statements
       - id: no-commit-to-branch
+        stages: [pre-commit]
+        args: [--branch, main]
 
   - repo: https://github.com/PyCQA/isort
     rev: 5.13.2
     hooks:
       - id: isort
+        files: ^(src/|examples/|docs/)
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.4
     hooks:
@@ -44,4 +48,4 @@ repos:
     rev: 0.8.1
     hooks:
       - id: nbstripout
-        args: ['--keep-output']
+        args: ["--keep-output"]
