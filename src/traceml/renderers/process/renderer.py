@@ -15,18 +15,17 @@ All aggregation and synchronization logic is delegated to
 """
 
 import shutil
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from rich.panel import Panel
 from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import PROCESS_LAYOUT
-from traceml.database.remote_database_store import RemoteDBStore
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.utils.formatting import fmt_mem_new, fmt_mem_triple
 
-from .compute import ProcessMetricsComputer
+from .computer import ProcessMetricsComputer
 
 
 class ProcessRenderer(BaseRenderer):
@@ -36,16 +35,15 @@ class ProcessRenderer(BaseRenderer):
 
     NAME = "Process"
 
-    def __init__(self, remote_store: Optional[RemoteDBStore] = None):
+    def __init__(self, db_path):
         super().__init__(name=self.NAME, layout_section_name=PROCESS_LAYOUT)
 
-        self._remote_store = remote_store
-        self._computer = ProcessMetricsComputer(remote_store)
+        self._computer = ProcessMetricsComputer(db_path=db_path)
         self._logger = get_error_logger("ProcessRenderer")
 
     # CLI rendering
     def get_panel_renderable(self) -> Panel:
-        snap = self._computer.compute_live_snapshot()
+        snap = self._computer.compute_cli()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(justify="left", style="bright_white", no_wrap=True)
@@ -71,10 +69,11 @@ class ProcessRenderer(BaseRenderer):
             gpu_str,
         )
 
-        if snap.get("gpu_used_imbalance", 0.0) > 0.0:
+        gpu_imbalance = snap.get("gpu_used_imbalance")
+        if gpu_imbalance is not None and gpu_imbalance > 0.0:
             table.add_row(
                 "[bold green]GPU used imbalance[/bold green]",
-                fmt_mem_new(snap["gpu_used_imbalance"]),
+                fmt_mem_new(gpu_imbalance),
             )
 
         cols, _ = shutil.get_terminal_size()
@@ -89,7 +88,5 @@ class ProcessRenderer(BaseRenderer):
 
     # Dashboard payload
     def get_dashboard_renderable(self) -> Dict[str, Any]:
-        self._computer.update_dashboard()
-        snap = self._computer.compute_live_snapshot()
-        snap["history"] = self._computer.get_dashboard_history()
+        snap = self._computer.compute_dashboard()
         return snap
