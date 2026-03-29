@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find why training is slow, while the run is still running.**
+**Find why training is slow, while it is still running.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)

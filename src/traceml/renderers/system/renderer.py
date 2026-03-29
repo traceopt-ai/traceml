@@ -38,14 +38,13 @@ class SystemRenderer(BaseRenderer):
         super().__init__(name=self.NAME, layout_section_name=SYSTEM_LAYOUT)
         self.db_path = db_path
         self._logger = get_error_logger(self.NAME + "Renderer")
+        self._computer = SystemMetricsComputer(db_path=self.db_path)
 
     def _compute_cli(self) -> Dict[str, Any]:
-        return SystemMetricsComputer(self.db_path).compute_cli()
+        return self._computer.compute_cli()
 
     def _compute_dashboard(self, window_n: int = 100) -> Dict[str, Any]:
-        return SystemMetricsComputer(self.db_path).compute_dashboard(
-            window_n=window_n
-        )
+        return self._computer.compute_dashboard(window_n=window_n)
 
     def get_panel_renderable(self) -> Panel:
         """Return a Rich Panel for CLI display (latest sample)."""
