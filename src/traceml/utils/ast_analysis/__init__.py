@@ -1,23 +1,44 @@
-"""traceml.utils.ast_analysis — Public API.
+"""Public API for static ML training-script analysis.
 
-Provides static analysis of Python training scripts without executing them.
+This package provides AST-based inspection of Python training
+scripts without importing user code, importing torch, or executing anything.
 
-Usage:
-    from traceml.utils.ast_analysis import analyze_script, scan_for_optimizer
+It is designed for observability and recommendation systems where partial
+signal is still valuable. Public entry points never raise on ordinary
+user-script failures; instead they return structured findings with
+``parse_errors`` populated when needed.
+
+Typical usage:
+    from traceml.utils.ast_analysis import analyze_script, build_code_manifest
 
     findings = analyze_script("train.py")
-    optimizer = scan_for_optimizer("train.py")
+    manifest = build_code_manifest(findings)
+
+Stability
+---------
+The following are considered public and stable:
+- analyze_script
+- detect_strategy_hint
+- scan_for_optimizer
+- build_code_manifest
+- public result dataclasses in scanner.py
+
+Private helpers and internal detection logic may change without notice.
 """
 
-from traceml.utils.ast_analysis.scanner import (
+from traceml.utils.ast_analysis.code_manifest import build_code_manifest
+from traceml.utils.ast_analysis.models import (
     CodeFindings,
     DataLoaderFinding,
     DistributedFinding,
     FineTuningFinding,
+    HFTrainingArgumentsFinding,
     ModelFinding,
     OptimizerFinding,
     PrecisionFinding,
     ScriptLocation,
+)
+from traceml.utils.ast_analysis.scanner import (
     analyze_script,
     detect_strategy_hint,
     scan_for_optimizer,
@@ -28,11 +49,13 @@ __all__ = [
     "analyze_script",
     "detect_strategy_hint",
     "scan_for_optimizer",
+    "build_code_manifest",
     # Data classes
     "CodeFindings",
     "DataLoaderFinding",
     "DistributedFinding",
     "FineTuningFinding",
+    "HFTrainingArgumentsFinding",
     "ModelFinding",
     "OptimizerFinding",
     "PrecisionFinding",

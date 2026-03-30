@@ -97,7 +97,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         # Watch profile
         self._renderers: List[BaseRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
-            ProcessRenderer(remote_store=store),
+            ProcessRenderer(db_path=self._settings.db_path),
             StdoutStderrRenderer(remote_store=store),
         ]
 

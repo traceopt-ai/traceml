@@ -114,7 +114,10 @@ def _build_torchrun_base_cmd(nproc_per_node: int) -> list[str]:
     ]
 
 
-def _collect_existing_artifacts(db_path: Path) -> Dict[str, str]:
+def _collect_existing_artifacts(
+    db_path: Path,
+    session_root: Optional[Path] = None,
+) -> Dict[str, str]:
     """Return only artifacts that exist on disk."""
     candidates = {
         "db": db_path,
@@ -123,6 +126,11 @@ def _collect_existing_artifacts(db_path: Path) -> Dict[str, str]:
         "code_manifest": db_path.parent.parent / "code_manifest.json",
         "recommendations": db_path.parent / "recommendations.json",
     }
+    if session_root is not None:
+        candidates["code_manifest"] = (
+            Path(session_root).resolve() / "code_manifest.json"
+        )
+
     return {
         name: str(path) for name, path in candidates.items() if path.exists()
     }
@@ -203,7 +211,11 @@ def write_run_manifest(
     }
 
     if extra:
-        manifest.update(extra)
+        for key, value in extra.items():
+            if key == "artifacts" and isinstance(value, dict):
+                manifest.setdefault("artifacts", {}).update(value)
+            else:
+                manifest[key] = value
 
     _write_json_atomic(manifest_path, manifest)
     return manifest_path
@@ -410,6 +422,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"
 
+    code_manifest_path = write_code_manifest(
+        session_root=session_root,
+        script_path=script_path,
+    )
+
     manifest_path = write_run_manifest(
         session_root=session_root,
         session_id=session_id,
@@ -424,6 +441,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         status="starting",
         aggregator_dir=aggregator_dir,
         db_path=db_path,
+        extra=(
+            {"artifacts": {"code_manifest": str(code_manifest_path)}}
+            if code_manifest_path is not None
+            else None
+        ),
     )
 
     code_manifest_path = session_root / "code_manifest.json"
@@ -519,7 +541,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             update_run_manifest(
                 manifest_path,
                 status=final_status,
-                artifacts=_collect_existing_artifacts(db_path),
+                artifacts=_collect_existing_artifacts(
+                    db_path, session_root=session_root
+                ),
             )
             raise SystemExit(train_rc)
 
