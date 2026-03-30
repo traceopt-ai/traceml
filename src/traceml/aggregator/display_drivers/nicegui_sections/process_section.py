@@ -142,7 +142,14 @@ def _build_graph():
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
         showlegend=False,
-        xaxis=dict(showgrid=False),
+        xaxis=dict(
+            type="date",
+            showgrid=False,
+            title=dict(text="Time"),
+            tickformat="%H:%M:%S",
+            hoverformat="%H:%M:%S",
+            zeroline=False,
+        ),
         yaxis=dict(
             range=[0, 100],
             title=dict(text="RAM (%)", font=dict(color="#4caf50")),
@@ -189,7 +196,7 @@ def update_process_section(panel, data, window_n=100):
         panel["window_text"].content = f"window: last {len(window)} samples"
         roll = _compute_rollups(window)
         _update_tiles(panel, roll, data)
-        _update_graph(panel, window)
+        _update_graph(panel, data, window)
 
     except Exception:
         # never crash/freeze the update loop
@@ -199,7 +206,7 @@ def update_process_section(panel, data, window_n=100):
             if window:
                 roll = _compute_rollups(window)
                 _update_tiles(panel, roll, data)
-                _update_graph(panel, window)
+                _update_graph(panel, data, window)
         except Exception:
             pass
         return
@@ -231,7 +238,7 @@ def _update_tiles(panel, roll, snap):
     )
 
 
-def _update_graph(panel, window):
+def _update_graph(panel, data, window):
     window = [
         r
         for r in window
@@ -244,7 +251,17 @@ def _update_graph(panel, window):
 
     fig = panel["_fig"]
 
-    x = list(range(len(window)))
+    series = data.get("series", {}) if isinstance(data, dict) else {}
+    x_time = series.get("x_time", [])
+
+    # Align x-axis to the same rolling window shown in the panel
+    if x_time and len(x_time) >= len(window):
+        x = x_time[-len(window) :]
+    else:
+        x = [
+            r.get("ts") if r.get("ts") is not None else i
+            for i, r in enumerate(window)
+        ]
 
     ram_total = max(window[-1]["ram_total"], 1.0)
     ram_pct = [(r["ram_used_max"] / ram_total) * 100.0 for r in window]
@@ -254,14 +271,24 @@ def _update_graph(panel, window):
     fig.data[0].y = ram_pct
 
     # Update GPU trace (trace 1)
-    if window[-1].get("gpu_used") is not None:
+    gpu_window = [r for r in window if r.get("gpu_used") is not None]
+    if gpu_window and window[-1].get("gpu_used") is not None:
         gpu_total = max(window[-1].get("gpu_total", 1.0), 1.0)
-        gpu_pct = [
-            (r["gpu_used"] / gpu_total) * 100.0
-            for r in window
-            if r.get("gpu_used") is not None
-        ]
-        fig.data[1].x = list(range(len(gpu_pct)))
+        gpu_pct = [(r["gpu_used"] / gpu_total) * 100.0 for r in gpu_window]
+
+        if x_time and len(x_time) >= len(window):
+            gpu_x = [
+                x[idx]
+                for idx, r in enumerate(window)
+                if r.get("gpu_used") is not None
+            ]
+        else:
+            gpu_x = [
+                r.get("ts") if r.get("ts") is not None else i
+                for i, r in enumerate(gpu_window)
+            ]
+
+        fig.data[1].x = gpu_x
         fig.data[1].y = gpu_pct
     else:
         fig.data[1].x = []

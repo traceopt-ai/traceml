@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Iterable, Optional
 import msgspec
 
 from traceml.runtime.session import get_session_id
+from traceml.utils.ast_analysis import analyze_script, build_code_manifest
 
 DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
@@ -112,16 +113,61 @@ def _build_torchrun_base_cmd(nproc_per_node: int) -> list[str]:
     ]
 
 
-def _collect_existing_artifacts(db_path: Path) -> Dict[str, str]:
+def _collect_existing_artifacts(
+    db_path: Path,
+    session_root: Optional[Path] = None,
+) -> Dict[str, str]:
     """Return only artifacts that exist on disk."""
     candidates = {
         "db": db_path,
         "summary_card_json": Path(str(db_path) + ".summary_card.json"),
         "summary_card_txt": Path(str(db_path) + ".summary_card.txt"),
     }
+    if session_root is not None:
+        candidates["code_manifest"] = (
+            Path(session_root).resolve() / "code_manifest.json"
+        )
+
     return {
         name: str(path) for name, path in candidates.items() if path.exists()
     }
+
+
+def write_code_manifest(
+    session_root: Path,
+    script_path: str,
+) -> Optional[Path]:
+    """Write a separate static-analysis manifest under the session directory.
+
+    This helper must never break the CLI flow. If AST analysis fails, it writes
+    a minimal fallback manifest when possible and otherwise returns ``None``.
+    """
+    session_root = Path(session_root).resolve()
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = session_root / "code_manifest.json"
+
+    try:
+        findings = analyze_script(str(Path(script_path).resolve()))
+        manifest = build_code_manifest(findings)
+        manifest["analysis_status"] = (
+            "ok" if not findings.parse_errors else "partial"
+        )
+        _write_json_atomic(manifest_path, manifest)
+        return manifest_path
+    except Exception as exc:
+        fallback: Dict[str, Any] = {
+            "schema_version": 1,
+            "script_path": str(Path(script_path).resolve()),
+            "generated_at": _utc_now_iso(),
+            "analysis_status": "failed",
+            "parse_errors": [f"Static analysis failed: {exc}"],
+        }
+        try:
+            _write_json_atomic(manifest_path, fallback)
+            return manifest_path
+        except Exception:
+            return None
 
 
 def write_run_manifest(
@@ -181,7 +227,11 @@ def write_run_manifest(
     }
 
     if extra:
-        manifest.update(extra)
+        for key, value in extra.items():
+            if key == "artifacts" and isinstance(value, dict):
+                manifest.setdefault("artifacts", {}).update(value)
+            else:
+                manifest[key] = value
 
     _write_json_atomic(manifest_path, manifest)
     return manifest_path
@@ -389,6 +439,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"
 
+    code_manifest_path = write_code_manifest(
+        session_root=session_root,
+        script_path=script_path,
+    )
+
     manifest_path = write_run_manifest(
         session_root=session_root,
         session_id=session_id,
@@ -403,6 +458,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         status="starting",
         aggregator_dir=aggregator_dir,
         db_path=db_path,
+        extra=(
+            {"artifacts": {"code_manifest": str(code_manifest_path)}}
+            if code_manifest_path is not None
+            else None
+        ),
     )
 
     runner_path = str(Path(__file__).parent / "runtime" / "executor.py")
@@ -494,7 +554,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             update_run_manifest(
                 manifest_path,
                 status=final_status,
-                artifacts=_collect_existing_artifacts(db_path),
+                artifacts=_collect_existing_artifacts(
+                    db_path, session_root=session_root
+                ),
             )
             raise SystemExit(train_rc)
 

@@ -126,7 +126,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         # ---- Renderers ----
         self._renderers: List[BaseRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
-            ProcessRenderer(remote_store=store),
+            ProcessRenderer(db_path=self._settings.db_path),
             StepCombinedRenderer(db_path=self._settings.db_path),
             StepMemoryRenderer(remote_store=store),
         ]
