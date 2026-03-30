@@ -136,22 +136,41 @@ def _collect_existing_artifacts(
     }
 
 
-def _generate_code_manifest(script_path: str, dest_path: Path) -> None:
-    """Run AST analysis on *script_path* and write code_manifest.json atomically.
+def write_code_manifest(
+    session_root: Path,
+    script_path: str,
+) -> Optional[Path]:
+    """Write a separate static-analysis manifest under the session directory.
 
-    Fail-open: if analysis raises, writes a minimal error manifest so downstream
-    components still have a parseable file.
+    This helper must never break the CLI flow. If AST analysis fails, it writes
+    a minimal fallback manifest when possible and otherwise returns ``None``.
     """
+    session_root = Path(session_root).resolve()
+    session_root.mkdir(parents=True, exist_ok=True)
+
+    manifest_path = session_root / "code_manifest.json"
+
     try:
-        findings = analyze_script(script_path)
-        payload = build_code_manifest(findings)
-    except Exception as exc:  # noqa: BLE001
-        payload = {
+        findings = analyze_script(str(Path(script_path).resolve()))
+        manifest = build_code_manifest(findings)
+        manifest["analysis_status"] = (
+            "ok" if not findings.parse_errors else "partial"
+        )
+        _write_json_atomic(manifest_path, manifest)
+        return manifest_path
+    except Exception as exc:
+        fallback: Dict[str, Any] = {
             "schema_version": 1,
-            "error": str(exc),
-            "script_path": script_path,
+            "script_path": str(Path(script_path).resolve()),
+            "generated_at": _utc_now_iso(),
+            "analysis_status": "failed",
+            "parse_errors": [f"Static analysis failed: {exc}"],
         }
-    _write_json_atomic(dest_path, payload)
+        try:
+            _write_json_atomic(manifest_path, fallback)
+            return manifest_path
+        except Exception:
+            return None
 
 
 def write_run_manifest(
@@ -447,10 +466,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             else None
         ),
     )
-
-    code_manifest_path = session_root / "code_manifest.json"
-    _generate_code_manifest(script_path, code_manifest_path)
-    env["TRACEML_CODE_MANIFEST_PATH"] = str(code_manifest_path)
 
     runner_path = str(Path(__file__).parent / "runtime" / "executor.py")
     script_args = args.args or []
