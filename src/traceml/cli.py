@@ -15,7 +15,8 @@ from typing import Any, Callable, Dict, Iterable, Optional
 import msgspec
 
 from traceml.runtime.session import get_session_id
-from traceml.utils.ast_analysis import analyze_script, build_code_manifest
+from traceml.utils.ast_analysis.code_manifest import build_code_manifest
+from traceml.utils.ast_analysis.scanner import analyze_script
 
 DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
@@ -122,6 +123,8 @@ def _collect_existing_artifacts(
         "db": db_path,
         "summary_card_json": Path(str(db_path) + ".summary_card.json"),
         "summary_card_txt": Path(str(db_path) + ".summary_card.txt"),
+        "code_manifest": db_path.parent.parent / "code_manifest.json",
+        "recommendations": db_path.parent / "recommendations.json",
     }
     if session_root is not None:
         candidates["code_manifest"] = (
@@ -133,41 +136,22 @@ def _collect_existing_artifacts(
     }
 
 
-def write_code_manifest(
-    session_root: Path,
-    script_path: str,
-) -> Optional[Path]:
-    """Write a separate static-analysis manifest under the session directory.
+def _generate_code_manifest(script_path: str, dest_path: Path) -> None:
+    """Run AST analysis on *script_path* and write code_manifest.json atomically.
 
-    This helper must never break the CLI flow. If AST analysis fails, it writes
-    a minimal fallback manifest when possible and otherwise returns ``None``.
+    Fail-open: if analysis raises, writes a minimal error manifest so downstream
+    components still have a parseable file.
     """
-    session_root = Path(session_root).resolve()
-    session_root.mkdir(parents=True, exist_ok=True)
-
-    manifest_path = session_root / "code_manifest.json"
-
     try:
-        findings = analyze_script(str(Path(script_path).resolve()))
-        manifest = build_code_manifest(findings)
-        manifest["analysis_status"] = (
-            "ok" if not findings.parse_errors else "partial"
-        )
-        _write_json_atomic(manifest_path, manifest)
-        return manifest_path
-    except Exception as exc:
-        fallback: Dict[str, Any] = {
+        findings = analyze_script(script_path)
+        payload = build_code_manifest(findings)
+    except Exception as exc:  # noqa: BLE001
+        payload = {
             "schema_version": 1,
-            "script_path": str(Path(script_path).resolve()),
-            "generated_at": _utc_now_iso(),
-            "analysis_status": "failed",
-            "parse_errors": [f"Static analysis failed: {exc}"],
+            "error": str(exc),
+            "script_path": script_path,
         }
-        try:
-            _write_json_atomic(manifest_path, fallback)
-            return manifest_path
-        except Exception:
-            return None
+    _write_json_atomic(dest_path, payload)
 
 
 def write_run_manifest(
@@ -433,7 +417,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
-
     session_id = env["TRACEML_SESSION_ID"]
     session_root = Path(args.logs_dir).resolve() / session_id
     aggregator_dir = session_root / "aggregator"
@@ -464,6 +447,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             else None
         ),
     )
+
+    code_manifest_path = session_root / "code_manifest.json"
+    _generate_code_manifest(script_path, code_manifest_path)
+    env["TRACEML_CODE_MANIFEST_PATH"] = str(code_manifest_path)
 
     runner_path = str(Path(__file__).parent / "runtime" / "executor.py")
     script_args = args.args or []

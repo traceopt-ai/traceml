@@ -19,6 +19,7 @@ Key invariants
 
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, Type
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
@@ -29,6 +30,7 @@ from traceml.aggregator.sqlite_writer import (
     SQLiteWriterSimple,
 )
 from traceml.database.remote_database_store import RemoteDBStore
+from traceml.renderers.code_hints_renderer import CodeHintsRenderer
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
 
@@ -106,6 +108,7 @@ class TraceMLAggregator:
 
         # Display driver owns renderer selection and layout mapping.
         driver_cls = _DISPLAY_DRIVERS.get(settings.mode)
+
         if driver_cls is None:
             raise ValueError(
                 f"[TraceML] Unknown display mode: {settings.mode!r}. "
@@ -117,6 +120,9 @@ class TraceMLAggregator:
             store=self._store,
             settings=self._settings,
         )
+
+        aggregator_dir = Path(str(db_path)).parent
+        self._hints_renderer = CodeHintsRenderer(aggregator_dir=aggregator_dir)
 
         self._thread = threading.Thread(
             target=self._loop,
@@ -144,6 +150,11 @@ class TraceMLAggregator:
         """
         self._tcp_server.start()
         self._sqlite_writer.start()
+        _safe(
+            self._logger,
+            "CodeHintsRenderer.start failed",
+            self._hints_renderer.start,
+        )
         self._display_driver.start()
 
         try:
@@ -175,6 +186,11 @@ class TraceMLAggregator:
             self._logger,
             "Display driver stop failed",
             self._display_driver.stop,
+        )
+        _safe(
+            self._logger,
+            "CodeHintsRenderer.stop failed",
+            self._hints_renderer.stop,
         )
         _safe(
             self._logger,

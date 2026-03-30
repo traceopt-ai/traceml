@@ -8,8 +8,11 @@ Behavior:
 - Else: show Median/Worst/Worst Rank/Skew rows
 """
 
+import json
+import os
 import shutil
-from typing import Optional
+from dataclasses import replace as dc_replace
+from typing import Any, Dict, Optional
 
 from rich.console import Group
 from rich.panel import Panel
@@ -20,8 +23,21 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.utils import fmt_time_run
 
 from .compute import StepCombinedComputer
-from .diagnostics import build_step_diagnosis, format_cli_diagnosis
+from .diagnostics import (
+    build_step_diagnosis,
+    enrich_input_bound_action,
+    enrich_wait_heavy_action,
+    format_cli_diagnosis,
+)
 from .schema import StepCombinedTimeResult
+
+# Maps a DiagnosisKind to a manifest-aware enricher for its action string.
+# Add an entry here to enrich additional bottleneck kinds without modifying
+# get_panel_renderable.
+_ENRICHERS = {
+    "INPUT_BOUND": enrich_input_bound_action,
+    "WAIT_HEAVY": enrich_wait_heavy_action,
+}
 
 
 class StepCombinedRenderer(BaseRenderer):
@@ -36,6 +52,29 @@ class StepCombinedRenderer(BaseRenderer):
         )
         self._computer = StepCombinedComputer(db_path=db_path)
         self._cached: Optional[StepCombinedTimeResult] = None
+        self._code_manifest: Optional[Dict[str, Any]] = None
+        self._system_manifest: Optional[Dict[str, Any]] = None
+
+    def _load_manifests_once(self) -> None:
+        """Lazy, one-shot load of code and system manifests from disk."""
+        if self._code_manifest is not None:
+            return
+
+        def _read(path: str) -> Dict[str, Any]:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+
+        code_path = os.environ.get("TRACEML_CODE_MANIFEST_PATH", "")
+        self._code_manifest = _read(code_path) if code_path else {}
+        # system_manifest lives next to the telemetry db
+        sys_path = os.path.join(
+            os.path.dirname(str(self._computer.db_path)),
+            "system_manifest.json",
+        )
+        self._system_manifest = _read(sys_path)
 
     def _payload(self) -> Optional[StepCombinedTimeResult]:
         """
@@ -58,6 +97,17 @@ class StepCombinedRenderer(BaseRenderer):
 
         metrics = payload.metrics
         diag = build_step_diagnosis(metrics)
+
+        enricher = _ENRICHERS.get(diag.kind)
+        if enricher:
+            self._load_manifests_once()
+            diag = dc_replace(
+                diag,
+                action=enricher(
+                    self._code_manifest or {}, self._system_manifest or {}
+                ),
+            )
+
         diag_text = format_cli_diagnosis(diag)
 
         step_metric = next(
