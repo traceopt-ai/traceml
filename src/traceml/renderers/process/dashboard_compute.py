@@ -13,6 +13,7 @@ Semantics
 
 import time
 from collections import deque
+from datetime import datetime, timezone
 from typing import Any, Deque, Dict, Optional
 
 from .common import ProcessDashboardPayload, ProcessMetricsDB
@@ -135,12 +136,14 @@ class ProcessDashboardComputer:
         if history:
             latest_imbalance = history[-1].get("gpu_used_imbalance")
 
+        x_time = [
+            self._format_time_iso(float(r["ts"]))
+            for r in history
+            if isinstance(r, dict) and r.get("ts") is not None
+        ]
+
         series = {
-            "time_s": [
-                float(r["ts"])
-                for r in history
-                if isinstance(r, dict) and r.get("ts") is not None
-            ],
+            "x_time": x_time,
             "cpu_max": [
                 float(r["cpu_max"])
                 for r in history
@@ -164,6 +167,21 @@ class ProcessDashboardComputer:
             series=series,
         ).to_dict()
 
+    def _format_time_iso(self, ts_s: float) -> str:
+        """
+        Convert one UNIX timestamp in seconds to an ISO-8601 UTC string.
+
+        Returns an empty string on invalid input so callers can safely degrade.
+        """
+        try:
+            if ts_s <= 0.0:
+                return ""
+            return datetime.fromtimestamp(
+                float(ts_s), tz=timezone.utc
+            ).isoformat()
+        except Exception:
+            return ""
+
     def _return_stale(self) -> Dict[str, Any]:
         now = time.time()
         if self._last_ok is not None:
@@ -177,7 +195,7 @@ class ProcessDashboardComputer:
             history=[],
             gpu_used_imbalance=None,
             series={
-                "time_s": [],
+                "x_time": [],
                 "cpu_max": [],
                 "ram_used_max": [],
                 "gpu_used": [],
