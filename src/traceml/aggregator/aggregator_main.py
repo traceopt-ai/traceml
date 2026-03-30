@@ -19,9 +19,7 @@ Error handling
   terminal UI has already been torn down or failed.
 """
 
-import json
 import os
-import platform
 import signal
 import sys
 import threading
@@ -29,9 +27,6 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
-
-import psutil
-import pynvml
 
 from traceml.aggregator.trace_aggregator import TraceMLAggregator
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
@@ -128,116 +123,6 @@ def _install_signal_handlers(stop_event: threading.Event) -> None:
     signal.signal(signal.SIGTERM, _handler)
 
 
-def collect_cpu_info() -> dict:
-    return {
-        "architecture": platform.machine(),
-        "physical_cores": psutil.cpu_count(logical=False),
-        "logical_cores": psutil.cpu_count(logical=True),
-        "cpu_usage_percent": psutil.cpu_percent(interval=0.1),
-    }
-
-
-def collect_gpu_info() -> list:
-    gpus = []
-    try:
-        pynvml.nvmlInit()
-        count = pynvml.nvmlDeviceGetCount()
-        for i in range(count):
-            h = pynvml.nvmlDeviceGetHandleByIndex(i)
-            name_val = pynvml.nvmlDeviceGetName(h)
-            name_str = (
-                name_val.decode() if isinstance(name_val, bytes) else name_val
-            )
-            util = pynvml.nvmlDeviceGetUtilizationRates(h)
-            mem = pynvml.nvmlDeviceGetMemoryInfo(h)
-            gpus.append(
-                {
-                    "index": i,
-                    "name": name_str,
-                    "memory_total_mb": mem.total // 1024**2,
-                    "memory_used_mb": mem.used // 1024**2,
-                    "gpu_util_percent": util.gpu,
-                    "mem_util_percent": util.memory,
-                    "temperature_c": pynvml.nvmlDeviceGetTemperature(
-                        h, pynvml.NVML_TEMPERATURE_GPU
-                    ),
-                    "power_w": pynvml.nvmlDeviceGetPowerUsage(h) / 1000,
-                    "sm_clock_mhz": pynvml.nvmlDeviceGetClockInfo(
-                        h, pynvml.NVML_CLOCK_SM
-                    ),
-                    "mem_clock_mhz": pynvml.nvmlDeviceGetClockInfo(
-                        h, pynvml.NVML_CLOCK_MEM
-                    ),
-                    "perf_state": pynvml.nvmlDeviceGetPerformanceState(h),
-                }
-            )
-        pynvml.nvmlShutdown()
-    except Exception as e:
-        return {"error": str(e)}
-    return gpus
-
-
-def collect_system_manifest(nproc_per_node: int = 1) -> dict:
-    """Collect a unified hardware snapshot used by the heuristics engine."""
-    cpu_info = collect_cpu_info()
-    ram = psutil.virtual_memory()
-
-    gpus = []
-    try:
-        pynvml.nvmlInit()
-        count = pynvml.nvmlDeviceGetCount()
-        for i in range(count):
-            h = pynvml.nvmlDeviceGetHandleByIndex(i)
-            name_val = pynvml.nvmlDeviceGetName(h)
-            name_str = (
-                name_val.decode() if isinstance(name_val, bytes) else name_val
-            )
-            mem = pynvml.nvmlDeviceGetMemoryInfo(h)
-            sm_clock = pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_SM)
-            mem_clock = pynvml.nvmlDeviceGetClockInfo(h, pynvml.NVML_CLOCK_MEM)
-            try:
-                cc = pynvml.nvmlDeviceGetCudaComputeCapability(h)
-                compute_capability = f"{cc[0]}.{cc[1]}"
-            except Exception:
-                compute_capability = None
-            gpus.append(
-                {
-                    "index": i,
-                    "name": name_str,
-                    "memory_total_gb": round(mem.total / 1024**3, 2),
-                    "memory_used_gb": round(mem.used / 1024**3, 2),
-                    "compute_capability": compute_capability,
-                    "sm_clock_mhz": sm_clock,
-                    "mem_clock_mhz": mem_clock,
-                }
-            )
-        pynvml.nvmlShutdown()
-    except Exception:
-        pass
-
-    return {
-        "schema_version": 1,
-        "generated_at": _utc_now_iso(),
-        "cpu": {
-            "model": platform.processor(),
-            "architecture": cpu_info["architecture"],
-            "physical_cores": cpu_info["physical_cores"],
-            "logical_cores": cpu_info["logical_cores"],
-        },
-        "ram": {
-            "total_gb": round(ram.total / 1024**3, 2),
-            "available_gb": round(ram.available / 1024**3, 2),
-        },
-        "gpus": gpus,
-        "nproc_per_node": nproc_per_node,
-    }
-
-
-def save_system_manifest(path: Path, nproc_per_node: int = 1) -> None:
-    with open(path, "w") as f:
-        json.dump(collect_system_manifest(nproc_per_node), f, indent=2)
-
-
 def main() -> None:
     """
     Aggregator process entrypoint.
@@ -261,8 +146,7 @@ def main() -> None:
     session_dir = session_root / "aggregator"
     session_dir.mkdir(parents=True, exist_ok=True)
     db_path = session_dir / "telemetry"
-    nproc_per_node = int(os.environ.get("TRACEML_NPROC_PER_NODE", "1"))
-    save_system_manifest(session_dir / "system_manifest.json", nproc_per_node)
+
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
 
