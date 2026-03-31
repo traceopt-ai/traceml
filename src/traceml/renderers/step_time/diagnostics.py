@@ -43,6 +43,10 @@ class DiagnosisThresholds:
 
     low_step_skew: float = 0.05
 
+    straggler_dl_share_min: float = 0.15
+
+    min_steps_for_confident_diag: int = 8
+
 
 DEFAULT_THRESHOLDS = DiagnosisThresholds()
 
@@ -105,7 +109,7 @@ def build_step_diagnosis(
     overall_worst_rank = step.summary.worst_rank
 
     step_total = _metric_total(step, single_rank)
-    if step_total <= 0.0:
+    if step_total <= thresholds.min_steps_for_confident_diag:
         return StepDiagnosis(
             kind="NO_DATA",
             severity="info",
@@ -144,7 +148,7 @@ def build_step_diagnosis(
         severity = _severity(step_skew, thresholds.straggler_skew_crit)
 
         if (
-            dl_share >= 0.15
+            dl_share >= thresholds.straggler_dl_share_min
             and dl_skew >= thresholds.compute_skew_warn
             and dl_worst_rank == overall_worst_rank
         ):
@@ -223,7 +227,7 @@ def build_step_diagnosis(
             reason=reason,
             action="Increase workers, prefetch, or storage throughput.",
             steps_used=steps_used,
-            worst_rank=None if single_rank else overall_worst_rank,
+            worst_rank=None if single_rank else dl_worst_rank,
         )
 
     # 3) WAIT-HEAVY

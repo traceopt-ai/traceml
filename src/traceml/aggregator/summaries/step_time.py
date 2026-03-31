@@ -1,7 +1,28 @@
+"""
+STEP TIME post-run summary generator.
+
+This module reads the `step_time_samples` SQLite projection table, builds
+per-rank timing summaries, and writes:
+1) a text card (`*_summary_card.txt`)
+2) a structured JSON payload (`*_summary_card.json`)
+
+It also augments the summary with a diagnosis produced by a dedicated
+summary-mode adapter.
+"""
+
 import json
 import sqlite3
+import textwrap
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+import numpy as np
+
+from traceml.aggregator.summaries.step_time_diagnosis import (
+    RankStepSignals,
+    build_summary_step_diagnosis,
+    diagnosis_to_json,
+)
 
 
 def _append_text(path: str, text: str) -> None:
@@ -39,6 +60,12 @@ def _safe_float(x: Any) -> float:
         return 0.0
 
 
+def _finite_float(x: Any) -> float:
+    """Convert to float; coerce non-finite values to 0.0."""
+    v = _safe_float(x)
+    return v if np.isfinite(v) else 0.0
+
+
 def _event_total_ms(by_dev: Any) -> float:
     """
     Sum duration_ms across all devices for one event.
@@ -59,7 +86,7 @@ def _event_total_ms(by_dev: Any) -> float:
     for stats in by_dev.values():
         if not isinstance(stats, dict):
             continue
-        total += _safe_float(stats.get("duration_ms"))
+        total += _finite_float(stats.get("duration_ms"))
     return total
 
 
@@ -122,22 +149,28 @@ def _share(num: float, denom: float) -> Optional[float]:
 def _closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
     """
     Return the rank whose value is closest to the median of all values.
+
+    Tie-breaker order:
+    1) closest absolute distance to median
+    2) smaller metric value
+    3) smaller rank id
     """
     if not rank_to_value:
         return None
 
-    vals = sorted(rank_to_value.values())
-    n = len(vals)
-    if n % 2 == 1:
-        median_val = vals[n // 2]
-    else:
-        median_val = 0.5 * (vals[n // 2 - 1] + vals[n // 2])
+    vals = np.asarray(
+        [_finite_float(v) for v in rank_to_value.values()],
+        dtype=np.float64,
+    )
+    if vals.size == 0:
+        return None
+    median_val = float(np.median(vals))
 
     return min(
         rank_to_value.keys(),
         key=lambda r: (
-            abs(rank_to_value[r] - median_val),
-            rank_to_value[r],
+            abs(_finite_float(rank_to_value[r]) - median_val),
+            _finite_float(rank_to_value[r]),
             r,
         ),
     )
@@ -157,6 +190,25 @@ class RankStepSummary:
     avg_step_cpu_ms: float
     avg_gpu_compute_ms: float
     avg_total_step_ms: float
+
+
+def _to_rank_signals(
+    per_rank_summary: Dict[int, RankStepSummary],
+) -> Dict[int, RankStepSignals]:
+    """
+    Convert local rank summaries to diagnosis adapter input objects.
+    """
+    return {
+        int(rank): RankStepSignals(
+            steps_analyzed=int(s.steps_analyzed),
+            dataloader_ms=_finite_float(s.avg_dataloader_ms),
+            forward_ms=_finite_float(s.avg_forward_ms),
+            backward_ms=_finite_float(s.avg_backward_ms),
+            optimizer_ms=_finite_float(s.avg_optimizer_ms),
+            step_cpu_ms=_finite_float(s.avg_step_cpu_ms),
+        )
+        for rank, s in per_rank_summary.items()
+    }
 
 
 def _load_rank_step_rows(
@@ -270,11 +322,11 @@ def _build_rank_summary(
         if metrics is None:
             continue
 
-        dl = float(metrics["dataloader"])
-        fwd = float(metrics["forward"])
-        bwd = float(metrics["backward"])
-        opt = float(metrics["optimizer"])
-        step_cpu = float(metrics["step_time"])
+        dl = _finite_float(metrics["dataloader"])
+        fwd = _finite_float(metrics["forward"])
+        bwd = _finite_float(metrics["backward"])
+        opt = _finite_float(metrics["optimizer"])
+        step_cpu = _finite_float(metrics["step_time"])
 
         gpu_compute = fwd + bwd + opt
         total_step = dl + max(step_cpu, gpu_compute)
@@ -428,6 +480,11 @@ def _build_step_time_card(
     worst_split_pct = _split_pct(worst_summary) if worst_summary else None
     dominant_text = _dominant_line(median_split_ms, worst_split_ms)
 
+    summary_diag = build_summary_step_diagnosis(
+        rank_signals=_to_rank_signals(per_rank_summary),
+        max_rows=max_rows,
+    )
+
     width = 78
     inner_width = width - 4
 
@@ -437,7 +494,23 @@ def _build_step_time_card(
     def row(text: str = "") -> str:
         return f"|  {text:<{inner_width}}|"
 
-    header = f"TraceML Step Timing Summary | steps {training_steps} | ranks {len(ranks_present)}"
+    def wrapped_row(label: str, text: str) -> None:
+        """
+        Render a labeled row with wrapping while preserving card width.
+        """
+        prefix = f"{label:<13}"
+        wrapped = textwrap.wrap(
+            text,
+            width=max(10, inner_width - len(prefix)),
+        ) or [""]
+        lines.append(row(f"{prefix}{wrapped[0]}"))
+        for part in wrapped[1:]:
+            lines.append(row(f"{'':<{len(prefix)}}{part}"))
+
+    header = (
+        f"TraceML Step Timing Summary | steps {training_steps} | "
+        f"ranks {len(ranks_present)}"
+    )
 
     lines = [
         border(),
@@ -523,6 +596,16 @@ def _build_step_time_card(
         lines.append(row())
         lines.append(row(f"Dominant      {dominant_text}"))
 
+    if summary_diag is not None:
+        lines.append(row())
+        wrapped_row(
+            "Diagnosis",
+            f"{summary_diag.status}: {summary_diag.reason}",
+        )
+        wrapped_row("Action", summary_diag.action)
+        if summary_diag.note:
+            wrapped_row("Note", summary_diag.note)
+
     lines.append(border())
     card = "\n".join(lines)
 
@@ -541,6 +624,7 @@ def _build_step_time_card(
         "worst_split_ms": worst_split_ms,
         "median_split_pct": median_split_pct,
         "worst_split_pct": worst_split_pct,
+        "diagnosis": diagnosis_to_json(summary_diag),
         "per_rank": {
             str(rank): {
                 "steps_analyzed": s.steps_analyzed,
