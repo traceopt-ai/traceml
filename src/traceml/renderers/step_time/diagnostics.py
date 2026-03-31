@@ -93,7 +93,6 @@ def build_step_diagnosis(
     by_key = {metric.metric: metric for metric in metrics}
 
     step = by_key.get("step_time")
-    print("StPETREAR", step)
     if step is None:
         return StepDiagnosis(
             kind="NO_DATA",
@@ -110,13 +109,29 @@ def build_step_diagnosis(
     overall_worst_rank = step.summary.worst_rank
 
     step_total = _metric_total(step, single_rank)
-    if step_total <= thresholds.min_steps_for_confident_diag:
+    # 1) No usable timing values yet.
+    if step_total <= 0.0:
         return StepDiagnosis(
             kind="NO_DATA",
             severity="info",
             status="NO DATA",
             reason="No usable step-time data yet.",
             action="Wait for the first complete window.",
+            steps_used=steps_used,
+            worst_rank=overall_worst_rank,
+        )
+
+    # 2) Not enough samples yet for stable diagnosis.
+    if steps_used < thresholds.min_steps_for_confident_diag:
+        return StepDiagnosis(
+            kind="NO_DATA",
+            severity="info",
+            status="NO DATA",
+            reason=(
+                f"Only {steps_used} steps available; "
+                "need more samples for a confident diagnosis."
+            ),
+            action="Wait for more completed steps in the window.",
             steps_used=steps_used,
             worst_rank=overall_worst_rank,
         )
