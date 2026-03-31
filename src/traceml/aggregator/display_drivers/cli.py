@@ -183,7 +183,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         )
         dashboard = self._layout["dashboard"]
         dashboard.split_row(
-            Layout(name=SYSTEM_LAYOUT, ratio=3),
+            Layout(name=SYSTEM_LAYOUT, ratio=4),
             Layout(name=PROCESS_LAYOUT, ratio=5),
         )
         return dashboard
@@ -199,7 +199,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
             Layout(name="middle_row", ratio=4),
         )
         dashboard["upper_row"].split_row(
-            Layout(name=SYSTEM_LAYOUT, ratio=3),
+            Layout(name=SYSTEM_LAYOUT, ratio=4),
             Layout(name=PROCESS_LAYOUT, ratio=5),
         )
         dashboard["middle_row"].split_row(

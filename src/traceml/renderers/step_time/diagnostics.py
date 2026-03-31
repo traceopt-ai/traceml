@@ -93,6 +93,7 @@ def build_step_diagnosis(
     by_key = {metric.metric: metric for metric in metrics}
 
     step = by_key.get("step_time")
+    print("StPETREAR", step)
     if step is None:
         return StepDiagnosis(
             kind="NO_DATA",

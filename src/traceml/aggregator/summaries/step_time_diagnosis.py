@@ -143,7 +143,11 @@ def build_summary_step_diagnosis(
     """
     Build a summary-mode diagnosis from per-rank averaged timing signals.
 
-    Returns None when there is not enough data to produce a stable diagnosis.
+    Important:
+    - `step_time` in summaries can be missing/under-reported for some jobs.
+    - For diagnosis stability, we use:
+        step_effective = max(step_cpu_ms, forward + backward + optimizer)
+      so `step_time` is never below known compute.
     """
     if not rank_signals:
         return None
@@ -166,18 +170,16 @@ def build_summary_step_diagnosis(
     fwd = {r: _finite_float(s.forward_ms) for r, s in rank_signals.items()}
     bwd = {r: _finite_float(s.backward_ms) for r, s in rank_signals.items()}
     opt = {r: _finite_float(s.optimizer_ms) for r, s in rank_signals.items()}
-    step_cpu = {
+    step_raw = {
         r: _finite_float(s.step_cpu_ms) for r, s in rank_signals.items()
     }
 
-    # Keep the same semantics as live diagnostics.
-    wait = {
-        r: max(0.0, step_cpu[r] - (fwd[r] + bwd[r] + opt[r])) for r in ranks
-    }
+    compute = {r: fwd[r] + bwd[r] + opt[r] for r in ranks}
+    step_effective = {r: max(step_raw[r], compute[r]) for r in ranks}
+    wait = {r: max(0.0, step_effective[r] - compute[r]) for r in ranks}
 
-    overall_rank_scores = {
-        r: dl[r] + max(step_cpu[r], fwd[r] + bwd[r] + opt[r]) for r in ranks
-    }
+    # Keep overall rank identity aligned with summary card semantics.
+    overall_rank_scores = {r: dl[r] + step_effective[r] for r in ranks}
     overall_worst_rank = int(
         max(ranks, key=lambda r: (overall_rank_scores[r], -r))
     )
@@ -187,7 +189,7 @@ def build_summary_step_diagnosis(
         "forward": fwd,
         "backward": bwd,
         "optimizer_step": opt,
-        "step_time": step_cpu,
+        "step_time": step_effective,
         "wait_proxy": wait,
     }
 
