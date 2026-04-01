@@ -1,4 +1,3 @@
-# /Users/abhinavsrivastav/Documents/projects/traceml/src/traceml/diagnostics/step_time.py
 """
 Step-time diagnosis logic shared by live renderers and post-run summaries.
 

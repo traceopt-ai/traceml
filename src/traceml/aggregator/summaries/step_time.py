@@ -192,6 +192,26 @@ class RankStepSummary:
     avg_total_step_ms: float
 
 
+@dataclass
+class RankStepAnalysis:
+    """
+    Per-rank summary + per-step canonical metrics.
+
+    `per_step_metrics` shape:
+      step -> {
+        "dataloader_fetch": ms,
+        "forward": ms,
+        "backward": ms,
+        "optimizer_step": ms,
+        "step_time": ms,
+        "wait_proxy": ms,
+      }
+    """
+
+    summary: RankStepSummary
+    per_step_metrics: Dict[int, Dict[str, float]]
+
+
 def _to_rank_signals(
     per_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[int, RankStepSignals]:
@@ -295,16 +315,15 @@ def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
 
 def _build_rank_summary(
     step_rows: list[Dict[str, Any]],
-) -> Optional[RankStepSummary]:
+) -> Optional[RankStepAnalysis]:
     """
-    Build a per-rank summary over the provided step rows.
+    Build per-rank summary and per-step canonical metrics over provided rows.
 
     For each step:
         gpu_compute = forward + backward + optimizer
-        total_step  = dataloader + max(step_time, gpu_compute)
-
-    This keeps step-time comparable across ranks even when step_time excludes
-    dataloader and GPU compute is recorded separately.
+        step_effective = max(step_time, gpu_compute)
+        total_step = dataloader + step_effective
+        wait_proxy = max(0, step_effective - gpu_compute)
     """
     if not step_rows:
         return None
@@ -317,9 +336,12 @@ def _build_rank_summary(
     sum_total = 0.0
     n = 0
 
+    per_step_metrics: Dict[int, Dict[str, float]] = {}
+
     for row in step_rows:
+        step_id = row.get("step")
         metrics = _row_metrics(row["events"])
-        if metrics is None:
+        if metrics is None or step_id is None:
             continue
 
         dl = _finite_float(metrics["dataloader"])
@@ -329,7 +351,18 @@ def _build_rank_summary(
         step_cpu = _finite_float(metrics["step_time"])
 
         gpu_compute = fwd + bwd + opt
-        total_step = dl + max(step_cpu, gpu_compute)
+        step_effective = max(step_cpu, gpu_compute)
+        wait_proxy = max(0.0, step_effective - gpu_compute)
+        total_step = dl + step_effective
+
+        per_step_metrics[int(step_id)] = {
+            "dataloader_fetch": dl,
+            "forward": fwd,
+            "backward": bwd,
+            "optimizer_step": opt,
+            "step_time": step_effective,
+            "wait_proxy": wait_proxy,
+        }
 
         sum_dl += dl
         sum_fwd += fwd
@@ -342,7 +375,7 @@ def _build_rank_summary(
     if n == 0:
         return None
 
-    return RankStepSummary(
+    summary = RankStepSummary(
         steps_analyzed=n,
         avg_dataloader_ms=sum_dl / n,
         avg_forward_ms=sum_fwd / n,
@@ -352,6 +385,8 @@ def _build_rank_summary(
         avg_gpu_compute_ms=(sum_fwd + sum_bwd + sum_opt) / n,
         avg_total_step_ms=sum_total / n,
     )
+
+    return RankStepAnalysis(summary=summary, per_step_metrics=per_step_metrics)
 
 
 def _split_ms(s: RankStepSummary) -> Dict[str, float]:
@@ -418,6 +453,7 @@ def _build_step_time_card(
     training_steps: int,
     latest_step_observed: Optional[int],
     per_rank_summary: Dict[int, RankStepSummary],
+    per_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]],
     max_rows: int,
 ) -> tuple[str, Dict[str, Any]]:
     """
@@ -483,6 +519,7 @@ def _build_step_time_card(
     summary_diag = build_summary_step_diagnosis(
         rank_signals=_to_rank_signals(per_rank_summary),
         max_rows=max_rows,
+        per_rank_step_metrics=per_rank_step_metrics,
     )
 
     width = 78
@@ -701,15 +738,18 @@ def generate_step_time_summary_card(
         ranks_present = [int(r[0]) for r in rank_rows if r[0] is not None]
 
         per_rank_summary: Dict[int, RankStepSummary] = {}
+        per_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]] = {}
+
         for rank in ranks_present:
             step_rows = _load_rank_step_rows(
                 conn,
                 rank=rank,
                 max_rows=max_rows,
             )
-            summary = _build_rank_summary(step_rows)
-            if summary is not None:
-                per_rank_summary[rank] = summary
+            analysis = _build_rank_summary(step_rows)
+            if analysis is not None:
+                per_rank_summary[rank] = analysis.summary
+                per_rank_step_metrics[rank] = analysis.per_step_metrics
 
     finally:
         conn.close()
@@ -718,6 +758,7 @@ def generate_step_time_summary_card(
         training_steps=training_steps,
         latest_step_observed=latest_step_observed,
         per_rank_summary=per_rank_summary,
+        per_rank_step_metrics=per_rank_step_metrics,
         max_rows=max_rows,
     )
 
