@@ -11,7 +11,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from traceml.renderers.step_time.diagnostics import (
+from traceml.diagnostics.step_time import (
     DiagnosisThresholds,
     StepDiagnosis,
     build_step_diagnosis,
