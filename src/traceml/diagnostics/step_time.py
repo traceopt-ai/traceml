@@ -1,3 +1,4 @@
+# /Users/abhinavsrivastav/Documents/projects/traceml/src/traceml/diagnostics/step_time.py
 """
 Step-time diagnosis logic shared by live renderers and post-run summaries.
 
@@ -9,12 +10,16 @@ Semantics
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Optional, Sequence
 
 from traceml.renderers.step_time.schema import StepCombinedTimeMetric
 
 from .common import BaseDiagnosis, Severity, validate_confidence
+from .step_time_trend import (
+    DEFAULT_STEP_TREND_HEURISTICS,
+    build_step_trend_note,
+)
 
 DiagnosisKind = Literal[
     "NO_DATA",
@@ -108,6 +113,51 @@ def _mk_diag(
     )
 
 
+def _merge_note(base: Optional[str], extra: Optional[str]) -> Optional[str]:
+    if not extra:
+        return base
+    if not base:
+        return extra
+    return f"{base} {extra}"
+
+
+def _apply_trend_note(
+    diagnosis: StepDiagnosis,
+    *,
+    single_rank: bool,
+    step_metric: Optional[StepCombinedTimeMetric],
+    wait_metric: Optional[StepCombinedTimeMetric],
+    dataloader_metric: Optional[StepCombinedTimeMetric],
+    wait_share: float,
+    dataloader_share: float,
+    thresholds: DiagnosisThresholds,
+) -> StepDiagnosis:
+    """
+    Best-effort trend annotation.
+
+    This function never raises; on any failure it returns the original diagnosis.
+    """
+    try:
+        trend_note = build_step_trend_note(
+            diagnosis_kind=diagnosis.kind,
+            steps_used=diagnosis.steps_used,
+            single_rank=single_rank,
+            step_metric=step_metric,
+            wait_metric=wait_metric,
+            dataloader_metric=dataloader_metric,
+            wait_share=wait_share,
+            dataloader_share=dataloader_share,
+            wait_warn_threshold=thresholds.wait_share_warn,
+            input_warn_threshold=thresholds.input_share_warn,
+            cfg=DEFAULT_STEP_TREND_HEURISTICS,
+        )
+        if not trend_note:
+            return diagnosis
+        return replace(diagnosis, note=_merge_note(diagnosis.note, trend_note))
+    except Exception:
+        return diagnosis
+
+
 def build_step_diagnosis(
     metrics: Sequence[StepCombinedTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
@@ -197,6 +247,39 @@ def build_step_diagnosis(
         single_rank=single_rank,
     )
 
+    def _finalize(diag: StepDiagnosis) -> StepDiagnosis:
+        return _apply_trend_note(
+            diag,
+            single_rank=single_rank,
+            step_metric=step,
+            wait_metric=wait,
+            dataloader_metric=dl,
+            wait_share=wait_share,
+            dataloader_share=dl_share,
+            thresholds=thresholds,
+        )
+
+    def _emit(
+        *,
+        kind: DiagnosisKind,
+        severity: Severity,
+        reason: str,
+        action: str,
+        worst_rank: Optional[int] = None,
+        note: Optional[str] = None,
+        apply_trend: bool = True,
+    ) -> StepDiagnosis:
+        diag = _mk_diag(
+            kind=kind,
+            severity=severity,
+            reason=reason,
+            action=action,
+            steps_used=steps_used,
+            worst_rank=worst_rank,
+            note=note,
+        )
+        return _finalize(diag) if apply_trend else diag
+
     # 1) STRAGGLER
     if not single_rank and step_skew >= thresholds.straggler_skew_warn:
         rank_str = _rank_str(overall_worst_rank)
@@ -207,7 +290,7 @@ def build_step_diagnosis(
             and dl_skew >= thresholds.compute_skew_warn
             and dl_worst_rank == overall_worst_rank
         ):
-            return _mk_diag(
+            return _emit(
                 kind="STRAGGLER",
                 severity=severity,
                 reason=(
@@ -215,7 +298,6 @@ def build_step_diagnosis(
                     f"{rank_str} also leads dataloader imbalance."
                 ),
                 action=f"Check input loading on {rank_str}.",
-                steps_used=steps_used,
                 worst_rank=overall_worst_rank,
             )
 
@@ -225,7 +307,7 @@ def build_step_diagnosis(
             and dominant_compute.share >= thresholds.compute_share_min
             and dominant_compute.worst_rank == overall_worst_rank
         ):
-            return _mk_diag(
+            return _emit(
                 kind="STRAGGLER",
                 severity=severity,
                 reason=(
@@ -233,12 +315,11 @@ def build_step_diagnosis(
                     f"{dominant_compute.label} is most imbalanced on {rank_str}."
                 ),
                 action=f"Inspect {dominant_compute.label.lower()} on {rank_str}.",
-                steps_used=steps_used,
                 worst_rank=overall_worst_rank,
             )
 
         if wait_share >= thresholds.wait_share_warn:
-            return _mk_diag(
+            return _emit(
                 kind="STRAGGLER",
                 severity=severity,
                 reason=(
@@ -246,11 +327,10 @@ def build_step_diagnosis(
                     f"WAIT* is elevated on {rank_str}."
                 ),
                 action=f"Inspect sync / CPU stalls on {rank_str}.",
-                steps_used=steps_used,
                 worst_rank=overall_worst_rank,
             )
 
-        return _mk_diag(
+        return _emit(
             kind="STRAGGLER",
             severity=severity,
             reason=(
@@ -258,7 +338,6 @@ def build_step_diagnosis(
                 f"worst rank is {rank_str}."
             ),
             action=f"Inspect slower work on {rank_str}.",
-            steps_used=steps_used,
             worst_rank=overall_worst_rank,
         )
 
@@ -271,23 +350,21 @@ def build_step_diagnosis(
                 f"worst rank is {_rank_str(dl_worst_rank)}."
             )
 
-        return _mk_diag(
+        return _emit(
             kind="INPUT_BOUND",
             severity=_severity(dl_share, thresholds.input_share_crit),
             reason=reason,
             action="Increase workers, prefetch, or storage throughput.",
-            steps_used=steps_used,
             worst_rank=None if single_rank else dl_worst_rank,
         )
 
     # 3) WAIT-HEAVY
     if wait_share >= thresholds.wait_share_warn:
-        return _mk_diag(
+        return _emit(
             kind="WAIT_HEAVY",
             severity=_severity(wait_share, thresholds.wait_share_crit),
             reason=f"WAIT* is {_pct(wait_share)} of step time.",
             action="Inspect sync points, CPU stalls, and H2D copies.",
-            steps_used=steps_used,
             worst_rank=None if single_rank else overall_worst_rank,
             note="WAIT* = step_time - (forward + backward + optimizer_step).",
         )
@@ -303,7 +380,7 @@ def build_step_diagnosis(
         if step_skew < thresholds.low_step_skew:
             note = "Step time stays fairly balanced, so this may be partly hidden."
 
-        return _mk_diag(
+        return _emit(
             kind="COMPUTE_IMBALANCE",
             severity=_severity(
                 dominant_compute.skew, thresholds.compute_skew_crit
@@ -316,50 +393,18 @@ def build_step_diagnosis(
                 f"Inspect {dominant_compute.label.lower()} "
                 f"on {_rank_str(dominant_compute.worst_rank)}."
             ),
-            steps_used=steps_used,
             worst_rank=dominant_compute.worst_rank,
             note=note,
         )
 
     # 5) BALANCED
-    return _mk_diag(
+    return _emit(
         kind="BALANCED",
         severity="info",
         reason="No dominant bottleneck is visible in this window.",
         action="Focus on throughput only if overall speed is still low.",
-        steps_used=steps_used,
         worst_rank=None if single_rank else overall_worst_rank,
     )
-
-
-def format_cli_diagnosis(diagnosis: StepDiagnosis) -> str:
-    """Render a short Rich-friendly diagnosis block for terminal output."""
-    status = _styled_status(diagnosis.status, diagnosis.severity)
-    return "\n".join(
-        [
-            f"[bold]Issue:[/bold] {status}",
-            f"[bold]Why:[/bold] {diagnosis.reason}",
-            f"[bold]Hint:[/bold] {diagnosis.action}",
-        ]
-    )
-
-
-def format_dashboard_diagnosis(diagnosis: StepDiagnosis) -> str:
-    """Render a short diagnosis block for dashboard use."""
-    meta = f"*Window: {diagnosis.steps_used} steps"
-    if diagnosis.worst_rank is not None and diagnosis.kind != "BALANCED":
-        meta += f" · Worst rank: {_rank_str(diagnosis.worst_rank)}"
-    meta += "*"
-
-    text = (
-        f"**Status:** {diagnosis.status}  \n"
-        f"**Why:** {diagnosis.reason}  \n"
-        f"**Next:** {diagnosis.action}  \n"
-        f"{meta}"
-    )
-    if diagnosis.note:
-        text += f"  \n*Note:* {diagnosis.note}"
-    return text
 
 
 def _non_negative_finite(value: float) -> float:
@@ -470,16 +515,6 @@ def _severity(value: float, crit_threshold: float) -> Severity:
     return "crit" if _non_negative_finite(value) >= crit_threshold else "warn"
 
 
-def _styled_status(status: str, severity: Severity) -> str:
-    """Render a colored status label for Rich CLI output."""
-    style = {
-        "crit": "bold red",
-        "warn": "bold yellow",
-        "info": "bold green",
-    }.get(severity, "bold")
-    return f"[{style}]{status}[/{style}]"
-
-
 __all__ = [
     "Severity",
     "DiagnosisKind",
@@ -488,6 +523,4 @@ __all__ = [
     "StepDiagnosis",
     "ComputeSignal",
     "build_step_diagnosis",
-    "format_cli_diagnosis",
-    "format_dashboard_diagnosis",
 ]
