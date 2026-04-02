@@ -36,6 +36,7 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.utils.formatting import fmt_mem_new
 
 from .computer import StepMemoryMetricsComputer
+from .diagnostics import build_step_memory_diagnosis, format_cli_diagnosis
 from .schema import StepMemoryCombinedResult
 
 
@@ -89,6 +90,9 @@ class StepMemoryRenderer(BaseRenderer):
             )
 
         metrics = payload.metrics
+
+        diag = build_step_memory_diagnosis(metrics)
+        diag_text = format_cli_diagnosis(diag)
 
         # Stable order: allocated then reserved (if present)
         def _sort_key(m) -> int:
@@ -171,6 +175,8 @@ class StepMemoryRenderer(BaseRenderer):
 
         return Panel(
             Group(
+                diag_text,
+                "",
                 table,
                 footer,
             ),
@@ -194,12 +200,11 @@ class StepMemoryRenderer(BaseRenderer):
             return "—"
 
         delta = float(series.worst[-1]) - float(series.worst[0])
-        sign = "+" if delta >= 0 else ""
-        return (
-            f"{sign}{fmt_mem_new(abs(delta))}"
-            if delta != 0
-            else fmt_mem_new(0.0)
-        )
+        if delta == 0.0:
+            return fmt_mem_new(0.0)
+
+        sign = "+" if delta > 0.0 else "-"
+        return f"{sign}{fmt_mem_new(abs(delta))}"
 
     def get_dashboard_renderable(self) -> StepMemoryCombinedResult:
         """
