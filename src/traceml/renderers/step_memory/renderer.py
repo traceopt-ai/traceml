@@ -32,11 +32,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import MODEL_MEMORY_LAYOUT
-from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.utils.formatting import fmt_mem_new
 
-from .compute import StepMemoryCombinedComputer
+from .computer import StepMemoryMetricsComputer
 from .schema import StepMemoryCombinedResult
 
 
@@ -52,12 +51,12 @@ class StepMemoryRenderer(BaseRenderer):
     without overwhelming the user with per-step noise.
     """
 
-    def __init__(self, remote_store: RemoteDBStore):
+    def __init__(self, db_path: str):
         super().__init__(
             name="Model Step Memory",
             layout_section_name=MODEL_MEMORY_LAYOUT,
         )
-        self._computer = StepMemoryCombinedComputer(remote_store)
+        self._computer = StepMemoryMetricsComputer(db_path=db_path)
         self._cached: Optional[StepMemoryCombinedResult] = None
 
     def _payload(self) -> Optional[StepMemoryCombinedResult]:
@@ -67,7 +66,7 @@ class StepMemoryRenderer(BaseRenderer):
         Uses a simple cache to avoid flicker when data is temporarily
         incomplete (e.g., ranks slightly out of sync).
         """
-        payload = self._computer.compute()
+        payload = self._computer.compute_cli()
         if payload and payload.metrics:
             self._cached = payload
         return self._cached
@@ -206,4 +205,4 @@ class StepMemoryRenderer(BaseRenderer):
         """
         Return the typed compute result directly to dashboard consumers.
         """
-        return self._payload()
+        return self._computer.compute_dashboard()

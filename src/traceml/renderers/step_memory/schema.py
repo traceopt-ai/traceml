@@ -11,8 +11,6 @@ Design goals
 - Step alignment across ranks (intersection-based)
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import List, Optional
 

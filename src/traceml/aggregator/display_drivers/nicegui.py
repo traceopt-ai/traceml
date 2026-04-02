@@ -128,7 +128,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
             StepCombinedRenderer(db_path=self._settings.db_path),
-            StepMemoryRenderer(remote_store=store),
+            StepMemoryRenderer(db_path=self._settings.db_path),
         ]
 
         if self._deep_profile:

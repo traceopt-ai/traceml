@@ -105,7 +105,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         if not self._watch_profile:
             self._renderers += [
                 StepCombinedRenderer(db_path=self._settings.db_path),
-                StepMemoryRenderer(remote_store=store),
+                StepMemoryRenderer(db_path=self._settings.db_path),
             ]
 
         # Deep Profile
