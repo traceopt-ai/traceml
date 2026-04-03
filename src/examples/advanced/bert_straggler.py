@@ -212,7 +212,7 @@ def main() -> None:
                 loss = out.loss
                 logits = out.logits
 
-                # maybe_inject_straggler(rank, global_step, phase="backward")
+                maybe_inject_straggler(rank, global_step, phase="backward")
                 scaler.scale(loss).backward()
 
                 maybe_inject_straggler(rank, global_step, phase="optimizer")
