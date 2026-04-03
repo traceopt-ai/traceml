@@ -31,7 +31,7 @@ WARMUP_RATIO = 0.06
 
 # Straggler controls
 STRAGGLER_RANK = 0
-STRAGGLER_SLEEP_S = 0.08
+STRAGGLER_SLEEP_S = 0.8
 STRAGGLER_EVERY_N_STEPS = 1
 STRAGGLER_PHASE = (
     "backward"  # one of: dataloader, forward, backward, optimizer
