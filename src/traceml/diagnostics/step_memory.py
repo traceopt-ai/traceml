@@ -63,7 +63,9 @@ class StepMemoryDiagnosisThresholds:
     trend: StepMemoryTrendHeuristics = DEFAULT_STEP_MEMORY_TREND_HEURISTICS
 
     early_creep_min_steps: int = 100
-    early_creep_abs_delta_bytes_min: float = 768.0 * 1024.0 * 1024.0  # 768 MiB
+    early_creep_abs_delta_bytes_min: float = (
+        1024.0 * 1024.0 * 1024.0
+    )  # 768 MiB
     early_creep_worst_trend_pct_min: float = 0.06
     early_creep_median_trend_pct_min: float = 0.03
     early_creep_pullback_max: float = 0.03
@@ -102,6 +104,7 @@ class EarlyCreepEvidence:
     abs_delta_bytes: Optional[float]
     worst_trend_pct: Optional[float]
     median_trend_pct: Optional[float]
+    weak_recovery: Optional[bool]
 
 
 def build_step_memory_diagnosis(
@@ -323,7 +326,10 @@ def _evaluate_early_creep(
     """
     Compute lightweight early-creep evidence directly from the visible window.
 
-    This intentionally does not depend on the strict long-window creep engine.
+    This version is intentionally smoother than a raw last-minus-first check:
+    - compares head vs tail averages
+    - requires enough points for stability
+    - exposes weak-recovery information to suppress noisy spikes
     """
     if int(steps_used) < int(min_steps):
         return EarlyCreepEvidence(
@@ -331,28 +337,46 @@ def _evaluate_early_creep(
             abs_delta_bytes=None,
             worst_trend_pct=None,
             median_trend_pct=None,
+            weak_recovery=None,
         )
 
     worst = _clean_series(worst_series_bytes)
     median = _clean_series(median_series_bytes)
 
-    if len(worst) < 2 or len(median) < 2:
+    n = min(len(worst), len(median))
+    if n < 12:
         return EarlyCreepEvidence(
             eligible=False,
             abs_delta_bytes=None,
             worst_trend_pct=None,
             median_trend_pct=None,
+            weak_recovery=None,
         )
 
-    worst_delta = float(worst[-1] - worst[0])
-    worst_baseline = max(1.0, float(sum(worst) / len(worst)))
-    median_baseline = max(1.0, float(sum(median) / len(median)))
+    worst = worst[:n]
+    median = median[:n]
+
+    segment = max(4, n // 5)
+    worst_head = worst[:segment]
+    worst_tail = worst[-segment:]
+    median_head = median[:segment]
+    median_tail = median[-segment:]
+
+    worst_head_avg = float(sum(worst_head) / len(worst_head))
+    worst_tail_avg = float(sum(worst_tail) / len(worst_tail))
+    median_head_avg = float(sum(median_head) / len(median_head))
+    median_tail_avg = float(sum(median_tail) / len(median_tail))
+
+    abs_delta = worst_tail_avg - worst_head_avg
+    worst_baseline = max(1.0, worst_head_avg)
+    median_baseline = max(1.0, median_head_avg)
 
     return EarlyCreepEvidence(
         eligible=True,
-        abs_delta_bytes=worst_delta,
-        worst_trend_pct=worst_delta / worst_baseline,
-        median_trend_pct=float(median[-1] - median[0]) / median_baseline,
+        abs_delta_bytes=abs_delta,
+        worst_trend_pct=(worst_tail_avg - worst_head_avg) / worst_baseline,
+        median_trend_pct=(median_tail_avg - median_head_avg) / median_baseline,
+        weak_recovery=_weak_recovery_from_series(worst),
     )
 
 
@@ -365,6 +389,34 @@ def _clean_series(values: Sequence[float]) -> list[float]:
             number = 0.0
         out.append(max(0.0, number))
     return out
+
+
+def _weak_recovery_from_series(
+    values: Sequence[float],
+    *,
+    pullback_max: float = 0.03,
+) -> Optional[bool]:
+    """
+    Return True when the visible window does not show a strong recovery after peak.
+
+    This suppresses early-creep triggers caused by transient spikes that already
+    pulled back materially.
+    """
+    cleaned = _clean_series(values)
+    if len(cleaned) < 16:
+        return None
+
+    peak_idx = max(range(len(cleaned)), key=lambda i: cleaned[i])
+    if peak_idx >= len(cleaned) - 4:
+        return None
+
+    peak = float(cleaned[peak_idx])
+    if peak <= 0.0:
+        return None
+
+    post_min = min(float(v) for v in cleaned[peak_idx:])
+    pullback = (peak - post_min) / peak
+    return bool(pullback <= pullback_max)
 
 
 def _is_early_creep_signal(
@@ -381,6 +433,10 @@ def _is_early_creep_signal(
     if early_ev.median_trend_pct is None:
         return False
 
+    pullback_ok = (
+        early_ev.weak_recovery is None or early_ev.weak_recovery is True
+    )
+
     return bool(
         float(early_ev.abs_delta_bytes)
         >= float(thresholds.early_creep_abs_delta_bytes_min)
@@ -388,6 +444,7 @@ def _is_early_creep_signal(
         >= float(thresholds.early_creep_worst_trend_pct_min)
         and float(early_ev.median_trend_pct)
         >= float(thresholds.early_creep_median_trend_pct_min)
+        and pullback_ok
     )
 
 
@@ -500,12 +557,12 @@ def _early_trend_note(
     if early_ev.abs_delta_bytes is not None:
         parts.append(f"window_Δ={_fmt_bytes(early_ev.abs_delta_bytes)}")
     if early_ev.worst_trend_pct is not None:
-        parts.append(
-            f"worst_window_trend={early_ev.worst_trend_pct * 100.0:.1f}%"
-        )
+        parts.append(f"worst_trend={early_ev.worst_trend_pct * 100.0:.1f}%")
     if early_ev.median_trend_pct is not None:
+        parts.append(f"median_trend={early_ev.median_trend_pct * 100.0:.1f}%")
+    if early_ev.weak_recovery is not None:
         parts.append(
-            f"median_window_trend={early_ev.median_trend_pct * 100.0:.1f}%"
+            f"weak_recovery={'yes' if early_ev.weak_recovery else 'no'}"
         )
 
     if not parts:
