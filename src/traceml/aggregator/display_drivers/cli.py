@@ -195,7 +195,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         )
         dashboard = self._layout["dashboard"]
         dashboard.split_column(
-            Layout(name="upper_row", ratio=3),
+            Layout(name="upper_row", ratio=2),
             Layout(name="middle_row", ratio=4),
         )
         dashboard["upper_row"].split_row(
