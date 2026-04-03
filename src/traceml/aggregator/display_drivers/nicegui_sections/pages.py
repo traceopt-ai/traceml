@@ -4,6 +4,7 @@ from traceml.aggregator.display_drivers.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
+    MODEL_DIAGNOSTICS_LAYOUT,
     MODEL_MEMORY_LAYOUT,
     PROCESS_LAYOUT,
     SYSTEM_LAYOUT,
@@ -21,18 +22,26 @@ from .model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
 )
+from .model_diagnostics_section import (
+    build_model_diagnostics_section,
+    update_model_diagnostics_section,
+)
 from .process_section import build_process_section, update_process_section
 from .step_memory_section import (
     build_step_memory_section,
     update_step_memory_section,
 )
 from .system_section import build_system_section, update_system_section
+from .ui_shell import PAGE_GAP_CLASS, VIEWPORT_STYLE
 
 
 def build_top_tabs(active: str, show_layers: bool):
-    """Shared top navigation tabs. `active` ∈ {"overview", "layers"}."""
-    with ui.row().classes("w-full px-4 pt-2"):
-        with ui.tabs().classes("text-lg") as tabs:
+    """Shared top navigation tabs."""
+    with ui.row().classes("w-full px-4 pt-1 pb-1 items-center"):
+        ui.label("TraceML").classes("text-3xl font-extrabold mr-6").style(
+            "color:#d47a00;"
+        )
+        with ui.tabs().classes("text-base") as tabs:
             overview = ui.tab("Overview")
             layers = ui.tab("Layer-wise") if show_layers else None
 
@@ -45,8 +54,7 @@ def build_top_tabs(active: str, show_layers: bool):
 
 
 def define_pages(cls):
-    """Attach the NiceGUI pages to the UI server."""
-
+    """Attach the NiceGUI pages using a dense left-rail overview layout."""
     deep_enabled = getattr(cls._settings, "profile", "run") == "deep"
 
     @ui.page("/")
@@ -68,46 +76,91 @@ def define_pages(cls):
             """
         )
 
-        ui.label("TraceML").classes(
-            "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
-        ).style("color:#d47a00;")
-
         build_top_tabs(active="overview", show_layers=deep_enabled)
 
-        with ui.row().classes(
-            "mt-1 mx-2 w-[99%] gap-2 flex-nowrap items-center"
+        with (
+            ui.row()
+            .classes(f"w-[99%] mx-2 {PAGE_GAP_CLASS} items-stretch")
+            .style(VIEWPORT_STYLE)
         ):
-
-            with ui.column().classes("w-[36%]"):
-                cards = build_system_section()
+            with (
+                ui.column()
+                .classes("h-full shrink-0")
+                .style(
+                    "width: 22%; min-width: 280px; max-width: 340px; overflow: hidden;"
+                )
+            ):
+                cards = build_model_diagnostics_section()
                 cls.subscribe_layout(
-                    SYSTEM_LAYOUT, cards, update_system_section
+                    MODEL_DIAGNOSTICS_LAYOUT,
+                    cards,
+                    update_model_diagnostics_section,
                 )
 
-            with ui.column().classes("w-[30%]"):
-                cards = build_process_section()
-                cls.subscribe_layout(
-                    PROCESS_LAYOUT, cards, update_process_section
-                )
+            with (
+                ui.column()
+                .classes(f"h-full flex-1 {PAGE_GAP_CLASS}")
+                .style("min-width: 0; overflow: hidden;")
+            ):
+                with (
+                    ui.row()
+                    .classes(f"w-full {PAGE_GAP_CLASS} items-stretch no-wrap")
+                    .style(
+                        "height: 45%; min-height: 210px; flex-wrap: nowrap; overflow: hidden;"
+                    )
+                ):
+                    with (
+                        ui.column()
+                        .classes("h-full flex-1")
+                        .style("min-width: 0; overflow: hidden;")
+                    ):
+                        cards = build_system_section()
+                        cls.subscribe_layout(
+                            SYSTEM_LAYOUT, cards, update_system_section
+                        )
 
-            with ui.column().classes("w-[33]"):
-                cards = build_step_memory_section()
-                cls.subscribe_layout(
-                    MODEL_MEMORY_LAYOUT, cards, update_step_memory_section
-                )
-                # cards = build_fake_section()
-                # cls.subscribe_layout(MODEL_MEMORY_LAYOUT, cards, update_fake_section)
+                    with (
+                        ui.column()
+                        .classes("h-full flex-1")
+                        .style("min-width: 0; overflow: hidden;")
+                    ):
+                        cards = build_process_section()
+                        cls.subscribe_layout(
+                            PROCESS_LAYOUT, cards, update_process_section
+                        )
 
-        with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-center"):
-            with ui.column().classes("w-[99%]"):
-                cards = build_model_combined_section()
-                cls.subscribe_layout(
-                    MODEL_COMBINED_LAYOUT, cards, update_model_combined_section
-                )
-                # cards = build_fake_section()
-                # cls.subscribe_layout(MODEL_COMBINED_LAYOUT, cards, update_fake_section)
+                with (
+                    ui.row()
+                    .classes(f"w-full {PAGE_GAP_CLASS} items-stretch no-wrap")
+                    .style(
+                        "height: 55%; min-height: 380px; flex-wrap: nowrap; overflow: hidden;"
+                    )
+                ):
+                    with (
+                        ui.column()
+                        .classes("h-full shrink-0")
+                        .style("width: 62%; min-width: 0; overflow: hidden;")
+                    ):
+                        cards = build_model_combined_section()
+                        cls.subscribe_layout(
+                            MODEL_COMBINED_LAYOUT,
+                            cards,
+                            update_model_combined_section,
+                        )
 
-        cls.ensure_ui_timer(1.0)
+                    with (
+                        ui.column()
+                        .classes("h-full flex-1")
+                        .style("min-width: 0; overflow: hidden;")
+                    ):
+                        cards = build_step_memory_section()
+                        cls.subscribe_layout(
+                            MODEL_MEMORY_LAYOUT,
+                            cards,
+                            update_step_memory_section,
+                        )
+
+        cls.ensure_ui_timer(0.75)
 
         if not cls._ui_ready:
             cls._ui_ready = True
@@ -116,10 +169,6 @@ def define_pages(cls):
 
         @ui.page("/layers")
         def layer_page():
-            ui.label("TraceML").classes(
-                "text-4xl font-extrabold mt-3 mb-1 ml-4 w-full text-left"
-            ).style("color:#d47a00;")
-
             build_top_tabs(active="layers", show_layers=True)
 
             with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
@@ -139,9 +188,6 @@ def define_pages(cls):
                         update_layer_timer_table_section,
                     )
 
-            # Optional:
-            # If you want /layers to work when opened directly (without visiting / first),
-            # keep this. Otherwise remove it.
             cls.ensure_ui_timer(1.0)
 
             if not cls._ui_ready:
