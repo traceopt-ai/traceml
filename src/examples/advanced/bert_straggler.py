@@ -1,6 +1,5 @@
 import os
 import random
-import time
 
 import torch
 import torch.distributed as dist
@@ -32,7 +31,7 @@ WARMUP_RATIO = 0.06
 # Straggler controls
 STRAGGLER_RANK = 0
 STRAGGLER_SLEEP_S = 0.8
-STRAGGLER_EVERY_N_STEPS = 1
+STRAGGLER_EVERY_N_STEPS = 10
 STRAGGLER_PHASE = (
     "backward"  # one of: dataloader, forward, backward, optimizer
 )
@@ -51,20 +50,20 @@ def accuracy_from_logits(
     return (preds == labels).float().mean()
 
 
-def maybe_inject_straggler(rank: int, global_step: int, phase: str) -> None:
-    """
-    Inject a deterministic delay on one rank to create a clean DDP straggler.
+def inject_straggler_compute(device: torch.device) -> None:
+    """Inject extra GPU work on one rank to create a deterministic compute straggler."""
+    if device.type != "cuda":
+        return
 
-    This is intentionally synthetic and more stable than relying on slow disk
-    or noisy input pipelines.
-    """
-    if rank != STRAGGLER_RANK:
-        return
-    if phase != STRAGGLER_PHASE:
-        return
-    if global_step % STRAGGLER_EVERY_N_STEPS != 0:
-        return
-    time.sleep(STRAGGLER_SLEEP_S)
+    torch.cuda.synchronize(device)
+
+    x = torch.randn(2048, 2048, device=device)
+    y = torch.randn(2048, 2048, device=device)
+
+    for _ in range(6):
+        x = x @ y
+
+    torch.cuda.synchronize(device)
 
 
 def prepare_data(rank: int, world_size: int):
@@ -192,7 +191,6 @@ def main() -> None:
             global_step += 1
 
             with trace_step(model.module):
-                maybe_inject_straggler(rank, global_step, phase="dataloader")
 
                 batch = {
                     key: value.to(device, non_blocking=True)
@@ -201,21 +199,20 @@ def main() -> None:
 
                 optimizer.zero_grad(set_to_none=True)
 
+                inject_straggler_compute(device)
+
                 with torch.amp.autocast(
                     device_type="cuda" if use_cuda else "cpu",
                     enabled=use_cuda,
                     dtype=amp_dtype,
                 ):
-                    maybe_inject_straggler(rank, global_step, phase="forward")
                     out = model(**batch)
 
                 loss = out.loss
                 logits = out.logits
 
-                maybe_inject_straggler(rank, global_step, phase="backward")
                 scaler.scale(loss).backward()
 
-                maybe_inject_straggler(rank, global_step, phase="optimizer")
                 scaler.step(optimizer)
                 scaler.update()
                 scheduler.step()
