@@ -30,11 +30,9 @@ WARMUP_RATIO = 0.06
 
 # Straggler controls
 STRAGGLER_RANK = 0
-STRAGGLER_SLEEP_S = 0.8
 STRAGGLER_EVERY_N_STEPS = 10
-STRAGGLER_PHASE = (
-    "backward"  # one of: dataloader, forward, backward, optimizer
-)
+STRAGGLER_MATMUL_SIZE = 4096
+STRAGGLER_MATMUL_ITERS = 12
 
 
 def set_seed(seed: int) -> None:
@@ -57,10 +55,10 @@ def inject_straggler_compute(device: torch.device) -> None:
 
     torch.cuda.synchronize(device)
 
-    x = torch.randn(2048, 2048, device=device)
-    y = torch.randn(2048, 2048, device=device)
+    x = torch.randn(4096, 4096, device=device, dtype=torch.float16)
+    y = torch.randn(4096, 4096, device=device, dtype=torch.float16)
 
-    for _ in range(6):
+    for _ in range(12):
         x = x @ y
 
     torch.cuda.synchronize(device)
@@ -191,7 +189,6 @@ def main() -> None:
             global_step += 1
 
             with trace_step(model.module):
-
                 batch = {
                     key: value.to(device, non_blocking=True)
                     for key, value in batch.items()
@@ -199,7 +196,11 @@ def main() -> None:
 
                 optimizer.zero_grad(set_to_none=True)
 
-                inject_straggler_compute(device)
+                if (
+                    rank == STRAGGLER_RANK
+                    and global_step % STRAGGLER_EVERY_N_STEPS == 0
+                ):
+                    inject_straggler_compute(device)
 
                 with torch.amp.autocast(
                     device_type="cuda" if use_cuda else "cpu",
@@ -227,9 +228,7 @@ def main() -> None:
                         f"[Train] epoch {epoch + 1} step {global_step} "
                         f"| loss {running_loss / 50:.4f} "
                         f"| acc {running_acc / 50:.4f} "
-                        f"| straggler_rank={STRAGGLER_RANK} "
-                        f"| phase={STRAGGLER_PHASE} "
-                        f"| sleep={STRAGGLER_SLEEP_S:.3f}s"
+                        f"| straggler_rank={STRAGGLER_RANK}"
                     )
                     running_loss = 0.0
                     running_acc = 0.0
