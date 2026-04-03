@@ -433,10 +433,6 @@ def _is_early_creep_signal(
     if early_ev.median_trend_pct is None:
         return False
 
-    pullback_ok = (
-        early_ev.weak_recovery is None or early_ev.weak_recovery is True
-    )
-
     return bool(
         float(early_ev.abs_delta_bytes)
         >= float(thresholds.early_creep_abs_delta_bytes_min)
@@ -444,7 +440,6 @@ def _is_early_creep_signal(
         >= float(thresholds.early_creep_worst_trend_pct_min)
         and float(early_ev.median_trend_pct)
         >= float(thresholds.early_creep_median_trend_pct_min)
-        and pullback_ok
     )
 
 
