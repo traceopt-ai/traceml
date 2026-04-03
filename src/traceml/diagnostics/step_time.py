@@ -115,7 +115,7 @@ class StepDiagnosis(BaseDiagnosis):
 
 
 @dataclass(frozen=True)
-class LocalSignal:
+class ComputeSignal:
     """
     Dominant local-work signal used for attribution.
 
@@ -624,11 +624,11 @@ def _dominant_compute_signal(
     optimizer: Optional[StepCombinedTimeMetric],
     step_total: float,
     single_rank: bool,
-) -> Optional[LocalSignal]:
+) -> Optional[ComputeSignal]:
     """
     Pick the compute component with strongest skew, then strongest share.
     """
-    candidates: list[LocalSignal] = []
+    candidates: list[ComputeSignal] = []
 
     for label, metric in (
         ("Forward", forward),
@@ -643,7 +643,7 @@ def _dominant_compute_signal(
             continue
 
         candidates.append(
-            LocalSignal(
+            ComputeSignal(
                 label=label,
                 share=_share(total, step_total),
                 skew=_metric_skew(metric, single_rank),
@@ -686,6 +686,6 @@ __all__ = [
     "DiagnosisThresholds",
     "DEFAULT_THRESHOLDS",
     "StepDiagnosis",
-    "LocalSignal",
+    "ComputeSignal",
     "build_step_diagnosis",
 ]
