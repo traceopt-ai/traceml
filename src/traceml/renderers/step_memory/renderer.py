@@ -158,7 +158,7 @@ class StepMemoryRenderer(BaseRenderer):
         # This is helpful for spotting monotonic growth / fragmentation.
         table.add_row("")
         table.add_row(
-            "Worst Trend (Δ)",
+            "Window Delta (worst)",
             *[self._format_worst_trend_delta(m) for m in metrics],
         )
 

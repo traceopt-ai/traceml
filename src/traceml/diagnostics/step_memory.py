@@ -4,8 +4,9 @@ Step-memory diagnosis logic shared by live renderers and summaries.
 Semantics
 ---------
 - Input values are bytes.
-- Diagnosis is conservative (low false positives).
-- Creep detection requires strong statistical gates.
+- Diagnosis is conservative for confirmed creep.
+- Early creep detection is intentionally lighter-weight so short live windows
+  can surface meaningful upward drift before long-window confirmation exists.
 """
 
 from dataclasses import dataclass
@@ -42,7 +43,13 @@ _STATUS_BY_KIND = {
 @dataclass(frozen=True)
 class StepMemoryDiagnosisThresholds:
     """
-    Conservative thresholds for step-memory diagnosis.
+    Thresholds for step-memory diagnosis.
+
+    Notes
+    -----
+    - Confirmed creep remains strict through StepMemoryTrendHeuristics.
+    - Early creep is deliberately lighter so shorter live windows can surface
+      obvious upward-drift issues without waiting for long-horizon confirmation.
     """
 
     min_steps_for_confident_diag: int = 80
@@ -56,7 +63,7 @@ class StepMemoryDiagnosisThresholds:
     trend: StepMemoryTrendHeuristics = DEFAULT_STEP_MEMORY_TREND_HEURISTICS
 
     early_creep_min_steps: int = 80
-    early_creep_abs_delta_bytes_min: float = 256.0 * 1024.0 * 1024.0
+    early_creep_abs_delta_bytes_min: float = 256.0 * 1024.0 * 1024.0  # 256 MiB
     early_creep_worst_trend_pct_min: float = 0.03
     early_creep_median_trend_pct_min: float = 0.01
 
@@ -79,6 +86,21 @@ class StepMemoryDiagnosis(BaseDiagnosis):
 
     def __post_init__(self) -> None:
         validate_confidence(self.confidence)
+
+
+@dataclass(frozen=True)
+class EarlyCreepEvidence:
+    """
+    Lightweight visible-window evidence for short-horizon memory creep.
+
+    This is separate from the stricter long-window trend engine used for
+    confirmed creep detection.
+    """
+
+    eligible: bool
+    abs_delta_bytes: Optional[float]
+    worst_trend_pct: Optional[float]
+    median_trend_pct: Optional[float]
 
 
 def build_step_memory_diagnosis(
@@ -137,6 +159,12 @@ def build_step_memory_diagnosis(
         median_series_bytes=metric.series.median,
         cfg=thresholds.trend,
     )
+    early_ev = _evaluate_early_creep(
+        steps_used=steps_used,
+        worst_series_bytes=metric.series.worst,
+        median_series_bytes=metric.series.median,
+        min_steps=thresholds.early_creep_min_steps,
+    )
 
     # 1) HIGH PRESSURE
     if (
@@ -144,7 +172,10 @@ def build_step_memory_diagnosis(
         and pressure_frac >= thresholds.pressure_warn_fraction
     ):
         sev = _severity(pressure_frac, thresholds.pressure_crit_fraction)
-        note = _trend_note(metric_name=metric.metric, trend_ev=trend_ev)
+        note = _merge_notes(
+            _trend_note(metric_name=metric.metric, trend_ev=trend_ev),
+            _early_trend_note(metric_name=metric.metric, early_ev=early_ev),
+        )
         return _mk_diag(
             kind="HIGH_PRESSURE",
             severity=sev,
@@ -163,7 +194,10 @@ def build_step_memory_diagnosis(
     # 2) IMBALANCE
     if skew_pct >= thresholds.imbalance_skew_warn:
         sev = _severity(skew_pct, thresholds.imbalance_skew_crit)
-        note = _trend_note(metric_name=metric.metric, trend_ev=trend_ev)
+        note = _merge_notes(
+            _trend_note(metric_name=metric.metric, trend_ev=trend_ev),
+            _early_trend_note(metric_name=metric.metric, early_ev=early_ev),
+        )
         return _mk_diag(
             kind="IMBALANCE",
             severity=sev,
@@ -197,11 +231,7 @@ def build_step_memory_diagnosis(
         )
 
     # 4) MEMORY CREEP (early)
-    if _is_early_creep_signal(
-        steps_used=steps_used,
-        trend_ev=trend_ev,
-        thresholds=thresholds,
-    ):
+    if _is_early_creep_signal(early_ev=early_ev, thresholds=thresholds):
         return _mk_diag(
             kind="CREEP_EARLY",
             severity="info",
@@ -209,14 +239,16 @@ def build_step_memory_diagnosis(
             steps_used=steps_used,
             worst_rank=worst_rank,
             reason=(
-                f"{metric.metric.replace('_', ' ')} is rising in the current window "
+                f"{metric.metric.replace('_', ' ')} is rising in the visible window "
                 "and already shows an early creep signal."
             ),
             action=(
                 "Monitor continued growth; confirm with longer history before "
                 "treating this as a high-confidence leak."
             ),
-            note=_trend_note(metric_name=metric.metric, trend_ev=trend_ev),
+            note=_early_trend_note(
+                metric_name=metric.metric, early_ev=early_ev
+            ),
             confidence=0.55,
         )
 
@@ -229,7 +261,10 @@ def build_step_memory_diagnosis(
         worst_rank=worst_rank,
         reason="No strong memory pressure, imbalance, or confirmed creep signal.",
         action="Keep monitoring memory trends while optimizing throughput.",
-        note=_trend_note(metric_name=metric.metric, trend_ev=trend_ev),
+        note=_merge_notes(
+            _trend_note(metric_name=metric.metric, trend_ev=trend_ev),
+            _early_trend_note(metric_name=metric.metric, early_ev=early_ev),
+        ),
         confidence=0.75,
     )
 
@@ -237,19 +272,131 @@ def build_step_memory_diagnosis(
 def _select_primary_metric(
     metrics: Sequence[StepMemoryCombinedMetric],
 ) -> Optional[StepMemoryCombinedMetric]:
-    by_name = {}
-    for m in metrics:
-        key = str(getattr(m, "metric", "") or "")
-        if key:
-            by_name[key] = m
+    """
+    Select the most informative memory metric for diagnosis.
 
-    if "peak_reserved" in by_name:
-        return by_name["peak_reserved"]
-    if "peak_allocated" in by_name:
-        return by_name["peak_allocated"]
+    Policy
+    ------
+    - If both reserved and allocated exist, choose the one with the larger
+      visible upward delta in the worst series.
+    - This allows live diagnosis to react to the stronger creep signal instead
+      of always defaulting to reserved memory.
+    - Fall back to reserved, then allocated, then first available metric.
+    """
+    by_name = {}
+    for metric in metrics:
+        key = str(getattr(metric, "metric", "") or "")
+        if key:
+            by_name[key] = metric
+
+    reserved = by_name.get("peak_reserved")
+    allocated = by_name.get("peak_allocated")
+
+    if reserved is not None and allocated is not None:
+        reserved_delta = _worst_series_delta(reserved)
+        allocated_delta = _worst_series_delta(allocated)
+        if allocated_delta > reserved_delta:
+            return allocated
+        return reserved
+
+    if reserved is not None:
+        return reserved
+    if allocated is not None:
+        return allocated
     if metrics:
         return metrics[0]
     return None
+
+
+def _worst_series_delta(metric: StepMemoryCombinedMetric) -> float:
+    """
+    Return the visible worst-series delta over the current window.
+    """
+    try:
+        values = metric.series.worst
+        if not values or len(values) < 2:
+            return 0.0
+        return max(0.0, float(values[-1]) - float(values[0]))
+    except Exception:
+        return 0.0
+
+
+def _evaluate_early_creep(
+    *,
+    steps_used: int,
+    worst_series_bytes: Sequence[float],
+    median_series_bytes: Sequence[float],
+    min_steps: int,
+) -> EarlyCreepEvidence:
+    """
+    Compute lightweight early-creep evidence directly from the visible window.
+
+    This intentionally does not depend on the strict long-window creep engine.
+    """
+    if int(steps_used) < int(min_steps):
+        return EarlyCreepEvidence(
+            eligible=False,
+            abs_delta_bytes=None,
+            worst_trend_pct=None,
+            median_trend_pct=None,
+        )
+
+    worst = _clean_series(worst_series_bytes)
+    median = _clean_series(median_series_bytes)
+
+    if len(worst) < 2 or len(median) < 2:
+        return EarlyCreepEvidence(
+            eligible=False,
+            abs_delta_bytes=None,
+            worst_trend_pct=None,
+            median_trend_pct=None,
+        )
+
+    worst_delta = float(worst[-1] - worst[0])
+    worst_baseline = max(1.0, float(sum(worst) / len(worst)))
+    median_baseline = max(1.0, float(sum(median) / len(median)))
+
+    return EarlyCreepEvidence(
+        eligible=True,
+        abs_delta_bytes=worst_delta,
+        worst_trend_pct=worst_delta / worst_baseline,
+        median_trend_pct=float(median[-1] - median[0]) / median_baseline,
+    )
+
+
+def _clean_series(values: Sequence[float]) -> list[float]:
+    out = []
+    for value in values:
+        try:
+            number = float(value)
+        except Exception:
+            number = 0.0
+        out.append(max(0.0, number))
+    return out
+
+
+def _is_early_creep_signal(
+    *,
+    early_ev: EarlyCreepEvidence,
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> bool:
+    if not early_ev.eligible:
+        return False
+    if early_ev.abs_delta_bytes is None:
+        return False
+    if early_ev.worst_trend_pct is None:
+        return False
+    if early_ev.median_trend_pct is None:
+        return False
+
+    return bool(
+        float(early_ev.abs_delta_bytes)
+        >= float(thresholds.early_creep_abs_delta_bytes_min)
+        and float(early_ev.worst_trend_pct)
+        >= float(thresholds.early_creep_worst_trend_pct_min)
+        and float(early_ev.median_trend_pct)
+        >= float(thresholds.early_creep_median_trend_pct_min)
+    )
 
 
 def _mk_diag(
@@ -348,6 +495,39 @@ def _trend_note(
     return f"{metric_name}: " + ", ".join(parts)
 
 
+def _early_trend_note(
+    *,
+    metric_name: str,
+    early_ev: EarlyCreepEvidence,
+) -> Optional[str]:
+    if not early_ev.eligible:
+        return None
+
+    parts = []
+
+    if early_ev.abs_delta_bytes is not None:
+        parts.append(f"window_Δ={_fmt_bytes(early_ev.abs_delta_bytes)}")
+    if early_ev.worst_trend_pct is not None:
+        parts.append(
+            f"worst_window_trend={early_ev.worst_trend_pct * 100.0:.1f}%"
+        )
+    if early_ev.median_trend_pct is not None:
+        parts.append(
+            f"median_window_trend={early_ev.median_trend_pct * 100.0:.1f}%"
+        )
+
+    if not parts:
+        return None
+    return f"{metric_name}: " + ", ".join(parts)
+
+
+def _merge_notes(*notes: Optional[str]) -> Optional[str]:
+    parts = [note for note in notes if note]
+    if not parts:
+        return None
+    return " | ".join(parts)
+
+
 def _fmt_bytes(v: float) -> str:
     x = abs(float(v))
     kib = 1024.0
@@ -369,30 +549,3 @@ __all__ = [
     "StepMemoryDiagnosis",
     "build_step_memory_diagnosis",
 ]
-
-
-def _is_early_creep_signal(
-    *,
-    steps_used: int,
-    trend_ev,
-    thresholds: StepMemoryDiagnosisThresholds,
-) -> bool:
-    if trend_ev is None:
-        return False
-    if steps_used < int(thresholds.early_creep_min_steps):
-        return False
-    if trend_ev.abs_delta_bytes is None:
-        return False
-    if trend_ev.worst_trend_pct is None:
-        return False
-    if trend_ev.median_trend_pct is None:
-        return False
-
-    return bool(
-        float(trend_ev.abs_delta_bytes)
-        >= float(thresholds.early_creep_abs_delta_bytes_min)
-        and float(trend_ev.worst_trend_pct)
-        >= float(thresholds.early_creep_worst_trend_pct_min)
-        and float(trend_ev.median_trend_pct)
-        >= float(thresholds.early_creep_median_trend_pct_min)
-    )
