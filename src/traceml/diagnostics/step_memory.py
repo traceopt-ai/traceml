@@ -221,11 +221,8 @@ def build_step_memory_diagnosis(
             metric=metric.metric,
             steps_used=steps_used,
             worst_rank=worst_rank,
-            reason=(
-                f"{metric.metric.replace('_', ' ')} shows persistent upward drift "
-                "with absolute and slope confirmation."
-            ),
-            action="Check retained tensors/caches and allocator fragmentation patterns.",
+            reason=f"{metric.metric.replace('_', ' ')} shows sustained upward drift.",
+            action="Check retained tensors, caches, or fragmentation.",
             note=_trend_note(metric_name=metric.metric, trend_ev=trend_ev),
             confidence=0.9,
         )
@@ -238,14 +235,8 @@ def build_step_memory_diagnosis(
             metric=metric.metric,
             steps_used=steps_used,
             worst_rank=worst_rank,
-            reason=(
-                f"{metric.metric.replace('_', ' ')} is rising in the visible window "
-                "and already shows an early creep signal."
-            ),
-            action=(
-                "Monitor continued growth; confirm with longer history before "
-                "treating this as a high-confidence leak."
-            ),
+            reason=f"{metric.metric.replace('_', ' ')} is trending upward.",
+            action="Watch for continued growth.",
             note=_early_trend_note(
                 metric_name=metric.metric, early_ev=early_ev
             ),
