@@ -24,7 +24,7 @@ MAX_LENGTH = 128
 MAX_TRAIN_EXAMPLES = 40000
 MAX_VAL_EXAMPLES = 0
 
-BATCH_SIZE = 128
+BATCH_SIZE = 16
 EPOCHS = 8
 LR = 2e-6
 WARMUP_RATIO = 0.06
@@ -212,7 +212,7 @@ def main() -> None:
                 loss = out.loss
                 logits = out.logits
 
-                maybe_inject_straggler(rank, global_step, phase="backward")
+                # maybe_inject_straggler(rank, global_step, phase="backward")
                 scaler.scale(loss).backward()
 
                 maybe_inject_straggler(rank, global_step, phase="optimizer")
