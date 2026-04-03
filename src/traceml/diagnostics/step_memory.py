@@ -62,10 +62,11 @@ class StepMemoryDiagnosisThresholds:
 
     trend: StepMemoryTrendHeuristics = DEFAULT_STEP_MEMORY_TREND_HEURISTICS
 
-    early_creep_min_steps: int = 80
-    early_creep_abs_delta_bytes_min: float = 256.0 * 1024.0 * 1024.0  # 256 MiB
-    early_creep_worst_trend_pct_min: float = 0.03
-    early_creep_median_trend_pct_min: float = 0.01
+    early_creep_min_steps: int = 100
+    early_creep_abs_delta_bytes_min: float = 768.0 * 1024.0 * 1024.0  # 768 MiB
+    early_creep_worst_trend_pct_min: float = 0.06
+    early_creep_median_trend_pct_min: float = 0.03
+    early_creep_pullback_max: float = 0.03
 
 
 DEFAULT_STEP_MEMORY_THRESHOLDS = StepMemoryDiagnosisThresholds()
