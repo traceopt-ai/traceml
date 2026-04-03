@@ -231,6 +231,14 @@ def build_step_diagnosis(
     opt = by_key.get("optimizer_step")
 
     step_skew = _metric_skew(step, single_rank)
+    burden_skew = _overall_burden_skew(
+        dataloader=dl,
+        step=step,
+        forward=fwd,
+        backward=bwd,
+        optimizer=opt,
+        single_rank=single_rank,
+    )
 
     dl_share = _share(_metric_total(dl, single_rank), step_total)
     dl_skew = _metric_skew(dl, single_rank)
@@ -280,9 +288,9 @@ def build_step_diagnosis(
         return _finalize(diag) if apply_trend else diag
 
     # 1) STRAGGLER
-    if not single_rank and step_skew >= thresholds.straggler_skew_warn:
+    if not single_rank and burden_skew >= thresholds.straggler_skew_warn:
         rank_str = _rank_str(overall_worst_rank)
-        severity = _severity(step_skew, thresholds.straggler_skew_crit)
+        severity = _severity(burden_skew, thresholds.straggler_skew_crit)
 
         if (
             dl_share >= thresholds.straggler_dl_share_min
@@ -293,7 +301,7 @@ def build_step_diagnosis(
                 kind="STRAGGLER",
                 severity=severity,
                 reason=(
-                    f"Step skew is +{_pct(step_skew)}; "
+                    f"Overall burden skew is +{_pct(burden_skew)}; "
                     f"{rank_str} also leads dataloader imbalance."
                 ),
                 action=f"Check input loading on {rank_str}.",
@@ -310,7 +318,7 @@ def build_step_diagnosis(
                 kind="STRAGGLER",
                 severity=severity,
                 reason=(
-                    f"Step skew is +{_pct(step_skew)}; "
+                    f"Overall burden skew is +{_pct(burden_skew)}; "
                     f"{dominant_compute.label} is most imbalanced on {rank_str}."
                 ),
                 action=f"Inspect {dominant_compute.label.lower()} on {rank_str}.",
@@ -322,7 +330,7 @@ def build_step_diagnosis(
                 kind="STRAGGLER",
                 severity=severity,
                 reason=(
-                    f"Step skew is +{_pct(step_skew)}; "
+                    f"Overall burden skew is +{_pct(burden_skew)}; "
                     f"WAIT* is elevated on {rank_str}."
                 ),
                 action=f"Inspect sync / CPU stalls on {rank_str}.",
@@ -333,7 +341,7 @@ def build_step_diagnosis(
             kind="STRAGGLER",
             severity=severity,
             reason=(
-                f"Step skew is +{_pct(step_skew)}; "
+                f"Overall burden skew is +{_pct(burden_skew)}; "
                 f"worst rank is {rank_str}."
             ),
             action=f"Inspect slower work on {rank_str}.",
@@ -431,6 +439,63 @@ def _metric_total(
     return _non_negative_finite(raw)
 
 
+def _overall_burden_summary(
+    *,
+    dataloader: Optional[StepCombinedTimeMetric],
+    step: Optional[StepCombinedTimeMetric],
+    forward: Optional[StepCombinedTimeMetric],
+    backward: Optional[StepCombinedTimeMetric],
+    optimizer: Optional[StepCombinedTimeMetric],
+    single_rank: bool,
+) -> tuple[float, float]:
+    """
+    Return median-visible and worst-visible overall step burden.
+
+    The burden definition matches the renderer's dashboard ranking logic:
+        dataloader_fetch + max(step_time, forward + backward + optimizer_step)
+
+    Notes
+    -----
+    - For multi-rank runs we compute burden from median and worst summaries.
+    - This is an intentionally stable approximation for diagnosis.
+    """
+
+    def _pick(metric: Optional[StepCombinedTimeMetric], which: str) -> float:
+        if metric is None:
+            return 0.0
+        raw = (
+            metric.summary.worst_total
+            if which == "worst"
+            else metric.summary.median_total
+        )
+        return _non_negative_finite(raw)
+
+    dl_med = _pick(dataloader, "median")
+    dl_worst = _pick(dataloader, "worst")
+
+    step_med = _pick(step, "median")
+    step_worst = _pick(step, "worst")
+
+    compute_med = (
+        _pick(forward, "median")
+        + _pick(backward, "median")
+        + _pick(optimizer, "median")
+    )
+    compute_worst = (
+        _pick(forward, "worst")
+        + _pick(backward, "worst")
+        + _pick(optimizer, "worst")
+    )
+
+    visible_median = dl_med + max(step_med, compute_med)
+    visible_worst = dl_worst + max(step_worst, compute_worst)
+
+    if single_rank:
+        visible_median = visible_worst
+
+    return visible_median, visible_worst
+
+
 def _metric_skew(
     metric: Optional[StepCombinedTimeMetric],
     single_rank: bool,
@@ -439,6 +504,38 @@ def _metric_skew(
     if metric is None or single_rank:
         return 0.0
     return _non_negative_finite(metric.summary.skew_pct)
+
+
+def _overall_burden_skew(
+    *,
+    dataloader: Optional[StepCombinedTimeMetric],
+    step: Optional[StepCombinedTimeMetric],
+    forward: Optional[StepCombinedTimeMetric],
+    backward: Optional[StepCombinedTimeMetric],
+    optimizer: Optional[StepCombinedTimeMetric],
+    single_rank: bool,
+) -> float:
+    """
+    Return skew of the combined overall step burden.
+
+    This is used for straggler detection instead of step_time skew alone.
+    """
+    if single_rank:
+        return 0.0
+
+    median_total, worst_total = _overall_burden_summary(
+        dataloader=dataloader,
+        step=step,
+        forward=forward,
+        backward=backward,
+        optimizer=optimizer,
+        single_rank=single_rank,
+    )
+
+    if median_total <= 0.0:
+        return 0.0
+
+    return max(0.0, (worst_total - median_total) / median_total)
 
 
 def _metric_worst_rank(
