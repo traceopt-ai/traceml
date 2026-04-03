@@ -1,10 +1,11 @@
 """
 Formatting helpers for step-memory diagnosis.
 
-These helpers intentionally keep CLI output compact and high-signal:
-- short colored status
-- concise reason/action lines
-- compact stats line with only the most useful fields
+The CLI/dashboard output is intentionally compact:
+- short status
+- short reason
+- short next step
+- one optional compact stats line
 """
 
 from __future__ import annotations
@@ -18,25 +19,23 @@ def _styled_status(diagnosis: StepMemoryDiagnosis) -> str:
 
     Color policy
     ------------
-    - confirmed/high-risk states: red or yellow
-    - early creep / watch-like states: yellow
-    - balanced: green
-    - no data: dim
+    - BALANCED: green
+    - NO DATA: dim
+    - EARLY issues: yellow
+    - CONFIRMED / critical issues: red or yellow depending on severity
     """
     if diagnosis.kind == "BALANCED":
         style = "bold green"
     elif diagnosis.kind == "NO_DATA":
         style = "bold bright_black"
-    elif diagnosis.kind in {"CREEP_EARLY", "IMBALANCE", "HIGH_PRESSURE"}:
+    elif diagnosis.kind in {"CREEP_EARLY", "IMBALANCE"}:
         style = "bold yellow"
+    elif diagnosis.kind == "HIGH_PRESSURE":
+        style = "bold red" if diagnosis.severity == "crit" else "bold yellow"
     elif diagnosis.kind == "CREEP_CONFIRMED":
         style = "bold red"
     else:
-        style = {
-            "crit": "bold red",
-            "warn": "bold yellow",
-            "info": "bold",
-        }.get(diagnosis.severity, "bold")
+        style = "bold"
 
     return f"[{style}]{diagnosis.status}[/{style}]"
 
@@ -49,13 +48,10 @@ def format_cli_diagnosis(diagnosis: StepMemoryDiagnosis) -> str:
     lines = [
         f"[bold]Issue:[/bold] {status}",
         f"[bold]Why:[/bold] {diagnosis.reason}",
-        f"[bold]Hint:[/bold] {diagnosis.action}",
+        f"[bold]Next:[/bold] {diagnosis.action}",
     ]
-
-    stats = _compact_note(diagnosis.note)
-    if stats:
-        lines.append(f"[bold]Stats:[/bold] {stats}")
-
+    if diagnosis.note:
+        lines.append(f"[bold]Stats:[/bold] {diagnosis.note}")
     return "\n".join(lines)
 
 
@@ -74,62 +70,6 @@ def format_dashboard_diagnosis(diagnosis: StepMemoryDiagnosis) -> str:
         f"**Next:** {diagnosis.action}  \n"
         f"{meta}"
     )
-
-    stats = _compact_note(diagnosis.note)
-    if stats:
-        text += f"  \n*Stats:* {stats}"
-
+    if diagnosis.note:
+        text += f"  \n*Stats:* {diagnosis.note}"
     return text
-
-
-def _compact_note(note: str | None) -> str | None:
-    """
-    Compress verbose diagnostic note text into a smaller CLI-friendly form.
-
-    Examples
-    --------
-    Input:
-      peak_allocated: window_Δ=3.30 GiB, worst_window_trend=20.5%, median_window_trend=20.5%
-
-    Output:
-      delta=3.30 GiB, trend=20.5%
-    """
-    if not note:
-        return None
-
-    value = str(note).strip()
-    if not value:
-        return None
-
-    if ": " in value:
-        _, value = value.split(": ", 1)
-
-    parts = []
-    for chunk in value.split(","):
-        item = chunk.strip()
-        if not item:
-            continue
-
-        if item.startswith("window_Δ="):
-            parts.append("delta=" + item.split("=", 1)[1])
-        elif item.startswith("Δ="):
-            parts.append("delta=" + item.split("=", 1)[1])
-        elif item.startswith("worst_window_trend="):
-            parts.append("trend=" + item.split("=", 1)[1])
-        elif item.startswith("worst_trend="):
-            parts.append("trend=" + item.split("=", 1)[1])
-        elif item.startswith("median_window_trend="):
-            continue
-        elif item.startswith("median_trend="):
-            continue
-        elif item.startswith("worst_slope="):
-            parts.append("slope=" + item.split("=", 1)[1])
-        elif item.startswith("weak_recovery="):
-            parts.append(item)
-        elif item.startswith("median_slope="):
-            continue
-
-    if not parts:
-        return value
-
-    return ", ".join(parts[:3])
