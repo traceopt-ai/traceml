@@ -25,7 +25,7 @@ StepMemoryDiagnosisKind = Literal[
     "BALANCED",
     "HIGH_PRESSURE",
     "IMBALANCE",
-    "CREEP_WATCH",
+    "CREEP_EARLY",
     "CREEP_CONFIRMED",
 ]
 
@@ -34,7 +34,7 @@ _STATUS_BY_KIND = {
     "BALANCED": "BALANCED",
     "HIGH_PRESSURE": "HIGH PRESSURE",
     "IMBALANCE": "IMBALANCE",
-    "CREEP_WATCH": "CREEP WATCH",
+    "CREEP_EARLY": "MEMORY CREEP",
     "CREEP_CONFIRMED": "CREEP CONFIRMED",
 }
 
@@ -54,6 +54,11 @@ class StepMemoryDiagnosisThresholds:
     pressure_crit_fraction: float = 0.97
 
     trend: StepMemoryTrendHeuristics = DEFAULT_STEP_MEMORY_TREND_HEURISTICS
+
+    early_creep_min_steps: int = 80
+    early_creep_abs_delta_bytes_min: float = 256.0 * 1024.0 * 1024.0
+    early_creep_worst_trend_pct_min: float = 0.03
+    early_creep_median_trend_pct_min: float = 0.01
 
 
 DEFAULT_STEP_MEMORY_THRESHOLDS = StepMemoryDiagnosisThresholds()
@@ -90,7 +95,7 @@ def build_step_memory_diagnosis(
     1) HIGH_PRESSURE
     2) IMBALANCE
     3) CREEP_CONFIRMED
-    4) CREEP_WATCH
+    4) CREEP_EARLY
     5) BALANCED
     """
     metric = _select_primary_metric(metrics)
@@ -191,21 +196,28 @@ def build_step_memory_diagnosis(
             confidence=0.9,
         )
 
-    # 4) CREEP WATCH
-    if trend_ev.watch:
+    # 4) MEMORY CREEP (early)
+    if _is_early_creep_signal(
+        steps_used=steps_used,
+        trend_ev=trend_ev,
+        thresholds=thresholds,
+    ):
         return _mk_diag(
-            kind="CREEP_WATCH",
+            kind="CREEP_EARLY",
             severity="info",
             metric=metric.metric,
             steps_used=steps_used,
             worst_rank=worst_rank,
             reason=(
-                f"{metric.metric.replace('_', ' ')} is trending up, "
-                "but confirmation gates are not all satisfied yet."
+                f"{metric.metric.replace('_', ' ')} is rising in the current window "
+                "and already shows an early creep signal."
             ),
-            action="Continue monitoring; require sustained growth before remediation.",
+            action=(
+                "Monitor continued growth; confirm with longer history before "
+                "treating this as a high-confidence leak."
+            ),
             note=_trend_note(metric_name=metric.metric, trend_ev=trend_ev),
-            confidence=0.6,
+            confidence=0.55,
         )
 
     # 5) BALANCED
@@ -357,3 +369,30 @@ __all__ = [
     "StepMemoryDiagnosis",
     "build_step_memory_diagnosis",
 ]
+
+
+def _is_early_creep_signal(
+    *,
+    steps_used: int,
+    trend_ev,
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> bool:
+    if trend_ev is None:
+        return False
+    if steps_used < int(thresholds.early_creep_min_steps):
+        return False
+    if trend_ev.abs_delta_bytes is None:
+        return False
+    if trend_ev.worst_trend_pct is None:
+        return False
+    if trend_ev.median_trend_pct is None:
+        return False
+
+    return bool(
+        float(trend_ev.abs_delta_bytes)
+        >= float(thresholds.early_creep_abs_delta_bytes_min)
+        and float(trend_ev.worst_trend_pct)
+        >= float(thresholds.early_creep_worst_trend_pct_min)
+        and float(trend_ev.median_trend_pct)
+        >= float(thresholds.early_creep_median_trend_pct_min)
+    )
