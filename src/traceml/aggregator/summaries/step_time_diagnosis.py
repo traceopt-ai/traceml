@@ -50,22 +50,29 @@ class SummaryDiagnosisConfig:
     """
     Configuration for summary-mode diagnosis behavior.
 
-    Thresholds are stricter than live diagnostics because post-run summaries
-    should favor precision over sensitivity.
+    Thresholds are slightly stricter than live diagnostics because post-run
+    summaries should favor precision over sensitivity.
     """
 
     thresholds: DiagnosisThresholds = field(
         default_factory=lambda: DiagnosisThresholds(
-            straggler_skew_warn=0.10,
-            straggler_skew_crit=0.18,
+            distributed_effect_warn=0.10,
+            distributed_effect_crit=0.18,
             input_share_warn=0.30,
             input_share_crit=0.40,
             wait_share_warn=0.18,
             wait_share_crit=0.28,
+            input_skew_warn=0.12,
+            input_skew_crit=0.22,
             compute_skew_warn=0.12,
             compute_skew_crit=0.22,
             compute_share_min=0.12,
+            input_bound_max_skew=0.05,
+            compute_bound_max_skew=0.05,
+            compute_bound_share_warn=0.88,
+            compute_bound_share_crit=0.94,
             low_step_skew=0.04,
+            min_steps_for_confident_diag=20,
         )
     )
     min_steps_for_diag: int = 20

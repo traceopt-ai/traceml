@@ -3,10 +3,12 @@ Conservative trend heuristics for step-time diagnosis.
 
 Design goals
 ------------
-- Never crash diagnosis flow (all failures are swallowed).
-- Avoid false positives by using trend only as a confirmation note.
-- Reusable helper for live CLI and summary contexts.
+- Never break diagnosis flow.
+- Trend should annotate, not dominate, the primary diagnosis.
+- Work with the live renderer window instead of requiring very long history.
 """
+
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -28,7 +30,7 @@ class StepTrendHeuristicConfig:
     """
 
     enabled: bool = True
-    min_steps: int = 200
+    min_steps: int = 80
     deadband_pct: float = 0.03
     worsening_threshold_pct: float = 0.08
     improving_threshold_pct: float = 0.08
@@ -45,9 +47,7 @@ def _safe_metric_trend_pct(
     single_rank: bool,
     cfg: StepTrendHeuristicConfig,
 ) -> Optional[float]:
-    """
-    Safely compute trend percentage for one metric.
-    """
+    """Safely compute trend percentage for one metric."""
     try:
         if metric is None or metric.series is None:
             return None
@@ -64,9 +64,7 @@ def _trend_state(
     *,
     cfg: StepTrendHeuristicConfig,
 ) -> Optional[str]:
-    """
-    Map trend ratio to a coarse state.
-    """
+    """Map trend ratio to a coarse state."""
     if pct is None:
         return None
     if pct >= cfg.worsening_threshold_pct:
@@ -92,12 +90,6 @@ def build_step_trend_note(
 ) -> Optional[str]:
     """
     Build one optional trend note for a step diagnosis.
-
-    Returns
-    -------
-    Optional[str]
-        Human-readable note if a high-confidence trend confirmation exists.
-        Returns None otherwise.
     """
     try:
         if not cfg.enabled or steps_used < cfg.min_steps:
@@ -117,28 +109,39 @@ def build_step_trend_note(
         wait_state = _trend_state(wait_tr, cfg=cfg)
         dl_state = _trend_state(dl_tr, cfg=cfg)
 
-        # WAIT_HEAVY: only annotate if wait is clearly moving.
-        if diagnosis_kind == "WAIT_HEAVY" and wait_state is not None:
-            return f"Trend: WAIT* is {wait_state} ({format_trend_pct(wait_tr, deadband_pct=cfg.deadband_pct)})."
+        if diagnosis_kind in {"INPUT_BOUND", "INPUT_STRAGGLER"} and dl_state:
+            return (
+                "Trend: dataloader is "
+                f"{dl_state} ({format_trend_pct(dl_tr, deadband_pct=cfg.deadband_pct)})."
+            )
 
-        # INPUT_BOUND: confirm dataloader trajectory.
-        if diagnosis_kind == "INPUT_BOUND" and dl_state is not None:
-            return f"Trend: dataloader time is {dl_state} ({format_trend_pct(dl_tr, deadband_pct=cfg.deadband_pct)})."
-
-        # STRAGGLER / COMPUTE_IMBALANCE: confirm top-level step trajectory.
         if (
-            diagnosis_kind in {"STRAGGLER", "COMPUTE_IMBALANCE"}
-            and step_state is not None
+            diagnosis_kind
+            in {
+                "COMPUTE_BOUND",
+                "COMPUTE_STRAGGLER",
+                "STRAGGLER",
+            }
+            and step_state
         ):
-            return f"Trend: step time is {step_state} ({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
+            return (
+                "Trend: step time is "
+                f"{step_state} ({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
+            )
 
-        # BALANCED: only warn if strong rise and near warning zones (very conservative).
+        if diagnosis_kind == "WAIT_HEAVY" and wait_state:
+            return (
+                "Trend: WAIT* is "
+                f"{wait_state} ({format_trend_pct(wait_tr, deadband_pct=cfg.deadband_pct)})."
+            )
+
         near_wait_warn = wait_share >= (
             wait_warn_threshold * cfg.near_warn_fraction
         )
         near_input_warn = dataloader_share >= (
             input_warn_threshold * cfg.near_warn_fraction
         )
+
         if (
             diagnosis_kind == "BALANCED"
             and step_state == "worsening"
@@ -146,11 +149,9 @@ def build_step_trend_note(
         ):
             return (
                 "Trend: step time is rising "
-                f"({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)}) "
-                "and is nearing warning ranges."
+                f"({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
             )
 
         return None
     except Exception:
-        # Hard safety requirement: heuristics must never break rendering/training.
         return None
