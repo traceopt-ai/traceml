@@ -5,8 +5,23 @@ Semantics
 ---------
 - `step_time` excludes dataloader fetch time.
 - `wait_proxy = step_time - (forward + backward + optimizer_step)`.
-- `step_time.summary.worst_rank` is treated as the UI-visible overall worst rank.
+- DDP stragglers are diagnosed from two layers of evidence:
+  1. distributed effect:
+     - wall-clock skew and/or elevated wait
+  2. likely culprit:
+     - dataloader imbalance
+     - compute imbalance
+
+Policy
+------
+- If only a subset of ranks is materially slower, emit a straggler diagnosis.
+- If most/all ranks look similar, classify the run by dominant phase:
+  - INPUT_BOUND
+  - COMPUTE_BOUND
+- If waiting dominates without a clear culprit, emit WAIT_HEAVY.
 """
+
+from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
@@ -24,27 +39,40 @@ DiagnosisKind = Literal[
     "NO_DATA",
     "BALANCED",
     "STRAGGLER",
+    "INPUT_STRAGGLER",
+    "COMPUTE_STRAGGLER",
     "INPUT_BOUND",
+    "COMPUTE_BOUND",
     "WAIT_HEAVY",
-    "COMPUTE_IMBALANCE",
 ]
 
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "NO_DATA": "NO DATA",
     "BALANCED": "BALANCED",
     "STRAGGLER": "STRAGGLER",
+    "INPUT_STRAGGLER": "INPUT STRAGGLER",
+    "COMPUTE_STRAGGLER": "COMPUTE STRAGGLER",
     "INPUT_BOUND": "INPUT-BOUND",
+    "COMPUTE_BOUND": "COMPUTE-BOUND",
     "WAIT_HEAVY": "WAIT-HEAVY",
-    "COMPUTE_IMBALANCE": "COMPUTE-IMBALANCE",
 }
 
 
 @dataclass(frozen=True)
 class DiagnosisThresholds:
-    """Thresholds controlling diagnosis selection."""
+    """
+    Thresholds controlling diagnosis selection.
 
-    straggler_skew_warn: float = 0.10
-    straggler_skew_crit: float = 0.20
+    Design notes
+    ------------
+    - `distributed_effect_*` gates decide whether the window shows a multi-rank
+      slowdown effect at all.
+    - If effect exists, we attribute likely cause from dataloader or compute.
+    - If effect does not exist, we classify the run by dominant phase.
+    """
+
+    distributed_effect_warn: float = 0.10
+    distributed_effect_crit: float = 0.20
 
     input_share_warn: float = 0.25
     input_share_crit: float = 0.35
@@ -52,14 +80,20 @@ class DiagnosisThresholds:
     wait_share_warn: float = 0.15
     wait_share_crit: float = 0.25
 
+    input_skew_warn: float = 0.10
+    input_skew_crit: float = 0.20
+
     compute_skew_warn: float = 0.10
     compute_skew_crit: float = 0.20
     compute_share_min: float = 0.10
 
-    low_step_skew: float = 0.05
-    straggler_dl_share_min: float = 0.15
+    input_bound_max_skew: float = 0.06
+    compute_bound_max_skew: float = 0.06
 
-    # Count of steps required for a stable diagnosis.
+    compute_bound_share_warn: float = 0.85
+    compute_bound_share_crit: float = 0.92
+
+    low_step_skew: float = 0.05
     min_steps_for_confident_diag: int = 8
 
 
@@ -81,8 +115,13 @@ class StepDiagnosis(BaseDiagnosis):
 
 
 @dataclass(frozen=True)
-class ComputeSignal:
-    """Dominant compute-side signal used for diagnosis."""
+class LocalSignal:
+    """
+    Dominant local-work signal used for attribution.
+
+    `share` is measured against typical step time.
+    `skew` is cross-rank skew for the signal itself.
+    """
 
     label: str
     share: float
@@ -166,10 +205,10 @@ def build_step_diagnosis(
 
     Priority
     --------
-    1. STRAGGLER
+    1. INPUT_STRAGGLER / COMPUTE_STRAGGLER / STRAGGLER
     2. INPUT_BOUND
     3. WAIT_HEAVY
-    4. COMPUTE_IMBALANCE
+    4. COMPUTE_BOUND
     5. BALANCED
     """
     metric_names = [m.metric for m in metrics]
@@ -177,8 +216,8 @@ def build_step_diagnosis(
         return _mk_diag(
             kind="NO_DATA",
             severity="info",
-            reason="Duplicate metric keys found in diagnosis input.",
-            action="Check upstream metric aggregation for duplicate entries.",
+            reason="Duplicate metric keys in diagnosis input.",
+            action="Check upstream aggregation.",
             steps_used=0,
         )
 
@@ -197,10 +236,9 @@ def build_step_diagnosis(
     coverage = step.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
     steps_used = int(step.summary.steps_used)
-    overall_worst_rank = step.summary.worst_rank
+    overall_worst_rank = _metric_worst_rank(step)
 
     step_total = _metric_total(step, single_rank)
-
     if step_total <= 0.0:
         return _mk_diag(
             kind="NO_DATA",
@@ -215,11 +253,8 @@ def build_step_diagnosis(
         return _mk_diag(
             kind="NO_DATA",
             severity="info",
-            reason=(
-                f"Only {steps_used} steps available; "
-                "need more samples for a confident diagnosis."
-            ),
-            action="Wait for more completed steps in the window.",
+            reason=f"Only {steps_used} steps available.",
+            action="Wait for a fuller window.",
             steps_used=steps_used,
             worst_rank=overall_worst_rank,
         )
@@ -230,7 +265,25 @@ def build_step_diagnosis(
     bwd = by_key.get("backward")
     opt = by_key.get("optimizer_step")
 
+    dl_total = _metric_total(dl, single_rank)
+    wait_total = _metric_total(wait, single_rank)
+
+    dl_share = _share(dl_total, step_total)
+    wait_share = _share(wait_total, step_total)
+
     step_skew = _metric_skew(step, single_rank)
+    wait_skew = _metric_skew(wait, single_rank)
+    dl_skew = _metric_skew(dl, single_rank)
+    dl_worst_rank = _metric_worst_rank(dl)
+
+    dominant_compute = _dominant_compute_signal(
+        forward=fwd,
+        backward=bwd,
+        optimizer=opt,
+        step_total=step_total,
+        single_rank=single_rank,
+    )
+
     burden_skew = _overall_burden_skew(
         dataloader=dl,
         step=step,
@@ -240,19 +293,7 @@ def build_step_diagnosis(
         single_rank=single_rank,
     )
 
-    dl_share = _share(_metric_total(dl, single_rank), step_total)
-    dl_skew = _metric_skew(dl, single_rank)
-    dl_worst_rank = _metric_worst_rank(dl)
-
-    wait_share = _share(_metric_total(wait, single_rank), step_total)
-
-    dominant_compute = _dominant_compute_signal(
-        forward=fwd,
-        backward=bwd,
-        optimizer=opt,
-        step_total=step_total,
-        single_rank=single_rank,
-    )
+    distributed_effect = max(step_skew, wait_skew, burden_skew)
 
     def _finalize(diag: StepDiagnosis) -> StepDiagnosis:
         return _apply_trend_note(
@@ -287,80 +328,83 @@ def build_step_diagnosis(
         )
         return _finalize(diag) if apply_trend else diag
 
-    # 1) STRAGGLER
-    if not single_rank and burden_skew >= thresholds.straggler_skew_warn:
-        rank_str = _rank_str(overall_worst_rank)
-        severity = _severity(burden_skew, thresholds.straggler_skew_crit)
+    # 1) STRAGGLER FAMILY
+    if (
+        not single_rank
+        and distributed_effect >= thresholds.distributed_effect_warn
+    ):
+        severity = _severity(
+            distributed_effect, thresholds.distributed_effect_crit
+        )
 
         if (
-            dl_share >= thresholds.straggler_dl_share_min
-            and dl_skew >= thresholds.compute_skew_warn
-            and dl_worst_rank == overall_worst_rank
+            dl_worst_rank is not None
+            and dl_skew >= thresholds.input_skew_warn
+            and dl_share >= thresholds.compute_share_min
         ):
             return _emit(
-                kind="STRAGGLER",
+                kind="INPUT_STRAGGLER",
                 severity=severity,
                 reason=(
-                    f"Overall burden skew is +{_pct(burden_skew)}; "
-                    f"{rank_str} also leads dataloader imbalance."
+                    f"Dataloader is imbalanced (+{_pct(dl_skew)}) on "
+                    f"{_rank_str(dl_worst_rank)}."
                 ),
-                action=f"Check input loading on {rank_str}.",
-                worst_rank=overall_worst_rank,
+                action=f"Inspect input loading on {_rank_str(dl_worst_rank)}.",
+                worst_rank=dl_worst_rank,
+                note=(
+                    f"Distributed effect is +{_pct(distributed_effect)} across ranks."
+                ),
             )
 
         if (
             dominant_compute is not None
             and dominant_compute.skew >= thresholds.compute_skew_warn
             and dominant_compute.share >= thresholds.compute_share_min
-            and dominant_compute.worst_rank == overall_worst_rank
         ):
             return _emit(
-                kind="STRAGGLER",
+                kind="COMPUTE_STRAGGLER",
                 severity=severity,
                 reason=(
-                    f"Overall burden skew is +{_pct(burden_skew)}; "
-                    f"{dominant_compute.label} is most imbalanced on {rank_str}."
+                    f"{dominant_compute.label} is imbalanced "
+                    f"(+{_pct(dominant_compute.skew)}) on "
+                    f"{_rank_str(dominant_compute.worst_rank)}."
                 ),
-                action=f"Inspect {dominant_compute.label.lower()} on {rank_str}.",
-                worst_rank=overall_worst_rank,
+                action=(
+                    f"Inspect {dominant_compute.label.lower()} on "
+                    f"{_rank_str(dominant_compute.worst_rank)}."
+                ),
+                worst_rank=dominant_compute.worst_rank,
+                note=(
+                    f"Distributed effect is +{_pct(distributed_effect)} across ranks."
+                ),
             )
 
         if wait_share >= thresholds.wait_share_warn:
             return _emit(
                 kind="STRAGGLER",
                 severity=severity,
-                reason=(
-                    f"Overall burden skew is +{_pct(burden_skew)}; "
-                    f"WAIT* is elevated on {rank_str}."
-                ),
-                action=f"Inspect sync / CPU stalls on {rank_str}.",
+                reason=f"Ranks are diverging and WAIT* is elevated ({_pct(wait_share)}).",
+                action="Inspect sync points and uneven rank progress.",
                 worst_rank=overall_worst_rank,
+                note=f"Distributed effect is +{_pct(distributed_effect)} across ranks.",
             )
 
         return _emit(
             kind="STRAGGLER",
             severity=severity,
-            reason=(
-                f"Overall burden skew is +{_pct(burden_skew)}; "
-                f"worst rank is {rank_str}."
-            ),
-            action=f"Inspect slower work on {rank_str}.",
+            reason=f"Ranks are diverging (+{_pct(distributed_effect)} effect).",
+            action="Inspect the slowest rank and dominant phase.",
             worst_rank=overall_worst_rank,
         )
 
     # 2) INPUT-BOUND
-    if dl_share >= thresholds.input_share_warn:
-        reason = f"Dataloader is {_pct(dl_share)} of step time."
-        if not single_rank and dl_worst_rank is not None:
-            reason = (
-                f"Dataloader is {_pct(dl_share)} of step time; "
-                f"worst rank is {_rank_str(dl_worst_rank)}."
-            )
-
+    if dl_share >= thresholds.input_share_warn and (
+        single_rank or dl_skew <= thresholds.input_bound_max_skew
+    ):
         return _emit(
             kind="INPUT_BOUND",
             severity=_severity(dl_share, thresholds.input_share_crit),
-            reason=reason,
+            reason=f"Dataloader is {_pct(dl_share)} of step time.",
             action="Increase workers, prefetch, or storage throughput.",
             worst_rank=None if single_rank else dl_worst_rank,
         )
@@ -371,37 +415,42 @@ def build_step_diagnosis(
             kind="WAIT_HEAVY",
             severity=_severity(wait_share, thresholds.wait_share_crit),
             reason=f"WAIT* is {_pct(wait_share)} of step time.",
-            action="Inspect sync points, CPU stalls, and H2D copies.",
+            action="Inspect sync points, CPU stalls, or H2D copies.",
             worst_rank=None if single_rank else overall_worst_rank,
             note="WAIT* = step_time - (forward + backward + optimizer_step).",
         )
 
-    # 4) COMPUTE-IMBALANCE
-    if (
-        not single_rank
-        and dominant_compute is not None
-        and dominant_compute.skew >= thresholds.compute_skew_warn
-        and dominant_compute.share >= thresholds.compute_share_min
-    ):
-        note = None
-        if step_skew < thresholds.low_step_skew:
-            note = "Step time stays fairly balanced, so this may be partly hidden."
+    # 4) COMPUTE-BOUND
+    compute_total = _compute_total(
+        forward=fwd,
+        backward=bwd,
+        optimizer=opt,
+        single_rank=single_rank,
+    )
+    compute_share = _share(compute_total, step_total)
+    compute_skew = (
+        dominant_compute.skew if dominant_compute is not None else 0.0
+    )
 
+    if (
+        compute_share >= thresholds.compute_bound_share_warn
+        and dl_share < thresholds.input_share_warn
+        and wait_share < thresholds.wait_share_warn
+        and (single_rank or compute_skew <= thresholds.compute_bound_max_skew)
+    ):
+        label = (
+            dominant_compute.label
+            if dominant_compute is not None
+            else "Compute"
+        )
         return _emit(
-            kind="COMPUTE_IMBALANCE",
+            kind="COMPUTE_BOUND",
             severity=_severity(
-                dominant_compute.skew, thresholds.compute_skew_crit
+                compute_share, thresholds.compute_bound_share_crit
             ),
-            reason=(
-                f"{dominant_compute.label} skew is +{_pct(dominant_compute.skew)} "
-                f"on {_rank_str(dominant_compute.worst_rank)}."
-            ),
-            action=(
-                f"Inspect {dominant_compute.label.lower()} "
-                f"on {_rank_str(dominant_compute.worst_rank)}."
-            ),
-            worst_rank=dominant_compute.worst_rank,
-            note=note,
+            reason=f"{label} dominates the step ({_pct(compute_share)}).",
+            action="Optimize model compute or reduce step cost.",
+            worst_rank=None if single_rank else overall_worst_rank,
         )
 
     # 5) BALANCED
@@ -428,7 +477,12 @@ def _metric_total(
     metric: Optional[StepCombinedTimeMetric],
     single_rank: bool,
 ) -> float:
-    """Return the visible total used for diagnosis."""
+    """
+    Return the visible total used for diagnosis.
+
+    - single-rank: use worst_total (same as sum for one rank)
+    - multi-rank: use median_total (typical rank)
+    """
     if metric is None:
         return 0.0
     raw = (
@@ -437,6 +491,21 @@ def _metric_total(
         else metric.summary.median_total
     )
     return _non_negative_finite(raw)
+
+
+def _compute_total(
+    *,
+    forward: Optional[StepCombinedTimeMetric],
+    backward: Optional[StepCombinedTimeMetric],
+    optimizer: Optional[StepCombinedTimeMetric],
+    single_rank: bool,
+) -> float:
+    """Return typical compute total for the step."""
+    return (
+        _metric_total(forward, single_rank)
+        + _metric_total(backward, single_rank)
+        + _metric_total(optimizer, single_rank)
+    )
 
 
 def _overall_burden_summary(
@@ -451,13 +520,11 @@ def _overall_burden_summary(
     """
     Return median-visible and worst-visible overall step burden.
 
-    The burden definition matches the renderer's dashboard ranking logic:
+    Burden definition:
         dataloader_fetch + max(step_time, forward + backward + optimizer_step)
 
-    Notes
-    -----
-    - For multi-rank runs we compute burden from median and worst summaries.
-    - This is an intentionally stable approximation for diagnosis.
+    This is used only to detect whether a distributed effect exists. It is not
+    used to attribute culprit rank by itself.
     """
 
     def _pick(metric: Optional[StepCombinedTimeMetric], which: str) -> float:
@@ -518,7 +585,7 @@ def _overall_burden_skew(
     """
     Return skew of the combined overall step burden.
 
-    This is used for straggler detection instead of step_time skew alone.
+    Used to detect a distributed slowdown effect, not to assign blame.
     """
     if single_rank:
         return 0.0
@@ -557,9 +624,11 @@ def _dominant_compute_signal(
     optimizer: Optional[StepCombinedTimeMetric],
     step_total: float,
     single_rank: bool,
-) -> Optional[ComputeSignal]:
-    """Pick the compute component with strongest skew, then share."""
-    candidates = []
+) -> Optional[LocalSignal]:
+    """
+    Pick the compute component with strongest skew, then strongest share.
+    """
+    candidates: list[LocalSignal] = []
 
     for label, metric in (
         ("Forward", forward),
@@ -574,7 +643,7 @@ def _dominant_compute_signal(
             continue
 
         candidates.append(
-            ComputeSignal(
+            LocalSignal(
                 label=label,
                 share=_share(total, step_total),
                 skew=_metric_skew(metric, single_rank),
@@ -585,7 +654,7 @@ def _dominant_compute_signal(
     if not candidates:
         return None
 
-    return max(candidates, key=lambda x: (x.skew, x.share))
+    return max(candidates, key=lambda item: (item.skew, item.share))
 
 
 def _share(value: float, total: float) -> float:
@@ -598,7 +667,7 @@ def _share(value: float, total: float) -> float:
 
 def _pct(value: float) -> str:
     """Format a ratio as a percentage string."""
-    return f"{_non_negative_finite(value) * 100:.1f}%"
+    return f"{_non_negative_finite(value) * 100.0:.1f}%"
 
 
 def _rank_str(rank: Optional[int]) -> str:
@@ -617,6 +686,6 @@ __all__ = [
     "DiagnosisThresholds",
     "DEFAULT_THRESHOLDS",
     "StepDiagnosis",
-    "ComputeSignal",
+    "LocalSignal",
     "build_step_diagnosis",
 ]
