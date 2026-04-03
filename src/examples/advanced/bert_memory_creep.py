@@ -10,7 +10,6 @@ from torch.utils.data.distributed import DistributedSampler
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
-    DataCollatorWithPadding,
     get_linear_schedule_with_warmup,
 )
 
@@ -18,11 +17,12 @@ from traceml.decorators import trace_model_instance, trace_step
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
+MAX_LENGTH = 96
 
 MAX_TRAIN_EXAMPLES = 40000
 MAX_VAL_EXAMPLES = 0
 
-BATCH_SIZE = 64
+BATCH_SIZE = 128
 EPOCHS = 12
 LR = 2e-6
 WARMUP_RATIO = 0.06
@@ -54,15 +54,18 @@ def prepare_data(rank: int, world_size: int):
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
     def tok(examples):
-        return tokenizer(examples["text"], truncation=True)
+        return tokenizer(
+            examples["text"],
+            truncation=True,
+            padding="max_length",
+            max_length=MAX_LENGTH,
+        )
 
     train_ds = train_raw.map(tok, batched=True, remove_columns=["text"])
     val_ds = val_raw.map(tok, batched=True, remove_columns=["text"])
 
     train_ds = train_ds.rename_column("label", "labels")
     val_ds = val_ds.rename_column("label", "labels")
-
-    collator = DataCollatorWithPadding(tokenizer)
 
     train_sampler = DistributedSampler(
         train_ds,
@@ -75,7 +78,6 @@ def prepare_data(rank: int, world_size: int):
         train_ds,
         batch_size=BATCH_SIZE,
         sampler=train_sampler,
-        collate_fn=collator,
         pin_memory=True,
     )
 
@@ -83,7 +85,7 @@ def prepare_data(rank: int, world_size: int):
         val_ds,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        collate_fn=collator,
+        pin_memory=True,
     )
 
     return tokenizer, train_loader, val_loader, train_sampler
@@ -150,9 +152,8 @@ def main() -> None:
         device="cuda" if use_cuda else "cpu",
     )
 
-    # Intentionally buggy cache: this retains graph-backed tensors every step.
-    # This is a stronger and more visible memory-creep example than storing
-    # only the scalar loss tensor.
+    # Intentionally buggy cache: retains graph-backed tensors each step.
+    # Fixed-length batches make the memory trend easier to interpret.
     retained_debug_cache = []
 
     model.train()
@@ -189,7 +190,6 @@ def main() -> None:
                 scheduler.step()
 
                 # BUG: retaining graph-backed tensors instead of detached scalars.
-                # This pins progressively more memory over time.
                 retained_debug_cache.append(
                     {
                         "loss": loss,
