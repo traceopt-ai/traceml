@@ -105,7 +105,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         if not self._watch_profile:
             self._renderers += [
                 StepCombinedRenderer(db_path=self._settings.db_path),
-                StepMemoryRenderer(remote_store=store),
+                StepMemoryRenderer(db_path=self._settings.db_path),
             ]
 
         # Deep Profile
@@ -183,7 +183,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         )
         dashboard = self._layout["dashboard"]
         dashboard.split_row(
-            Layout(name=SYSTEM_LAYOUT, ratio=3),
+            Layout(name=SYSTEM_LAYOUT, ratio=4),
             Layout(name=PROCESS_LAYOUT, ratio=5),
         )
         return dashboard
@@ -195,11 +195,11 @@ class CLIDisplayDriver(BaseDisplayDriver):
         )
         dashboard = self._layout["dashboard"]
         dashboard.split_column(
-            Layout(name="upper_row", ratio=3),
+            Layout(name="upper_row", ratio=2),
             Layout(name="middle_row", ratio=4),
         )
         dashboard["upper_row"].split_row(
-            Layout(name=SYSTEM_LAYOUT, ratio=3),
+            Layout(name=SYSTEM_LAYOUT, ratio=4),
             Layout(name=PROCESS_LAYOUT, ratio=5),
         )
         dashboard["middle_row"].split_row(

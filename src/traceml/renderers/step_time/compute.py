@@ -121,7 +121,7 @@ class StepCombinedComputer:
     # ------------------------------------------------------------------
 
     def compute_cli(self) -> StepCombinedTimeResult:
-        return self._compute(include_series=False, include_rank_heatmap=False)
+        return self._compute(include_series=True, include_rank_heatmap=False)
 
     def compute_dashboard(self) -> StepCombinedTimeResult:
         return self._compute(include_series=False, include_rank_heatmap=True)

@@ -61,6 +61,9 @@ from traceml.renderers.layer_combined_memory.renderer import (
 from traceml.renderers.layer_combined_time.renderer import (
     LayerCombinedTimeRenderer,
 )
+from traceml.renderers.model_diagnostics.renderer import (
+    ModelDiagnosticsRenderer,
+)
 from traceml.renderers.process.renderer import ProcessRenderer
 from traceml.renderers.step_memory.renderer import StepMemoryRenderer
 from traceml.renderers.step_time.renderer import StepCombinedRenderer
@@ -128,7 +131,8 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
             StepCombinedRenderer(db_path=self._settings.db_path),
-            StepMemoryRenderer(remote_store=store),
+            StepMemoryRenderer(db_path=self._settings.db_path),
+            ModelDiagnosticsRenderer(db_path=self._settings.db_path),
         ]
 
         if self._deep_profile:

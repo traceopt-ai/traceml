@@ -420,7 +420,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     )
     env["TRACEML_PROFILE"] = getattr(args, "profile", "watch")
     env["TRACEML_SCRIPT_PATH"] = script_path
-    env["TRACEML_UI_MODE"] = args.ui_mode
+    env["TRACEML_UI_MODE"] = args.mode
     env["TRACEML_INTERVAL"] = str(args.interval)
     env["TRACEML_ENABLE_LOGGING"] = "1" if args.enable_logging else "0"
     env["TRACEML_LOGS_DIR"] = args.logs_dir
@@ -449,7 +449,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         session_id=session_id,
         script_path=script_path,
         profile=env["TRACEML_PROFILE"],
-        ui_mode=args.ui_mode,
+        ui_mode=args.mode,
         logs_dir=args.logs_dir,
         tcp_host=args.tcp_host,
         tcp_port=args.tcp_port,
@@ -486,8 +486,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         update_run_manifest(manifest_path, status=final_status)
         raise SystemExit(train_proc.returncode)
 
-    if args.ui_mode not in ["cli", "dashboard"]:
-        raise ValueError(f"Invalid ui mode '{args.ui_mode}'")
+    if args.mode not in ["cli", "dashboard"]:
+        raise ValueError(f"Invalid ui mode '{args.mode}'")
 
     train_cmd = [
         *_build_torchrun_base_cmd(args.nproc_per_node),
@@ -505,7 +505,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     print(
         f"[TraceML] Starting aggregator on {args.tcp_host}:{args.tcp_port} "
-        f"(ui={args.ui_mode}, profile={env['TRACEML_PROFILE']})"
+        f"(ui={args.mode}, profile={env['TRACEML_PROFILE']})"
     )
     try:
         agg_proc = start_aggregator_process(env=env)
@@ -635,7 +635,7 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         "script", help="Path to the target Python training script."
     )
     parser.add_argument(
-        "--ui-mode",
+        "--mode",
         type=str,
         default="cli",
         choices=["cli", "dashboard"],

@@ -7,11 +7,9 @@ step-level peak memory aggregated across DDP ranks.
 Design goals
 ------------
 - Renderer/UI consumes ONLY these dataclasses
-- Stable, explicit semantics (MB units)
+- Stable, explicit semantics (bytes)
 - Step alignment across ranks (intersection-based)
 """
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Optional
@@ -79,8 +77,8 @@ class StepMemoryCombinedMetric:
     Renderer-ready payload for ONE combined step memory metric.
 
     metric
-      - "peak_allocated_mb"
-      - "peak_reserved_mb"
+      - "peak_allocated"
+      - "peak_reserved"
     """
 
     metric: str
