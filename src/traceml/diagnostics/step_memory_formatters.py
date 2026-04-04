@@ -1,28 +1,26 @@
 """
-Formatting helpers for step-time diagnosis.
+Formatting helpers for step-memory diagnosis.
 
-Separated from core rule logic to keep diagnosis engine lean and reusable.
+These helpers intentionally keep CLI and dashboard output compact and
+memory-specific.
 """
 
 from __future__ import annotations
 
-from .step_time import StepDiagnosis
+from .step_memory import StepMemoryDiagnosis
 
 
-def _styled_status(diagnosis: StepDiagnosis) -> str:
+def _styled_status(diagnosis: StepMemoryDiagnosis) -> str:
     """Render a colored status label for Rich CLI output."""
     if diagnosis.kind == "BALANCED":
         style = "bold green"
     elif diagnosis.kind == "NO_DATA":
         style = "bold bright_black"
-    elif diagnosis.kind in {"INPUT_BOUND", "COMPUTE_BOUND"}:
+    elif diagnosis.kind == "CREEP_EARLY":
         style = "bold yellow"
-    elif diagnosis.kind in {
-        "INPUT_STRAGGLER",
-        "COMPUTE_STRAGGLER",
-        "STRAGGLER",
-        "WAIT_HEAVY",
-    }:
+    elif diagnosis.kind == "CREEP_CONFIRMED":
+        style = "bold red"
+    elif diagnosis.kind in {"HIGH_PRESSURE", "IMBALANCE"}:
         style = "bold red" if diagnosis.severity == "crit" else "bold yellow"
     else:
         style = {
@@ -34,8 +32,8 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
     return f"[{style}]{diagnosis.status}[/{style}]"
 
 
-def format_cli_diagnosis(diagnosis: StepDiagnosis) -> str:
-    """Render a short Rich-friendly diagnosis block for terminal output."""
+def format_cli_diagnosis(diagnosis: StepMemoryDiagnosis) -> str:
+    """Render a compact Rich-friendly diagnosis block for terminal output."""
     status = _styled_status(diagnosis)
     lines = [
         f"[bold]Issue:[/bold] {status}",
@@ -43,12 +41,12 @@ def format_cli_diagnosis(diagnosis: StepDiagnosis) -> str:
         f"[bold]Next:[/bold] {diagnosis.action}",
     ]
     if diagnosis.note:
-        lines.append(f"[bold]Note:[/bold] {diagnosis.note}")
+        lines.append(f"[bold]Stats:[/bold] {diagnosis.note}")
     return "\n".join(lines)
 
 
-def format_dashboard_diagnosis(diagnosis: StepDiagnosis) -> str:
-    """Render a short diagnosis block for dashboard use."""
+def format_dashboard_diagnosis(diagnosis: StepMemoryDiagnosis) -> str:
+    """Render a compact diagnosis block for dashboard use."""
     meta = f"*Window: {diagnosis.steps_used} steps"
     if diagnosis.worst_rank is not None and diagnosis.kind != "BALANCED":
         meta += f" · Worst rank: r{diagnosis.worst_rank}"
@@ -61,5 +59,5 @@ def format_dashboard_diagnosis(diagnosis: StepDiagnosis) -> str:
         f"{meta}"
     )
     if diagnosis.note:
-        text += f"  \n*Note:* {diagnosis.note}"
+        text += f"  \n*Stats:* {diagnosis.note}"
     return text
