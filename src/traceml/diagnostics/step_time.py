@@ -457,6 +457,13 @@ def build_step_diagnosis(
             note="WAIT* = step_time - (forward + backward + optimizer_step).",
         )
 
+    largest_compute = _largest_compute_phase(
+        forward=fwd,
+        backward=bwd,
+        optimizer=opt,
+        step_total=step_total,
+        single_rank=single_rank,
+    )
     # 4) COMPUTE-BOUND
     compute_share = _share(compute_total, step_total)
 
@@ -467,9 +474,7 @@ def build_step_diagnosis(
         and (single_rank or compute_skew <= thresholds.compute_bound_max_skew)
     ):
         label = (
-            dominant_compute.label
-            if dominant_compute is not None
-            else "Compute"
+            largest_compute.label if largest_compute is not None else "Compute"
         )
         return _emit(
             kind="COMPUTE_BOUND",
@@ -477,7 +482,7 @@ def build_step_diagnosis(
                 compute_share,
                 thresholds.compute_bound_share_crit,
             ),
-            reason=f"{label} dominates the typical step ({_pct(compute_share)}).",
+            reason=f"Compute-bound; {label.lower()} is the largest phase.",
             action="Optimize model compute or reduce step cost.",
             worst_rank=None if single_rank else overall_worst_rank,
         )
@@ -730,6 +735,49 @@ def _dominant_compute_signal(
         return None
 
     return max(candidates, key=lambda item: (item.skew, item.share))
+
+
+def _largest_compute_phase(
+    *,
+    forward: Optional[StepCombinedTimeMetric],
+    backward: Optional[StepCombinedTimeMetric],
+    optimizer: Optional[StepCombinedTimeMetric],
+    step_total: float,
+    single_rank: bool,
+) -> Optional[ComputeSignal]:
+    """
+    Pick the compute component with the largest typical share.
+
+    This is used for COMPUTE-BOUND messaging, where we want the dominant
+    compute phase by size, not by skew.
+    """
+    candidates: list[ComputeSignal] = []
+
+    for label, metric in (
+        ("Forward", forward),
+        ("Backward", backward),
+        ("Optimizer", optimizer),
+    ):
+        if metric is None:
+            continue
+
+        total = _metric_total(metric, single_rank)
+        if total <= 0.0:
+            continue
+
+        candidates.append(
+            ComputeSignal(
+                label=label,
+                share=_share(total, step_total),
+                skew=_metric_skew(metric, single_rank),
+                worst_rank=_metric_worst_rank(metric),
+            )
+        )
+
+    if not candidates:
+        return None
+
+    return max(candidates, key=lambda item: item.share)
 
 
 def _share(value: float, total: float) -> float:
