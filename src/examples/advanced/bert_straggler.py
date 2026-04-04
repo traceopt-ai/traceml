@@ -1,5 +1,6 @@
 import os
 import random
+import time
 
 import torch
 import torch.distributed as dist
@@ -28,11 +29,10 @@ EPOCHS = 8
 LR = 2e-6
 WARMUP_RATIO = 0.06
 
-# Straggler controls
+# Input-straggler controls
 STRAGGLER_RANK = 0
-STRAGGLER_EVERY_N_STEPS = 1
-STRAGGLER_MATMUL_SIZE = 4096
-STRAGGLER_MATMUL_ITERS = 50
+STRAGGLER_EVERY_N_BATCHES = 1
+STRAGGLER_SLEEP_S = 0.35
 
 
 def set_seed(seed: int) -> None:
@@ -48,20 +48,38 @@ def accuracy_from_logits(
     return (preds == labels).float().mean()
 
 
-def inject_straggler_compute(device: torch.device) -> None:
-    """Inject extra GPU work on one rank to create a deterministic compute straggler."""
-    if device.type != "cuda":
-        return
+class SlowRankCollator:
+    """
+    Rank-local collator that injects deterministic delay on one rank.
 
-    torch.cuda.synchronize(device)
+    This makes one worker slow in the input path so TraceML can surface an
+    INPUT STRAGGLER signal from dataloader fetch imbalance.
+    """
 
-    x = torch.randn(4096, 4096, device=device, dtype=torch.float16)
-    y = torch.randn(4096, 4096, device=device, dtype=torch.float16)
+    def __init__(
+        self,
+        *,
+        rank: int,
+        straggler_rank: int,
+        sleep_s: float,
+        every_n_batches: int,
+    ) -> None:
+        self.rank = rank
+        self.straggler_rank = straggler_rank
+        self.sleep_s = float(sleep_s)
+        self.every_n_batches = max(1, int(every_n_batches))
+        self.batch_idx = 0
 
-    for _ in range(12):
-        x = x @ y
+    def __call__(self, features):
+        self.batch_idx += 1
 
-    torch.cuda.synchronize(device)
+        if (
+            self.rank == self.straggler_rank
+            and self.batch_idx % self.every_n_batches == 0
+        ):
+            time.sleep(self.sleep_s)
+
+        return default_data_collator(features)
 
 
 def prepare_data(rank: int, world_size: int):
@@ -97,11 +115,20 @@ def prepare_data(rank: int, world_size: int):
         shuffle=True,
     )
 
+    train_collator = SlowRankCollator(
+        rank=rank,
+        straggler_rank=STRAGGLER_RANK,
+        sleep_s=STRAGGLER_SLEEP_S,
+        every_n_batches=STRAGGLER_EVERY_N_BATCHES,
+    )
+
+    val_collator = default_data_collator
+
     train_loader = DataLoader(
         train_ds,
         batch_size=BATCH_SIZE,
         sampler=train_sampler,
-        collate_fn=default_data_collator,
+        collate_fn=train_collator,
         pin_memory=True,
     )
 
@@ -109,7 +136,7 @@ def prepare_data(rank: int, world_size: int):
         val_ds,
         batch_size=BATCH_SIZE,
         shuffle=False,
-        collate_fn=default_data_collator,
+        collate_fn=val_collator,
         pin_memory=True,
     )
 
@@ -196,12 +223,6 @@ def main() -> None:
 
                 optimizer.zero_grad(set_to_none=True)
 
-                if (
-                    rank == STRAGGLER_RANK
-                    and global_step % STRAGGLER_EVERY_N_STEPS == 0
-                ):
-                    inject_straggler_compute(device)
-
                 with torch.amp.autocast(
                     device_type="cuda" if use_cuda else "cpu",
                     enabled=use_cuda,
@@ -213,7 +234,6 @@ def main() -> None:
                 logits = out.logits
 
                 scaler.scale(loss).backward()
-
                 scaler.step(optimizer)
                 scaler.update()
                 scheduler.step()
@@ -228,13 +248,14 @@ def main() -> None:
                         f"[Train] epoch {epoch + 1} step {global_step} "
                         f"| loss {running_loss / 50:.4f} "
                         f"| acc {running_acc / 50:.4f} "
-                        f"| straggler_rank={STRAGGLER_RANK}"
+                        f"| input_straggler_rank={STRAGGLER_RANK} "
+                        f"| sleep={STRAGGLER_SLEEP_S:.2f}s"
                     )
                     running_loss = 0.0
                     running_acc = 0.0
 
     if rank == 0:
-        save_dir = "./bert_agnews_ddp_straggler"
+        save_dir = "./bert_agnews_ddp_input_straggler"
         os.makedirs(save_dir, exist_ok=True)
         model.module.save_pretrained(save_dir)
         tokenizer.save_pretrained(save_dir)
