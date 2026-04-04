@@ -158,7 +158,7 @@ class StepMemoryRenderer(BaseRenderer):
         # This is helpful for spotting monotonic growth / fragmentation.
         table.add_row("")
         table.add_row(
-            "Window Delta (worst)",
+            "Head/Tail Delta (worst)",
             *[self._format_worst_trend_delta(m) for m in metrics],
         )
 
@@ -188,18 +188,26 @@ class StepMemoryRenderer(BaseRenderer):
     @staticmethod
     def _format_worst_trend_delta(m) -> str:
         """
-        Format worst-series delta (last - first) as a compact trend hint.
+        Format a stable head-vs-tail delta for the worst series.
 
-        Uses bytes; fmt_mem_new handles scaling to MB/GB.
+        This mirrors the memory diagnosis more closely than raw last-minus-first.
         """
         series = m.series
         if not series.steps or not series.worst:
             return "—"
 
-        if len(series.worst) < 2:
+        values = [float(v) for v in series.worst]
+        n = len(values)
+        if n < 2:
             return "—"
 
-        delta = float(series.worst[-1]) - float(series.worst[0])
+        segment = max(4, int(round(n * 0.20)))
+        segment = min(segment, max(1, n // 2))
+
+        head_avg = sum(values[:segment]) / segment
+        tail_avg = sum(values[-segment:]) / segment
+        delta = tail_avg - head_avg
+
         if delta == 0.0:
             return fmt_mem_new(0.0)
 
