@@ -31,7 +31,8 @@ WARMUP_RATIO = 0.06
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def accuracy_from_logits(
@@ -47,9 +48,6 @@ def prepare_data(rank: int, world_size: int):
     train_raw = raw["train"].select(
         range(min(MAX_TRAIN_EXAMPLES, len(raw["train"])))
     )
-    val_raw = raw["test"].select(
-        range(min(MAX_VAL_EXAMPLES, len(raw["test"])))
-    )
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
@@ -62,10 +60,11 @@ def prepare_data(rank: int, world_size: int):
         )
 
     train_ds = train_raw.map(tok, batched=True, remove_columns=["text"])
-    val_ds = val_raw.map(tok, batched=True, remove_columns=["text"])
-
     train_ds = train_ds.rename_column("label", "labels")
-    val_ds = val_ds.rename_column("label", "labels")
+    train_ds.set_format(
+        type="torch",
+        columns=["input_ids", "attention_mask", "labels"],
+    )
 
     train_sampler = DistributedSampler(
         train_ds,
@@ -81,12 +80,24 @@ def prepare_data(rank: int, world_size: int):
         pin_memory=True,
     )
 
-    val_loader = DataLoader(
-        val_ds,
-        batch_size=BATCH_SIZE,
-        shuffle=False,
-        pin_memory=True,
-    )
+    val_loader = None
+    if MAX_VAL_EXAMPLES > 0:
+        val_raw = raw["test"].select(
+            range(min(MAX_VAL_EXAMPLES, len(raw["test"])))
+        )
+        val_ds = val_raw.map(tok, batched=True, remove_columns=["text"])
+        val_ds = val_ds.rename_column("label", "labels")
+        val_ds.set_format(
+            type="torch",
+            columns=["input_ids", "attention_mask", "labels"],
+        )
+
+        val_loader = DataLoader(
+            val_ds,
+            batch_size=BATCH_SIZE,
+            shuffle=False,
+            pin_memory=True,
+        )
 
     return tokenizer, train_loader, val_loader, train_sampler
 
@@ -152,8 +163,6 @@ def main() -> None:
         device="cuda" if use_cuda else "cpu",
     )
 
-    # Intentionally buggy cache: retains graph-backed tensors each step.
-    # Fixed-length batches make the memory trend easier to interpret.
     retained_debug_cache = []
 
     model.train()
@@ -189,7 +198,7 @@ def main() -> None:
                 scaler.update()
                 scheduler.step()
 
-                # BUG: retaining graph-backed tensors instead of detached scalars.
+                # Intentional memory-creep bug for testing.
                 retained_debug_cache.append(
                     {
                         "loss": loss,
