@@ -1,15 +1,26 @@
 # TraceML Quickstart
 
-Get from install to your first useful TraceML run in under 5 minutes.
+Get from install to your first useful TraceML run in a few minutes.
 
-If you just want the fastest path:
+This guide is for practitioners who want the fastest path to an answer.
+
+TraceML is most useful when you want to know:
+
+- why training is slow
+- whether the bottleneck is input, compute, wait, or rank imbalance
+- whether memory is drifting over time
+
+If you are new to TraceML, start here.
+
+---
+
+## What you will do
 
 1. Install TraceML
 2. Wrap your training step with `trace_step(model)`
 3. Run `traceml run train.py`
-
-If you are new to TraceML, start here.
-If you want the high-level overview first, see the [README](../README.md).
+4. Read the diagnosis in the CLI
+5. Optionally open the local UI
 
 ---
 
@@ -19,6 +30,8 @@ If you want the high-level overview first, see the [README](../README.md).
 |---|---|
 | Python | 3.10+ |
 | PyTorch | 2.5+ |
+
+TraceML works best with PyTorch training scripts that already run successfully on their own.
 
 ---
 
@@ -34,7 +47,11 @@ Check that the CLI is available:
 traceml --help
 ```
 
-You should see the `run` and `deep` command.
+You should see commands such as:
+
+- `watch`
+- `run`
+- `deep`
 
 ### Optional extras
 
@@ -44,7 +61,13 @@ For Hugging Face Trainer support:
 pip install "traceml-ai[hf]"
 ```
 
-If you want PyTorch pinned to the versions TraceML is tested against:
+For PyTorch Lightning support:
+
+```bash
+pip install "traceml-ai[lightning]"
+```
+
+If you want the PyTorch versions TraceML is tested against:
 
 ```bash
 pip install "traceml-ai[torch]"
@@ -107,7 +130,7 @@ if __name__ == "__main__":
 
 ### The only required change
 
-TraceML only needs one change in a normal PyTorch loop:
+In a normal PyTorch loop, the only required code change is:
 
 ```python
 with trace_step(model):
@@ -124,71 +147,147 @@ Wrap the full training step body, from `zero_grad(...)` through `optimizer.step(
 traceml run train.py
 ```
 
+This is the default TraceML workflow.
+
 During training, TraceML opens a live terminal view alongside your logs.
 
 At the end of the run, it prints a compact summary you can review or share.
 
+---
 
-### What TraceML helps you spot
+## 4) How to read the output
 
-- input / dataloader stalls
-- unstable step times
-- DDP rank imbalance
-- memory drift over time
-- how step time splits across forward, backward, optimizer, and overhead
+TraceML is built to answer one question quickly:
+
+**Why is this training job slow?**
+
+Common diagnoses:
+
+### `INPUT-BOUND`
+
+The dataloader or preprocessing path is taking a large share of the step.
+
+Typical next steps:
+
+- increase dataloader workers
+- improve storage throughput
+- reduce CPU preprocessing cost
+- check host-to-device transfer delays
+
+### `COMPUTE-BOUND`
+
+Model compute dominates the step.
+
+Typical next steps:
+
+- reduce model step cost
+- tune batch size / precision / kernels
+- inspect forward / backward / optimizer cost
+- use a deeper profiler only after identifying the hot path
+
+### `INPUT STRAGGLER`
+
+One rank is slower in the input path than the others.
+
+Typical next steps:
+
+- inspect dataloader imbalance
+- check rank-local preprocessing
+- check host-side jitter
+- look at the worst rank called out in the summary
+
+### `COMPUTE STRAGGLER`
+
+One rank is slower in compute than the others.
+
+Typical next steps:
+
+- inspect forward / backward / optimizer imbalance
+- check uneven data shapes or rank-local work
+- inspect the worst rank called out in the summary
+
+### `WAIT-HEAVY`
+
+A meaningful part of the step is going into waiting rather than useful work.
+
+Typical next steps:
+
+- inspect synchronization points
+- check CPU stalls
+- check uneven rank progress
+- compare wait share against input and compute shares
+
+### `MEMORY CREEP`
+
+Memory is rising over time instead of staying stable.
+
+Typical next steps:
+
+- inspect retained tensors
+- inspect caches and per-step state
+- compare early vs later steps
+- look for graph-backed tensors kept alive across steps
 
 ---
 
-## 4) Optional: local UI
+## 5) Optional: local UI
 
-If you want a richer view, TraceML also includes a local UI for reviewing runs and comparing them locally.
+If you want a richer view, run:
 
 ```bash
 traceml run train.py --mode=dashboard
 ```
 
-The UI runs locally at `http://localhost:8765`.
+The local UI runs at:
 
+```text
+http://localhost:8765
+```
 
 Use the local UI when you want:
 
 - a richer run review experience
-- an easier view for comparing runs
-- a browser-based layout instead of the terminal
+- an easier browser-based layout
+- local comparison of runs
 
-If you just want the fastest path, stay with the default terminal mode.
-
----
-
-## 5) What TraceML records
-
-### Always on
-
-- step time
-- dataloader / input wait time
-- forward / backward / optimizer / overhead timing
-- GPU memory allocated
-- GPU memory peak
-- CPU / RAM / GPU signals
-
-### In single-node DDP
-
-- median rank
-- worst rank
-- skew (%)
-
-This makes stragglers and rank imbalance easier to spot without extra instrumentation.
+If you just want the fastest path, stay with the default CLI mode.
 
 ---
 
-## 6) Single-node DDP
+## 6) Other run modes
 
-TraceML supports single-node multi-GPU training.
+### `traceml watch`
 
-Use standard PyTorch DDP, and keep `trace_step(...)` inside the training loop.
-If you also enable model hooks, call `trace_model_instance(model)` **before** wrapping the model in `DistributedDataParallel`.
+```bash
+traceml watch train.py
+```
 
-> **Scope:** Multi-node DDP is not yet supported.
+Use this when you want:
+
+- zero-code system and process visibility
+- a quick look before adding step instrumentation
+
+`watch` is lighter-weight than `run`, but it does not provide the same step-aware diagnosis.
+
+### `traceml deep`
+
+```bash
+traceml deep train.py
+```
+
+Use this only for short diagnostic runs when you need deeper per-layer signals.
+
+`deep` is more expensive than `run` and is best used after TraceML already showed you where to dig.
+
+---
+
+## 7) Single-node DDP
+
+TraceML supports single-node multi-GPU DDP.
+
+Keep `trace_step(...)` inside the training loop.
+
+If you also enable model hooks, call `trace_model_instance(model)` before wrapping the model in `DistributedDataParallel`.
 
 ### Minimal DDP example
 
@@ -200,7 +299,7 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
 
-from traceml.decorators import trace_model_instance, trace_step
+from traceml.decorators import trace_step
 
 
 class MyModel(nn.Module):
@@ -223,7 +322,11 @@ def main():
 
     use_cuda = torch.cuda.is_available()
     backend = "nccl" if use_cuda else "gloo"
-    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
+    dist.init_process_group(
+        backend=backend,
+        rank=rank,
+        world_size=world_size,
+    )
 
     if use_cuda:
         torch.cuda.set_device(local_rank)
@@ -232,7 +335,6 @@ def main():
         device = torch.device("cpu")
 
     model = MyModel().to(device)
-
     model = torch.nn.parallel.DistributedDataParallel(
         model,
         device_ids=[local_rank] if use_cuda else None,
@@ -260,55 +362,19 @@ if __name__ == "__main__":
     main()
 ```
 
-Launch it with:
+Launch with:
 
 ```bash
-traceml run train_ddp.py --nproc-per-node=4
+traceml run train.py --nproc-per-node=4
 ```
 
-You will see:
-
-- per-rank metrics
-- median step time
-- worst rank
-- skew (%)
+> Scope: multi-node distributed training is not yet supported.
 
 ---
 
-## 7) Hugging Face Trainer
+## 8) Optional model hooks
 
-If you use `transformers.Trainer`, replace it with `TraceMLTrainer`.
-
-```python
-from traceml.integrations.huggingface import TraceMLTrainer
-from transformers import TrainingArguments
-
-training_args = TrainingArguments(output_dir="./output", num_train_epochs=3)
-
-trainer = TraceMLTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    traceml_enabled=True,
-)
-
-trainer.train()
-```
-
-Run it the same way:
-
-```bash
-traceml run fine_tune.py
-```
-
-For full details, see [huggingface.md](huggingface.md).
-
----
-
-## 8) Deep mode (optional): model-level hooks
-
-Use model-level hooks only for deep per-layer analysis.
+If you want per-layer timing and memory signals, you can attach model hooks.
 
 ```python
 from traceml.decorators import trace_model_instance
@@ -316,51 +382,58 @@ from traceml.decorators import trace_model_instance
 trace_model_instance(model)
 ```
 
-Launch deep mode when using these hooks:
+Use this together with `trace_step(model)`.
+
+Launch `deep` mode when you want a short diagnostic run with deeper layer-level signals:
 
 ```bash
 traceml deep train.py
 ```
 
-Use this together with `trace_step(model)`.
-The core step-level view works without it.
+Use model hooks only when:
 
-Use model-level hooks when:
-
-- step-level signals are not enough
-- you suspect a specific layer is slow
-- you want extra memory detail for a short diagnostic run
+- you already know the step is slow
+- you want more detail about where inside the model the time or memory is going
+- you are okay with some extra overhead for diagnosis
 
 ---
 
-## 9) Useful CLI flags
+## 9) Common launch patterns
 
-### `traceml run` flags
-
-| Flag | Default | Description |
-|---|---|---|
-| `--mode` | `cli` | `cli` for terminal view, `dashboard` for local UI |
-| `--nproc-per-node` | `1` | Number of processes to launch for DDP |
-| `--interval` | `2.0` | Refresh interval in seconds |
-| `--enable-logging` | off | Save raw metrics to disk |
-| `--logs-dir` | `./logs` | Directory for saved logs |
-| `--num-display-layers` | `5` | Number of layers to show with model hooks |
-| `--no-history` | off | Disable run history |
-| `--disable-traceml` | off | Bypass TraceML and run the script natively via `torchrun` |
-
-### `traceml inspect`
-
-Decode and print binary `.msgpack` telemetry log files for debugging:
+Standard CLI:
 
 ```bash
-traceml inspect path/to/telemetry.msgpack
+traceml run train.py
 ```
 
-Full reference:
+Local UI:
 
 ```bash
-traceml run --help
-traceml inspect --help
+traceml run train.py --mode=dashboard
+```
+
+Single-node DDP:
+
+```bash
+traceml run train.py --nproc-per-node=4
+```
+
+Zero-code first look:
+
+```bash
+traceml watch train.py
+```
+
+Run without telemetry for a baseline comparison:
+
+```bash
+traceml run train.py --disable-traceml
+```
+
+Pass arguments to your training script:
+
+```bash
+traceml run train.py --args -- --epochs 10 --lr 1e-3
 ```
 
 ---
@@ -369,47 +442,50 @@ traceml inspect --help
 
 ### `torchrun: command not found`
 
-TraceML uses `torchrun` to launch your script.
+TraceML launches your script through:
 
-Check whether it is available:
+```bash
+python -m torch.distributed.run
+```
+
+Check that this works:
 
 ```bash
 python -m torch.distributed.run --help
 ```
 
-If that works but `torchrun` does not, fix your PATH or raise an issue.
+If that works but your environment still fails to launch, check your Python environment and PATH.
 
-### No CUDA detected
+### Output is messy in the terminal
 
-TraceML also works on CPU.
-GPU memory signals will show `N/A`, but step timing still works.
+If your own logger, progress bar, or framework output is fighting with the TraceML CLI:
 
-Check CUDA availability:
+- disable `tqdm`
+- reduce extra terminal logging
+- try `--mode=dashboard` for browser-based viewing
+
+### I want the fastest path
+
+Stay with:
 
 ```bash
-python -c "import torch; print(torch.cuda.is_available())"
+traceml run train.py
 ```
 
-### Local UI does not open
-
-On a headless or remote machine:
-
-1. note the port: `http://localhost:8765`
-2. forward it: `ssh -L 8765:localhost:8765 user@remote`
-3. open it locally in your browser
-
-### Aggregator fails or exits early
-
-TraceML is fail-open.
-If the UI/aggregator exits unexpectedly, training continues.
-
-Please open an issue and include the output you saw.
+Add the local UI only after you get value from the CLI.
 
 ---
 
 ## Next steps
 
-- check the examples in [`src/examples/`](../src/examples/)
-- read [huggingface.md](huggingface.md) for the Trainer integration
-- open an issue if TraceML caught a real slowdown for you
-- join [GitHub Discussions](https://github.com/traceopt-ai/traceml/discussions)
+- Hugging Face integration: `docs/huggingface.md`
+- PyTorch Lightning integration: `docs/lightning.md`
+- GitHub issues: `https://github.com/traceopt-ai/traceml/issues`
+
+If TraceML helped you find a slowdown, please open an issue and include:
+
+- hardware / CUDA / PyTorch versions
+- single GPU or multi-GPU
+- whether you used `run`, `watch`, or `deep`
+- the end-of-run summary
+- a minimal repro if possible

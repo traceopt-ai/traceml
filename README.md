@@ -13,8 +13,7 @@
 
 </div>
 
-TraceML is a lightweight training-efficiency diagnosis tool for PyTorch.
-
+TraceML helps you find training bottlenecks in PyTorch while the job is still running.
 It helps you catch:
 
 - input bottlenecks
