@@ -66,8 +66,8 @@ class StepMemorySampler(BaseSampler):
         device = getattr(event, "device", None)
         step = getattr(event, "step", None)
 
-        peak_alloc = getattr(event, "peak_allocated_mb", None)
-        peak_resv = getattr(event, "peak_reserved_mb", None)
+        peak_alloc = getattr(event, "peak_allocated", None)
+        peak_resv = getattr(event, "peak_reserved", None)
 
         # Drop records that contain no memory signal
         if peak_alloc is None and peak_resv is None:

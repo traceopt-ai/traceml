@@ -1,178 +1,120 @@
 """
-System Metrics Dashboard (NiceGUI) section.
+Compact System Metrics dashboard section.
 
-UI-only module:
-- Builds the System Metrics card
-- Updates it from the dashboard payload produced by SystemMetricsComputer
+This card is optimized for overview usage:
+- compact chart
+- dense KPI grid
+- stable dimensions before and after data arrives
 
-Expected payload schema (from SystemRenderer.get_dashboard_renderable()):
-{
-  "window_len": int,
-  "gpu_available": bool,
-  "rollups": {
-    "gpu_available": bool,
-    "cpu": {"now","p50","p95"},
-    "ram": {"now","p95","total","headroom"},
-    "gpu_util": {"now","p50","p95"},
-    "gpu_delta": {"now","p95"},
-    "gpu_mem": {"now","p95","headroom"},
-    "temp": {"now","p95","status"},
-  },
-  "series": {
-    "cpu": [..],
-    "gpu_avg": [..],   # may be empty if gpu not available
-  }
-}
+It is presentation-only and preserves previous visible values on transient gaps.
 """
+
+from __future__ import annotations
+
+from typing import Any, Dict, List
 
 import plotly.graph_objects as go
 from nicegui import ui
 
 from traceml.utils.formatting import fmt_mem_new
 
-METRIC_TITLE = "text-l font-bold mb-1 ml-1 break-words whitespace-normal"
-LABEL = "text-[11px] font-semibold tracking-wide leading-tight"
-VAL = "text-[12.5px] text-gray-700 leading-tight"
-SUB = "text-[11px] text-gray-500 leading-tight"
+from .ui_shell import CARD_STYLE, compact_metric_html
 
 
-def build_system_section() -> dict:
-    """Build the static System Metrics dashboard card and return UI handles."""
-    card = ui.card().classes("m-2 p-2 w-full")
+def build_system_section() -> Dict[str, Any]:
+    """Build a compact System Metrics card."""
+    card = ui.card().classes("w-full h-full p-3")
     card.style(
-        """
-        background: ffffff;
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-radius: 14px;
-        border: 1px solid rgba(255,255,255,0.25);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-        height: 360px;
-        overflow-y: auto;
-        overflow-x: hidden;
-        """
+        CARD_STYLE + "height: 100%; overflow-y: auto; overflow-x: hidden;"
     )
 
     with card:
-        with ui.row().classes("w-full items-center justify-between"):
-            ui.label("System Metrics").classes(METRIC_TITLE).style(
+        with ui.row().classes("w-full items-center justify-between mb-1"):
+            ui.label("System Metrics").classes("text-sm font-bold").style(
                 "color:#d47a00;"
             )
-            with ui.icon("info").classes("text-gray-400 cursor-pointer"):
-                with (
-                    ui.menu()
-                    .props("anchor='bottom left' self='top left' auto-close")
-                    .classes("w-96 p-2")
-                ):
-                    ui.markdown(
-                        """
-                        **System Metrics (node-local)**
-
-                        - **CPU**: host stats over rolling window.
-                        - **RAM**: host stats over rolling window.
-                        - **GPU Util**: average across GPUs visible on this node; skew = max − min.
-                        - **GPU Mem**: worst GPU (max mem across local GPUs).
-                        - **Temp**: max GPU temperature on this node.
-                        """
-                    )
-            window_text = ui.html("window: –", sanitize=False).classes(
-                "text-xs text-gray-500 mr-1"
+            window_text = ui.html("window: -", sanitize=False).classes(
+                "text-[11px] text-gray-500"
             )
 
         graph = _build_graph()
-
-        with ui.grid(columns=3).classes("w-full gap-1 mt-1"):
-            _, cpu_v, cpu_s = _tile("CPU (now/p50/p95)")
-            _, gpu_v, gpu_s = _tile("GPU Util (now/p50/p95)")
-            _, imb_v, imb_s = _tile("GPU Util Skew (now/p95)")
-            _, ram_v, ram_s = _tile("RAM (now/p95/total)")
-            _, gmem_v, gmem_s = _tile("GPU Mem (now/p95)")
-            _, temp_v, temp_s = _tile("GPU Temp (max)")
+        kpis = ui.html("", sanitize=False).classes("mt-2")
+        status_text = ui.html("", sanitize=False).classes(
+            "text-[11px] text-gray-500 mt-2"
+        )
 
     return {
         "window_text": window_text,
         "graph": graph,
-        "cpu_v": cpu_v,
-        "cpu_s": cpu_s,
-        "gpu_v": gpu_v,
-        "gpu_s": gpu_s,
-        "imb_v": imb_v,
-        "imb_s": imb_s,
-        "ram_v": ram_v,
-        "ram_s": ram_s,
-        "gmem_v": gmem_v,
-        "gmem_s": gmem_s,
-        "temp_v": temp_v,
-        "temp_s": temp_s,
+        "kpis": kpis,
+        "status_text": status_text,
+        "_last_good_payload": None,
+        "_last_window_text": None,
+        "_last_kpis": None,
     }
 
 
-def update_system_section(panel: dict, payload: dict) -> None:
+def update_system_section(
+    panel: Dict[str, Any], payload: Dict[str, Any] | None
+) -> None:
+    """Update the System Metrics card while preserving last good values."""
     try:
-        payload = payload or {}
+        if _usable_payload(payload):
+            panel["_last_good_payload"] = payload
+        else:
+            payload = panel.get("_last_good_payload")
+
+        if not payload:
+            return
+
         window_len = int(payload.get("window_len", 0) or 0)
         roll = payload.get("rollups") or {}
         series = payload.get("series") or {}
 
-        if window_len <= 0 or not roll:
-            panel["window_text"].content = "window: –"
-            return
+        window_text = (
+            f"window: last {window_len} samples"
+            if window_len > 0
+            else "window: -"
+        )
+        if panel.get("_last_window_text") != window_text:
+            panel["window_text"].content = window_text
+            panel["_last_window_text"] = window_text
 
-        panel["window_text"].content = f"window: last {window_len} samples"
-
-        # If GPU is unavailable, proactively clear temp subtitle to avoid stale status text.
-        if not roll.get("gpu_available", False):
-            try:
-                panel["temp_s"].content = ""
-            except Exception:
-                pass
-
-        _update_tiles(panel, roll)
+        panel["status_text"].content = str(roll.get("status") or "")
         _update_graph(panel, series)
 
+        kpis_html = _render_kpis(roll)
+        if panel.get("_last_kpis") != kpis_html:
+            panel["kpis"].content = kpis_html
+            panel["_last_kpis"] = kpis_html
+
     except Exception:
-        try:
-            panel["window_text"].content = "window: –"
-        except Exception:
-            pass
-        return
+        pass
 
 
 def _build_graph():
-    """Create a Plotly graph ONCE with fixed layout and persistent traces."""
     fig = go.Figure()
-
-    # Create the traces once (keep colors/axes exactly as before)
     fig.add_trace(
-        go.Scatter(
-            x=[],
-            y=[],
-            mode="lines",
-            line=dict(color="#4caf50"),
-            yaxis="y",
-            name="CPU",
-            showlegend=False,
-        )
+        go.Scatter(x=[], y=[], mode="lines", line=dict(color="#4caf50"))
     )
     fig.add_trace(
         go.Scatter(
-            x=[],
-            y=[],
-            mode="lines",
-            line=dict(color="#ff9800"),
-            yaxis="y2",
-            name="GPU",
-            showlegend=False,
+            x=[], y=[], mode="lines", line=dict(color="#ff9800"), yaxis="y2"
         )
     )
-
     fig.update_layout(
-        height=150,
-        margin=dict(l=10, r=10, t=2, b=24),
+        height=104,
+        margin=dict(l=8, r=8, t=4, b=20),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0.05)",
         showlegend=False,
-        xaxis=dict(showgrid=False),
+        xaxis=dict(
+            type="date",
+            showgrid=False,
+            title="Time",
+            tickformat="%H:%M:%S",
+            hoverformat="%H:%M:%S",
+        ),
         yaxis=dict(
             range=[0, 100],
             title=dict(text="CPU (%)", font=dict(color="#4caf50")),
@@ -186,106 +128,129 @@ def _build_graph():
             tickfont=dict(color="#ff9800"),
         ),
     )
-
     return ui.plotly(fig).classes("w-full")
 
 
-def _tile(title: str):
-    """Create a compact metric tile."""
-    box = ui.column().classes("w-full px-1 py-1").style("min-height: 46px;")
-    with box:
-        ui.html(title, sanitize=False).classes(LABEL).style("color:#ff9800;")
-        v = ui.html("–", sanitize=False).classes(VAL)
-        s = ui.html("", sanitize=False).classes(SUB)
-    return box, v, s
-
-
-def _update_tiles(panel: dict, roll: dict) -> None:
-    cpu = roll.get("cpu")
-    ram = roll.get("ram")
-    if not isinstance(cpu, dict) or not isinstance(ram, dict):
-        return  # payload incomplete; keep previous values rather than crash
-
-    panel["cpu_v"].content = (
-        f"{cpu['now']:.0f}% / {cpu['p50']:.0f}% / {cpu['p95']:.0f}%"
+def _usable_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    series = payload.get("series") or {}
+    return bool(
+        isinstance(series.get("x_time"), list) and series.get("x_time")
     )
 
-    if ram["total"] > 0:
-        panel["ram_v"].content = (
-            f"{fmt_mem_new(ram['now'])}/"
-            f"{fmt_mem_new(ram['p95'])}/"
-            f"({fmt_mem_new(ram['total'])})"
-        )
-    else:
-        panel["ram_v"].content = "–"
 
-    if not roll.get("gpu_available", False):
-        for k in ("gpu_v", "imb_v", "gmem_v", "temp_v"):
-            panel[k].content = "Not available"
-        panel["temp_s"].content = (
-            ""  # prevent stale "Status: ..." when GPU disappears
-        )
-        return
+def _update_graph(panel: Dict[str, Any], series: Dict[str, Any]) -> None:
+    try:
+        x = _to_str_list(series.get("x_time"))
+        cpu = _to_float_list(series.get("cpu"))
+        gpu = _to_float_list(series.get("gpu_avg"))
 
-    gpu = roll.get("gpu_util")
-    imb = roll.get("gpu_delta")
-    gmem = roll.get("gpu_mem")
-    temp = roll.get("temp")
-    if not all(isinstance(x, dict) for x in (gpu, imb, gmem, temp)):
-        return  # incomplete GPU payload; don't crash
+        fig = panel["graph"].figure
 
-    panel["gpu_v"].content = (
-        f"{gpu['now']:.0f}% / {gpu['p50']:.0f}% / {gpu['p95']:.0f}%"
-    )
-    panel["imb_v"].content = f"{imb['now']:.0f}% / {imb['p95']:.0f}%"
-    panel["gmem_v"].content = (
-        f"{fmt_mem_new(gmem['now'])}/{fmt_mem_new(gmem['p95'])}"
-    )
+        n = min(len(x), len(cpu))
+        fig.data[0].x = x[:n]
+        fig.data[0].y = cpu[:n]
 
-    panel["temp_v"].content = f"{temp['now']:.0f}°C"
-    panel["temp_s"].content = f"Status: {temp['status']}"
-
-
-def _update_graph(panel: dict, series: dict) -> None:
-    """Update ONLY trace data (no new Figure() each tick)."""
-    cpu_hist = list(series.get("cpu") or [])
-    gpu_hist = list(series.get("gpu_avg") or [])
-
-    plot = panel["graph"]
-    fig = plot.figure  # existing persistent figure
-
-    # Ensure traces exist (in case something rebuilt the figure elsewhere)
-    if len(fig.data) < 2:
-        # fallback: rebuild once (rare)
-        new_plot = _build_graph()
-        panel["graph"] = new_plot
-        plot = new_plot
-        fig = plot.figure
-
-    # No CPU history => clear both traces
-    if not cpu_hist:
-        fig.data[0].x, fig.data[0].y = [], []
-        fig.data[1].x, fig.data[1].y = [], []
-        # prefer lightweight update
-        if hasattr(plot, "update"):
-            plot.update()
+        if gpu:
+            m = min(len(x), len(gpu))
+            fig.data[1].x = x[:m]
+            fig.data[1].y = gpu[:m]
         else:
-            plot.update_figure(fig)
-        return
+            fig.data[1].x = []
+            fig.data[1].y = []
 
-    x_cpu = list(range(len(cpu_hist)))
-    fig.data[0].x = x_cpu
-    fig.data[0].y = cpu_hist
+        panel["graph"].update()
+    except Exception:
+        pass
 
-    if gpu_hist:
-        m = min(len(cpu_hist), len(gpu_hist))
-        x_gpu = x_cpu[:m]
-        fig.data[1].x = x_gpu
-        fig.data[1].y = gpu_hist[:m]
+
+def _render_kpis(roll: Dict[str, Any]) -> str:
+    cpu = roll.get("cpu") or {}
+    ram = roll.get("ram") or {}
+
+    items = [
+        compact_metric_html(
+            "CPU now/p50/p95",
+            f"{_num(cpu, 'now'):.0f}% / {_num(cpu, 'p50'):.0f}% / {_num(cpu, 'p95'):.0f}%",
+        ),
+        compact_metric_html(
+            "RAM now/p95/total",
+            f"{fmt_mem_new(_num(ram, 'now'))} / {fmt_mem_new(_num(ram, 'p95'))} / {fmt_mem_new(_num(ram, 'total'))}",
+        ),
+    ]
+
+    if not bool(roll.get("gpu_available", False)):
+        items.extend(
+            [
+                compact_metric_html("GPU Util", "N/A"),
+                compact_metric_html("GPU Skew", "N/A"),
+                compact_metric_html("GPU Mem", "N/A"),
+                compact_metric_html("GPU Temp", "N/A"),
+            ]
+        )
     else:
-        fig.data[1].x, fig.data[1].y = [], []
+        gpu = roll.get("gpu_util") or {}
+        delta = roll.get("gpu_delta") or {}
+        mem = roll.get("gpu_mem") or {}
+        temp = roll.get("temp") or {}
+        items.extend(
+            [
+                compact_metric_html(
+                    "GPU Util",
+                    f"{_num(gpu, 'now'):.0f}% / {_num(gpu, 'p95'):.0f}%",
+                ),
+                compact_metric_html(
+                    "GPU Skew",
+                    f"{_num(delta, 'now'):.0f}% / {_num(delta, 'p95'):.0f}%",
+                ),
+                compact_metric_html(
+                    "GPU Mem",
+                    f"{fmt_mem_new(_num(mem, 'now'))} / {fmt_mem_new(_num(mem, 'p95'))}",
+                ),
+                compact_metric_html(
+                    "GPU Temp",
+                    f"{_num(temp, 'now'):.0f}C / {_num(temp, 'p95'):.0f}C",
+                ),
+            ]
+        )
 
-    if hasattr(plot, "update"):
-        plot.update()
-    else:
-        plot.update_figure(fig)
+    return (
+        "<div style='display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); "
+        "gap:6px; padding-top:6px; border-top:1px solid #ececec;'>"
+        + "".join(items)
+        + "</div>"
+    )
+
+
+def _num(mapping: Dict[str, Any], key: str, default: float = 0.0) -> float:
+    try:
+        return float(mapping.get(key, default))
+    except Exception:
+        return default
+
+
+def _to_str_list(value: Any) -> List[str]:
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    for item in value:
+        try:
+            s = str(item).strip()
+            if s:
+                out.append(s)
+        except Exception:
+            continue
+    return out
+
+
+def _to_float_list(value: Any) -> List[float]:
+    if not isinstance(value, list):
+        return []
+    out: List[float] = []
+    for item in value:
+        try:
+            out.append(float(item))
+        except Exception:
+            continue
+    return out

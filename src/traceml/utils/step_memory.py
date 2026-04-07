@@ -23,8 +23,8 @@ class StepMemoryEvent:
     step: int
     model_id: int
     device: str
-    peak_allocated_mb: float
-    peak_reserved_mb: float
+    peak_allocated: float
+    peak_reserved: float
 
 
 class StepMemoryTracker:
@@ -78,8 +78,8 @@ class StepMemoryTracker:
         evt = StepMemoryEvent(
             model_id=self.model_id,
             device=str(self.device),
-            peak_allocated_mb=float(peak_allocated),
-            peak_reserved_mb=float(peak_reserved),
+            peak_allocated=float(peak_allocated),
+            peak_reserved=float(peak_reserved),
             step=-1,  # filled during flush
         )
         _temp_step_memory_buffer[self.model_id] = evt

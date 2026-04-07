@@ -1,55 +1,34 @@
 """
-Model Step Breakdown (Median vs Worst)
+Unified Step Time analysis section for the overview dashboard.
 
-Fast NiceGUI section for TraceML "Model Combined" metrics.
+This card is intentionally compact and space-efficient:
+- one grouped stacked bar chart comparing Median vs Worst
+- one dense KPI strip
 
-UI goals
---------
-- Match System card visual tone (white, subtle border/shadow, rounded)
-- Avoid repeated titles (card titles only; Plotly title hidden)
-- Update Plotly traces in-place (no re-creating figures each tick)
-- Skip updates if values didn't change
-
-Data contract
--------------
-Expects canonical metric keys:
-  dataloader_fetch, forward, backward, optimizer_step, wait_proxy, step_time
+It does not render diagnosis prose; interpretation belongs in the diagnostics rail.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
 
 import plotly.graph_objects as go
 from nicegui import ui
 
-from traceml.renderers.step_time.diagnostics import (
-    build_step_diagnosis,
-    format_dashboard_diagnosis,
-)
 from traceml.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeResult,
 )
 
-# UI labels (fixed order)
-_LABELS: List[str] = [
-    "Dataloader",
-    "Forward",
-    "Backward",
-    "Optimizer",
-    "WAIT*",
-    "Step Time",
-]
+from .ui_shell import CARD_STYLE, compact_metric_html, safe_ms, safe_pct
 
-# Keep your existing palette (fine)
-_COLORS: Dict[str, str] = {
-    "Dataloader": "#d32f2f",
-    "Forward": "#1976d2",
-    "Backward": "#512da8",
-    "Optimizer": "#2e7d32",
-    "WAIT*": "#f9a825",
-    "Step Time": "#455a64",
-}
-_LABEL_COLORS: List[str] = [_COLORS.get(label, "#999999") for label in _LABELS]
+_STACK_KEYS = [
+    ("Dataloader", "dataloader_fetch", "#d32f2f"),
+    ("Forward", "forward", "#1976d2"),
+    ("Backward", "backward", "#512da8"),
+    ("Optimizer", "optimizer_step", "#2e7d32"),
+    ("WAIT*", "wait_proxy", "#f9a825"),
+]
 
 _REQUIRED_KEYS = {
     "dataloader_fetch",
@@ -60,116 +39,36 @@ _REQUIRED_KEYS = {
     "step_time",
 }
 
-_ORDER: List[Tuple[str, str]] = [
-    ("Dataloader", "dataloader_fetch"),
-    ("Forward", "forward"),
-    ("Backward", "backward"),
-    ("Optimizer", "optimizer_step"),
-    ("WAIT*", "wait_proxy"),
-    ("Step Time", "step_time"),
-]
-
-
-def _card_style() -> str:
-    """
-    Visual tone aligned with System card:
-    - white background
-    - subtle border + shadow
-    - rounded corners
-    """
-    return """
-    background: #ffffff;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-radius: 14px;
-    border: 1px solid rgba(0,0,0,0.08);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
-    """
-
-
-def _init_bar_figure() -> go.Figure:
-    """
-    Create the Plotly figure once.
-
-    Titles are hidden to avoid repeating card headings.
-    Later updates patch only:
-      - fig.data[0].y
-    """
-    fig = go.Figure(
-        go.Bar(
-            x=_LABELS,
-            y=[0.0] * len(_LABELS),
-            marker=dict(color=_LABEL_COLORS),
-            hovertemplate="%{x}<br>%{y:.2f} ms<extra></extra>",
-        )
-    )
-    fig.update_layout(
-        # Hide plot title (card title is the title)
-        title=None,
-        height=220,
-        margin=dict(l=10, r=10, t=8, b=28),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0.05)",
-        yaxis=dict(title="Time (ms)"),
-        xaxis=dict(showgrid=False),
-        showlegend=False,
-    )
-    return fig
-
 
 def build_model_combined_section() -> Dict[str, Any]:
-    """
-    Build the Model Combined section: Median chart, Worst chart, and Summary.
+    """Build the Step Time analysis card."""
+    card = ui.card().classes("w-full h-full p-3")
+    card.style(
+        CARD_STYLE + "height: 100%; overflow-y: auto; overflow-x: hidden;"
+    )
 
-    Returns a dict of UI handles used by update_model_combined_section().
-    """
-    container = ui.row().classes("w-full gap-3").style("flex-wrap: nowrap;")
+    fig = _init_figure()
 
-    with container:
-        # -------- Card 1: Median --------
-        median_card = ui.card().classes("p-3 flex-1").style(_card_style())
-        with median_card:
-            ui.label("Median Step Breakdown").classes(
-                "text-sm font-bold mb-1"
-            ).style("color:#2e7d32;")
-            median_plot = ui.plotly(_init_bar_figure()).classes("w-full")
-
-        # -------- Card 2: Worst --------
-        worst_card = ui.card().classes("p-3 flex-1").style(_card_style())
-        with worst_card:
-            # This title will be updated with the actual worst rank
-            worst_title = (
-                ui.label("Worst Rank Breakdown")
-                .classes("text-sm font-bold mb-1")
-                .style("color:#c62828;")
+    with card:
+        with ui.row().classes("w-full items-center justify-between mb-1"):
+            ui.label("Step Time Analysis").classes("text-sm font-bold").style(
+                "color:#455a64;"
             )
-            worst_plot = ui.plotly(_init_bar_figure()).classes("w-full")
-
-        # -------- Card 3: Summary --------
-        stats_card = ui.card().classes("p-3 flex-1").style(_card_style())
-        with stats_card:
-            ui.label("Summary & Interpretation").classes(
-                "text-sm font-bold mb-2"
-            ).style("color:#455a64;")
-            stats = ui.markdown("").classes(
-                "text-xs text-gray-700 leading-relaxed"
+            window_text = ui.html("window: -", sanitize=False).classes(
+                "text-[11px] text-gray-500"
             )
 
-    # Cache to avoid re-sending identical updates
-    cache = {
-        "median_vals": None,  # Optional[Tuple[float, ...]]
-        "worst_vals": None,  # Optional[Tuple[float, ...]]
-        "worst_title": None,  # Optional[str]
-        "stats_md": None,  # Optional[str]
-    }
+        plot = ui.plotly(fig).classes("w-full")
+        kpis = ui.html("", sanitize=False).classes("mt-2")
 
     return {
-        "container": container,
-        "median_plot": median_plot,
-        "worst_plot": worst_plot,
-        "worst_title": worst_title,
-        "stats": stats,
-        "_cache": cache,
+        "window_text": window_text,
+        "plot": plot,
+        "kpis": kpis,
+        "_fig": fig,
+        "_last_kpis": None,
+        "_last_window_text": None,
+        "_last_signature": None,
     }
 
 
@@ -177,14 +76,7 @@ def update_model_combined_section(
     panel: Dict[str, Any],
     payload: Optional[StepCombinedTimeResult],
 ) -> None:
-    """
-    Update section (fast path).
-
-    - Build fixed-size tuples of values
-    - Patch y-values in-place
-    - Update card title for worst rank
-    - Skip if unchanged
-    """
+    """Update the Step Time analysis card in place with cached signatures."""
     if not payload or not payload.metrics:
         return
 
@@ -192,73 +84,145 @@ def update_model_combined_section(
     if not _REQUIRED_KEYS.issubset(metrics):
         return
 
-    cache: Dict[str, Any] = panel.get("_cache", {})
-
-    # Build arrays in fixed order (cheap)
-    median_vals = tuple(
-        round(metrics[k].summary.median_total, 3) for _, k in _ORDER
-    )
-    worst_vals = tuple(
-        round(metrics[k].summary.worst_total, 3) for _, k in _ORDER
-    )
-
     step = metrics["step_time"]
-    worst_rank = step.summary.worst_rank
-    worst_title = (
-        f"Worst Rank Breakdown (r{worst_rank})"
-        if worst_rank is not None
-        else "Worst Rank Breakdown"
+    wait = metrics["wait_proxy"]
+
+    signature = (
+        tuple(
+            round(float(metrics[key].summary.median_total or 0.0), 4)
+            for _, key, _ in _STACK_KEYS
+        )
+        + tuple(
+            round(float(metrics[key].summary.worst_total or 0.0), 4)
+            for _, key, _ in _STACK_KEYS
+        )
+        + (
+            round(float(step.summary.median_total or 0.0), 4),
+            round(float(step.summary.worst_total or 0.0), 4),
+            int(step.summary.steps_used or 0),
+            int(step.summary.worst_rank or -1),
+        )
     )
 
-    # --- Median plot update ---
-    if cache.get("median_vals") != median_vals:
-        fig = panel["median_plot"].figure
-        fig.data[0].y = list(median_vals)
-        panel["median_plot"].update()
-        cache["median_vals"] = median_vals
+    if panel.get("_last_signature") != signature:
+        _update_plot(panel, metrics)
+        panel["_last_signature"] = signature
 
-    # --- Worst plot update ---
-    if cache.get("worst_vals") != worst_vals:
-        fig = panel["worst_plot"].figure
-        fig.data[0].y = list(worst_vals)
-        panel["worst_plot"].update()
-        cache["worst_vals"] = worst_vals
+    window_text = f"window: {int(step.summary.steps_used or 0)} aligned steps"
+    if panel.get("_last_window_text") != window_text:
+        panel["window_text"].content = window_text
+        panel["_last_window_text"] = window_text
 
-    # --- Worst title update (avoid repeating plot title) ---
-    if cache.get("worst_title") != worst_title:
-        panel["worst_title"].text = worst_title
-        cache["worst_title"] = worst_title
+    kpis_html = _render_kpis(metrics, step, wait)
+    if panel.get("_last_kpis") != kpis_html:
+        panel["kpis"].content = kpis_html
+        panel["_last_kpis"] = kpis_html
 
-    # --- Stats markdown update ---
-    stats_md = _render_stats_block(metrics, step.summary.steps_used)
-    if cache.get("stats_md") != stats_md:
-        panel["stats"].set_content(stats_md)
-        cache["stats_md"] = stats_md
 
-    panel["_cache"] = cache
+def _init_figure() -> go.Figure:
+    fig = go.Figure()
+    for label, _metric_key, color in _STACK_KEYS:
+        fig.add_trace(
+            go.Bar(
+                x=["Median", "Worst"],
+                y=[0.0, 0.0],
+                name=label,
+                marker=dict(color=color),
+                hovertemplate="%{x}<br>"
+                + label
+                + ": %{y:.2f} ms<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        barmode="stack",
+        height=235,
+        margin=dict(l=8, r=8, t=8, b=28),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0.05)",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1.0,
+            font=dict(size=10),
+        ),
+        xaxis=dict(showgrid=False),
+        yaxis=dict(title="Time (ms)"),
+    )
+    return fig
+
+
+def _update_plot(
+    panel: Dict[str, Any], metrics: Dict[str, StepCombinedTimeMetric]
+) -> None:
+    fig = panel["_fig"]
+    for idx, (_label, key, _color) in enumerate(_STACK_KEYS):
+        metric = metrics[key]
+        fig.data[idx].y = [
+            float(metric.summary.median_total or 0.0),
+            float(metric.summary.worst_total or 0.0),
+        ]
+    panel["plot"].update_figure(fig)
 
 
 def _index_metrics(
     metrics: List[StepCombinedTimeMetric],
 ) -> Dict[str, StepCombinedTimeMetric]:
-    """Index metrics by metric key."""
-    return {m.metric: m for m in metrics}
+    return {metric.metric: metric for metric in metrics}
 
 
-def _render_stats_block(
+def _render_kpis(
     metrics: Dict[str, StepCombinedTimeMetric],
-    steps: int,
+    step: StepCombinedTimeMetric,
+    wait: StepCombinedTimeMetric,
 ) -> str:
-    """
-    Render the dashboard summary using the shared diagnosis logic.
+    median_total = float(step.summary.median_total or 0.0)
+    worst_total = float(step.summary.worst_total or 0.0)
+    wait_share = (
+        float(wait.summary.median_total or 0.0) / median_total
+        if median_total > 0.0
+        else 0.0
+    )
 
-    Notes
-    -----
-    - `steps` is kept in the signature for compatibility with existing call sites.
-    - The diagnosis formatter already uses `steps_used` from the metric payload,
-      so `steps` is not needed here.
-    """
-    _ = steps  # kept for API compatibility
+    items = [
+        compact_metric_html("Median Total", safe_ms(median_total)),
+        compact_metric_html("Worst Total", safe_ms(worst_total)),
+        compact_metric_html("Gap", safe_pct(step.summary.skew_pct)),
+        compact_metric_html(
+            "Worst Rank",
+            (
+                f"r{int(step.summary.worst_rank)}"
+                if step.summary.worst_rank is not None
+                else "-"
+            ),
+        ),
+        compact_metric_html("WAIT Share", safe_pct(wait_share)),
+        compact_metric_html(
+            "Dominant Split",
+            _dominant_metric(metrics, mode="worst_total"),
+        ),
+    ]
 
-    diagnosis = build_step_diagnosis(list(metrics.values()))
-    return format_dashboard_diagnosis(diagnosis)
+    return (
+        "<div style='display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); "
+        "gap:8px; padding-top:6px; border-top:1px solid #ececec;'>"
+        + "".join(items)
+        + "</div>"
+    )
+
+
+def _dominant_metric(
+    metrics: Dict[str, StepCombinedTimeMetric], mode: str
+) -> str:
+    best_label = "-"
+    best_value = -1.0
+
+    for label, key, _ in _STACK_KEYS:
+        value = float(getattr(metrics[key].summary, mode, 0.0) or 0.0)
+        if value > best_value:
+            best_value = value
+            best_label = label
+
+    return f"{best_label} ({best_value:.1f} ms)" if best_value >= 0.0 else "-"

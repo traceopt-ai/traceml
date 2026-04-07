@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find training bottlenecks live, while the run is still running.**
+**Find why training is slow, while it is still running.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
@@ -24,13 +24,13 @@ TraceML is a lightweight bottleneck finder for PyTorch training. It helps you ca
 
 without jumping straight to heavyweight profiling.
 
-**The gap it fills:** system dashboards show utilization over time. TraceML shows what happened **during training steps** and, in DDP, **which rank is slowing the run down**.
+**The gap it fills:** system dashboards show utilization over time. TraceML shows what happens **during training steps** and, in distributed settings, **which rank is slowing the run down**.
 
-**Works today:** Single GPU, Single-node DDP
+**Works today:** Single GPU, Single-node DDP/FSDP
 
-**Not yet:** Multi-node DDP, FSDP, TP, PP
+**Not yet:** Multi-node, TP, PP
 
-Minimal setup with system and process behaviour during training
+With minimal setup observe system and process behaviour during training
 
 ```bash
 pip install traceml-ai
@@ -45,10 +45,10 @@ Use it when training feels:
 
 - slower than expected
 - jittery from step to step
-- imbalanced across DDP ranks
+- imbalanced across distributed ranks
 - stable in dashboards but still underperforming
 
-Start with TraceML when you need a fast answer in the terminal. Reach for `torch.profiler` after you know where to dig.
+Start with TraceML when you need a fast answer in the terminal. Reach for `torch.profiler` once you know where to dig.
 
 ---
 
@@ -60,11 +60,11 @@ Start with TraceML when you need a fast answer in the terminal. Reach for `torch
 traceml watch train.py
 ```
 
-Use `watch` for a zero-code live view of system and process behavior during training.
+Use `watch` for a zero-code live view of system and process behavior while training is running.
 
 ### Step-aware bottleneck diagnosis
 
-Wrap your training step:
+Wrap your training step to see where time goes:
 
 ```python
 from traceml.decorators import trace_step
@@ -92,7 +92,7 @@ At the end of the run, it prints a compact summary.
 
 ![TraceML summary](docs/assets/end-of-run-summary.png)
 
-For local review and comparison, TraceML also includes a local UI. See [`docs/quickstart.md`](docs/quickstart.md) for setup details.
+TraceML also includes a local UI. See [`docs/quickstart.md`](docs/quickstart.md) for setup details.
 
 ---
 
@@ -105,7 +105,7 @@ Zero-code live visibility for system and process behavior.
 Default mode for live bottleneck diagnosis.
 
 #### `traceml deep train.py`
-Adds per-layer timing and memory signals for deeper inspection.
+Adds per-layer timing and memory signals for deeper inspection (experimental).
 
 Start with `watch` for fast visibility. Use `run` when you need step-aware diagnosis. Use `deep` only when you need layer-level root cause.
 
@@ -113,13 +113,13 @@ Start with `watch` for fast visibility. Use `run` when you need step-aware diagn
 
 ## What TraceML shows
 
+- CPU / RAM / GPU signals
 - step time and its breakdown
 - dataloader / input wait
 - forward / backward / optimizer / overhead timing
 - step jitter and drift
 - GPU memory trend
-- CPU / RAM / GPU signals
-- in single-node DDP: worst-rank vs median-rank timing and skew
+- in distributed settings: worst-rank vs median-rank timing and skew
 
 This helps you tell whether the slowdown is coming from input, compute, optimizer work, or rank imbalance.
 
@@ -127,7 +127,7 @@ This helps you tell whether the slowdown is coming from input, compute, optimize
 
 ## Supported stacks
 
-### Plain PyTorch
+### Standard PyTorch loop
 Use `trace_step(model)` around your training step.
 
 ### Hugging Face Trainer
@@ -143,7 +143,7 @@ trainer = TraceMLTrainer(
 )
 ```
 
-See [`docs/huggingface.md`](docs/huggingface.md).
+See [`docs/huggingface.md`](docs/huggingface.md) for the full setup.
 
 ### PyTorch Lightning
 ```python
@@ -157,7 +157,7 @@ See [`docs/lightning.md`](docs/lightning.md) for the full setup.
 
 ---
 
-## Optional model hooks
+## Optional model hooks (experimental)
 
 ```python
 from traceml.decorators import trace_model_instance
@@ -166,6 +166,8 @@ trace_model_instance(model)
 ```
 
 Use this with `trace_step(model)` when you want optional per-layer timing and memory signals. The core step-level view works without it.
+
+This is experimental and may not work with `torch.compile`, especially with full-graph compilation. The core step-level view works without model hooks.
 
 ---
 
@@ -199,7 +201,7 @@ See [**Examples**](src/examples) for runnable cases.
 If TraceML caught a slowdown for you, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
-- single GPU or DDP
+- single or multi GPU
 - whether you used `watch`, `run`, or `deep`
 - whether you used core tracing only or model hooks
 - the end-of-run summary

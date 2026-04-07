@@ -16,6 +16,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import MODEL_COMBINED_LAYOUT
+from traceml.diagnostics.trends import (
+    DEFAULT_TREND_CONFIG,
+    compute_trend_pct,
+    format_trend_pct,
+)
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.utils import fmt_time_run
 
@@ -127,8 +132,15 @@ class StepCombinedRenderer(BaseRenderer):
                 *[f"+{m.summary.skew_pct * 100:.1f}%" for m in metrics],
             )
 
-        # Optional WAIT share line (still meaningful in both modes)
         table.add_row("")
+        if K >= DEFAULT_TREND_CONFIG.min_points:
+            table.add_row(
+                f"Trend ({DEFAULT_TREND_CONFIG.short_window} vs {DEFAULT_TREND_CONFIG.long_window})",
+                *[_metric_trend_label(m, single_rank) for m in metrics],
+            )
+            table.add_row("")
+
+        # Optional WAIT share line (still meaningful in both modes)
         if step_metric and wait_metric and step_metric.summary.worst_total > 0:
             denom = (
                 step_metric.summary.median_total
@@ -167,3 +179,13 @@ class StepCombinedRenderer(BaseRenderer):
         Dashboard gets a richer payload (cheap summaries + rank heatmap).
         """
         return self._computer.compute_dashboard()
+
+
+def _metric_trend_label(metric, single_rank: bool) -> str:
+    if metric is None or metric.series is None:
+        return "—"
+    series = metric.series.worst if single_rank else metric.series.median
+    return format_trend_pct(
+        compute_trend_pct(series, config=DEFAULT_TREND_CONFIG),
+        deadband_pct=DEFAULT_TREND_CONFIG.deadband_pct,
+    )

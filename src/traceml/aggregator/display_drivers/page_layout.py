@@ -2,6 +2,7 @@ from traceml.aggregator.display_drivers.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
     LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
+    MODEL_DIAGNOSTICS_LAYOUT,
     PROCESS_LAYOUT,
     STEPTIMER_LAYOUT,
     SYSTEM_LAYOUT,
@@ -14,9 +15,10 @@ TRACE_ML_PAGE = [
         PROCESS_LAYOUT,
         STEPTIMER_LAYOUT,
     ],
-    # Row 2: model summary
+    # Row 2: model metrics + diagnostics
     [
         MODEL_COMBINED_LAYOUT,
+        MODEL_DIAGNOSTICS_LAYOUT,
     ],
     # Row 3: layer tables
     [

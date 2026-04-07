@@ -32,11 +32,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import MODEL_MEMORY_LAYOUT
-from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.utils.formatting import fmt_mem_new
 
-from .compute import StepMemoryCombinedComputer
+from .computer import StepMemoryMetricsComputer
+from .diagnostics import build_step_memory_diagnosis, format_cli_diagnosis
 from .schema import StepMemoryCombinedResult
 
 
@@ -52,12 +52,12 @@ class StepMemoryRenderer(BaseRenderer):
     without overwhelming the user with per-step noise.
     """
 
-    def __init__(self, remote_store: RemoteDBStore):
+    def __init__(self, db_path: str):
         super().__init__(
             name="Model Step Memory",
             layout_section_name=MODEL_MEMORY_LAYOUT,
         )
-        self._computer = StepMemoryCombinedComputer(remote_store)
+        self._computer = StepMemoryMetricsComputer(db_path=db_path)
         self._cached: Optional[StepMemoryCombinedResult] = None
 
     def _payload(self) -> Optional[StepMemoryCombinedResult]:
@@ -67,7 +67,7 @@ class StepMemoryRenderer(BaseRenderer):
         Uses a simple cache to avoid flicker when data is temporarily
         incomplete (e.g., ranks slightly out of sync).
         """
-        payload = self._computer.compute()
+        payload = self._computer.compute_cli()
         if payload and payload.metrics:
             self._cached = payload
         return self._cached
@@ -90,6 +90,9 @@ class StepMemoryRenderer(BaseRenderer):
             )
 
         metrics = payload.metrics
+
+        diag = build_step_memory_diagnosis(metrics)
+        diag_text = format_cli_diagnosis(diag)
 
         # Stable order: allocated then reserved (if present)
         def _sort_key(m) -> int:
@@ -155,7 +158,7 @@ class StepMemoryRenderer(BaseRenderer):
         # This is helpful for spotting monotonic growth / fragmentation.
         table.add_row("")
         table.add_row(
-            "Worst Trend (Δ)",
+            "Head/Tail Delta (worst)",
             *[self._format_worst_trend_delta(m) for m in metrics],
         )
 
@@ -172,6 +175,8 @@ class StepMemoryRenderer(BaseRenderer):
 
         return Panel(
             Group(
+                diag_text,
+                "",
                 table,
                 footer,
             ),
@@ -183,27 +188,34 @@ class StepMemoryRenderer(BaseRenderer):
     @staticmethod
     def _format_worst_trend_delta(m) -> str:
         """
-        Format worst-series delta (last - first) as a compact trend hint.
+        Format a stable head-vs-tail delta for the worst series.
 
-        Uses bytes; fmt_mem_new handles scaling to MB/GB.
+        This mirrors the memory diagnosis more closely than raw last-minus-first.
         """
         series = m.series
         if not series.steps or not series.worst:
             return "—"
 
-        if len(series.worst) < 2:
+        values = [float(v) for v in series.worst]
+        n = len(values)
+        if n < 2:
             return "—"
 
-        delta = float(series.worst[-1]) - float(series.worst[0])
-        sign = "+" if delta >= 0 else ""
-        return (
-            f"{sign}{fmt_mem_new(abs(delta))}"
-            if delta != 0
-            else fmt_mem_new(0.0)
-        )
+        segment = max(4, int(round(n * 0.20)))
+        segment = min(segment, max(1, n // 2))
+
+        head_avg = sum(values[:segment]) / segment
+        tail_avg = sum(values[-segment:]) / segment
+        delta = tail_avg - head_avg
+
+        if delta == 0.0:
+            return fmt_mem_new(0.0)
+
+        sign = "+" if delta > 0.0 else "-"
+        return f"{sign}{fmt_mem_new(abs(delta))}"
 
     def get_dashboard_renderable(self) -> StepMemoryCombinedResult:
         """
         Return the typed compute result directly to dashboard consumers.
         """
-        return self._payload()
+        return self._computer.compute_dashboard()
