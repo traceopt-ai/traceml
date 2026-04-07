@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](docs/quickstart.md) • [**How to Read Output**](docs/how-to-read-output) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Quickstart**](docs/quickstart.md) • [**How to Read Output**](docs/how-to-read-output.md) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
 
 
 </div>
@@ -69,7 +69,7 @@ At the end of the run, it prints a compact summary you can review or share.
 
 For full setup details, see [docs/quickstart.md](docs/quickstart.md).
 
-Not sure how to interpret the output? Read [How to Read TraceML Output](docs/how-to-read-output).
+Not sure how to interpret the output? Read [How to Read TraceML Output](docs/how-to-read-output.md).
 
 ---
 
@@ -140,7 +140,7 @@ See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 ## Next steps
 
 - [Quickstart](docs/quickstart.md)
-- [How to Read TraceML Output](docs/how-to-read-output)
+- [How to Read TraceML Output](docs/how-to-read-output.md)
 - [FAQ](docs/faq.md)
 - [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md)
 - Hugging Face integration: `docs/huggingface.md`
