@@ -6,16 +6,15 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 
-from traceml.decorators import trace_model_instance, trace_step
+from traceml.decorators import trace_step
 
 SEED = 42
-INPUT_DIM = 1024
-HIDDEN_DIM = 2048
+INPUT_DIM = 128
+HIDDEN_DIM = 256
 NUM_CLASSES = 10
-
-NUM_SAMPLES = 100000
-BATCH_SIZE = 256
-EPOCHS = 6
+NUM_SAMPLES = 8192
+BATCH_SIZE = 64
+EPOCHS = 4
 
 
 class TinyMLP(nn.Module):
@@ -23,9 +22,7 @@ class TinyMLP(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(INPUT_DIM, HIDDEN_DIM),
-            nn.GELU(),
-            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Linear(HIDDEN_DIM, NUM_CLASSES),
         )
 
@@ -33,9 +30,10 @@ class TinyMLP(nn.Module):
         return self.net(x)
 
 
-def set_seed(seed: int):
+def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def prepare_data(rank: int, world_size: int):
@@ -43,33 +41,25 @@ def prepare_data(rank: int, world_size: int):
     y = torch.randint(0, NUM_CLASSES, (NUM_SAMPLES,))
     dataset = TensorDataset(x, y)
 
-    train_sampler = DistributedSampler(
+    sampler = DistributedSampler(
         dataset,
         num_replicas=world_size,
         rank=rank,
         shuffle=True,
     )
 
-    train_loader = DataLoader(
+    loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
-        sampler=train_sampler,
-        pin_memory=True,
+        sampler=sampler,
+        pin_memory=torch.cuda.is_available(),
         drop_last=True,
     )
 
-    return train_loader, train_sampler
+    return loader, sampler
 
 
-def load_batch_to_device(batch, device):
-    batch_x, batch_y = batch
-    batch_x = batch_x.to(device, non_blocking=True)
-    batch_y = batch_y.to(device, non_blocking=True)
-    return batch_x, batch_y
-
-
-def main():
-    # torchrun provides these
+def main() -> None:
     rank = int(os.environ.get("RANK", 0))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -95,9 +85,6 @@ def main():
 
     model = TinyMLP().to(device)
 
-    # Attach TraceML hooks to the real model before DDP wrapping
-    trace_model_instance(model)
-
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(
             model,
@@ -112,32 +99,33 @@ def main():
 
     model.train()
     global_step = 0
-    running_loss = 0.0
 
     for epoch in range(EPOCHS):
         train_sampler.set_epoch(epoch)
 
-        for batch in train_loader:
+        running_loss = 0.0
+
+        for batch_x, batch_y in train_loader:
+            global_step += 1
+
+            batch_x = batch_x.to(device, non_blocking=True)
+            batch_y = batch_y.to(device, non_blocking=True)
+
             with trace_step(model.module):
-                batch_x, batch_y = load_batch_to_device(batch, device)
-
                 optimizer.zero_grad(set_to_none=True)
-
                 logits = model(batch_x)
                 loss = criterion(logits, batch_y)
-
                 loss.backward()
                 optimizer.step()
 
-                running_loss += loss.detach()
-                global_step += 1
+            running_loss += float(loss.detach())
 
-                if rank == 0 and global_step % 50 == 0:
-                    print(
-                        f"[Train] epoch {epoch+1} step {global_step} "
-                        f"| loss {(running_loss / 50).item():.4f}"
-                    )
-                    running_loss.zero_()
+            if rank == 0 and global_step % 25 == 0:
+                print(
+                    f"Epoch {epoch + 1} | Step {global_step} | "
+                    f"loss: {running_loss / 25:.4f}"
+                )
+                running_loss = 0.0
 
     if rank == 0:
         print("Done.")
