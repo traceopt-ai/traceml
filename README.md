@@ -112,8 +112,7 @@ Use those for:
 
 Use TraceML for:
 
-- training-efficiency diagnosis
-- bottleneck finding
+- bottleneck diagnosis
 - rank imbalance / straggler detection
 - memory trend debugging
 
@@ -140,12 +139,12 @@ See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 ## Next steps
 
 - [Quickstart](docs/quickstart.md)
+- [Examples](examples/README.md)
 - [How to Read TraceML Output](docs/how-to-read-output.md)
 - [FAQ](docs/faq.md)
 - [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md)
 - Hugging Face integration: `docs/huggingface.md`
 - PyTorch Lightning integration: `docs/lightning.md`
-
 
 ---
 

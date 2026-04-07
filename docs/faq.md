@@ -107,9 +107,9 @@ Today the main distributed target is single-node DDP.
 
 ## Does TraceML support FSDP?
 
-Partially / early, depending on setup.
+Yes, for single-node FSDP.
 
-If FSDP matters for your workload, test it on a representative run and open an issue if something does not behave as expected.
+If you hit an issue on your setup, please open an issue with a minimal repro and environment details.
 
 ---
 
