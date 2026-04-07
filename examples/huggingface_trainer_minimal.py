@@ -1,20 +1,17 @@
-import time
-
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
-from transformers import TrainerCallback, TrainingArguments
+from transformers import TrainingArguments
 
 from traceml.integrations.huggingface import TraceMLTrainer
 
 SEED = 42
-INPUT_DIM = 1024
-HIDDEN_DIM = 2048
+INPUT_DIM = 128
+HIDDEN_DIM = 256
 NUM_CLASSES = 10
-NUM_SAMPLES = 50000
-BATCH_SIZE = 256
-MAX_STEPS = 600
-PAUSE_BETWEEN_STEPS = 0.05
+NUM_SAMPLES = 4096
+BATCH_SIZE = 64
+MAX_STEPS = 200
 
 
 class SyntheticClassificationDataset(Dataset):
@@ -22,7 +19,7 @@ class SyntheticClassificationDataset(Dataset):
         self.x = torch.randn(num_samples, INPUT_DIM)
         self.y = torch.randint(0, NUM_CLASSES, (num_samples,))
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.y)
 
     def __getitem__(self, idx):
@@ -37,9 +34,7 @@ class TinyMLPForTrainer(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(INPUT_DIM, HIDDEN_DIM),
-            nn.GELU(),
-            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Linear(HIDDEN_DIM, NUM_CLASSES),
         )
         self.loss_fn = nn.CrossEntropyLoss()
@@ -57,13 +52,7 @@ class TinyMLPForTrainer(nn.Module):
         }
 
 
-class SlowDownCallback(TrainerCallback):
-    def on_step_end(self, args, state, control, **kwargs):
-        time.sleep(PAUSE_BETWEEN_STEPS)
-        return control
-
-
-def main():
+def main() -> None:
     torch.manual_seed(SEED)
 
     model = TinyMLPForTrainer()
@@ -85,7 +74,6 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         traceml_enabled=True,
-        callbacks=[SlowDownCallback()],
     )
 
     trainer.train()
