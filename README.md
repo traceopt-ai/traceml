@@ -2,214 +2,165 @@
 
 # TraceML
 
-**Find why training is slow, while it is still running.**
+**Find why PyTorch training is slow while the job is still running.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
-[![GitHub issues](https://img.shields.io/github/issues/traceopt-ai/traceml)](https://github.com/traceopt-ai/traceml/issues)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 
-[**Quickstart**](docs/quickstart.md) • [**Examples**](src/examples) • [**Contributing**](#contributing)
+[**Quickstart**](docs/quickstart.md) • [**How to Read Output**](docs/how-to-read-output.md) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+
 
 </div>
 
-TraceML is a lightweight bottleneck finder for PyTorch training. It helps you catch:
+TraceML helps you find training bottlenecks in PyTorch while the job is still running.
+It helps you catch:
 
-- input stalls
-- unstable or drifting step times
-- DDP rank stragglers
+- input bottlenecks
+- compute-bound steps
+- DDP stragglers
+- wait-heavy training
 - memory creep over time
 
-without jumping straight to heavyweight profiling.
+without jumping straight to a heavyweight profiler.
 
-**The gap it fills:** system dashboards show utilization over time. TraceML shows what happens **during training steps** and, in distributed settings, **which rank is slowing the run down**.
+**Why this exists:** dashboards show utilization and curves. TraceML shows **why throughput is poor inside the training step**.
 
-**Works today:** Single GPU, Single-node DDP/FSDP
+---
 
-**Not yet:** Multi-node, TP, PP
+## The fastest way to try it
 
-With minimal setup observe system and process behaviour during training
+Install:
 
 ```bash
 pip install traceml-ai
-traceml watch train.py
 ```
 
----
-
-## When to use TraceML
-
-Use it when training feels:
-
-- slower than expected
-- jittery from step to step
-- imbalanced across distributed ranks
-- stable in dashboards but still underperforming
-
-Start with TraceML when you need a fast answer in the terminal. Reach for `torch.profiler` once you know where to dig.
-
----
-
-## Quick start
-
-### Zero-code first look
-
-```bash
-traceml watch train.py
-```
-
-Use `watch` for a zero-code live view of system and process behavior while training is running.
-
-### Step-aware bottleneck diagnosis
-
-Wrap your training step to see where time goes:
+Wrap your training step:
 
 ```python
 from traceml.decorators import trace_step
 
 for batch in dataloader:
     with trace_step(model):
+        optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
         loss.backward()
         optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
 ```
 
-Run through TraceML:
+Run:
 
 ```bash
 traceml run train.py
 ```
 
-During training, TraceML opens a live CLI view alongside your logs.
+
+During training, TraceML opens a live terminal view alongside your logs.
+
 
 ![TraceML terminal dashboard](docs/assets/cli_demo_v1.png)
 
-At the end of the run, it prints a compact summary.
+At the end of the run, it prints a compact summary you can review or share.
 
 ![TraceML summary](docs/assets/end-of-run-summary.png)
 
-TraceML also includes a local UI. See [`docs/quickstart.md`](docs/quickstart.md) for setup details.
+For full setup details, see [docs/quickstart.md](docs/quickstart.md).
+
+Not sure how to interpret the output? Read [How to Read TraceML Output](docs/how-to-read-output.md).
 
 ---
 
-## Run modes
+## What TraceML tells you
 
-#### `traceml watch train.py`
-Zero-code live visibility for system and process behavior.
+TraceML helps answer questions like:
 
-#### `traceml run train.py`
-Default mode for live bottleneck diagnosis.
-
-#### `traceml deep train.py`
-Adds per-layer timing and memory signals for deeper inspection (experimental).
-
-Start with `watch` for fast visibility. Use `run` when you need step-aware diagnosis. Use `deep` only when you need layer-level root cause.
+- Is training input-bound or compute-bound?
+- Is one DDP rank slower than the others?
+- Is the job wait-heavy because of uneven progress?
+- Is memory drifting upward over time?
+- Is the slowdown coming from dataloader, forward, backward, or optimizer work?
 
 ---
 
-## What TraceML shows
+## When to use TraceML
 
-- CPU / RAM / GPU signals
-- step time and its breakdown
-- dataloader / input wait
-- forward / backward / optimizer / overhead timing
-- step jitter and drift
-- GPU memory trend
-- in distributed settings: worst-rank vs median-rank timing and skew
+Use TraceML when training feels:
 
-This helps you tell whether the slowdown is coming from input, compute, optimizer work, or rank imbalance.
+- slower than expected
+- unstable from step to step
+- imbalanced across distributed ranks
+- fine in dashboards but still underperforming
 
----
-
-## Supported stacks
-
-### Standard PyTorch loop
-Use `trace_step(model)` around your training step.
-
-### Hugging Face Trainer
-```python
-from traceml.integrations.huggingface import TraceMLTrainer
-
-trainer = TraceMLTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_ds,
-    eval_dataset=eval_ds,
-    traceml_enabled=True,
-)
-```
-
-See [`docs/huggingface.md`](docs/huggingface.md) for the full setup.
-
-### PyTorch Lightning
-```python
-import lightning as L
-from traceml.integrations.lightning import TraceMLCallback
-
-trainer = L.Trainer(callbacks=[TraceMLCallback()])
-```
-
-See [`docs/lightning.md`](docs/lightning.md) for the full setup.
+Start with TraceML when you need a fast answer in the terminal.
+Reach for `torch.profiler` once you know where to dig deeper.
 
 ---
 
-## Optional model hooks (experimental)
+## How it fits with your stack
 
-```python
-from traceml.decorators import trace_model_instance
+TraceML is designed to work alongside tools like W&B, MLflow, and TensorBoard.
 
-trace_model_instance(model)
-```
+Use those for:
 
-Use this with `trace_step(model)` when you want optional per-layer timing and memory signals. The core step-level view works without it.
+- experiment tracking
+- artifacts
+- dashboards
+- team reporting
 
-This is experimental and may not work with `torch.compile`, especially with full-graph compilation. The core step-level view works without model hooks.
+Use TraceML for:
 
----
+- bottleneck diagnosis
+- rank imbalance / straggler detection
+- memory trend debugging
 
-## Scope
+See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 
-TraceML is for lightweight diagnosis during real PyTorch training runs.
-
-It is **not**:
-
-- a kernel-level tracer
-- an auto-tuner
-- a replacement for deep profilers
-- a full observability platform
 
 ---
 
-## Example cases
+## Current support
 
-Start with examples such as:
+**Works today:**
 
-- basic example
-- input / dataloader stall
-- DDP straggler / rank skew
+- single GPU
+- single-node DDP/FSDP
 
-See [**Examples**](src/examples) for runnable cases.
+**Not yet:**
+
+- multi-node
+- tensor parallel
+- pipeline parallel
+
+---
+
+## Next steps
+
+- [Quickstart](docs/quickstart.md)
+- [Examples](examples/README.md)
+- [How to Read TraceML Output](docs/how-to-read-output.md)
+- [FAQ](docs/faq.md)
+- [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md)
+- Hugging Face integration: `docs/huggingface.md`
+- PyTorch Lightning integration: `docs/lightning.md`
 
 ---
 
 ## Feedback
 
-If TraceML caught a slowdown for you, please open an issue and include:
+If TraceML helped you find a slowdown, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
-- single or multi GPU
-- whether you used `watch`, `run`, or `deep`
-- whether you used core tracing only or model hooks
+- single GPU or multi-GPU
+- whether you used `run`, `watch`, or `deep`
 - the end-of-run summary
 - a minimal repro if possible
 
-📧 Email: support@traceopt.ai
+GitHub issues: https://github.com/traceopt-ai/traceml/issues
 
-📋 User Survey: https://forms.gle/KwPSLaPmJnJjoVXSA
+Email: support@traceopt.ai
 
 ---
 
@@ -218,12 +169,13 @@ If TraceML caught a slowdown for you, please open an issue and include:
 Contributions are welcome, especially:
 
 - reproducible slowdown cases
-- integrations
 - bug reports
+- docs improvements
+- integrations
 - examples
 
 ---
 
 ## License
 
-Apache 2.0. See [`LICENSE`](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).
