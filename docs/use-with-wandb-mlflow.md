@@ -244,6 +244,6 @@ This keeps TraceML in the part of the workflow where it adds the most value.
 ## Related docs
 
 - [Quickstart](quickstart.md)
-- [How to Read TraceML Output](how-to-read-output.md)
+- [How to Read TraceML Output](how-to-read-output)
 - [Hugging Face Trainer](huggingface.md)
 - [PyTorch Lightning](lightning.md)
