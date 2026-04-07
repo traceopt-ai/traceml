@@ -1,29 +1,16 @@
-# PyTorch Lightning Integration
+# PyTorch Lightning
 
-TraceML provides `TraceMLCallback`, an official callback for PyTorch Lightning that automatically adds step-level timing and memory visibility to your `Trainer`.
+Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
 
-> **Prerequisites:** Follow the [Quickstart](quickstart.md) first to confirm `traceml run` works with a plain PyTorch loop.
+`TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing memory drift.
 
----
-
-## Table of Contents
-
-- [PyTorch Lightning Integration](#pytorch-lightning-integration)
-  - [Table of Contents](#table-of-contents)
-  - [1. Install](#1-install)
-  - [2. How it works](#2-how-it-works)
-  - [3. Basic usage](#3-basic-usage)
-  - [4. Enable Deep-Dive mode](#4-enable-deep-dive-mode)
-  - [5. Complete Example: MNIST CNN](#5-complete-example-mnist-cnn)
-  - [6. Gradient Accumulation](#6-gradient-accumulation)
-  - [7. Trainer tips](#7-trainer-tips)
-  - [Next steps](#next-steps)
+> Start with the [Quickstart](quickstart.md) if you have not used TraceML yet.
 
 ---
 
-## 1. Install
+## Install
 
-Install TraceML and PyTorch Lightning:
+Install TraceML with Lightning support:
 
 ```bash
 pip install "traceml-ai[lightning]"
@@ -31,17 +18,9 @@ pip install "traceml-ai[lightning]"
 
 ---
 
-## 2. How it works
+## Basic usage
 
-`TraceMLCallback` hooks into Lightning's lifecycle events (`on_train_batch_start`, `on_before_backward`, `on_train_batch_end`, etc.) to automatically time the forward, backward, and optimizer phases, and to sample GPU memory.
-
-You don't need to wrap your code with `trace_step(model)` because the callback manages the tracing context for you.
-
----
-
-## 3. Basic usage
-
-Just import `TraceMLCallback` and add it to your `Trainer` callbacks list. Everything else stays the same.
+Add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
 
 ```python
 import lightning as L
@@ -53,20 +32,20 @@ trainer = L.Trainer(
     max_steps=500,
     accelerator="auto",
     devices=1,
-    enable_progress_bar=False,  # Lets the TraceML dashboard own the terminal output
+    enable_progress_bar=False,
     callbacks=[TraceMLCallback()],
 )
 
 trainer.fit(model, train_dataloaders=loader)
 ```
 
-Then launch with the CLI:
+Run with:
 
 ```bash
 traceml run train.py
 ```
 
-Or with the web dashboard:
+Or open the local UI:
 
 ```bash
 traceml run train.py --mode=dashboard
@@ -74,13 +53,86 @@ traceml run train.py --mode=dashboard
 
 ---
 
-## 4. Enable Deep-Dive mode
+## What TraceML will show
 
-To enable Deep-Dive mode (per-layer memory and timing), you need to attach hooks to your model instance. Since the callback only handles the step-level lifecycle, call `trace_model_instance` directly inside your `LightningModule`'s `__init__`.
+In Lightning runs, TraceML helps you spot:
+
+- input-bound training
+- compute-bound steps
+- wait-heavy behavior
+- rank imbalance and stragglers
+- memory creep over time
+
+You keep the normal Lightning workflow. TraceML adds diagnosis around the training step.
+
+---
+
+## How it works
+
+`TraceMLCallback` hooks into Lightning’s training lifecycle automatically.
+
+That means you do not need to wrap your code with `trace_step(...)` manually in Lightning.
+
+---
+
+## Use with Lightning loggers
+
+TraceML works alongside Lightning loggers such as:
+
+- W&B
+- TensorBoard
+- CSVLogger
+
+For the cleanest terminal experience during diagnosis runs, it helps to use:
 
 ```python
-from traceml.decorators import trace_model_instance
+enable_progress_bar=False
+```
+
+You do not need to replace your existing logger stack to use TraceML.
+
+---
+
+## Optional: local UI
+
+If you want a richer browser-based view, run:
+
+```bash
+traceml run train.py --mode=dashboard
+```
+
+The local UI is useful when you want:
+
+- a richer run review experience
+- easier local comparison
+- less terminal clutter
+
+---
+
+## Trainer tips
+
+These settings usually give the cleanest experience with TraceML:
+
+| Setting | Recommended value | Why |
+|---|---|---|
+| `enable_progress_bar=False` | Yes | Prevents Lightning progress output from fighting with the TraceML CLI |
+| `enable_model_summary=False` | Optional | Keeps terminal output cleaner |
+| `logger=False` | Optional | Useful for local diagnosis runs if you want minimal output |
+
+---
+
+## Optional: deeper layer-level signals
+
+Use this only for short diagnostic runs when step-level diagnosis already told you where to dig.
+
+Since `TraceMLCallback` handles step-level tracing, deeper layer-level hooks are added separately with `trace_model_instance(...)`.
+
+```python
 import lightning as L
+import torch.nn as nn
+
+from traceml.decorators import trace_model_instance
+
 
 class MyLightningModule(L.LightningModule):
     def __init__(self):
@@ -88,10 +140,8 @@ class MyLightningModule(L.LightningModule):
         self.model = MyCoreModel()
         self.loss_fn = nn.CrossEntropyLoss()
 
-        # Enable Deep-Dive hooks
         trace_model_instance(
             self,
-            sample_layer_memory=True,
             trace_layer_forward_memory=True,
             trace_layer_backward_memory=True,
             trace_layer_forward_time=True,
@@ -99,18 +149,21 @@ class MyLightningModule(L.LightningModule):
         )
 ```
 
-> **Note:** TraceML attaches hooks to the modules that exist when `trace_model_instance` is called. It's often best to pass `self` (the `LightningModule` itself) so that it traces the entire forward pass.
+Use this when you want:
+
+- per-layer timing
+- per-layer memory detail
+- a short follow-up diagnostic run
+
+Hooks add overhead, so keep them off for normal runs unless you need them.
 
 ---
 
-## 5. Complete Example: MNIST CNN
+## Full example
 
-A fully runnable example.
-
-**Save as `train_lightning.py`:**
+Save as `train_lightning.py`:
 
 ```python
-import os
 import sys
 
 import lightning as L
@@ -146,7 +199,6 @@ class TraceLightningModule(L.LightningModule):
         self.model = MNISTCNN()
         self.loss_fn = nn.CrossEntropyLoss()
 
-        # Enable Deep-Dive per-layer signals
         trace_model_instance(
             self,
             trace_layer_forward_memory=True,
@@ -177,7 +229,10 @@ def main():
 
     try:
         dataset = datasets.MNIST(
-            root="./mnist", train=True, download=True, transform=transform
+            root="./mnist",
+            train=True,
+            download=True,
+            transform=transform,
         )
     except Exception as e:
         print(f"Failed to download dataset: {e}")
@@ -202,47 +257,58 @@ if __name__ == "__main__":
     main()
 ```
 
-**Run it:**
+Run with:
+
 ```bash
 traceml run train_lightning.py
 ```
 
 ---
 
-## 6. Gradient Accumulation
+## Gradient accumulation
 
-`TraceMLCallback` safely handles gradient accumulation out of the box.
+`TraceMLCallback` supports gradient accumulation.
 
-When you set `accumulate_grad_batches=N` in your `Trainer`, Lightning skips the optimizer step for N-1 micro-batches. TraceML treats every micro-batch as a "step" to preserve fine-grained forward/backward times. On the aggregating micro-batches, TraceML emits a 0-duration dummy optimizer event.
-
-This ensures the dashboard's step alignment remains perfectly intact without crashing or showing misaligned phases.
+When Lightning uses `accumulate_grad_batches=N`, TraceML still preserves step alignment so the dashboard and summaries stay consistent.
 
 ---
 
-## 7. Trainer tips
+## Troubleshooting
 
-A few `Trainer` settings interact with TraceML.
+### Terminal output overlaps with TraceML
 
-| Setting | Recommended value | Why |
-|---------|-------------------|-----|
-| `enable_progress_bar=False` | Yes | Prevents Lightning's `tqdm` from fighting with the Rich terminal dashboard for output. |
-| `enable_model_summary=False`| Optional | You can disable Lightning's textual model summary to keep terminal output cleaner. |
-| `logger=False` | Yes (for local debug) | Disables TensorBoard/CSV loggers if you only need TraceML. |
+Set:
 
-### Bypass instrumentation for a baseline run
+```python
+enable_progress_bar=False
+```
 
-To run without TraceML telemetry (e.g., for benchmarking overhead), use the `--disable-traceml` flag:
+This gives the TraceML CLI cleaner terminal control.
+
+### I still want W&B or TensorBoard
+
+That is fine. TraceML is designed to work alongside them.
+
+If terminal output gets noisy, use:
+
+```bash
+traceml run train.py --mode=dashboard
+```
+
+### I want a baseline without TraceML
+
+Run:
 
 ```bash
 traceml run train_lightning.py --disable-traceml
 ```
 
-This runs your script natively via `torchrun`, with zero TraceML overhead.
+This launches your script natively through `torchrun` without TraceML telemetry.
 
 ---
 
 ## Next steps
 
-- Read the [Quickstart](quickstart.md) for plain PyTorch training loops
-- Read [huggingface.md](huggingface.md) for the Hugging Face Trainer integration
-- [Open an issue](https://github.com/traceopt-ai/traceml/issues) if you hit a problem not covered here
+- Read the [Quickstart](quickstart.md) for plain PyTorch loops
+- Read [huggingface.md](huggingface.md) for Hugging Face Trainer integration
+- Open an issue if you hit a problem: https://github.com/traceopt-ai/traceml/issues
