@@ -1,3 +1,19 @@
+"""
+Compact end-of-run system summary generation.
+
+This module reads aggregated host and GPU system metrics from the
+`system_samples` projection table and produces:
+
+1. a compact text summary for end-of-run display and sharing
+2. a structured JSON payload for future automation and compare features
+
+Design goals
+------------
+- Keep the printed summary short and easy to scan
+- Preserve richer structured fields in JSON
+- Avoid changing the aggregation contract while improving presentation
+"""
+
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -9,8 +25,11 @@ class SystemSummaryAgg:
     """
     Aggregated system metrics loaded from `system_samples`.
 
-    All memory fields remain in raw bytes while aggregating and are converted
-    to GB only at formatting/output time.
+    Notes
+    -----
+    - Memory values remain in raw bytes while aggregating and are converted
+      only at formatting / serialization time.
+    - GPU fields are optional because CPU-only runs are fully supported.
     """
 
     first_ts: Optional[float] = None
@@ -48,8 +67,19 @@ def _b_to_gb(x: Optional[float]) -> Optional[float]:
 
 
 def _fmt(x: Optional[float], suffix: str = "", ndigits: int = 1) -> str:
-    """Format optional numeric values for card output."""
+    """Format an optional numeric value for human-readable output."""
     return "n/a" if x is None else f"{x:.{ndigits}f}{suffix}"
+
+
+def _duration_s(agg: SystemSummaryAgg) -> Optional[float]:
+    """Return summary duration in seconds if timestamps are valid."""
+    if (
+        agg.first_ts is None
+        or agg.last_ts is None
+        or agg.last_ts < agg.first_ts
+    ):
+        return None
+    return agg.last_ts - agg.first_ts
 
 
 def _load_system_summary_agg(
@@ -77,6 +107,7 @@ def _load_system_summary_agg(
     """
     where_clause = ""
     params: list[Any] = []
+
     if rank is not None:
         where_clause = "WHERE rank = ?"
         params.append(int(rank))
@@ -97,6 +128,7 @@ def _load_system_summary_agg(
     count_row = conn.execute(
         count_sql, (*params, int(max_system_rows))
     ).fetchone()
+
     n_rows = int(count_row[0] or 0)
     first_ts = float(count_row[1]) if count_row[1] is not None else None
     last_ts = float(count_row[2]) if count_row[2] is not None else None
@@ -156,20 +188,66 @@ def _load_system_summary_agg(
     )
 
 
+def _build_gpu_line(
+    *,
+    gpu_available: Optional[bool],
+    gpu_count: Optional[int],
+    gpu_util_avg_percent: Optional[float],
+    gpu_util_peak_percent: Optional[float],
+    gpu_mem_peak_gb: Optional[float],
+    gpu_temp_peak_c: Optional[float],
+) -> str:
+    """
+    Build one compact GPU line for the printed summary.
+
+    The printed end-of-run summary is intentionally compact. We therefore keep:
+    - availability / absence
+    - utilization
+    - peak memory
+    - peak temperature
+
+    More detailed GPU fields remain available in JSON.
+    """
+    if gpu_util_avg_percent is not None:
+        parts = [
+            f"util avg {_fmt(gpu_util_avg_percent, '%', 1)}",
+            f"peak {_fmt(gpu_util_peak_percent, '%', 1)}",
+        ]
+
+        if gpu_mem_peak_gb is not None:
+            parts.append(f"mem peak {_fmt(gpu_mem_peak_gb, ' GB', 1)}")
+
+        if gpu_temp_peak_c is not None:
+            parts.append(f"temp peak {_fmt(gpu_temp_peak_c, ' C', 1)}")
+
+        return "GPU: " + " | ".join(parts)
+
+    if gpu_available is False:
+        return "GPU: unavailable"
+
+    if (gpu_count or 0) > 0:
+        return "GPU: detected, but no per-GPU samples were recorded"
+
+    return "GPU: n/a"
+
+
 def _build_system_card(agg: SystemSummaryAgg) -> tuple[str, Dict[str, Any]]:
     """
-    Build a clean, shareable SYSTEM summary card.
+    Build a compact, shareable end-of-run system summary.
 
-    Output is plain text with fixed-width boundaries so it renders cleanly in
-    terminal, logs, Slack code blocks, GitHub comments, and saved text files.
+    Returns
+    -------
+    tuple[str, Dict[str, Any]]
+        - text block for stdout / saved text summaries
+        - structured JSON payload
+
+    Notes
+    -----
+    The JSON payload keeps richer data than the printed text. This preserves
+    future flexibility for compare views without making the default summary
+    noisy.
     """
-    duration_s = None
-    if (
-        agg.first_ts is not None
-        and agg.last_ts is not None
-        and agg.last_ts >= agg.first_ts
-    ):
-        duration_s = agg.last_ts - agg.first_ts
+    duration_s = _duration_s(agg)
 
     ram_avg_gb = _b_to_gb(agg.ram_avg_bytes)
     ram_peak_gb = _b_to_gb(agg.ram_peak_bytes)
@@ -178,74 +256,26 @@ def _build_system_card(agg: SystemSummaryAgg) -> tuple[str, Dict[str, Any]]:
     gpu_mem_avg_gb = _b_to_gb(agg.gpu_mem_avg_bytes)
     gpu_mem_peak_gb = _b_to_gb(agg.gpu_mem_peak_bytes)
 
-    width = 78
-    inner_width = width - 4
-
-    def border() -> str:
-        return "+" + "-" * (width - 2) + "+"
-
-    def row(text: str = "") -> str:
-        return f"|  {text:<{inner_width}}|"
-
-    header = (
-        f"TraceML System Summary | duration {_fmt(duration_s, 's', 1)}"
-        f" | samples {agg.system_samples}"
-    )
-
-    lines: list[str] = [
-        border(),
-        row(header),
-        border(),
-        row("SYSTEM"),
-        row(),
-        row(
-            f"CPU       avg {_fmt(agg.cpu_avg_percent, '%', 1)}   "
-            f"peak {_fmt(agg.cpu_peak_percent, '%', 1)}"
+    lines = [
+        f"TraceML System Summary | duration {_fmt(duration_s, 's', 1)} | samples {agg.system_samples}",
+        "System",
+        f"- CPU: avg {_fmt(agg.cpu_avg_percent, '%', 1)}, peak {_fmt(agg.cpu_peak_percent, '%', 1)}",
+        (
+            f"- RAM: avg {_fmt(ram_avg_gb, ' GB', 1)}, "
+            f"peak {_fmt(ram_peak_gb, ' GB', 1)} / {_fmt(ram_total_gb, ' GB', 1)}"
         ),
-        row(
-            f"RAM       avg {_fmt(ram_avg_gb, ' GB', 1)}   "
-            f"peak {_fmt(ram_peak_gb, ' GB', 1)}   "
-            f"total {_fmt(ram_total_gb, ' GB', 1)}"
+        (
+            "- "
+            + _build_gpu_line(
+                gpu_available=agg.gpu_available,
+                gpu_count=agg.gpu_count,
+                gpu_util_avg_percent=agg.gpu_util_avg_percent,
+                gpu_util_peak_percent=agg.gpu_util_peak_percent,
+                gpu_mem_peak_gb=gpu_mem_peak_gb,
+                gpu_temp_peak_c=agg.gpu_temp_peak_c,
+            )
         ),
     ]
-
-    if agg.gpu_util_avg_percent is not None:
-        lines.append(
-            row(
-                f"GPU util  avg {_fmt(agg.gpu_util_avg_percent, '%', 1)}   "
-                f"peak {_fmt(agg.gpu_util_peak_percent, '%', 1)}"
-            )
-        )
-        lines.append(
-            row(
-                f"GPU mem   avg {_fmt(gpu_mem_avg_gb, ' GB', 1)}   "
-                f"peak {_fmt(gpu_mem_peak_gb, ' GB', 1)}"
-            )
-        )
-        lines.append(
-            row(
-                f"GPU temp  avg {_fmt(agg.gpu_temp_avg_c, ' C', 1)}   "
-                f"peak {_fmt(agg.gpu_temp_peak_c, ' C', 1)}"
-            )
-        )
-        lines.append(
-            row(
-                f"GPU power avg {_fmt(agg.gpu_power_avg_w, ' W', 1)}   "
-                f"peak {_fmt(agg.gpu_power_peak_w, ' W', 1)}"
-            )
-        )
-    else:
-        if agg.gpu_available is False:
-            gpu_msg = (
-                "unavailable (no NVIDIA GPU detected or NVML inaccessible)"
-            )
-        elif (agg.gpu_count or 0) > 0:
-            gpu_msg = "detected, but no per-GPU samples were recorded"
-        else:
-            gpu_msg = "n/a"
-        lines.append(row(f"GPU       {gpu_msg}"))
-
-    lines.append(border())
     card = "\n".join(lines)
 
     summary = {
@@ -272,6 +302,7 @@ def _build_system_card(agg: SystemSummaryAgg) -> tuple[str, Dict[str, Any]]:
             "power": "W",
             "util": "%",
         },
+        # Keep `card` for backward compatibility with existing callers/files.
         "card": card,
     }
     return card, summary
@@ -285,7 +316,7 @@ def generate_system_summary_card(
     max_system_rows: int = 5_000,
 ) -> Dict[str, Any]:
     """
-    Generate a shareable SYSTEM summary card from SQL projection tables.
+    Generate a compact SYSTEM summary from SQL projection tables.
 
     Parameters
     ----------
@@ -294,14 +325,14 @@ def generate_system_summary_card(
     rank:
         Optional rank filter. If None, summarizes across all ranks.
     print_to_stdout:
-        If True, print the rendered card.
+        If True, print the rendered compact summary.
     max_system_rows:
         Safety cap on rows included in aggregation.
 
     Returns
     -------
     Dict[str, Any]
-        Structured summary JSON including the rendered `card`.
+        Structured summary JSON including the rendered `card` text.
     """
     conn = sqlite3.connect(db_path)
     try:
