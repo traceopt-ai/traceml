@@ -1,5 +1,6 @@
 import os
 import random
+import time
 
 import torch
 import torch.distributed as dist
@@ -8,7 +9,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
-from traceml.decorators import trace_model_instance, trace_step
+from traceml.decorators import trace_step
 
 SEED = 42
 INPUT_DIM = 1024
@@ -17,33 +18,70 @@ NUM_CLASSES = 10
 
 BATCH_SIZE = 128
 NUM_SAMPLES = 12000
-NUM_EPOCHS = 40
+NUM_EPOCHS = 20
 
-# Main knob for the demo:
-# rank 0 does extra compute every step, making it the straggler.
+# Main knobs for the demo:
+# rank 0 becomes slow in the input path, not compute.
 STRAGGLER_RANK = 0
-EXTRA_MATMUL_ITERS = 4
+STRAGGLER_SLEEP_S = 0.25
+STRAGGLER_EVERY_N_BATCHES = 1
 
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 class FastDataset(Dataset):
-    def __init__(self, num_samples, input_dim, num_classes):
+    def __init__(self, num_samples: int, input_dim: int, num_classes: int):
         self.num_samples = num_samples
         self.input_dim = input_dim
         self.num_classes = num_classes
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples
 
     def __getitem__(self, idx):
         x = torch.randn(self.input_dim)
         y = torch.randint(0, self.num_classes, (1,), dtype=torch.long).item()
         return x, y
+
+
+class SlowRankCollate:
+    """
+    Inject delay on one rank during batch collation.
+
+    This makes one rank slow before the traced compute step starts, which helps
+    TraceML surface an INPUT STRAGGLER diagnosis.
+    """
+
+    def __init__(
+        self,
+        *,
+        rank: int,
+        straggler_rank: int,
+        sleep_s: float,
+        every_n_batches: int,
+    ) -> None:
+        self.rank = rank
+        self.straggler_rank = straggler_rank
+        self.sleep_s = float(sleep_s)
+        self.every_n_batches = max(1, int(every_n_batches))
+        self.batch_idx = 0
+
+    def __call__(self, batch):
+        self.batch_idx += 1
+
+        if (
+            self.rank == self.straggler_rank
+            and self.batch_idx % self.every_n_batches == 0
+        ):
+            time.sleep(self.sleep_s)
+
+        xs, ys = zip(*batch)
+        return torch.stack(xs, dim=0), torch.tensor(ys, dtype=torch.long)
 
 
 class TinyMLP(nn.Module):
@@ -61,17 +99,7 @@ class TinyMLP(nn.Module):
         return self.net(x)
 
 
-def inject_straggler_compute(device: torch.device) -> None:
-    if device.type != "cuda":
-        return
-
-    x = torch.randn(1024, 1024, device=device)
-    y = torch.randn(1024, 1024, device=device)
-    for _ in range(4):
-        x = x @ y
-
-
-def main():
+def main() -> None:
     rank = int(os.environ.get("RANK", 0))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
@@ -106,17 +134,24 @@ def main():
         shuffle=True,
     )
 
+    collate_fn = SlowRankCollate(
+        rank=rank,
+        straggler_rank=STRAGGLER_RANK,
+        sleep_s=STRAGGLER_SLEEP_S,
+        every_n_batches=STRAGGLER_EVERY_N_BATCHES,
+    )
+
     loader = DataLoader(
         dataset,
         batch_size=BATCH_SIZE,
         sampler=sampler,
+        collate_fn=collate_fn,
         num_workers=0,
         pin_memory=use_cuda,
         drop_last=True,
     )
 
     model = TinyMLP().to(device)
-    trace_model_instance(model)
 
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -146,19 +181,16 @@ def main():
                 optimizer.zero_grad(set_to_none=True)
 
                 logits = model(batch_x)
-
-                # Deliberately make one rank slower during traced compute.
-                if rank == STRAGGLER_RANK:
-                    inject_straggler_compute(device)
-
                 loss = criterion(logits, batch_y)
+
                 loss.backward()
                 optimizer.step()
 
             if rank == 0 and total_steps % 25 == 0:
                 print(
                     f"Epoch {epoch} | Step {total_steps} | "
-                    f"loss: {loss.item():.4f}"
+                    f"loss: {loss.item():.4f} | "
+                    f"input_straggler_rank={STRAGGLER_RANK}"
                 )
 
     if rank == 0:

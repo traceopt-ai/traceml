@@ -24,14 +24,14 @@ repos:
     rev: 5.13.2
     hooks:
       - id: isort
-        files: ^(src/|examples/|docs/)
+        files: ^(src/|dev/|docs/)
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.4
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
-        files: ^(src/|examples/|docs/)
+        files: ^(src/|dev/|docs/)
 
   - repo: https://github.com/psf/black
     rev: 24.10.0
