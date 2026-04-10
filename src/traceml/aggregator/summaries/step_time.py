@@ -15,51 +15,31 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from traceml.aggregator.summaries.diagnosis_presentation import (
+    diagnosis_presentation_to_json,
+    present_step_time_summary_diagnosis,
+)
 from traceml.aggregator.summaries.step_time_diagnosis import (
     RankStepSignals,
     build_summary_step_diagnosis,
     diagnosis_to_json,
 )
-
-
-def _append_text(path: str, text: str) -> None:
-    """
-    Append text to a file, inserting a blank line first if the file already
-    contains content.
-    """
-    with open(path, "a+", encoding="utf-8") as f:
-        f.seek(0, 2)
-        if f.tell() > 0:
-            f.write("\n")
-        f.write(text.rstrip() + "\n")
-
-
-def _load_json_or_empty(path: str) -> Dict[str, Any]:
-    """Load JSON if present; otherwise return an empty dict."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _write_json(path: str, obj: Dict[str, Any]) -> None:
-    """Write JSON with indentation."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2)
-
-
-def _safe_float(x: Any) -> float:
-    """Best-effort float conversion; return 0.0 on failure."""
-    try:
-        return float(x)
-    except Exception:
-        return 0.0
+from traceml.aggregator.summaries.summary_formatting import (
+    format_ms,
+    format_percent,
+    safe_float,
+    share_percent,
+)
+from traceml.aggregator.summaries.summary_io import (
+    append_text,
+    load_json_or_empty,
+    write_json,
+)
 
 
 def _finite_float(x: Any) -> float:
     """Convert to float; coerce non-finite values to 0.0."""
-    v = _safe_float(x)
+    v = safe_float(x)
     return v if np.isfinite(v) else 0.0
 
 
@@ -122,23 +102,6 @@ def _event_bucket(name: str) -> Optional[str]:
         return "optimizer"
 
     return None
-
-
-def _fmt_ms(x: Optional[float]) -> str:
-    """Format milliseconds for human-readable output."""
-    return "n/a" if x is None else f"{x:.1f}ms"
-
-
-def _fmt_pct(x: Optional[float]) -> str:
-    """Format percentage for human-readable output."""
-    return "n/a" if x is None else f"{x:.1f}%"
-
-
-def _share(num: float, denom: float) -> Optional[float]:
-    """Return percentage share num/denom, or None if denom is non-positive."""
-    if denom <= 0.0:
-        return None
-    return 100.0 * num / denom
 
 
 def _closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
@@ -392,10 +355,10 @@ def _split_ms(s: RankStepSummary) -> Dict[str, float]:
 def _split_pct(s: RankStepSummary) -> Dict[str, Optional[float]]:
     """Return the main timing split as percentage share of average total step."""
     return {
-        "dataloader": _share(s.avg_dataloader_ms, s.avg_total_step_ms),
-        "forward": _share(s.avg_forward_ms, s.avg_total_step_ms),
-        "backward": _share(s.avg_backward_ms, s.avg_total_step_ms),
-        "optimizer": _share(s.avg_optimizer_ms, s.avg_total_step_ms),
+        "dataloader": share_percent(s.avg_dataloader_ms, s.avg_total_step_ms),
+        "forward": share_percent(s.avg_forward_ms, s.avg_total_step_ms),
+        "backward": share_percent(s.avg_backward_ms, s.avg_total_step_ms),
+        "optimizer": share_percent(s.avg_optimizer_ms, s.avg_total_step_ms),
     }
 
 
@@ -563,13 +526,15 @@ def _build_step_time_card(
         per_rank_step_metrics=per_rank_step_metrics,
     )
 
+    summary_diag_presented = present_step_time_summary_diagnosis(summary_diag)
+
     primary_wait_avg_ms = (
         _compute_wait_avg_ms(primary_summary)
         if primary_summary is not None
         else None
     )
     primary_wait_share_pct = (
-        _share(primary_wait_avg_ms, primary_summary.avg_total_step_ms)
+        share_percent(primary_wait_avg_ms, primary_summary.avg_total_step_ms)
         if primary_summary is not None and primary_wait_avg_ms is not None
         else None
     )
@@ -580,7 +545,9 @@ def _build_step_time_card(
         else None
     )
     primary_compute_share_pct = (
-        _share(primary_compute_avg_ms, primary_summary.avg_total_step_ms)
+        share_percent(
+            primary_compute_avg_ms, primary_summary.avg_total_step_ms
+        )
         if primary_summary is not None and primary_compute_avg_ms is not None
         else None
     )
@@ -611,13 +578,13 @@ def _build_step_time_card(
         lines.extend(
             [
                 f"- Scope: last {primary_summary.steps_analyzed} steps on rank r{only_rank}",
-                f"- Step avg: {_fmt_ms(primary_summary.avg_total_step_ms)}",
+                f"- Step avg: {format_ms(primary_summary.avg_total_step_ms)}",
                 (
-                    f"- Split: DL {_fmt_ms(only_split_ms['dataloader'])} | "
-                    f"FWD {_fmt_ms(only_split_ms['forward'])} | "
-                    f"BWD {_fmt_ms(only_split_ms['backward'])} | "
-                    f"OPT {_fmt_ms(only_split_ms['optimizer'])} | "
-                    f"WAIT {_fmt_ms(primary_wait_avg_ms)}"
+                    f"- Split: DL {format_ms(only_split_ms['dataloader'])} | "
+                    f"FWD {format_ms(only_split_ms['forward'])} | "
+                    f"BWD {format_ms(only_split_ms['backward'])} | "
+                    f"OPT {format_ms(only_split_ms['optimizer'])} | "
+                    f"WAIT {format_ms(primary_wait_avg_ms)}"
                 ),
                 f"- Dominant: {_dominant_line(only_split_ms, None)}",
             ]
@@ -629,9 +596,9 @@ def _build_step_time_card(
                     f"- Scope: ranks {len(ranks_present)} | compared over last up to {int(max_rows)} steps per rank"
                 ),
                 (
-                    f"- Step avg: median r{median_rank} {_fmt_ms(median_avg_step_ms)} | "
-                    f"worst r{worst_rank} {_fmt_ms(worst_avg_step_ms)} | "
-                    f"gap {_fmt_pct(worst_vs_median_pct)}"
+                    f"- Step avg: median r{median_rank} {format_ms(median_avg_step_ms)} | "
+                    f"worst r{worst_rank} {format_ms(worst_avg_step_ms)} | "
+                    f"gap {format_percent(worst_vs_median_pct)}"
                 ),
             ]
         )
@@ -639,33 +606,33 @@ def _build_step_time_card(
         if median_split_ms is not None:
             lines.append(
                 (
-                    f"- Median split: DL {_fmt_ms(median_split_ms['dataloader'])} | "
-                    f"FWD {_fmt_ms(median_split_ms['forward'])} | "
-                    f"BWD {_fmt_ms(median_split_ms['backward'])} | "
-                    f"OPT {_fmt_ms(median_split_ms['optimizer'])} | "
-                    f"WAIT {_fmt_ms(_compute_wait_avg_ms(median_summary))}"
+                    f"- Median split: DL {format_ms(median_split_ms['dataloader'])} | "
+                    f"FWD {format_ms(median_split_ms['forward'])} | "
+                    f"BWD {format_ms(median_split_ms['backward'])} | "
+                    f"OPT {format_ms(median_split_ms['optimizer'])} | "
+                    f"WAIT {format_ms(_compute_wait_avg_ms(median_summary))}"
                 )
             )
 
         if worst_split_ms is not None:
             lines.append(
                 (
-                    f"- Worst split: DL {_fmt_ms(worst_split_ms['dataloader'])} | "
-                    f"FWD {_fmt_ms(worst_split_ms['forward'])} | "
-                    f"BWD {_fmt_ms(worst_split_ms['backward'])} | "
-                    f"OPT {_fmt_ms(worst_split_ms['optimizer'])} | "
-                    f"WAIT {_fmt_ms(_compute_wait_avg_ms(worst_summary))}"
+                    f"- Worst split: DL {format_ms(worst_split_ms['dataloader'])} | "
+                    f"FWD {format_ms(worst_split_ms['forward'])} | "
+                    f"BWD {format_ms(worst_split_ms['backward'])} | "
+                    f"OPT {format_ms(worst_split_ms['optimizer'])} | "
+                    f"WAIT {format_ms(_compute_wait_avg_ms(worst_summary))}"
                 )
             )
 
         lines.append(f"- Dominant: {dominant_text}")
 
-    if summary_diag is not None:
-        lines.append(f"- Diagnosis: {summary_diag.status}")
-        lines.append(f"- Why: {summary_diag.reason}")
-        lines.append(f"- Next: {summary_diag.action}")
-        if summary_diag.note:
-            lines.append(f"- Note: {summary_diag.note}")
+    if summary_diag_presented is not None:
+        lines.append(f"- Diagnosis: {summary_diag_presented.status}")
+        lines.append(f"- Why: {summary_diag_presented.reason}")
+        lines.append(f"- Next: {summary_diag_presented.action}")
+        if summary_diag_presented.note:
+            lines.append(f"- Note: {summary_diag_presented.note}")
 
     card = "\n".join(lines)
 
@@ -686,6 +653,9 @@ def _build_step_time_card(
         "median_split_pct": median_split_pct,
         "worst_split_pct": worst_split_pct,
         "diagnosis": diagnosis_to_json(summary_diag),
+        "diagnosis_presented": diagnosis_presentation_to_json(
+            summary_diag_presented
+        ),
         "per_rank": {
             str(rank): {
                 "steps_analyzed": s.steps_analyzed,
@@ -858,11 +828,11 @@ def generate_step_time_summary_card(
         max_rows=max_rows,
     )
 
-    _append_text(db_path + "_summary_card.txt", card)
+    append_text(db_path + "_summary_card.txt", card)
 
-    existing = _load_json_or_empty(db_path + "_summary_card.json")
+    existing = load_json_or_empty(db_path + "_summary_card.json")
     existing["step_time"] = step_summary
-    _write_json(db_path + "_summary_card.json", existing)
+    write_json(db_path + "_summary_card.json", existing)
 
     if print_to_stdout:
         print(card)

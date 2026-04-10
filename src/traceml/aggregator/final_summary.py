@@ -15,8 +15,16 @@ Design goals
 from typing import Any, Dict, List, Optional
 
 from traceml.aggregator.summaries.process import generate_process_summary_card
+from traceml.aggregator.summaries.step_memory import (
+    generate_step_memory_summary_card,
+)
 from traceml.aggregator.summaries.step_time import (
     generate_step_time_summary_card,
+)
+from traceml.aggregator.summaries.summary_layout import (
+    border,
+    indented_block,
+    row,
 )
 from traceml.aggregator.summaries.system import generate_system_summary_card
 
@@ -38,31 +46,12 @@ def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
     return None
 
 
-def _border(width: int = 78) -> str:
-    """Return a fixed-width outer border."""
-    return "+" + "-" * (width - 2) + "+"
-
-
-def _row(text: str = "", width: int = 78) -> str:
-    """Return one padded row inside the outer border."""
-    inner_width = width - 4
-    return f"|  {text:<{inner_width}}|"
-
-
-def _indented_block(text: str) -> List[str]:
-    """
-    Convert a multiline text block into rows suitable for the final summary.
-
-    Empty lines are preserved as blank rows.
-    """
-    return [line.rstrip() for line in str(text).splitlines()]
-
-
 def _build_final_summary_text(
     *,
     system_summary: Dict[str, Any],
     process_summary: Dict[str, Any],
     step_time_summary: Dict[str, Any],
+    step_memory_summary: Dict[str, Any],
 ) -> str:
     """
     Build the single printed end-of-run summary.
@@ -77,8 +66,8 @@ def _build_final_summary_text(
     )
 
     lines: List[str] = [
-        _border(),
-        _row(
+        border(),
+        row(
             "TraceML Run Summary"
             + (
                 f" | duration {duration_s:.1f}s"
@@ -86,47 +75,46 @@ def _build_final_summary_text(
                 else ""
             )
         ),
-        _border(),
-        _row(),
-        _row("System"),
+        border(),
+        row(),
+        row("System"),
     ]
 
-    for line in _indented_block(system_summary.get("card", "")):
+    for line in indented_block(system_summary.get("card", "")):
         if line.startswith("TraceML System Summary"):
             continue
         if line == "System":
             continue
-        lines.append(_row(line))
+        lines.append(row(line))
 
-    lines.extend(
-        [
-            _row(),
-            _row("Process"),
-        ]
-    )
+    lines.extend([row(), row("Process")])
 
-    for line in _indented_block(process_summary.get("card", "")):
+    for line in indented_block(process_summary.get("card", "")):
         if line.startswith("TraceML Process Summary"):
             continue
         if line == "Process":
             continue
-        lines.append(_row(line))
+        lines.append(row(line))
 
-    lines.extend(
-        [
-            _row(),
-            _row("Step Time"),
-        ]
-    )
+    lines.extend([row(), row("Step Time")])
 
-    for line in _indented_block(step_time_summary.get("card", "")):
+    for line in indented_block(step_time_summary.get("card", "")):
         if line.startswith("TraceML Step Timing Summary"):
             continue
         if line == "Step Time":
             continue
-        lines.append(_row(line))
+        lines.append(row(line))
 
-    lines.append(_border())
+    lines.extend([row(), row("Step Memory")])
+
+    for line in indented_block(step_memory_summary.get("card", "")):
+        if line.startswith("TraceML Step Memory Summary"):
+            continue
+        if line == "Step Memory":
+            continue
+        lines.append(row(line))
+
+    lines.append(border())
     return "\n".join(lines)
 
 
@@ -157,10 +145,15 @@ def generate_summary(db_path: str) -> None:
         db_path,
         print_to_stdout=False,
     )
+    step_memory_summary = generate_step_memory_summary_card(
+        db_path,
+        print_to_stdout=False,
+    )
 
     final_text = _build_final_summary_text(
         system_summary=system_summary,
         process_summary=process_summary,
         step_time_summary=step_time_summary,
+        step_memory_summary=step_memory_summary,
     )
     print(final_text)

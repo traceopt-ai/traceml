@@ -14,37 +14,21 @@ Design goals
 - Keep the process summary useful for single-process and distributed runs
 """
 
-import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-
-def _append_text(path: str, text: str) -> None:
-    """
-    Append text to a file, inserting a blank line first if the file already
-    contains content.
-    """
-    with open(path, "a+", encoding="utf-8") as f:
-        f.seek(0, 2)
-        if f.tell() > 0:
-            f.write("\n")
-        f.write(text.rstrip() + "\n")
-
-
-def _load_json_or_empty(path: str) -> Dict[str, Any]:
-    """Load JSON if present; otherwise return an empty dict."""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _write_json(path: str, obj: Dict[str, Any]) -> None:
-    """Write JSON with indentation."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2)
+from traceml.aggregator.summaries.summary_formatting import (
+    bytes_to_gb,
+    duration_from_bounds,
+    format_optional,
+    share_percent,
+)
+from traceml.aggregator.summaries.summary_io import (
+    append_text,
+    load_json_or_empty,
+    write_json,
+)
 
 
 @dataclass
@@ -84,36 +68,6 @@ class ProcessSummaryAgg:
     gpu_mem_reserved_avg_bytes: Optional[float] = None
     gpu_mem_reserved_peak_bytes: Optional[float] = None
     gpu_mem_total_bytes: Optional[float] = None
-
-
-def _b_to_gb(x: Optional[float]) -> Optional[float]:
-    """Convert bytes to decimal GB for display."""
-    if x is None:
-        return None
-    return float(x) / 1e9
-
-
-def _fmt(x: Optional[float], suffix: str = "", ndigits: int = 1) -> str:
-    """Format an optional numeric value for human-readable output."""
-    return "n/a" if x is None else f"{x:.{ndigits}f}{suffix}"
-
-
-def _share(num: Optional[float], denom: Optional[float]) -> Optional[float]:
-    """Return percentage share num/denom, or None if denom is not positive."""
-    if num is None or denom is None or denom <= 0.0:
-        return None
-    return 100.0 * num / denom
-
-
-def _duration_s(agg: ProcessSummaryAgg) -> Optional[float]:
-    """Return summary duration in seconds if timestamps are valid."""
-    if (
-        agg.first_ts is None
-        or agg.last_ts is None
-        or agg.last_ts < agg.first_ts
-    ):
-        return None
-    return agg.last_ts - agg.first_ts
 
 
 def _load_process_summary_agg(
@@ -240,7 +194,7 @@ def _build_takeaway(agg: ProcessSummaryAgg) -> str:
         return "n/a"
 
     if agg.gpu_available and agg.gpu_mem_total_bytes is not None:
-        used_peak_pct = _share(
+        used_peak_pct = share_percent(
             agg.gpu_mem_used_peak_bytes,
             agg.gpu_mem_total_bytes,
         )
@@ -299,12 +253,14 @@ def _build_gpu_line(
         )
         parts = [
             device_text,
-            f"used peak {_fmt(gpu_mem_used_peak_gb, ' GB', 1)}"
-            f" / {_fmt(gpu_mem_total_gb, ' GB', 1)}",
+            f"used peak {format_optional(gpu_mem_used_peak_gb, ' GB', 1)}"
+            f" / {format_optional(gpu_mem_total_gb, ' GB', 1)}",
         ]
 
         if gpu_mem_used_peak_pct is not None:
-            parts.append(f"{_fmt(gpu_mem_used_peak_pct, '%', 1)} of limit")
+            parts.append(
+                f"{format_optional(gpu_mem_used_peak_pct, '%', 1)} of limit"
+            )
 
         if (
             gpu_mem_reserved_peak_gb is not None
@@ -312,11 +268,11 @@ def _build_gpu_line(
             and gpu_mem_reserved_peak_gb > gpu_mem_used_peak_gb * 1.25
         ):
             parts.append(
-                f"reserved peak {_fmt(gpu_mem_reserved_peak_gb, ' GB', 1)}"
+                f"reserved peak {format_optional(gpu_mem_reserved_peak_gb, ' GB', 1)}"
             )
             if gpu_mem_reserved_peak_pct is not None:
                 parts.append(
-                    f"reserved {_fmt(gpu_mem_reserved_peak_pct, '%', 1)}"
+                    f"reserved {format_optional(gpu_mem_reserved_peak_pct, '%', 1)}"
                 )
 
         return "GPU: " + " | ".join(parts)
@@ -347,23 +303,23 @@ def _build_process_card(
     The printed text is intentionally compact. The JSON payload retains richer
     fields so compare and future UI features do not lose fidelity.
     """
-    duration_s = _duration_s(agg)
+    duration_s = duration_from_bounds(agg.first_ts, agg.last_ts)
 
-    ram_avg_gb = _b_to_gb(agg.ram_avg_bytes)
-    ram_peak_gb = _b_to_gb(agg.ram_peak_bytes)
-    ram_total_gb = _b_to_gb(agg.ram_total_bytes)
+    ram_avg_gb = bytes_to_gb(agg.ram_avg_bytes)
+    ram_peak_gb = bytes_to_gb(agg.ram_peak_bytes)
+    ram_total_gb = bytes_to_gb(agg.ram_total_bytes)
 
-    gpu_mem_used_avg_gb = _b_to_gb(agg.gpu_mem_used_avg_bytes)
-    gpu_mem_used_peak_gb = _b_to_gb(agg.gpu_mem_used_peak_bytes)
-    gpu_mem_reserved_avg_gb = _b_to_gb(agg.gpu_mem_reserved_avg_bytes)
-    gpu_mem_reserved_peak_gb = _b_to_gb(agg.gpu_mem_reserved_peak_bytes)
-    gpu_mem_total_gb = _b_to_gb(agg.gpu_mem_total_bytes)
+    gpu_mem_used_avg_gb = bytes_to_gb(agg.gpu_mem_used_avg_bytes)
+    gpu_mem_used_peak_gb = bytes_to_gb(agg.gpu_mem_used_peak_bytes)
+    gpu_mem_reserved_avg_gb = bytes_to_gb(agg.gpu_mem_reserved_avg_bytes)
+    gpu_mem_reserved_peak_gb = bytes_to_gb(agg.gpu_mem_reserved_peak_bytes)
+    gpu_mem_total_gb = bytes_to_gb(agg.gpu_mem_total_bytes)
 
-    gpu_mem_used_peak_pct = _share(
+    gpu_mem_used_peak_pct = share_percent(
         agg.gpu_mem_used_peak_bytes,
         agg.gpu_mem_total_bytes,
     )
-    gpu_mem_reserved_peak_pct = _share(
+    gpu_mem_reserved_peak_pct = share_percent(
         agg.gpu_mem_reserved_peak_bytes,
         agg.gpu_mem_total_bytes,
     )
@@ -371,21 +327,21 @@ def _build_process_card(
     takeaway = _build_takeaway(agg)
 
     lines = [
-        f"TraceML Process Summary | duration {_fmt(duration_s, 's', 1)} | samples {agg.process_samples}",
+        f"TraceML Process Summary | duration {format_optional(duration_s, 's', 1)} | samples {agg.process_samples}",
         "Process",
         (f"- Scope: ranks {agg.distinct_ranks} | pids {agg.distinct_pids}"),
         (
-            f"- CPU: avg {_fmt(agg.cpu_avg_percent, '%', 1)}, "
-            f"peak {_fmt(agg.cpu_peak_percent, '%', 1)}"
+            f"- CPU: avg {format_optional(agg.cpu_avg_percent, '%', 1)}, "
+            f"peak {format_optional(agg.cpu_peak_percent, '%', 1)}"
             + (
-                f" | cores {_fmt(float(agg.cpu_logical_core_count), '', 0)}"
+                f" | cores {format_optional(float(agg.cpu_logical_core_count), '', 0)}"
                 if agg.cpu_logical_core_count is not None
                 else ""
             )
         ),
         (
-            f"- RSS: avg {_fmt(ram_avg_gb, ' GB', 1)}, "
-            f"peak {_fmt(ram_peak_gb, ' GB', 1)} / {_fmt(ram_total_gb, ' GB', 1)}"
+            f"- RSS: avg {format_optional(ram_avg_gb, ' GB', 1)}, "
+            f"peak {format_optional(ram_peak_gb, ' GB', 1)} / {format_optional(ram_total_gb, ' GB', 1)}"
         ),
         (
             "- "
@@ -474,11 +430,11 @@ def generate_process_summary_card(
 
     card, process_summary = _build_process_card(agg)
 
-    _append_text(db_path + "_summary_card.txt", card)
+    append_text(db_path + "_summary_card.txt", card)
 
-    existing = _load_json_or_empty(db_path + "_summary_card.json")
+    existing = load_json_or_empty(db_path + "_summary_card.json")
     existing["process"] = process_summary
-    _write_json(db_path + "_summary_card.json", existing)
+    write_json(db_path + "_summary_card.json", existing)
 
     if print_to_stdout:
         print(card)

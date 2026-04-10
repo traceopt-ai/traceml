@@ -1,0 +1,153 @@
+"""
+End-of-run diagnosis presentation helpers.
+
+This module adapts shared diagnosis objects into wording that fits a completed
+run summary.
+
+End-of-run summaries have a different job:
+- explain what the run most likely showed
+- tell the user what to do next
+- avoid live-monitoring phrasing once the run is already over
+
+To keep the architecture clean, this module does not change diagnosis truth or
+threshold logic. It only rewrites wording for summary presentation.
+"""
+
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Optional
+
+
+@dataclass(frozen=True)
+class SummaryDiagnosisPresentation:
+    """
+    Summary-ready diagnosis wording for end-of-run output.
+
+    Fields
+    ------
+    status:
+        Final diagnosis label shown to the user.
+    reason:
+        Concise explanation of why that diagnosis was selected.
+    action:
+        End-of-run next step phrasing. This is intentionally different from
+        live-view wording when needed.
+    note:
+        Optional supporting context.
+    """
+
+    status: str
+    reason: str
+    action: str
+    note: Optional[str] = None
+
+
+def diagnosis_presentation_to_json(
+    presentation: Optional[SummaryDiagnosisPresentation],
+) -> Optional[Dict[str, Any]]:
+    """
+    Serialize a summary diagnosis presentation into JSON.
+    """
+    if presentation is None:
+        return None
+    return asdict(presentation)
+
+
+def present_step_time_summary_diagnosis(
+    diagnosis: Optional[Any],
+) -> Optional[SummaryDiagnosisPresentation]:
+    """
+    Adapt a step-time diagnosis object for end-of-run summary display.
+
+    This keeps the original diagnosis truth, but normalizes live-style actions
+    into wording that makes sense after the run has finished.
+    """
+    if diagnosis is None:
+        return None
+
+    status = str(getattr(diagnosis, "status", "") or "").strip()
+    reason = str(getattr(diagnosis, "reason", "") or "").strip()
+    action = str(getattr(diagnosis, "action", "") or "").strip()
+    note = getattr(diagnosis, "note", None)
+
+    if status == "NO DATA":
+        action = (
+            "This run ended before enough step data was collected for a stable "
+            "timing diagnosis."
+        )
+    elif action in {
+        "Wait for a fuller window.",
+        "Wait for more completed steps.",
+    }:
+        action = (
+            "This run did not collect enough step data for a stable timing "
+            "diagnosis."
+        )
+
+    return SummaryDiagnosisPresentation(
+        status=status,
+        reason=reason,
+        action=action,
+        note=note,
+    )
+
+
+def present_step_memory_summary_diagnosis(
+    diagnosis: Optional[Any],
+) -> Optional[SummaryDiagnosisPresentation]:
+    """
+    Adapt a step-memory diagnosis object for end-of-run summary display.
+
+    Memory diagnoses are especially sensitive to live-window wording, so this
+    function rewrites operational actions into end-of-run recommendations while
+    preserving the original diagnosis label and reason.
+    """
+    if diagnosis is None:
+        return None
+
+    status = str(getattr(diagnosis, "status", "") or "").strip()
+    reason = str(getattr(diagnosis, "reason", "") or "").strip()
+    action = str(getattr(diagnosis, "action", "") or "").strip()
+    note = getattr(diagnosis, "note", None)
+
+    action_overrides = {
+        "BALANCED": (
+            "No immediate memory issue was detected in the analyzed tail window."
+        ),
+        "HIGH PRESSURE": (
+            "Reduce peak memory demand or increase available device memory."
+        ),
+        "IMBALANCE": (
+            "Check for rank-local memory skew, uneven batch shapes, or "
+            "rank-specific retained state."
+        ),
+        "MEMORY CREEP (EARLY)": (
+            "Review retained tensors, caches, or step-to-step state if this "
+            "pattern continues across longer runs."
+        ),
+        "MEMORY CREEP": (
+            "Inspect retained tensors, caches, or accumulating per-step state."
+        ),
+        "NO DATA": (
+            "This run ended before enough aligned memory data was collected for "
+            "a stable diagnosis."
+        ),
+    }
+
+    if status in action_overrides:
+        action = action_overrides[status]
+    elif action in {
+        "Keep monitoring.",
+        "Watch the next window.",
+        "Wait for more completed steps.",
+        "Wait for a fuller window.",
+    }:
+        action = (
+            "Review the recorded memory trend if this behavior was unexpected."
+        )
+
+    return SummaryDiagnosisPresentation(
+        status=status,
+        reason=reason,
+        action=action,
+        note=note,
+    )

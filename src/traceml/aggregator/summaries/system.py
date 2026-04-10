@@ -14,10 +14,19 @@ Design goals
 - Avoid changing the aggregation contract while improving presentation
 """
 
-import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+from traceml.aggregator.summaries.summary_formatting import (
+    bytes_to_gb,
+    duration_from_bounds,
+    format_optional,
+)
+from traceml.aggregator.summaries.summary_io import (
+    load_json_or_empty,
+    write_json,
+)
 
 
 @dataclass
@@ -57,29 +66,6 @@ class SystemSummaryAgg:
 
     gpu_power_avg_w: Optional[float] = None
     gpu_power_peak_w: Optional[float] = None
-
-
-def _b_to_gb(x: Optional[float]) -> Optional[float]:
-    """Convert bytes to decimal GB for display."""
-    if x is None:
-        return None
-    return float(x) / 1e9
-
-
-def _fmt(x: Optional[float], suffix: str = "", ndigits: int = 1) -> str:
-    """Format an optional numeric value for human-readable output."""
-    return "n/a" if x is None else f"{x:.{ndigits}f}{suffix}"
-
-
-def _duration_s(agg: SystemSummaryAgg) -> Optional[float]:
-    """Return summary duration in seconds if timestamps are valid."""
-    if (
-        agg.first_ts is None
-        or agg.last_ts is None
-        or agg.last_ts < agg.first_ts
-    ):
-        return None
-    return agg.last_ts - agg.first_ts
 
 
 def _load_system_summary_agg(
@@ -210,15 +196,19 @@ def _build_gpu_line(
     """
     if gpu_util_avg_percent is not None:
         parts = [
-            f"util avg {_fmt(gpu_util_avg_percent, '%', 1)}",
-            f"peak {_fmt(gpu_util_peak_percent, '%', 1)}",
+            f"util avg {format_optional(gpu_util_avg_percent, '%', 1)}",
+            f"peak {format_optional(gpu_util_peak_percent, '%', 1)}",
         ]
 
         if gpu_mem_peak_gb is not None:
-            parts.append(f"mem peak {_fmt(gpu_mem_peak_gb, ' GB', 1)}")
+            parts.append(
+                f"mem peak {format_optional(gpu_mem_peak_gb, ' GB', 1)}"
+            )
 
         if gpu_temp_peak_c is not None:
-            parts.append(f"temp peak {_fmt(gpu_temp_peak_c, ' C', 1)}")
+            parts.append(
+                f"temp peak {format_optional(gpu_temp_peak_c, ' C', 1)}"
+            )
 
         return "GPU: " + " | ".join(parts)
 
@@ -247,22 +237,22 @@ def _build_system_card(agg: SystemSummaryAgg) -> tuple[str, Dict[str, Any]]:
     future flexibility for compare views without making the default summary
     noisy.
     """
-    duration_s = _duration_s(agg)
+    duration_s = duration_from_bounds(agg.first_ts, agg.last_ts)
 
-    ram_avg_gb = _b_to_gb(agg.ram_avg_bytes)
-    ram_peak_gb = _b_to_gb(agg.ram_peak_bytes)
-    ram_total_gb = _b_to_gb(agg.ram_total_bytes)
+    ram_avg_gb = bytes_to_gb(agg.ram_avg_bytes)
+    ram_peak_gb = bytes_to_gb(agg.ram_peak_bytes)
+    ram_total_gb = bytes_to_gb(agg.ram_total_bytes)
 
-    gpu_mem_avg_gb = _b_to_gb(agg.gpu_mem_avg_bytes)
-    gpu_mem_peak_gb = _b_to_gb(agg.gpu_mem_peak_bytes)
+    gpu_mem_avg_gb = bytes_to_gb(agg.gpu_mem_avg_bytes)
+    gpu_mem_peak_gb = bytes_to_gb(agg.gpu_mem_peak_bytes)
 
     lines = [
-        f"TraceML System Summary | duration {_fmt(duration_s, 's', 1)} | samples {agg.system_samples}",
+        f"TraceML System Summary | duration {format_optional(duration_s, 's', 1)} | samples {agg.system_samples}",
         "System",
-        f"- CPU: avg {_fmt(agg.cpu_avg_percent, '%', 1)}, peak {_fmt(agg.cpu_peak_percent, '%', 1)}",
+        f"- CPU: avg {format_optional(agg.cpu_avg_percent, '%', 1)}, peak {format_optional(agg.cpu_peak_percent, '%', 1)}",
         (
-            f"- RAM: avg {_fmt(ram_avg_gb, ' GB', 1)}, "
-            f"peak {_fmt(ram_peak_gb, ' GB', 1)} / {_fmt(ram_total_gb, ' GB', 1)}"
+            f"- RAM: avg {format_optional(ram_avg_gb, ' GB', 1)}, "
+            f"peak {format_optional(ram_peak_gb, ' GB', 1)} / {format_optional(ram_total_gb, ' GB', 1)}"
         ),
         (
             "- "
@@ -349,8 +339,9 @@ def generate_system_summary_card(
     with open(db_path + "_summary_card.txt", "w", encoding="utf-8") as f:
         f.write(card + "\n")
 
-    with open(db_path + "_summary_card.json", "w", encoding="utf-8") as f:
-        json.dump(summary, f, indent=2)
+    existing = load_json_or_empty(db_path + "_summary_card.json")
+    existing["system"] = summary
+    write_json(db_path + "_summary_card.json", existing)
 
     if print_to_stdout:
         print(card)
