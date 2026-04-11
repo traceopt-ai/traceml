@@ -70,10 +70,7 @@ def present_step_time_summary_diagnosis(
     note = getattr(diagnosis, "note", None)
 
     if status == "NO DATA":
-        action = (
-            "This run ended before enough step data was collected for a stable "
-            "timing diagnosis."
-        )
+        action = "Run longer for a stable timing diagnosis."
     elif action in {
         "Wait for a fuller window.",
         "Wait for more completed steps.",
@@ -110,27 +107,12 @@ def present_step_memory_summary_diagnosis(
     note = getattr(diagnosis, "note", None)
 
     action_overrides = {
-        "BALANCED": (
-            "No immediate memory issue was detected in the analyzed tail window."
-        ),
-        "HIGH PRESSURE": (
-            "Reduce peak memory demand or increase available device memory."
-        ),
-        "IMBALANCE": (
-            "Check for rank-local memory skew, uneven batch shapes, or "
-            "rank-specific retained state."
-        ),
-        "MEMORY CREEP (EARLY)": (
-            "Review retained tensors, caches, or step-to-step state if this "
-            "pattern continues across longer runs."
-        ),
-        "MEMORY CREEP": (
-            "Inspect retained tensors, caches, or accumulating per-step state."
-        ),
-        "NO DATA": (
-            "This run ended before enough aligned memory data was collected for "
-            "a stable diagnosis."
-        ),
+        "BALANCED": ("No pressure, skew, or creep signal."),
+        "HIGH PRESSURE": ("Peak memory is close to capacity."),
+        "IMBALANCE": ("Memory usage differs across ranks."),
+        "MEMORY CREEP (EARLY)": ("Memory is rising in the tail window."),
+        "MEMORY CREEP": ("Memory keeps rising over time."),
+        "NO DATA": ("Too little aligned memory data was collected."),
     }
 
     if status in action_overrides:

@@ -12,6 +12,8 @@ Design goals
 - Keep the printed summary compact and shareable
 """
 
+from __future__ import annotations
+
 from typing import Any, Dict, List, Optional
 
 from traceml.aggregator.summaries.process import generate_process_summary_card
@@ -25,8 +27,12 @@ from traceml.aggregator.summaries.summary_layout import (
     border,
     indented_block,
     row,
+    wrap_lines,
 )
 from traceml.aggregator.summaries.system import generate_system_summary_card
+
+SUMMARY_WIDTH = 78
+SUMMARY_INNER_TEXT_WIDTH = SUMMARY_WIDTH - 4
 
 
 def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
@@ -44,6 +50,39 @@ def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
         except Exception:
             continue
     return None
+
+
+def _append_wrapped_card_lines(
+    lines: List[str],
+    card_text: str,
+    *,
+    section_title: str,
+    card_header_prefix: str,
+) -> None:
+    """
+    Append wrapped summary card lines into the final combined summary.
+
+    Parameters
+    ----------
+    lines:
+        Mutable list of already-rendered boxed rows.
+    card_text:
+        Raw multiline card text returned by a summary builder.
+    section_title:
+        Section heading used in the final combined summary. Matching inner
+        headings are skipped to avoid duplication.
+    card_header_prefix:
+        Prefix of the inner card header line to skip, for example
+        'TraceML Step Timing Summary'.
+    """
+    for line in indented_block(card_text):
+        if line.startswith(card_header_prefix):
+            continue
+        if line == section_title:
+            continue
+
+        for wrapped in wrap_lines(line, SUMMARY_INNER_TEXT_WIDTH):
+            lines.append(row(wrapped, width=SUMMARY_WIDTH))
 
 
 def _build_final_summary_text(
@@ -66,55 +105,71 @@ def _build_final_summary_text(
     )
 
     lines: List[str] = [
-        border(),
+        border(width=SUMMARY_WIDTH),
         row(
             "TraceML Run Summary"
             + (
                 f" | duration {duration_s:.1f}s"
                 if duration_s is not None
                 else ""
-            )
+            ),
+            width=SUMMARY_WIDTH,
         ),
-        border(),
-        row(),
-        row("System"),
+        border(width=SUMMARY_WIDTH),
+        row(width=SUMMARY_WIDTH),
+        row("System", width=SUMMARY_WIDTH),
     ]
 
-    for line in indented_block(system_summary.get("card", "")):
-        if line.startswith("TraceML System Summary"):
-            continue
-        if line == "System":
-            continue
-        lines.append(row(line))
+    _append_wrapped_card_lines(
+        lines,
+        system_summary.get("card", ""),
+        section_title="System",
+        card_header_prefix="TraceML System Summary",
+    )
 
-    lines.extend([row(), row("Process")])
+    lines.extend(
+        [
+            row(width=SUMMARY_WIDTH),
+            row("Process", width=SUMMARY_WIDTH),
+        ]
+    )
 
-    for line in indented_block(process_summary.get("card", "")):
-        if line.startswith("TraceML Process Summary"):
-            continue
-        if line == "Process":
-            continue
-        lines.append(row(line))
+    _append_wrapped_card_lines(
+        lines,
+        process_summary.get("card", ""),
+        section_title="Process",
+        card_header_prefix="TraceML Process Summary",
+    )
 
-    lines.extend([row(), row("Step Time")])
+    lines.extend(
+        [
+            row(width=SUMMARY_WIDTH),
+            row("Step Time", width=SUMMARY_WIDTH),
+        ]
+    )
 
-    for line in indented_block(step_time_summary.get("card", "")):
-        if line.startswith("TraceML Step Timing Summary"):
-            continue
-        if line == "Step Time":
-            continue
-        lines.append(row(line))
+    _append_wrapped_card_lines(
+        lines,
+        step_time_summary.get("card", ""),
+        section_title="Step Time",
+        card_header_prefix="TraceML Step Timing Summary",
+    )
 
-    lines.extend([row(), row("Step Memory")])
+    lines.extend(
+        [
+            row(width=SUMMARY_WIDTH),
+            row("Step Memory", width=SUMMARY_WIDTH),
+        ]
+    )
 
-    for line in indented_block(step_memory_summary.get("card", "")):
-        if line.startswith("TraceML Step Memory Summary"):
-            continue
-        if line == "Step Memory":
-            continue
-        lines.append(row(line))
+    _append_wrapped_card_lines(
+        lines,
+        step_memory_summary.get("card", ""),
+        section_title="Step Memory",
+        card_header_prefix="TraceML Step Memory Summary",
+    )
 
-    lines.append(border())
+    lines.append(border(width=SUMMARY_WIDTH))
     return "\n".join(lines)
 
 

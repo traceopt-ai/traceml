@@ -248,8 +248,8 @@ def _build_step_memory_card(
                     f"{latest_step_observed if latest_step_observed is not None else 'n/a'}"
                 ),
                 "- Diagnosis: NO DATA",
-                "- Why: No step-memory data yet.",
-                "- Next: Wait for more completed steps.",
+                "- Why: No step-memory data was collected.",
+                "- Next: Run longer or collect more memory steps.",
             ]
         )
 
@@ -284,7 +284,7 @@ def _build_step_memory_card(
     lines.append(
         (
             f"- Primary: {_metric_label(primary.metric)} | "
-            f"worst peak {fmt_mem_new(primary.summary.worst_peak)}"
+            f"worst {fmt_mem_new(primary.summary.worst_peak)}"
             f" on r{primary.summary.worst_rank if primary.summary.worst_rank is not None else 'n/a'} | "
             f"skew {format_ratio_percent(primary.summary.skew_pct)}"
         )

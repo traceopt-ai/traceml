@@ -204,12 +204,12 @@ def _build_takeaway(agg: ProcessSummaryAgg) -> str:
             and agg.gpu_mem_reserved_peak_bytes
             > agg.gpu_mem_used_peak_bytes * 1.25
         ):
-            return "process reserved noticeably more GPU memory than it actively used"
+            return "reserved GPU memory exceeds active use."
 
         if used_peak_pct is not None and used_peak_pct >= 90.0:
-            return "process came close to the GPU memory limit"
+            return "GPU memory use is close to capacity"
         if used_peak_pct is not None and used_peak_pct <= 20.0:
-            return "process used only a small fraction of available GPU memory"
+            return "GPU memory use stayed low"
 
     if (
         agg.cpu_avg_percent is not None
@@ -218,9 +218,9 @@ def _build_takeaway(agg: ProcessSummaryAgg) -> str:
     ):
         approx_single_core_pct = 100.0 / agg.cpu_logical_core_count
         if agg.cpu_avg_percent <= approx_single_core_pct * 1.5:
-            return "process CPU usage stayed relatively low on average"
+            return "CPU usage stayed low"
 
-    return "process resource usage looked stable overall"
+    return "stable overall"
 
 
 def _build_gpu_line(
