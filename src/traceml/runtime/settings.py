@@ -28,7 +28,9 @@ class TraceMLSettings:
     Notes:
     - `sampler_interval_sec` controls sampling cadence (all ranks).
     - `render_interval_sec` controls UI cadence (aggregator only).
-    - `mode` selects display backend and capture behavior ("cli" | "notebook" | "dashboard").
+    - `mode` selects display backend and capture behavior ("cli" | "summary" | "dashboard").
+    - `summary` mode disables live rendering and prints only the final
+      end-of-run summary.
     - TCP is used for telemetry transport (including rank0 -> rank0 loopback).
     """
 

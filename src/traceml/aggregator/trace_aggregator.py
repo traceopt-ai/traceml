@@ -6,7 +6,8 @@ Responsibilities
 - Receive telemetry rows from all ranks over TCP
 - Ingest rows into a unified RemoteDBStore
 - Optionally persist telemetry to SQLite history
-- Drive a display driver (CLI / NiceGUI) that owns renderers and view layout
+- Drive a display driver (CLI / NiceGUI / summary-only) that owns live
+  rendering behavior
 
 
 Key invariants
@@ -24,6 +25,7 @@ from typing import Any, Callable, Dict, Type
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
+from traceml.aggregator.display_drivers.summary import SummaryDisplayDriver
 from traceml.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
@@ -53,6 +55,7 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
 _DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
     "cli": CLIDisplayDriver,
     "dashboard": NiceGUIDisplayDriver,
+    "summary": SummaryDisplayDriver,
 }
 
 
@@ -65,7 +68,7 @@ class TraceMLAggregator:
     - TCPServer: receives messages from training ranks
     - RemoteDBStore: unified telemetry store (single source of truth)
     - SQLiteWriterSimple: optional history persistence
-    - Display driver: backend-specific driver that owns renderers and UI updates
+    - Display driver: backend-specific driver that owns live rendering behavior
     """
 
     def __init__(
