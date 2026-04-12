@@ -20,6 +20,7 @@ Key invariants
 
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, Type
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
@@ -30,6 +31,7 @@ from traceml.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
 )
+from traceml.aggregator.summary_service import FinalSummaryService
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
@@ -105,6 +107,17 @@ class TraceMLAggregator:
                 max_flush_items=20_000,
                 synchronous="NORMAL",
             ),
+        )
+
+        session_root = Path(str(settings.logs_dir)).resolve() / str(
+            settings.session_id or "default"
+        )
+
+        self._summary_service = FinalSummaryService(
+            logger=self._logger,
+            session_root=session_root,
+            db_path=str(db_path),
+            flush_history=self._sqlite_writer.flush_now,
         )
 
         # Display driver owns renderer selection and layout mapping.
@@ -194,7 +207,14 @@ class TraceMLAggregator:
             _safe(
                 self._logger,
                 "Final summary failed",
-                lambda: generate_summary(str(self._settings.db_path)),
+                lambda: generate_summary(
+                    str(self._settings.db_path),
+                    session_root=str(
+                        Path(str(self._settings.logs_dir)).resolve()
+                        / str(self._settings.session_id or "default")
+                    ),
+                    print_to_stdout=True,
+                ),
             )
 
     def _drain_tcp(self) -> None:
@@ -229,6 +249,11 @@ class TraceMLAggregator:
             self._drain_tcp()
             _safe(
                 self._logger,
+                "Final summary service poll failed",
+                self._summary_service.poll,
+            )
+            _safe(
+                self._logger,
                 "Display driver tick failed",
                 self._display_driver.tick,
             )
@@ -236,6 +261,11 @@ class TraceMLAggregator:
 
         # Final drain and final display tick on shutdown.
         self._drain_tcp()
+        _safe(
+            self._logger,
+            "Final summary service poll failed",
+            self._summary_service.poll,
+        )
         _safe(
             self._logger,
             "Display driver tick failed",

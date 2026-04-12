@@ -1,19 +1,18 @@
 """
 Final end-of-run summary orchestration for TraceML.
 
-This module is responsible for building the user-facing end-of-run summary from
-individual summary generators.
+This module builds the user-facing end-of-run summary from individual summary
+generators and can also write canonical summary artifacts for programmatic use.
 
 Design goals
 ------------
-- Print exactly once at shutdown
+- Print exactly once at shutdown when requested
 - Keep section layout consistent across runs
-- Let per-domain summary modules compute and serialize their own payloads
-- Keep the printed summary compact and shareable
+- Return a clean structured payload for programmatic callers
+- Write canonical final summary artifacts for user code and integrations
 """
 
-from __future__ import annotations
-
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from traceml.aggregator.summaries.process import generate_process_summary_card
@@ -30,6 +29,13 @@ from traceml.aggregator.summaries.summary_layout import (
     wrap_lines,
 )
 from traceml.aggregator.summaries.system import generate_system_summary_card
+from traceml.final_summary_protocol import (
+    get_final_summary_json_path,
+    get_final_summary_txt_path,
+    utc_now_iso,
+    write_json_atomic,
+    write_text_atomic,
+)
 
 SUMMARY_WIDTH = 78
 SUMMARY_INNER_TEXT_WIDTH = SUMMARY_WIDTH - 4
@@ -61,19 +67,6 @@ def _append_wrapped_card_lines(
 ) -> None:
     """
     Append wrapped summary card lines into the final combined summary.
-
-    Parameters
-    ----------
-    lines:
-        Mutable list of already-rendered boxed rows.
-    card_text:
-        Raw multiline card text returned by a summary builder.
-    section_title:
-        Section heading used in the final combined summary. Matching inner
-        headings are skipped to avoid duplication.
-    card_header_prefix:
-        Prefix of the inner card header line to skip, for example
-        'TraceML Step Timing Summary'.
     """
     for line in indented_block(card_text):
         if line.startswith(card_header_prefix):
@@ -85,7 +78,7 @@ def _append_wrapped_card_lines(
             lines.append(row(wrapped, width=SUMMARY_WIDTH))
 
 
-def _build_final_summary_text(
+def _build_final_summary_text_from_sections(
     *,
     system_summary: Dict[str, Any],
     process_summary: Dict[str, Any],
@@ -93,10 +86,7 @@ def _build_final_summary_text(
     step_memory_summary: Dict[str, Any],
 ) -> str:
     """
-    Build the single printed end-of-run summary.
-
-    This intentionally uses one outer boundary and compact inner sections to
-    keep the output easy to scan and easy to paste into issues or chat.
+    Build the single printed end-of-run summary from per-domain sections.
     """
     duration_s = _summary_duration_s(
         step_time_summary,
@@ -173,20 +163,20 @@ def _build_final_summary_text(
     return "\n".join(lines)
 
 
-def generate_summary(db_path: str) -> None:
+def build_summary_payload(db_path: str) -> Dict[str, Any]:
     """
-    Generate and print the final end-of-run summary.
+    Build the structured final summary payload for one session database.
 
     Parameters
     ----------
     db_path:
         Path to the session SQLite database file.
 
-    Notes
-    -----
-    Individual summary modules still write their own JSON/text artifacts.
-    This function is responsible only for orchestrating and printing the final
-    compact combined summary once.
+    Returns
+    -------
+    Dict[str, Any]
+        Structured summary payload suitable for writing to disk or returning to
+        programmatic callers.
     """
     system_summary = generate_system_summary_card(
         db_path,
@@ -205,10 +195,94 @@ def generate_summary(db_path: str) -> None:
         print_to_stdout=False,
     )
 
-    final_text = _build_final_summary_text(
+    final_text = _build_final_summary_text_from_sections(
         system_summary=system_summary,
         process_summary=process_summary,
         step_time_summary=step_time_summary,
         step_memory_summary=step_memory_summary,
     )
-    print(final_text)
+
+    return {
+        "schema_version": 1,
+        "generated_at": utc_now_iso(),
+        "duration_s": _summary_duration_s(
+            step_time_summary,
+            process_summary,
+            system_summary,
+        ),
+        "system": system_summary,
+        "process": process_summary,
+        "step_time": step_time_summary,
+        "step_memory": step_memory_summary,
+        "text": final_text,
+    }
+
+
+def write_summary_artifacts(
+    *,
+    db_path: str,
+    payload: Dict[str, Any],
+    session_root: Optional[str] = None,
+) -> None:
+    """
+    Write final summary artifacts to disk.
+
+    Artifacts written
+    -----------------
+    - legacy DB-adjacent artifacts for compatibility
+    - canonical session-root artifacts for public API consumers
+    """
+    final_text = str(payload.get("text", ""))
+
+    legacy_json_path = Path(str(db_path) + "_summary_card.json").resolve()
+    legacy_txt_path = Path(str(db_path) + "_summary_card.txt").resolve()
+
+    write_json_atomic(legacy_json_path, payload)
+    write_text_atomic(legacy_txt_path, final_text + "\n")
+
+    if session_root:
+        session_root_path = Path(session_root).resolve()
+        write_json_atomic(
+            get_final_summary_json_path(session_root_path),
+            payload,
+        )
+        write_text_atomic(
+            get_final_summary_txt_path(session_root_path),
+            final_text + "\n",
+        )
+
+
+def generate_summary(
+    db_path: str,
+    *,
+    session_root: Optional[str] = None,
+    print_to_stdout: bool = True,
+) -> Dict[str, Any]:
+    """
+    Generate, write, and optionally print the final end-of-run summary.
+
+    Parameters
+    ----------
+    db_path:
+        Path to the session SQLite database file.
+    session_root:
+        Optional session root used for canonical final summary artifacts.
+    print_to_stdout:
+        If True, print the final combined summary text.
+
+    Returns
+    -------
+    Dict[str, Any]
+        Structured final summary payload.
+    """
+    payload = build_summary_payload(db_path)
+    write_summary_artifacts(
+        db_path=db_path,
+        payload=payload,
+        session_root=session_root,
+    )
+
+    if print_to_stdout:
+        print(payload["text"])
+
+    return payload
