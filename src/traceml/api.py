@@ -12,8 +12,35 @@ Design goals
 
 from typing import Any, Dict, Optional
 
-from traceml.decorators import trace_model_instance, trace_step
 from traceml.summary_client import final_summary as _final_summary
+
+
+def trace_step(*args: Any, **kwargs: Any) -> Any:
+    """
+    Lazily resolve and return the TraceML step tracing context manager.
+
+    This indirection keeps `import traceml` usable in environments where the
+    torch-dependent training instrumentation stack is not installed, while
+    preserving the public `traceml.trace_step(...)` API.
+    """
+    from traceml.decorators import trace_step as _trace_step
+
+    return _trace_step(*args, **kwargs)
+
+
+def trace_model_instance(*args: Any, **kwargs: Any) -> Any:
+    """
+    Lazily resolve and invoke TraceML model hook attachment.
+
+    This avoids importing torch-dependent decorator code at package import
+    time, which keeps non-training utilities such as CLI inspection usable in
+    lighter environments.
+    """
+    from traceml.decorators import (
+        trace_model_instance as _trace_model_instance,
+    )
+
+    return _trace_model_instance(*args, **kwargs)
 
 
 def final_summary(
