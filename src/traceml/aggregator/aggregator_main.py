@@ -82,6 +82,12 @@ def read_traceml_env() -> dict[str, Any]:
     ----------------------
     - ``TRACEML_UI_MODE`` is preferred
     - ``TRACEML_MODE`` is still accepted
+
+    Supported display modes
+    -----------------------
+    - ``cli``: live terminal UI
+    - ``dashboard``: NiceGUI browser UI
+    - ``summary``: no live UI, final summary only
     """
 
     ui_mode = os.environ.get(

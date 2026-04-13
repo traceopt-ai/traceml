@@ -133,6 +133,24 @@ def _collect_existing_artifacts(
     }
 
 
+def _validate_launch_args(args: argparse.Namespace) -> None:
+    """
+    Validate cross-argument constraints for TraceML launch commands.
+
+    Summary mode depends on SQLite-backed history because the final end-of-run
+    summary is generated from the persisted session database. We reject invalid
+    combinations early in the CLI so runtime and aggregator code can stay
+    simple and mode-agnostic.
+    """
+    if getattr(args, "mode", None) == "summary" and getattr(
+        args, "no_history", False
+    ):
+        raise SystemExit(
+            "[TraceML] ERROR: --mode=summary requires history. "
+            "Remove --no-history to enable final summary generation."
+        )
+
+
 def write_code_manifest(
     session_root: Path,
     script_path: str,
@@ -486,8 +504,12 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         update_run_manifest(manifest_path, status=final_status)
         raise SystemExit(train_proc.returncode)
 
-    if args.mode not in ["cli", "dashboard"]:
-        raise ValueError(f"Invalid ui mode '{args.mode}'")
+    supported_modes = {"cli", "dashboard", "summary"}
+    if args.mode not in supported_modes:
+        raise ValueError(
+            f"Invalid display mode '{args.mode}'. "
+            f"Supported modes: {sorted(supported_modes)}"
+        )
 
     train_cmd = [
         *_build_torchrun_base_cmd(args.nproc_per_node),
@@ -638,8 +660,11 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         "--mode",
         type=str,
         default="cli",
-        choices=["cli", "dashboard"],
-        help="TraceML frontend to launch. Default: cli.",
+        choices=["cli", "dashboard", "summary"],
+        help=(
+            "TraceML display mode to launch. "
+            "Use 'summary' for final-summary-only runs. Default: cli."
+        ),
     )
     parser.add_argument(
         "--interval",
@@ -756,6 +781,9 @@ def main() -> None:
     """CLI entrypoint for the TraceML launcher."""
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.command in {"watch", "run", "deep"}:
+        _validate_launch_args(args)
 
     if args.command == "watch":
         run_with_tracing(args, profile="watch")

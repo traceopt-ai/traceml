@@ -6,7 +6,8 @@ Responsibilities
 - Receive telemetry rows from all ranks over TCP
 - Ingest rows into a unified RemoteDBStore
 - Optionally persist telemetry to SQLite history
-- Drive a display driver (CLI / NiceGUI) that owns renderers and view layout
+- Drive a display driver (CLI / NiceGUI / summary-only) that owns live
+  rendering behavior
 
 
 Key invariants
@@ -19,15 +20,18 @@ Key invariants
 
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, Type
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
 from traceml.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
+from traceml.aggregator.display_drivers.summary import SummaryDisplayDriver
 from traceml.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
     SQLiteWriterSimple,
 )
+from traceml.aggregator.summary_service import FinalSummaryService
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
@@ -53,6 +57,7 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
 _DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
     "cli": CLIDisplayDriver,
     "dashboard": NiceGUIDisplayDriver,
+    "summary": SummaryDisplayDriver,
 }
 
 
@@ -65,7 +70,7 @@ class TraceMLAggregator:
     - TCPServer: receives messages from training ranks
     - RemoteDBStore: unified telemetry store (single source of truth)
     - SQLiteWriterSimple: optional history persistence
-    - Display driver: backend-specific driver that owns renderers and UI updates
+    - Display driver: backend-specific driver that owns live rendering behavior
     """
 
     def __init__(
@@ -102,6 +107,17 @@ class TraceMLAggregator:
                 max_flush_items=20_000,
                 synchronous="NORMAL",
             ),
+        )
+
+        session_root = Path(str(settings.logs_dir)).resolve() / str(
+            settings.session_id or "default"
+        )
+
+        self._summary_service = FinalSummaryService(
+            logger=self._logger,
+            session_root=session_root,
+            db_path=str(db_path),
+            flush_history=self._sqlite_writer.flush_now,
         )
 
         # Display driver owns renderer selection and layout mapping.
@@ -191,7 +207,14 @@ class TraceMLAggregator:
             _safe(
                 self._logger,
                 "Final summary failed",
-                lambda: generate_summary(str(self._settings.db_path)),
+                lambda: generate_summary(
+                    str(self._settings.db_path),
+                    session_root=str(
+                        Path(str(self._settings.logs_dir)).resolve()
+                        / str(self._settings.session_id or "default")
+                    ),
+                    print_to_stdout=True,
+                ),
             )
 
     def _drain_tcp(self) -> None:
@@ -226,6 +249,11 @@ class TraceMLAggregator:
             self._drain_tcp()
             _safe(
                 self._logger,
+                "Final summary service poll failed",
+                self._summary_service.poll,
+            )
+            _safe(
+                self._logger,
                 "Display driver tick failed",
                 self._display_driver.tick,
             )
@@ -233,6 +261,11 @@ class TraceMLAggregator:
 
         # Final drain and final display tick on shutdown.
         self._drain_tcp()
+        _safe(
+            self._logger,
+            "Final summary service poll failed",
+            self._summary_service.poll,
+        )
         _safe(
             self._logger,
             "Display driver tick failed",

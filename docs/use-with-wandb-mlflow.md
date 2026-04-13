@@ -46,7 +46,7 @@ A common setup looks like this:
 
 - Hugging Face / Lightning / PyTorch loop for training
 - W&B or MLflow for experiment tracking
-- TraceML for bottleneck diagnosis during runs
+- TraceML for bottleneck diagnosis during runs and end-of-run summaries
 
 That means:
 
@@ -83,12 +83,13 @@ You can keep using W&B logging in your training script and launch the run throug
 Example:
 
 ```python
+import traceml
 import wandb
 
 wandb.init(project="my-project")
 
 for batch in dataloader:
-    with trace_step(model):
+    with traceml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -111,17 +112,54 @@ This gives you:
 
 ---
 
+## Log the final TraceML summary to W&B
+
+If you want a quieter run and a structured TraceML summary you can log at the
+end, launch in summary mode:
+
+```bash
+traceml run train.py --mode=summary
+```
+
+Then request the finalized TraceML summary near the end of your script and log
+selected fields into W&B:
+
+```python
+import traceml
+import wandb
+
+wandb.init(project="my-project")
+
+# training loop ...
+
+summary = traceml.final_summary(print_text=True)
+if summary is not None:
+    wandb.summary["traceml/step_time_status"] = summary["step_time"][
+        "diagnosis"
+    ]["status"]
+    wandb.summary["traceml/step_memory_status"] = summary["step_memory"][
+        "diagnosis"
+    ]["status"]
+    wandb.summary["traceml/duration_s"] = summary.get("duration_s")
+```
+
+This lets W&B stay your experiment system of record while TraceML contributes a
+clean bottleneck diagnosis at the end of the run.
+
+---
+
 ## Example: MLflow + TraceML
 
 You can do the same with MLflow.
 
 ```python
+import traceml
 import mlflow
 
 mlflow.start_run()
 
 for batch in dataloader:
-    with trace_step(model):
+    with traceml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -144,6 +182,36 @@ This gives you:
 
 ---
 
+## Log the final TraceML summary to MLflow
+
+TraceML can also return a structured final summary for MLflow logging:
+
+```python
+import traceml
+import mlflow
+
+mlflow.start_run()
+
+# training loop ...
+
+summary = traceml.final_summary(print_text=True)
+if summary is not None:
+    mlflow.log_param(
+        "traceml_step_time_status",
+        summary["step_time"]["diagnosis"]["status"],
+    )
+    mlflow.log_param(
+        "traceml_step_memory_status",
+        summary["step_memory"]["diagnosis"]["status"],
+    )
+    mlflow.log_dict(summary, "traceml/final_summary.json")
+```
+
+This is a good fit when you want both a compact diagnosis in your run metadata
+and the full TraceML summary JSON attached to the run.
+
+---
+
 ## Keeping terminal output clean
 
 If you use TraceML in CLI mode together with other loggers, the terminal can get noisy.
@@ -152,6 +220,7 @@ Good ways to reduce that:
 
 - disable `tqdm` progress bars
 - reduce extra console logging
+- use `--mode=summary` if you only want the final TraceML summary
 - use the local UI if the terminal feels crowded
 
 Launch the local UI with:
@@ -192,9 +261,17 @@ It is not a TraceML requirement.
 The easiest path is:
 
 1. keep your existing tracking setup
-2. add `trace_step(model)` or a supported integration
+2. add `traceml.trace_step(model)` or a supported integration
 3. launch the run with `traceml run ...`
 4. use TraceML when training feels slower than expected
+
+For low-noise adoption, start with:
+
+```bash
+traceml run train.py --mode=summary
+```
+
+and log selected fields from `traceml.final_summary()` into W&B or MLflow.
 
 This is much easier than trying to replace your tracking stack.
 

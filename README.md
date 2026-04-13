@@ -40,10 +40,10 @@ pip install traceml-ai
 Wrap your training step:
 
 ```python
-from traceml.decorators import trace_step
+import traceml
 
 for batch in dataloader:
-    with trace_step(model):
+    with traceml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -66,6 +66,14 @@ During training, TraceML opens a live terminal view alongside your logs.
 At the end of the run, it prints a compact summary you can review or share.
 
 ![TraceML summary](docs/assets/end-of-run-summary.png)
+
+If you want a low-noise run and a structured summary you can log into W&B or
+MLflow, launch in summary mode and call `traceml.final_summary()` near the end
+of your script:
+
+```bash
+traceml run train.py --mode=summary
+```
 
 For full setup details, see [docs/quickstart.md](docs/quickstart.md).
 
@@ -115,6 +123,7 @@ Use TraceML for:
 - bottleneck diagnosis
 - rank imbalance / straggler detection
 - memory trend debugging
+- structured final summaries you can forward into W&B or MLflow
 
 See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 

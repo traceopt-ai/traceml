@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-from traceml.decorators import trace_step
+import traceml
 
 SEED = 42
 INPUT_DIM = 1024
@@ -89,7 +89,7 @@ def main():
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
 
-            with trace_step(model):
+            with traceml.trace_step(model):
                 optimizer.zero_grad(set_to_none=True)
                 logits = model(batch_x)
                 loss = criterion(logits, batch_y)

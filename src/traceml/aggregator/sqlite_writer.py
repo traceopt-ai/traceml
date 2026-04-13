@@ -55,6 +55,18 @@ _PROJECTION_WRITERS = [
 
 
 @dataclass(frozen=True)
+class _FlushBarrier:
+    """
+    Internal queue item used to establish a flush barrier.
+
+    When the writer thread processes this barrier, all messages enqueued before
+    it have been written to SQLite.
+    """
+
+    done: threading.Event
+
+
+@dataclass(frozen=True)
 class SQLiteWriterConfig:
     """
     Configuration for SQLiteWriterSimple.
@@ -106,9 +118,8 @@ class SQLiteWriterSimple:
         self._cfg = cfg
         self._logger = logger or get_error_logger("TraceML-SQLiteWriterSimple")
 
-        self._q: "queue.Queue[Dict[str, Any]]" = queue.Queue(
-            maxsize=int(cfg.max_queue)
-        )
+        self._q: "queue.Queue[Any]" = queue.Queue(maxsize=int(cfg.max_queue))
+        self._wake = threading.Event()
         self._stop = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
@@ -143,8 +154,43 @@ class SQLiteWriterSimple:
         try:
             self._q.put_nowait(msg)
             self._enqueued += 1
+            self._wake.set()
         except queue.Full:
             self._dropped += 1
+
+    def flush_now(self, timeout_sec: float = 5.0) -> bool:
+        """
+        Block until all messages enqueued before this call have been flushed.
+
+        Parameters
+        ----------
+        timeout_sec:
+            Maximum time to wait for the flush barrier to be processed.
+
+        Returns
+        -------
+        bool
+            True if the flush barrier was processed in time, otherwise False.
+
+        Notes
+        -----
+        This method is intended for low-frequency control-plane operations such
+        as on-demand final summary generation. It should not be called on every
+        training step.
+        """
+        if not self._cfg.enabled or not self._started:
+            return True
+
+        done = threading.Event()
+        barrier = _FlushBarrier(done=done)
+
+        try:
+            self._q.put(barrier, timeout=float(timeout_sec))
+            self._wake.set()
+        except queue.Full:
+            return False
+
+        return done.wait(timeout=float(timeout_sec))
 
     def stop(self, timeout_sec: float = 2.0) -> None:
         """
@@ -156,6 +202,7 @@ class SQLiteWriterSimple:
             return
 
         self._stop.set()
+        self._wake.set()
 
         if self._started:
             self._thread.join(timeout=float(timeout_sec))
@@ -344,24 +391,46 @@ class SQLiteWriterSimple:
 
     def _flush_once(self, conn: sqlite3.Connection) -> None:
         """
-        Drain up to ``max_flush_items`` from the queue and write them to SQLite.
+        Drain up to ``max_flush_items`` queued items and write them to SQLite.
+
+        Flush barriers are processed in-order and guarantee that all telemetry
+        queued before the barrier has been committed before the barrier is
+        acknowledged.
         """
         items = self._drain_nowait(self._cfg.max_flush_items)
         if not items:
             return
 
-        raw_rows, projection_rows = self._collect_flush_rows(items)
-        if not raw_rows:
-            return
+        pending_payloads: list[Any] = []
 
-        try:
-            self._write_flush_rows(conn, raw_rows, projection_rows)
-        except Exception as exc:
+        def _flush_payload_batch(batch: list[Any]) -> None:
+            if not batch:
+                return
+
+            raw_rows, projection_rows = self._collect_flush_rows(batch)
+            if not raw_rows:
+                return
+
             try:
-                conn.execute("ROLLBACK;")
-            except Exception:
-                pass
-            self._log_error(f"[TraceML] SQLiteWriter flush failed: {exc}")
+                self._write_flush_rows(conn, raw_rows, projection_rows)
+            except Exception as exc:
+                try:
+                    conn.execute("ROLLBACK;")
+                except Exception:
+                    pass
+                self._log_error(f"[TraceML] SQLiteWriter flush failed: {exc}")
+
+        for item in items:
+            if isinstance(item, _FlushBarrier):
+                _flush_payload_batch(pending_payloads)
+                pending_payloads = []
+                item.done.set()
+                continue
+
+            if isinstance(item, (dict, list)):
+                pending_payloads.append(item)
+
+        _flush_payload_batch(pending_payloads)
 
     def _run(self) -> None:
         """
@@ -388,11 +457,13 @@ class SQLiteWriterSimple:
 
         try:
             while not self._stop.is_set():
-                time.sleep(interval)
+                self._wake.wait(timeout=interval)
+                self._wake.clear()
                 self._flush_once(conn)
 
-            # Best-effort final flush on stop.
-            self._flush_once(conn)
+                # Best-effort final flush on stop.
+            while not self._q.empty():
+                self._flush_once(conn)
         finally:
             try:
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
