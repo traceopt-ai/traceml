@@ -53,7 +53,9 @@ A simple rule:
 Usually just this:
 
 ```python
-with trace_step(model):
+import traceml
+
+with traceml.trace_step(model):
     ...
 ```
 
@@ -61,6 +63,31 @@ For supported integrations:
 
 - Hugging Face: use `TraceMLTrainer`
 - Lightning: add `TraceMLCallback()`
+
+`from traceml.decorators import trace_step` still works for backward
+compatibility, but the preferred public API is now `traceml.trace_step(...)`.
+
+---
+
+## Should I use `traceml.trace_step()` or `trace_step()`?
+
+Prefer:
+
+```python
+import traceml
+
+with traceml.trace_step(model):
+    ...
+```
+
+TraceML still supports:
+
+```python
+from traceml.decorators import trace_step
+```
+
+for backward compatibility, but new examples and docs use the top-level
+`traceml.*` API. Legacy decorator imports may be removed in a future version.
 
 ---
 
@@ -151,6 +178,39 @@ The local UI runs at:
 ```text
 http://localhost:8765
 ```
+
+---
+
+## Is there a summary-only mode?
+
+Yes.
+
+Run:
+
+```bash
+traceml run train.py --mode=summary
+```
+
+This skips the live UI and focuses on the final end-of-run summary. It is a
+good fit when you want lower terminal noise or want to forward TraceML summary
+fields into W&B or MLflow.
+
+---
+
+## Can I log TraceML output into W&B or MLflow?
+
+Yes.
+
+TraceML is designed to work alongside your existing tracking stack. The
+recommended low-noise path is:
+
+1. launch with `traceml run train.py --mode=summary`
+2. call `traceml.final_summary()` near the end of your script
+3. log selected fields from the returned dict into W&B or MLflow
+
+See:
+
+- [Use TraceML with W&B / MLflow](use-with-wandb-mlflow.md)
 
 ---
 

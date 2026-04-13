@@ -13,7 +13,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from traceml.decorators import trace_step
+import traceml
 
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
@@ -134,7 +134,7 @@ def main():
             optimizer.zero_grad(set_to_none=True)
 
             # ONE TraceML step == GRAD_ACC_STEPS micro-steps + optimizer step
-            with trace_step(model):
+            with traceml.trace_step(model):
                 last_logits = None
                 last_labels = None
                 total_step_loss = 0.0

@@ -71,7 +71,8 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 `TraceMLCallback` hooks into Lightning’s training lifecycle automatically.
 
-That means you do not need to wrap your code with `trace_step(...)` manually in Lightning.
+That means you do not need to wrap your code with `traceml.trace_step(...)`
+manually in Lightning.
 
 ---
 
@@ -125,13 +126,13 @@ These settings usually give the cleanest experience with TraceML:
 
 Use this only for short diagnostic runs when step-level diagnosis already told you where to dig.
 
-Since `TraceMLCallback` handles step-level tracing, deeper layer-level hooks are added separately with `trace_model_instance(...)`.
+Since `TraceMLCallback` handles step-level tracing, deeper layer-level hooks are
+added separately with `traceml.trace_model_instance(...)`.
 
 ```python
+import traceml
 import lightning as L
 import torch.nn as nn
-
-from traceml.decorators import trace_model_instance
 
 
 class MyLightningModule(L.LightningModule):
@@ -140,7 +141,7 @@ class MyLightningModule(L.LightningModule):
         self.model = MyCoreModel()
         self.loss_fn = nn.CrossEntropyLoss()
 
-        trace_model_instance(
+        traceml.trace_model_instance(
             self,
             trace_layer_forward_memory=True,
             trace_layer_backward_memory=True,
