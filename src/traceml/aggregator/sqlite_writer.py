@@ -40,6 +40,9 @@ import msgspec
 
 from traceml.aggregator.sqlite_writers import process as process_sql_writer
 from traceml.aggregator.sqlite_writers import (
+    stdout_stderr as stdout_stderr_sql_writer,
+)
+from traceml.aggregator.sqlite_writers import (
     step_memory as step_memory_sql_writer,
 )
 from traceml.aggregator.sqlite_writers import step_time as step_time_sql_writer
@@ -51,6 +54,7 @@ _PROJECTION_WRITERS = [
     process_sql_writer,
     step_time_sql_writer,
     step_memory_sql_writer,
+    stdout_stderr_sql_writer,
 ]
 
 
