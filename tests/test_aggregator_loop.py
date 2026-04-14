@@ -71,10 +71,6 @@ class TestTCPServerDataReady:
         ), "TCPServer is missing 'wait_for_data' method (Issue #1 fix not applied)"
         assert callable(srv.wait_for_data)
 
-    @pytest.mark.xfail(
-        reason="Requires Issue #1 fix: _data_ready Event not yet added to TCPServer",
-        strict=True,
-    )
     def test_wait_returns_false_when_no_data(self):
         """wait_for_data should return False when timeout expires with no data."""
         srv = _make_server_no_socket()
@@ -86,10 +82,6 @@ class TestTCPServerDataReady:
         # Should have waited roughly the timeout (within 20 ms slack)
         assert elapsed >= 0.04, f"Returned too early: {elapsed:.3f}s"
 
-    @pytest.mark.xfail(
-        reason="Requires Issue #1 fix: _data_ready Event not yet added to TCPServer",
-        strict=True,
-    )
     def test_wait_returns_true_after_put(self):
         """
         wait_for_data should return True (and quickly) when a message is
@@ -116,10 +108,6 @@ class TestTCPServerDataReady:
             elapsed < 0.3
         ), f"Loop woke too late ({elapsed:.3f}s) — event-driven drain not working"
 
-    @pytest.mark.xfail(
-        reason="Requires Issue #1 fix: _data_ready Event not yet added to TCPServer",
-        strict=True,
-    )
     def test_event_clears_after_wait(self):
         """
         After wait_for_data() returns True, the event must be cleared so
@@ -142,10 +130,6 @@ class TestTCPServerDataReady:
         ), "Event was not cleared after first wait — loop would spin!"
         assert elapsed >= 0.04
 
-    @pytest.mark.xfail(
-        reason="Requires Issue #1 fix: _data_ready Event not yet added to TCPServer",
-        strict=True,
-    )
     def test_multiple_puts_single_wait(self):
         """
         A burst of N messages should produce exactly one wakeup; all messages
