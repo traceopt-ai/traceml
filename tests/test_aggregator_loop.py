@@ -318,10 +318,6 @@ class TestLoopLatency:
     These tests mock out everything except the event-wait + drain interaction.
     """
 
-    @pytest.mark.xfail(
-        reason="Requires Issue #1 fix: aggregator loop still uses blind sleep",
-        strict=True,
-    )
     def test_drain_triggered_before_interval_expires(self):
         """
         Key latency regression test.
@@ -374,10 +370,6 @@ class TestLoopLatency:
             f"aggregator loop is not event-driven"
         )
 
-    @pytest.mark.xfail(
-        reason="Requires Issue #1 fix: aggregator loop still uses blind sleep",
-        strict=True,
-    )
     def test_tick_not_faster_than_interval(self):
         """
         Even when data arrives very frequently, the UI tick must not be called
