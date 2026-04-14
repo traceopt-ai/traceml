@@ -1,48 +1,29 @@
+from __future__ import annotations
+
 import hashlib
 import time
 from typing import Dict, List, Optional, Set
 
-from traceml.loggers.error_log import get_error_logger
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.schema.layer_memory import (
     LayerMemoryPayload,
     LayerMemorySample,
 )
+from traceml.samplers.utils import drain_queue_nowait
 from traceml.utils.layer_parameter_memory import get_model_queue
 
 
 class LayerMemorySampler(BaseSampler):
     """
-    Sampler for static, per-layer *parameter* memory of PyTorch models.
-
-    This sampler ingests precomputed layer-memory snapshots produced
-    by the training code (not live model objects). Each unique model
-    architecture is recorded at most once.
-
-    Scope
-    -----
-    - One-time / low-frequency sampling
-    - Parameter memory only (no activations, no gradients)
-    - Architecture-level, not step-level
-
-    Design principles
-    -----------------
-    - Sampler never touches live `nn.Module` objects
-    - Deterministic, race-free ingestion
-    - Deduplication based on stable content signature
-    - Safe to run asynchronously
+    Sampler for static, per-layer parameter memory of PyTorch models.
     """
 
     def __init__(self) -> None:
-        self.name = "LayerMemory"
-        self.sampler_name = self.name + "Sampler"
-        self.table_name = self.name + "Table"
-        super().__init__(sampler_name=self.sampler_name)
+        super().__init__(
+            sampler_name="LayerMemorySampler",
+            table_name="LayerMemoryTable",
+        )
         self.sample_idx = 0
-
-        self.logger = get_error_logger(self.sampler_name)
-
-        # Deduplication store for seen models
         self.seen_signatures: Set[str] = set()
 
     def _compute_signature(
@@ -50,9 +31,6 @@ class LayerMemorySampler(BaseSampler):
     ) -> str:
         """
         Compute a stable architecture signature from ordered layer memory.
-
-        The signature is derived from ordered (layer_name, bytes) pairs,
-        making it robust to object identity, process lifetime, and dict order.
         """
         items = [
             f"{name}:{int(b)}" for name, b in zip(layer_names, layer_bytes)
@@ -65,10 +43,6 @@ class LayerMemorySampler(BaseSampler):
     ) -> LayerMemoryPayload:
         """
         Normalize raw layer-memory dict into a deterministic payload.
-
-        Sorting happens *once* here to guarantee:
-        - stable hashing
-        - stable wire representation
         """
         names = sorted(layer_memory.keys())
         bytes_ = [float(layer_memory[name]) for name in names]
@@ -80,8 +54,6 @@ class LayerMemorySampler(BaseSampler):
     ) -> Optional[LayerMemorySample]:
         """
         Build a LayerMemorySample from raw layer-memory input.
-
-        Returns None if the architecture has already been seen.
         """
         payload = self._normalize_layer_memory(layer_memory)
         signature = self._compute_signature(
@@ -106,17 +78,9 @@ class LayerMemorySampler(BaseSampler):
     def _sample_from_queue(self) -> Optional[LayerMemorySample]:
         """
         Consume the model queue and return the first unseen architecture.
-
-        The queue is expected to contain dict payloads mapping
-        layer_name -> parameter_bytes.
         """
         try:
-            queue = get_model_queue()
-            if queue.empty():
-                return None
-
-            while not queue.empty():
-                payload = queue.get_nowait()
+            for payload in drain_queue_nowait(get_model_queue()):
                 if not payload:
                     continue
 
@@ -132,17 +96,13 @@ class LayerMemorySampler(BaseSampler):
 
     def sample(self) -> None:
         """
-        Ingest one layer-memory snapshot from the queue (if available).
-
-        This method is safe to call frequently; actual writes occur
-        only when a new, unseen model architecture is encountered.
+        Ingest one layer-memory snapshot from the queue if available.
         """
         self.sample_idx += 1
         try:
             sample = self._sample_from_queue()
             if sample:
-                self.db.add_record(self.table_name, sample.to_wire())
+                self._add_record(sample.to_wire())
 
         except Exception as e:
-            # Absolute safety net — sampling must never break training
             self.logger.error(f"[TraceML] LayerMemorySampler error: {e}")
