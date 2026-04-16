@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find why PyTorch training is slow while the job is still running.**
+**Catch PyTorch training slowdowns early, while the job is still running.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
@@ -11,21 +11,13 @@
 
 [**Quickstart**](docs/quickstart.md) • [**How to Read Output**](docs/how-to-read-output.md) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
 
-
 </div>
 
-TraceML helps you find training bottlenecks in PyTorch while the job is still running.
-It helps you catch:
+TraceML is an open-source tool for catching PyTorch training slowdowns early, so bad runs do not quietly waste costly compute.
 
-- input bottlenecks
-- compute-bound steps
-- DDP stragglers
-- wait-heavy training
-- memory creep over time
+It gives you lightweight step-level signals while the job is still running, so you can quickly tell whether the slowdown looks input-bound, compute-bound, wait-heavy, imbalanced across ranks, or memory-related.
 
-without jumping straight to a heavyweight profiler.
-
-**Why this exists:** dashboards show utilization and curves. TraceML shows **why throughput is poor inside the training step**.
+Use TraceML when you want a fast answer before reaching for a heavyweight profiler.
 
 ---
 
@@ -57,9 +49,7 @@ Run:
 traceml run train.py
 ```
 
-
 During training, TraceML opens a live terminal view alongside your logs.
-
 
 ![TraceML terminal dashboard](docs/assets/cli_demo_v1.png)
 
@@ -81,15 +71,17 @@ Not sure how to interpret the output? Read [How to Read TraceML Output](docs/how
 
 ---
 
-## What TraceML tells you
+## What TraceML helps you see
 
-TraceML helps answer questions like:
+TraceML is currently strongest at surfacing:
 
-- Is training input-bound or compute-bound?
-- Is one DDP rank slower than the others?
-- Is the job wait-heavy because of uneven progress?
-- Is memory drifting upward over time?
-- Is the slowdown coming from dataloader, forward, backward, or optimizer work?
+- step-time slowdowns while training is still running
+- whether the pattern looks input-bound, compute-bound, or wait-heavy
+- whether work is uneven across distributed ranks
+- whether memory is drifting upward over time
+- where time is showing up across dataloader, forward, backward, and optimizer phases
+
+It is designed to help you decide quickly whether a run looks healthy or whether it is worth digging deeper.
 
 ---
 
@@ -120,13 +112,13 @@ Use those for:
 
 Use TraceML for:
 
-- bottleneck diagnosis
-- rank imbalance / straggler detection
-- memory trend debugging
+- bottleneck diagnosis while a run is still in progress
+- spotting throughput drift during a run
+- checking for rank imbalance / straggler patterns
+- checking for memory creep or pressure signals
 - structured final summaries you can forward into W&B or MLflow
 
 See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
-
 
 ---
 
@@ -159,7 +151,7 @@ See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 
 ## Feedback
 
-If TraceML helped you find a slowdown, please open an issue and include:
+If TraceML helped you catch a slowdown, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
 - single GPU or multi-GPU

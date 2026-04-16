@@ -4,7 +4,7 @@ TraceML Aggregator (out-of-process telemetry server + UI driver).
 Responsibilities
 ----------------
 - Receive telemetry rows from all ranks over TCP
-- Ingest rows into a unified RemoteDBStore
+- Ingest only legacy live-view rows into RemoteDBStore
 - Optionally persist telemetry to SQLite history
 - Drive a display driver (CLI / NiceGUI / summary-only) that owns live
   rendering behavior
@@ -12,9 +12,10 @@ Responsibilities
 
 Key invariants
 --------------
-- Renderers currently read from RemoteDBStore and, in some cases, SQLite-backed
-  history during the storage transition.
-- Over time, SQLite-backed history may replace parts of the RemoteDBStore read path.
+- Renderers currently read from SQLite-backed history in most places, with a
+  small number of legacy deep-profile views still reading from RemoteDBStore.
+- Over time, SQLite-backed history is expected to replace the remaining
+  RemoteDBStore read path entirely.
 - The aggregator MUST NOT know about UI sections, layouts, or renderer methods.
 """
 
@@ -68,10 +69,21 @@ class TraceMLAggregator:
     Owns
     ----
     - TCPServer: receives messages from training ranks
-    - RemoteDBStore: unified telemetry store (single source of truth)
+    - RemoteDBStore: temporary live store for legacy renderers still migrating
+      to SQLite-backed reads
     - SQLiteWriterSimple: optional history persistence
     - Display driver: backend-specific driver that owns live rendering behavior
     """
+
+    _REMOTE_STORE_SAMPLERS = frozenset(
+        {
+            "LayerMemorySampler",
+            "LayerForwardMemorySampler",
+            "LayerBackwardMemorySampler",
+            "LayerForwardTimeSampler",
+            "LayerBackwardTimeSampler",
+        }
+    )
 
     def __init__(
         self,
@@ -83,7 +95,8 @@ class TraceMLAggregator:
         self._stop_event = stop_event
         self._settings = settings
 
-        # Unified telemetry store: renderers read only from here.
+        # Transitional live store for the remaining renderer paths that have
+        # not yet moved to SQLite-backed history.
         self._store = RemoteDBStore(max_rows=int(settings.remote_max_rows))
 
         # TCP server: aggregator listens for rank-local agents.
@@ -222,19 +235,68 @@ class TraceMLAggregator:
         Drain pending TCP messages and ingest them into the store and history.
 
         Each message is expected to be a telemetry row or batch compatible with
-        ``RemoteDBStore.ingest()`` and ``SQLiteWriterSimple.ingest()``.
+        ``SQLiteWriterSimple.ingest()``. A legacy subset is also mirrored into
+        ``RemoteDBStore`` for renderers that still depend on the in-memory path.
         """
         for msg in self._tcp_server.poll():
-            _safe(
-                self._logger,
-                "RemoteDBStore.ingest failed",
-                lambda m=msg: self._store.ingest(m),
-            )
+            remote_msg = self._filter_remote_store_message(msg)
+            if remote_msg is not None:
+                _safe(
+                    self._logger,
+                    "RemoteDBStore.ingest failed",
+                    lambda m=remote_msg: self._store.ingest(m),
+                )
             _safe(
                 self._logger,
                 "SQLiteWriter.ingest failed",
                 lambda m=msg: self._sqlite_writer.ingest(m),
             )
+
+    def _message_sampler_name(self, msg: Any) -> str | None:
+        """
+        Return the sampler name carried by one logical telemetry payload.
+
+        Returns ``None`` when the payload is malformed or does not follow the
+        expected envelope shape.
+        """
+        if not isinstance(msg, dict):
+            return None
+
+        sampler = msg.get("sampler")
+        if sampler is None:
+            return None
+
+        try:
+            return str(sampler)
+        except Exception:
+            return None
+
+    def _filter_remote_store_message(self, msg: Any) -> Any:
+        """
+        Return the subset of a telemetry message still needed by RemoteDBStore.
+
+        Notes
+        -----
+        - SQLite remains the full history sink for every payload.
+        - RemoteDBStore is now treated as a transitional cache for the few
+          legacy renderers that still depend on it.
+        - Batch envelopes preserve their original list shape so
+          `RemoteDBStore.ingest()` can continue to process them normally.
+        """
+        if isinstance(msg, list):
+            filtered = [
+                item
+                for item in msg
+                if self._message_sampler_name(item)
+                in self._REMOTE_STORE_SAMPLERS
+            ]
+            return filtered if filtered else None
+
+        sampler_name = self._message_sampler_name(msg)
+        if sampler_name in self._REMOTE_STORE_SAMPLERS:
+            return msg
+
+        return None
 
     def _loop(self) -> None:
         """
