@@ -85,9 +85,12 @@ traceml run train.py --mode=summary
 
 Then call `traceml.final_summary()` near the end of your script.
 
+TraceML also writes canonical summary artifacts for the run, including `final_summary.json`, which is the intended machine-readable output for downstream logging and later run comparison.
+
+
 ### 3. Compare two runs
 
-If you saved TraceML final summary JSON files, compare them directly:
+If you have `final_summary.json` from two runs, compare them directly:
 
 ```bash
 traceml compare run_a.json run_b.json

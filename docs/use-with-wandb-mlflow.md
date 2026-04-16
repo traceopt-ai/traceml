@@ -147,8 +147,8 @@ if summary is not None:
 This lets W&B stay your experiment system of record while TraceML contributes a
 clean bottleneck diagnosis at the end of the run.
 
-If you also keep the TraceML final summary JSON as a run artifact, you can
-compare runs later with `traceml compare`.
+If you also store `final_summary.json` as a run artifact, you can reuse it
+later with `traceml compare`.
 
 ---
 

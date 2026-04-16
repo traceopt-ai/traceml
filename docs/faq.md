@@ -210,7 +210,9 @@ Use:
 traceml compare run_a.json run_b.json
 ```
 
-`traceml compare` is designed for TraceML final summary JSON files.
+`traceml compare` is designed to consume TraceML `final_summary.json`
+artifacts.
+
 
 It writes:
 
@@ -220,7 +222,7 @@ It writes:
 A good workflow is:
 
 1. run each job with TraceML
-2. keep the final summary JSON for each run
+2. retain `final_summary.json` for each run
 3. compare the two runs with `traceml compare`
 
 See:
