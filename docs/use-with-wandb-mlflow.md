@@ -22,7 +22,7 @@ A good mental model is:
 Use your existing tools for:
 
 - experiment tracking
-- loss / accuracy curves
+- loss and accuracy curves
 - artifacts and checkpoints
 - long-term dashboards
 - team reporting
@@ -35,8 +35,9 @@ Use TraceML for:
 - wait-heavy behavior
 - memory creep
 - step-aware bottleneck diagnosis
+- compact run-to-run comparison from saved TraceML summary JSON files
 
-TraceML is the **training bottleneck finder** in the stack.
+TraceML is the training bottleneck finder in the stack.
 
 ---
 
@@ -44,7 +45,7 @@ TraceML is the **training bottleneck finder** in the stack.
 
 A common setup looks like this:
 
-- Hugging Face / Lightning / PyTorch loop for training
+- Hugging Face, Lightning, or a normal PyTorch loop for training
 - W&B or MLflow for experiment tracking
 - TraceML for bottleneck diagnosis during runs and end-of-run summaries
 
@@ -146,6 +147,9 @@ if summary is not None:
 This lets W&B stay your experiment system of record while TraceML contributes a
 clean bottleneck diagnosis at the end of the run.
 
+If you also keep the TraceML final summary JSON as a run artifact, you can
+compare runs later with `traceml compare`.
+
 ---
 
 ## Example: MLflow + TraceML
@@ -210,6 +214,33 @@ if summary is not None:
 This is a good fit when you want both a compact diagnosis in your run metadata
 and the full TraceML summary JSON attached to the run.
 
+That attached JSON is also a good input for `traceml compare` later.
+
+---
+
+## Compare runs later
+
+Once you have TraceML final summary JSON files for two runs, compare them with:
+
+```bash
+traceml compare run_a.json run_b.json
+```
+
+This is useful when:
+
+- a training change may have made runs slower
+- a dataloader or preprocessing change may have shifted the bottleneck
+- a model or optimizer change may have moved time into a different phase
+- dashboards look similar but throughput still feels worse
+
+A practical workflow is:
+
+1. run training with TraceML summary mode
+2. keep the TraceML final summary JSON as a W&B or MLflow artifact
+3. compare two saved summaries locally with `traceml compare`
+
+See [Compare Runs](compare.md).
+
 ---
 
 ## Keeping terminal output clean
@@ -258,69 +289,26 @@ It is not a TraceML requirement.
 
 ## Best way to adopt TraceML
 
-The easiest path is:
+A clean adoption path is:
 
-1. keep your existing tracking setup
-2. add `traceml.trace_step(model)` or a supported integration
-3. launch the run with `traceml run ...`
-4. use TraceML when training feels slower than expected
+1. start with `traceml run train.py`
+2. use `--mode=summary` when you want a quieter run and a structured final summary
+3. log selected TraceML summary fields into W&B or MLflow if useful
+4. keep the TraceML final summary JSON for important runs
+5. compare two saved runs later with `traceml compare`
 
-For low-noise adoption, start with:
+This usually gives the best balance between:
 
-```bash
-traceml run train.py --mode=summary
-```
-
-and log selected fields from `traceml.final_summary()` into W&B or MLflow.
-
-This is much easier than trying to replace your tracking stack.
-
----
-
-## When TraceML is most useful alongside other tools
-
-TraceML is especially useful when:
-
-- dashboards look normal but throughput is still poor
-- one distributed rank is slowing the job down
-- memory grows over time but you do not know why
-- you want a fast answer before using a heavyweight profiler
-
----
-
-## What TraceML is not trying to replace
-
-TraceML is not trying to replace:
-
-- experiment tracking
-- artifact storage
-- model registry
-- team dashboards
-- long-term run management
-
-Its job is narrower:
-
-- help you find the training bottleneck quickly
-
----
-
-## Recommended workflow
-
-A practical workflow is:
-
-1. run training normally with your existing stack
-2. if training is slower than expected, launch with TraceML
-3. read the diagnosis
-4. inspect the called-out bottleneck
-5. only then move to deeper profiling if needed
-
-This keeps TraceML in the part of the workflow where it adds the most value.
+- low overhead
+- clear diagnosis
+- compatibility with your current stack
+- simple run-to-run review
 
 ---
 
 ## Related docs
 
 - [Quickstart](quickstart.md)
-- [How to Read TraceML Output](how-to-read-output)
-- [Hugging Face Trainer](huggingface.md)
-- [PyTorch Lightning](lightning.md)
+- [Compare Runs](compare.md)
+- [How to Read TraceML Output](how-to-read-output.md)
+- [FAQ](faq.md)
