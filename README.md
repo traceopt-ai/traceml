@@ -19,6 +19,12 @@ It gives you lightweight step-level signals while the job is still running, so y
 
 Use TraceML when you want a fast answer before reaching for a heavyweight profiler.
 
+
+> **Upcoming rename:** TraceML will transition to **TraceOpt** in a future release.
+> For now, the active package remains `traceml-ai` and Python imports remain `traceml`.
+> The future PyPI package name [`traceopt-ai`](https://pypi.org/project/traceopt-ai/) is now in place as we prepare the migration.
+
+
 ---
 
 ## The fastest way to try it
