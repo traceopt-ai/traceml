@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](docs/quickstart.md) • [**How to Read Output**](docs/how-to-read-output.md) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Quickstart**](docs/quickstart.md) • [**Compare Runs**](docs/compare.md) • [**How to Read Output**](docs/how-to-read-output.md) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
 
 </div>
 
@@ -19,11 +19,9 @@ It gives you lightweight step-level signals while the job is still running, so y
 
 Use TraceML when you want a fast answer before reaching for a heavyweight profiler.
 
-
 > **Upcoming rename:** TraceML will transition to **TraceOpt** in a future release.
 > For now, the active package remains `traceml-ai` and Python imports remain `traceml`.
 > The future PyPI package name [`traceopt-ai`](https://pypi.org/project/traceopt-ai/) is now in place as we prepare the migration.
-
 
 ---
 
@@ -63,17 +61,41 @@ At the end of the run, it prints a compact summary you can review or share.
 
 ![TraceML summary](docs/assets/end-of-run-summary.png)
 
-If you want a low-noise run and a structured summary you can log into W&B or
-MLflow, launch in summary mode and call `traceml.final_summary()` near the end
-of your script:
+Start with `traceml run train.py`. Most users do not need `watch` or `deep` first.
+
+---
+
+## Core workflows
+
+### 1. Live diagnosis
+
+Use the default workflow when you want live step-aware diagnosis during training plus the end-of-run summary.
+
+```bash
+traceml run train.py
+```
+
+### 2. Low-noise summary runs
+
+Use summary mode when you mainly want the structured final summary for logging into W&B or MLflow.
 
 ```bash
 traceml run train.py --mode=summary
 ```
 
-For full setup details, see [docs/quickstart.md](docs/quickstart.md).
+Then call `traceml.final_summary()` near the end of your script.
 
-Not sure how to interpret the output? Read [How to Read TraceML Output](docs/how-to-read-output.md).
+### 3. Compare two runs
+
+If you saved TraceML final summary JSON files, compare them directly:
+
+```bash
+traceml compare run_a.json run_b.json
+```
+
+TraceML writes both a structured compare JSON and a compact text report.
+
+See [docs/compare.md](docs/compare.md).
 
 ---
 
@@ -120,9 +142,10 @@ Use TraceML for:
 
 - bottleneck diagnosis while a run is still in progress
 - spotting throughput drift during a run
-- checking for rank imbalance / straggler patterns
+- checking for rank imbalance or straggler patterns
 - checking for memory creep or pressure signals
 - structured final summaries you can forward into W&B or MLflow
+- simple run-to-run comparison from saved TraceML summary JSON files
 
 See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 
@@ -143,15 +166,18 @@ See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 
 ---
 
-## Next steps
+## Learn more
 
 - [Quickstart](docs/quickstart.md)
+- [Compare Runs](docs/compare.md)
 - [Examples](examples/README.md)
 - [How to Read TraceML Output](docs/how-to-read-output.md)
 - [FAQ](docs/faq.md)
 - [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md)
 - Hugging Face integration: `docs/huggingface.md`
 - PyTorch Lightning integration: `docs/lightning.md`
+
+Need a lighter zero-code first look or a deeper follow-up run? See the Quickstart and FAQ for `watch` and `deep`.
 
 ---
 
