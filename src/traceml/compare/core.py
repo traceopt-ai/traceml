@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from traceml.compare.io import derive_compare_labels
+from traceml.compare.verdict import build_compare_verdict
 from traceml.final_summary_protocol import utc_now_iso
 
 _STEP_PHASES = ("dataloader", "forward", "backward", "optimizer")
@@ -39,6 +40,13 @@ def _as_str(value: Any) -> Optional[str]:
     except Exception:
         return None
     return text or None
+
+
+def _as_dict(value: Any) -> Optional[Dict[str, Any]]:
+    """
+    Return a dictionary value if present, otherwise None.
+    """
+    return value if isinstance(value, dict) else None
 
 
 def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
@@ -261,6 +269,10 @@ def build_compare_payload(
                 _nested_get(lhs_step_time, "diagnosis", "status"),
                 _nested_get(rhs_step_time, "diagnosis", "status"),
             ),
+            "presented": {
+                "lhs": _as_dict(lhs_step_time.get("diagnosis_presented")),
+                "rhs": _as_dict(rhs_step_time.get("diagnosis_presented")),
+            },
             "step_avg_ms": step_avg,
             "wait_share_pct": _value_delta(
                 _nested_get(lhs_step_time, "timing_primary", "wait_share_pct"),
@@ -298,6 +310,10 @@ def build_compare_payload(
                 _nested_get(lhs_step_memory, "diagnosis", "status"),
                 _nested_get(rhs_step_memory, "diagnosis", "status"),
             ),
+            "presented": {
+                "lhs": _as_dict(lhs_step_memory.get("diagnosis_presented")),
+                "rhs": _as_dict(rhs_step_memory.get("diagnosis_presented")),
+            },
             "primary_metric": _value_change(
                 _nested_get(lhs_step_memory, "primary_metric", "metric"),
                 _nested_get(rhs_step_memory, "primary_metric", "metric"),
@@ -337,5 +353,11 @@ def build_compare_payload(
         },
         "text": "",
     }
+
+    payload["verdict"] = build_compare_verdict(
+        lhs_payload=lhs_payload,
+        rhs_payload=rhs_payload,
+        compare_payload=payload,
+    )
 
     return payload

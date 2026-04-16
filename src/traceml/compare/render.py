@@ -59,7 +59,6 @@ def _has_numeric_signal(
     if abs(delta) > delta_eps:
         return True
 
-    # suppress pure zero-to-zero noise
     if _is_effectively_zero(lhs, delta_eps) and _is_effectively_zero(
         rhs, delta_eps
     ):
@@ -78,10 +77,6 @@ def _has_text_signal(block: Dict[str, Any]) -> bool:
     if lhs is None and rhs is None:
         return False
     return False
-
-
-def _format_duration(value: Optional[float]) -> str:
-    return "n/a" if value is None else f"{value:.1f}s"
 
 
 def _format_ms(value: Optional[float]) -> str:
@@ -142,7 +137,7 @@ def _format_from_delta_block(
 
 def _render_split_shift(split_pct: Dict[str, Any]) -> Optional[str]:
     """
-    Render only the step phases that changed materially.
+    Render only the step phases that changed materially enough to mention.
     """
     phase_map = {
         "dataloader": "DL",
@@ -165,19 +160,34 @@ def _render_split_shift(split_pct: Dict[str, Any]) -> Optional[str]:
     return " | ".join(parts)
 
 
+def _title_case(value: Optional[str]) -> str:
+    """
+    Format a small label for human-readable output.
+    """
+    if not value:
+        return "n/a"
+    return str(value).replace("_", " ").title()
+
+
 def build_compare_text(payload: Dict[str, Any]) -> str:
     """
     Render a compact terminal-friendly compare report.
+
+    The report is intentionally split into:
+    1. a short conservative verdict
+    2. real top changes only
+    3. compact evidence sections
     """
     lhs = payload.get("lhs", {})
     rhs = payload.get("rhs", {})
-    overview = payload.get("overview", {})
+    verdict = payload.get("verdict", {})
     step_time = payload.get("step_time", {})
     step_memory = payload.get("step_memory", {})
     process = payload.get("process", {})
     system = payload.get("system", {})
 
-    duration = overview.get("duration_s", {})
+    outcome = _as_str(verdict.get("outcome"))
+
     step_avg = step_time.get("step_avg_ms", {})
     wait_share = step_time.get("wait_share_pct", {})
     dominant_phase = step_time.get("dominant_phase", {})
@@ -186,13 +196,26 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
     worst_peak = step_memory.get("worst_peak_bytes", {})
     mem_skew = step_memory.get("skew_pct", {})
     mem_trend = step_memory.get("trend_worst_delta_bytes", {})
+
     process_cpu = process.get("cpu_avg_percent", {})
     process_rss = process.get("ram_peak_gb", {})
     process_takeaway = process.get("takeaway", {})
+
     system_cpu = system.get("cpu_avg_percent", {})
     system_ram = system.get("ram_peak_gb", {})
     gpu_change = system.get("gpu_available", {})
     gpu_count = system.get("gpu_count", {})
+
+    step_presented_rhs = (
+        step_time.get("presented", {}).get("rhs")
+        if isinstance(step_time.get("presented"), dict)
+        else None
+    )
+    mem_presented_rhs = (
+        step_memory.get("presented", {}).get("rhs")
+        if isinstance(step_memory.get("presented"), dict)
+        else None
+    )
 
     lines: List[str] = [
         border(width=_COMPARE_WIDTH),
@@ -204,31 +227,65 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
     _append_wrapped(lines, f"- A: {lhs.get('label', 'lhs')}")
     _append_wrapped(lines, f"- B: {rhs.get('label', 'rhs')}")
     _append_wrapped(lines, "- Format: A -> B | delta = B - A")
-    lines.append(row(width=_COMPARE_WIDTH))
 
-    _append_wrapped(lines, "Overview")
-    _append_wrapped(lines, f"- Headline: {overview.get('headline', 'n/a')}")
+    lines.append(row(width=_COMPARE_WIDTH))
+    _append_wrapped(lines, "Verdict")
+    _append_wrapped(lines, f"- Result: {verdict.get('summary', 'n/a')}")
     _append_wrapped(
         lines,
-        "- Duration: "
-        f"{_format_from_delta_block(duration, formatter=_format_duration)} | "
-        f"{_format_numeric_delta(duration.get('delta'), duration.get('pct_change'), unit='s')}",
+        f"- Severity: {_title_case(_as_str(verdict.get('severity')))}",
     )
-    _append_wrapped(
-        lines,
-        "- Diagnoses: "
-        f"{step_status.get('lhs', 'n/a')} -> {step_status.get('rhs', 'n/a')} | "
-        f"{mem_status.get('lhs', 'n/a')} -> {mem_status.get('rhs', 'n/a')}",
-    )
+
+    why = _as_str(verdict.get("why"))
+    if why:
+        _append_wrapped(lines, f"- Why: {why}")
+
+    largest_shift = _as_str(verdict.get("largest_shift"))
+    if largest_shift:
+        _append_wrapped(lines, f"- Largest shift: {largest_shift}")
+
+    _append_wrapped(lines, f"- Action: {verdict.get('action', 'n/a')}")
+
+    top_changes = verdict.get("top_changes", [])
+    lines.append(row(width=_COMPARE_WIDTH))
+    _append_wrapped(lines, "Top Changes")
+    if isinstance(top_changes, list) and top_changes:
+        for item in top_changes:
+            if not isinstance(item, dict):
+                continue
+            summary = _as_str(item.get("summary"))
+            significance = _as_str(item.get("significance"))
+            if not summary:
+                continue
+            if significance:
+                _append_wrapped(lines, f"- {summary} ({significance})")
+            else:
+                _append_wrapped(lines, f"- {summary}")
+    else:
+        _append_wrapped(
+            lines, "- No material or clearly interpretable changes detected."
+        )
 
     lines.append(row(width=_COMPARE_WIDTH))
     _append_wrapped(lines, "Step Time")
+    _append_wrapped(
+        lines,
+        f"- Diagnosis: {step_status.get('lhs', 'n/a')} -> {step_status.get('rhs', 'n/a')}",
+    )
     _append_wrapped(
         lines,
         "- Step avg: "
         f"{_format_from_delta_block(step_avg, formatter=_format_ms)} | "
         f"{_format_numeric_delta(step_avg.get('delta'), step_avg.get('pct_change'), unit='ms')}",
     )
+
+    if isinstance(step_presented_rhs, dict) and step_status.get("changed"):
+        rhs_reason = _as_str(step_presented_rhs.get("reason"))
+        rhs_action = _as_str(step_presented_rhs.get("action"))
+        if rhs_reason:
+            _append_wrapped(lines, f"- Why B: {rhs_reason}")
+        if rhs_action and outcome == "regression":
+            _append_wrapped(lines, f"- Next: {rhs_action}")
 
     if _has_numeric_signal(wait_share, delta_eps=0.05):
         _append_wrapped(
@@ -248,31 +305,53 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
     if split_line:
         _append_wrapped(lines, f"- Split shift: {split_line}")
 
-    memory_lines: List[str] = []
-    if _has_numeric_signal(worst_peak, delta_eps=1.0):
-        memory_lines.append(
-            "- Worst peak: "
-            f"{_format_from_delta_block(worst_peak, formatter=fmt_mem_new)} | "
-            f"{_format_bytes_delta(_as_float(worst_peak.get('delta')))}"
-        )
-    if _has_numeric_signal(mem_skew, delta_eps=0.05):
-        memory_lines.append(
-            "- Skew: "
-            f"{_format_from_delta_block(mem_skew, formatter=_format_pct)} | "
-            f"{_format_pp_delta(_as_float(mem_skew.get('delta')))}"
-        )
-    if _has_numeric_signal(mem_trend, delta_eps=1.0):
-        memory_lines.append(
-            "- Trend (worst): "
-            f"{_format_from_delta_block(mem_trend, formatter=fmt_mem_new)} | "
-            f"{_format_bytes_delta(_as_float(mem_trend.get('delta')))}"
-        )
+    show_memory_section = bool(mem_status.get("changed")) or any(
+        [
+            _has_numeric_signal(worst_peak, delta_eps=1.0),
+            _has_numeric_signal(mem_skew, delta_eps=0.05),
+            _has_numeric_signal(mem_trend, delta_eps=1.0),
+        ]
+    )
 
-    if memory_lines:
+    if show_memory_section:
         lines.append(row(width=_COMPARE_WIDTH))
         _append_wrapped(lines, "Step Memory")
-        for text in memory_lines:
-            _append_wrapped(lines, text)
+        _append_wrapped(
+            lines,
+            f"- Diagnosis: {mem_status.get('lhs', 'n/a')} -> {mem_status.get('rhs', 'n/a')}",
+        )
+
+        if isinstance(mem_presented_rhs, dict) and mem_status.get("changed"):
+            rhs_reason = _as_str(mem_presented_rhs.get("reason"))
+            rhs_action = _as_str(mem_presented_rhs.get("action"))
+            if rhs_reason:
+                _append_wrapped(lines, f"- Why B: {rhs_reason}")
+            if rhs_action and outcome == "regression":
+                _append_wrapped(lines, f"- Next: {rhs_action}")
+
+        if _has_numeric_signal(worst_peak, delta_eps=1.0):
+            _append_wrapped(
+                lines,
+                "- Worst peak: "
+                f"{_format_from_delta_block(worst_peak, formatter=fmt_mem_new)} | "
+                f"{_format_bytes_delta(_as_float(worst_peak.get('delta')))}",
+            )
+        if _has_numeric_signal(mem_skew, delta_eps=0.05):
+            _append_wrapped(
+                lines,
+                "- Skew: "
+                f"{_format_from_delta_block(mem_skew, formatter=_format_pct)} | "
+                f"{_format_pp_delta(_as_float(mem_skew.get('delta')))}",
+            )
+        if _has_numeric_signal(mem_trend, delta_eps=1.0):
+            _append_wrapped(
+                lines,
+                "- Trend (worst): "
+                f"{_format_from_delta_block(mem_trend, formatter=fmt_mem_new)} | "
+                f"{_format_bytes_delta(_as_float(mem_trend.get('delta')))}",
+            )
+
+    show_context = outcome in {"regression", "improvement"}
 
     process_lines: List[str] = []
     if _has_numeric_signal(process_cpu, delta_eps=0.05):
@@ -292,9 +371,9 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
             f"- Takeaway: {process_takeaway.get('lhs', 'n/a')} -> {process_takeaway.get('rhs', 'n/a')}"
         )
 
-    if process_lines:
+    if show_context and process_lines:
         lines.append(row(width=_COMPARE_WIDTH))
-        _append_wrapped(lines, "Process")
+        _append_wrapped(lines, "Process Context")
         for text in process_lines:
             _append_wrapped(lines, text)
 
@@ -321,9 +400,9 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
             f"{gpu_count.get('lhs', 'n/a')} -> {gpu_count.get('rhs', 'n/a')}"
         )
 
-    if system_lines:
+    if (show_context or _has_text_signal(gpu_change)) and system_lines:
         lines.append(row(width=_COMPARE_WIDTH))
-        _append_wrapped(lines, "System")
+        _append_wrapped(lines, "System Context")
         for text in system_lines:
             _append_wrapped(lines, text)
 
