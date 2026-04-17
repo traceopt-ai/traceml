@@ -1,6 +1,6 @@
 [project]
 name = "traceml-ai"
-version = "0.2.8"
+version = "0.2.9"
 
 description = "TraceML: Lightweight training runtime health monitor."
 authors = [{ name = "Abhinav Srivastav", email = "abhinav@traceopt.ai" }]
