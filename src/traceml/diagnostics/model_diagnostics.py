@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from traceml.diagnostics.step_memory import build_step_memory_diagnosis
 from traceml.diagnostics.step_time import build_step_diagnosis
+from traceml.diagnostics.trends import DEFAULT_TREND_CONFIG, compute_trend_pct
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml.renderers.step_time.schema import StepCombinedTimeMetric
 
@@ -344,29 +345,16 @@ def _select_memory_metric(
 
 def _series_trend_pct(values: Optional[Sequence[float]]) -> float:
     """
-    Compute a simple first-half vs second-half trend ratio.
+    Compute canonical trend percentage for dashboard metadata.
 
-    This is intentionally lightweight and robust for dashboard metadata.
+    This deliberately reuses the shared trend engine so dashboard evidence,
+    live diagnosis, and summaries stay consistent.
     """
     if not values:
         return 0.0
 
-    cleaned: List[float] = []
-    for value in values:
-        try:
-            cleaned.append(max(0.0, float(value)))
-        except Exception:
-            continue
-
-    if len(cleaned) < 4:
-        return 0.0
-
-    mid = max(1, len(cleaned) // 2)
-    first = sum(cleaned[:mid]) / float(mid)
-    second = sum(cleaned[mid:]) / float(max(1, len(cleaned) - mid))
-    if first <= 1e-9:
-        return 0.0
-    return (second - first) / first
+    pct = compute_trend_pct(values, config=DEFAULT_TREND_CONFIG)
+    return float(pct) if pct is not None else 0.0
 
 
 def _confidence_label(confidence: Optional[float]) -> Optional[str]:

@@ -135,7 +135,7 @@ class StepCombinedRenderer(BaseRenderer):
         table.add_row("")
         if K >= DEFAULT_TREND_CONFIG.min_points:
             table.add_row(
-                f"Trend ({DEFAULT_TREND_CONFIG.short_window} vs {DEFAULT_TREND_CONFIG.long_window})",
+                "Trend",
                 *[_metric_trend_label(m, single_rank) for m in metrics],
             )
             table.add_row("")

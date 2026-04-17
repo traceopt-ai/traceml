@@ -22,7 +22,7 @@ Key invariants
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Type
+from typing import Any, Callable, Dict, Optional, Type
 
 from traceml.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml.aggregator.display_drivers.cli import CLIDisplayDriver
@@ -252,7 +252,7 @@ class TraceMLAggregator:
                 lambda m=msg: self._sqlite_writer.ingest(m),
             )
 
-    def _message_sampler_name(self, msg: Any) -> str | None:
+    def _message_sampler_name(self, msg: Any) -> Optional[str]:
         """
         Return the sampler name carried by one logical telemetry payload.
 
