@@ -288,16 +288,180 @@ def _supported_memory_status_shift(
     return False
 
 
+def _delta_block_state(block: Dict[str, Any]) -> str:
+    """
+    Classify one numeric compare block by comparability state.
+
+    States
+    ------
+    comparable:
+        Both lhs and rhs are present, so a numeric comparison is possible.
+    missing_both:
+        Neither side has a value.
+    missing_lhs:
+        Only the left-hand side is missing.
+    missing_rhs:
+        Only the right-hand side is missing.
+    """
+    lhs = _as_float(block.get("lhs"))
+    rhs = _as_float(block.get("rhs"))
+
+    if lhs is not None and rhs is not None:
+        return "comparable"
+    if lhs is None and rhs is None:
+        return "missing_both"
+    if lhs is None:
+        return "missing_lhs"
+    return "missing_rhs"
+
+
+def _text_block_state(block: Dict[str, Any]) -> str:
+    """
+    Classify one text compare block by comparability state.
+    """
+    lhs = _as_str(block.get("lhs"))
+    rhs = _as_str(block.get("rhs"))
+
+    if lhs is not None and rhs is not None:
+        return "comparable"
+    if lhs is None and rhs is None:
+        return "missing_both"
+    if lhs is None:
+        return "missing_lhs"
+    return "missing_rhs"
+
+
+def _section_comparability(
+    *,
+    section_name: str,
+    states: List[str],
+) -> Dict[str, str]:
+    """
+    Summarize comparability for one compare domain.
+
+    Rules
+    -----
+    - comparable:
+        All primary fields are comparable.
+    - partial:
+        At least one primary field is comparable, but one or more are missing.
+    - missing_one_side:
+        No primary field is comparable and one side is missing all of them.
+    - missing_both:
+        No primary field is comparable and both sides are missing all of them.
+    """
+    comparable_count = sum(state == "comparable" for state in states)
+    missing_lhs_count = sum(state == "missing_lhs" for state in states)
+    missing_rhs_count = sum(state == "missing_rhs" for state in states)
+    missing_both_count = sum(state == "missing_both" for state in states)
+
+    if comparable_count == len(states):
+        return {
+            "state": "comparable",
+            "reason": f"{section_name} metrics are available on both runs.",
+        }
+
+    if comparable_count > 0:
+        side_bits: List[str] = []
+        if missing_lhs_count:
+            side_bits.append("A is missing some fields")
+        if missing_rhs_count:
+            side_bits.append("B is missing some fields")
+        if missing_both_count:
+            side_bits.append("some fields are absent on both runs")
+
+        suffix = (
+            "; ".join(side_bits) if side_bits else "some fields are missing"
+        )
+        return {
+            "state": "partial",
+            "reason": (
+                f"{section_name} is only partially comparable because {suffix}."
+            ),
+        }
+
+    if missing_lhs_count > 0 and missing_rhs_count == 0:
+        return {
+            "state": "missing_one_side",
+            "reason": f"{section_name} is missing on run A.",
+        }
+
+    if missing_rhs_count > 0 and missing_lhs_count == 0:
+        return {
+            "state": "missing_one_side",
+            "reason": f"{section_name} is missing on run B.",
+        }
+
+    if missing_lhs_count > 0 and missing_rhs_count > 0:
+        return {
+            "state": "missing_one_side",
+            "reason": (
+                f"{section_name} is missing on different sides across primary fields."
+            ),
+        }
+
+    return {
+        "state": "missing_both",
+        "reason": f"{section_name} is unavailable on both runs.",
+    }
+
+
+def _overall_comparability(
+    *,
+    step_time_cmp: Dict[str, str],
+    step_memory_cmp: Dict[str, str],
+) -> Dict[str, str]:
+    """
+    Summarize compare-wide comparability from the primary TraceML domains.
+    """
+    states = {
+        step_time_cmp.get("state", "missing_both"),
+        step_memory_cmp.get("state", "missing_both"),
+    }
+
+    if states == {"comparable"}:
+        return {
+            "state": "comparable",
+            "reason": "Primary TraceML sections are comparable on both runs.",
+        }
+
+    if "partial" in states or "comparable" in states:
+        reasons = [
+            step_time_cmp.get("reason"),
+            step_memory_cmp.get("reason"),
+        ]
+        reason = " ".join(r for r in reasons if r)
+        return {
+            "state": "partial",
+            "reason": reason
+            or "Only part of the compare is directly comparable.",
+        }
+
+    reasons = [
+        step_time_cmp.get("reason"),
+        step_memory_cmp.get("reason"),
+    ]
+    reason = " ".join(r for r in reasons if r)
+    return {
+        "state": "insufficient",
+        "reason": reason or "Primary TraceML sections are not comparable.",
+    }
+
+
 def _why_equivalent(
     *,
     step_stable: bool,
     wait_stable: bool,
     diagnoses_stable: bool,
     dominant_phase_stable: bool,
+    comparability_reason: Optional[str] = None,
 ) -> str:
     """
     Build one short explanation for an equivalent outcome.
     """
+    if comparability_reason:
+        return comparability_reason
+
     parts: List[str] = []
 
     if step_stable:
@@ -366,10 +530,14 @@ def _why_unclear(
     peak_sig: str,
     skew_sig: str,
     trend_sig: str,
+    comparability_reason: Optional[str] = None,
 ) -> str:
     """
     Build one short explanation for an unclear outcome.
     """
+    if comparability_reason:
+        return comparability_reason
+
     if step_status_changed and not supported_step_status:
         return "Step-time diagnosis changed without strong supporting timing movement"
 
@@ -397,10 +565,17 @@ def _recommended_action(
     rhs_mem_action: Optional[str],
     supported_step_status: bool,
     supported_mem_status: bool,
+    comparability_state: Optional[str] = None,
 ) -> str:
     """
     Choose one concise next-step recommendation.
     """
+    if comparability_state in {"partial", "insufficient"}:
+        return (
+            "Re-run or compare with matching TraceML summary coverage before "
+            "drawing strong conclusions."
+        )
+
     if outcome == "regression":
         if supported_step_status and rhs_step_action:
             return rhs_step_action
@@ -466,6 +641,30 @@ def build_compare_verdict(
     mem_skew = _metric_block(compare_payload, "step_memory", "skew_pct")
     mem_trend = _metric_block(
         compare_payload, "step_memory", "trend_worst_delta_bytes"
+    )
+    step_time_cmp = _section_comparability(
+        section_name="Step time",
+        states=[
+            _text_block_state(
+                _metric_block(compare_payload, "step_time", "status")
+            ),
+            _delta_block_state(step_avg),
+            _delta_block_state(wait_share),
+        ],
+    )
+    step_memory_cmp = _section_comparability(
+        section_name="Step memory",
+        states=[
+            _text_block_state(
+                _metric_block(compare_payload, "step_memory", "status")
+            ),
+            _delta_block_state(worst_peak),
+            _delta_block_state(mem_skew),
+        ],
+    )
+    overall_cmp = _overall_comparability(
+        step_time_cmp=step_time_cmp,
+        step_memory_cmp=step_memory_cmp,
     )
 
     step_avg_pct = _as_float(step_avg.get("pct_change"))
@@ -554,7 +753,8 @@ def build_compare_verdict(
     )
 
     equivalent = bool(
-        not clear_regression
+        overall_cmp.get("state") == "comparable"
+        and not clear_regression
         and not clear_improvement
         and step_sig == "negligible"
         and wait_sig == "negligible"
@@ -565,7 +765,9 @@ def build_compare_verdict(
         and not supported_mem_status
     )
 
-    if clear_regression:
+    if overall_cmp.get("state") == "insufficient":
+        outcome = "unclear"
+    elif clear_regression:
         outcome = "regression"
     elif clear_improvement:
         outcome = "improvement"
@@ -575,6 +777,29 @@ def build_compare_verdict(
         outcome = "unclear"
 
     changes: List[Dict[str, Any]] = []
+
+    if overall_cmp.get("state") == "insufficient":
+        changes.append(
+            _make_change(
+                importance=99,
+                domain="compare",
+                metric="comparability",
+                significance="material",
+                summary="Primary compare sections are not comparable between the two runs",
+                detail=overall_cmp.get("reason"),
+            )
+        )
+    elif overall_cmp.get("state") == "partial":
+        changes.append(
+            _make_change(
+                importance=80,
+                domain="compare",
+                metric="comparability",
+                significance="moderate",
+                summary="Compare is only partially comparable across the two runs",
+                detail=overall_cmp.get("reason"),
+            )
+        )
 
     if supported_step_status and rhs_step_status:
         changes.append(
@@ -777,22 +1002,58 @@ def build_compare_verdict(
             wait_stable=(wait_sig == "negligible"),
             diagnoses_stable=diagnoses_stable,
             dominant_phase_stable=dominant_phase_stable,
+            comparability_reason=(
+                overall_cmp.get("reason")
+                if overall_cmp.get("state") != "comparable"
+                else None
+            ),
         )
         severity = "info"
     else:
-        summary = "No clear comparison outcome."
-        why = _why_unclear(
-            step_status_changed=step_status_changed,
-            mem_status_changed=mem_status_changed,
-            supported_step_status=supported_step_status,
-            supported_mem_status=supported_mem_status,
-            step_sig=step_sig,
-            wait_sig=wait_sig,
-            peak_sig=peak_sig,
-            skew_sig=skew_sig,
-            trend_sig=trend_sig,
-        )
-        severity = "info"
+        if overall_cmp.get("state") == "insufficient":
+            summary = "No clear comparison outcome."
+            why = _why_unclear(
+                step_status_changed=step_status_changed,
+                mem_status_changed=mem_status_changed,
+                supported_step_status=supported_step_status,
+                supported_mem_status=supported_mem_status,
+                step_sig=step_sig,
+                wait_sig=wait_sig,
+                peak_sig=peak_sig,
+                skew_sig=skew_sig,
+                trend_sig=trend_sig,
+                comparability_reason=overall_cmp.get("reason"),
+            )
+            severity = "info"
+        elif overall_cmp.get("state") == "partial":
+            summary = "Only a partial comparison is available."
+            why = _why_unclear(
+                step_status_changed=step_status_changed,
+                mem_status_changed=mem_status_changed,
+                supported_step_status=supported_step_status,
+                supported_mem_status=supported_mem_status,
+                step_sig=step_sig,
+                wait_sig=wait_sig,
+                peak_sig=peak_sig,
+                skew_sig=skew_sig,
+                trend_sig=trend_sig,
+                comparability_reason=overall_cmp.get("reason"),
+            )
+            severity = "info"
+        else:
+            summary = "No clear comparison outcome."
+            why = _why_unclear(
+                step_status_changed=step_status_changed,
+                mem_status_changed=mem_status_changed,
+                supported_step_status=supported_step_status,
+                supported_mem_status=supported_mem_status,
+                step_sig=step_sig,
+                wait_sig=wait_sig,
+                peak_sig=peak_sig,
+                skew_sig=skew_sig,
+                trend_sig=trend_sig,
+            )
+            severity = "info"
 
     action = _recommended_action(
         outcome=outcome,
@@ -800,10 +1061,11 @@ def build_compare_verdict(
         rhs_mem_action=_as_str(rhs_mem_presented.get("action")),
         supported_step_status=supported_step_status,
         supported_mem_status=supported_mem_status,
+        comparability_state=overall_cmp.get("state"),
     )
 
     return {
-        "policy_version": 2,
+        "policy_version": 3,
         "outcome": outcome,
         "summary": summary,
         "why": why,
@@ -813,5 +1075,10 @@ def build_compare_verdict(
         "severity": severity,
         "material_regression": outcome == "regression",
         "material_improvement": outcome == "improvement",
+        "comparability": {
+            "overall": overall_cmp,
+            "step_time": step_time_cmp,
+            "step_memory": step_memory_cmp,
+        },
         "top_changes": top_changes,
     }

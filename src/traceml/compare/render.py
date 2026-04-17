@@ -125,6 +125,29 @@ def _format_bytes_delta(delta: Optional[float]) -> str:
     return f"{sign}{fmt_mem_new(abs(delta))}"
 
 
+def _format_compare_presence(
+    block: Dict[str, Any],
+    *,
+    formatter,
+) -> Optional[str]:
+    """
+    Render a compare block when one or both sides are missing.
+
+    Returns None when both values are present, so the normal delta formatter
+    should be used instead.
+    """
+    lhs = _as_float(block.get("lhs"))
+    rhs = _as_float(block.get("rhs"))
+
+    if lhs is not None and rhs is not None:
+        return None
+    if lhs is None and rhs is None:
+        return "unavailable in both runs"
+    if lhs is None:
+        return f"unavailable in A; B = {formatter(rhs)}"
+    return f"A = {formatter(lhs)}; unavailable in B"
+
+
 def _format_from_delta_block(
     block: Dict[str, Any],
     *,
@@ -272,12 +295,18 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
         lines,
         f"- Diagnosis: {step_status.get('lhs', 'n/a')} -> {step_status.get('rhs', 'n/a')}",
     )
-    _append_wrapped(
-        lines,
-        "- Step avg: "
-        f"{_format_from_delta_block(step_avg, formatter=_format_ms)} | "
-        f"{_format_numeric_delta(step_avg.get('delta'), step_avg.get('pct_change'), unit='ms')}",
+    step_avg_presence = _format_compare_presence(
+        step_avg, formatter=_format_ms
     )
+    if step_avg_presence is not None:
+        _append_wrapped(lines, f"- Step avg: {step_avg_presence}")
+    else:
+        _append_wrapped(
+            lines,
+            "- Step avg: "
+            f"{_format_from_delta_block(step_avg, formatter=_format_ms)} | "
+            f"{_format_numeric_delta(step_avg.get('delta'), step_avg.get('pct_change'), unit='ms')}",
+        )
 
     if isinstance(step_presented_rhs, dict) and step_status.get("changed"):
         rhs_reason = _as_str(step_presented_rhs.get("reason"))
@@ -287,7 +316,10 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
         if rhs_action and outcome == "regression":
             _append_wrapped(lines, f"- Next: {rhs_action}")
 
-    if _has_numeric_signal(wait_share, delta_eps=0.05):
+    wait_presence = _format_compare_presence(wait_share, formatter=_format_pct)
+    if wait_presence is not None:
+        _append_wrapped(lines, f"- Wait share: {wait_presence}")
+    elif _has_numeric_signal(wait_share, delta_eps=0.05):
         _append_wrapped(
             lines,
             "- Wait share: "
@@ -329,20 +361,32 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
             if rhs_action and outcome == "regression":
                 _append_wrapped(lines, f"- Next: {rhs_action}")
 
-        if _has_numeric_signal(worst_peak, delta_eps=1.0):
+        worst_peak_presence = _format_compare_presence(
+            worst_peak, formatter=fmt_mem_new
+        )
+        if worst_peak_presence is not None:
+            _append_wrapped(lines, f"- Worst peak: {worst_peak_presence}")
+        elif _has_numeric_signal(worst_peak, delta_eps=1.0):
             _append_wrapped(
                 lines,
                 "- Worst peak: "
                 f"{_format_from_delta_block(worst_peak, formatter=fmt_mem_new)} | "
                 f"{_format_bytes_delta(_as_float(worst_peak.get('delta')))}",
             )
-        if _has_numeric_signal(mem_skew, delta_eps=0.05):
+
+        skew_presence = _format_compare_presence(
+            mem_skew, formatter=_format_pct
+        )
+        if skew_presence is not None:
+            _append_wrapped(lines, f"- Skew: {skew_presence}")
+        elif _has_numeric_signal(mem_skew, delta_eps=0.05):
             _append_wrapped(
                 lines,
                 "- Skew: "
                 f"{_format_from_delta_block(mem_skew, formatter=_format_pct)} | "
                 f"{_format_pp_delta(_as_float(mem_skew.get('delta')))}",
             )
+
         if _has_numeric_signal(mem_trend, delta_eps=1.0):
             _append_wrapped(
                 lines,
