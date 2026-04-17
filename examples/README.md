@@ -23,6 +23,14 @@ If you only try one example first, use:
 traceml run examples/pytorch_minimal.py
 ```
 
+If you want a quieter artifact-oriented flow, run an example with:
+
+```bash
+traceml run examples/pytorch_minimal.py --mode=summary
+```
+
+Then keep the TraceML final summary JSON if you want to compare runs later with `traceml compare`.
+
 ---
 
 ## Diagnosis demos
@@ -31,7 +39,7 @@ These examples are still user-facing, but they are more about showing specific T
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
-| `input_bound_demo.py` | Slow input pipeline / input-bound training | CPU / CUDA | Simulates dataloader delay |
+| `input_bound_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
 | `input_straggler_ddp_demo.py` | Input straggler in single-node DDP | CPU / CUDA | One rank is deliberately slower in the input path |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
@@ -52,6 +60,12 @@ Local UI:
 traceml run examples/pytorch_minimal.py --mode=dashboard
 ```
 
+Summary mode:
+
+```bash
+traceml run examples/pytorch_minimal.py --mode=summary
+```
+
 Single-node DDP:
 
 ```bash
@@ -62,6 +76,12 @@ Run without TraceML telemetry for a baseline:
 
 ```bash
 traceml run examples/pytorch_minimal.py --disable-traceml
+```
+
+Compare two saved TraceML final summary JSON files:
+
+```bash
+traceml compare run_a.json run_b.json
 ```
 
 Starter examples now prefer the top-level public API:
@@ -107,6 +127,7 @@ That includes things like:
 ## Related docs
 
 - [Quickstart](../docs/quickstart.md)
+- [Compare Runs](../docs/compare.md)
 - [How to Read TraceML Output](../docs/how-to-read-output.md)
 - [FAQ](../docs/faq.md)
 - [Use TraceML with W&B / MLflow](../docs/use-with-wandb-mlflow.md)

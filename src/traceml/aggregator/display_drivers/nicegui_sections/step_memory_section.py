@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 import plotly.graph_objects as go
 from nicegui import ui
 
+from traceml.diagnostics.trends import compute_trend_pct
+
 from .ui_shell import CARD_STYLE, compact_metric_html, safe_mem, safe_pct
 
 BYTES_PER_GB = 1e9
@@ -331,10 +333,9 @@ def _compute_stats(values_bytes: List[float]) -> SeriesStats:
             trend_pct=0.0,
         )
 
-    mid = max(1, len(values_bytes) // 2)
-    first = float(sum(values_bytes[:mid]) / max(1, mid))
-    second = float(sum(values_bytes[mid:]) / max(1, len(values_bytes) - mid))
-    trend_pct = ((second - first) / first) if first > 1e-9 else 0.0
+    trend_pct = compute_trend_pct(values_bytes)
+    if trend_pct is None:
+        trend_pct = 0.0
 
     return SeriesStats(
         last_bytes=float(values_bytes[-1]),

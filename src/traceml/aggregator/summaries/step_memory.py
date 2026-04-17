@@ -34,6 +34,7 @@ from traceml.diagnostics.step_memory import (
     StepMemoryDiagnosis,
     build_step_memory_diagnosis,
 )
+from traceml.diagnostics.trends import compute_trend_evidence
 from traceml.renderers.step_memory.common import (
     StepMemoryMetricsDB,
     build_step_memory_combined_result,
@@ -113,45 +114,34 @@ def _gpu_total_bytes(conn: sqlite3.Connection) -> Optional[float]:
 
 def _head_tail_trend(series: list[float]) -> Dict[str, Optional[float]]:
     """
-    Compute a stable head-vs-tail trend summary for one series.
+    Compute the canonical trend summary for one memory series.
 
-    Returns
-    -------
-    dict
-        {
-            "head_avg_bytes": ...,
-            "tail_avg_bytes": ...,
-            "delta_bytes": ...,
-            "growth_pct": ...,
-        }
+    Compatibility note:
+    - ``head_avg_bytes`` maps to the canonical baseline average
+    - ``tail_avg_bytes`` maps to the canonical recent average
     """
     values = [max(0.0, safe_float(v)) for v in series]
-    n = len(values)
+    evidence = compute_trend_evidence(values)
 
-    if n < 2:
+    if evidence is None:
         return {
             "head_avg_bytes": None,
+            "mid_avg_bytes": None,
             "tail_avg_bytes": None,
+            "baseline_avg_bytes": None,
+            "recent_avg_bytes": None,
             "delta_bytes": None,
             "growth_pct": None,
         }
 
-    segment = max(4, int(round(n * 0.20)))
-    segment = min(segment, max(1, n // 2))
-
-    head_avg = sum(values[:segment]) / segment
-    tail_avg = sum(values[-segment:]) / segment
-    delta = tail_avg - head_avg
-
-    growth_pct = None
-    if head_avg > 0.0:
-        growth_pct = delta / head_avg
-
     return {
-        "head_avg_bytes": head_avg,
-        "tail_avg_bytes": tail_avg,
-        "delta_bytes": delta,
-        "growth_pct": growth_pct,
+        "head_avg_bytes": evidence.baseline_avg,
+        "mid_avg_bytes": evidence.mid_avg,
+        "tail_avg_bytes": evidence.recent_avg,
+        "baseline_avg_bytes": evidence.baseline_avg,
+        "recent_avg_bytes": evidence.recent_avg,
+        "delta_bytes": evidence.delta_vs_baseline,
+        "growth_pct": evidence.delta_pct_vs_baseline,
     }
 
 

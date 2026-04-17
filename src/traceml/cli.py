@@ -651,6 +651,27 @@ def run_inspect(args: argparse.Namespace) -> None:
             raise SystemExit(1)
 
 
+def run_compare(args: argparse.Namespace) -> None:
+    """
+    Compare two TraceML final summary JSON files.
+    """
+    try:
+        from traceml.compare.command import compare_summaries
+
+        compare_summaries(
+            args.left,
+            args.right,
+            output=args.output,
+            print_to_stdout=True,
+        )
+    except RuntimeError as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as exc:
+        print(f"[TraceML] ERROR: compare failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     """Add shared launch arguments for TraceML run commands."""
     parser.add_argument(
@@ -746,6 +767,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  traceml watch train.py\n"
             "  traceml run train.py --args -- --epochs 10 --lr 1e-3\n"
             "  traceml deep train.py --args -- --config config.yaml"
+            "  traceml compare run_a.json run_b.json"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -769,6 +791,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_launch_args(deep_parser)
 
+    compare_parser = sub.add_parser(
+        "compare",
+        help="Compare two TraceML final summary JSON files.",
+    )
+    compare_parser.add_argument(
+        "left",
+        help="Path to the left-hand TraceML final summary JSON file.",
+    )
+    compare_parser.add_argument(
+        "right",
+        help="Path to the right-hand TraceML final summary JSON file.",
+    )
+    compare_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help=(
+            "Optional output base path. "
+            "Writes both <base>.json and <base>.txt. "
+            "Default: compare/<left>_vs_<right> in the current directory."
+        ),
+    )
+
     inspect_parser = sub.add_parser(
         "inspect", help="Inspect binary .msgpack logs."
     )
@@ -791,6 +836,8 @@ def main() -> None:
         run_with_tracing(args, profile="run")
     elif args.command == "deep":
         run_with_tracing(args, profile="deep")
+    elif args.command == "compare":
+        run_compare(args)
     elif args.command == "inspect":
         run_inspect(args)
     else:
