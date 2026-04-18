@@ -69,7 +69,7 @@ def _should_auto_install_optimizer_timing() -> bool:
 
     Behavior
     --------
-    - Without an explicit SDK init config, preserve historical behavior.
+    - Without an explicit init config, preserve historical behavior.
     - With explicit init:
       - auto      -> install optimizer hooks automatically
       - manual    -> do not install hooks
@@ -77,13 +77,9 @@ def _should_auto_install_optimizer_timing() -> bool:
 
     Rationale
     ---------
-    Optimizer timing is special because:
-    - the historical path used global optimizer hooks
-    - the new SDK path adds `traceml.wrap_optimizer(...)`
-    - those two ownership models must not run at the same time
-
-    In manual/selective mode, optimizer timing is expected to come from the
-    explicit wrapper path when users want it.
+    Optimizer timing ownership must be unambiguous:
+    - legacy / auto path uses global optimizer hooks
+    - manual / selective path uses `traceml.wrap_optimizer(...)`
     """
     try:
         from traceml.initialization import get_init_config

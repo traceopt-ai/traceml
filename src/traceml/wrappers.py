@@ -43,10 +43,6 @@ def _raise_duplicate_instrumentation(feature: str, reason: str) -> None:
 def _is_torch_dataloader_iterator(obj: Any) -> bool:
     """
     Best-effort detection for iterators returned by torch DataLoader.
-
-    We intentionally keep this lightweight and non-invasive. This check is only
-    used to prevent obvious duplicate wrapping when the global DataLoader patch
-    is already active.
     """
     typ = type(obj)
     module = str(getattr(typ, "__module__", "") or "")
@@ -61,8 +57,8 @@ def _ensure_dataloader_wrapper_allowed(obj: Any) -> None:
     Reject manual wrapping only for the torch DataLoader path that is already
     automatically patched.
 
-    This intentionally still allows custom loaders / custom iterators even when
-    the global torch DataLoader patch is active.
+    Custom loaders and custom iterators remain allowed even when the global
+    torch DataLoader patch is active.
     """
     if not getattr(DataLoader, "_traceml_patched", False):
         return
@@ -145,12 +141,6 @@ class _WrappedDataLoaderFetch:
 class _WrappedBackwardHandle:
     """
     Thin proxy that times `.backward(...)` on a loss-like object.
-
-    This wrapper is intentionally lightweight and is designed for the common
-    pattern:
-
-        loss = traceml.wrap_backward(loss)
-        loss.backward()
     """
 
     def __init__(self, loss: Any) -> None:
