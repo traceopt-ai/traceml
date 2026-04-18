@@ -1,5 +1,5 @@
 """
-Core training instrumentation helpers used by the TraceML.
+Core training instrumentation helpers used by TraceML.
 
 This module contains the actual tracing context managers and hook attachment
 logic. It intentionally has no import-time side effects. Patch installation is
@@ -7,7 +7,7 @@ owned by `traceml.init(...)` and the legacy `traceml.decorators` compatibility
 layer.
 
 New path
-------------
+--------
 - `import traceml`
 - `traceml.init(...)`
 - `traceml.trace_step(...)`
@@ -61,6 +61,40 @@ def _traceml_disabled() -> bool:
 
 def _traceml_profile() -> str:
     return (os.environ.get("TRACEML_PROFILE", "run") or "run").strip().lower()
+
+
+def _should_auto_install_optimizer_timing() -> bool:
+    """
+    Return True when `trace_step(...)` should install global optimizer timing.
+
+    Behavior
+    --------
+    - Without an explicit SDK init config, preserve historical behavior.
+    - With explicit init:
+      - auto      -> install optimizer hooks automatically
+      - manual    -> do not install hooks
+      - selective -> do not install hooks
+
+    Rationale
+    ---------
+    Optimizer timing is special because:
+    - the historical path used global optimizer hooks
+    - the new SDK path adds `traceml.wrap_optimizer(...)`
+    - those two ownership models must not run at the same time
+
+    In manual/selective mode, optimizer timing is expected to come from the
+    explicit wrapper path when users want it.
+    """
+    try:
+        from traceml.initialization import get_init_config
+    except Exception:
+        return True
+
+    cfg = get_init_config()
+    if cfg is None:
+        return True
+
+    return getattr(cfg, "mode", "auto") == "auto"
 
 
 class TraceState:
@@ -118,7 +152,8 @@ def trace_step(model: nn.Module):
             "_traceml_internal:step_time", scope="step", use_gpu=False
         ):
             with forward_auto_timer(), backward_auto_timer():
-                ensure_optimizer_timing_installed()
+                if _should_auto_install_optimizer_timing():
+                    ensure_optimizer_timing_installed()
                 yield
                 step_completed = True
     finally:

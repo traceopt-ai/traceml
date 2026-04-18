@@ -61,6 +61,44 @@ def final_summary(
     )
 
 
+def wrap_dataloader_fetch(*args: Any, **kwargs: Any) -> Any:
+    """
+    Lazily resolve and apply TraceML dataloader-fetch wrapping.
+    """
+    from traceml.wrappers import (
+        wrap_dataloader_fetch as _wrap_dataloader_fetch,
+    )
+
+    return _wrap_dataloader_fetch(*args, **kwargs)
+
+
+def wrap_forward(*args: Any, **kwargs: Any) -> Any:
+    """
+    Lazily resolve and apply TraceML forward wrapping.
+    """
+    from traceml.wrappers import wrap_forward as _wrap_forward
+
+    return _wrap_forward(*args, **kwargs)
+
+
+def wrap_backward(*args: Any, **kwargs: Any) -> Any:
+    """
+    Lazily resolve and apply TraceML backward wrapping.
+    """
+    from traceml.wrappers import wrap_backward as _wrap_backward
+
+    return _wrap_backward(*args, **kwargs)
+
+
+def wrap_optimizer(*args: Any, **kwargs: Any) -> Any:
+    """
+    Lazily resolve and apply TraceML optimizer-step wrapping.
+    """
+    from traceml.wrappers import wrap_optimizer as _wrap_optimizer
+
+    return _wrap_optimizer(*args, **kwargs)
+
+
 def init(
     *,
     mode: str = "auto",
@@ -129,10 +167,13 @@ def start(
 
 
 __all__ = [
-    "TraceMLInitConfig",
     "trace_step",
     "trace_model_instance",
     "final_summary",
     "start",
     "init",
+    "wrap_dataloader_fetch",
+    "wrap_forward",
+    "wrap_backward",
+    "wrap_optimizer",
 ]
