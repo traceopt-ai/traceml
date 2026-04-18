@@ -1,4 +1,5 @@
 from traceml.api import (
+    TraceMLInitConfig,
     final_summary,
     init,
     start,
@@ -10,6 +11,7 @@ __version__ = "0.2.10"
 
 __all__ = [
     "__version__",
+    "TraceMLInitConfig",
     "trace_step",
     "trace_model_instance",
     "final_summary",
