@@ -17,12 +17,13 @@ If you are new to TraceML, start here.
 ## What you will do
 
 1. Install TraceML
-2. Wrap your training step with `traceml.trace_step(model)`
-3. Run `traceml run train.py`
-4. Read the diagnosis in the CLI
-5. Optionally collect a structured final summary
-6. Optionally compare two runs
-7. Optionally open the local UI
+2. Initialize TraceML with `traceml.init(mode="auto")`
+3. Wrap your training step with `traceml.trace_step(model)`
+4. Run `traceml run train.py`
+5. Read the diagnosis in the CLI
+6. Optionally collect a structured final summary
+7. Optionally compare two runs
+8. Optionally open the local UI
 
 ---
 
@@ -106,6 +107,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on: {device}")
 
+    traceml.init(mode="auto")
+
     model = MyModel().to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
@@ -132,18 +135,25 @@ if __name__ == "__main__":
 
 ### The only required change
 
-In a normal PyTorch loop, the only required code change is:
+In a normal PyTorch loop, the preferred minimal setup is:
 
 ```python
+traceml.init(mode="auto")
+
 with traceml.trace_step(model):
     ...
 ```
 
-Wrap the full training step body, from `zero_grad(...)` through `optimizer.step()`.
+Call `traceml.init(mode="auto")` once near the start of the script, then wrap
+the full training step body from `zero_grad(...)` through `optimizer.step()`.
 
-TraceML also still supports `from traceml.decorators import trace_step` for
-backward compatibility, but the preferred public API is now
-`traceml.trace_step(...)`.
+Legacy imports from `traceml.decorators` still work for backward compatibility.
+The preferred API is the top-level `traceml.*`. Legacy decorator
+imports are planned for deprecation starting in `v0.3.0`.
+
+If you need explicit wrappers or partial auto-instrumentation, use
+`mode="manual"` or `mode="selective"`. Keep that as a second step after you
+are comfortable with the default `auto` path.
 
 ---
 

@@ -119,6 +119,8 @@ def main() -> None:
     else:
         device = torch.device("cpu")
 
+    traceml.init(mode="auto")
+
     set_seed(SEED + rank)
 
     dataset = FastDataset(
