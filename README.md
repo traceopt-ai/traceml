@@ -19,7 +19,6 @@ It gives you lightweight step-level signals while the job is still running, so y
 
 Use TraceML when you want a fast answer before reaching for a heavyweight profiler.
 
-
 **⭐ If TraceML helps you, please consider starring the repo.**
 
 > **Upcoming rename:** TraceML will transition to **TraceOpt** in a future release.
@@ -36,10 +35,12 @@ Install:
 pip install traceml-ai
 ```
 
-Wrap your training step:
+Initialize TraceML and wrap your training step:
 
 ```python
 import traceml
+
+traceml.init(mode="auto")
 
 for batch in dataloader:
     with traceml.trace_step(model):
@@ -65,6 +66,23 @@ At the end of the run, it prints a compact summary you can review or share.
 ![TraceML summary](docs/assets/end-of-run-summary.png)
 
 Start with `traceml run train.py`. Most users do not need `watch` or `deep` first.
+
+> Legacy imports from `traceml.decorators` still work for backward compatibility.
+> The preferred interface is now the top-level `traceml.*`.
+> Legacy decorator imports are planned for deprecation starting in `v0.3.0`.
+
+TraceML supports three initialization modes:
+
+- `traceml.init(mode="auto")` for the default patch-based workflow
+- `traceml.init(mode="manual")` for fully explicit wrapper-based instrumentation
+- `traceml.init(mode="selective", ...)` when you want part automatic and part explicit
+
+Manual and selective flows can use:
+
+- `traceml.wrap_dataloader_fetch(...)`
+- `traceml.wrap_forward(...)`
+- `traceml.wrap_backward(...)`
+- `traceml.wrap_optimizer(...)`
 
 ---
 
@@ -169,6 +187,9 @@ See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 - multi-node
 - tensor parallel
 - pipeline parallel
+
+`deep` remains available for deeper follow-up inspection. If `deep` is important
+for your workflow, please let us know in [GitHub issues](https://github.com/traceopt-ai/traceml/issues).
 
 ---
 
