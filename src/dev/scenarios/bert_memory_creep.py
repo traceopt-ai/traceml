@@ -13,7 +13,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-from traceml.decorators import trace_model_instance, trace_step
+import traceml
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
@@ -124,6 +124,8 @@ def main() -> None:
         device = torch.device("cpu")
         amp_dtype = torch.float32
 
+    traceml.init(mode="auto")
+
     set_seed(SEED + rank)
 
     tokenizer, train_loader, _val_loader, train_sampler = prepare_data(
@@ -136,7 +138,7 @@ def main() -> None:
         output_hidden_states=True,
     ).to(device)
 
-    trace_model_instance(model)
+    traceml.trace_model_instance(model)
 
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(
@@ -175,7 +177,7 @@ def main() -> None:
         running_acc = 0.0
 
         for batch in train_loader:
-            with trace_step(model.module):
+            with traceml.trace_step(model.module):
                 batch = {
                     key: value.to(device, non_blocking=True)
                     for key, value in batch.items()

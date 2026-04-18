@@ -12,10 +12,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torchvision import transforms
 from torchvision.models import vit_b_16
 
-# ============================================================
-# TraceML imports
-# ============================================================
-from traceml.decorators import trace_step
+import traceml
 
 # ============================================================
 # CONFIG
@@ -148,6 +145,7 @@ def main():
 
     dist.init_process_group("nccl")
     set_seed(SEED + rank)
+    traceml.init(mode="auto")
 
     # --------------------------------------------------------
     # Data
@@ -191,7 +189,7 @@ def main():
             # ------------------------------------------------
             # TraceML: ONE logical training step
             # ------------------------------------------------
-            with trace_step(model.module):
+            with traceml.trace_step(model.module):
 
                 batch = load_batch_to_device(batch, device)
 

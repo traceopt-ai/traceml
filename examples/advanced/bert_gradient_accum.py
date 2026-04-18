@@ -87,6 +87,8 @@ def main():
     use_amp = torch.cuda.is_available()
     dtype = torch.float16 if use_amp else torch.float32
 
+    traceml.init(mode="auto")
+
     tokenizer, train_loader, _ = prepare_data()
 
     model = AutoModelForSequenceClassification.from_pretrained(
