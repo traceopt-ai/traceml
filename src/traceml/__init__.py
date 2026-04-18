@@ -1,20 +1,26 @@
 from traceml.api import (
-    TraceMLInitConfig,
     final_summary,
     init,
     start,
     trace_model_instance,
     trace_step,
+    wrap_backward,
+    wrap_dataloader_fetch,
+    wrap_forward,
+    wrap_optimizer,
 )
 
-__version__ = "0.2.10"
+__version__ = "0.2.9"
 
 __all__ = [
     "__version__",
-    "TraceMLInitConfig",
     "trace_step",
     "trace_model_instance",
     "final_summary",
     "start",
     "init",
+    "wrap_dataloader_fetch",
+    "wrap_forward",
+    "wrap_backward",
+    "wrap_optimizer",
 ]
