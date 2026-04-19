@@ -555,8 +555,8 @@ Add the local UI or compare workflow only after you get value from the default r
 ## Next steps
 
 - [Compare Runs](compare.md)
-- Hugging Face integration: `docs/huggingface.md`
-- PyTorch Lightning integration: `docs/lightning.md`
+- Hugging Face integration: `user_guide/integrations/huggingface.md`
+- PyTorch Lightning integration: `user_guide/integrations/lightning.md`
 - GitHub issues: `https://github.com/traceopt-ai/traceml/issues`
 
 If TraceML helped you find a slowdown, please open an issue and include:

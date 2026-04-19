@@ -4,7 +4,7 @@ Use TraceML with Hugging Face `Trainer` to find training bottlenecks without rew
 
 `TraceMLTrainer` is a drop-in replacement for `transformers.Trainer`. It adds step-aware diagnosis so you can quickly tell whether a run is input-bound, compute-bound, straggler-heavy, or showing memory drift.
 
-> Start with the [Quickstart](quickstart.md) if you have not used TraceML yet.
+> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
 
 ---
 
@@ -407,6 +407,6 @@ Each key in `traceml_kwargs` maps to an option on `trace_model_instance(...)`.
 
 ## Next steps
 
-- Read the [Quickstart](quickstart.md) for plain PyTorch training loops
-- Read [lightning.md](lightning.md) for the PyTorch Lightning integration
+- Read the [Quickstart](../quickstart.md) for plain PyTorch training loops
+- Read [PyTorch Lightning](lightning.md) for the PyTorch Lightning integration
 - Open an issue if you hit a problem: https://github.com/traceopt-ai/traceml/issues
