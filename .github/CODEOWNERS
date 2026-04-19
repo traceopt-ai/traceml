@@ -1,9 +1,0 @@
-# Default owner — receives a review request on any PR
-*                                      @abhinavsriva
-
-# Docs owned by Abhijeet
-/docs/                                 @Pendu
-/mkdocs.yml                            @Pendu
-/.github/workflows/docs.yml            @Pendu
-/.github/pull_request_template.md      @Pendu
-/.github/ISSUE_TEMPLATE/                @Pendu

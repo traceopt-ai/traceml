@@ -60,3 +60,9 @@ repos:
         pass_filenames: false
         files: ^(docs/|mkdocs\.yml|src/)
         stages: [pre-push]
+
+      - id: block-workflow-artifacts
+        name: block AI / workflow artifacts from being committed
+        entry: .git-hooks/block-workflow-artifacts.sh
+        language: system
+        stages: [pre-commit]

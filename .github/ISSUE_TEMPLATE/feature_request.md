@@ -23,9 +23,6 @@ labels: enhancement
 **Quality criteria:**
 - (tests, docs, review)
 
-**Owner & team:**
--
-
 **Associated requirements:**
 Requirements #NUMBER:
 > TITLE
