@@ -28,9 +28,9 @@ def test_auto_mode_enables_all_supported_patches(monkeypatch):
 
     calls = []
 
-    import traceml.utils.patches.backward_auto_timer_patch as backward_patch
-    import traceml.utils.patches.dataloader_patch as dataloader_patch
-    import traceml.utils.patches.forward_auto_timer_patch as forward_patch
+    import traceml.patches.backward_auto_timer_patch as backward_patch
+    import traceml.patches.dataloader_patch as dataloader_patch
+    import traceml.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         dataloader_patch,
@@ -106,7 +106,7 @@ def test_custom_alias_maps_to_selective(monkeypatch):
 
     calls = []
 
-    import traceml.utils.patches.forward_auto_timer_patch as forward_patch
+    import traceml.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         forward_patch,

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from traceml.aggregator.summaries.summary_layout import border, row, wrap_lines
+from traceml.reporting.summaries.summary_layout import border, row, wrap_lines
 from traceml.utils.formatting import fmt_mem_new
 
 _COMPARE_WIDTH = 78

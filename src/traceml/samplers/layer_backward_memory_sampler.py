@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from traceml.hooks.layer_backward_memory_hooks import get_layer_backward_queue
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.layer_memory_common import (
     aggregate_layer_memory_payload_max,
@@ -11,9 +12,6 @@ from traceml.samplers.schema.layer_forward_backward_memory import (
     LayerForwardBackwardMemorySample,
 )
 from traceml.samplers.utils import drain_queue_nowait
-from traceml.utils.hooks.layer_backward_memory_hook import (
-    get_layer_backward_queue,
-)
 
 
 class LayerBackwardMemorySampler(BaseSampler):

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from traceml.compare.policy import (
+from traceml.reporting.compare.policy import (
     DEFAULT_COMPARE_POLICY,
     CompareDecisionPolicy,
     classify_memory_bytes,

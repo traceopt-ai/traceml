@@ -7,13 +7,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from traceml.compare.core import build_compare_payload
-from traceml.compare.io import (
+from traceml.reporting.compare.core import build_compare_payload
+from traceml.reporting.compare.io import (
     default_output_base,
     load_summary_json,
     write_compare_artifacts,
 )
-from traceml.compare.render import build_compare_text
+from traceml.reporting.compare.render import build_compare_text
 
 
 def compare_summaries(

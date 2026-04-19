@@ -15,22 +15,22 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from traceml.aggregator.summaries.diagnosis_presentation import (
+from traceml.reporting.summaries.diagnosis_presentation import (
     diagnosis_presentation_to_json,
     present_step_time_summary_diagnosis,
 )
-from traceml.aggregator.summaries.step_time_diagnosis import (
+from traceml.reporting.summaries.step_time_diagnosis import (
     RankStepSignals,
     build_summary_step_diagnosis,
     diagnosis_to_json,
 )
-from traceml.aggregator.summaries.summary_formatting import (
+from traceml.reporting.summaries.summary_formatting import (
     format_ms,
     format_percent,
     safe_float,
     share_percent,
 )
-from traceml.aggregator.summaries.summary_io import (
+from traceml.reporting.summaries.summary_io import (
     append_text,
     load_json_or_empty,
     write_json,

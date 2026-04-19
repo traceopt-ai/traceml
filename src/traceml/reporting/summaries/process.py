@@ -18,13 +18,13 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from traceml.aggregator.summaries.summary_formatting import (
+from traceml.reporting.summaries.summary_formatting import (
     bytes_to_gb,
     duration_from_bounds,
     format_optional,
     share_percent,
 )
-from traceml.aggregator.summaries.summary_io import (
+from traceml.reporting.summaries.summary_io import (
     append_text,
     load_json_or_empty,
     write_json,

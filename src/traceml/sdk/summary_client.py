@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from traceml.sdk.final_summary_protocol import (
+from traceml.sdk.protocol import (
     build_final_summary_request,
     get_final_summary_request_path,
     get_final_summary_response_path,

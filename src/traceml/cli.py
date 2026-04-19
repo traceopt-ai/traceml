@@ -656,7 +656,7 @@ def run_compare(args: argparse.Namespace) -> None:
     Compare two TraceML final summary JSON files.
     """
     try:
-        from traceml.compare.command import compare_summaries
+        from traceml.reporting.compare import compare_summaries
 
         compare_summaries(
             args.left,

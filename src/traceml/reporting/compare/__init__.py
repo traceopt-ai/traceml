@@ -6,6 +6,6 @@ TraceML and produces both a machine-readable comparison JSON and a compact
 human-readable text summary.
 """
 
-from traceml.compare.command import compare_summaries
+from traceml.reporting.compare.command import compare_summaries
 
 __all__ = ["compare_summaries"]

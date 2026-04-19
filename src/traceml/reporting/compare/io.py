@@ -17,10 +17,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from traceml.sdk.final_summary_protocol import (
-    write_json_atomic,
-    write_text_atomic,
-)
+from traceml.sdk.protocol import write_json_atomic, write_text_atomic
 
 _REQUIRED_TOP_LEVEL_SECTIONS = (
     "system",

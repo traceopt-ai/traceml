@@ -10,9 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from traceml.compare.io import derive_compare_labels
-from traceml.compare.verdict import build_compare_verdict
-from traceml.sdk.final_summary_protocol import utc_now_iso
+from traceml.reporting.compare.io import derive_compare_labels
+from traceml.reporting.compare.verdict import build_compare_verdict
+from traceml.sdk.protocol import utc_now_iso
 
 _STEP_PHASES = ("dataloader", "forward", "backward", "optimizer")
 

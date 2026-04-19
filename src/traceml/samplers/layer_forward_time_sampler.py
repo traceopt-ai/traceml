@@ -4,6 +4,10 @@ import time
 from collections import deque
 from typing import Deque
 
+from traceml.hooks.layer_forward_time_hooks import (
+    LayerForwardTimeStepEvent,
+    get_layer_forward_time_queue,
+)
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.layer_time_common import (
     aggregate_layer_time_payload,
@@ -13,10 +17,6 @@ from traceml.samplers.schema.layer_forward_backward_time import (
     LayerForwardBackwardTimeSample,
 )
 from traceml.samplers.utils import append_queue_nowait_to_deque
-from traceml.utils.hooks.layer_forward_time_hooks import (
-    LayerForwardTimeStepEvent,
-    get_layer_forward_time_queue,
-)
 
 
 class LayerForwardTimeSampler(BaseSampler):

@@ -17,19 +17,6 @@ Design goals
 import sqlite3
 from typing import Any, Dict, Optional
 
-from traceml.aggregator.summaries.diagnosis_presentation import (
-    diagnosis_presentation_to_json,
-    present_step_memory_summary_diagnosis,
-)
-from traceml.aggregator.summaries.summary_formatting import (
-    format_ratio_percent,
-    safe_float,
-)
-from traceml.aggregator.summaries.summary_io import (
-    append_text,
-    load_json_or_empty,
-    write_json,
-)
 from traceml.diagnostics.step_memory import (
     StepMemoryDiagnosis,
     build_step_memory_diagnosis,
@@ -40,6 +27,19 @@ from traceml.renderers.step_memory.common import (
     build_step_memory_combined_result,
 )
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml.reporting.summaries.diagnosis_presentation import (
+    diagnosis_presentation_to_json,
+    present_step_memory_summary_diagnosis,
+)
+from traceml.reporting.summaries.summary_formatting import (
+    format_ratio_percent,
+    safe_float,
+)
+from traceml.reporting.summaries.summary_io import (
+    append_text,
+    load_json_or_empty,
+    write_json,
+)
 from traceml.utils.formatting import fmt_mem_new
 
 

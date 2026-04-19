@@ -180,19 +180,17 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
 
     try:
         if config.patch_dataloader:
-            from traceml.utils.patches.dataloader_patch import patch_dataloader
+            from traceml.patches.dataloader_patch import patch_dataloader
 
             patch_dataloader()
 
         if config.patch_forward:
-            from traceml.utils.patches.forward_auto_timer_patch import (
-                patch_forward,
-            )
+            from traceml.patches.forward_auto_timer_patch import patch_forward
 
             patch_forward()
 
         if config.patch_backward:
-            from traceml.utils.patches.backward_auto_timer_patch import (
+            from traceml.patches.backward_auto_timer_patch import (
                 patch_backward,
             )
 

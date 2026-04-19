@@ -1,8 +1,8 @@
 from pathlib import Path
 from typing import Optional
 
-from traceml.compare.core import build_compare_payload
-from traceml.compare.render import build_compare_text
+from traceml.reporting.compare import build_compare_payload
+from traceml.reporting.compare import build_compare_text
 
 
 def _base_payload() -> dict:
