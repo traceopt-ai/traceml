@@ -85,3 +85,4 @@ nav:
           - Decorators: developer_guide/subsystems/decorators.md
           - Integrations: developer_guide/subsystems/integrations.md
           - Utils: developer_guide/subsystems/utils.md
+      - Contributing: developer_guide/contributing.md
