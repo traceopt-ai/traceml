@@ -53,7 +53,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Integrations | `src/traceml/integrations/` | Hugging Face + Lightning adapters |
 | Utils | `src/traceml/utils/` | Hooks, patches, memory/timing helpers |
 
-Each layer has its own page under [Subsystems](subsystems/cli.md).
+Auto-generated API reference is available for the [CLI](subsystems/cli.md) and [Decorators](subsystems/decorators.md). Narrative docs for the other subsystems are on the roadmap — in the meantime, the source tree above is the canonical reference: start from the entry points and follow the imports.
 
 ## Design principles
 

@@ -11,10 +11,12 @@ theme:
   # favicon: assets/favicon.png
   palette:
     - scheme: default
-      primary: indigo
+      primary: custom
+      accent: custom
       toggle: { icon: material/brightness-7, name: Switch to dark mode }
     - scheme: slate
-      primary: indigo
+      primary: custom
+      accent: custom
       toggle: { icon: material/brightness-4, name: Switch to light mode }
   features:
     - navigation.instant
@@ -23,6 +25,7 @@ theme:
     - navigation.tabs
     - navigation.sections
     - navigation.top
+    - navigation.footer
     - search.suggest
     - search.highlight
     - content.code.copy
@@ -47,6 +50,9 @@ plugins:
             show_root_heading: true
             show_symbol_type_heading: true
 
+extra_css:
+  - stylesheets/traceopt.css
+
 markdown_extensions:
   - admonition
   - attr_list
@@ -66,7 +72,6 @@ markdown_extensions:
   - toc: { permalink: true }
 
 nav:
-  - Home: index.md
   - User Guide:
       - Quickstart: user_guide/quickstart.md
       - Reading output: user_guide/reading-output.md
@@ -79,16 +84,7 @@ nav:
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
-      - Subsystems:
+      - API reference:
           - CLI: developer_guide/subsystems/cli.md
-          - Runtime: developer_guide/subsystems/runtime.md
-          - Aggregator: developer_guide/subsystems/aggregator.md
-          - Samplers: developer_guide/subsystems/samplers.md
-          - Database: developer_guide/subsystems/database.md
-          - Transport: developer_guide/subsystems/transport.md
-          - Renderers: developer_guide/subsystems/renderers.md
-          - Display drivers: developer_guide/subsystems/display-drivers.md
           - Decorators: developer_guide/subsystems/decorators.md
-          - Integrations: developer_guide/subsystems/integrations.md
-          - Utils: developer_guide/subsystems/utils.md
       - Contributing: developer_guide/contributing.md
