@@ -127,7 +127,7 @@ That includes things like:
 ## Related docs
 
 - [Quickstart](../docs/user_guide/quickstart.md)
-- [Compare Runs](../docs/compare.md)
+- [Compare Runs](../docs/user_guide/compare.md)
 - [How to Read TraceML Output](../docs/user_guide/reading-output.md)
 - [FAQ](../docs/user_guide/faq.md)
 - [Use TraceML with W&B / MLflow](../docs/user_guide/integrations/wandb-mlflow.md)

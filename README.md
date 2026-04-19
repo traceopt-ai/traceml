@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](docs/user_guide/quickstart.md) • [**Compare Runs**](docs/compare.md) • [**How to Read Output**](docs/user_guide/reading-output.md) • [**FAQ**](docs/user_guide/faq.md) • [**Use with W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Quickstart**](docs/user_guide/quickstart.md) • [**Compare Runs**](docs/user_guide/compare.md) • [**How to Read Output**](docs/user_guide/reading-output.md) • [**FAQ**](docs/user_guide/faq.md) • [**Use with W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
 
 </div>
 
@@ -101,7 +101,7 @@ traceml compare run_a.json run_b.json
 
 TraceML writes both a structured compare JSON and a compact text report.
 
-See [docs/compare.md](docs/compare.md).
+See [docs/user_guide/compare.md](docs/user_guide/compare.md).
 
 ---
 
@@ -175,7 +175,7 @@ See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md
 ## Learn more
 
 - [Quickstart](docs/user_guide/quickstart.md)
-- [Compare Runs](docs/compare.md)
+- [Compare Runs](docs/user_guide/compare.md)
 - [Examples](examples/README.md)
 - [How to Read TraceML Output](docs/user_guide/reading-output.md)
 - [FAQ](docs/user_guide/faq.md)
