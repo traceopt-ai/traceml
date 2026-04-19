@@ -1,0 +1,68 @@
+site_name: TraceML
+site_description: Real-time bottleneck finder for PyTorch training runs
+site_url: https://traceopt-ai.github.io/traceml/
+repo_url: https://github.com/traceopt-ai/traceml
+repo_name: traceopt-ai/traceml
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  # logo: assets/logo.png        # uncomment when traceopt.ai logo is available
+  # favicon: assets/favicon.png
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle: { icon: material/brightness-7, name: Switch to dark mode }
+    - scheme: slate
+      primary: indigo
+      toggle: { icon: material/brightness-4, name: Switch to light mode }
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+
+plugins:
+  - search
+  - autorefs
+  - include-markdown
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            merge_init_into_class: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed: { alternate_style: true }
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - toc: { permalink: true }
+
+validation:
+  links:
+    not_found: ignore   # pre-existing docs outside nav have stale links; Task 3 will relocate them
+
+nav:
+  - Home: index.md
