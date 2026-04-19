@@ -1,20 +1,31 @@
 ---
 name: Feature request
-about: Suggest an idea for this project
-title: ''
-labels: ''
-assignees: ''
-
+about: Propose a new capability or enhancement
+title: "[feat] "
+labels: enhancement
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+**Feature concept:**
+-
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+**Inputs:**
+-
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+**Outputs:**
+-
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+**Business / functional criteria:**
+-
+
+**Non-functional criteria:**
+- (performance, overhead budget, security, UX)
+
+**Quality criteria:**
+- (tests, docs, review)
+
+**Owner & team:**
+-
+
+**Associated requirements:**
+Requirements #NUMBER:
+> TITLE
