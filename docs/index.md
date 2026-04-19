@@ -5,7 +5,7 @@ hide:
 ---
 
 <p align="center" markdown>
-  <img src="assets/traceopt-logo-trimmed.png" alt="TraceOpt" width="220" />
+  <img src="assets/traceopt-logo.png" alt="TraceOpt" width="200" />
 </p>
 
 <h1 align="center" style="margin-top: 0.5rem;">TraceML</h1>
