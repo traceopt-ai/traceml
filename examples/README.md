@@ -12,7 +12,7 @@ These are the main user-facing examples.
 
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
-| `pytorch_minimal.py` | Minimal plain PyTorch loop with `trace_step(...)` | CPU / CUDA | Best first example |
+| `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.trace_step(...)` and `traceml.final_summary()` | CPU / CUDA | Best first example |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
 | `lightning_minimal.py` | Minimal Lightning `TraceMLCallback` example | CPU / CUDA | No dataset download required |
@@ -20,8 +20,16 @@ These are the main user-facing examples.
 If you only try one example first, use:
 
 ```bash
-traceml run dev/pytorch_minimal.py
+traceml run examples/pytorch_minimal.py
 ```
+
+If you want a quieter artifact-oriented flow, run an example with:
+
+```bash
+traceml run examples/pytorch_minimal.py --mode=summary
+```
+
+Then keep the TraceML final summary JSON if you want to compare runs later with `traceml compare`.
 
 ---
 
@@ -31,7 +39,7 @@ These examples are still user-facing, but they are more about showing specific T
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
-| `input_bound_demo.py` | Slow input pipeline / input-bound training | CPU / CUDA | Simulates dataloader delay |
+| `input_bound_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
 | `input_straggler_ddp_demo.py` | Input straggler in single-node DDP | CPU / CUDA | One rank is deliberately slower in the input path |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
@@ -43,26 +51,47 @@ These are useful when you want to see how TraceML behaves on a known bottleneck.
 Standard run:
 
 ```bash
-traceml run dev/pytorch_minimal.py
+traceml run examples/pytorch_minimal.py
 ```
 
 Local UI:
 
 ```bash
-traceml run dev/pytorch_minimal.py --mode=dashboard
+traceml run examples/pytorch_minimal.py --mode=dashboard
+```
+
+Summary mode:
+
+```bash
+traceml run examples/pytorch_minimal.py --mode=summary
 ```
 
 Single-node DDP:
 
 ```bash
-traceml run dev/ddp_minimal.py --nproc-per-node=4
+traceml run examples/ddp_minimal.py --nproc-per-node=4
 ```
 
 Run without TraceML telemetry for a baseline:
 
 ```bash
-traceml run dev/pytorch_minimal.py --disable-traceml
+traceml run examples/pytorch_minimal.py --disable-traceml
 ```
+
+Compare two saved TraceML final summary JSON files:
+
+```bash
+traceml compare run_a.json run_b.json
+```
+
+Starter examples now prefer the top-level public API:
+
+- `traceml.trace_step(...)`
+- `traceml.trace_model_instance(...)`
+- `traceml.final_summary()`
+
+Legacy imports from `traceml.decorators` still work for backward
+compatibility, but new examples use the top-level `traceml.*` API.
 
 ---
 
@@ -98,6 +127,7 @@ That includes things like:
 ## Related docs
 
 - [Quickstart](../docs/quickstart.md)
+- [Compare Runs](../docs/compare.md)
 - [How to Read TraceML Output](../docs/how-to-read-output.md)
 - [FAQ](../docs/faq.md)
 - [Use TraceML with W&B / MLflow](../docs/use-with-wandb-mlflow.md)

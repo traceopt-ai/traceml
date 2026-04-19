@@ -133,6 +133,24 @@ def _collect_existing_artifacts(
     }
 
 
+def _validate_launch_args(args: argparse.Namespace) -> None:
+    """
+    Validate cross-argument constraints for TraceML launch commands.
+
+    Summary mode depends on SQLite-backed history because the final end-of-run
+    summary is generated from the persisted session database. We reject invalid
+    combinations early in the CLI so runtime and aggregator code can stay
+    simple and mode-agnostic.
+    """
+    if getattr(args, "mode", None) == "summary" and getattr(
+        args, "no_history", False
+    ):
+        raise SystemExit(
+            "[TraceML] ERROR: --mode=summary requires history. "
+            "Remove --no-history to enable final summary generation."
+        )
+
+
 def write_code_manifest(
     session_root: Path,
     script_path: str,
@@ -486,8 +504,12 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         update_run_manifest(manifest_path, status=final_status)
         raise SystemExit(train_proc.returncode)
 
-    if args.mode not in ["cli", "dashboard"]:
-        raise ValueError(f"Invalid ui mode '{args.mode}'")
+    supported_modes = {"cli", "dashboard", "summary"}
+    if args.mode not in supported_modes:
+        raise ValueError(
+            f"Invalid display mode '{args.mode}'. "
+            f"Supported modes: {sorted(supported_modes)}"
+        )
 
     train_cmd = [
         *_build_torchrun_base_cmd(args.nproc_per_node),
@@ -629,6 +651,27 @@ def run_inspect(args: argparse.Namespace) -> None:
             raise SystemExit(1)
 
 
+def run_compare(args: argparse.Namespace) -> None:
+    """
+    Compare two TraceML final summary JSON files.
+    """
+    try:
+        from traceml.compare.command import compare_summaries
+
+        compare_summaries(
+            args.left,
+            args.right,
+            output=args.output,
+            print_to_stdout=True,
+        )
+    except RuntimeError as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as exc:
+        print(f"[TraceML] ERROR: compare failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     """Add shared launch arguments for TraceML run commands."""
     parser.add_argument(
@@ -638,8 +681,11 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         "--mode",
         type=str,
         default="cli",
-        choices=["cli", "dashboard"],
-        help="TraceML frontend to launch. Default: cli.",
+        choices=["cli", "dashboard", "summary"],
+        help=(
+            "TraceML display mode to launch. "
+            "Use 'summary' for final-summary-only runs. Default: cli."
+        ),
     )
     parser.add_argument(
         "--interval",
@@ -721,6 +767,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  traceml watch train.py\n"
             "  traceml run train.py --args -- --epochs 10 --lr 1e-3\n"
             "  traceml deep train.py --args -- --config config.yaml"
+            "  traceml compare run_a.json run_b.json"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -744,6 +791,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_launch_args(deep_parser)
 
+    compare_parser = sub.add_parser(
+        "compare",
+        help="Compare two TraceML final summary JSON files.",
+    )
+    compare_parser.add_argument(
+        "left",
+        help="Path to the left-hand TraceML final summary JSON file.",
+    )
+    compare_parser.add_argument(
+        "right",
+        help="Path to the right-hand TraceML final summary JSON file.",
+    )
+    compare_parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help=(
+            "Optional output base path. "
+            "Writes both <base>.json and <base>.txt. "
+            "Default: compare/<left>_vs_<right> in the current directory."
+        ),
+    )
+
     inspect_parser = sub.add_parser(
         "inspect", help="Inspect binary .msgpack logs."
     )
@@ -757,12 +827,17 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    if args.command in {"watch", "run", "deep"}:
+        _validate_launch_args(args)
+
     if args.command == "watch":
         run_with_tracing(args, profile="watch")
     elif args.command == "run":
         run_with_tracing(args, profile="run")
     elif args.command == "deep":
         run_with_tracing(args, profile="deep")
+    elif args.command == "compare":
+        run_compare(args)
     elif args.command == "inspect":
         run_inspect(args)
     else:

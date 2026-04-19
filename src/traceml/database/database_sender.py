@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 
 from traceml.loggers.error_log import get_error_logger
@@ -5,27 +7,40 @@ from traceml.loggers.error_log import get_error_logger
 
 class DBIncrementalSender:
     """
-    Incremental network sender for Database contents.
+    Incremental network sender for database contents.
 
     This class is responsible for streaming database updates over the network
     in an incremental and low-overhead manner.
 
     Core assumptions
     ----------------
-    - Tables are append-only in logical time (monotonically increasing `step`)
-    - Tables are bounded in memory (e.g., backed by deque(maxlen=N))
+    - Tables are append-only in logical time.
+    - Tables are bounded in memory.
     - Supports a sampling knob:
         * max_rows_per_flush = -1  -> best-effort "send everything since last sent row"
-                                   (bounded by current deque contents)
         * max_rows_per_flush = N>0 -> send at most the latest N rows per flush
-                                   (may skip backlog by design)
 
     Design rationale
     ----------------
     - Sending indices is unsafe with bounded deques because old rows
       may be evicted, shifting indices.
-    - Instead, we track progress using a semantic key (`step`) embedded
-      in each row.
+    - Instead, we track progress using a monotonic append counter.
+
+    Payload contract
+    ----------------
+    This class returns a single payload dict from `collect_payload()`:
+
+    {
+        "rank": <int>,
+        "sampler": <str>,
+        "timestamp": <float>,
+        "tables": {
+            table_name: [row, row, ...]
+        }
+    }
+
+    Higher runtime layers may batch multiple sampler payload dicts into a
+    `list[dict]` before transport. That batching is outside this class.
     """
 
     def __init__(
@@ -38,18 +53,6 @@ class DBIncrementalSender:
     ):
         """
         Initialize the incremental sender.
-
-        Parameters
-        ----------
-        db : Database
-            In-memory database instance holding sampler telemetry.
-        sampler_name : str
-            Logical name of the sampler emitting the data.
-        sender : Any
-            Transport abstraction with a `.send(payload)` method
-            (e.g., socket sender, IPC sender, async queue).
-        rank : int
-            Distributed rank of the current process (e.g., DDP rank).
         """
         self.db = db
         self.sampler_name = sampler_name
@@ -57,36 +60,17 @@ class DBIncrementalSender:
         self.rank = rank
         self.max_rows_per_flush = int(max_rows_per_flush)
 
-        # Tracks the last successfully sent append-count per table.
-        # Used for O(1) new-row detection: compare db.get_append_count()
-        # against this value to determine how many new rows exist.
         self._last_sent_seq: dict[str, int] = {}
         self.logger = get_error_logger("DBIncrementalSender")
 
-    def collect_payload(self) -> "dict | None":
+    def collect_payload(self) -> dict | None:
         """
         Collect new rows since the last flush and return them as a ready-to-send
-        payload dict.  Returns ``None`` when there is nothing new to send.
+        payload dict. Returns `None` when there is nothing new to send.
 
-        This method advances the internal cursor (``_last_sent_record``) so that
-        a subsequent call to either :meth:`collect_payload` or :meth:`flush` will
-        not re-send the same rows.
-
-        Uses monotonic append counters for O(1) new-row detection
-        instead of scanning the deque.
-
-        Payload format
-        --------------
-        {
-            "rank": <int>,
-            "sampler": <str>,
-            "timestamp": <float>,
-            "tables": {
-                table_name: [row, row, ...]  # possibly multiple rows per table
-            }
-        }
-
-        The caller is responsible for actually transmitting the returned dict.
+        This method advances the internal cursor (`_last_sent_seq`) so that a
+        subsequent call to either `collect_payload()` or `flush()` will not
+        re-send the same rows.
         """
         tables_payload = {}
 
@@ -98,20 +82,16 @@ class DBIncrementalSender:
             last_seq = self._last_sent_seq.get(table_name, 0)
             new_count = total - last_seq
 
-            # O(1) fast path: nothing new since last flush
             if new_count <= 0:
                 continue
 
-            # Apply "recent-only" cap if configured
             if self.max_rows_per_flush != -1:
                 new_count = min(new_count, self.max_rows_per_flush)
 
             n = len(rows)
             if new_count >= n:
-                # First flush or eviction happened — send entire deque
                 new_rows = list(rows)
             else:
-                # Slice only the tail (new rows), via indexed access
                 new_rows = [rows[i] for i in range(n - new_count, n)]
 
             tables_payload[table_name] = new_rows
@@ -129,11 +109,7 @@ class DBIncrementalSender:
 
     def flush(self) -> None:
         """
-        Collect and immediately send incremental updates (single message).
-
-        This is a backward-compatible wrapper around :meth:`collect_payload`.
-        Callers that need batching should use :meth:`collect_payload` directly
-        and transmit the payload themselves via ``TCPClient.send_batch()``.
+        Collect and immediately send incremental updates as a single payload.
         """
         payload = self.collect_payload()
         if payload is None:

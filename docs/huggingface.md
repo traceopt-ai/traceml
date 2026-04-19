@@ -89,7 +89,8 @@ You keep the normal Hugging Face workflow. TraceML adds diagnosis around the tra
 
 `TraceMLTrainer` subclasses `transformers.Trainer` and wraps the training step automatically.
 
-That means you do not need to add `trace_step(...)` manually in your Hugging Face training loop.
+That means you do not need to add `traceml.trace_step(...)` manually in your
+Hugging Face training loop.
 
 If `traceml_enabled=False`, it behaves like a normal `Trainer`.
 

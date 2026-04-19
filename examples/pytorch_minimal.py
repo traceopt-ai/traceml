@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-from traceml.decorators import trace_step
+import traceml
 
 SEED = 42
 INPUT_DIM = 1024
@@ -13,7 +13,7 @@ HIDDEN_DIM = 2048
 NUM_CLASSES = 10
 BATCH_SIZE = 256
 NUM_SAMPLES = 50000
-NUM_EPOCHS = 6
+NUM_EPOCHS = 2
 PAUSE_BETWEEN_STEPS = 0.05  # keeps the run visible a bit longer
 
 
@@ -66,7 +66,7 @@ def main():
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
 
-            with trace_step(model):
+            with traceml.trace_step(model):
                 optimizer.zero_grad(set_to_none=True)
                 logits = model(batch_x)
                 loss = criterion(logits, batch_y)
@@ -81,6 +81,9 @@ def main():
             time.sleep(PAUSE_BETWEEN_STEPS)
 
     print("Done.")
+
+    summary = traceml.final_summary(print_text=True)
+    print(summary is not None)
 
 
 if __name__ == "__main__":

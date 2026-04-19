@@ -199,6 +199,11 @@ def read_traceml_env() -> Dict[str, Any]:
     Backward compatibility:
     - TRACEML_UI_MODE is preferred
     - TRACEML_MODE is still accepted
+
+     Supported display modes:
+    - cli
+    - dashboard
+    - summary
     """
     ui_mode = os.environ.get(
         "TRACEML_UI_MODE",

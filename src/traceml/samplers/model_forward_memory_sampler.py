@@ -1,11 +1,12 @@
+from __future__ import annotations
+
 import time
 
-from traceml.loggers.error_log import get_error_logger
+from traceml.samplers.base_sampler import BaseSampler
+from traceml.samplers.utils import drain_queue_nowait
 from traceml.utils.hooks.model_forward_memory_hook import (
     get_model_forward_memory_queue,
 )
-
-from .base_sampler import BaseSampler
 
 
 class ModelForwardMemorySampler(BaseSampler):
@@ -18,27 +19,16 @@ class ModelForwardMemorySampler(BaseSampler):
     """
 
     def __init__(self) -> None:
-        self.sampler_name = "ModelForwardMemorySampler"
-        super().__init__(sampler_name=self.sampler_name)
-        self.logger = get_error_logger(self.sampler_name)
+        super().__init__(
+            sampler_name="ModelForwardMemorySampler",
+            table_name="model_forward_memory",
+        )
 
     def _drain_queue(self) -> None:
         """
         Drain entire model forward memory queue.
         """
-        queue = get_model_forward_memory_queue()
-        if queue.empty():
-            return
-
-        while not queue.empty():
-            try:
-                event = queue.get_nowait()
-            except Exception:
-                break
-
-            if event is None:
-                continue
-
+        for event in drain_queue_nowait(get_model_forward_memory_queue()):
             self._save_event(event)
 
     def _save_event(self, event) -> None:
@@ -63,11 +53,11 @@ class ModelForwardMemorySampler(BaseSampler):
             "peak_allocated_mb": peak_alloc,
             "peak_reserved_mb": peak_resv,
         }
-        self.db.add_record("model_forward_memory", record)
+        self._add_record(record)
 
-    def sample(self):
+    def sample(self) -> None:
         """
-        Drain queue → save raw events → no aggregation.
+        Drain queue -> save raw events -> no aggregation.
         """
         try:
             self._drain_queue()

@@ -71,8 +71,10 @@ class CLIDisplayDriver(BaseDisplayDriver):
       - stop(): stop display / cleanup
 
     Renderers:
-      - Renderers MUST read only from RemoteDBStore.
+      - Renderers may read from SQLite-backed history or other approved
+        backend-specific compute paths.
       - CLI driver expects renderers to implement get_panel_renderable().
+
     """
 
     def __init__(
@@ -98,7 +100,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
         self._renderers: List[BaseRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
-            StdoutStderrRenderer(remote_store=store),
+            StdoutStderrRenderer(db_path=self._settings.db_path),
         ]
 
         # Run profile

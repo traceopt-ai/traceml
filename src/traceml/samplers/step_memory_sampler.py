@@ -1,64 +1,39 @@
+from __future__ import annotations
+
 import time
 from typing import Any, Optional
 
-from traceml.loggers.error_log import get_error_logger
+from traceml.samplers.base_sampler import BaseSampler
 from traceml.samplers.schema.step_memory import StepMemorySample
+from traceml.samplers.utils import drain_queue_nowait
 from traceml.utils.step_memory import step_memory_queue
-
-from .base_sampler import BaseSampler
 
 
 class StepMemorySampler(BaseSampler):
     """
     Drain-all step-level peak-memory sampler.
-
-    Each call to `sample()`:
-      - Drains the step memory queue.
-      - Stores one record per TraceML step (per event).
-
-    Guarantees
-    ----------
-    - Never raises; failures are logged and swallowed
-    - Drain-all behavior: does not aggregate or drop records intentionally
-    - Records stored are wire-format dicts (schema-owned)
     """
 
     def __init__(self) -> None:
-        self.name = "StepMemory"
-        self.sampler_name = self.name + "Sampler"
-        self.table_name = "step_memory"
+        super().__init__(
+            sampler_name="StepMemorySampler",
+            table_name="step_memory",
+        )
         self.sample_idx = 0
-
-        super().__init__(sampler_name=self.sampler_name)
-        self.logger = get_error_logger(self.sampler_name)
 
     def _drain_queue(self) -> None:
         """
         Drain entire step memory queue.
         """
-        q = step_memory_queue
-        while not q.empty():
-            try:
-                event = q.get_nowait()
-            except Exception:
-                break
-
-            if event is None:
-                continue
-
+        for event in drain_queue_nowait(step_memory_queue):
             sample = self._event_to_sample(event)
             if sample is None:
                 continue
-
-            # Store wire representation to keep DB/transport independent
-            # of Python objects.
-            self.db.add_record(self.table_name, sample.to_wire())
+            self._add_record(sample.to_wire())
 
     def _event_to_sample(self, event: Any) -> Optional[StepMemorySample]:
         """
         Convert a raw queue event to a StepMemorySample.
-
-        Returns None if the event doesn't contain any usable memory signals.
         """
         ts = time.time()
 
@@ -69,7 +44,6 @@ class StepMemorySampler(BaseSampler):
         peak_alloc = getattr(event, "peak_allocated", None)
         peak_resv = getattr(event, "peak_reserved", None)
 
-        # Drop records that contain no memory signal
         if peak_alloc is None and peak_resv is None:
             return None
 
@@ -85,9 +59,7 @@ class StepMemorySampler(BaseSampler):
 
     def sample(self) -> None:
         """
-        Drain queue → save raw events → no aggregation.
-
-        Safe to call frequently; never interferes with training.
+        Drain queue -> save raw events -> no aggregation.
         """
         self.sample_idx += 1
         try:

@@ -22,12 +22,13 @@ Diagnosis priority
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional, Sequence
 
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 
 from .common import BaseDiagnosis, Severity, validate_confidence
+from .trends import TrendConfig, compute_trend_evidence
 
 StepMemoryDiagnosisKind = Literal[
     "NO_DATA",
@@ -53,11 +54,9 @@ class StepMemoryDiagnosisThresholds:
     """
     Thresholds for live step-memory diagnosis.
 
-    Notes
-    -----
-    - These thresholds are designed for the current visible aligned window.
-    - "Early" creep is a strong advisory.
-    - "Confirmed" creep requires stronger agreement across multiple slices.
+    Memory trend / creep uses the shared trend engine and metric-specific byte
+    thresholds. This keeps the trend definition centralized while preserving
+    memory-specific policy in this module.
     """
 
     min_steps_for_diag: int = 48
@@ -68,21 +67,18 @@ class StepMemoryDiagnosisThresholds:
     imbalance_skew_warn: float = 0.12
     imbalance_skew_crit: float = 0.20
 
-    slice_fractions: tuple[float, ...] = (0.10, 0.20, 0.30)
-    min_slice_points: int = 4
+    creep_watch_delta_bytes: float = 100.0 * 1024.0 * 1024.0
+    creep_confirmed_delta_bytes: float = 1024.0 * 1024.0 * 1024.0
 
-    early_min_positive_pairs: int = 2
-    confirmed_min_positive_pairs: int = 3
+    early_overall_worst_growth_min: float = 0.02
+    early_overall_median_growth_min: float = 0.01
+    confirmed_overall_worst_growth_min: float = 0.05
+    confirmed_overall_median_growth_min: float = 0.03
 
-    early_pair_worst_growth_min: float = 0.02
-    early_pair_median_growth_min: float = 0.01
-    confirmed_pair_worst_growth_min: float = 0.04
-    confirmed_pair_median_growth_min: float = 0.02
+    require_recent_gt_mid: bool = True
+    require_mid_ge_baseline: bool = False
 
-    early_overall_worst_growth_min: float = 0.06
-    early_overall_median_growth_min: float = 0.03
-    confirmed_overall_worst_growth_min: float = 0.10
-    confirmed_overall_median_growth_min: float = 0.05
+    trend: TrendConfig = field(default_factory=lambda: TrendConfig())
 
 
 DEFAULT_STEP_MEMORY_THRESHOLDS = StepMemoryDiagnosisThresholds()
@@ -108,23 +104,14 @@ class StepMemoryDiagnosis(BaseDiagnosis):
 @dataclass(frozen=True)
 class WindowCreepEvidence:
     """
-    Creep evidence computed from the current visible aligned window.
-
-    Fields
-    ------
-    positive_pairs:
-        Number of slice pairs (10/90, 20/80, 30/70 style) where both median
-        and worst rise enough.
-    overall_*:
-        Head-vs-tail growth using a stable 20% slice.
-    score:
-        Simple ranking score used to pick the stronger metric when both
-        allocated and reserved are available.
+    Memory creep evidence derived from the shared trend engine.
     """
 
     eligible: bool
-    positive_pairs: int
-    total_pairs: int
+
+    baseline_avg_bytes: Optional[float]
+    mid_avg_bytes: Optional[float]
+    recent_avg_bytes: Optional[float]
 
     overall_abs_delta_bytes: Optional[float]
     overall_worst_growth_pct: Optional[float]
@@ -335,18 +322,17 @@ def _compute_window_creep_evidence(
     thresholds: StepMemoryDiagnosisThresholds,
 ) -> WindowCreepEvidence:
     """
-    Compute creep evidence from the current visible window.
+    Compute memory creep evidence from the shared trend engine.
 
-    The policy is intentionally simple:
-    - compare head vs tail averages over multiple slice sizes
-    - require both worst and median to rise
-    - combine absolute and relative growth
+    The trend definition is common across TraceML. Memory-specific thresholds
+    remain local here because memory uses bytes-based alerting semantics.
     """
     if int(steps_used) < int(thresholds.min_steps_for_diag):
         return WindowCreepEvidence(
             eligible=False,
-            positive_pairs=0,
-            total_pairs=0,
+            baseline_avg_bytes=None,
+            mid_avg_bytes=None,
+            recent_avg_bytes=None,
             overall_abs_delta_bytes=None,
             overall_worst_growth_pct=None,
             overall_median_growth_pct=None,
@@ -358,12 +344,15 @@ def _compute_window_creep_evidence(
     worst = _clean_series(worst_series_bytes)
     median = _clean_series(median_series_bytes)
 
-    n = min(len(worst), len(median), int(steps_used))
-    if n < int(thresholds.min_steps_for_diag):
+    worst_ev = compute_trend_evidence(worst, config=thresholds.trend)
+    median_ev = compute_trend_evidence(median, config=thresholds.trend)
+
+    if worst_ev is None or median_ev is None:
         return WindowCreepEvidence(
             eligible=False,
-            positive_pairs=0,
-            total_pairs=0,
+            baseline_avg_bytes=None,
+            mid_avg_bytes=None,
+            recent_avg_bytes=None,
             overall_abs_delta_bytes=None,
             overall_worst_growth_pct=None,
             overall_median_growth_pct=None,
@@ -372,116 +361,58 @@ def _compute_window_creep_evidence(
             score=0.0,
         )
 
-    worst = worst[-n:]
-    median = median[-n:]
+    abs_delta = float(worst_ev.delta_vs_baseline)
+    worst_growth = worst_ev.delta_pct_vs_baseline
+    median_growth = median_ev.delta_pct_vs_baseline
 
-    positive_pairs_early = 0
-    positive_pairs_confirmed = 0
-    total_pairs = 0
-
-    for frac in thresholds.slice_fractions:
-        segment = max(
-            int(thresholds.min_slice_points),
-            int(round(n * float(frac))),
-        )
-        segment = min(segment, max(1, n // 2))
-        if segment < 1:
-            continue
-
-        worst_head = _avg(worst[:segment])
-        worst_tail = _avg(worst[-segment:])
-        median_head = _avg(median[:segment])
-        median_tail = _avg(median[-segment:])
-
-        worst_growth = _growth_pct(worst_head, worst_tail)
-        median_growth = _growth_pct(median_head, median_tail)
-
-        total_pairs += 1
-
-        if (
-            worst_growth is not None
-            and median_growth is not None
-            and worst_growth >= float(thresholds.early_pair_worst_growth_min)
-            and median_growth >= float(thresholds.early_pair_median_growth_min)
-        ):
-            positive_pairs_early += 1
-
-        if (
-            worst_growth is not None
-            and median_growth is not None
-            and worst_growth
-            >= float(thresholds.confirmed_pair_worst_growth_min)
-            and median_growth
-            >= float(thresholds.confirmed_pair_median_growth_min)
-        ):
-            positive_pairs_confirmed += 1
-
-    overall_segment = max(
-        int(thresholds.min_slice_points),
-        int(round(n * 0.20)),
+    direction_recent_mid = (
+        worst_ev.delta_vs_mid > 0.0 and median_ev.delta_vs_mid > 0.0
     )
-    overall_segment = min(overall_segment, max(1, n // 2))
-
-    worst_head = _avg(worst[:overall_segment])
-    worst_tail = _avg(worst[-overall_segment:])
-    median_head = _avg(median[:overall_segment])
-    median_tail = _avg(median[-overall_segment:])
-
-    overall_abs_delta = worst_tail - worst_head
-    overall_worst_growth = _growth_pct(worst_head, worst_tail)
-    overall_median_growth = _growth_pct(median_head, median_tail)
-
-    early_abs_min = _dynamic_abs_delta_min(
-        baseline_bytes=worst_head,
-        gpu_total_bytes=gpu_total_bytes,
-        mode="early",
+    direction_mid_base = (worst_ev.mid_avg >= worst_ev.baseline_avg) and (
+        median_ev.mid_avg >= median_ev.baseline_avg
     )
-    confirmed_abs_min = _dynamic_abs_delta_min(
-        baseline_bytes=worst_head,
-        gpu_total_bytes=gpu_total_bytes,
-        mode="confirmed",
-    )
+
+    direction_ok = True
+    if thresholds.require_recent_gt_mid:
+        direction_ok = direction_ok and direction_recent_mid
+    if thresholds.require_mid_ge_baseline:
+        direction_ok = direction_ok and direction_mid_base
 
     early = bool(
-        total_pairs > 0
-        and positive_pairs_early >= int(thresholds.early_min_positive_pairs)
-        and overall_worst_growth is not None
-        and overall_median_growth is not None
-        and overall_abs_delta >= early_abs_min
-        and overall_worst_growth
-        >= float(thresholds.early_overall_worst_growth_min)
-        and overall_median_growth
-        >= float(thresholds.early_overall_median_growth_min)
+        direction_ok
+        and abs_delta >= float(thresholds.creep_watch_delta_bytes)
+        and worst_growth is not None
+        and median_growth is not None
+        and worst_growth >= float(thresholds.early_overall_worst_growth_min)
+        and median_growth >= float(thresholds.early_overall_median_growth_min)
     )
 
     confirmed = bool(
-        total_pairs > 0
-        and positive_pairs_confirmed
-        >= int(thresholds.confirmed_min_positive_pairs)
-        and overall_worst_growth is not None
-        and overall_median_growth is not None
-        and overall_abs_delta >= confirmed_abs_min
-        and overall_worst_growth
+        direction_ok
+        and abs_delta >= float(thresholds.creep_confirmed_delta_bytes)
+        and worst_growth is not None
+        and median_growth is not None
+        and worst_growth
         >= float(thresholds.confirmed_overall_worst_growth_min)
-        and overall_median_growth
+        and median_growth
         >= float(thresholds.confirmed_overall_median_growth_min)
     )
 
     score = (
-        float(positive_pairs_confirmed) * 2.0
-        + float(positive_pairs_early)
-        + max(0.0, float(overall_worst_growth or 0.0)) * 10.0
-        + max(0.0, float(overall_median_growth or 0.0)) * 6.0
-        + max(0.0, float(overall_abs_delta)) / max(1.0, early_abs_min)
+        max(0.0, abs_delta)
+        / max(1.0, float(thresholds.creep_watch_delta_bytes))
+        + max(0.0, float(worst_growth or 0.0)) * 10.0
+        + max(0.0, float(median_growth or 0.0)) * 6.0
     )
 
     return WindowCreepEvidence(
         eligible=True,
-        positive_pairs=positive_pairs_early,
-        total_pairs=total_pairs,
-        overall_abs_delta_bytes=overall_abs_delta,
-        overall_worst_growth_pct=overall_worst_growth,
-        overall_median_growth_pct=overall_median_growth,
+        baseline_avg_bytes=worst_ev.baseline_avg,
+        mid_avg_bytes=worst_ev.mid_avg,
+        recent_avg_bytes=worst_ev.recent_avg,
+        overall_abs_delta_bytes=abs_delta,
+        overall_worst_growth_pct=worst_growth,
+        overall_median_growth_pct=median_growth,
         early=early,
         confirmed=confirmed,
         score=score,
@@ -500,38 +431,6 @@ def _pick_balanced_metric(
     if "peak_allocated" in by_name:
         return by_name["peak_allocated"]
     return max(assessments, key=lambda item: item.creep.score)
-
-
-def _dynamic_abs_delta_min(
-    *,
-    baseline_bytes: float,
-    gpu_total_bytes: Optional[float],
-    mode: str,
-) -> float:
-    """
-    Compute a scale-aware absolute-delta threshold.
-
-    This makes the policy less brittle across small and large GPUs.
-    """
-    baseline = max(0.0, float(baseline_bytes))
-    total = max(0.0, float(gpu_total_bytes or 0.0))
-
-    if mode == "confirmed":
-        candidates = [
-            512.0 * 1024.0 * 1024.0,
-            baseline * 0.05,
-        ]
-        if total > 0.0:
-            candidates.append(total * 0.015)
-    else:
-        candidates = [
-            256.0 * 1024.0 * 1024.0,
-            baseline * 0.03,
-        ]
-        if total > 0.0:
-            candidates.append(total * 0.010)
-
-    return max(candidates)
 
 
 def _pressure_fraction(
@@ -575,25 +474,30 @@ def _format_creep_note(evidence: WindowCreepEvidence) -> Optional[str]:
     """
     Format a compact note for CLI and dashboard display.
 
-    Example
-    -------
-    up ~12%, +1.4 GiB, votes 3/3
+    Example:
+    baseline 12.2 GiB -> recent 13.0 GiB, +820 MiB (~6%)
     """
     if not evidence.eligible:
         return None
 
     parts = []
 
-    if evidence.overall_worst_growth_pct is not None:
-        parts.append(f"up ~{evidence.overall_worst_growth_pct * 100.0:.0f}%")
+    if (
+        evidence.baseline_avg_bytes is not None
+        and evidence.recent_avg_bytes is not None
+    ):
+        parts.append(
+            f"baseline {_fmt_bytes(evidence.baseline_avg_bytes)} -> "
+            f"recent {_fmt_bytes(evidence.recent_avg_bytes)}"
+        )
 
     if evidence.overall_abs_delta_bytes is not None:
-        parts.append(f"+{_fmt_bytes(evidence.overall_abs_delta_bytes)}")
+        delta = evidence.overall_abs_delta_bytes
+        sign = "+" if delta >= 0.0 else "-"
+        parts.append(f"{sign}{_fmt_bytes(abs(delta))}")
 
-    if evidence.total_pairs > 0:
-        parts.append(
-            f"votes {int(evidence.positive_pairs)}/{int(evidence.total_pairs)}"
-        )
+    if evidence.overall_worst_growth_pct is not None:
+        parts.append(f"(~{evidence.overall_worst_growth_pct * 100.0:.0f}%)")
 
     if not parts:
         return None

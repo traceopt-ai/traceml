@@ -1,79 +1,86 @@
 from __future__ import annotations
 
-from itertools import islice
-from typing import Any, Dict, List
+from typing import List
 
 from IPython.display import HTML
 from rich.panel import Panel
 from rich.text import Text
 
 from traceml.aggregator.display_drivers.layout import STDOUT_STDERR_LAYOUT
-from traceml.database.remote_database_store import RemoteDBStore
 from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.stdout_stderr.common import (
+    StdoutStderrDB,
+    StdoutStderrLine,
+)
 
 
 class StdoutStderrRenderer(BaseRenderer):
     """
     Renderer for stdout/stderr lines stored by StdoutStderrSampler.
 
-    Rank-0 display only:
-    - Reads ONLY from RemoteDBStore (which itself only lives on rank0).
-    - Shows only rank 0 logs by default.
+    Current behavior
+    ----------------
+    - Displays only rank 0 logs by default.
+    - Reads from SQLite-backed history instead of RemoteDBStore.
+    - Preserves the same user-visible CLI behavior as before.
     """
 
     def __init__(
         self,
-        remote_store: RemoteDBStore,
+        db_path: str,
         display_lines: int = 50,
         rank: int = 0,
-        sampler_name: str = "Stdout/Stderr",
-        table_name: str = "stdout_stderr",
     ) -> None:
         super().__init__(
             name="Stdout/Stderr",
             layout_section_name=STDOUT_STDERR_LAYOUT,
         )
-        self._store = remote_store
+        self._db = StdoutStderrDB(db_path=db_path)
         self._display_lines = int(display_lines)
         self._rank = int(rank)
-        self._sampler_name = str(sampler_name)
-        self._table_name = str(table_name)
 
     @staticmethod
-    def _tail_rows(rows: Any, n: int) -> List[Dict[str, Any]]:
+    def _lines_to_text(lines: List[StdoutStderrLine]) -> Text:
         """
-        Tail helper that works with your Database table (likely a deque/list).
+        Convert line records into a Rich Text block.
         """
-        if not rows or n <= 0:
-            return []
-        # rows is expected to be sized (deque/list). islice works fine.
-        start = max(0, len(rows) - n)
-        return list(islice(rows, start, len(rows)))
+        if not lines:
+            return Text(
+                "Waiting for stdout/stderr...",
+                style="dim",
+                justify="center",
+            )
+
+        text_block = "\n".join(line.line for line in lines if line.line)
+        if not text_block:
+            return Text(
+                "Waiting for stdout/stderr...",
+                style="dim",
+                justify="center",
+            )
+
+        return Text(text_block)
 
     def get_panel_renderable(self) -> Panel:
-        db = self._store.get_db(
-            rank=self._rank, sampler_name=self._sampler_name
-        )
-        table = (
-            None if db is None else db.create_or_get_table(self._table_name)
-        )
+        """
+        Render the latest stdout/stderr lines as a Rich panel.
+        """
+        lines: List[StdoutStderrLine] = []
+        try:
+            conn = self._db.connect()
+            try:
+                lines = self._db.fetch_latest_lines(
+                    conn,
+                    rank=self._rank,
+                    limit=self._display_lines,
+                )
+            finally:
+                conn.close()
+        except Exception:
+            # Best-effort only: renderer must never crash the display loop.
+            lines = []
 
-        tail = (
-            self._tail_rows(table, self._display_lines)
-            if table is not None
-            else []
-        )
-
-        if not tail:
-            content = Text(
-                "Waiting for stdout/stderr...", style="dim", justify="center"
-            )
-        else:
-            # render as one block for speed + simpler wrapping behavior
-            text_block = "\n".join(
-                str(r.get("line", "")) for r in tail if r.get("line")
-            )
-            content = Text(text_block)
+        content = self._lines_to_text(lines)
 
         return Panel(
             content,
@@ -82,9 +89,15 @@ class StdoutStderrRenderer(BaseRenderer):
         )
 
     def get_notebook_renderable(self) -> HTML:
+        """
+        Notebook mode is not currently supported for this renderer.
+        """
         return HTML(
             "<pre>Stdout/Stderr renderer disabled in notebook mode.</pre>"
         )
 
     def log_summary(self, path: str) -> None:
-        pass
+        """
+        Reserved for future summary export support.
+        """
+        return None
