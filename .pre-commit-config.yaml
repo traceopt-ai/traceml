@@ -9,6 +9,7 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        exclude: ^mkdocs\.yml$
       - id: check-toml
       - id: check-ast
       - id: check-added-large-files
@@ -49,3 +50,13 @@ repos:
     hooks:
       - id: nbstripout
         args: ["--keep-output"]
+
+  - repo: local
+    hooks:
+      - id: mkdocs-build
+        name: mkdocs build --strict
+        entry: mkdocs build --strict --quiet
+        language: system
+        pass_filenames: false
+        files: ^(docs/|mkdocs\.yml|src/)
+        stages: [pre-push]

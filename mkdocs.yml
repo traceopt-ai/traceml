@@ -1,0 +1,89 @@
+site_name: TraceML
+site_description: Real-time bottleneck finder for PyTorch training runs
+site_url: https://traceopt-ai.github.io/traceml/
+repo_url: https://github.com/traceopt-ai/traceml
+repo_name: traceopt-ai/traceml
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  # logo: assets/logo.png        # uncomment when traceopt.ai logo is available
+  # favicon: assets/favicon.png
+  palette:
+    - scheme: default
+      primary: indigo
+      toggle: { icon: material/brightness-7, name: Switch to dark mode }
+    - scheme: slate
+      primary: indigo
+      toggle: { icon: material/brightness-4, name: Switch to light mode }
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+
+plugins:
+  - search
+  - autorefs
+  - include-markdown
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            merge_init_into_class: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed: { alternate_style: true }
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - toc: { permalink: true }
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - Quickstart: user_guide/quickstart.md
+      - Reading output: user_guide/reading-output.md
+      - Integrations:
+          - Hugging Face: user_guide/integrations/huggingface.md
+          - PyTorch Lightning: user_guide/integrations/lightning.md
+          - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
+      - FAQ: user_guide/faq.md
+      - Compare Runs: user_guide/compare.md
+      - Public API: user_guide/public-api.md
+  - Developer Guide:
+      - Architecture: developer_guide/architecture.md
+      - Subsystems:
+          - CLI: developer_guide/subsystems/cli.md
+          - Runtime: developer_guide/subsystems/runtime.md
+          - Aggregator: developer_guide/subsystems/aggregator.md
+          - Samplers: developer_guide/subsystems/samplers.md
+          - Database: developer_guide/subsystems/database.md
+          - Transport: developer_guide/subsystems/transport.md
+          - Renderers: developer_guide/subsystems/renderers.md
+          - Display drivers: developer_guide/subsystems/display-drivers.md
+          - Decorators: developer_guide/subsystems/decorators.md
+          - Integrations: developer_guide/subsystems/integrations.md
+          - Utils: developer_guide/subsystems/utils.md
+      - Contributing: developer_guide/contributing.md
