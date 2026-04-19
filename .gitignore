@@ -60,3 +60,6 @@ Thumbs.db
 # MkDocs build output
 site/
 .cache/
+
+# Internal planning artifacts (do not ship to upstream)
+specs/
