@@ -239,7 +239,7 @@ A practical workflow is:
 2. keep the TraceML final summary JSON as a W&B or MLflow artifact
 3. compare two saved summaries locally with `traceml compare`
 
-See [Compare Runs](compare.md).
+See [Compare Runs](../compare.md).
 
 ---
 
@@ -308,7 +308,7 @@ This usually gives the best balance between:
 
 ## Related docs
 
-- [Quickstart](quickstart.md)
-- [Compare Runs](compare.md)
-- [How to Read TraceML Output](how-to-read-output.md)
-- [FAQ](faq.md)
+- [Quickstart](../quickstart.md)
+- [Compare Runs](../compare.md)
+- [How to Read TraceML Output](../reading-output.md)
+- [FAQ](../faq.md)

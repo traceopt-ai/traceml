@@ -4,7 +4,7 @@ Use TraceML with PyTorch Lightning to find training bottlenecks without changing
 
 `TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing memory drift.
 
-> Start with the [Quickstart](quickstart.md) if you have not used TraceML yet.
+> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
 
 ---
 
@@ -301,6 +301,6 @@ This launches your script natively through `torchrun` without TraceML telemetry.
 
 ## Next steps
 
-- Read the [Quickstart](quickstart.md) for plain PyTorch loops
-- Read [huggingface.md](huggingface.md) for Hugging Face Trainer integration
+- Read the [Quickstart](../quickstart.md) for plain PyTorch loops
+- Read [Hugging Face Trainer](huggingface.md) for Hugging Face Trainer integration
 - Open an issue if you hit a problem: https://github.com/traceopt-ai/traceml/issues

@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](docs/quickstart.md) • [**Compare Runs**](docs/compare.md) • [**How to Read Output**](docs/how-to-read-output.md) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Quickstart**](docs/user_guide/quickstart.md) • [**Compare Runs**](docs/compare.md) • [**How to Read Output**](docs/user_guide/reading-output.md) • [**FAQ**](docs/user_guide/faq.md) • [**Use with W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
 
 </div>
 
@@ -153,7 +153,7 @@ Use TraceML for:
 - structured final summaries you can forward into W&B or MLflow
 - simple run-to-run comparison from saved TraceML summary JSON files
 
-See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
+See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md).
 
 ---
 
@@ -174,14 +174,14 @@ See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 
 ## Learn more
 
-- [Quickstart](docs/quickstart.md)
+- [Quickstart](docs/user_guide/quickstart.md)
 - [Compare Runs](docs/compare.md)
 - [Examples](examples/README.md)
-- [How to Read TraceML Output](docs/how-to-read-output.md)
-- [FAQ](docs/faq.md)
-- [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md)
-- Hugging Face integration: `docs/huggingface.md`
-- PyTorch Lightning integration: `docs/lightning.md`
+- [How to Read TraceML Output](docs/user_guide/reading-output.md)
+- [FAQ](docs/user_guide/faq.md)
+- [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md)
+- Hugging Face integration: `docs/user_guide/integrations/huggingface.md`
+- PyTorch Lightning integration: `docs/user_guide/integrations/lightning.md`
 
 Need a lighter zero-code first look or a deeper follow-up run? See the Quickstart and FAQ for `watch` and `deep`.
 

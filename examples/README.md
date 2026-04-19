@@ -126,10 +126,10 @@ That includes things like:
 
 ## Related docs
 
-- [Quickstart](../docs/quickstart.md)
+- [Quickstart](../docs/user_guide/quickstart.md)
 - [Compare Runs](../docs/compare.md)
-- [How to Read TraceML Output](../docs/how-to-read-output.md)
-- [FAQ](../docs/faq.md)
-- [Use TraceML with W&B / MLflow](../docs/use-with-wandb-mlflow.md)
-- [Hugging Face Trainer](../docs/huggingface.md)
-- [PyTorch Lightning](../docs/lightning.md)
+- [How to Read TraceML Output](../docs/user_guide/reading-output.md)
+- [FAQ](../docs/user_guide/faq.md)
+- [Use TraceML with W&B / MLflow](../docs/user_guide/integrations/wandb-mlflow.md)
+- [Hugging Face Trainer](../docs/user_guide/integrations/huggingface.md)
+- [PyTorch Lightning](../docs/user_guide/integrations/lightning.md)
