@@ -1,23 +1,38 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-title: ''
-labels: ''
-assignees: ''
-
+about: Something broke or behaved unexpectedly
+title: "[bug] "
+labels: bug
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**Feature tested:**
+-
 
-**To Reproduce**
-Steps to reproduce the behavior.
+**Bug description:**
+-
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**Steps to reproduce:**
+1.
+2.
+3.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Expected output:**
+-
 
-**Additional context**
-Add any other context about the problem here.
+**Actual output:**
+-
+
+## System
+- OS / hardware / virtualization:
+
+## Environment
+- TraceML version:
+- Python version:
+- PyTorch version:
+- CUDA version (if GPU):
+- Branch / commit hash (if dev install):
+- Other library versions that diverge from the pinned set:
+
+## Associated feature
+Feature #NUMBER:
+> TITLE

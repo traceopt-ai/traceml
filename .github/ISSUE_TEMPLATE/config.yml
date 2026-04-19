@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Quickstart / FAQ
+    url: https://traceopt-ai.github.io/traceml/user_guide/faq/
+    about: Check the FAQ for common questions before filing an issue.
+  - name: Discussion
+    url: https://github.com/traceopt-ai/traceml/discussions
+    about: For open-ended questions or RFC-style discussion, use Discussions instead.
