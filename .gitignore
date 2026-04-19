@@ -66,3 +66,6 @@ site/
 
 # Internal planning artifacts (do not ship to upstream)
 specs/
+
+# Claude Code project instructions (local-only, not upstream)
+CLAUDE.md
