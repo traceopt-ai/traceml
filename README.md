@@ -180,8 +180,8 @@ See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md
 - [How to Read TraceML Output](docs/user_guide/reading-output.md)
 - [FAQ](docs/user_guide/faq.md)
 - [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md)
-- Hugging Face integration: `docs/user_guide/integrations/huggingface.md`
-- PyTorch Lightning integration: `docs/user_guide/integrations/lightning.md`
+- [Hugging Face integration](docs/user_guide/integrations/huggingface.md)
+- [PyTorch Lightning integration](docs/user_guide/integrations/lightning.md)
 
 Need a lighter zero-code first look or a deeper follow-up run? See the Quickstart and FAQ for `watch` and `deep`.
 

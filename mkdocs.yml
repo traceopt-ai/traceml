@@ -70,6 +70,7 @@ nav:
           - PyTorch Lightning: user_guide/integrations/lightning.md
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
       - FAQ: user_guide/faq.md
+      - Compare Runs: user_guide/compare.md
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
