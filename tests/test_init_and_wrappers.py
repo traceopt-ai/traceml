@@ -14,19 +14,19 @@ if str(SRC) not in sys.path:
 
 
 def _reload_initialization_module():
-    import traceml.initialization as initialization
+    import traceml.sdk.initial as initialization
 
     return importlib.reload(initialization)
 
 
 def _reload_instrumentation_module():
-    import traceml.instrumentation as instrumentation
+    import traceml.sdk.instrumentation as instrumentation
 
     return importlib.reload(instrumentation)
 
 
 def _reload_wrappers_module():
-    import traceml.wrappers as wrappers
+    import traceml.sdk.wrappers as wrappers
 
     return importlib.reload(wrappers)
 
@@ -200,7 +200,7 @@ def test_decorators_import_preserves_legacy_auto_init(monkeypatch):
     )
 
     sys.modules.pop("traceml.decorators", None)
-    import traceml.decorators as decorators
+    import traceml.sdk.decorators_compat as decorators
 
     importlib.reload(decorators)
 

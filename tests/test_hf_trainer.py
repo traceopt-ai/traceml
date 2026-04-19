@@ -1,5 +1,3 @@
-import math
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -75,7 +73,7 @@ def test_hf_trainer_integration():
 
         # Verification: Check if TraceState.step incremented
         # We can import TraceState to check global state
-        from traceml.decorators import TraceState
+        from traceml.sdk.decorators_compat import TraceState
 
         # Note: TraceState is global, so it might be > 5 if other tests ran.
         # But we know it should be at least 5 more than before?

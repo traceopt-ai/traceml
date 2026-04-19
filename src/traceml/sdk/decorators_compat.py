@@ -18,8 +18,8 @@ Importing this module still triggers automatic patch installation once per
 process, matching the legacy user experience.
 """
 
-from traceml.initialization import enable_legacy_decorator_auto_init
-from traceml.instrumentation import (
+from traceml.sdk.initial import enable_legacy_decorator_auto_init
+from traceml.sdk.instrumentation import (
     TraceState,
     trace_model_instance,
     trace_step,

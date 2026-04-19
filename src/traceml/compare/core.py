@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from traceml.compare.io import derive_compare_labels
 from traceml.compare.verdict import build_compare_verdict
-from traceml.final_summary_protocol import utc_now_iso
+from traceml.sdk.final_summary_protocol import utc_now_iso
 
 _STEP_PHASES = ("dataloader", "forward", "backward", "optimizer")
 

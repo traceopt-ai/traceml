@@ -90,7 +90,7 @@ with traceml.trace_step(model):
 TraceML still supports:
 
 ```python
-from traceml.decorators import trace_step
+from traceml.sdk.decorators_compat import trace_step
 ```
 
 for backward compatibility, but new examples and docs use the top-level

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from traceml.aggregator.final_summary import generate_summary
-from traceml.final_summary_protocol import (
+from traceml.sdk.final_summary_protocol import (
     FinalSummaryResponse,
     get_final_summary_json_path,
     get_final_summary_request_path,

@@ -29,7 +29,7 @@ from traceml.aggregator.summaries.summary_layout import (
     wrap_lines,
 )
 from traceml.aggregator.summaries.system import generate_system_summary_card
-from traceml.final_summary_protocol import (
+from traceml.sdk.final_summary_protocol import (
     get_final_summary_json_path,
     get_final_summary_txt_path,
     utc_now_iso,

@@ -3,7 +3,7 @@ import sys
 
 from lightning.pytorch.callbacks import Callback
 
-from traceml.decorators import TraceState
+from traceml.sdk.decorators_compat import TraceState
 from traceml.utils.flush_buffers import flush_step_events
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.timing import (

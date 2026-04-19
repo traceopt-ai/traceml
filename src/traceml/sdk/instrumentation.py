@@ -82,7 +82,7 @@ def _should_auto_install_optimizer_timing() -> bool:
     - manual / selective path uses `traceml.wrap_optimizer(...)`
     """
     try:
-        from traceml.initialization import get_init_config
+        from traceml.sdk.initial import get_init_config
     except Exception:
         return True
 
