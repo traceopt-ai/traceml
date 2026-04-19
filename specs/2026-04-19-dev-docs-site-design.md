@@ -27,8 +27,10 @@ A portable blueprint of the Ecoki workflow exists at `DEV_DOCS_BLUEPRINT.md` for
 - Unified site with two top-level sections: **User Guide** (existing content) and **Developer Guide** (architecture + internals).
 - Auto-generated API reference for both public API (what users call) and curated developer internals (the 11 architecture layers).
 - Markdown-native authoring, NumPy-style docstring parsing, Mermaid diagram support, live-reload dev loop.
-- CI fails PRs that break links or rendering (`mkdocs build --strict`).
-- Issue templates (bug / feature / design doc) ported from the Ecoki blueprint.
+- Cross-page API references resolvable via `autorefs` (internal "intersphinx" equivalent).
+- CI fails PRs that break links or rendering (`mkdocs build --strict`), with pip caching for fast feedback and concurrency-cancelled PR builds on rebase.
+- Pre-push hook enforces `mkdocs build --strict` locally so contributors catch breaks before pushing.
+- Issue templates (bug / feature / design doc), PR template with docs checklist, and CODEOWNERS routing all ported from the Ecoki blueprint and adapted for GitHub.
 
 ## Non-Goals (deferred / backlog)
 
@@ -51,6 +53,7 @@ docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.26",
+    "mkdocs-autorefs>=1.2",
     "mkdocs-include-markdown-plugin>=7.0",
     "pymdown-extensions>=10.0",
 ]
@@ -59,14 +62,17 @@ docs = [
 - `mkdocs` — site generator (native CLI handles build + serve).
 - `mkdocs-material` — theme; provides search, dark mode, code tabs, admonitions.
 - `mkdocstrings[python]` — auto-API from docstrings, configured for NumPy style.
+- `mkdocs-autorefs` — cross-page reference resolution. Lets prose link `[trace_step][]` or `[Database][traceml.database.Database]` and resolve to the right API page. Equivalent of Sphinx's intersphinx for internal refs.
 - `mkdocs-include-markdown-plugin` — reuse README snippets inside docs without duplication.
 - `pymdown-extensions` — Material's standard markdown extensions (tabs, admonitions, content tabs).
+
+**Docs-build requires `torch` installed.** TraceML modules (`decorators.py`, `integrations/*.py`, layer hooks, many samplers) `import torch` at module top. mkdocstrings imports every module it documents, so building docs without torch installed fails at import. CI installs `.[docs,torch,lightning,hf]` to cover every importable module. This is the MkDocs-equivalent of Sphinx's `mock_heavy_deps.py` problem — it cannot be ignored.
 
 Explicitly **not** adopted from the Ecoki blueprint:
 - No custom `build_docs.py` — `mkdocs build` / `mkdocs serve` cover the use cases.
 - No custom watcher — `mkdocs serve` auto-reloads natively.
 - No RST underline fixer — project is Markdown.
-- No `mock_heavy_deps.py` — mkdocstrings imports modules lazily and the Material theme isn't sensitive to side-effect-heavy imports the way Sphinx autodoc is; `pip install -e ".[docs,torch]"` in CI is straightforward.
+- No `mock_heavy_deps.py` — instead, CI installs the optional deps (see above). Simpler and produces real API output.
 - No LaTeX `.sty` files — PDF is out of scope.
 
 ## Architecture — site structure
@@ -130,6 +136,8 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  # logo: assets/logo.png        # add when traceopt.ai logo is available
+  # favicon: assets/favicon.png  # 32x32 ico/png
   palette:
     - scheme: default
       primary: indigo
@@ -138,16 +146,22 @@ theme:
       primary: indigo
       toggle: { icon: material/brightness-4, name: Light mode }
   features:
+    - navigation.instant           # SPA-feel prefetching
+    - navigation.instant.progress  # loading bar
+    - navigation.tracking          # URL updates on scroll
     - navigation.tabs
     - navigation.sections
     - navigation.top
     - search.suggest
+    - search.highlight
     - content.code.copy
     - content.code.annotate
     - content.tabs.link
+    - content.action.edit          # "edit this page" pencil
 
 plugins:
   - search
+  - autorefs
   - include-markdown
   - mkdocstrings:
       handlers:
@@ -159,6 +173,8 @@ plugins:
             separate_signature: true
             members_order: source
             merge_init_into_class: true
+            show_root_heading: true
+            show_symbol_type_heading: true
 
 markdown_extensions:
   - admonition
@@ -221,18 +237,22 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0             # full history for any future git-log plugins
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-      - run: pip install -e ".[docs]"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[docs,torch,lightning,hf]"
       - run: mkdocs build --strict
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -251,6 +271,9 @@ jobs:
 
 - PR builds run `--strict` — broken internal links, missing references, or malformed markdown fail the check.
 - Only pushes to `main` deploy. PRs build but do not deploy.
+- `pip` cache keyed on `pyproject.toml` hash — after first CI run, subsequent runs reuse wheels (build time ~60s → ~15s).
+- `concurrency` cancels superseded PR builds on rebase; main-branch deploys are never cancelled.
+- CI installs `[docs,torch,lightning,hf]` extras (not just `[docs]`) — required so mkdocstrings can import every TraceML module without `ImportError`.
 - GitHub Pages must be enabled in repo settings (source: "GitHub Actions") as a one-time setup step.
 
 ## Issue templates
@@ -263,18 +286,93 @@ Ported from the Ecoki blueprint into `.github/ISSUE_TEMPLATE/`:
 
 YAML frontmatter (`name`, `about`, `labels`, `title`) added so GitHub's new-issue chooser displays them correctly.
 
+## Repo-root additions
+
+**`.gitignore`** — append:
+```
+site/
+.cache/
+```
+
+**`.github/pull_request_template.md`** — every PR gets an auto-populated checklist:
+```markdown
+## Summary
+<!-- what changed, why -->
+
+## Checklist
+- [ ] Tests added or updated (unless docs-only)
+- [ ] Docs updated if user-facing behavior changed
+- [ ] `mkdocs build --strict` succeeds locally
+- [ ] Commit messages are short single lines, no Co-Authored-By trailers
+- [ ] New public functions/classes have NumPy docstrings (Parameters / Returns / Raises)
+- [ ] Internal doc links resolve (`mkdocs serve` renders clean)
+```
+
+**`.github/CODEOWNERS`** — auto-requests review from the right person:
+```
+# Default owner
+*                           @abhinav
+# Docs owned by Abhijeet
+/docs/                      @Pendu
+/mkdocs.yml                 @Pendu
+/.github/workflows/docs.yml @Pendu
+```
+(Adjust GitHub handles as needed.)
+
+**`.pre-commit-config.yaml`** — append a docs hook so `mkdocs build --strict` runs locally before push:
+```yaml
+- repo: local
+  hooks:
+    - id: mkdocs-build
+      name: mkdocs build --strict
+      entry: mkdocs build --strict --quiet
+      language: system
+      pass_filenames: false
+      files: ^(docs/|mkdocs\.yml|src/)
+      stages: [pre-push]
+```
+`pre-push` stage (not `pre-commit`) so every commit isn't slowed down by a full docs build.
+
 ## Contributing page content
 
 Short page. The Ecoki full style guide is overkill for an open-source PyTorch library. Cover:
 
-1. **Dev setup** — `pip install -e ".[dev,torch,docs]"`.
+1. **Dev setup** — `pip install -e ".[dev,torch,lightning,hf,docs]"` (all extras so the docs build works end-to-end).
 2. **Branch naming** — `feature/<short-name>`, `fix/<short-name>`, `docs/<short-name>` (matches existing branch patterns).
 3. **Commit messages** — short single-line, no `Co-Authored-By` trailers (per root `CLAUDE.md`).
 4. **Code style** — black (line length 79), ruff, isort (black profile), pre-commit hooks.
-5. **Docstrings** — NumPy style. Every public class, function, method gets one with Parameters / Returns / Raises sections.
+5. **Docstrings** — NumPy style. Every public class, function, method gets one with Parameters / Returns / Raises sections. Template:
+
+   ```python
+   def trace_step(model: nn.Module):
+       """Mark a training step boundary.
+
+       Responsibilities
+       ----------------
+       - Marks the semantic start/end of a training step.
+       - Attributes step-scoped timing events.
+       - Advances the global step counter.
+
+       Parameters
+       ----------
+       model : torch.nn.Module
+           The model being trained. Used for memory-tracker attachment.
+
+       Yields
+       ------
+       None
+           Context-manager protocol; no value yielded.
+
+       Raises
+       ------
+       RuntimeError
+           If called outside of a training loop context.
+       """
+   ```
 6. **Tests** — `pytest tests/`. New code must include tests unless docs-only.
 7. **Docs** — if a code change affects user-facing behavior, update the relevant doc in the same PR.
 8. **Local preview** — `mkdocs serve` at repo root, open http://127.0.0.1:8000.
+9. **Before pushing** — `mkdocs build --strict` must succeed (pre-push hook enforces this).
 
 ## Gotchas carried over from Ecoki
 
@@ -290,20 +388,58 @@ Sphinx-specific gotchas (LaTeX passes, WebP images, underline drift, `mock_heavy
 
 ## Out of scope — explicit backlog
 
-These items are captured here because the project's roadmap may pick them up; the spec is the pointer.
+Captured so the roadmap can pick these up intentionally. Grouped by type.
+
+### Content & structure
 
 1. **Full docstring coverage.** Today ~65% of functions documented; private helpers and some modules have none. Requires roadmap buy-in from Abhinav. Likely 1-2 phases of dedicated work per subsystem.
-2. **Notes/Code_base/ integration.** CODE_MAP, CODE_WALKTHROUGH, INTEGRATION_REFERENCE, METRICS_REFERENCE, EXAMPLES_WALKTHROUGH, and ARCHITECTURE_DIAGRAMS are substantial existing content (~140KB total across six files). Integrating them transforms the Developer Guide and User Guide reference density. Post-MVP phase.
-3. **Internal-only MkDocs site.** `mkdocs.internal.yml` + `docs_internal/` for TIMELINE.md and strategic notes. Same Material theme, never deployed, served locally via `mkdocs serve -f mkdocs.internal.yml`. ~30 min to add.
-4. **Custom domain `docs.traceopt.ai`** via CNAME file + DNS.
-5. **Versioned docs** via `mike` once tagged releases matter.
-6. **PDF output** if a stakeholder demands it later.
-7. **Spell-check and prose linters** (vale, codespell on prose) in CI.
-8. **Architecture PNG replacement with Mermaid equivalent** — retire the 730KB PNG.
+2. **Notes/Code_base/ integration.** CODE_MAP, CODE_WALKTHROUGH, INTEGRATION_REFERENCE, METRICS_REFERENCE, EXAMPLES_WALKTHROUGH, ARCHITECTURE_DIAGRAMS — ~140KB of existing high-quality content. Integrating them transforms reference density of both User Guide and Developer Guide. Post-MVP phase.
+3. **Internal-only MkDocs site.** `mkdocs.internal.yml` + `docs_internal/` for TIMELINE.md and strategic notes. Same Material theme, never deployed, served locally via `mkdocs serve -f mkdocs.internal.yml`. ~30 min once content is ready.
+4. **Architecture Decision Records.** `docs/adr/` for permanent rationale — distinct from `specs/` (ephemeral implementation planning).
+5. **Glossary page** for ML/training terms (tensor parallelism, FSDP, gradient accumulation) — helps non-ML-specialist readers.
+6. **Changelog integration.** Render `CHANGELOG.md` as a docs page; optionally auto-generate via `release-please`.
+7. **Retire 730KB `traceml_architecture_diagram.png`** — replace with Mermaid once content is migrated.
+
+### CI/CD hardening
+
+8. **PR preview deploys.** GitHub Pages doesn't do this natively. Options: Cloudflare Pages (free, per-PR subdomain), Netlify (free tier), or self-hosted surge. Critical once external PRs arrive.
+9. **Branch protection on `main`** — require `Docs` check to be green before merge.
+10. **Weekly scheduled rebuild** — cron-triggered workflow catches rot in external references (PyPI badges, PyTorch intersphinx, changed dependencies).
+11. **Dependabot for docs deps.** Add `docs` dependency group to `.github/dependabot.yml`.
+12. **Broken external link checker** — `linkchecker` or `lychee` weekly.
+13. **Release automation.** `release-please` or `python-semantic-release` — auto-version bumps, tag, publish to PyPI, update docs.
+
+### Distribution & access
+
+14. **Custom domain `docs.traceopt.ai`** — CNAME file + DNS.
+15. **Versioned docs** via `mike`. Needed once tagged releases carry API differences worth preserving.
+16. **Redirects plugin** (`mkdocs-redirects`) — preserve old URLs after content moves; essential post-public-launch.
+17. **Analytics** — Plausible (privacy-first) preferred over Google Analytics. `extra.analytics` block.
+18. **robots.txt / sitemap** — Material auto-generates sitemap; add robots.txt for crawler control.
+19. **PDF output** if a stakeholder demands it later.
+
+### Polish & SEO
+
+20. **Social cards** — Material `social` plugin auto-generates branded OpenGraph images per page. Every LinkedIn/Twitter share gets a TraceML card.
+21. **Announcement bar** — Material's `extra.announcement` block for "TraceML v1.0 is out" style notices.
+22. **Custom 404 page** branded.
+23. **Logo + favicon** — commit `docs/assets/logo.png` + `docs/assets/favicon.png`, uncomment the `theme.logo` / `theme.favicon` entries in `mkdocs.yml`. Blocked on having a logomark from traceopt.ai.
+24. **"Last updated" timestamps** via `mkdocs-git-revision-date-localized-plugin`. Already enabled by `fetch-depth: 0` in CI.
+25. **Blog plugin** (Material native) — once TraceML starts shipping posts.
+26. **Footer social links** — GitHub, Discord, LinkedIn, X. `extra.social` block.
+27. **Privacy / offline plugin** — bundles external assets for GDPR, EU users.
+
+### Quality gates
+
+28. **Vale prose linter** — modern superset of codespell + spelling. Catches passive voice, jargon, inconsistent terminology.
+29. **`interrogate`** — measure docstring coverage in CI, fail below a ratcheting floor. Pairs with item #1.
+30. **Markdown linter** — `markdownlint-cli2` pre-commit for consistent heading levels, list style, trailing whitespace.
+31. **Image optimization** — `optipng` / `mozjpeg` pre-commit to prevent bloat.
+32. **Spell-check** — `codespell` on docs content in CI.
 
 ## Acceptance criteria
 
-1. `pip install -e ".[docs]"` installs all docs dependencies cleanly.
+1. `pip install -e ".[docs,torch,lightning,hf]"` installs all docs dependencies cleanly.
 2. `mkdocs serve` launches a site at `http://127.0.0.1:8000` with the nav tree above, no build warnings.
 3. `mkdocs build --strict` exits 0 on a clean checkout.
 4. User Guide pages render with all internal links resolved.
@@ -312,7 +448,11 @@ These items are captured here because the project's roadmap may pick them up; th
 7. Architecture page renders the Mermaid diagram visually (not as raw code).
 8. `.github/workflows/docs.yml` builds green on this branch's PR.
 9. `.github/ISSUE_TEMPLATE/` templates appear in GitHub's new-issue picker after merge.
-10. The PR description lists the backlog items above so Abhinav sees them at review time.
+10. `.github/pull_request_template.md` populates the PR body on new PRs.
+11. `.github/CODEOWNERS` routes review requests correctly on a test PR touching both `src/` and `docs/`.
+12. Pre-push hook `mkdocs build --strict` blocks a push that breaks the docs build.
+13. CI pip cache hit observed on second run (build time drops measurably).
+14. The PR description lists the backlog items above so Abhinav sees them at review time.
 
 ## Out-of-scope verification note
 
