@@ -4,8 +4,8 @@ hide:
   - toc
 ---
 
-<p align="center" markdown>
-  <img src="assets/traceopt-logo.png" alt="TraceOpt" width="200" />
+<p style="text-align: center;" markdown>
+  <img src="assets/traceopt-logo.png" alt="TraceOpt" width="100" style="display: inline-block; margin: 0 auto;" />
 </p>
 
 <h1 align="center" style="margin-top: 0.5rem;">TraceML</h1>
