@@ -49,3 +49,13 @@ repos:
     hooks:
       - id: nbstripout
         args: ["--keep-output"]
+
+  - repo: local
+    hooks:
+      - id: mkdocs-build
+        name: mkdocs build --strict
+        entry: mkdocs build --strict --quiet
+        language: system
+        pass_filenames: false
+        files: ^(docs/|mkdocs\.yml|src/)
+        stages: [pre-push]
