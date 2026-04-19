@@ -60,9 +60,12 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - toc: { permalink: true }
 
+# GLOBAL suppression — affects every page mkdocs processes, not just non-nav files.
+# Temporary: pre-existing docs link to `compare.md` which does not exist.
+# Remove this block after Task 4 updates internal links.
 validation:
   links:
-    not_found: ignore   # pre-existing docs outside nav have stale links; Task 3 will relocate them
+    not_found: ignore
 
 nav:
   - Home: index.md
