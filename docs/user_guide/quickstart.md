@@ -37,6 +37,99 @@ TraceML works best with PyTorch training scripts that already run successfully o
 
 ---
 
+## Pick your stack
+
+Three minimal paths to a first TraceML run, depending on how your training code is structured. Pick the tab that matches your setup — each shows install + the single change + the run command. Deeper details for each stack live in their integration pages.
+
+=== "Plain PyTorch"
+
+    ```bash
+    pip install "traceml-ai[torch]"
+    ```
+
+    Wrap the training step body:
+
+    ```python
+    import traceml
+
+    for step in range(num_steps):
+        with traceml.trace_step(model):
+            optimizer.zero_grad(set_to_none=True)
+            loss = criterion(model(x), y)
+            loss.backward()
+            optimizer.step()
+    ```
+
+    Run:
+
+    ```bash
+    traceml run train.py
+    ```
+
+    !!! note
+        For a full end-to-end example, see the [plain PyTorch walkthrough](#2-minimal-training-script) below.
+
+=== "HF Trainer"
+
+    ```bash
+    pip install "traceml-ai[hf]"
+    ```
+
+    Replace `Trainer` with `TraceMLTrainer`:
+
+    ```python
+    from traceml.integrations.huggingface import TraceMLTrainer
+
+    trainer = TraceMLTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        traceml_enabled=True,
+    )
+    trainer.train()
+    ```
+
+    Run:
+
+    ```bash
+    traceml run fine_tune.py
+    ```
+
+    !!! note
+        For full HF details, multi-GPU DDP, and deeper layer signals, see the [Hugging Face integration](integrations/huggingface.md).
+
+=== "Lightning"
+
+    ```bash
+    pip install "traceml-ai[lightning]"
+    ```
+
+    Add `TraceMLCallback` to your `Trainer`:
+
+    ```python
+    import lightning as L
+    from traceml.integrations.lightning import TraceMLCallback
+
+    trainer = L.Trainer(
+        max_steps=500,
+        callbacks=[TraceMLCallback()],
+    )
+    trainer.fit(model, train_dataloaders=loader)
+    ```
+
+    Run:
+
+    ```bash
+    traceml run train.py
+    ```
+
+    !!! note
+        For full Lightning details, see the [PyTorch Lightning integration](integrations/lightning.md).
+
+Everything below this point applies to all three stacks — reading output, compare runs, DDP, troubleshooting.
+
+---
+
 ## 1) Install
 
 ```bash
