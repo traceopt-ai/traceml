@@ -11,10 +11,12 @@ theme:
   # favicon: assets/favicon.png
   palette:
     - scheme: default
-      primary: indigo
+      primary: custom
+      accent: custom
       toggle: { icon: material/brightness-7, name: Switch to dark mode }
     - scheme: slate
-      primary: indigo
+      primary: custom
+      accent: custom
       toggle: { icon: material/brightness-4, name: Switch to light mode }
   features:
     - navigation.instant
@@ -46,6 +48,9 @@ plugins:
             merge_init_into_class: true
             show_root_heading: true
             show_symbol_type_heading: true
+
+extra_css:
+  - stylesheets/traceopt.css
 
 markdown_extensions:
   - admonition
