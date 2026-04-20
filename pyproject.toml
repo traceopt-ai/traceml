@@ -1,8 +1,8 @@
 [project]
 name = "traceml-ai"
-version = "0.2.9"
+version = "0.2.10"
 
-description = "TraceML: Lightweight training runtime health monitor."
+description = "TraceML: Lightweight runtime diagnostics for PyTorch training bottlenecks."
 authors = [{ name = "Abhinav Srivastav", email = "abhinav@traceopt.ai" }]
 readme = "README.md"
 license = { text = "Apache 2.0" }
