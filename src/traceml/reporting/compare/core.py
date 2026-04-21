@@ -79,6 +79,22 @@ def _system_value(summary: Dict[str, Any], key: str) -> Any:
     return None
 
 
+def _process_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one process summary value from the canonical nested schema.
+
+    This keeps compare payload shape stable even if the final summary JSON uses
+    a cleaner nested process structure.
+    """
+    if key == "cpu_avg_percent":
+        return _nested_get(summary, "process", "cpu", "avg_percent")
+    if key == "ram_peak_gb":
+        return _nested_get(summary, "process", "ram", "peak_gb")
+    if key == "takeaway":
+        return _nested_get(summary, "process", "takeaway")
+    return None
+
+
 def _value_delta(lhs: Any, rhs: Any) -> Dict[str, Optional[float]]:
     """
     Compare two numeric values and return lhs/rhs/delta/pct_change.
@@ -270,16 +286,16 @@ def build_compare_payload(
         },
         "process": {
             "cpu_avg_percent": _value_delta(
-                _nested_get(lhs_payload, "process", "cpu_avg_percent"),
-                _nested_get(rhs_payload, "process", "cpu_avg_percent"),
+                _process_value(lhs_payload, "cpu_avg_percent"),
+                _process_value(rhs_payload, "cpu_avg_percent"),
             ),
             "ram_peak_gb": _value_delta(
-                _nested_get(lhs_payload, "process", "ram_peak_gb"),
-                _nested_get(rhs_payload, "process", "ram_peak_gb"),
+                _process_value(lhs_payload, "ram_peak_gb"),
+                _process_value(rhs_payload, "ram_peak_gb"),
             ),
             "takeaway": _value_change(
-                _nested_get(lhs_payload, "process", "takeaway"),
-                _nested_get(rhs_payload, "process", "takeaway"),
+                _process_value(lhs_payload, "takeaway"),
+                _process_value(rhs_payload, "takeaway"),
             ),
         },
         "step_time": {

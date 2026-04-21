@@ -1,17 +1,30 @@
 """
 Compact end-of-run process summary generation.
 
-This module reads process-centric metrics from the `process_samples`
+This module reads traced workload process metrics from the `process_samples`
 projection table and produces:
 
 1. a compact text summary for end-of-run display and sharing
-2. a structured JSON payload for future automation and compare features
+2. a structured JSON payload for automation, logging, and future dashboard use
 
 Design goals
 ------------
 - Keep the printed summary short and easy to scan
-- Preserve the current JSON field names as much as possible
-- Keep the process summary useful for single-process and distributed runs
+- Use one clear canonical schema for process summary data
+- Preserve richer machine-readable fields in JSON
+- Add explicit structured blocks for:
+  - scope across traced ranks and pids
+  - CPU rollup
+  - RAM rollup
+  - GPU rollup across the traced workload
+  - per-rank process rollups
+
+Notes
+-----
+- The printed text intentionally remains compact.
+- The JSON summary is the richer source of truth for downstream systems.
+- Compare should continue to work without changing its output because it will
+  adapt internally to read the new nested process schema.
 """
 
 import sqlite3
@@ -50,6 +63,44 @@ class ProcessSummaryAgg:
 
     distinct_ranks: int = 0
     distinct_pids: int = 0
+
+    cpu_avg_percent: Optional[float] = None
+    cpu_peak_percent: Optional[float] = None
+    cpu_logical_core_count: Optional[int] = None
+
+    ram_avg_bytes: Optional[float] = None
+    ram_peak_bytes: Optional[float] = None
+    ram_total_bytes: Optional[float] = None
+
+    gpu_available: Optional[bool] = None
+    gpu_count: Optional[int] = None
+    gpu_device_index: Optional[int] = None
+
+    gpu_mem_used_avg_bytes: Optional[float] = None
+    gpu_mem_used_peak_bytes: Optional[float] = None
+    gpu_mem_reserved_avg_bytes: Optional[float] = None
+    gpu_mem_reserved_peak_bytes: Optional[float] = None
+    gpu_mem_total_bytes: Optional[float] = None
+
+
+@dataclass
+class PerRankProcessSummary:
+    """
+    Aggregated traced-process metrics for one rank across the sampled summary
+    window.
+
+    Notes
+    -----
+    - Values are aggregated across all selected `process_samples` rows for the
+      rank.
+    - Memory values remain in raw bytes while aggregating and are converted only
+      during final summary serialization.
+    - `pid_count` is included because a rank may emit from more than one traced
+      process over the sampled window in some environments.
+    """
+
+    rank: int
+    pid_count: int = 0
 
     cpu_avg_percent: Optional[float] = None
     cpu_peak_percent: Optional[float] = None
@@ -183,6 +234,113 @@ def _load_process_summary_agg(
     )
 
 
+def _load_per_rank_process_summary(
+    conn: sqlite3.Connection,
+    *,
+    rank: Optional[int] = None,
+    max_process_rows: int = 10_000,
+) -> Dict[int, PerRankProcessSummary]:
+    """
+    Load per-rank aggregated process metrics from `process_samples`.
+
+    Parameters
+    ----------
+    conn:
+        Open SQLite connection.
+    rank:
+        Optional rank filter. If None, aggregates across all ranks.
+    max_process_rows:
+        Safety cap on rows included in aggregation.
+
+    Returns
+    -------
+    Dict[int, PerRankProcessSummary]
+        Mapping rank -> aggregated traced-process metrics.
+
+    Notes
+    -----
+    This uses the same bounded `process_samples` window as the top-level
+    process summary so that the rollup and per-rank views describe the same
+    time range.
+    """
+    where_clause = ""
+    params: list[Any] = []
+
+    if rank is not None:
+        where_clause = "WHERE rank = ?"
+        params.append(int(rank))
+
+    sql = f"""
+        SELECT
+            rank,
+            COUNT(DISTINCT pid),
+
+            AVG(cpu_percent),
+            MAX(cpu_percent),
+            MAX(cpu_logical_core_count),
+
+            AVG(ram_used_bytes),
+            MAX(ram_used_bytes),
+            MAX(ram_total_bytes),
+
+            MAX(gpu_available),
+            MAX(gpu_count),
+            MIN(gpu_device_index),
+
+            AVG(gpu_mem_used_bytes),
+            MAX(gpu_mem_used_bytes),
+            AVG(gpu_mem_reserved_bytes),
+            MAX(gpu_mem_reserved_bytes),
+            MAX(gpu_mem_total_bytes)
+
+        FROM (
+            SELECT *
+            FROM process_samples
+            {where_clause}
+            ORDER BY id ASC
+            LIMIT ?
+        )
+        WHERE rank IS NOT NULL
+        GROUP BY rank
+        ORDER BY rank ASC;
+    """
+
+    rows = conn.execute(sql, (*params, int(max_process_rows))).fetchall()
+
+    out: Dict[int, PerRankProcessSummary] = {}
+    for row in rows:
+        rank_id = int(row[0])
+        out[rank_id] = PerRankProcessSummary(
+            rank=rank_id,
+            pid_count=int(row[1] or 0),
+            cpu_avg_percent=float(row[2]) if row[2] is not None else None,
+            cpu_peak_percent=float(row[3]) if row[3] is not None else None,
+            cpu_logical_core_count=int(row[4]) if row[4] is not None else None,
+            ram_avg_bytes=float(row[5]) if row[5] is not None else None,
+            ram_peak_bytes=float(row[6]) if row[6] is not None else None,
+            ram_total_bytes=float(row[7]) if row[7] is not None else None,
+            gpu_available=bool(row[8]) if row[8] is not None else None,
+            gpu_count=int(row[9]) if row[9] is not None else None,
+            gpu_device_index=int(row[10]) if row[10] is not None else None,
+            gpu_mem_used_avg_bytes=(
+                float(row[11]) if row[11] is not None else None
+            ),
+            gpu_mem_used_peak_bytes=(
+                float(row[12]) if row[12] is not None else None
+            ),
+            gpu_mem_reserved_avg_bytes=(
+                float(row[13]) if row[13] is not None else None
+            ),
+            gpu_mem_reserved_peak_bytes=(
+                float(row[14]) if row[14] is not None else None
+            ),
+            gpu_mem_total_bytes=(
+                float(row[15]) if row[15] is not None else None
+            ),
+        )
+    return out
+
+
 def _build_takeaway(agg: ProcessSummaryAgg) -> str:
     """
     Build one concise process-centric takeaway line.
@@ -286,8 +444,84 @@ def _build_gpu_line(
     return "GPU: n/a"
 
 
+def _per_rank_to_json(
+    per_rank: Dict[int, PerRankProcessSummary],
+) -> Dict[str, Dict[str, Optional[float]]]:
+    """
+    Convert per-rank aggregates into a JSON-friendly dictionary keyed by rank.
+    """
+    out: Dict[str, Dict[str, Optional[float]]] = {}
+
+    for rank_id, item in sorted(per_rank.items()):
+        used_peak_pct = share_percent(
+            item.gpu_mem_used_peak_bytes,
+            item.gpu_mem_total_bytes,
+        )
+        reserved_peak_pct = share_percent(
+            item.gpu_mem_reserved_peak_bytes,
+            item.gpu_mem_total_bytes,
+        )
+
+        total_gb = bytes_to_gb(item.gpu_mem_total_bytes)
+        used_peak_gb = bytes_to_gb(item.gpu_mem_used_peak_bytes)
+        reserved_peak_gb = bytes_to_gb(item.gpu_mem_reserved_peak_bytes)
+
+        out[str(rank_id)] = {
+            "pid_count": float(item.pid_count),
+            "gpu_device_index": (
+                float(item.gpu_device_index)
+                if item.gpu_device_index is not None
+                else None
+            ),
+            "cpu_avg_percent": item.cpu_avg_percent,
+            "cpu_peak_percent": item.cpu_peak_percent,
+            "ram_avg_gb": bytes_to_gb(item.ram_avg_bytes),
+            "ram_peak_gb": bytes_to_gb(item.ram_peak_bytes),
+            "ram_total_gb": bytes_to_gb(item.ram_total_bytes),
+            "gpu_mem_used_avg_gb": bytes_to_gb(item.gpu_mem_used_avg_bytes),
+            "gpu_mem_used_peak_gb": used_peak_gb,
+            "gpu_mem_reserved_avg_gb": bytes_to_gb(
+                item.gpu_mem_reserved_avg_bytes
+            ),
+            "gpu_mem_reserved_peak_gb": reserved_peak_gb,
+            "gpu_mem_total_gb": total_gb,
+            "gpu_mem_used_peak_pct": used_peak_pct,
+            "gpu_mem_reserved_peak_pct": reserved_peak_pct,
+            "gpu_mem_headroom_gb": (
+                max(total_gb - reserved_peak_gb, 0.0)
+                if total_gb is not None and reserved_peak_gb is not None
+                else None
+            ),
+        }
+
+    return out
+
+
+def _best_rank_idx(
+    per_rank: Dict[int, PerRankProcessSummary],
+    attr_name: str,
+) -> Optional[int]:
+    """
+    Return the rank id with the largest value for `attr_name`.
+    """
+    best_idx: Optional[int] = None
+    best_value: Optional[float] = None
+
+    for rank_id, item in per_rank.items():
+        value = getattr(item, attr_name, None)
+        if value is None:
+            continue
+        if best_value is None or float(value) > float(best_value):
+            best_idx = int(rank_id)
+            best_value = float(value)
+
+    return best_idx
+
+
 def _build_process_card(
     agg: ProcessSummaryAgg,
+    *,
+    per_rank: Dict[int, PerRankProcessSummary],
 ) -> tuple[str, Dict[str, Any]]:
     """
     Build a compact, shareable end-of-run process summary.
@@ -300,8 +534,15 @@ def _build_process_card(
 
     Notes
     -----
-    The printed text is intentionally compact. The JSON payload retains richer
-    fields so compare and future UI features do not lose fidelity.
+    The printed text is intentionally compact and continues to show one concise
+    process GPU line for readability.
+
+    The structured JSON summary is richer and includes:
+    - a `scope` block for traced ranks and pids
+    - nested CPU and RAM rollups
+    - a `gpu_rollup` block summarizing the traced workload GPU memory behavior
+    - a `per_rank` block preserving per-rank process aggregates for dashboards,
+      logging, and future analysis
     """
     duration_s = duration_from_bounds(agg.first_ts, agg.last_ts)
 
@@ -323,6 +564,36 @@ def _build_process_card(
         agg.gpu_mem_reserved_peak_bytes,
         agg.gpu_mem_total_bytes,
     )
+
+    highest_used_rank = _best_rank_idx(per_rank, "gpu_mem_used_peak_bytes")
+    highest_reserved_rank = _best_rank_idx(
+        per_rank, "gpu_mem_reserved_peak_bytes"
+    )
+
+    highest_used_peak_gb = (
+        bytes_to_gb(per_rank[highest_used_rank].gpu_mem_used_peak_bytes)
+        if highest_used_rank is not None
+        else None
+    )
+    highest_reserved_peak_gb = (
+        bytes_to_gb(
+            per_rank[highest_reserved_rank].gpu_mem_reserved_peak_bytes
+        )
+        if highest_reserved_rank is not None
+        else None
+    )
+
+    least_headroom_rank: Optional[int] = None
+    least_headroom_gb: Optional[float] = None
+    for rank_id, item in per_rank.items():
+        total_gb = bytes_to_gb(item.gpu_mem_total_bytes)
+        reserved_gb = bytes_to_gb(item.gpu_mem_reserved_peak_bytes)
+        if total_gb is None or reserved_gb is None:
+            continue
+        headroom_gb = max(total_gb - reserved_gb, 0.0)
+        if least_headroom_gb is None or headroom_gb < least_headroom_gb:
+            least_headroom_rank = int(rank_id)
+            least_headroom_gb = headroom_gb
 
     takeaway = _build_takeaway(agg)
 
@@ -363,30 +634,44 @@ def _build_process_card(
     summary = {
         "duration_s": duration_s,
         "process_samples": agg.process_samples,
-        "distinct_ranks": agg.distinct_ranks,
-        "distinct_pids": agg.distinct_pids,
-        "cpu_avg_percent": agg.cpu_avg_percent,
-        "cpu_peak_percent": agg.cpu_peak_percent,
-        "cpu_logical_core_count": agg.cpu_logical_core_count,
-        "ram_avg_gb": ram_avg_gb,
-        "ram_peak_gb": ram_peak_gb,
-        "ram_total_gb": ram_total_gb,
-        "gpu_available": agg.gpu_available,
-        "gpu_count": agg.gpu_count,
-        "gpu_device_index": agg.gpu_device_index,
-        "gpu_mem_used_avg_gb": gpu_mem_used_avg_gb,
-        "gpu_mem_used_peak_gb": gpu_mem_used_peak_gb,
-        "gpu_mem_reserved_avg_gb": gpu_mem_reserved_avg_gb,
-        "gpu_mem_reserved_peak_gb": gpu_mem_reserved_peak_gb,
-        "gpu_mem_total_gb": gpu_mem_total_gb,
-        "gpu_mem_used_peak_pct": gpu_mem_used_peak_pct,
-        "gpu_mem_reserved_peak_pct": gpu_mem_reserved_peak_pct,
+        "scope": {
+            "ranks": agg.distinct_ranks,
+            "pids": agg.distinct_pids,
+        },
+        "cpu": {
+            "avg_percent": agg.cpu_avg_percent,
+            "peak_percent": agg.cpu_peak_percent,
+            "logical_core_count": agg.cpu_logical_core_count,
+        },
+        "ram": {
+            "avg_gb": ram_avg_gb,
+            "peak_gb": ram_peak_gb,
+            "total_gb": ram_total_gb,
+        },
+        "gpu_rollup": {
+            "available": agg.gpu_available,
+            "count": agg.gpu_count,
+            "device_index": agg.gpu_device_index,
+            "used_avg_gb": gpu_mem_used_avg_gb,
+            "used_peak_gb": gpu_mem_used_peak_gb,
+            "reserved_avg_gb": gpu_mem_reserved_avg_gb,
+            "reserved_peak_gb": gpu_mem_reserved_peak_gb,
+            "total_gb": gpu_mem_total_gb,
+            "used_peak_pct": gpu_mem_used_peak_pct,
+            "reserved_peak_pct": gpu_mem_reserved_peak_pct,
+            "highest_used_rank": highest_used_rank,
+            "highest_used_peak_gb": highest_used_peak_gb,
+            "highest_reserved_rank": highest_reserved_rank,
+            "highest_reserved_peak_gb": highest_reserved_peak_gb,
+            "least_headroom_rank": least_headroom_rank,
+            "least_headroom_gb": least_headroom_gb,
+        },
+        "per_rank": _per_rank_to_json(per_rank),
         "takeaway": takeaway,
         "units": {
             "memory": "GB",
             "cpu": "%",
         },
-        # Keep `card` for backward compatibility with existing callers/files.
         "card": card,
     }
     return card, summary
@@ -425,10 +710,15 @@ def generate_process_summary_card(
             rank=rank,
             max_process_rows=max_process_rows,
         )
+        per_rank = _load_per_rank_process_summary(
+            conn,
+            rank=rank,
+            max_process_rows=max_process_rows,
+        )
     finally:
         conn.close()
 
-    card, process_summary = _build_process_card(agg)
+    card, process_summary = _build_process_card(agg, per_rank=per_rank)
 
     append_text(db_path + "_summary_card.txt", card)
 
