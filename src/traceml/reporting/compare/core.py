@@ -61,6 +61,24 @@ def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
     return cur
 
 
+def _system_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one system summary value from the canonical nested schema.
+
+    This keeps compare payload shape stable even if the final summary JSON uses
+    a cleaner nested system structure.
+    """
+    if key == "cpu_avg_percent":
+        return _nested_get(summary, "system", "cpu", "avg_percent")
+    if key == "ram_peak_gb":
+        return _nested_get(summary, "system", "ram", "peak_gb")
+    if key == "gpu_available":
+        return _nested_get(summary, "system", "gpu_rollup", "available")
+    if key == "gpu_count":
+        return _nested_get(summary, "system", "gpu_rollup", "count")
+    return None
+
+
 def _value_delta(lhs: Any, rhs: Any) -> Dict[str, Optional[float]]:
     """
     Compare two numeric values and return lhs/rhs/delta/pct_change.
@@ -234,20 +252,20 @@ def build_compare_payload(
         },
         "system": {
             "cpu_avg_percent": _value_delta(
-                _nested_get(lhs_payload, "system", "cpu_avg_percent"),
-                _nested_get(rhs_payload, "system", "cpu_avg_percent"),
+                _system_value(lhs_payload, "cpu_avg_percent"),
+                _system_value(rhs_payload, "cpu_avg_percent"),
             ),
             "ram_peak_gb": _value_delta(
-                _nested_get(lhs_payload, "system", "ram_peak_gb"),
-                _nested_get(rhs_payload, "system", "ram_peak_gb"),
+                _system_value(lhs_payload, "ram_peak_gb"),
+                _system_value(rhs_payload, "ram_peak_gb"),
             ),
             "gpu_available": _value_change(
-                _nested_get(lhs_payload, "system", "gpu_available"),
-                _nested_get(rhs_payload, "system", "gpu_available"),
+                _system_value(lhs_payload, "gpu_available"),
+                _system_value(rhs_payload, "gpu_available"),
             ),
             "gpu_count": _value_delta(
-                _nested_get(lhs_payload, "system", "gpu_count"),
-                _nested_get(rhs_payload, "system", "gpu_count"),
+                _system_value(lhs_payload, "gpu_count"),
+                _system_value(rhs_payload, "gpu_count"),
             ),
         },
         "process": {
