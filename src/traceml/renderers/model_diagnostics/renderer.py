@@ -58,8 +58,8 @@ class ModelDiagnosticsRenderer(BaseRenderer):
         Never raises; returns last-good payload on failures.
         """
         try:
-            step_time = self._step_time.compute_cli()
-            step_memory = self._step_memory.compute_cli()
+            step_time = self._step_time.compute_dashboard()
+            step_memory = self._step_memory.compute_dashboard()
 
             payload: ModelDiagnosticsPayload = build_model_diagnostics_payload(
                 step_time_metrics=step_time.metrics,

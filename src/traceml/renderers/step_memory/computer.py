@@ -21,8 +21,8 @@ class StepMemoryMetricsComputer:
         db_path: str,
         *,
         stale_ttl_s: Optional[float] = 30.0,
-        cli_window_size: int = 100,
-        dashboard_window_size: int = 200,
+        cli_window_size: int = 400,
+        dashboard_window_size: int = 400,
     ) -> None:
         self._cli = StepMemoryCLIComputer(
             db_path=db_path,
