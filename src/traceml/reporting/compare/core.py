@@ -95,6 +95,66 @@ def _process_value(summary: Dict[str, Any], key: str) -> Any:
     return None
 
 
+def _first_non_none(*values: Any) -> Any:
+    """
+    Return the first value that is not None.
+    """
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _step_time_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Read the canonical primary step-time rollup.
+
+    Prefer the cleaner structured schema and fall back to legacy-compatible
+    fields when needed.
+    """
+    primary = _nested_get(summary, "global_rollup", "typical")
+    if isinstance(primary, dict):
+        return primary
+
+    primary = _nested_get(summary, "timing_primary")
+    return primary if isinstance(primary, dict) else {}
+
+
+def _step_time_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one step-time summary value from the canonical nested schema while
+    preserving compare stability.
+    """
+    if key == "status":
+        return _nested_get(summary, "diagnosis", "status")
+
+    primary = _step_time_primary(summary)
+
+    if key == "step_avg_ms":
+        return primary.get("step_avg_ms")
+    if key == "wait_share_pct":
+        return primary.get("wait_share_pct")
+    if key == "compute_share_pct":
+        return primary.get("compute_share_pct")
+    if key == "dominant_phase":
+        return primary.get("dominant_phase")
+
+    return None
+
+
+def _step_time_split(
+    summary: Dict[str, Any],
+    *,
+    split_key: str,
+) -> Dict[str, Any]:
+    """
+    Read one canonical step-time split dictionary.
+    """
+    primary = _step_time_primary(summary)
+    split = primary.get(split_key)
+    return split if isinstance(split, dict) else {}
+
+
 def _value_delta(lhs: Any, rhs: Any) -> Dict[str, Optional[float]]:
     """
     Compare two numeric values and return lhs/rhs/delta/pct_change.
@@ -148,11 +208,8 @@ def _compare_step_splits(
     """
     out: Dict[str, Dict[str, Optional[float]]] = {}
 
-    lhs_split = _nested_get(lhs_summary, "timing_primary", split_key)
-    rhs_split = _nested_get(rhs_summary, "timing_primary", split_key)
-
-    lhs_split = lhs_split if isinstance(lhs_split, dict) else {}
-    rhs_split = rhs_split if isinstance(rhs_split, dict) else {}
+    lhs_split = _step_time_split(lhs_summary, split_key=split_key)
+    rhs_split = _step_time_split(rhs_summary, split_key=split_key)
 
     for phase in _STEP_PHASES:
         out[phase] = _value_delta(lhs_split.get(phase), rhs_split.get(phase))
@@ -212,8 +269,8 @@ def build_compare_payload(
     rhs_step_memory = rhs_payload.get("step_memory", {})
 
     step_avg = _value_delta(
-        _nested_get(lhs_step_time, "timing_primary", "step_avg_ms"),
-        _nested_get(rhs_step_time, "timing_primary", "step_avg_ms"),
+        _step_time_value(lhs_step_time, "step_avg_ms"),
+        _step_time_value(rhs_step_time, "step_avg_ms"),
     )
     lhs_step_status = _nested_get(lhs_step_time, "diagnosis", "status")
     rhs_step_status = _nested_get(rhs_step_time, "diagnosis", "status")
@@ -309,24 +366,16 @@ def build_compare_payload(
             },
             "step_avg_ms": step_avg,
             "wait_share_pct": _value_delta(
-                _nested_get(lhs_step_time, "timing_primary", "wait_share_pct"),
-                _nested_get(rhs_step_time, "timing_primary", "wait_share_pct"),
+                _step_time_value(lhs_step_time, "wait_share_pct"),
+                _step_time_value(rhs_step_time, "wait_share_pct"),
             ),
             "compute_share_pct": _value_delta(
-                _nested_get(
-                    lhs_step_time,
-                    "timing_primary",
-                    "compute_share_pct",
-                ),
-                _nested_get(
-                    rhs_step_time,
-                    "timing_primary",
-                    "compute_share_pct",
-                ),
+                _step_time_value(lhs_step_time, "compute_share_pct"),
+                _step_time_value(rhs_step_time, "compute_share_pct"),
             ),
             "dominant_phase": _value_change(
-                _nested_get(lhs_step_time, "timing_primary", "dominant_phase"),
-                _nested_get(rhs_step_time, "timing_primary", "dominant_phase"),
+                _step_time_value(lhs_step_time, "dominant_phase"),
+                _step_time_value(rhs_step_time, "dominant_phase"),
             ),
             "split_ms": _compare_step_splits(
                 lhs_step_time,

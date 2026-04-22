@@ -5,7 +5,24 @@ This module reads `step_time_samples`, builds per-rank timing summaries, and
 produces:
 
 1. a compact text summary for end-of-run display and sharing
-2. a structured JSON payload designed to be useful for future compare views
+2. a structured JSON payload for automation, comparison, and future dashboards
+
+Design goals
+------------
+- Keep the printed summary concise and easy to scan
+- Make future extension straightforward for:
+  - richer global rollups
+  - per-rank detail
+  - optional per-device / per-GPU detail when the data model supports it
+
+Notes
+-----
+- The printed text intentionally remains compact.
+- The JSON summary is the richer source of truth for downstream systems.
+- The current persistent step-time data is rank-based, so this module exposes
+  `per_rank` as the canonical detailed dimension today.
+- A `per_device` extension point is included, but it is intentionally empty
+  until canonical step-time rows carry device identity reliably.
 """
 
 import json
@@ -420,56 +437,216 @@ def _dominant_line(
     )
 
 
+def _empty_timing_rollup() -> Dict[str, Any]:
+    """
+    Return an empty timing rollup block with stable keys.
+
+    Using a stable empty structure makes downstream consumers simpler and keeps
+    missing-data handling explicit rather than forcing callers to guard every
+    field access.
+    """
+    return {
+        "steps_analyzed": 0,
+        "step_avg_ms": None,
+        "compute_avg_ms": None,
+        "compute_share_pct": None,
+        "wait_avg_ms": None,
+        "wait_share_pct": None,
+        "split_ms": None,
+        "split_pct": None,
+        "dominant_phase": None,
+    }
+
+
+def _timing_rollup_from_summary(
+    summary: Optional[RankStepSummary],
+) -> Dict[str, Any]:
+    """
+    Build one canonical timing rollup from a per-rank summary.
+
+    The chosen metrics are intentionally conservative and user-oriented:
+    - average milliseconds per phase over the analyzed window
+    - percentage share of the average total step
+    - dominant phase
+    - derived wait proxy
+
+    This avoids noisy sums and preserves the fields most useful for diagnosis,
+    run-to-run comparison, and future dashboards.
+    """
+    if summary is None:
+        return _empty_timing_rollup()
+
+    split_ms = _split_ms(summary)
+    split_pct = _split_pct(summary)
+    step_avg_ms = _finite_float(summary.avg_total_step_ms)
+    compute_avg_ms = _finite_float(summary.avg_gpu_compute_ms)
+    wait_avg_ms = _compute_wait_avg_ms(summary)
+
+    return {
+        "steps_analyzed": int(summary.steps_analyzed),
+        "step_avg_ms": step_avg_ms,
+        "compute_avg_ms": compute_avg_ms,
+        "compute_share_pct": share_percent(compute_avg_ms, step_avg_ms),
+        "wait_avg_ms": wait_avg_ms,
+        "wait_share_pct": share_percent(wait_avg_ms, step_avg_ms),
+        "split_ms": split_ms,
+        "split_pct": split_pct,
+        "dominant_phase": _dominant_bucket(split_ms),
+    }
+
+
+def _rank_entry_to_json(
+    rank: int,
+    summary: RankStepSummary,
+) -> Dict[str, Any]:
+    """
+    Serialize one rank summary into the canonical machine-readable structure.
+
+    Device identity is intentionally nullable today because the current
+    `step_time_samples` projection is rank-based and does not reliably persist
+    canonical GPU identity for end-of-run timing summaries.
+    """
+    return {
+        "identity": {
+            "rank": int(rank),
+            "local_rank": None,
+            "gpu_idx": None,
+        },
+        "timing": _timing_rollup_from_summary(summary),
+    }
+
+
+def _timing_rollup_with_rank(
+    rank: Optional[int],
+    summary: Optional[RankStepSummary],
+) -> Dict[str, Any]:
+    """
+    Attach rank identity to a timing rollup block.
+    """
+    rollup = _timing_rollup_from_summary(summary)
+    rollup["rank"] = int(rank) if rank is not None else None
+    return rollup
+
+
+def _build_global_rollup(
+    *,
+    per_rank_summary: Dict[int, RankStepSummary],
+    representative_rank: Optional[int],
+    bottleneck_rank: Optional[int],
+    imbalance_gap_pct: Optional[float],
+) -> Dict[str, Any]:
+    """
+    Build the canonical top-level step-time rollup for the analyzed run window.
+
+    Semantics
+    ---------
+    - `typical` is the representative rank for the run window. In distributed
+      runs this is the rank closest to the median average step time. In
+      single-rank runs it is the only available rank.
+    - `bottleneck` is the slowest rank in the analyzed window.
+    - `imbalance_gap_pct` captures worst-vs-typical spread and is one of the
+      most useful signals for distributed straggler diagnosis.
+
+    Notes
+    -----
+    This is intentionally rank-based today. A future `per_device` view can be
+    added cleanly once canonical step-time rows include reliable device
+    identity.
+    """
+    if not per_rank_summary:
+        return {
+            "mode": "no_data",
+            "ranks_seen": 0,
+            "representative_rank": None,
+            "bottleneck_rank": None,
+            "imbalance_gap_pct": None,
+            "typical": _empty_timing_rollup(),
+            "bottleneck": _empty_timing_rollup(),
+        }
+
+    representative_summary = (
+        per_rank_summary.get(representative_rank)
+        if representative_rank is not None
+        else None
+    )
+    bottleneck_summary = (
+        per_rank_summary.get(bottleneck_rank)
+        if bottleneck_rank is not None
+        else None
+    )
+
+    return {
+        "mode": (
+            "single_rank" if len(per_rank_summary) <= 1 else "distributed"
+        ),
+        "ranks_seen": len(per_rank_summary),
+        "representative_rank": representative_rank,
+        "bottleneck_rank": bottleneck_rank,
+        "imbalance_gap_pct": imbalance_gap_pct,
+        "typical": _timing_rollup_from_summary(representative_summary),
+        "bottleneck": _timing_rollup_from_summary(bottleneck_summary),
+    }
+
+
 def _build_overview(
     *,
     per_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[str, Any]:
     """
-    Build comparison-friendly overview fields from per-rank summaries.
+    Build high-level comparison-friendly overview fields from per-rank timing
+    summaries.
+
+    Notes
+    -----
+    The overview intentionally centers on representative-vs-bottleneck behavior
+    rather than cross-rank mean values. For distributed training, bottlenecks
+    and imbalance matter more than arithmetic averages across ranks.
     """
     if not per_rank_summary:
         return {
             "mode": "no_data",
+            "representative_rank": None,
             "worst_rank": None,
-            "median_rank": None,
+            "representative_avg_step_ms": None,
             "worst_avg_step_ms": None,
-            "median_avg_step_ms": None,
-            "worst_vs_median_pct": None,
+            "worst_vs_representative_pct": None,
         }
 
     avg_total_by_rank = {
         rank: s.avg_total_step_ms for rank, s in per_rank_summary.items()
     }
     worst_rank = max(avg_total_by_rank, key=avg_total_by_rank.get)
-    median_rank = _closest_rank_to_median(avg_total_by_rank)
+    representative_rank = _closest_rank_to_median(avg_total_by_rank)
 
     worst_avg_step_ms = avg_total_by_rank.get(worst_rank)
-    median_avg_step_ms = (
-        avg_total_by_rank.get(median_rank) if median_rank is not None else None
+    representative_avg_step_ms = (
+        avg_total_by_rank.get(representative_rank)
+        if representative_rank is not None
+        else None
     )
 
-    worst_vs_median_pct = None
+    worst_vs_representative_pct = None
     if (
         worst_avg_step_ms is not None
-        and median_avg_step_ms is not None
-        and median_avg_step_ms > 0.0
-        and worst_rank != median_rank
+        and representative_avg_step_ms is not None
+        and representative_avg_step_ms > 0.0
+        and worst_rank != representative_rank
     ):
-        worst_vs_median_pct = (
+        worst_vs_representative_pct = (
             100.0
-            * (worst_avg_step_ms - median_avg_step_ms)
-            / median_avg_step_ms
+            * (worst_avg_step_ms - representative_avg_step_ms)
+            / representative_avg_step_ms
         )
 
     return {
         "mode": (
             "single_rank" if len(per_rank_summary) <= 1 else "distributed"
         ),
+        "representative_rank": representative_rank,
         "worst_rank": worst_rank,
-        "median_rank": median_rank,
+        "representative_avg_step_ms": representative_avg_step_ms,
         "worst_avg_step_ms": worst_avg_step_ms,
-        "median_avg_step_ms": median_avg_step_ms,
-        "worst_vs_median_pct": worst_vs_median_pct,
+        "worst_vs_representative_pct": worst_vs_representative_pct,
     }
 
 
@@ -491,70 +668,90 @@ def _build_step_time_card(
     - one dominant-phase takeaway
     - diagnosis + next action
 
-    The JSON payload remains richer and structured for future compare views.
+    The JSON payload is richer than the printed text and is the canonical
+    machine-readable representation for compare, logging, and dashboards.
+
+    Schema notes
+    ------------
+    The canonical structured blocks are:
+    - `overview`
+    - `global_rollup`
+    - `rank_rollup`
+    - `per_rank`
+    - `per_device` (reserved for future extension)
+    - `diagnosis`
+
+    Compatibility notes
+    -------------------
+    `timing_primary`, `timing_median_rank`, and `timing_worst_rank` are kept so
+    existing compare and rendering logic remain stable while the internal schema
+    becomes cleaner.
     """
     ranks_present = sorted(per_rank_summary.keys())
     overview = _build_overview(per_rank_summary=per_rank_summary)
 
+    representative_rank = overview["representative_rank"]
     worst_rank = overview["worst_rank"]
-    median_rank = overview["median_rank"]
+    representative_avg_step_ms = overview["representative_avg_step_ms"]
     worst_avg_step_ms = overview["worst_avg_step_ms"]
-    median_avg_step_ms = overview["median_avg_step_ms"]
-    worst_vs_median_pct = overview["worst_vs_median_pct"]
+    worst_vs_representative_pct = overview["worst_vs_representative_pct"]
 
+    representative_summary = (
+        per_rank_summary.get(representative_rank)
+        if representative_rank is not None
+        else None
+    )
     worst_summary = (
         per_rank_summary.get(worst_rank) if worst_rank is not None else None
     )
-    median_summary = (
-        per_rank_summary.get(median_rank) if median_rank is not None else None
-    )
 
     primary_summary = (
-        median_summary if median_summary is not None else worst_summary
+        representative_summary
+        if representative_summary is not None
+        else worst_summary
     )
 
-    median_split_ms = _split_ms(median_summary) if median_summary else None
-    worst_split_ms = _split_ms(worst_summary) if worst_summary else None
-    median_split_pct = _split_pct(median_summary) if median_summary else None
-    worst_split_pct = _split_pct(worst_summary) if worst_summary else None
+    representative_split_ms = (
+        _split_ms(representative_summary)
+        if representative_summary is not None
+        else None
+    )
+    worst_split_ms = (
+        _split_ms(worst_summary) if worst_summary is not None else None
+    )
+    representative_split_pct = (
+        _split_pct(representative_summary)
+        if representative_summary is not None
+        else None
+    )
+    worst_split_pct = (
+        _split_pct(worst_summary) if worst_summary is not None else None
+    )
 
-    dominant_text = _dominant_line(median_split_ms, worst_split_ms)
+    dominant_text = _dominant_line(
+        representative_split_ms,
+        worst_split_ms,
+    )
 
     summary_diag = build_summary_step_diagnosis(
         rank_signals=_to_rank_signals(per_rank_summary),
         max_rows=max_rows,
         per_rank_step_metrics=per_rank_step_metrics,
     )
-
     summary_diag_presented = present_step_time_summary_diagnosis(summary_diag)
 
-    primary_wait_avg_ms = (
-        _compute_wait_avg_ms(primary_summary)
-        if primary_summary is not None
-        else None
+    primary_rollup = _timing_rollup_from_summary(primary_summary)
+    representative_rollup = _timing_rollup_with_rank(
+        representative_rank,
+        representative_summary,
     )
-    primary_wait_share_pct = (
-        share_percent(primary_wait_avg_ms, primary_summary.avg_total_step_ms)
-        if primary_summary is not None and primary_wait_avg_ms is not None
-        else None
-    )
+    worst_rollup = _timing_rollup_with_rank(worst_rank, worst_summary)
 
-    primary_compute_avg_ms = (
-        primary_summary.avg_gpu_compute_ms
-        if primary_summary is not None
-        else None
-    )
-    primary_compute_share_pct = (
-        share_percent(
-            primary_compute_avg_ms, primary_summary.avg_total_step_ms
-        )
-        if primary_summary is not None and primary_compute_avg_ms is not None
-        else None
-    )
-
-    primary_split_ms = _split_ms(primary_summary) if primary_summary else None
-    primary_split_pct = (
-        _split_pct(primary_summary) if primary_summary else None
+    global_rollup = _build_global_rollup(
+        per_rank_summary=per_rank_summary,
+        representative_rank=representative_rank,
+        bottleneck_rank=worst_rank,
+        imbalance_gap_pct=worst_vs_representative_pct,
     )
 
     lines = [
@@ -584,7 +781,7 @@ def _build_step_time_card(
                     f"FWD {format_ms(only_split_ms['forward'])} | "
                     f"BWD {format_ms(only_split_ms['backward'])} | "
                     f"OPT {format_ms(only_split_ms['optimizer'])} | "
-                    f"WAIT {format_ms(primary_wait_avg_ms)}"
+                    f"WAIT {format_ms(primary_rollup['wait_avg_ms'])}"
                 ),
                 f"- Dominant: {_dominant_line(only_split_ms, None)}",
             ]
@@ -596,21 +793,21 @@ def _build_step_time_card(
                     f"- Scope: ranks {len(ranks_present)} | compared over last up to {int(max_rows)} steps per rank"
                 ),
                 (
-                    f"- Step avg: median r{median_rank} {format_ms(median_avg_step_ms)} | "
+                    f"- Step avg: median r{representative_rank} {format_ms(representative_avg_step_ms)} | "
                     f"worst r{worst_rank} {format_ms(worst_avg_step_ms)} | "
-                    f"gap {format_percent(worst_vs_median_pct)}"
+                    f"gap {format_percent(worst_vs_representative_pct)}"
                 ),
             ]
         )
 
-        if median_split_ms is not None:
+        if representative_split_ms is not None:
             lines.append(
                 (
-                    f"- Median split: DL {format_ms(median_split_ms['dataloader'])} | "
-                    f"FWD {format_ms(median_split_ms['forward'])} | "
-                    f"BWD {format_ms(median_split_ms['backward'])} | "
-                    f"OPT {format_ms(median_split_ms['optimizer'])} | "
-                    f"WAIT {format_ms(_compute_wait_avg_ms(median_summary))}"
+                    f"- Median split: DL {format_ms(representative_split_ms['dataloader'])} | "
+                    f"FWD {format_ms(representative_split_ms['forward'])} | "
+                    f"BWD {format_ms(representative_split_ms['backward'])} | "
+                    f"OPT {format_ms(representative_split_ms['optimizer'])} | "
+                    f"WAIT {format_ms(representative_rollup['wait_avg_ms'])}"
                 )
             )
 
@@ -621,7 +818,7 @@ def _build_step_time_card(
                     f"FWD {format_ms(worst_split_ms['forward'])} | "
                     f"BWD {format_ms(worst_split_ms['backward'])} | "
                     f"OPT {format_ms(worst_split_ms['optimizer'])} | "
-                    f"WAIT {format_ms(_compute_wait_avg_ms(worst_summary))}"
+                    f"WAIT {format_ms(worst_rollup['wait_avg_ms'])}"
                 )
             )
 
@@ -637,106 +834,61 @@ def _build_step_time_card(
     card = "\n".join(lines)
 
     summary = {
-        # Existing top-level fields kept for compatibility.
+        # Existing top-level fields kept for compatibility and to minimize risk.
         "training_steps": training_steps,
         "latest_step_observed": latest_step_observed,
         "ranks_seen": len(ranks_present),
         "max_steps_analyzed_per_rank": int(max_rows),
         "worst_rank": worst_rank,
-        "median_rank": median_rank,
-        "worst_vs_median_pct": worst_vs_median_pct,
+        "median_rank": representative_rank,
+        "worst_vs_median_pct": worst_vs_representative_pct,
         "worst_avg_step_ms": worst_avg_step_ms,
-        "median_avg_step_ms": median_avg_step_ms,
+        "median_avg_step_ms": representative_avg_step_ms,
         "dominant_text": dominant_text,
-        "median_split_ms": median_split_ms,
+        "median_split_ms": representative_split_ms,
         "worst_split_ms": worst_split_ms,
-        "median_split_pct": median_split_pct,
+        "median_split_pct": representative_split_pct,
         "worst_split_pct": worst_split_pct,
         "diagnosis": diagnosis_to_json(summary_diag),
         "diagnosis_presented": diagnosis_presentation_to_json(
             summary_diag_presented
         ),
-        "per_rank": {
-            str(rank): {
-                "steps_analyzed": s.steps_analyzed,
-                "avg_dataloader_ms": s.avg_dataloader_ms,
-                "avg_forward_ms": s.avg_forward_ms,
-                "avg_backward_ms": s.avg_backward_ms,
-                "avg_optimizer_ms": s.avg_optimizer_ms,
-                "avg_step_cpu_ms": s.avg_step_cpu_ms,
-                "avg_gpu_compute_ms": s.avg_gpu_compute_ms,
-                "avg_total_step_ms": s.avg_total_step_ms,
-                "avg_wait_proxy_ms": _compute_wait_avg_ms(s),
-            }
-            for rank, s in per_rank_summary.items()
-        },
-        # New structured compare-friendly fields.
+        "timing_primary": primary_rollup,
+        "timing_median_rank": representative_rollup,
+        "timing_worst_rank": worst_rollup,
+        # Canonical structured fields.
         "overview": {
             "mode": overview["mode"],
             "training_steps": training_steps,
             "latest_step_observed": latest_step_observed,
             "ranks_seen": len(ranks_present),
             "max_steps_analyzed_per_rank": int(max_rows),
-            "steps_used_primary": (
-                primary_summary.steps_analyzed
-                if primary_summary is not None
-                else 0
-            ),
+            "steps_used_primary": int(primary_rollup["steps_analyzed"]),
         },
-        "rank_comparison": {
-            "worst_rank": worst_rank,
-            "median_rank": median_rank,
-            "worst_avg_step_ms": worst_avg_step_ms,
-            "median_avg_step_ms": median_avg_step_ms,
-            "worst_vs_median_pct": worst_vs_median_pct,
+        "global_rollup": global_rollup,
+        "rank_rollup": {
+            "representative_rank": representative_rank,
+            "bottleneck_rank": worst_rank,
+            "representative_avg_step_ms": representative_avg_step_ms,
+            "bottleneck_avg_step_ms": worst_avg_step_ms,
+            "imbalance_gap_pct": worst_vs_representative_pct,
         },
-        "timing_primary": {
-            "step_avg_ms": (
-                primary_summary.avg_total_step_ms
-                if primary_summary is not None
-                else None
-            ),
-            "compute_avg_ms": primary_compute_avg_ms,
-            "compute_share_pct": primary_compute_share_pct,
-            "wait_avg_ms": primary_wait_avg_ms,
-            "wait_share_pct": primary_wait_share_pct,
-            "split_ms": primary_split_ms,
-            "split_pct": primary_split_pct,
-            "dominant_phase": (
-                _dominant_bucket(primary_split_ms or {})
-                if primary_split_ms is not None
-                else None
-            ),
+        "per_rank": {
+            str(rank): _rank_entry_to_json(rank, s)
+            for rank, s in sorted(per_rank_summary.items())
         },
-        "timing_median_rank": {
-            "rank": median_rank,
-            "step_avg_ms": (
-                median_summary.avg_total_step_ms
-                if median_summary is not None
-                else None
+        "per_device": {},
+        "extensibility": {
+            "per_device_available": False,
+            "per_device_reason": (
+                "step_time_samples is currently rank-based and does not "
+                "persist canonical device identity for end-of-run timing "
+                "summaries"
             ),
-            "wait_avg_ms": (
-                _compute_wait_avg_ms(median_summary)
-                if median_summary is not None
-                else None
+            "future_extension": (
+                "populate per_device when canonical step-time rows include "
+                "stable device identity"
             ),
-            "split_ms": median_split_ms,
-            "split_pct": median_split_pct,
-        },
-        "timing_worst_rank": {
-            "rank": worst_rank,
-            "step_avg_ms": (
-                worst_summary.avg_total_step_ms
-                if worst_summary is not None
-                else None
-            ),
-            "wait_avg_ms": (
-                _compute_wait_avg_ms(worst_summary)
-                if worst_summary is not None
-                else None
-            ),
-            "split_ms": worst_split_ms,
-            "split_pct": worst_split_pct,
         },
         "notes": {
             "step_basis": (
@@ -744,6 +896,12 @@ def _build_step_time_card(
             ),
             "comparison_mode": (
                 f"per-rank averages over each rank's last up to {int(max_rows)} steps"
+            ),
+            "representative_rank_definition": (
+                "rank closest to the median average step time across analyzed ranks"
+            ),
+            "bottleneck_rank_definition": (
+                "rank with the highest average step time across analyzed ranks"
             ),
             "wait_definition": (
                 "wait_proxy = max(0, effective_step - (forward + backward + optimizer))"
