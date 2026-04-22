@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 import msgspec
 
+from traceml.runtime.launch_context import LaunchContext
 from traceml.runtime.session import get_session_id
 from traceml.utils.ast_analysis import analyze_script, build_code_manifest
 
@@ -200,6 +201,7 @@ def write_run_manifest(
     nproc_per_node: int,
     history_enabled: bool,
     status: str,
+    launch_cwd: str,
     aggregator_dir: Optional[Path] = None,
     db_path: Optional[Path] = None,
     extra: Optional[Dict[str, Any]] = None,
@@ -233,6 +235,7 @@ def write_run_manifest(
             "tcp_port": int(tcp_port),
             "nproc_per_node": int(nproc_per_node),
             "history_enabled": bool(history_enabled),
+            "launch_cwd": str(Path(launch_cwd).resolve()),
         },
         "paths": {
             "session_root": str(session_root),
@@ -389,10 +392,14 @@ def install_shutdown_handlers(
     signal.signal(signal.SIGTERM, _handler)
 
 
-def start_aggregator_process(env: Dict[str, str]) -> subprocess.Popen:
+def start_aggregator_process(
+    env: Dict[str, str], cwd: str
+) -> subprocess.Popen:
     """Start the TraceML aggregator as a separate process.
 
-    Stdout/stderr are inherited so Rich output and tracebacks remain visible.
+    The subprocess cwd is set explicitly so all child processes inherit a
+    deterministic working directory rather than depending on ambient shell
+    state.
     """
     aggregator_path = (
         Path(__file__).parent / "aggregator" / "aggregator_main.py"
@@ -404,18 +411,29 @@ def start_aggregator_process(env: Dict[str, str]) -> subprocess.Popen:
 
     cmd = [sys.executable, str(aggregator_path)]
     print("[TraceML] Launching TraceML aggregator:", " ".join(cmd))
-    return subprocess.Popen(cmd, env=env, start_new_session=True)
+    return subprocess.Popen(
+        cmd,
+        env=env,
+        cwd=cwd,
+        start_new_session=True,
+    )
 
 
 def start_training_process(
-    train_cmd: list[str], env: Dict[str, str]
+    train_cmd: list[str], env: Dict[str, str], cwd: str
 ) -> subprocess.Popen:
     """Start the training process in a new process group.
 
-    Stdout/stderr are inherited so user logs and tracebacks remain visible.
+    The subprocess cwd is set explicitly so worker processes see the same
+    working directory the user launched TraceML from.
     """
     print("[TraceML] Launching TraceML executor:", " ".join(train_cmd))
-    return subprocess.Popen(train_cmd, env=env, start_new_session=True)
+    return subprocess.Popen(
+        train_cmd,
+        env=env,
+        cwd=cwd,
+        start_new_session=True,
+    )
 
 
 def launch_process(script_path: str, args: argparse.Namespace) -> None:
@@ -430,6 +448,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     5. Keep training as the primary process; aggregator may fail open
     6. On shutdown, terminate child process groups and update the manifest
     """
+
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
@@ -451,6 +470,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
     env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
+
+    launch_context = LaunchContext.capture()
+    env.update(launch_context.to_env())
+    execution_cwd = launch_context.launch_cwd
 
     session_id = env["TRACEML_SESSION_ID"]
     session_root = Path(args.logs_dir).resolve() / session_id
@@ -474,6 +497,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         nproc_per_node=args.nproc_per_node,
         history_enabled=not args.no_history,
         status="starting",
+        launch_cwd=execution_cwd,
         aggregator_dir=aggregator_dir,
         db_path=db_path,
         extra=(
@@ -495,7 +519,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             str(script_path),
             *script_args,
         ]
-        train_proc = start_training_process(train_cmd=train_cmd, env=env)
+        train_proc = start_training_process(
+            train_cmd=train_cmd,
+            env=env,
+            cwd=execution_cwd,
+        )
         install_shutdown_handlers(
             lambda: (train_proc, None), manifest_path=manifest_path
         )
@@ -530,7 +558,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         f"(ui={args.mode}, profile={env['TRACEML_PROFILE']})"
     )
     try:
-        agg_proc = start_aggregator_process(env=env)
+        agg_proc = start_aggregator_process(env=env, cwd=execution_cwd)
     except FileNotFoundError as exc:
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
         update_run_manifest(manifest_path, status="failed")
@@ -558,7 +586,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     print("[TraceML] Aggregator ready.")
     update_run_manifest(manifest_path, status="running")
 
-    train_proc = start_training_process(train_cmd=train_cmd, env=env)
+    train_proc = start_training_process(
+        train_cmd=train_cmd,
+        env=env,
+        cwd=execution_cwd,
+    )
 
     while True:
         train_rc = train_proc.poll()
