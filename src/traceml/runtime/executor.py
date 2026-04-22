@@ -351,14 +351,27 @@ def run_user_script(script_path: str, script_args: list[str]) -> None:
     - stack traces remain meaningful
     - execution context matches the user's script as closely as possible
 
-    Global sys.argv is restored afterward to avoid leaking state.
+    Global ``sys.argv`` and ``sys.path`` are restored afterward to avoid
+    leaking state.
     """
+    resolved_script_path = str(Path(script_path).resolve())
+    script_dir = str(Path(resolved_script_path).parent)
     old_argv = sys.argv[:]
+    old_path = sys.path[:]
     try:
-        sys.argv = [script_path, *script_args]
-        runpy.run_path(script_path, run_name="__main__")
+        sys.argv = [resolved_script_path, *script_args]
+
+        # Match normal ``python script.py`` semantics so sibling imports and
+        # path-relative module discovery work the same way under TraceML.
+        if sys.path:
+            sys.path[0] = script_dir
+        else:
+            sys.path = [script_dir]
+
+        runpy.run_path(resolved_script_path, run_name="__main__")
     finally:
         sys.argv = old_argv
+        sys.path = old_path
 
 
 def report_crash(cfg: Dict[str, Any], error: BaseException) -> None:
