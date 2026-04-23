@@ -79,6 +79,8 @@ def main() -> None:
     else:
         device = torch.device("cpu")
 
+    traceml.init(mode="auto")
+
     set_seed(SEED + rank)
 
     train_loader, train_sampler = prepare_data(rank, world_size)

@@ -37,6 +37,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on: {device}")
+    traceml.init(mode="auto")
 
     # Create a simple in-memory dataset
     x = torch.randn(NUM_SAMPLES, INPUT_DIM)
