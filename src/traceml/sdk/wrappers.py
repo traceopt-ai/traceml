@@ -94,6 +94,14 @@ def _ensure_optimizer_wrapper_allowed() -> None:
         )
 
 
+def _ensure_h2d_wrapper_allowed() -> None:
+    if getattr(torch.Tensor, "_traceml_h2d_patched", False):
+        _raise_duplicate_instrumentation(
+            "h2d transfer",
+            "torch.Tensor.to() has already been patched for H2D timing.",
+        )
+
+
 class _WrappedDataLoaderIterator:
     """
     Iterator proxy that times `next(...)` as TraceML dataloader fetch.
@@ -286,9 +294,78 @@ def wrap_optimizer(optimizer: Any) -> Any:
     return optimizer
 
 
+class _WrappedH2D:
+    """
+    Proxy for a tensor or batch object that times ``.to(...)`` calls.
+
+    This wrapper is consumed by the first ``.to(...)`` invocation: that call
+    returns the real transferred tensor/object, not another proxy.  For the
+    common pattern of ``x = traceml.wrap_h2d(x); x = x.to(device)`` this
+    is sufficient and keeps usage straightforward.
+
+    ``.to(...)`` uses CUDA events when CUDA is available so the measurement
+    aligns with GPU-side DMA timing, consistent with forward/backward timing.
+
+    Unknown attributes are forwarded to the wrapped object so code that reads
+    tensor attributes (shape, dtype, ...) before calling ``.to(...)`` continues
+    to work naturally.
+    """
+
+    def __init__(self, obj: Any) -> None:
+        self._obj = obj
+
+    def to(self, *args: Any, **kwargs: Any) -> Any:
+        with timed_region(
+            name="_traceml_internal:h2d_time",
+            scope=TimeScope.STEP,
+            use_gpu=True,
+        ):
+            return self._obj.to(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._obj, name)
+
+    def __repr__(self) -> str:
+        return f"_WrappedH2D({self._obj!r})"
+
+
+def wrap_h2d(obj: Any) -> "_WrappedH2D":
+    """
+    Wrap a tensor or batch object so the next ``.to(...)`` call is timed.
+
+    Intended for ``manual`` or ``selective`` initialization modes where the
+    automatic ``torch.Tensor.to()`` patch is not installed.
+
+    Usage
+    -----
+    .. code-block:: python
+
+        x = traceml.wrap_h2d(x)
+        x = x.to(device)           # timed as _traceml_internal:h2d_time
+
+    Notes
+    -----
+    - Raises if the automatic H2D patch is already active to prevent double
+      counting.
+    - The wrapper does not need the object to be a ``torch.Tensor``; any
+      object with a ``.to(...)`` method is accepted (e.g. custom batch
+      containers).
+    """
+    _ensure_h2d_wrapper_allowed()
+
+    to_fn = getattr(obj, "to", None)
+    if to_fn is None or not callable(to_fn):
+        raise TypeError(
+            "wrap_h2d() expects an object with a callable .to() method."
+        )
+
+    return _WrappedH2D(obj)
+
+
 __all__ = [
     "wrap_dataloader_fetch",
     "wrap_forward",
     "wrap_backward",
     "wrap_optimizer",
+    "wrap_h2d",
 ]
