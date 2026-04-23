@@ -161,26 +161,26 @@ def main():
                 scaler.update()
                 scheduler.step()
 
-            # Logging on optimizer steps (use last micro-batch logits/labels)
-            # Report unscaled loss (multiply back)
-            step_loss_unscaled = (total_step_loss * GRAD_ACC_STEPS).item()
-            acc = accuracy_from_logits(
-                last_logits.detach(), last_labels
-            ).item()
+                # Logging on optimizer steps (use last micro-batch logits/labels)
+                # Report unscaled loss (multiply back)
+                step_loss_unscaled = (total_step_loss * GRAD_ACC_STEPS).item()
+                acc = accuracy_from_logits(
+                    last_logits.detach(), last_labels
+                ).item()
 
-            running_loss += step_loss_unscaled
-            running_acc += acc
-            global_step += 1
+                running_loss += step_loss_unscaled
+                running_acc += acc
+                global_step += 1
 
-            if global_step % 50 == 0:
-                avg_loss = running_loss / 50
-                avg_acc = running_acc / 50
-                print(
-                    f"[Train] epoch {epoch+1} step {global_step} "
-                    f"| loss {avg_loss:.4f} | acc {avg_acc:.4f}"
-                )
-                running_loss = 0.0
-                running_acc = 0.0
+                if global_step % 50 == 0:
+                    avg_loss = running_loss / 50
+                    avg_acc = running_acc / 50
+                    print(
+                        f"[Train] epoch {epoch+1} step {global_step} "
+                        f"| loss {avg_loss:.4f} | acc {avg_acc:.4f}"
+                    )
+                    running_loss = 0.0
+                    running_acc = 0.0
 
         print(f"Finished epoch {epoch + 1}")
 

@@ -176,24 +176,22 @@ def main() -> None:
         for batch_x, batch_y in loader:
             total_steps += 1
 
-            batch_x = batch_x.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
-
             with traceml.trace_step(model.module):
+                batch_x = batch_x.to(device, non_blocking=True)
+                batch_y = batch_y.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
-
                 logits = model(batch_x)
                 loss = criterion(logits, batch_y)
 
                 loss.backward()
                 optimizer.step()
 
-            if rank == 0 and total_steps % 25 == 0:
-                print(
-                    f"Epoch {epoch} | Step {total_steps} | "
-                    f"loss: {loss.item():.4f} | "
-                    f"input_straggler_rank={STRAGGLER_RANK}"
-                )
+                if rank == 0 and total_steps % 25 == 0:
+                    print(
+                        f"Epoch {epoch} | Step {total_steps} | "
+                        f"loss: {loss.item():.4f} | "
+                        f"input_straggler_rank={STRAGGLER_RANK}"
+                    )
 
     if rank == 0:
         print("Done.")

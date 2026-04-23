@@ -95,6 +95,39 @@ def _process_value(summary: Dict[str, Any], key: str) -> Any:
     return None
 
 
+def _step_memory_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Read the canonical primary step-memory block.
+
+    Prefer the explicit `primary_metric` block and fall back to an empty
+    dictionary when unavailable.
+    """
+    primary = _nested_get(summary, "primary_metric")
+    return primary if isinstance(primary, dict) else {}
+
+
+def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one step-memory summary value from the canonical schema while keeping
+    compare output stable.
+    """
+    if key == "status":
+        return _nested_get(summary, "diagnosis", "status")
+
+    primary = _step_memory_primary(summary)
+
+    if key == "primary_metric":
+        return primary.get("metric")
+    if key == "worst_peak_bytes":
+        return primary.get("worst_peak_bytes")
+    if key == "skew_pct":
+        return primary.get("skew_pct")
+    if key == "trend_worst_delta_bytes":
+        return _nested_get(primary, "trend", "worst", "delta_bytes")
+
+    return None
+
+
 def _first_non_none(*values: Any) -> Any:
     """
     Return the first value that is not None.
@@ -390,48 +423,28 @@ def build_compare_payload(
         },
         "step_memory": {
             "status": _value_change(
-                _nested_get(lhs_step_memory, "diagnosis", "status"),
-                _nested_get(rhs_step_memory, "diagnosis", "status"),
+                _step_memory_value(lhs_step_memory, "status"),
+                _step_memory_value(rhs_step_memory, "status"),
             ),
             "presented": {
                 "lhs": _as_dict(lhs_step_memory.get("diagnosis_presented")),
                 "rhs": _as_dict(rhs_step_memory.get("diagnosis_presented")),
             },
             "primary_metric": _value_change(
-                _nested_get(lhs_step_memory, "primary_metric", "metric"),
-                _nested_get(rhs_step_memory, "primary_metric", "metric"),
+                _step_memory_value(lhs_step_memory, "primary_metric"),
+                _step_memory_value(rhs_step_memory, "primary_metric"),
             ),
             "worst_peak_bytes": _value_delta(
-                _nested_get(
-                    lhs_step_memory,
-                    "primary_metric",
-                    "worst_peak_bytes",
-                ),
-                _nested_get(
-                    rhs_step_memory,
-                    "primary_metric",
-                    "worst_peak_bytes",
-                ),
+                _step_memory_value(lhs_step_memory, "worst_peak_bytes"),
+                _step_memory_value(rhs_step_memory, "worst_peak_bytes"),
             ),
             "skew_pct": _value_delta(
-                _nested_get(lhs_step_memory, "primary_metric", "skew_pct"),
-                _nested_get(rhs_step_memory, "primary_metric", "skew_pct"),
+                _step_memory_value(lhs_step_memory, "skew_pct"),
+                _step_memory_value(rhs_step_memory, "skew_pct"),
             ),
             "trend_worst_delta_bytes": _value_delta(
-                _nested_get(
-                    lhs_step_memory,
-                    "primary_metric",
-                    "trend",
-                    "worst",
-                    "delta_bytes",
-                ),
-                _nested_get(
-                    rhs_step_memory,
-                    "primary_metric",
-                    "trend",
-                    "worst",
-                    "delta_bytes",
-                ),
+                _step_memory_value(lhs_step_memory, "trend_worst_delta_bytes"),
+                _step_memory_value(rhs_step_memory, "trend_worst_delta_bytes"),
             ),
         },
         "text": "",

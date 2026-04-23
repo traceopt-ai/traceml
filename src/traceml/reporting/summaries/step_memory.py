@@ -5,13 +5,14 @@ This module reads aligned step-memory telemetry from `step_memory_samples`,
 reuses the shared step-memory diagnosis engine, and produces:
 
 1. a compact text summary for end-of-run display and sharing
-2. a structured JSON payload suitable for future compare features
+2. a structured JSON payload for automation
 
 Design goals
 ------------
 - Keep the printed summary short and actionable
 - Reuse the same diagnosis logic as live CLI and dashboard views
-- Use a stable aligned tail window for printed diagnosis
+- Use one clear canonical schema for end-of-run step-memory data
+- Preserve richer machine-readable fields in JSON
 """
 
 import sqlite3
@@ -117,8 +118,8 @@ def _head_tail_trend(series: list[float]) -> Dict[str, Optional[float]]:
     Compute the canonical trend summary for one memory series.
 
     Compatibility note:
-    - ``head_avg_bytes`` maps to the canonical baseline average
-    - ``tail_avg_bytes`` maps to the canonical recent average
+    - `head_avg_bytes` maps to the canonical baseline average
+    - `tail_avg_bytes` maps to the canonical recent average
     """
     values = [max(0.0, safe_float(v)) for v in series]
     evidence = compute_trend_evidence(values)
@@ -145,12 +146,61 @@ def _head_tail_trend(series: list[float]) -> Dict[str, Optional[float]]:
     }
 
 
+def _window_variability(series: list[float]) -> Dict[str, Optional[float]]:
+    """
+    Compute compact within-window variability statistics for one memory series.
+
+    Peak memory alone does not distinguish stable high usage from noisy or
+    jittery behavior. This summary intentionally keeps the variability signal
+    compact and easy to interpret:
+    - `peak_bytes` captures the maximum observed value in the analyzed window
+    - `latest_bytes` captures the most recent value in the window
+    - `window_min_bytes` and `window_max_bytes` provide context
+    - `window_range_bytes` approximates instability / jitter magnitude
+    - `window_range_pct_of_peak` normalizes that range to the local peak
+    """
+    values = [max(0.0, safe_float(v)) for v in series]
+    if not values:
+        return {
+            "peak_bytes": None,
+            "latest_bytes": None,
+            "window_min_bytes": None,
+            "window_max_bytes": None,
+            "window_range_bytes": None,
+            "window_range_pct_of_peak": None,
+        }
+
+    min_value = min(values)
+    max_value = max(values)
+    latest_value = values[-1]
+    range_value = max_value - min_value
+
+    return {
+        "peak_bytes": max_value,
+        "latest_bytes": latest_value,
+        "window_min_bytes": min_value,
+        "window_max_bytes": max_value,
+        "window_range_bytes": range_value,
+        "window_range_pct_of_peak": (
+            (range_value / max_value) if max_value > 0.0 else None
+        ),
+    }
+
+
 def _metric_to_json(metric: StepMemoryCombinedMetric) -> Dict[str, Any]:
     """
-    Serialize one step-memory metric into a compare-friendly JSON shape.
+    Serialize one combined step-memory metric into the canonical JSON shape.
+
+    The combined metric remains useful because it answers the run-level story:
+    - `median` describes a typical rank
+    - `worst` describes the gating / most memory-heavy rank
+    - `skew` quantifies rank imbalance
     """
     worst_trend = _head_tail_trend(metric.series.worst)
     median_trend = _head_tail_trend(metric.series.median)
+
+    worst_variability = _window_variability(metric.series.worst)
+    median_variability = _window_variability(metric.series.median)
 
     return {
         "metric": metric.metric,
@@ -172,9 +222,15 @@ def _metric_to_json(metric: StepMemoryCombinedMetric) -> Dict[str, Any]:
             "skew_ratio": metric.summary.skew_ratio,
             "skew_pct": metric.summary.skew_pct,
         },
-        "trend": {
-            "worst": worst_trend,
-            "median": median_trend,
+        "series_summary": {
+            "median": {
+                "trend": median_trend,
+                "variability": median_variability,
+            },
+            "worst": {
+                "trend": worst_trend,
+                "variability": worst_variability,
+            },
         },
     }
 
@@ -206,12 +262,240 @@ def _primary_metric(
     return metrics[0]
 
 
+def _common_suffix_steps(
+    per_rank_steps: Dict[int, Dict[int, float]],
+    *,
+    completed_step: int,
+    window_size: int,
+) -> list[int]:
+    """
+    Return the last `window_size` common steps across all provided ranks.
+
+    This intentionally mirrors the alignment semantics used by the shared
+    step-memory renderer path:
+    - aligned on completed steps only
+    - use the largest common suffix up to `window_size`
+    - avoid misleading partial-rank windows
+    """
+    maps = list(per_rank_steps.values())
+    if not maps or window_size <= 0 or completed_step < 0:
+        return []
+
+    reference = maps[0]
+    out_rev: list[int] = []
+
+    step = int(completed_step)
+    scan_cap = max(window_size * 20, window_size + 1)
+    scanned = 0
+
+    while step >= 0 and len(out_rev) < window_size:
+        scanned += 1
+        if scanned > scan_cap:
+            break
+
+        if step in reference:
+            if all(step in step_map for step_map in maps[1:]):
+                out_rev.append(step)
+
+        step -= 1
+
+    if not out_rev:
+        return []
+
+    out_rev.reverse()
+    return out_rev
+
+
+def _parse_gpu_idx(device: Optional[str]) -> Optional[int]:
+    """
+    Best-effort parse of a CUDA device string such as `cuda:0`.
+    """
+    if not device:
+        return None
+
+    text = str(device).strip().lower()
+    if not text.startswith("cuda:"):
+        return None
+
+    try:
+        return int(text.split(":", 1)[1])
+    except Exception:
+        return None
+
+
+def _load_per_rank_summary(
+    conn: sqlite3.Connection,
+    *,
+    db: StepMemoryMetricsDB,
+    metrics: list[StepMemoryCombinedMetric],
+    window_size: int,
+) -> Dict[str, Any]:
+    """
+    Build per-rank step-memory summaries for the analyzed aligned tail window.
+
+    Combined worst/median summaries are excellent for end-of-run diagnosis, but
+    one often need to answer:
+    - which rank is gating or drifting?
+    - is one rank materially less stable than others?
+    - do allocated and reserved tell the same story?
+
+    This function provides that machine-readable rank-level view while keeping
+    the printed summary compact.
+    """
+    latest_per_rank = db.fetch_latest_step_per_rank(conn)
+    if not latest_per_rank:
+        return {}
+
+    completed_step = min(latest_per_rank.values())
+    scan_span = max(int(window_size) * 20, int(window_size) + 1)
+    start_step = max(0, int(completed_step) - scan_span + 1)
+
+    per_rank: Dict[str, Any] = {}
+
+    for metric in metrics:
+        rank_maps, rank_devices = db.fetch_rank_step_maps(
+            conn,
+            metric_key=metric.metric,
+            start_step=start_step,
+            end_step=int(completed_step),
+            max_unique_steps_per_rank=scan_span,
+        )
+
+        if not rank_maps:
+            continue
+
+        common_steps = _common_suffix_steps(
+            rank_maps,
+            completed_step=int(completed_step),
+            window_size=int(window_size),
+        )
+        if not common_steps:
+            continue
+
+        for rank in sorted(rank_maps.keys()):
+            step_map = rank_maps.get(rank, {})
+            values = [
+                float(step_map[s]) for s in common_steps if s in step_map
+            ]
+            if len(values) != len(common_steps) or not values:
+                continue
+
+            rank_key = str(rank)
+            rank_device = rank_devices.get(rank)
+
+            entry = per_rank.setdefault(
+                rank_key,
+                {
+                    "identity": {
+                        "rank": int(rank),
+                        "device": rank_device,
+                        "gpu_idx": _parse_gpu_idx(rank_device),
+                    },
+                    "metrics": {},
+                },
+            )
+
+            if (
+                entry["identity"].get("device") is None
+                and rank_device is not None
+            ):
+                entry["identity"]["device"] = rank_device
+                entry["identity"]["gpu_idx"] = _parse_gpu_idx(rank_device)
+
+            entry["metrics"][metric.metric] = {
+                "coverage": {
+                    "steps_used": len(common_steps),
+                    "window_size": int(window_size),
+                    "completed_step": int(completed_step),
+                },
+                "summary": _window_variability(values),
+                "trend": _head_tail_trend(values),
+            }
+
+    return dict(sorted(per_rank.items(), key=lambda item: int(item[0])))
+
+
+def _empty_global_rollup() -> Dict[str, Any]:
+    """
+    Return a stable empty global rollup for missing-data cases.
+    """
+    return {
+        "primary_metric": None,
+        "diagnosis_status": None,
+        "analysis_window": {
+            "steps_used": 0,
+            "window_size": None,
+            "completed_step": None,
+            "ranks_seen": 0,
+        },
+        "typical": None,
+        "bottleneck": None,
+        "imbalance": None,
+    }
+
+
+def _build_global_rollup(
+    *,
+    primary: Optional[StepMemoryCombinedMetric],
+    diagnosis: Optional[StepMemoryDiagnosis],
+) -> Dict[str, Any]:
+    """
+    Build the canonical global memory rollup for the analyzed window.
+
+    Semantics
+    ---------
+    - `typical` describes the median-across-ranks memory behavior
+    - `bottleneck` describes the worst-across-ranks memory behavior
+    - `imbalance` captures how far the gating rank is from the typical rank
+    """
+    if primary is None:
+        return _empty_global_rollup()
+
+    typical_trend = _head_tail_trend(primary.series.median)
+    bottleneck_trend = _head_tail_trend(primary.series.worst)
+
+    typical_variability = _window_variability(primary.series.median)
+    bottleneck_variability = _window_variability(primary.series.worst)
+
+    return {
+        "primary_metric": primary.metric,
+        "diagnosis_status": (
+            diagnosis.status if diagnosis is not None else None
+        ),
+        "analysis_window": {
+            "steps_used": primary.summary.steps_used,
+            "window_size": primary.summary.window_size,
+            "completed_step": primary.coverage.completed_step,
+            "ranks_seen": primary.coverage.ranks_present,
+        },
+        "typical": {
+            "metric": primary.metric,
+            "peak_bytes": primary.summary.median_peak,
+            "trend": typical_trend,
+            "variability": typical_variability,
+        },
+        "bottleneck": {
+            "metric": primary.metric,
+            "worst_rank": primary.summary.worst_rank,
+            "peak_bytes": primary.summary.worst_peak,
+            "trend": bottleneck_trend,
+            "variability": bottleneck_variability,
+        },
+        "imbalance": {
+            "worst_rank": primary.summary.worst_rank,
+            "skew_ratio": primary.summary.skew_ratio,
+            "skew_pct": primary.summary.skew_pct,
+        },
+    }
+
+
 def _build_step_memory_card(
     *,
     training_steps: int,
     latest_step_observed: Optional[int],
     metrics: list[StepMemoryCombinedMetric],
     diagnosis: Optional[StepMemoryDiagnosis],
+    per_rank: Dict[str, Any],
 ) -> tuple[str, Dict[str, Any]]:
     """
     Build a compact, shareable end-of-run step-memory summary.
@@ -222,7 +506,8 @@ def _build_step_memory_card(
     - primary metric details
     - one stable trend hint
 
-    The JSON payload retains both allocated and reserved detail for compare.
+    The JSON payload is richer than the printed text and is the canonical
+    machine-readable representation for compare, logging, and dashboards.
     """
     sorted_metrics = sorted(metrics, key=_metric_sort_key)
     primary = _primary_metric(sorted_metrics, diagnosis)
@@ -248,14 +533,43 @@ def _build_step_memory_card(
             "latest_step_observed": latest_step_observed,
             "ranks_seen": 0,
             "diagnosis": None,
+            "diagnosis_presented": None,
             "primary_metric": None,
+            "overview": {
+                "training_steps": training_steps,
+                "latest_step_observed": latest_step_observed,
+                "ranks_seen": 0,
+                "metric_names": [],
+                "window_size": None,
+                "steps_used": 0,
+            },
+            "global_rollup": _empty_global_rollup(),
+            "metric_rollup": {},
             "metrics": {},
+            "per_rank": {},
             "units": {"memory": "bytes"},
+            "notes": {
+                "window_basis": (
+                    "aligned tail window across ranks using the largest common "
+                    "suffix of completed steps"
+                ),
+                "trend_definition": (
+                    "trend compares recent average against baseline average "
+                    "within the analyzed window"
+                ),
+                "variability_definition": (
+                    "window_range_bytes approximates within-window instability "
+                    "or jitter for the analyzed series"
+                ),
+            },
             "card": card,
         }
         return card, summary
 
     primary_trend_worst = _head_tail_trend(primary.series.worst)
+    primary_trend_median = _head_tail_trend(primary.series.median)
+    primary_worst_variability = _window_variability(primary.series.worst)
+    primary_median_variability = _window_variability(primary.series.median)
 
     steps_used = int(primary.summary.steps_used)
     ranks_seen = int(primary.coverage.ranks_present)
@@ -297,6 +611,10 @@ def _build_step_memory_card(
 
     card = "\n".join(lines)
 
+    metric_rollup = {
+        metric.metric: _metric_to_json(metric) for metric in sorted_metrics
+    }
+
     summary = {
         "training_steps": training_steps,
         "latest_step_observed": latest_step_observed,
@@ -315,13 +633,54 @@ def _build_step_memory_card(
             "skew_pct": primary.summary.skew_pct,
             "trend": {
                 "worst": primary_trend_worst,
-                "median": _head_tail_trend(primary.series.median),
+                "median": primary_trend_median,
+            },
+            "variability": {
+                "worst": primary_worst_variability,
+                "median": primary_median_variability,
             },
         },
-        "metrics": {
-            metric.metric: _metric_to_json(metric) for metric in sorted_metrics
+        "overview": {
+            "training_steps": training_steps,
+            "latest_step_observed": latest_step_observed,
+            "ranks_seen": ranks_seen,
+            "metric_names": [metric.metric for metric in sorted_metrics],
+            "window_size": primary.summary.window_size,
+            "steps_used": primary.summary.steps_used,
+            "completed_step": primary.coverage.completed_step,
         },
+        "global_rollup": _build_global_rollup(
+            primary=primary,
+            diagnosis=diagnosis,
+        ),
+        "metric_rollup": metric_rollup,
+        # Kept as an alias to reduce downstream risk while callers migrate to
+        # the clearer `metric_rollup` name.
+        "metrics": metric_rollup,
+        "per_rank": per_rank,
         "units": {"memory": "bytes"},
+        "notes": {
+            "window_basis": (
+                "aligned tail window across ranks using the largest common "
+                "suffix of completed steps"
+            ),
+            "primary_metric_definition": (
+                "diagnosis-selected metric when available; otherwise reserved "
+                "memory is preferred, then allocated memory"
+            ),
+            "trend_definition": (
+                "trend compares recent average against baseline average within "
+                "the analyzed window"
+            ),
+            "variability_definition": (
+                "window_range_bytes approximates within-window instability or "
+                "jitter for the analyzed series"
+            ),
+            "imbalance_definition": (
+                "skew_pct compares worst rank peak against median rank peak "
+                "for the analyzed aligned window"
+            ),
+        },
         "card": card,
     }
     return card, summary
@@ -384,6 +743,13 @@ def generate_step_memory_summary_card(
                 metrics,
                 gpu_total_bytes=gpu_total_bytes,
             )
+
+        per_rank = _load_per_rank_summary(
+            conn,
+            db=db,
+            metrics=metrics,
+            window_size=max(1, int(window_size)),
+        )
     finally:
         conn.close()
 
@@ -392,6 +758,7 @@ def generate_step_memory_summary_card(
         latest_step_observed=latest_step_observed,
         metrics=metrics,
         diagnosis=diagnosis,
+        per_rank=per_rank,
     )
 
     append_text(db_path + "_summary_card.txt", card)
