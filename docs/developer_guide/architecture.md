@@ -1,23 +1,8 @@
 # Architecture
 
-TraceML runs as three cooperating processes during a training job:
+![TraceML architecture overview](../assets/Architecture_excali_b.png)
 
-```mermaid
-flowchart LR
-    User([user runs `traceml watch script.py`])
-    CLI[CLI launcher]
-    Agg[Aggregator process]
-    Train[Training process<br/>torchrun-spawned ranks]
-
-    User --> CLI
-    CLI -->|spawns| Agg
-    CLI -->|spawns| Train
-    Train -->|TCP telemetry| Agg
-    Agg -->|renders| Terminal
-    Agg -->|renders| WebUI
-```
-
-The CLI spawns an **aggregator** server and one or more **training** ranks via `torchrun`. Training ranks run user code in-process with TraceML hooks attached; telemetry is shipped over TCP to the aggregator, which renders the unified view.
+TraceML runs as three cooperating processes during a training job. The CLI spawns an **aggregator** server and one or more **training** ranks via `torchrun`. Training ranks run user code in-process with TraceML hooks attached; telemetry is shipped over TCP to the aggregator, which renders the unified view.
 
 ## Telemetry data flow
 
