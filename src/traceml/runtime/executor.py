@@ -30,6 +30,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from traceml.runtime.launch_context import (
+    LaunchContext,
+    script_execution_context,
+)
 from traceml.runtime.runtime import TraceMLRuntime
 from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
 from traceml.utils.shared_utils import EXECUTION_LAYER
@@ -344,21 +348,21 @@ def stop_runtime(
 
 def run_user_script(script_path: str, script_args: list[str]) -> None:
     """
-    Execute the user script in-process using runpy.
+    Execute the user script in-process using ``runpy``.
 
-    This intentionally does not spawn another subprocess so that:
-    - hooks attach to the real Python objects
-    - stack traces remain meaningful
-    - execution context matches the user's script as closely as possible
-
-    Global sys.argv is restored afterward to avoid leaking state.
+    TraceML preserves the user's original launch cwd while also exposing the
+    script directory as ``sys.path[0]`` so local imports and relative file
+    access behave like a normal ``python`` or ``torchrun`` script launch.
     """
-    old_argv = sys.argv[:]
-    try:
-        sys.argv = [script_path, *script_args]
-        runpy.run_path(script_path, run_name="__main__")
-    finally:
-        sys.argv = old_argv
+    launch_context = LaunchContext.from_env()
+    resolved_script_path = str(Path(script_path).resolve())
+
+    with script_execution_context(
+        script_path=resolved_script_path,
+        script_args=script_args,
+        launch_context=launch_context,
+    ):
+        runpy.run_path(resolved_script_path, run_name="__main__")
 
 
 def report_crash(cfg: Dict[str, Any], error: BaseException) -> None:

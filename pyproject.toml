@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "traceml-ai"
-version = "0.2.9"
+version = "0.2.11"
 
 description = "TraceML: Lightweight training runtime health monitor."
 authors = [{ name = "Abhinav Srivastav", email = "abhinav@traceopt.ai" }]

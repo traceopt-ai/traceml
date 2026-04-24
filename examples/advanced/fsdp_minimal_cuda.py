@@ -86,6 +86,8 @@ def main():
     torch.cuda.set_device(local_rank)
     device = torch.device("cuda", local_rank)
 
+    traceml.init(mode="auto")
+
     set_seed(SEED + rank)
 
     train_loader, train_sampler = prepare_data(rank, world_size)

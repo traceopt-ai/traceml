@@ -14,14 +14,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-# =========================
-# TraceML imports
-# =========================
-# trace_model_instance:
-#   Attaches model-level hooks (forward pass, backward pass, timings, etc.)
-# trace_step:
-#   Defines a training-step boundary (flushes TraceML buffers at step end)
-from traceml.decorators import trace_model_instance, trace_step
+import traceml
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
@@ -188,6 +181,8 @@ def main():
         device = torch.device("cpu")
         dtype = torch.float32
 
+    traceml.init(mode="auto")
+
     # Different seed per rank (important for shuffling etc.)
     set_seed(SEED + rank)
 
@@ -209,7 +204,7 @@ def main():
     # TraceML: attach hooks to the *real* model
     # --------------------------------------------------------
     # Do this BEFORE wrapping with DistributedDataParallel
-    trace_model_instance(model)
+    traceml.trace_model_instance(model)
 
     # Wrap model with DDP
     if use_cuda:
@@ -259,7 +254,7 @@ def main():
             # ------------------------------------------------
             # TraceML: define ONE training step boundary
             # ------------------------------------------------
-            with trace_step(model.module):
+            with traceml.trace_step(model.module):
 
                 # Load batch to GPU
                 batch = load_batch_to_device(batch, device)

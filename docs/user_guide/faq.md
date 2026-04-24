@@ -57,6 +57,8 @@ Usually just this:
 ```python
 import traceml
 
+traceml.init(mode="auto")
+
 with traceml.trace_step(model):
     ...
 ```
@@ -67,7 +69,8 @@ For supported integrations:
 - Lightning: add `TraceMLCallback()`
 
 `from traceml.decorators import trace_step` still works for backward
-compatibility, but the preferred public API is now `traceml.trace_step(...)`.
+compatibility, but the preferred public API is now the top-level
+`traceml.*`.
 
 ---
 
@@ -77,6 +80,8 @@ Prefer:
 
 ```python
 import traceml
+
+traceml.init(mode="auto")
 
 with traceml.trace_step(model):
     ...
@@ -89,7 +94,38 @@ from traceml.decorators import trace_step
 ```
 
 for backward compatibility, but new examples and docs use the top-level
-`traceml.*` API. Legacy decorator imports may be removed in a future version.
+`traceml.*` API. Legacy decorator imports are planned for deprecation
+starting in `v0.3.0`.
+
+---
+
+## What is the difference between `auto`, `manual`, and `selective`?
+
+Use:
+
+- `traceml.init(mode="auto")` for the default TraceML workflow
+- `traceml.init(mode="manual")` when you want fully explicit wrappers
+- `traceml.init(mode="selective", ...)` when you want some automatic patching
+  and some explicit wrapping
+
+Start with `auto` unless you already know you need more control.
+
+---
+
+## When should I use the wrapper APIs?
+
+Use wrappers when you do not want the default automatic patching path or when
+part of your training loop is custom.
+
+The main wrapper entrypoints are:
+
+- `traceml.wrap_dataloader_fetch(...)`
+- `traceml.wrap_forward(...)`
+- `traceml.wrap_backward(...)`
+- `traceml.wrap_optimizer(...)`
+
+This is most relevant in `manual` or `selective` mode. Most users should start
+with `mode="auto"` and only move to wrappers if they need explicit control.
 
 ---
 

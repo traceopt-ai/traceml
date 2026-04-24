@@ -12,7 +12,7 @@ These are the main user-facing examples.
 
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
-| `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.trace_step(...)` and `traceml.final_summary()` | CPU / CUDA | Best first example |
+| `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.final_summary()` | CPU / CUDA | Best first example |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
 | `lightning_minimal.py` | Minimal Lightning `TraceMLCallback` example | CPU / CUDA | No dataset download required |
@@ -86,12 +86,14 @@ traceml compare run_a.json run_b.json
 
 Starter examples now prefer the top-level public API:
 
+- `traceml.init(mode="auto")`
 - `traceml.trace_step(...)`
 - `traceml.trace_model_instance(...)`
 - `traceml.final_summary()`
 
 Legacy imports from `traceml.decorators` still work for backward
-compatibility, but new examples use the top-level `traceml.*` API.
+compatibility, but new examples use the top-level `traceml.*` API. Legacy
+decorator imports are planned for deprecation starting in `v0.3.0`.
 
 ---
 
