@@ -38,7 +38,8 @@ from traceml.reporting.summaries.diagnosis_presentation import (
 )
 from traceml.reporting.summaries.step_time_diagnosis import (
     RankStepSignals,
-    build_summary_step_diagnosis,
+    build_summary_step_diagnosis_result,
+    diagnosis_result_to_json,
     diagnosis_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import (
@@ -733,10 +734,15 @@ def _build_step_time_card(
         worst_split_ms,
     )
 
-    summary_diag = build_summary_step_diagnosis(
+    summary_diag_result = build_summary_step_diagnosis_result(
         rank_signals=_to_rank_signals(per_rank_summary),
         max_rows=max_rows,
         per_rank_step_metrics=per_rank_step_metrics,
+    )
+    summary_diag = (
+        summary_diag_result.primary
+        if summary_diag_result is not None
+        else None
     )
     summary_diag_presented = present_step_time_summary_diagnosis(summary_diag)
 
@@ -850,6 +856,7 @@ def _build_step_time_card(
         "median_split_pct": representative_split_pct,
         "worst_split_pct": worst_split_pct,
         "diagnosis": diagnosis_to_json(summary_diag),
+        "diagnosis_result": diagnosis_result_to_json(summary_diag_result),
         "diagnosis_presented": diagnosis_presentation_to_json(
             summary_diag_presented
         ),

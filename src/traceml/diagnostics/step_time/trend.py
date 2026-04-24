@@ -15,7 +15,7 @@ from typing import Optional
 
 from traceml.renderers.step_time.schema import StepCombinedTimeMetric
 
-from .trends import (
+from ..trends import (
     DEFAULT_TREND_CONFIG,
     TrendConfig,
     compute_trend_pct,
@@ -30,7 +30,7 @@ class StepTrendHeuristicConfig:
     """
 
     enabled: bool = True
-    min_steps: int = 80
+    min_steps: int = 100
     deadband_pct: float = 0.03
     worsening_threshold_pct: float = 0.08
     improving_threshold_pct: float = 0.08

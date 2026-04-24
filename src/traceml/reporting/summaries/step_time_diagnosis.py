@@ -15,10 +15,12 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from traceml.diagnostics.common import diagnosis_to_dict
+from traceml.diagnostics.framework import DiagnosticResult
 from traceml.diagnostics.step_time import (
     DiagnosisThresholds,
     StepDiagnosis,
-    build_step_diagnosis,
+    build_step_diagnosis_result,
 )
 from traceml.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
@@ -71,7 +73,7 @@ class SummaryDiagnosisConfig:
             min_steps_for_confident_diag=20,
         )
     )
-    min_steps_for_diag: int = 20
+    min_steps_for_diag: int = 50
 
 
 DEFAULT_SUMMARY_DIAG_CONFIG = SummaryDiagnosisConfig()
@@ -228,15 +230,47 @@ def _metric_from_rank_values(
     )
 
 
-def build_summary_step_diagnosis(
+def _build_summary_per_rank_timing(
+    rank_signals: Dict[int, RankStepSignals],
+) -> Dict[int, Dict[str, float]]:
+    """
+    Build canonical per-rank timing maps for the shared diagnosis result path.
+
+    These per-rank values mirror the summary semantics used elsewhere:
+    - `step_time` is the effective local step time
+    - `wait_proxy = max(0, effective_step - compute)`
+    """
+    out: Dict[int, Dict[str, float]] = {}
+    for rank, item in rank_signals.items():
+        dataloader = _finite_float(item.dataloader_ms)
+        forward = _finite_float(item.forward_ms)
+        backward = _finite_float(item.backward_ms)
+        optimizer = _finite_float(item.optimizer_ms)
+        step_cpu = _finite_float(item.step_cpu_ms)
+        compute = forward + backward + optimizer
+        step_effective = max(step_cpu, compute)
+        wait = max(0.0, step_effective - compute)
+
+        out[int(rank)] = {
+            "dataloader_fetch": dataloader,
+            "forward": forward,
+            "backward": backward,
+            "optimizer_step": optimizer,
+            "step_time": step_effective,
+            "wait_proxy": wait,
+        }
+    return out
+
+
+def build_summary_step_diagnosis_result(
     rank_signals: Dict[int, RankStepSignals],
     *,
     max_rows: int,
     per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
     config: SummaryDiagnosisConfig = DEFAULT_SUMMARY_DIAG_CONFIG,
-) -> Optional[StepDiagnosis]:
+) -> Optional[DiagnosticResult]:
     """
-    Build summary-mode diagnosis from per-rank averaged timing signals.
+    Build rich summary-mode diagnosis from per-rank averaged timing signals.
 
     Notes
     -----
@@ -337,7 +371,30 @@ def build_summary_step_diagnosis(
     if not metrics:
         return None
 
-    return build_step_diagnosis(metrics, thresholds=config.thresholds)
+    return build_step_diagnosis_result(
+        metrics,
+        thresholds=config.thresholds,
+        per_rank_timing=_build_summary_per_rank_timing(rank_signals),
+    )
+
+
+def build_summary_step_diagnosis(
+    rank_signals: Dict[int, RankStepSignals],
+    *,
+    max_rows: int,
+    per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
+    config: SummaryDiagnosisConfig = DEFAULT_SUMMARY_DIAG_CONFIG,
+) -> Optional[StepDiagnosis]:
+    """
+    Backward-compatible summary-mode primary diagnosis builder.
+    """
+    result = build_summary_step_diagnosis_result(
+        rank_signals,
+        max_rows=max_rows,
+        per_rank_step_metrics=per_rank_step_metrics,
+        config=config,
+    )
+    return result.primary if result is not None else None
 
 
 def diagnosis_to_json(
@@ -346,16 +403,13 @@ def diagnosis_to_json(
     """
     Serialize StepDiagnosis into a JSON-friendly dict.
     """
-    if diagnosis is None:
-        return None
+    return diagnosis_to_dict(diagnosis, drop_none=True)
 
-    return {
-        "kind": diagnosis.kind,
-        "severity": diagnosis.severity,
-        "status": diagnosis.status,
-        "reason": diagnosis.reason,
-        "action": diagnosis.action,
-        "steps_used": diagnosis.steps_used,
-        "worst_rank": diagnosis.worst_rank,
-        "note": diagnosis.note,
-    }
+
+def diagnosis_result_to_json(
+    result: Optional[DiagnosticResult],
+) -> Optional[Dict[str, Any]]:
+    """
+    Serialize a rich step-time diagnosis result into a JSON-friendly dict.
+    """
+    return diagnosis_to_dict(result, drop_none=True)

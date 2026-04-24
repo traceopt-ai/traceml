@@ -6,7 +6,7 @@ Separated from core rule logic to keep diagnosis engine lean and reusable.
 
 from __future__ import annotations
 
-from .step_time import StepDiagnosis
+from .api import StepDiagnosis
 
 
 def _styled_status(diagnosis: StepDiagnosis) -> str:
