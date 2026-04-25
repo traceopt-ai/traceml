@@ -9,15 +9,18 @@ def _base_payload() -> dict:
     return {
         "duration_s": 120.0,
         "system": {
-            "cpu_avg_percent": 25.0,
-            "ram_peak_gb": 4.0,
-            "gpu_available": True,
-            "gpu_count": 1,
+            "global": {
+                "cpu": {"avg_percent": 25.0},
+                "ram": {"peak_gb": 4.0},
+                "gpu_rollup": {"available": True, "count": 1},
+            },
         },
         "process": {
-            "cpu_avg_percent": 80.0,
-            "ram_peak_gb": 2.0,
-            "takeaway": "CPU usage looks normal.",
+            "global": {
+                "cpu": {"avg_percent": 80.0},
+                "ram": {"peak_gb": 2.0},
+                "takeaway": "CPU usage looks normal.",
+            },
         },
     }
 
@@ -35,32 +38,31 @@ def _step_time_section(
     split_ms: Optional[dict] = None,
 ) -> dict:
     return {
-        "diagnosis": {
-            "status": status,
-        },
-        "diagnosis_presented": {
+        "primary_diagnosis": {
             "status": status,
             "reason": reason,
             "action": action,
         },
-        "timing_primary": {
-            "step_avg_ms": step_avg_ms,
-            "wait_share_pct": wait_share_pct,
-            "compute_share_pct": compute_share_pct,
-            "dominant_phase": dominant_phase,
-            "split_pct": split_pct
-            or {
-                "dataloader": 8.0,
-                "forward": 20.0,
-                "backward": 60.0,
-                "optimizer": 12.0,
-            },
-            "split_ms": split_ms
-            or {
-                "dataloader": 24.0,
-                "forward": 60.0,
-                "backward": 180.0,
-                "optimizer": 36.0,
+        "global": {
+            "typical": {
+                "step_avg_ms": step_avg_ms,
+                "wait_share_pct": wait_share_pct,
+                "compute_share_pct": compute_share_pct,
+                "dominant_phase": dominant_phase,
+                "split_pct": split_pct
+                or {
+                    "dataloader": 8.0,
+                    "forward": 20.0,
+                    "backward": 60.0,
+                    "optimizer": 12.0,
+                },
+                "split_ms": split_ms
+                or {
+                    "dataloader": 24.0,
+                    "forward": 60.0,
+                    "backward": 180.0,
+                    "optimizer": 36.0,
+                },
             },
         },
     }
@@ -78,26 +80,25 @@ def _step_memory_section(
     trend_delta_bytes: float = 0.0,
 ) -> dict:
     return {
-        "diagnosis": {
-            "status": status,
-        },
-        "diagnosis_presented": {
+        "primary_diagnosis": {
             "status": status,
             "reason": reason,
             "action": action,
         },
-        "primary_metric": {
-            "metric": metric,
-            "worst_peak_bytes": worst_peak_bytes,
-            "median_peak_bytes": median_peak_bytes,
-            "worst_rank": 0,
-            "skew_pct": skew_pct,
-            "trend": {
-                "worst": {
-                    "delta_bytes": trend_delta_bytes,
-                },
-                "median": {
-                    "delta_bytes": trend_delta_bytes * 0.5,
+        "global": {
+            "primary_metric": {
+                "metric": metric,
+                "worst_peak_bytes": worst_peak_bytes,
+                "median_peak_bytes": median_peak_bytes,
+                "worst_rank": 0,
+                "skew_pct": skew_pct,
+                "trend": {
+                    "worst": {
+                        "delta_bytes": trend_delta_bytes,
+                    },
+                    "median": {
+                        "delta_bytes": trend_delta_bytes * 0.5,
+                    },
                 },
             },
         },
@@ -202,26 +203,27 @@ def test_compare_partial_step_time_stays_unclear_and_surfaces_partial_comparabil
 ):
     lhs = _payload_with_sections(
         step_time={
-            "diagnosis": {"status": "BALANCED"},
-            "diagnosis_presented": {
+            "primary_diagnosis": {
                 "status": "BALANCED",
                 "reason": "No clear timing issue.",
                 "action": "Keep monitoring.",
             },
-            "timing_primary": {
-                "step_avg_ms": 300.0,
-                "dominant_phase": "backward",
-                "split_pct": {
-                    "dataloader": 8.0,
-                    "forward": 20.0,
-                    "backward": 60.0,
-                    "optimizer": 12.0,
-                },
-                "split_ms": {
-                    "dataloader": 24.0,
-                    "forward": 60.0,
-                    "backward": 180.0,
-                    "optimizer": 36.0,
+            "global": {
+                "typical": {
+                    "step_avg_ms": 300.0,
+                    "dominant_phase": "backward",
+                    "split_pct": {
+                        "dataloader": 8.0,
+                        "forward": 20.0,
+                        "backward": 60.0,
+                        "optimizer": 12.0,
+                    },
+                    "split_ms": {
+                        "dataloader": 24.0,
+                        "forward": 60.0,
+                        "backward": 180.0,
+                        "optimizer": 36.0,
+                    },
                 },
             },
         },

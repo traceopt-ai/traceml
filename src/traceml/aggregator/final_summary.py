@@ -50,6 +50,8 @@ def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
             continue
         value = section.get("duration_s")
         if value is None:
+            value = section.get("overview", {}).get("duration_s")
+        if value is None:
             continue
         try:
             return float(value)
@@ -203,7 +205,7 @@ def build_summary_payload(db_path: str) -> Dict[str, Any]:
     )
 
     return {
-        "schema_version": 1.1,
+        "schema_version": 1.2,
         "generated_at": utc_now_iso(),
         "duration_s": _summary_duration_s(
             step_time_summary,

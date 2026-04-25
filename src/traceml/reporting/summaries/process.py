@@ -12,25 +12,30 @@ Design goals
 - Keep the printed summary short and easy to scan
 - Use one clear canonical schema for process summary data
 - Preserve richer machine-readable fields in JSON
-- Add explicit structured blocks for:
-  - scope across traced ranks and pids
-  - CPU rollup
-  - RAM rollup
-  - GPU rollup across the traced workload
-  - per-rank process rollups
+- Use the schema 1.2 section contract:
+  - `overview` for scope metadata
+  - `primary_diagnosis` for the concise user-facing diagnosis
+  - `global` for workload-level CPU, RAM, GPU, and takeaway data
+  - `per_rank` for traced-rank detail
 
 Notes
 -----
 - The printed text intentionally remains compact.
 - The JSON summary is the richer source of truth for downstream systems.
-- Compare should continue to work without changing its output because it will
-  adapt internally to read the new nested process schema.
 """
 
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from traceml.diagnostics.common import diagnosis_to_dict
+from traceml.diagnostics.process import build_process_diagnosis_result
+from traceml.reporting.summaries.issue_summary import (
+    issues_by_metric_json,
+    issues_by_rank_json,
+    issues_compact_text,
+    issues_to_json,
+)
 from traceml.reporting.summaries.summary_formatting import (
     bytes_to_gb,
     duration_from_bounds,
@@ -42,6 +47,8 @@ from traceml.reporting.summaries.summary_io import (
     load_json_or_empty,
     write_json,
 )
+
+MAX_SUMMARY_ROWS = 10_000
 
 
 @dataclass
@@ -497,6 +504,42 @@ def _per_rank_to_json(
     return out
 
 
+def _per_rank_to_diagnosis_input(
+    per_rank: Dict[int, PerRankProcessSummary],
+) -> Dict[int, Dict[str, Optional[float]]]:
+    """
+    Convert per-rank process summaries into the bytes-based shape used by
+    process diagnosis rules.
+
+    Notes
+    -----
+    Summary JSON intentionally exposes memory in GB for readability, while the
+    diagnosis layer keeps raw bytes so pressure calculations remain precise.
+    """
+    out: Dict[int, Dict[str, Optional[float]]] = {}
+
+    for rank_id, item in sorted(per_rank.items()):
+        out[int(rank_id)] = {
+            "pid_count": float(item.pid_count),
+            "gpu_device_index": (
+                float(item.gpu_device_index)
+                if item.gpu_device_index is not None
+                else None
+            ),
+            "cpu_avg_percent": item.cpu_avg_percent,
+            "cpu_peak_percent": item.cpu_peak_percent,
+            "ram_avg_bytes": item.ram_avg_bytes,
+            "ram_peak_bytes": item.ram_peak_bytes,
+            "ram_total_bytes": item.ram_total_bytes,
+            "gpu_mem_used_avg_bytes": item.gpu_mem_used_avg_bytes,
+            "gpu_mem_used_peak_bytes": item.gpu_mem_used_peak_bytes,
+            "gpu_mem_reserved_avg_bytes": item.gpu_mem_reserved_avg_bytes,
+            "gpu_mem_reserved_peak_bytes": item.gpu_mem_reserved_peak_bytes,
+            "gpu_mem_total_bytes": item.gpu_mem_total_bytes,
+        }
+    return out
+
+
 def _best_rank_idx(
     per_rank: Dict[int, PerRankProcessSummary],
     attr_name: str,
@@ -564,6 +607,7 @@ def _build_process_card(
         agg.gpu_mem_reserved_peak_bytes,
         agg.gpu_mem_total_bytes,
     )
+    per_rank_for_diagnosis = _per_rank_to_diagnosis_input(per_rank)
 
     highest_used_rank = _best_rank_idx(per_rank, "gpu_mem_used_peak_bytes")
     highest_reserved_rank = _best_rank_idx(
@@ -596,6 +640,37 @@ def _build_process_card(
             least_headroom_gb = headroom_gb
 
     takeaway = _build_takeaway(agg)
+    diagnosis_result = build_process_diagnosis_result(
+        duration_s=duration_s,
+        process_samples=agg.process_samples,
+        distinct_ranks=agg.distinct_ranks,
+        distinct_pids=agg.distinct_pids,
+        cpu_avg_percent=agg.cpu_avg_percent,
+        cpu_peak_percent=agg.cpu_peak_percent,
+        cpu_logical_core_count=agg.cpu_logical_core_count,
+        ram_avg_bytes=agg.ram_avg_bytes,
+        ram_peak_bytes=agg.ram_peak_bytes,
+        ram_total_bytes=agg.ram_total_bytes,
+        gpu_available=agg.gpu_available,
+        gpu_count=agg.gpu_count,
+        gpu_device_index=agg.gpu_device_index,
+        gpu_mem_used_avg_bytes=agg.gpu_mem_used_avg_bytes,
+        gpu_mem_used_peak_bytes=agg.gpu_mem_used_peak_bytes,
+        gpu_mem_reserved_avg_bytes=agg.gpu_mem_reserved_avg_bytes,
+        gpu_mem_reserved_peak_bytes=agg.gpu_mem_reserved_peak_bytes,
+        gpu_mem_total_bytes=agg.gpu_mem_total_bytes,
+        per_rank=per_rank_for_diagnosis,
+    )
+    primary_diagnosis = diagnosis_result.primary
+    issues = diagnosis_result.issues
+    issues_by_rank, unassigned_issues = issues_by_rank_json(
+        issues,
+        rank_keys=per_rank.keys(),
+    )
+    issues_by_metric, metric_unassigned = issues_by_metric_json(issues)
+    per_rank_json = _per_rank_to_json(per_rank)
+    for rank_key, entry in per_rank_json.items():
+        entry["issues"] = issues_by_rank.get(rank_key, [])
 
     lines = [
         f"TraceML Process Summary | duration {format_optional(duration_s, 's', 1)} | samples {agg.process_samples}",
@@ -628,12 +703,16 @@ def _build_process_card(
             )
         ),
         f"- Takeaway: {takeaway}",
+        f"- Diagnosis: {primary_diagnosis.status}",
+        f"- Why: {primary_diagnosis.reason}",
+        f"- Next: {primary_diagnosis.action}",
     ]
+    issue_text = issues_compact_text(issues, max_items=4)
+    if issue_text:
+        lines.append(f"- Issues: {issue_text}")
     card = "\n".join(lines)
 
-    summary = {
-        "duration_s": duration_s,
-        "process_samples": agg.process_samples,
+    global_summary = {
         "scope": {
             "ranks": agg.distinct_ranks,
             "pids": agg.distinct_pids,
@@ -666,8 +745,26 @@ def _build_process_card(
             "least_headroom_rank": least_headroom_rank,
             "least_headroom_gb": least_headroom_gb,
         },
-        "per_rank": _per_rank_to_json(per_rank),
         "takeaway": takeaway,
+    }
+
+    summary = {
+        "overview": {
+            "duration_s": duration_s,
+            "samples": agg.process_samples,
+            "ranks_seen": agg.distinct_ranks,
+            "pids_seen": agg.distinct_pids,
+        },
+        "primary_diagnosis": diagnosis_to_dict(
+            primary_diagnosis,
+            drop_none=True,
+        ),
+        "issues": issues_to_json(issues),
+        "issues_by_rank": issues_by_rank,
+        "issues_by_metric": issues_by_metric,
+        "unassigned_issues": unassigned_issues + metric_unassigned,
+        "global": global_summary,
+        "per_rank": per_rank_json,
         "units": {
             "memory": "GB",
             "cpu": "%",
@@ -682,7 +779,7 @@ def generate_process_summary_card(
     *,
     rank: Optional[int] = None,
     print_to_stdout: bool = True,
-    max_process_rows: int = 10_000,
+    max_process_rows: int = MAX_SUMMARY_ROWS,
 ) -> Dict[str, Any]:
     """
     Generate a compact PROCESS summary from SQL projection tables.
@@ -703,6 +800,7 @@ def generate_process_summary_card(
     Dict[str, Any]
         Structured summary JSON including the rendered `card`.
     """
+    max_process_rows = min(max(1, int(max_process_rows)), MAX_SUMMARY_ROWS)
     conn = sqlite3.connect(db_path)
     try:
         agg = _load_process_summary_agg(

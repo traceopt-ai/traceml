@@ -10,10 +10,8 @@ produces:
 Design goals
 ------------
 - Keep the printed summary concise and easy to scan
-- Make future extension straightforward for:
-  - richer global rollups
-  - per-rank detail
-  - optional per-device / per-GPU detail when the data model supports it
+- Keep the exported schema rank-centric and stable
+- Preserve a clean canonical rollup for platform consumers
 
 Notes
 -----
@@ -21,8 +19,6 @@ Notes
 - The JSON summary is the richer source of truth for downstream systems.
 - The current persistent step-time data is rank-based, so this module exposes
   `per_rank` as the canonical detailed dimension today.
-- A `per_device` extension point is included, but it is intentionally empty
-  until canonical step-time rows carry device identity reliably.
 """
 
 import json
@@ -36,11 +32,15 @@ from traceml.reporting.summaries.diagnosis_presentation import (
     diagnosis_presentation_to_json,
     present_step_time_summary_diagnosis,
 )
+from traceml.reporting.summaries.issue_summary import (
+    issues_by_metric_json,
+    issues_by_rank_json,
+    issues_compact_text,
+    issues_to_json,
+)
 from traceml.reporting.summaries.step_time_diagnosis import (
     RankStepSignals,
     build_summary_step_diagnosis_result,
-    diagnosis_result_to_json,
-    diagnosis_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import (
     format_ms,
@@ -53,6 +53,8 @@ from traceml.reporting.summaries.summary_io import (
     load_json_or_empty,
     write_json,
 )
+
+MAX_SUMMARY_WINDOW_ROWS = 10_000
 
 
 def _finite_float(x: Any) -> float:
@@ -550,9 +552,8 @@ def _build_global_rollup(
 
     Notes
     -----
-    This is intentionally rank-based today. A future `per_device` view can be
-    added cleanly once canonical step-time rows include reliable device
-    identity.
+    This is intentionally rank-based today and keeps the exported schema
+    centered on per-rank timing summaries.
     """
     if not per_rank_summary:
         return {
@@ -676,27 +677,20 @@ def _build_step_time_card(
     ------------
     The canonical structured blocks are:
     - `overview`
-    - `global_rollup`
-    - `rank_rollup`
+    - `global`
     - `per_rank`
-    - `per_device` (reserved for future extension)
-    - `diagnosis`
+    - `primary_diagnosis`
 
     Compatibility notes
     -------------------
-    `timing_primary`, `timing_median_rank`, and `timing_worst_rank` are kept so
-    existing compare and rendering logic remain stable while the internal schema
-    becomes cleaner.
+    Schema version 1.2 keeps cards compact and moves platform data into a small
+    set of stable JSON blocks that compare can read consistently.
     """
     ranks_present = sorted(per_rank_summary.keys())
     overview = _build_overview(per_rank_summary=per_rank_summary)
 
     representative_rank = overview["representative_rank"]
     worst_rank = overview["worst_rank"]
-    representative_avg_step_ms = overview["representative_avg_step_ms"]
-    worst_avg_step_ms = overview["worst_avg_step_ms"]
-    worst_vs_representative_pct = overview["worst_vs_representative_pct"]
-
     representative_summary = (
         per_rank_summary.get(representative_rank)
         if representative_rank is not None
@@ -712,28 +706,6 @@ def _build_step_time_card(
         else worst_summary
     )
 
-    representative_split_ms = (
-        _split_ms(representative_summary)
-        if representative_summary is not None
-        else None
-    )
-    worst_split_ms = (
-        _split_ms(worst_summary) if worst_summary is not None else None
-    )
-    representative_split_pct = (
-        _split_pct(representative_summary)
-        if representative_summary is not None
-        else None
-    )
-    worst_split_pct = (
-        _split_pct(worst_summary) if worst_summary is not None else None
-    )
-
-    dominant_text = _dominant_line(
-        representative_split_ms,
-        worst_split_ms,
-    )
-
     summary_diag_result = build_summary_step_diagnosis_result(
         rank_signals=_to_rank_signals(per_rank_summary),
         max_rows=max_rows,
@@ -745,20 +717,42 @@ def _build_step_time_card(
         else None
     )
     summary_diag_presented = present_step_time_summary_diagnosis(summary_diag)
-
-    primary_rollup = _timing_rollup_from_summary(primary_summary)
-    representative_rollup = _timing_rollup_with_rank(
-        representative_rank,
-        representative_summary,
+    issues = summary_diag_result.issues if summary_diag_result else ()
+    issues_by_rank, unassigned_issues = issues_by_rank_json(
+        issues,
+        rank_keys=ranks_present,
     )
-    worst_rollup = _timing_rollup_with_rank(worst_rank, worst_summary)
+    issues_by_metric, metric_unassigned = issues_by_metric_json(issues)
 
     global_rollup = _build_global_rollup(
         per_rank_summary=per_rank_summary,
         representative_rank=representative_rank,
         bottleneck_rank=worst_rank,
-        imbalance_gap_pct=worst_vs_representative_pct,
+        imbalance_gap_pct=overview["worst_vs_representative_pct"],
     )
+
+    if primary_summary is not None:
+        primary_rollup = _timing_rollup_from_summary(primary_summary)
+    else:
+        primary_rollup = {
+            "steps_analyzed": 0,
+            "step_avg_ms": None,
+            "compute_avg_ms": None,
+            "compute_share_pct": None,
+            "wait_avg_ms": None,
+            "wait_share_pct": None,
+            "split_ms": None,
+            "split_pct": None,
+            "dominant_phase": None,
+        }
+
+    steps_analyzed_by_rank = {
+        str(rank): int(s.steps_analyzed)
+        for rank, s in sorted(per_rank_summary.items())
+    }
+    analyzed_counts = list(steps_analyzed_by_rank.values())
+    min_steps_analyzed = min(analyzed_counts) if analyzed_counts else 0
+    max_steps_analyzed = max(analyzed_counts) if analyzed_counts else 0
 
     lines = [
         f"TraceML Step Timing Summary | steps {training_steps} | ranks {len(ranks_present)}",
@@ -769,66 +763,44 @@ def _build_step_time_card(
         lines.extend(
             [
                 f"- Scope: latest step {latest_step_observed if latest_step_observed is not None else 'n/a'}",
-                "- Step avg: n/a",
-                "- Split: n/a",
-                "- Dominant: n/a",
+                "- Global: n/a",
             ]
         )
     elif len(ranks_present) == 1 and primary_summary is not None:
         only_rank = ranks_present[0]
-        only_split_ms = _split_ms(primary_summary)
+        typical = global_rollup["typical"] or {}
 
         lines.extend(
             [
                 f"- Scope: last {primary_summary.steps_analyzed} steps on rank r{only_rank}",
-                f"- Step avg: {format_ms(primary_summary.avg_total_step_ms)}",
                 (
-                    f"- Split: DL {format_ms(only_split_ms['dataloader'])} | "
-                    f"FWD {format_ms(only_split_ms['forward'])} | "
-                    f"BWD {format_ms(only_split_ms['backward'])} | "
-                    f"OPT {format_ms(only_split_ms['optimizer'])} | "
-                    f"WAIT {format_ms(primary_rollup['wait_avg_ms'])}"
+                    f"- Global: step {format_ms(typical.get('step_avg_ms'))} | "
+                    f"compute {format_ms(typical.get('compute_avg_ms'))} | "
+                    f"wait {format_ms(typical.get('wait_avg_ms'))}"
                 ),
-                f"- Dominant: {_dominant_line(only_split_ms, None)}",
+                f"- Dominant: {typical.get('dominant_phase') or 'n/a'}",
             ]
         )
     else:
+        typical = global_rollup["typical"] or {}
+        bottleneck = global_rollup["bottleneck"] or {}
+        gap_pct = global_rollup.get("imbalance_gap_pct")
+        analyzed_text = (
+            f"last {max_steps_analyzed} steps per rank"
+            if min_steps_analyzed == max_steps_analyzed
+            else f"last {min_steps_analyzed}-{max_steps_analyzed} steps per rank"
+        )
         lines.extend(
             [
+                f"- Scope: ranks {len(ranks_present)} | compared over {analyzed_text}",
                 (
-                    f"- Scope: ranks {len(ranks_present)} | compared over last up to {int(max_rows)} steps per rank"
+                    f"- Global: median r{representative_rank} {format_ms(typical.get('step_avg_ms'))} | "
+                    f"worst r{worst_rank} {format_ms(bottleneck.get('step_avg_ms'))} | "
+                    f"gap {format_percent(gap_pct)}"
                 ),
-                (
-                    f"- Step avg: median r{representative_rank} {format_ms(representative_avg_step_ms)} | "
-                    f"worst r{worst_rank} {format_ms(worst_avg_step_ms)} | "
-                    f"gap {format_percent(worst_vs_representative_pct)}"
-                ),
+                f"- Dominant: {typical.get('dominant_phase') or 'n/a'}",
             ]
         )
-
-        if representative_split_ms is not None:
-            lines.append(
-                (
-                    f"- Median split: DL {format_ms(representative_split_ms['dataloader'])} | "
-                    f"FWD {format_ms(representative_split_ms['forward'])} | "
-                    f"BWD {format_ms(representative_split_ms['backward'])} | "
-                    f"OPT {format_ms(representative_split_ms['optimizer'])} | "
-                    f"WAIT {format_ms(representative_rollup['wait_avg_ms'])}"
-                )
-            )
-
-        if worst_split_ms is not None:
-            lines.append(
-                (
-                    f"- Worst split: DL {format_ms(worst_split_ms['dataloader'])} | "
-                    f"FWD {format_ms(worst_split_ms['forward'])} | "
-                    f"BWD {format_ms(worst_split_ms['backward'])} | "
-                    f"OPT {format_ms(worst_split_ms['optimizer'])} | "
-                    f"WAIT {format_ms(worst_rollup['wait_avg_ms'])}"
-                )
-            )
-
-        lines.append(f"- Dominant: {dominant_text}")
 
     if summary_diag_presented is not None:
         lines.append(f"- Diagnosis: {summary_diag_presented.status}")
@@ -837,33 +809,21 @@ def _build_step_time_card(
         if summary_diag_presented.note:
             lines.append(f"- Note: {summary_diag_presented.note}")
 
+    issue_text = issues_compact_text(issues, max_items=4)
+    if issue_text:
+        lines.append(f"- Issues: {issue_text}")
+
     card = "\n".join(lines)
 
+    per_rank_json = {
+        str(rank): {
+            **_rank_entry_to_json(rank, s),
+            "issues": issues_by_rank.get(str(rank), []),
+        }
+        for rank, s in sorted(per_rank_summary.items())
+    }
+
     summary = {
-        # Existing top-level fields kept for compatibility and to minimize risk.
-        "training_steps": training_steps,
-        "latest_step_observed": latest_step_observed,
-        "ranks_seen": len(ranks_present),
-        "max_steps_analyzed_per_rank": int(max_rows),
-        "worst_rank": worst_rank,
-        "median_rank": representative_rank,
-        "worst_vs_median_pct": worst_vs_representative_pct,
-        "worst_avg_step_ms": worst_avg_step_ms,
-        "median_avg_step_ms": representative_avg_step_ms,
-        "dominant_text": dominant_text,
-        "median_split_ms": representative_split_ms,
-        "worst_split_ms": worst_split_ms,
-        "median_split_pct": representative_split_pct,
-        "worst_split_pct": worst_split_pct,
-        "diagnosis": diagnosis_to_json(summary_diag),
-        "diagnosis_result": diagnosis_result_to_json(summary_diag_result),
-        "diagnosis_presented": diagnosis_presentation_to_json(
-            summary_diag_presented
-        ),
-        "timing_primary": primary_rollup,
-        "timing_median_rank": representative_rollup,
-        "timing_worst_rank": worst_rollup,
-        # Canonical structured fields.
         "overview": {
             "mode": overview["mode"],
             "training_steps": training_steps,
@@ -871,49 +831,19 @@ def _build_step_time_card(
             "ranks_seen": len(ranks_present),
             "max_steps_analyzed_per_rank": int(max_rows),
             "steps_used_primary": int(primary_rollup["steps_analyzed"]),
+            "steps_analyzed_min": int(min_steps_analyzed),
+            "steps_analyzed_max": int(max_steps_analyzed),
+            "steps_analyzed_per_rank": steps_analyzed_by_rank,
         },
-        "global_rollup": global_rollup,
-        "rank_rollup": {
-            "representative_rank": representative_rank,
-            "bottleneck_rank": worst_rank,
-            "representative_avg_step_ms": representative_avg_step_ms,
-            "bottleneck_avg_step_ms": worst_avg_step_ms,
-            "imbalance_gap_pct": worst_vs_representative_pct,
-        },
-        "per_rank": {
-            str(rank): _rank_entry_to_json(rank, s)
-            for rank, s in sorted(per_rank_summary.items())
-        },
-        "per_device": {},
-        "extensibility": {
-            "per_device_available": False,
-            "per_device_reason": (
-                "step_time_samples is currently rank-based and does not "
-                "persist canonical device identity for end-of-run timing "
-                "summaries"
-            ),
-            "future_extension": (
-                "populate per_device when canonical step-time rows include "
-                "stable device identity"
-            ),
-        },
-        "notes": {
-            "step_basis": (
-                "step_avg = dataloader + max(step_time, forward + backward + optimizer)"
-            ),
-            "comparison_mode": (
-                f"per-rank averages over each rank's last up to {int(max_rows)} steps"
-            ),
-            "representative_rank_definition": (
-                "rank closest to the median average step time across analyzed ranks"
-            ),
-            "bottleneck_rank_definition": (
-                "rank with the highest average step time across analyzed ranks"
-            ),
-            "wait_definition": (
-                "wait_proxy = max(0, effective_step - (forward + backward + optimizer))"
-            ),
-        },
+        "primary_diagnosis": diagnosis_presentation_to_json(
+            summary_diag_presented
+        ),
+        "issues": issues_to_json(issues),
+        "issues_by_rank": issues_by_rank,
+        "issues_by_metric": issues_by_metric,
+        "unassigned_issues": unassigned_issues + metric_unassigned,
+        "global": global_rollup,
+        "per_rank": per_rank_json,
         "card": card,
     }
     return card, summary
@@ -922,7 +852,7 @@ def _build_step_time_card(
 def generate_step_time_summary_card(
     db_path: str,
     *,
-    max_rows: int = 50_000,
+    max_rows: int = MAX_SUMMARY_WINDOW_ROWS,
     print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -949,6 +879,7 @@ def generate_step_time_summary_card(
     - Diagnosis is intentionally reused from the shared step-time diagnosis
       engine so live views and end-of-run summaries stay consistent.
     """
+    max_rows = min(max(1, int(max_rows)), MAX_SUMMARY_WINDOW_ROWS)
     conn = sqlite3.connect(db_path)
 
     try:

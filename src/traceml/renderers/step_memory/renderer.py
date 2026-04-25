@@ -12,13 +12,17 @@ Columns:
     - Peak Reserved
 
 Rows (over last K fully completed steps, aligned across ranks):
-- Median Peak (max/K) : median rank's *peak* over the window
-- Worst Peak (max/K)  : worst rank's *peak* over the window
-- Worst Rank          : rank responsible for worst peak
-- Skew (%)            : (worst − median) / median
+- Multi-rank:
+    - Median Peak (max/K) : median rank's *peak* over the window
+    - Worst Peak (max/K)  : worst rank's *peak* over the window
+    - Worst Rank          : rank responsible for worst peak
+    - Skew (%)            : (worst − median) / median
+- Single-rank:
+    - Peak (max/K)        : only rank's peak over the window
 
 Optional (low-noise):
-- Worst Trend (Δ)     : (last_worst − first_worst) over the aligned series window
+- Multi-rank: Worst Trend (Δ)
+- Single-rank: Trend (Δ)
 
 This table is intentionally stable and low-noise.
 Per-step volatility belongs in plots, not summaries.
@@ -46,7 +50,7 @@ class StepMemoryRenderer(BaseRenderer):
 
     This renderer shows a **window-peak summary table** where:
     - columns = memory metrics (allocated, reserved)
-    - rows    = median peak, worst peak, worst-rank, skew (+ optional trend)
+    - rows    = rank-aware peak summary (+ optional trend)
 
     It is designed to surface **OOM risk and rank imbalance quickly**
     without overwhelming the user with per-step noise.
@@ -70,7 +74,12 @@ class StepMemoryRenderer(BaseRenderer):
         payload = self._computer.compute_cli()
         if payload and payload.metrics:
             self._cached = payload
-        return self._cached
+            return payload
+
+        if self._cached is not None:
+            return self._cached
+
+        return payload
 
     def get_panel_renderable(self) -> Panel:
         """
@@ -85,7 +94,11 @@ class StepMemoryRenderer(BaseRenderer):
 
         if payload is None or not payload.metrics:
             return Panel(
-                "Waiting for first fully completed step across all ranks…",
+                (
+                    payload.status_message
+                    if payload is not None and payload.status_message
+                    else "Waiting for first fully completed step across all ranks…"
+                ),
                 title="Model Step Memory",
             )
 
@@ -106,6 +119,10 @@ class StepMemoryRenderer(BaseRenderer):
 
         # All metrics share the same window size by construction
         K = metrics[0].summary.steps_used
+        single_rank = bool(
+            metrics[0].coverage.world_size <= 1
+            or metrics[0].coverage.ranks_present <= 1
+        )
 
         table = Table(
             show_header=True,
@@ -127,39 +144,48 @@ class StepMemoryRenderer(BaseRenderer):
             table.add_column(title, justify="right")
 
         # Window-peak rows (bytes formatted via fmt_mem_new)
-        table.add_row(
-            f"Median Peak (max/{K})",
-            *[fmt_mem_new(m.summary.median_peak) for m in metrics],
-        )
+        if single_rank:
+            table.add_row(
+                f"Peak (max/{K})",
+                *[fmt_mem_new(m.summary.worst_peak) for m in metrics],
+            )
+        else:
+            table.add_row(
+                f"Median Peak (max/{K})",
+                *[fmt_mem_new(m.summary.median_peak) for m in metrics],
+            )
 
-        table.add_row(
-            f"Worst Peak (max/{K})",
-            *[fmt_mem_new(m.summary.worst_peak) for m in metrics],
-        )
+            table.add_row(
+                f"Worst Peak (max/{K})",
+                *[fmt_mem_new(m.summary.worst_peak) for m in metrics],
+            )
 
-        table.add_row(
-            "Worst Rank",
-            *[
-                (
-                    f"r{m.summary.worst_rank}"
-                    if m.summary.worst_rank is not None
-                    else "—"
-                )
-                for m in metrics
-            ],
-        )
+            table.add_row(
+                "Worst Rank",
+                *[
+                    (
+                        f"r{m.summary.worst_rank}"
+                        if m.summary.worst_rank is not None
+                        else "—"
+                    )
+                    for m in metrics
+                ],
+            )
 
-        table.add_row(
-            "Skew (%)",
-            *[f"+{m.summary.skew_pct * 100:.1f}%" for m in metrics],
-        )
+            table.add_row(
+                "Skew (%)",
+                *[f"+{m.summary.skew_pct * 100:.1f}%" for m in metrics],
+            )
 
         # Optional: low-noise trend (use worst series delta)
         # This is helpful for spotting monotonic growth / fragmentation.
         table.add_row("")
         table.add_row(
-            "Head/Tail Delta (worst)",
-            *[self._format_worst_trend_delta(m) for m in metrics],
+            "Head/Tail Delta" if single_rank else "Head/Tail Delta (worst)",
+            *[
+                self._format_worst_trend_delta(m, single_rank=single_rank)
+                for m in metrics
+            ],
         )
 
         subtitle = (
@@ -171,7 +197,11 @@ class StepMemoryRenderer(BaseRenderer):
         cols, _ = shutil.get_terminal_size()
         width = min(max(100, int(cols * 0.75)), 120)
 
-        footer = "\n\n[dim]Peaks = per-rank max over last K; median/worst = across ranks.[/dim]"
+        footer = (
+            "\n\n[dim]Peaks = max over last K aligned steps for the only rank.[/dim]"
+            if single_rank
+            else "\n\n[dim]Peaks = per-rank max over last K; median/worst = across ranks.[/dim]"
+        )
 
         return Panel(
             Group(
@@ -186,17 +216,19 @@ class StepMemoryRenderer(BaseRenderer):
         )
 
     @staticmethod
-    def _format_worst_trend_delta(m) -> str:
+    def _format_worst_trend_delta(m, *, single_rank: bool = False) -> str:
         """
-        Format a stable head-vs-tail delta for the worst series.
+        Format a stable head-vs-tail delta for the displayed series.
 
-        This mirrors the memory diagnosis more closely than raw last-minus-first.
+        Multi-rank mode uses the worst series; single-rank mode uses the only
+        rank series, which is stored identically in both median and worst.
         """
         series = m.series
-        if not series.steps or not series.worst:
+        values_source = series.median if single_rank else series.worst
+        if not series.steps or not values_source:
             return "—"
 
-        values = [float(v) for v in series.worst]
+        values = [float(v) for v in values_source]
         n = len(values)
         if n < 2:
             return "—"

@@ -11,7 +11,11 @@ Design goals
 ------------
 - Keep the printed summary short and actionable
 - Reuse the same diagnosis logic as live CLI and dashboard views
-- Use one clear canonical schema for end-of-run step-memory data
+- Use the schema 1.2 section contract:
+  - `overview` for scope metadata
+  - `primary_diagnosis` for the concise user-facing diagnosis
+  - `global` for primary metric, metric rollups, trend, and imbalance data
+  - `per_rank` for rank detail
 - Preserve richer machine-readable fields in JSON
 """
 
@@ -21,6 +25,9 @@ from typing import Any, Dict, Optional
 from traceml.diagnostics.step_memory import (
     StepMemoryDiagnosis,
     build_step_memory_diagnosis,
+)
+from traceml.diagnostics.step_memory_summary import (
+    build_step_memory_summary_diagnosis_result,
 )
 from traceml.diagnostics.trends import compute_trend_evidence
 from traceml.renderers.step_memory.common import (
@@ -32,6 +39,12 @@ from traceml.reporting.summaries.diagnosis_presentation import (
     diagnosis_presentation_to_json,
     present_step_memory_summary_diagnosis,
 )
+from traceml.reporting.summaries.issue_summary import (
+    issues_by_metric_json,
+    issues_by_rank_json,
+    issues_compact_text,
+    issues_to_json,
+)
 from traceml.reporting.summaries.summary_formatting import (
     format_ratio_percent,
     safe_float,
@@ -42,6 +55,8 @@ from traceml.reporting.summaries.summary_io import (
     write_json,
 )
 from traceml.utils.formatting import fmt_mem_new
+
+MAX_SUMMARY_WINDOW_ROWS = 10_000
 
 
 def _metric_sort_key(metric: StepMemoryCombinedMetric) -> int:
@@ -62,24 +77,37 @@ def _metric_label(metric_name: str) -> str:
     return metric_name.replace("_", " ")
 
 
-def _diagnosis_to_json(
-    diagnosis: Optional[StepMemoryDiagnosis],
-) -> Optional[Dict[str, Any]]:
-    """Serialize StepMemoryDiagnosis into a compare-friendly JSON shape."""
-    if diagnosis is None:
-        return None
-
+def _no_gpu_diagnosis_json() -> Dict[str, Any]:
+    """
+    Stable summary diagnosis block for CPU-only / no-GPU runs.
+    """
     return {
-        "kind": diagnosis.kind,
-        "status": diagnosis.status,
-        "severity": diagnosis.severity,
-        "metric": diagnosis.metric,
-        "steps_used": diagnosis.steps_used,
-        "worst_rank": diagnosis.worst_rank,
-        "reason": diagnosis.reason,
-        "action": diagnosis.action,
-        "note": diagnosis.note,
-        "confidence": diagnosis.confidence,
+        "kind": "NO_GPU",
+        "status": "NO GPU",
+        "severity": "info",
+        "metric": None,
+        "steps_used": 0,
+        "worst_rank": None,
+        "reason": (
+            "No GPU detected. Step memory uses torch-based GPU memory telemetry."
+        ),
+        "action": "Treat step memory as not applicable for this run.",
+        "note": None,
+        "confidence": 1.0,
+    }
+
+
+def _no_gpu_diagnosis_presented() -> Dict[str, Any]:
+    """
+    Stable end-of-run presentation block for CPU-only / no-GPU runs.
+    """
+    return {
+        "status": "NO GPU",
+        "reason": (
+            "No GPU detected. Step memory uses torch-based GPU memory telemetry."
+        ),
+        "action": "Step memory is not applicable for this run.",
+        "note": None,
     }
 
 
@@ -495,6 +523,8 @@ def _build_step_memory_card(
     latest_step_observed: Optional[int],
     metrics: list[StepMemoryCombinedMetric],
     diagnosis: Optional[StepMemoryDiagnosis],
+    diagnosis_result: Optional[Any],
+    no_gpu_detected: bool,
     per_rank: Dict[str, Any],
 ) -> tuple[str, Dict[str, Any]]:
     """
@@ -512,8 +542,27 @@ def _build_step_memory_card(
     sorted_metrics = sorted(metrics, key=_metric_sort_key)
     primary = _primary_metric(sorted_metrics, diagnosis)
     diagnosis_presented = present_step_memory_summary_diagnosis(diagnosis)
+    issues = tuple(getattr(diagnosis_result, "issues", ()) or ())
+    issues_by_rank, unassigned_issues = issues_by_rank_json(
+        issues,
+        rank_keys=per_rank.keys(),
+    )
+    issues_by_metric, metric_unassigned = issues_by_metric_json(issues)
+    per_rank_with_issues = {
+        rank_key: {
+            **entry,
+            "issues": issues_by_rank.get(rank_key, []),
+        }
+        for rank_key, entry in per_rank.items()
+    }
 
     if not sorted_metrics or primary is None:
+        no_gpu_diagnosis = (
+            _no_gpu_diagnosis_json() if no_gpu_detected else None
+        )
+        no_gpu_presented = (
+            _no_gpu_diagnosis_presented() if no_gpu_detected else None
+        )
         card = "\n".join(
             [
                 f"TraceML Step Memory Summary | steps {training_steps} | ranks 0",
@@ -522,19 +571,25 @@ def _build_step_memory_card(
                     f"- Scope: latest step "
                     f"{latest_step_observed if latest_step_observed is not None else 'n/a'}"
                 ),
-                "- Diagnosis: NO DATA",
-                "- Why: No step-memory data was collected.",
-                "- Next: Run longer or collect more memory steps.",
+                (
+                    f"- Diagnosis: {no_gpu_diagnosis['status']}"
+                    if no_gpu_diagnosis is not None
+                    else "- Diagnosis: NO DATA"
+                ),
+                (
+                    f"- Why: {no_gpu_diagnosis['reason']}"
+                    if no_gpu_diagnosis is not None
+                    else "- Why: No step-memory data was collected."
+                ),
+                (
+                    f"- Next: {no_gpu_diagnosis['action']}"
+                    if no_gpu_diagnosis is not None
+                    else "- Next: Run longer or collect more memory steps."
+                ),
             ]
         )
 
         summary = {
-            "training_steps": training_steps,
-            "latest_step_observed": latest_step_observed,
-            "ranks_seen": 0,
-            "diagnosis": None,
-            "diagnosis_presented": None,
-            "primary_metric": None,
             "overview": {
                 "training_steps": training_steps,
                 "latest_step_observed": latest_step_observed,
@@ -543,25 +598,17 @@ def _build_step_memory_card(
                 "window_size": None,
                 "steps_used": 0,
             },
-            "global_rollup": _empty_global_rollup(),
-            "metric_rollup": {},
-            "metrics": {},
+            "primary_diagnosis": no_gpu_presented,
+            "issues": [],
+            "issues_by_rank": {},
+            "issues_by_metric": {},
+            "unassigned_issues": [],
+            "global": {
+                **_empty_global_rollup(),
+                "metric_rollup": {},
+            },
             "per_rank": {},
             "units": {"memory": "bytes"},
-            "notes": {
-                "window_basis": (
-                    "aligned tail window across ranks using the largest common "
-                    "suffix of completed steps"
-                ),
-                "trend_definition": (
-                    "trend compares recent average against baseline average "
-                    "within the analyzed window"
-                ),
-                "variability_definition": (
-                    "window_range_bytes approximates within-window instability "
-                    "or jitter for the analyzed series"
-                ),
-            },
             "card": card,
         }
         return card, summary
@@ -573,6 +620,7 @@ def _build_step_memory_card(
 
     steps_used = int(primary.summary.steps_used)
     ranks_seen = int(primary.coverage.ranks_present)
+    single_rank = ranks_seen <= 1
 
     lines = [
         f"TraceML Step Memory Summary | steps {training_steps} | ranks {ranks_seen}",
@@ -585,18 +633,25 @@ def _build_step_memory_card(
         lines.append(f"- Why: {diagnosis_presented.reason}")
         lines.append(f"- Next: {diagnosis_presented.action}")
 
-    lines.append(
-        (
+    if single_rank:
+        lines.append(
             f"- Primary: {_metric_label(primary.metric)} | "
-            f"worst {fmt_mem_new(primary.summary.worst_peak)}"
-            f" on r{primary.summary.worst_rank if primary.summary.worst_rank is not None else 'n/a'} | "
-            f"skew {format_ratio_percent(primary.summary.skew_pct)}"
+            f"peak {fmt_mem_new(primary.summary.worst_peak)}"
         )
-    )
+    else:
+        lines.append(
+            (
+                f"- Primary: {_metric_label(primary.metric)} | "
+                f"worst {fmt_mem_new(primary.summary.worst_peak)}"
+                f" on r{primary.summary.worst_rank if primary.summary.worst_rank is not None else 'n/a'} | "
+                f"skew {format_ratio_percent(primary.summary.skew_pct)}"
+            )
+        )
 
     if primary_trend_worst["delta_bytes"] is not None:
+        trend_subject = "" if single_rank else "worst "
         trend_text = (
-            f"- Trend: worst "
+            f"- Trend: {trend_subject}"
             f"{'+' if float(primary_trend_worst['delta_bytes']) >= 0.0 else '-'}"
             f"{fmt_mem_new(abs(float(primary_trend_worst['delta_bytes'])))}"
         )
@@ -609,37 +664,42 @@ def _build_step_memory_card(
     if diagnosis_presented is not None and diagnosis_presented.note:
         lines.append(f"- Note: {diagnosis_presented.note}")
 
+    issue_text = issues_compact_text(issues, max_items=4)
+    if issue_text:
+        lines.append(f"- Issues: {issue_text}")
+
     card = "\n".join(lines)
 
     metric_rollup = {
         metric.metric: _metric_to_json(metric) for metric in sorted_metrics
     }
+    primary_metric = {
+        "metric": primary.metric,
+        "device": primary.device,
+        "steps_used": primary.summary.steps_used,
+        "worst_peak_bytes": primary.summary.worst_peak,
+        "median_peak_bytes": primary.summary.median_peak,
+        "worst_rank": primary.summary.worst_rank,
+        "skew_pct": primary.summary.skew_pct,
+        "trend": {
+            "worst": primary_trend_worst,
+            "median": primary_trend_median,
+        },
+        "variability": {
+            "worst": primary_worst_variability,
+            "median": primary_median_variability,
+        },
+    }
+    global_summary = {
+        **_build_global_rollup(
+            primary=primary,
+            diagnosis=diagnosis,
+        ),
+        "primary_metric": primary_metric,
+        "metric_rollup": metric_rollup,
+    }
 
     summary = {
-        "training_steps": training_steps,
-        "latest_step_observed": latest_step_observed,
-        "ranks_seen": ranks_seen,
-        "diagnosis": _diagnosis_to_json(diagnosis),
-        "diagnosis_presented": diagnosis_presentation_to_json(
-            diagnosis_presented
-        ),
-        "primary_metric": {
-            "metric": primary.metric,
-            "device": primary.device,
-            "steps_used": primary.summary.steps_used,
-            "worst_peak_bytes": primary.summary.worst_peak,
-            "median_peak_bytes": primary.summary.median_peak,
-            "worst_rank": primary.summary.worst_rank,
-            "skew_pct": primary.summary.skew_pct,
-            "trend": {
-                "worst": primary_trend_worst,
-                "median": primary_trend_median,
-            },
-            "variability": {
-                "worst": primary_worst_variability,
-                "median": primary_median_variability,
-            },
-        },
         "overview": {
             "training_steps": training_steps,
             "latest_step_observed": latest_step_observed,
@@ -649,38 +709,16 @@ def _build_step_memory_card(
             "steps_used": primary.summary.steps_used,
             "completed_step": primary.coverage.completed_step,
         },
-        "global_rollup": _build_global_rollup(
-            primary=primary,
-            diagnosis=diagnosis,
+        "primary_diagnosis": diagnosis_presentation_to_json(
+            diagnosis_presented
         ),
-        "metric_rollup": metric_rollup,
-        # Kept as an alias to reduce downstream risk while callers migrate to
-        # the clearer `metric_rollup` name.
-        "metrics": metric_rollup,
-        "per_rank": per_rank,
+        "issues": issues_to_json(issues),
+        "issues_by_rank": issues_by_rank,
+        "issues_by_metric": issues_by_metric,
+        "unassigned_issues": unassigned_issues + metric_unassigned,
+        "global": global_summary,
+        "per_rank": per_rank_with_issues,
         "units": {"memory": "bytes"},
-        "notes": {
-            "window_basis": (
-                "aligned tail window across ranks using the largest common "
-                "suffix of completed steps"
-            ),
-            "primary_metric_definition": (
-                "diagnosis-selected metric when available; otherwise reserved "
-                "memory is preferred, then allocated memory"
-            ),
-            "trend_definition": (
-                "trend compares recent average against baseline average within "
-                "the analyzed window"
-            ),
-            "variability_definition": (
-                "window_range_bytes approximates within-window instability or "
-                "jitter for the analyzed series"
-            ),
-            "imbalance_definition": (
-                "skew_pct compares worst rank peak against median rank peak "
-                "for the analyzed aligned window"
-            ),
-        },
         "card": card,
     }
     return card, summary
@@ -719,6 +757,7 @@ def generate_step_memory_summary_card(
     - Diagnosis is reused from the shared step-memory diagnosis engine to keep
       live CLI, dashboard, and end-of-run summaries consistent.
     """
+    window_size = min(max(1, int(window_size)), MAX_SUMMARY_WINDOW_ROWS)
     db = StepMemoryMetricsDB(db_path=db_path)
     conn = db.connect()
 
@@ -729,11 +768,12 @@ def generate_step_memory_summary_card(
         )
 
         gpu_total_bytes = _gpu_total_bytes(conn)
+        gpu_available = db.detect_gpu_available(conn)
 
         result = build_step_memory_combined_result(
             conn,
             db=db,
-            window_size=max(1, int(window_size)),
+            window_size=window_size,
         )
         metrics = sorted(result.metrics, key=_metric_sort_key)
 
@@ -748,8 +788,15 @@ def generate_step_memory_summary_card(
             conn,
             db=db,
             metrics=metrics,
-            window_size=max(1, int(window_size)),
+            window_size=window_size,
         )
+        diagnosis_result = None
+        if metrics:
+            diagnosis_result = build_step_memory_summary_diagnosis_result(
+                metrics,
+                gpu_total_bytes=gpu_total_bytes,
+                per_rank=per_rank,
+            )
     finally:
         conn.close()
 
@@ -758,6 +805,10 @@ def generate_step_memory_summary_card(
         latest_step_observed=latest_step_observed,
         metrics=metrics,
         diagnosis=diagnosis,
+        diagnosis_result=diagnosis_result,
+        no_gpu_detected=bool(
+            gpu_available is False and latest_step_observed is not None
+        ),
         per_rank=per_rank,
     )
 

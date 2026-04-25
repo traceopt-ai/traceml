@@ -12,18 +12,16 @@ Design goals
 - Keep the printed summary short and easy to scan
 - Preserve richer machine-readable fields in JSON
 - Use one clear canonical schema for system summary data
-- Add explicit structured blocks for:
-  - CPU rollup
-  - RAM rollup
-  - GPU rollup across all GPUs
-  - per-GPU rollups
+- Use the schema 1.2 section contract:
+  - `overview` for scope metadata
+  - `primary_diagnosis` for the concise user-facing diagnosis
+  - `global` for run-level CPU, RAM, and GPU rollups
+  - `per_gpu` for device detail
 
 Notes
 -----
 - The printed text intentionally remains compact.
 - The JSON summary is the richer source of truth for downstream systems.
-- Compare should continue to work without changing its output because it will
-  adapt internally to read the new nested system schema.
 """
 
 import sqlite3
@@ -32,6 +30,12 @@ from typing import Any, Dict, Optional
 
 from traceml.diagnostics.common import diagnosis_to_dict
 from traceml.diagnostics.system import build_system_diagnosis_result
+from traceml.reporting.summaries.issue_summary import (
+    issues_by_metric_json,
+    issues_by_rank_json,
+    issues_compact_text,
+    issues_to_json,
+)
 from traceml.reporting.summaries.summary_formatting import (
     bytes_to_gb,
     duration_from_bounds,
@@ -41,6 +45,8 @@ from traceml.reporting.summaries.summary_io import (
     load_json_or_empty,
     write_json,
 )
+
+MAX_SUMMARY_ROWS = 10_000
 
 
 @dataclass
@@ -502,6 +508,15 @@ def _build_system_card(
         per_gpu=per_gpu_for_diagnosis,
     )
     primary_diagnosis = diagnosis_result.primary
+    issues = diagnosis_result.issues
+    issues_by_rank, unassigned_issues = issues_by_rank_json(
+        issues,
+        rank_keys=per_gpu.keys(),
+    )
+    issues_by_metric, metric_unassigned = issues_by_metric_json(issues)
+    per_gpu_json = _per_gpu_to_json(per_gpu)
+    for gpu_idx, entry in per_gpu_json.items():
+        entry["issues"] = issues_by_rank.get(gpu_idx, [])
 
     lines = [
         f"TraceML System Summary | duration {format_optional(duration_s, 's', 1)} | samples {agg.system_samples}",
@@ -526,11 +541,12 @@ def _build_system_card(
         f"- Why: {primary_diagnosis.reason}",
         f"- Next: {primary_diagnosis.action}",
     ]
+    issue_text = issues_compact_text(issues, max_items=4)
+    if issue_text:
+        lines.append(f"- Issues: {issue_text}")
     card = "\n".join(lines)
 
-    summary = {
-        "duration_s": duration_s,
-        "system_samples": agg.system_samples,
+    global_summary = {
         "cpu": {
             "avg_percent": agg.cpu_avg_percent,
             "peak_percent": agg.cpu_peak_percent,
@@ -558,12 +574,25 @@ def _build_system_card(
             "highest_util_gpu_idx": highest_util_gpu_idx,
             "highest_util_peak_percent": highest_util_peak_percent,
         },
-        "diagnosis": diagnosis_to_dict(primary_diagnosis, drop_none=True),
-        "diagnosis_result": diagnosis_to_dict(
-            diagnosis_result,
+    }
+
+    summary = {
+        "overview": {
+            "duration_s": duration_s,
+            "samples": agg.system_samples,
+            "gpu_available": agg.gpu_available,
+            "gpu_count": agg.gpu_count,
+        },
+        "primary_diagnosis": diagnosis_to_dict(
+            primary_diagnosis,
             drop_none=True,
         ),
-        "per_gpu": _per_gpu_to_json(per_gpu),
+        "issues": issues_to_json(issues),
+        "issues_by_rank": issues_by_rank,
+        "issues_by_metric": issues_by_metric,
+        "unassigned_issues": unassigned_issues + metric_unassigned,
+        "global": global_summary,
+        "per_gpu": per_gpu_json,
         "units": {
             "memory": "GB",
             "temperature": "C",
@@ -581,7 +610,7 @@ def generate_system_summary_card(
     *,
     rank: Optional[int] = None,
     print_to_stdout: bool = True,
-    max_system_rows: int = 5_000,
+    max_system_rows: int = MAX_SUMMARY_ROWS,
 ) -> Dict[str, Any]:
     """
     Generate a compact SYSTEM summary from SQL projection tables.
@@ -602,6 +631,7 @@ def generate_system_summary_card(
     Dict[str, Any]
         Structured summary JSON including the rendered `card` text.
     """
+    max_system_rows = min(max(1, int(max_system_rows)), MAX_SUMMARY_ROWS)
     conn = sqlite3.connect(db_path)
     try:
         agg = _load_system_summary_agg(

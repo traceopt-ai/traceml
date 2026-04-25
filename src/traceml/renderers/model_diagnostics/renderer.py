@@ -64,6 +64,7 @@ class ModelDiagnosticsRenderer(BaseRenderer):
             payload: ModelDiagnosticsPayload = build_model_diagnostics_payload(
                 step_time_metrics=step_time.metrics,
                 step_memory_metrics=step_memory.metrics,
+                step_memory_status_message=step_memory.status_message,
                 gpu_total_bytes=None,
             )
             out = payload.to_dict()

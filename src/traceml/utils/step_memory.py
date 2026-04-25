@@ -2,7 +2,7 @@ import os
 import sys
 from dataclasses import dataclass
 from queue import Full, Queue
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
@@ -23,8 +23,8 @@ class StepMemoryEvent:
     step: int
     model_id: int
     device: str
-    peak_allocated: float
-    peak_reserved: float
+    peak_allocated: Optional[float]
+    peak_reserved: Optional[float]
 
 
 class StepMemoryTracker:
@@ -62,8 +62,9 @@ class StepMemoryTracker:
 
         Semantics:
         - CUDA: record real peak allocated / reserved memory
-        - Non-CUDA: emit a sentinel event with 0 values
-          (means: step memory not applicable on this device)
+        - Non-CUDA: record `None` for both fields so downstream samplers can
+          treat step memory as not applicable instead of a real zero-valued
+          measurement
         """
         if TRACEML_DISABLED:
             return
@@ -72,14 +73,18 @@ class StepMemoryTracker:
             peak_allocated = torch.cuda.max_memory_allocated(self.device)
             peak_reserved = torch.cuda.max_memory_reserved(self.device)
         else:
-            peak_allocated = 0.0
-            peak_reserved = 0.0
+            peak_allocated = None
+            peak_reserved = None
 
         evt = StepMemoryEvent(
             model_id=self.model_id,
             device=str(self.device),
-            peak_allocated=float(peak_allocated),
-            peak_reserved=float(peak_reserved),
+            peak_allocated=(
+                float(peak_allocated) if peak_allocated is not None else None
+            ),
+            peak_reserved=(
+                float(peak_reserved) if peak_reserved is not None else None
+            ),
             step=-1,  # filled during flush
         )
         _temp_step_memory_buffer[self.model_id] = evt

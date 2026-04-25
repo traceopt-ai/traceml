@@ -833,10 +833,15 @@ def build_step_diagnosis(
     This remains the backward-compatible runtime entry point. Richer consumers
     should use `build_step_diagnosis_result(...)`.
     """
-    return build_step_diagnosis_result(
+    primary = build_step_diagnosis_result(
         metrics,
         thresholds=thresholds,
     ).primary
+    if not isinstance(primary, StepDiagnosis):
+        raise TypeError(
+            "build_step_diagnosis_result() must return StepDiagnosis as primary"
+        )
+    return primary
 
 
 __all__ = [

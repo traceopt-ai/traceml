@@ -69,13 +69,15 @@ def _system_value(summary: Dict[str, Any], key: str) -> Any:
     a cleaner nested system structure.
     """
     if key == "cpu_avg_percent":
-        return _nested_get(summary, "system", "cpu", "avg_percent")
+        return _nested_get(summary, "system", "global", "cpu", "avg_percent")
     if key == "ram_peak_gb":
-        return _nested_get(summary, "system", "ram", "peak_gb")
+        return _nested_get(summary, "system", "global", "ram", "peak_gb")
     if key == "gpu_available":
-        return _nested_get(summary, "system", "gpu_rollup", "available")
+        return _nested_get(
+            summary, "system", "global", "gpu_rollup", "available"
+        )
     if key == "gpu_count":
-        return _nested_get(summary, "system", "gpu_rollup", "count")
+        return _nested_get(summary, "system", "global", "gpu_rollup", "count")
     return None
 
 
@@ -87,11 +89,11 @@ def _process_value(summary: Dict[str, Any], key: str) -> Any:
     a cleaner nested process structure.
     """
     if key == "cpu_avg_percent":
-        return _nested_get(summary, "process", "cpu", "avg_percent")
+        return _nested_get(summary, "process", "global", "cpu", "avg_percent")
     if key == "ram_peak_gb":
-        return _nested_get(summary, "process", "ram", "peak_gb")
+        return _nested_get(summary, "process", "global", "ram", "peak_gb")
     if key == "takeaway":
-        return _nested_get(summary, "process", "takeaway")
+        return _nested_get(summary, "process", "global", "takeaway")
     return None
 
 
@@ -99,10 +101,10 @@ def _step_memory_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
     """
     Read the canonical primary step-memory block.
 
-    Prefer the explicit `primary_metric` block and fall back to an empty
+    Prefer the explicit `global.primary_metric` block and fall back to an empty
     dictionary when unavailable.
     """
-    primary = _nested_get(summary, "primary_metric")
+    primary = _nested_get(summary, "global", "primary_metric")
     return primary if isinstance(primary, dict) else {}
 
 
@@ -112,7 +114,11 @@ def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
     compare output stable.
     """
     if key == "status":
-        return _nested_get(summary, "diagnosis", "status")
+        return _nested_get(summary, "primary_diagnosis", "status")
+    if key == "reason":
+        return _nested_get(summary, "primary_diagnosis", "reason")
+    if key == "action":
+        return _nested_get(summary, "primary_diagnosis", "action")
 
     primary = _step_memory_primary(summary)
 
@@ -128,29 +134,14 @@ def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
     return None
 
 
-def _first_non_none(*values: Any) -> Any:
-    """
-    Return the first value that is not None.
-    """
-    for value in values:
-        if value is not None:
-            return value
-    return None
-
-
 def _step_time_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
     """
     Read the canonical primary step-time rollup.
-
-    Prefer the cleaner structured schema and fall back to legacy-compatible
-    fields when needed.
     """
-    primary = _nested_get(summary, "global_rollup", "typical")
+    primary = _nested_get(summary, "global", "typical")
     if isinstance(primary, dict):
         return primary
-
-    primary = _nested_get(summary, "timing_primary")
-    return primary if isinstance(primary, dict) else {}
+    return {}
 
 
 def _step_time_value(summary: Dict[str, Any], key: str) -> Any:
@@ -159,7 +150,7 @@ def _step_time_value(summary: Dict[str, Any], key: str) -> Any:
     preserving compare stability.
     """
     if key == "status":
-        return _nested_get(summary, "diagnosis", "status")
+        return _nested_get(summary, "primary_diagnosis", "status")
 
     primary = _step_time_primary(summary)
 
@@ -305,8 +296,8 @@ def build_compare_payload(
         _step_time_value(lhs_step_time, "step_avg_ms"),
         _step_time_value(rhs_step_time, "step_avg_ms"),
     )
-    lhs_step_status = _nested_get(lhs_step_time, "diagnosis", "status")
-    rhs_step_status = _nested_get(rhs_step_time, "diagnosis", "status")
+    lhs_step_status = _nested_get(lhs_step_time, "primary_diagnosis", "status")
+    rhs_step_status = _nested_get(rhs_step_time, "primary_diagnosis", "status")
 
     payload: Dict[str, Any] = {
         "schema_version": 1,
@@ -352,8 +343,8 @@ def build_compare_payload(
                 rhs_step_status,
             ),
             "step_memory_status": _value_change(
-                _nested_get(lhs_step_memory, "diagnosis", "status"),
-                _nested_get(rhs_step_memory, "diagnosis", "status"),
+                _nested_get(lhs_step_memory, "primary_diagnosis", "status"),
+                _nested_get(rhs_step_memory, "primary_diagnosis", "status"),
             ),
         },
         "system": {
@@ -390,12 +381,12 @@ def build_compare_payload(
         },
         "step_time": {
             "status": _value_change(
-                _nested_get(lhs_step_time, "diagnosis", "status"),
-                _nested_get(rhs_step_time, "diagnosis", "status"),
+                _nested_get(lhs_step_time, "primary_diagnosis", "status"),
+                _nested_get(rhs_step_time, "primary_diagnosis", "status"),
             ),
             "presented": {
-                "lhs": _as_dict(lhs_step_time.get("diagnosis_presented")),
-                "rhs": _as_dict(rhs_step_time.get("diagnosis_presented")),
+                "lhs": _as_dict(lhs_step_time.get("primary_diagnosis")),
+                "rhs": _as_dict(rhs_step_time.get("primary_diagnosis")),
             },
             "step_avg_ms": step_avg,
             "wait_share_pct": _value_delta(
@@ -426,9 +417,17 @@ def build_compare_payload(
                 _step_memory_value(lhs_step_memory, "status"),
                 _step_memory_value(rhs_step_memory, "status"),
             ),
+            "reason": _value_change(
+                _step_memory_value(lhs_step_memory, "reason"),
+                _step_memory_value(rhs_step_memory, "reason"),
+            ),
+            "action": _value_change(
+                _step_memory_value(lhs_step_memory, "action"),
+                _step_memory_value(rhs_step_memory, "action"),
+            ),
             "presented": {
-                "lhs": _as_dict(lhs_step_memory.get("diagnosis_presented")),
-                "rhs": _as_dict(rhs_step_memory.get("diagnosis_presented")),
+                "lhs": _as_dict(lhs_step_memory.get("primary_diagnosis")),
+                "rhs": _as_dict(rhs_step_memory.get("primary_diagnosis")),
             },
             "primary_metric": _value_change(
                 _step_memory_value(lhs_step_memory, "primary_metric"),

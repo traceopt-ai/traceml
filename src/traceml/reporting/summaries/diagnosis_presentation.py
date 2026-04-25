@@ -112,6 +112,7 @@ def present_step_memory_summary_diagnosis(
         "IMBALANCE": ("Memory usage differs across ranks."),
         "MEMORY CREEP (EARLY)": ("Memory is rising in the tail window."),
         "MEMORY CREEP": ("Memory keeps rising over time."),
+        "NO GPU": ("Step memory is not applicable for this run."),
         "NO DATA": ("Too little aligned memory data was collected."),
     }
 

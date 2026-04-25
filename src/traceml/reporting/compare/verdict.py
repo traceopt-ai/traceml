@@ -91,7 +91,7 @@ def _presented_block(summary: Dict[str, Any], section: str) -> Dict[str, Any]:
     """
     Return a summary-side presented diagnosis block or an empty mapping.
     """
-    block = _nested_get(summary, section, "diagnosis_presented")
+    block = _nested_get(summary, section, "primary_diagnosis")
     return block if isinstance(block, dict) else {}
 
 
@@ -615,16 +615,16 @@ def build_compare_verdict(
     for a strict v1.
     """
     lhs_step_status = _as_str(
-        _nested_get(lhs_payload, "step_time", "diagnosis", "status")
+        _nested_get(lhs_payload, "step_time", "primary_diagnosis", "status")
     )
     rhs_step_status = _as_str(
-        _nested_get(rhs_payload, "step_time", "diagnosis", "status")
+        _nested_get(rhs_payload, "step_time", "primary_diagnosis", "status")
     )
     lhs_mem_status = _as_str(
-        _nested_get(lhs_payload, "step_memory", "diagnosis", "status")
+        _nested_get(lhs_payload, "step_memory", "primary_diagnosis", "status")
     )
     rhs_mem_status = _as_str(
-        _nested_get(rhs_payload, "step_memory", "diagnosis", "status")
+        _nested_get(rhs_payload, "step_memory", "primary_diagnosis", "status")
     )
 
     rhs_step_presented = _presented_block(rhs_payload, "step_time")
@@ -831,7 +831,7 @@ def build_compare_verdict(
             _make_change(
                 importance=90,
                 domain="step_time",
-                metric="timing_primary.step_avg_ms",
+                metric="global.typical.step_avg_ms",
                 significance=step_sig,
                 summary=f"Average step time {direction}: {_format_signed_pct(step_avg_pct)}",
                 detail=(
@@ -852,7 +852,7 @@ def build_compare_verdict(
             _make_change(
                 importance=85,
                 domain="step_time",
-                metric="timing_primary.wait_share_pct",
+                metric="global.typical.wait_share_pct",
                 significance=wait_sig,
                 summary=(
                     "Wait share "
@@ -868,7 +868,7 @@ def build_compare_verdict(
             _make_change(
                 importance=70,
                 domain="step_time",
-                metric="timing_primary.split_pct",
+                metric="global.typical.split_pct",
                 significance=_as_str(phase_rebalance.get("significance"))
                 or "moderate",
                 summary=_as_str(phase_rebalance.get("summary"))
@@ -882,7 +882,7 @@ def build_compare_verdict(
             _make_change(
                 importance=65,
                 domain="step_memory",
-                metric="primary_metric.worst_peak_bytes",
+                metric="global.primary_metric.worst_peak_bytes",
                 significance=peak_sig,
                 summary=(
                     "Worst peak memory "
@@ -898,7 +898,7 @@ def build_compare_verdict(
             _make_change(
                 importance=63,
                 domain="step_memory",
-                metric="primary_metric.skew_pct",
+                metric="global.primary_metric.skew_pct",
                 significance=skew_sig,
                 summary=(
                     "Memory skew "
@@ -914,7 +914,7 @@ def build_compare_verdict(
             _make_change(
                 importance=61,
                 domain="step_memory",
-                metric="primary_metric.trend.worst.delta_bytes",
+                metric="global.primary_metric.trend.worst.delta_bytes",
                 significance=trend_sig,
                 summary=(
                     "Worst-rank memory trend "

@@ -2,7 +2,8 @@
 Compact Step Memory analysis section for the overview dashboard.
 
 This section stays focused:
-- one merged line chart for worst vs median
+- one merged line chart for worst vs median in multi-rank mode
+- one single line chart in single-rank mode
 - one compact KPI strip
 
 It keeps the last good rendering during transient payload gaps.
@@ -81,6 +82,7 @@ class StepMemoryMetricView:
     median_stats: SeriesStats
     skew_pct: float
     worst_rank: Optional[int]
+    single_rank: bool
 
 
 def build_step_memory_section(
@@ -135,6 +137,35 @@ def update_step_memory_section(
         metric = _select_metric(payload, preferred=prefer_metric)
         view = _normalize_metric(metric)
         if view is None:
+            status_message = getattr(payload, "status_message", None)
+            if not isinstance(status_message, str) and isinstance(
+                payload, dict
+            ):
+                status_message = payload.get("status_message")
+            if (
+                isinstance(status_message, str)
+                and "No GPU detected" in status_message
+            ):
+                panel["window_text"].content = "window: no GPU"
+                panel["kpis"].content = ""
+                panel["empty_hint"].content = (
+                    "<div style='text-align:center; padding:10px; color:#888; font-style:italic;'>"
+                    "No GPU is present, so step memory is unavailable."
+                    "</div>"
+                )
+                _update_graph(
+                    panel["graph"],
+                    panel["_fig"],
+                    [],
+                    [],
+                    [],
+                    single_rank=False,
+                )
+                panel["_last_ok_view"] = None
+                panel["_last_kpis"] = None
+                panel["_last_signature"] = None
+                panel["_last_window_text"] = "window: no GPU"
+                return
             view = panel.get("_last_ok_view")
 
         if view is None:
@@ -148,6 +179,7 @@ def update_step_memory_section(
             tuple(round(v, 5) for v in view.median_y_gb[-12:]),
             round(view.skew_pct, 5),
             int(view.worst_rank or -1),
+            int(view.single_rank),
             len(view.steps),
         )
 
@@ -158,6 +190,7 @@ def update_step_memory_section(
                 view.steps,
                 view.worst_y_gb,
                 view.median_y_gb,
+                single_rank=view.single_rank,
             )
             panel["_last_signature"] = signature
 
@@ -222,11 +255,19 @@ def _update_graph(
     x: List[int],
     y_worst: List[float],
     y_median: List[float],
+    *,
+    single_rank: bool,
 ) -> None:
     fig.data[0].x = x
     fig.data[0].y = y_worst
-    fig.data[1].x = x
-    fig.data[1].y = y_median
+    fig.data[0].name = "Peak" if single_rank else "Worst"
+    fig.data[0].hovertemplate = (
+        "step=%{x}<br>peak=%{y:.2f} GB<extra></extra>"
+        if single_rank
+        else "step=%{x}<br>worst=%{y:.2f} GB<extra></extra>"
+    )
+    fig.data[1].x = [] if single_rank else x
+    fig.data[1].y = [] if single_rank else y_median
     plotly_ui.update_figure(fig)
 
 
@@ -307,6 +348,25 @@ def _normalize_metric(metric: Any) -> Optional[StepMemoryMetricView]:
         if not isinstance(summary, dict)
         else summary.get("worst_rank")
     )
+    coverage = (
+        getattr(metric, "coverage", None)
+        if not isinstance(metric, dict)
+        else metric.get("coverage", {})
+    )
+    world_size = (
+        getattr(coverage, "world_size", None)
+        if not isinstance(coverage, dict)
+        else coverage.get("world_size")
+    )
+    ranks_present = (
+        getattr(coverage, "ranks_present", None)
+        if not isinstance(coverage, dict)
+        else coverage.get("ranks_present")
+    )
+    single_rank = bool(
+        _safe_float(world_size, 0.0) <= 1.0
+        or _safe_float(ranks_present, 0.0) <= 1.0
+    )
 
     return StepMemoryMetricView(
         steps=steps,
@@ -320,6 +380,7 @@ def _normalize_metric(metric: Any) -> Optional[StepMemoryMetricView]:
             if worst_rank is None
             else int(_safe_float(worst_rank, 0.0))
         ),
+        single_rank=single_rank,
     )
 
 
@@ -347,24 +408,40 @@ def _compute_stats(values_bytes: List[float]) -> SeriesStats:
 
 
 def _render_kpis(view: StepMemoryMetricView) -> str:
-    items = [
-        compact_metric_html(
-            "Worst Last", safe_mem(view.worst_stats.last_bytes)
-        ),
-        compact_metric_html(
-            "Median Last", safe_mem(view.median_stats.last_bytes)
-        ),
-        compact_metric_html("Worst p95", safe_mem(view.worst_stats.p95_bytes)),
-        compact_metric_html(
-            "Avg(100)", safe_mem(view.worst_stats.avg100_bytes)
-        ),
-        compact_metric_html("Trend", safe_pct(view.worst_stats.trend_pct)),
-        compact_metric_html("Imbalance", safe_pct(view.skew_pct)),
-        compact_metric_html(
-            "Worst Rank",
-            f"r{view.worst_rank}" if view.worst_rank is not None else "-",
-        ),
-    ]
+    if view.single_rank:
+        items = [
+            compact_metric_html(
+                "Peak Last", safe_mem(view.worst_stats.last_bytes)
+            ),
+            compact_metric_html(
+                "Peak p95", safe_mem(view.worst_stats.p95_bytes)
+            ),
+            compact_metric_html(
+                "Avg(100)", safe_mem(view.worst_stats.avg100_bytes)
+            ),
+            compact_metric_html("Trend", safe_pct(view.worst_stats.trend_pct)),
+        ]
+    else:
+        items = [
+            compact_metric_html(
+                "Worst Last", safe_mem(view.worst_stats.last_bytes)
+            ),
+            compact_metric_html(
+                "Median Last", safe_mem(view.median_stats.last_bytes)
+            ),
+            compact_metric_html(
+                "Worst p95", safe_mem(view.worst_stats.p95_bytes)
+            ),
+            compact_metric_html(
+                "Avg(100)", safe_mem(view.worst_stats.avg100_bytes)
+            ),
+            compact_metric_html("Trend", safe_pct(view.worst_stats.trend_pct)),
+            compact_metric_html("Imbalance", safe_pct(view.skew_pct)),
+            compact_metric_html(
+                "Worst Rank",
+                f"r{view.worst_rank}" if view.worst_rank is not None else "-",
+            ),
+        ]
 
     return (
         "<div style='display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); "
