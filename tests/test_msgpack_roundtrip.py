@@ -12,15 +12,17 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import msgspec
 import pytest
+
+from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
+from traceml.utils.msgpack_codec import Encoder as MsgpackEncoder
 
 # helpers
 
 
 def write_framed_records(path: Path, records: list[dict]) -> None:
     """Write records in the same format as DatabaseWriter.flush()."""
-    encoder = msgspec.msgpack.Encoder()
+    encoder = MsgpackEncoder()
     with open(path, "ab") as f:
         for r in records:
             payload = encoder.encode(r)
@@ -30,7 +32,7 @@ def write_framed_records(path: Path, records: list[dict]) -> None:
 
 def read_framed_records(path: Path) -> list[dict]:
     """Read records using the same protocol as cli.run_inspect()."""
-    decoder = msgspec.msgpack.Decoder()
+    decoder = MsgpackDecoder()
     records = []
     with open(path, "rb") as f:
         while True:

@@ -173,7 +173,10 @@ def test_legacy_decorators_import_triggers_auto_init(monkeypatch):
         lambda: calls.append("legacy"),
     )
 
+    # Import-time compatibility behavior lives in the module body, so clear
+    # both public and SDK compatibility paths to force a fresh import.
     sys.modules.pop("traceml.decorators", None)
+    sys.modules.pop("traceml.sdk.decorators_compat", None)
     import traceml.sdk.decorators_compat  # noqa: F401
 
     assert calls == ["legacy"]
