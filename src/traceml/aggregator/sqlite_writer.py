@@ -36,8 +36,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
-import msgspec
-
 from traceml.aggregator.sqlite_writers import process as process_sql_writer
 from traceml.aggregator.sqlite_writers import (
     stdout_stderr as stdout_stderr_sql_writer,
@@ -48,6 +46,7 @@ from traceml.aggregator.sqlite_writers import (
 from traceml.aggregator.sqlite_writers import step_time as step_time_sql_writer
 from traceml.aggregator.sqlite_writers import system as system_sql_writer
 from traceml.loggers.error_log import get_error_logger
+from traceml.utils.msgpack_codec import Encoder as MsgpackEncoder
 
 _PROJECTION_WRITERS = [
     system_sql_writer,
@@ -132,7 +131,7 @@ class SQLiteWriterSimple:
         )
         self._started = False
 
-        self._encoder = msgspec.msgpack.Encoder()
+        self._encoder = MsgpackEncoder()
 
         # Stats (best-effort; telemetry doesn't need perfect atomicity)
         self._enqueued = 0

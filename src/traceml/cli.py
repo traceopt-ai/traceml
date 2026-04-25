@@ -12,11 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 
-import msgspec
-
 from traceml.runtime.launch_context import LaunchContext
 from traceml.runtime.session import get_session_id
 from traceml.utils.ast_analysis import analyze_script, build_code_manifest
+from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
@@ -652,7 +651,7 @@ def run_inspect(args: argparse.Namespace) -> None:
         print(f"[TraceML] ERROR: file not found: {args.file}", file=sys.stderr)
         raise SystemExit(1)
 
-    decoder = msgspec.msgpack.Decoder()
+    decoder = MsgpackDecoder()
     with open(path, "rb") as f:
         try:
             while True:
@@ -688,7 +687,7 @@ def run_compare(args: argparse.Namespace) -> None:
     Compare two TraceML final summary JSON files.
     """
     try:
-        from traceml.compare.command import compare_summaries
+        from traceml.reporting.compare import compare_summaries
 
         compare_summaries(
             args.left,

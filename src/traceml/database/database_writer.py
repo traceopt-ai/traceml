@@ -2,11 +2,10 @@ import struct
 from pathlib import Path
 from typing import Dict
 
-import msgspec
-
 from traceml.runtime.config import config
 from traceml.runtime.session import get_session_id
 from traceml.transport.distributed import get_ddp_info
+from traceml.utils.msgpack_codec import encode as encode_msgpack
 
 
 def _rank_suffix() -> str:
@@ -76,7 +75,17 @@ class DatabaseWriter:
         # Tracks the last written append-count per table.
         # Used for O(1) new-row detection via db.get_append_count().
         self._last_written_seq: Dict[str, int] = {}
-        self.encoder = msgspec.msgpack.Encoder()
+
+    @staticmethod
+    def _encode_row(row) -> bytes:
+        """
+        Encode one row as MessagePack bytes.
+
+        The shared codec helper keeps writer behavior consistent with the CLI
+        and transport layers while allowing a safe fallback when ``msgspec`` is
+        unavailable in a lightweight environment.
+        """
+        return encode_msgpack(row)
 
     def flush(self):
         """
@@ -120,7 +129,7 @@ class DatabaseWriter:
             path = self.logs_dir / f"{table_name}.msgpack"
             with open(path, "ab") as f:
                 for r in new_rows:
-                    payload = self.encoder.encode(r)
+                    payload = self._encode_row(r)
                     f.write(struct.pack("!I", len(payload)))
                     f.write(payload)
 

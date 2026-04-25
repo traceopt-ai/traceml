@@ -11,10 +11,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import msgspec
 import pytest
 
 from traceml.database.database import Database
+from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 # Database.get_append_count() tests
 
@@ -184,7 +184,7 @@ class TestDBIncrementalSender:
 
 def _read_framed_records(path: Path) -> list:
     """Read length-prefixed msgpack records (same as test_msgpack_roundtrip)."""
-    decoder = msgspec.msgpack.Decoder()
+    decoder = MsgpackDecoder()
     records = []
     with open(path, "rb") as f:
         while True:
