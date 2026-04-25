@@ -1,8 +1,8 @@
 [project]
 name = "traceml-ai"
-version = "0.2.10"
+version = "0.2.11"
 
-description = "TraceML: Lightweight runtime diagnostics for PyTorch training bottlenecks."
+description = "TraceML: Lightweight runtime bottleneck diagnostics for PyTorch training."
 authors = [{ name = "Abhinav Srivastav", email = "abhinav@traceopt.ai" }]
 readme = "README.md"
 license = { text = "Apache 2.0" }
@@ -13,7 +13,7 @@ requires-python = ">=3.10"
 dependencies = [
     "rich>=12.0.0",
     "psutil>=5.0.0",
-    "pynvml>=11.5.0",
+    "nvidia-ml-py",
     "scikit-learn>=1.3.0",
     "numpy<2",
     "pandas>=2.0.0",
