@@ -13,8 +13,7 @@ from traceml.diagnostics.step_time import (
     Severity,
     StepDiagnosis,
     build_step_diagnosis,
-)
-from traceml.diagnostics.step_time_formatters import (
+    build_step_diagnosis_result,
     format_cli_diagnosis,
     format_dashboard_diagnosis,
 )
@@ -27,6 +26,7 @@ __all__ = [
     "StepDiagnosis",
     "ComputeSignal",
     "build_step_diagnosis",
+    "build_step_diagnosis_result",
     "format_cli_diagnosis",
     "format_dashboard_diagnosis",
 ]
