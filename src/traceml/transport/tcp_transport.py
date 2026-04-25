@@ -5,9 +5,9 @@ import threading
 from dataclasses import dataclass
 from typing import Dict, Iterator, Optional
 
-import msgspec
-
 from traceml.loggers.error_log import get_error_logger
+from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
+from traceml.utils.msgpack_codec import encode as encode_msgpack
 
 
 @dataclass(frozen=True)
@@ -140,7 +140,7 @@ class TCPServer:
     def _handle_client(self, conn: socket.socket) -> None:
         buffer = bytearray()  # mutable extend() is O(1) amortised, no copies
         expected: Optional[int] = None
-        decoder = msgspec.msgpack.Decoder()
+        decoder = MsgpackDecoder()
 
         try:
             while not self._stop_event.is_set():
@@ -196,7 +196,7 @@ class TCPClient:
         try:
             self._ensure_connected()
             # Encode dict to binary MessagePack
-            data = msgspec.msgpack.encode(payload)
+            data = encode_msgpack(payload)
             header = struct.pack("!I", len(data))
             with self._lock:
                 self._sock.sendall(header + data)
@@ -225,7 +225,7 @@ class TCPClient:
         try:
             self._ensure_connected()
             # Encode the whole list as one msgpack frame
-            data = msgspec.msgpack.encode(payloads)
+            data = encode_msgpack(payloads)
             header = struct.pack("!I", len(data))
             with self._lock:
                 self._sock.sendall(header + data)
