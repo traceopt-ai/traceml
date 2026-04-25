@@ -34,6 +34,9 @@ class TCPServer:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._queue: "queue.Queue[Dict]" = queue.Queue()
+        self._data_ready = (
+            threading.Event()
+        )  # set by _handle_client on every new message
         self.logger = get_error_logger("TraceML-TCPServer")
 
     def start(self) -> None:
@@ -69,6 +72,27 @@ class TCPServer:
                 yield self._queue.get_nowait()
             except queue.Empty:
                 break
+
+    def wait_for_data(self, timeout: float) -> bool:
+        """
+        Block until at least one message is available or ``timeout`` expires.
+
+        Returns
+        -------
+        bool
+            True if a message arrived before the timeout; False if the timeout
+            expired with no data.  The caller should then call ``poll()`` to
+            drain whatever is available.
+
+        Notes
+        -----
+        - The internal event is cleared before this method returns so that the
+          next call will block correctly (no spurious immediate wakeup).
+        - This method is safe to call from any thread.
+        """
+        signalled = self._data_ready.wait(timeout=timeout)
+        self._data_ready.clear()
+        return signalled
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
@@ -135,6 +159,7 @@ class TCPServer:
                     try:
                         msg = decoder.decode(payload)
                         self._queue.put_nowait(msg)
+                        self._data_ready.set()  # wake the aggregator loop
                     except queue.Full:
                         pass  # drop on overflow
                     except Exception:

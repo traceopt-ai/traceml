@@ -237,20 +237,27 @@ class TraceMLAggregator:
         Each message is expected to be a telemetry row or batch compatible with
         ``SQLiteWriterSimple.ingest()``. A legacy subset is also mirrored into
         ``RemoteDBStore`` for renderers that still depend on the in-memory path.
+
+        Design note
+        -----------
+        Errors in each sink are isolated: a failure in one does not prevent the
+        other from receiving the message.  Direct try/except is used instead of
+        ``_safe(lambda ...)`` to avoid allocating two closure objects per message
+        in the hot path.
         """
         for msg in self._tcp_server.poll():
             remote_msg = self._filter_remote_store_message(msg)
             if remote_msg is not None:
-                _safe(
-                    self._logger,
-                    "RemoteDBStore.ingest failed",
-                    lambda m=remote_msg: self._store.ingest(m),
-                )
-            _safe(
-                self._logger,
-                "SQLiteWriter.ingest failed",
-                lambda m=msg: self._sqlite_writer.ingest(m),
-            )
+                try:
+                    self._store.ingest(remote_msg)
+                except Exception:
+                    self._logger.exception(
+                        "[TraceML] RemoteDBStore.ingest failed"
+                    )
+            try:
+                self._sqlite_writer.ingest(msg)
+            except Exception:
+                self._logger.exception("[TraceML] SQLiteWriter.ingest failed")
 
     def _message_sampler_name(self, msg: Any) -> Optional[str]:
         """
@@ -300,26 +307,38 @@ class TraceMLAggregator:
 
     def _loop(self) -> None:
         """
-        Run the periodic drain and display tick loop.
+        Run the event-driven drain and display tick loop.
 
-        The aggregator does not render directly. Rendering is delegated to the
-        configured display driver.
+        The loop blocks on ``TCPServer.wait_for_data()`` rather than sleeping
+        for a fixed interval.  This means the aggregator drains new messages
+        as soon as they arrive over TCP — reducing end-to-end ingestion latency
+        from up to ``render_interval_sec`` down to near-zero.
+
+        The display driver tick is still rate-limited to at most once per
+        ``render_interval_sec`` so the UI cadence is unchanged.
         """
         interval_sec = float(self._settings.render_interval_sec)
+        last_tick_ts = 0.0
 
         while not self._stop_event.is_set():
+            # Wake immediately when data arrives, or after interval_sec at most.
+            self._tcp_server.wait_for_data(timeout=interval_sec)
             self._drain_tcp()
-            _safe(
-                self._logger,
-                "Final summary service poll failed",
-                self._summary_service.poll,
-            )
-            _safe(
-                self._logger,
-                "Display driver tick failed",
-                self._display_driver.tick,
-            )
-            self._stop_event.wait(interval_sec)
+
+            # Rate-limit the UI tick to interval_sec cadence.
+            now = time.monotonic()
+            if now - last_tick_ts >= interval_sec:
+                _safe(
+                    self._logger,
+                    "Final summary service poll failed",
+                    self._summary_service.poll,
+                )
+                _safe(
+                    self._logger,
+                    "Display driver tick failed",
+                    self._display_driver.tick,
+                )
+                last_tick_ts = now
 
         # Final drain and final display tick on shutdown.
         self._drain_tcp()
