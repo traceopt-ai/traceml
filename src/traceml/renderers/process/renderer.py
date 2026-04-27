@@ -27,9 +27,9 @@ class ProcessRenderer(BaseRenderer):
 
     def __init__(self, db_path: str):
         super().__init__(name=self.NAME, layout_section_name=PROCESS_LAYOUT)
-
-        self._computer = ProcessMetricsComputer(db_path=db_path)
-        self._logger = get_error_logger("ProcessRenderer")
+        self.db_path = db_path
+        self._computer = ProcessMetricsComputer(db_path=self.db_path)
+        self._logger = get_error_logger(self.NAME + "Renderer")
 
     def get_panel_renderable(self) -> Panel:
         """

@@ -137,6 +137,12 @@ It is designed to help you decide quickly whether a run looks healthy or whether
 
 ---
 
+## Overhead
+
+TraceML adds fixed per-step instrumentation overhead, so the relative cost is highest when training steps are very short. In larger or distributed workloads, that fixed cost is amortized over a longer end-to-end step. In our early DDP benchmarks, TraceML did not produce a measurable slowdown beyond normal run-to-run variation.
+
+---
+
 ## When to use TraceML
 
 Use TraceML when training feels:

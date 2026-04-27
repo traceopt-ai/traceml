@@ -110,24 +110,24 @@ def main() -> None:
         for batch_x, batch_y in train_loader:
             global_step += 1
 
-            batch_x = batch_x.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
-
             with traceml.trace_step(model.module):
+                batch_x = batch_x.to(device, non_blocking=True)
+                batch_y = batch_y.to(device, non_blocking=True)
+
                 optimizer.zero_grad(set_to_none=True)
                 logits = model(batch_x)
                 loss = criterion(logits, batch_y)
                 loss.backward()
                 optimizer.step()
 
-            running_loss += float(loss.detach())
+                running_loss += float(loss.detach())
 
-            if rank == 0 and global_step % 25 == 0:
-                print(
-                    f"Epoch {epoch + 1} | Step {global_step} | "
-                    f"loss: {running_loss / 25:.4f}"
-                )
-                running_loss = 0.0
+                if rank == 0 and global_step % 25 == 0:
+                    print(
+                        f"Epoch {epoch + 1} | Step {global_step} | "
+                        f"loss: {running_loss / 25:.4f}"
+                    )
+                    running_loss = 0.0
 
     if rank == 0:
         print("Done.")

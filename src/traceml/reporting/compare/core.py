@@ -10,9 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from traceml.compare.io import derive_compare_labels
-from traceml.compare.verdict import build_compare_verdict
-from traceml.final_summary_protocol import utc_now_iso
+from traceml.reporting.compare.io import derive_compare_labels
+from traceml.reporting.compare.verdict import build_compare_verdict
+from traceml.sdk.protocol import utc_now_iso
 
 _STEP_PHASES = ("dataloader", "forward", "backward", "optimizer")
 
@@ -59,6 +59,124 @@ def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
             return None
         cur = cur.get(key)
     return cur
+
+
+def _system_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one system summary value from the canonical nested schema.
+
+    This keeps compare payload shape stable even if the final summary JSON uses
+    a cleaner nested system structure.
+    """
+    if key == "cpu_avg_percent":
+        return _nested_get(summary, "system", "global", "cpu", "avg_percent")
+    if key == "ram_peak_gb":
+        return _nested_get(summary, "system", "global", "ram", "peak_gb")
+    if key == "gpu_available":
+        return _nested_get(
+            summary, "system", "global", "gpu_rollup", "available"
+        )
+    if key == "gpu_count":
+        return _nested_get(summary, "system", "global", "gpu_rollup", "count")
+    return None
+
+
+def _process_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one process summary value from the canonical nested schema.
+
+    This keeps compare payload shape stable even if the final summary JSON uses
+    a cleaner nested process structure.
+    """
+    if key == "cpu_avg_percent":
+        return _nested_get(summary, "process", "global", "cpu", "avg_percent")
+    if key == "ram_peak_gb":
+        return _nested_get(summary, "process", "global", "ram", "peak_gb")
+    if key == "takeaway":
+        return _nested_get(summary, "process", "global", "takeaway")
+    return None
+
+
+def _step_memory_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Read the canonical primary step-memory block.
+
+    Prefer the explicit `global.primary_metric` block and fall back to an empty
+    dictionary when unavailable.
+    """
+    primary = _nested_get(summary, "global", "primary_metric")
+    return primary if isinstance(primary, dict) else {}
+
+
+def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one step-memory summary value from the canonical schema while keeping
+    compare output stable.
+    """
+    if key == "status":
+        return _nested_get(summary, "primary_diagnosis", "status")
+    if key == "reason":
+        return _nested_get(summary, "primary_diagnosis", "reason")
+    if key == "action":
+        return _nested_get(summary, "primary_diagnosis", "action")
+
+    primary = _step_memory_primary(summary)
+
+    if key == "primary_metric":
+        return primary.get("metric")
+    if key == "worst_peak_bytes":
+        return primary.get("worst_peak_bytes")
+    if key == "skew_pct":
+        return primary.get("skew_pct")
+    if key == "trend_worst_delta_bytes":
+        return _nested_get(primary, "trend", "worst", "delta_bytes")
+
+    return None
+
+
+def _step_time_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Read the canonical primary step-time rollup.
+    """
+    primary = _nested_get(summary, "global", "typical")
+    if isinstance(primary, dict):
+        return primary
+    return {}
+
+
+def _step_time_value(summary: Dict[str, Any], key: str) -> Any:
+    """
+    Read one step-time summary value from the canonical nested schema while
+    preserving compare stability.
+    """
+    if key == "status":
+        return _nested_get(summary, "primary_diagnosis", "status")
+
+    primary = _step_time_primary(summary)
+
+    if key == "step_avg_ms":
+        return primary.get("step_avg_ms")
+    if key == "wait_share_pct":
+        return primary.get("wait_share_pct")
+    if key == "compute_share_pct":
+        return primary.get("compute_share_pct")
+    if key == "dominant_phase":
+        return primary.get("dominant_phase")
+
+    return None
+
+
+def _step_time_split(
+    summary: Dict[str, Any],
+    *,
+    split_key: str,
+) -> Dict[str, Any]:
+    """
+    Read one canonical step-time split dictionary.
+    """
+    primary = _step_time_primary(summary)
+    split = primary.get(split_key)
+    return split if isinstance(split, dict) else {}
 
 
 def _value_delta(lhs: Any, rhs: Any) -> Dict[str, Optional[float]]:
@@ -114,11 +232,8 @@ def _compare_step_splits(
     """
     out: Dict[str, Dict[str, Optional[float]]] = {}
 
-    lhs_split = _nested_get(lhs_summary, "timing_primary", split_key)
-    rhs_split = _nested_get(rhs_summary, "timing_primary", split_key)
-
-    lhs_split = lhs_split if isinstance(lhs_split, dict) else {}
-    rhs_split = rhs_split if isinstance(rhs_split, dict) else {}
+    lhs_split = _step_time_split(lhs_summary, split_key=split_key)
+    rhs_split = _step_time_split(rhs_summary, split_key=split_key)
 
     for phase in _STEP_PHASES:
         out[phase] = _value_delta(lhs_split.get(phase), rhs_split.get(phase))
@@ -178,11 +293,11 @@ def build_compare_payload(
     rhs_step_memory = rhs_payload.get("step_memory", {})
 
     step_avg = _value_delta(
-        _nested_get(lhs_step_time, "timing_primary", "step_avg_ms"),
-        _nested_get(rhs_step_time, "timing_primary", "step_avg_ms"),
+        _step_time_value(lhs_step_time, "step_avg_ms"),
+        _step_time_value(rhs_step_time, "step_avg_ms"),
     )
-    lhs_step_status = _nested_get(lhs_step_time, "diagnosis", "status")
-    rhs_step_status = _nested_get(rhs_step_time, "diagnosis", "status")
+    lhs_step_status = _nested_get(lhs_step_time, "primary_diagnosis", "status")
+    rhs_step_status = _nested_get(rhs_step_time, "primary_diagnosis", "status")
 
     payload: Dict[str, Any] = {
         "schema_version": 1,
@@ -228,71 +343,63 @@ def build_compare_payload(
                 rhs_step_status,
             ),
             "step_memory_status": _value_change(
-                _nested_get(lhs_step_memory, "diagnosis", "status"),
-                _nested_get(rhs_step_memory, "diagnosis", "status"),
+                _nested_get(lhs_step_memory, "primary_diagnosis", "status"),
+                _nested_get(rhs_step_memory, "primary_diagnosis", "status"),
             ),
         },
         "system": {
             "cpu_avg_percent": _value_delta(
-                _nested_get(lhs_payload, "system", "cpu_avg_percent"),
-                _nested_get(rhs_payload, "system", "cpu_avg_percent"),
+                _system_value(lhs_payload, "cpu_avg_percent"),
+                _system_value(rhs_payload, "cpu_avg_percent"),
             ),
             "ram_peak_gb": _value_delta(
-                _nested_get(lhs_payload, "system", "ram_peak_gb"),
-                _nested_get(rhs_payload, "system", "ram_peak_gb"),
+                _system_value(lhs_payload, "ram_peak_gb"),
+                _system_value(rhs_payload, "ram_peak_gb"),
             ),
             "gpu_available": _value_change(
-                _nested_get(lhs_payload, "system", "gpu_available"),
-                _nested_get(rhs_payload, "system", "gpu_available"),
+                _system_value(lhs_payload, "gpu_available"),
+                _system_value(rhs_payload, "gpu_available"),
             ),
             "gpu_count": _value_delta(
-                _nested_get(lhs_payload, "system", "gpu_count"),
-                _nested_get(rhs_payload, "system", "gpu_count"),
+                _system_value(lhs_payload, "gpu_count"),
+                _system_value(rhs_payload, "gpu_count"),
             ),
         },
         "process": {
             "cpu_avg_percent": _value_delta(
-                _nested_get(lhs_payload, "process", "cpu_avg_percent"),
-                _nested_get(rhs_payload, "process", "cpu_avg_percent"),
+                _process_value(lhs_payload, "cpu_avg_percent"),
+                _process_value(rhs_payload, "cpu_avg_percent"),
             ),
             "ram_peak_gb": _value_delta(
-                _nested_get(lhs_payload, "process", "ram_peak_gb"),
-                _nested_get(rhs_payload, "process", "ram_peak_gb"),
+                _process_value(lhs_payload, "ram_peak_gb"),
+                _process_value(rhs_payload, "ram_peak_gb"),
             ),
             "takeaway": _value_change(
-                _nested_get(lhs_payload, "process", "takeaway"),
-                _nested_get(rhs_payload, "process", "takeaway"),
+                _process_value(lhs_payload, "takeaway"),
+                _process_value(rhs_payload, "takeaway"),
             ),
         },
         "step_time": {
             "status": _value_change(
-                _nested_get(lhs_step_time, "diagnosis", "status"),
-                _nested_get(rhs_step_time, "diagnosis", "status"),
+                _nested_get(lhs_step_time, "primary_diagnosis", "status"),
+                _nested_get(rhs_step_time, "primary_diagnosis", "status"),
             ),
             "presented": {
-                "lhs": _as_dict(lhs_step_time.get("diagnosis_presented")),
-                "rhs": _as_dict(rhs_step_time.get("diagnosis_presented")),
+                "lhs": _as_dict(lhs_step_time.get("primary_diagnosis")),
+                "rhs": _as_dict(rhs_step_time.get("primary_diagnosis")),
             },
             "step_avg_ms": step_avg,
             "wait_share_pct": _value_delta(
-                _nested_get(lhs_step_time, "timing_primary", "wait_share_pct"),
-                _nested_get(rhs_step_time, "timing_primary", "wait_share_pct"),
+                _step_time_value(lhs_step_time, "wait_share_pct"),
+                _step_time_value(rhs_step_time, "wait_share_pct"),
             ),
             "compute_share_pct": _value_delta(
-                _nested_get(
-                    lhs_step_time,
-                    "timing_primary",
-                    "compute_share_pct",
-                ),
-                _nested_get(
-                    rhs_step_time,
-                    "timing_primary",
-                    "compute_share_pct",
-                ),
+                _step_time_value(lhs_step_time, "compute_share_pct"),
+                _step_time_value(rhs_step_time, "compute_share_pct"),
             ),
             "dominant_phase": _value_change(
-                _nested_get(lhs_step_time, "timing_primary", "dominant_phase"),
-                _nested_get(rhs_step_time, "timing_primary", "dominant_phase"),
+                _step_time_value(lhs_step_time, "dominant_phase"),
+                _step_time_value(rhs_step_time, "dominant_phase"),
             ),
             "split_ms": _compare_step_splits(
                 lhs_step_time,
@@ -307,48 +414,36 @@ def build_compare_payload(
         },
         "step_memory": {
             "status": _value_change(
-                _nested_get(lhs_step_memory, "diagnosis", "status"),
-                _nested_get(rhs_step_memory, "diagnosis", "status"),
+                _step_memory_value(lhs_step_memory, "status"),
+                _step_memory_value(rhs_step_memory, "status"),
+            ),
+            "reason": _value_change(
+                _step_memory_value(lhs_step_memory, "reason"),
+                _step_memory_value(rhs_step_memory, "reason"),
+            ),
+            "action": _value_change(
+                _step_memory_value(lhs_step_memory, "action"),
+                _step_memory_value(rhs_step_memory, "action"),
             ),
             "presented": {
-                "lhs": _as_dict(lhs_step_memory.get("diagnosis_presented")),
-                "rhs": _as_dict(rhs_step_memory.get("diagnosis_presented")),
+                "lhs": _as_dict(lhs_step_memory.get("primary_diagnosis")),
+                "rhs": _as_dict(rhs_step_memory.get("primary_diagnosis")),
             },
             "primary_metric": _value_change(
-                _nested_get(lhs_step_memory, "primary_metric", "metric"),
-                _nested_get(rhs_step_memory, "primary_metric", "metric"),
+                _step_memory_value(lhs_step_memory, "primary_metric"),
+                _step_memory_value(rhs_step_memory, "primary_metric"),
             ),
             "worst_peak_bytes": _value_delta(
-                _nested_get(
-                    lhs_step_memory,
-                    "primary_metric",
-                    "worst_peak_bytes",
-                ),
-                _nested_get(
-                    rhs_step_memory,
-                    "primary_metric",
-                    "worst_peak_bytes",
-                ),
+                _step_memory_value(lhs_step_memory, "worst_peak_bytes"),
+                _step_memory_value(rhs_step_memory, "worst_peak_bytes"),
             ),
             "skew_pct": _value_delta(
-                _nested_get(lhs_step_memory, "primary_metric", "skew_pct"),
-                _nested_get(rhs_step_memory, "primary_metric", "skew_pct"),
+                _step_memory_value(lhs_step_memory, "skew_pct"),
+                _step_memory_value(rhs_step_memory, "skew_pct"),
             ),
             "trend_worst_delta_bytes": _value_delta(
-                _nested_get(
-                    lhs_step_memory,
-                    "primary_metric",
-                    "trend",
-                    "worst",
-                    "delta_bytes",
-                ),
-                _nested_get(
-                    rhs_step_memory,
-                    "primary_metric",
-                    "trend",
-                    "worst",
-                    "delta_bytes",
-                ),
+                _step_memory_value(lhs_step_memory, "trend_worst_delta_bytes"),
+                _step_memory_value(rhs_step_memory, "trend_worst_delta_bytes"),
             ),
         },
         "text": "",

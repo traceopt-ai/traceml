@@ -44,9 +44,6 @@ class StepMemorySampler(BaseSampler):
         peak_alloc = getattr(event, "peak_allocated", None)
         peak_resv = getattr(event, "peak_reserved", None)
 
-        if peak_alloc is None and peak_resv is None:
-            return None
-
         return StepMemorySample(
             sample_idx=self.sample_idx,
             timestamp=ts,

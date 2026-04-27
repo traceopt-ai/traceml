@@ -15,21 +15,21 @@ Design goals
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from traceml.aggregator.summaries.process import generate_process_summary_card
-from traceml.aggregator.summaries.step_memory import (
+from traceml.reporting.summaries.process import generate_process_summary_card
+from traceml.reporting.summaries.step_memory import (
     generate_step_memory_summary_card,
 )
-from traceml.aggregator.summaries.step_time import (
+from traceml.reporting.summaries.step_time import (
     generate_step_time_summary_card,
 )
-from traceml.aggregator.summaries.summary_layout import (
+from traceml.reporting.summaries.summary_layout import (
     border,
     indented_block,
     row,
     wrap_lines,
 )
-from traceml.aggregator.summaries.system import generate_system_summary_card
-from traceml.final_summary_protocol import (
+from traceml.reporting.summaries.system import generate_system_summary_card
+from traceml.sdk.protocol import (
     get_final_summary_json_path,
     get_final_summary_txt_path,
     utc_now_iso,
@@ -49,6 +49,8 @@ def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
         if not isinstance(section, dict):
             continue
         value = section.get("duration_s")
+        if value is None:
+            value = section.get("overview", {}).get("duration_s")
         if value is None:
             continue
         try:
@@ -203,7 +205,7 @@ def build_summary_payload(db_path: str) -> Dict[str, Any]:
     )
 
     return {
-        "schema_version": 1,
+        "schema_version": 1.2,
         "generated_at": utc_now_iso(),
         "duration_s": _summary_duration_s(
             step_time_summary,

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from traceml.aggregator.summaries.summary_layout import border, row, wrap_lines
+from traceml.reporting.summaries.summary_layout import border, row, wrap_lines
 from traceml.utils.formatting import fmt_mem_new
 
 _COMPARE_WIDTH = 78
@@ -216,6 +216,8 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
     dominant_phase = step_time.get("dominant_phase", {})
     step_status = step_time.get("status", {})
     mem_status = step_memory.get("status", {})
+    mem_reason = step_memory.get("reason", {})
+    mem_action = step_memory.get("action", {})
     worst_peak = step_memory.get("worst_peak_bytes", {})
     mem_skew = step_memory.get("skew_pct", {})
     mem_trend = step_memory.get("trend_worst_delta_bytes", {})
@@ -356,6 +358,13 @@ def build_compare_text(payload: Dict[str, Any]) -> str:
         if isinstance(mem_presented_rhs, dict) and mem_status.get("changed"):
             rhs_reason = _as_str(mem_presented_rhs.get("reason"))
             rhs_action = _as_str(mem_presented_rhs.get("action"))
+            if rhs_reason:
+                _append_wrapped(lines, f"- Why B: {rhs_reason}")
+            if rhs_action and outcome == "regression":
+                _append_wrapped(lines, f"- Next: {rhs_action}")
+        elif mem_status.get("changed"):
+            rhs_reason = _as_str(mem_reason.get("rhs"))
+            rhs_action = _as_str(mem_action.get("rhs"))
             if rhs_reason:
                 _append_wrapped(lines, f"- Why B: {rhs_reason}")
             if rhs_action and outcome == "regression":

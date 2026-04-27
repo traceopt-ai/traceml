@@ -87,10 +87,9 @@ def main():
         for batch_x, batch_y in loader:
             total_steps += 1
 
-            batch_x = batch_x.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
-
             with traceml.trace_step(model):
+                batch_x = batch_x.to(device, non_blocking=True)
+                batch_y = batch_y.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
                 logits = model(batch_x)
                 loss = criterion(logits, batch_y)

@@ -28,29 +28,27 @@ from typing import Callable, List, Optional
 
 import torch.nn as nn
 
-from traceml.utils.entry_hook import attach_execution_entry_hooks
-from traceml.utils.flush_buffers import flush_step_events
-from traceml.utils.hooks.layer_backward_memory_hook import (
+from traceml.hooks.layer_backward_memory_hooks import (
     attach_layer_backward_memory_hooks,
 )
-from traceml.utils.hooks.layer_backward_time_hooks import (
+from traceml.hooks.layer_backward_time_hooks import (
     attach_layer_backward_time_hooks,
 )
-from traceml.utils.hooks.layer_forward_memory_hook import (
+from traceml.hooks.layer_forward_memory_hooks import (
     attach_layer_forward_memory_hooks,
 )
-from traceml.utils.hooks.layer_forward_time_hooks import (
+from traceml.hooks.layer_forward_time_hooks import (
     attach_layer_forward_time_hooks,
 )
-from traceml.utils.hooks.optimizer_hook import (
-    ensure_optimizer_timing_installed,
-)
+from traceml.hooks.optimizer_hooks import ensure_optimizer_timing_installed
+from traceml.patches.backward_auto_timer_patch import backward_auto_timer
+from traceml.patches.forward_auto_timer_patch import forward_auto_timer
+from traceml.utils.entry_hook import attach_execution_entry_hooks
+from traceml.utils.flush_buffers import flush_step_events
 from traceml.utils.layer_parameter_memory import (
     collect_layer_parameter_memory,
     model_queue,
 )
-from traceml.utils.patches.backward_auto_timer_patch import backward_auto_timer
-from traceml.utils.patches.forward_auto_timer_patch import forward_auto_timer
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.timing import timed_region
 

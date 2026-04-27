@@ -64,22 +64,21 @@ def main():
         for batch_x, batch_y in loader:
             total_steps += 1
 
-            batch_x = batch_x.to(device, non_blocking=True)
-            batch_y = batch_y.to(device, non_blocking=True)
-
             with traceml.trace_step(model):
+                batch_x = batch_x.to(device, non_blocking=True)
+                batch_y = batch_y.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
                 logits = model(batch_x)
                 loss = criterion(logits, batch_y)
                 loss.backward()
                 optimizer.step()
 
-            if total_steps % 50 == 0:
-                print(
-                    f"Epoch {epoch} | Step {total_steps} | loss: {loss.item():.4f}"
-                )
+                if total_steps % 50 == 0:
+                    print(
+                        f"Epoch {epoch} | Step {total_steps} | loss: {loss.item():.4f}"
+                    )
 
-            time.sleep(PAUSE_BETWEEN_STEPS)
+                time.sleep(PAUSE_BETWEEN_STEPS)
 
     print("Done.")
 

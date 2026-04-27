@@ -13,6 +13,7 @@ These are the main user-facing examples.
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
 | `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.final_summary()` | CPU / CUDA | Best first example |
+| `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
 | `lightning_minimal.py` | Minimal Lightning `TraceMLCallback` example | CPU / CUDA | No dataset download required |
@@ -91,6 +92,14 @@ Starter examples now prefer the top-level public API:
 - `traceml.trace_model_instance(...)`
 - `traceml.final_summary()`
 
+For explicit manual instrumentation, see:
+
+- `traceml.init(mode="manual")`
+- `traceml.wrap_dataloader_fetch(...)`
+- `traceml.wrap_forward(...)`
+- `traceml.wrap_backward(...)`
+- `traceml.wrap_optimizer(...)`
+
 Legacy imports from `traceml.decorators` still work for backward
 compatibility, but new examples use the top-level `traceml.*` API. Legacy
 decorator imports are planned for deprecation starting in `v0.3.0`.
@@ -102,6 +111,7 @@ decorator imports are planned for deprecation starting in `v0.3.0`.
 Use:
 
 - `pytorch_minimal.py` if you have a normal PyTorch loop
+- `manual_custom_minimal.py` if you use a custom input pipeline or want full explicit control
 - `ddp_minimal.py` if you want single-node distributed training
 - `huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
 - `lightning_minimal.py` if you use PyTorch Lightning
