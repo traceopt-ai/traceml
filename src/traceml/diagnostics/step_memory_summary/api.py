@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Sequence
 
-from traceml.diagnostics.framework import DiagnosticResult, sort_issues
+from traceml.diagnostics.common import DiagnosticResult, sort_issues
 from traceml.diagnostics.step_memory import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
+    StepMemoryDiagnosis,
     StepMemoryDiagnosisThresholds,
     build_step_memory_diagnosis,
 )
@@ -27,7 +28,7 @@ def build_step_memory_summary_diagnosis_result(
     gpu_total_bytes: Optional[float] = None,
     per_rank: Optional[Dict[str, Any]] = None,
     thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS,
-) -> DiagnosticResult:
+) -> DiagnosticResult[StepMemoryDiagnosis]:
     """
     Build a rich summary-oriented step-memory diagnosis result.
 

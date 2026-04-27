@@ -2,10 +2,23 @@
 Shared diagnosis primitives used across runtime and summary diagnostics.
 """
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass, field, is_dataclass
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    TypeVar,
+)
 
 Severity = Literal["info", "warn", "crit"]
+ContextT = TypeVar("ContextT")
 
 
 @dataclass(frozen=True)
@@ -24,40 +37,16 @@ class BaseDiagnosis:
 
 
 @dataclass(frozen=True)
-class DiagnosisContributor:
+class DiagnosticIssue:
     """
-    One contributing issue or diagnostic signal.
+    One concrete issue detected in an analyzed window.
 
-    This is intentionally generic and domain-agnostic. It allows a diagnosis
-    engine to surface multiple meaningful signals while still selecting one
-    primary diagnosis for compact runtime display.
-
-    Fields
-    ------
-    kind:
-        Stable machine-readable issue label, e.g. `INPUT_STRAGGLER`.
-    status:
-        User-facing label shown in dashboards or summaries.
-    severity:
-        Relative seriousness of this contributor.
-    summary:
-        Concise explanation of the issue.
-    action:
-        Suggested next step.
-    metric:
-        Canonical metric key when applicable.
-    phase:
-        Optional more specific phase label, e.g. `backward`.
-    score:
-        Normalized scalar score used for ranking or thresholding.
-    share_pct:
-        Optional share ratio in `[0, 1]`.
-    skew_pct:
-        Optional skew ratio in `[0, 1]`.
-    ranks:
-        Ordered tuple of materially involved ranks.
-    evidence:
-        Small machine-readable evidence block for downstream consumers.
+    Notes
+    -----
+    - `kind` is the stable machine-readable label.
+    - `status` is the user-facing label shown in summaries and dashboards.
+    - `score` is an optional normalized scalar used for ranking issues.
+    - `ranks` contains the materially affected ranks in stable order.
     """
 
     kind: str
@@ -74,31 +63,64 @@ class DiagnosisContributor:
     evidence: Dict[str, Any] = field(default_factory=dict)
 
 
+PrimaryT = TypeVar("PrimaryT", bound=BaseDiagnosis)
+
+
 @dataclass(frozen=True)
-class DiagnosisResult:
+class DiagnosticResult(Generic[PrimaryT]):
     """
-    Rich diagnosis result returned by extensible diagnosis engines.
+    Full diagnosis output for one analyzed window.
 
-    Runtime UX can use `primary` only, while summaries and dashboards can use
-    the full result.
-
-    Fields
-    ------
-    primary:
-        The single diagnosis chosen for compact runtime display.
-    contributors:
-        Ranked contributing issues that were materially present in the same
-        analysis window.
-    metric_attribution:
-        Canonical machine-readable evidence keyed by metric / phase.
-    per_rank:
-        Optional per-rank local evidence and issue summaries.
+    Runtime UX usually consumes only `primary`. Richer downstream consumers
+    such as final summaries and dashboards can additionally use:
+    - `issues`
+    - `metric_attribution`
+    - `per_rank`
     """
 
-    primary: BaseDiagnosis
-    contributors: Tuple[DiagnosisContributor, ...] = ()
+    primary: PrimaryT
+    issues: Tuple[DiagnosticIssue, ...] = ()
     metric_attribution: Dict[str, Any] = field(default_factory=dict)
     per_rank: Dict[str, Any] = field(default_factory=dict)
+
+
+class DiagnosticRule(Protocol, Generic[ContextT]):
+    """
+    Minimal contract for a modular diagnosis rule.
+    """
+
+    name: str
+
+    def evaluate(self, context: ContextT) -> Optional[DiagnosticIssue]:
+        """
+        Return one issue if the rule materially triggers, else None.
+        """
+
+
+def severity_rank(severity: Severity) -> int:
+    """
+    Map severity to a numeric ranking value.
+    """
+    return {"crit": 2, "warn": 1, "info": 0}.get(severity, 0)
+
+
+def sort_issues(
+    issues: Sequence[DiagnosticIssue],
+) -> Tuple[DiagnosticIssue, ...]:
+    """
+    Return issues sorted by severity, score, and attribution breadth.
+    """
+    return tuple(
+        sorted(
+            issues,
+            key=lambda item: (
+                severity_rank(item.severity),
+                float(item.score or 0.0),
+                len(item.ranks),
+            ),
+            reverse=True,
+        )
+    )
 
 
 def validate_confidence(confidence: Optional[float]) -> None:
@@ -132,9 +154,13 @@ def diagnosis_to_dict(
 
 __all__ = [
     "Severity",
+    "ContextT",
     "BaseDiagnosis",
-    "DiagnosisContributor",
-    "DiagnosisResult",
+    "DiagnosticIssue",
+    "DiagnosticResult",
+    "DiagnosticRule",
+    "severity_rank",
+    "sort_issues",
     "validate_confidence",
     "diagnosis_to_dict",
 ]

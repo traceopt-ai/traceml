@@ -15,8 +15,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from traceml.diagnostics.common import diagnosis_to_dict
-from traceml.diagnostics.framework import DiagnosticResult
+from traceml.diagnostics.common import DiagnosticResult, diagnosis_to_dict
 from traceml.diagnostics.step_time import (
     DiagnosisThresholds,
     StepDiagnosis,
