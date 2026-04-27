@@ -116,6 +116,8 @@ class WindowCreepEvidence:
     overall_abs_delta_bytes: Optional[float]
     overall_worst_growth_pct: Optional[float]
     overall_median_growth_pct: Optional[float]
+    trend_window_steps: Optional[int]
+    avg_growth_bytes_per_step: Optional[float]
 
     early: bool
     confirmed: bool
@@ -336,6 +338,8 @@ def _compute_window_creep_evidence(
             overall_abs_delta_bytes=None,
             overall_worst_growth_pct=None,
             overall_median_growth_pct=None,
+            trend_window_steps=None,
+            avg_growth_bytes_per_step=None,
             early=False,
             confirmed=False,
             score=0.0,
@@ -356,6 +360,8 @@ def _compute_window_creep_evidence(
             overall_abs_delta_bytes=None,
             overall_worst_growth_pct=None,
             overall_median_growth_pct=None,
+            trend_window_steps=None,
+            avg_growth_bytes_per_step=None,
             early=False,
             confirmed=False,
             score=0.0,
@@ -404,6 +410,12 @@ def _compute_window_creep_evidence(
         + max(0.0, float(worst_growth or 0.0)) * 10.0
         + max(0.0, float(median_growth or 0.0)) * 6.0
     )
+    trend_window_steps = min(len(worst), 1000)
+    avg_growth_bytes_per_step = None
+    if trend_window_steps >= 2:
+        tail = worst[-trend_window_steps:]
+        total_delta = float(tail[-1] - tail[0])
+        avg_growth_bytes_per_step = total_delta / float(trend_window_steps - 1)
 
     return WindowCreepEvidence(
         eligible=True,
@@ -413,6 +425,8 @@ def _compute_window_creep_evidence(
         overall_abs_delta_bytes=abs_delta,
         overall_worst_growth_pct=worst_growth,
         overall_median_growth_pct=median_growth,
+        trend_window_steps=trend_window_steps,
+        avg_growth_bytes_per_step=avg_growth_bytes_per_step,
         early=early,
         confirmed=confirmed,
         score=score,
@@ -472,36 +486,34 @@ def _clean_series(values: Sequence[float]) -> list[float]:
 
 def _format_creep_note(evidence: WindowCreepEvidence) -> Optional[str]:
     """
-    Format a compact note for CLI and dashboard display.
+    Format a compact, action-oriented creep note for CLI and dashboard display.
 
     Example:
-    baseline 12.2 GiB -> recent 13.0 GiB, +820 MiB (~6%)
+    Memory creep detected: increasing by ~1.2 MiB / step over the last 1000 steps.
     """
     if not evidence.eligible:
         return None
 
-    parts = []
-
     if (
-        evidence.baseline_avg_bytes is not None
-        and evidence.recent_avg_bytes is not None
+        evidence.avg_growth_bytes_per_step is not None
+        and evidence.trend_window_steps is not None
+        and evidence.avg_growth_bytes_per_step > 0.0
+        and evidence.trend_window_steps >= 2
     ):
-        parts.append(
-            f"baseline {_fmt_bytes(evidence.baseline_avg_bytes)} -> "
-            f"recent {_fmt_bytes(evidence.recent_avg_bytes)}"
+        return (
+            "Memory creep detected: increasing by "
+            f"~{_fmt_bytes(evidence.avg_growth_bytes_per_step)} / step "
+            f"over the last {int(evidence.trend_window_steps)} steps."
         )
 
+    parts = []
     if evidence.overall_abs_delta_bytes is not None:
-        delta = evidence.overall_abs_delta_bytes
-        sign = "+" if delta >= 0.0 else "-"
-        parts.append(f"{sign}{_fmt_bytes(abs(delta))}")
-
+        parts.append(f"+{_fmt_bytes(abs(evidence.overall_abs_delta_bytes))}")
     if evidence.overall_worst_growth_pct is not None:
         parts.append(f"(~{evidence.overall_worst_growth_pct * 100.0:.0f}%)")
-
     if not parts:
         return None
-    return ", ".join(parts)
+    return "Memory creep detected: " + " ".join(parts)
 
 
 def _metric_label(metric_name: str) -> str:

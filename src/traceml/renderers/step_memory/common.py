@@ -70,6 +70,42 @@ class StepMemoryMetricsDB:
             out[int(rank)] = int(max_step)
         return out
 
+    def detect_gpu_available(self, conn: sqlite3.Connection) -> Optional[bool]:
+        """
+        Best-effort check for whether this run reported GPU availability.
+
+        Notes
+        -----
+        Step-memory telemetry is GPU-specific. When there are no
+        `step_memory_samples`, distinguishing "waiting for first memory sample"
+        from "this run has no GPU" makes the live UX much clearer.
+        """
+        queries = (
+            "SELECT MAX(gpu_available) FROM process_samples;",
+            "SELECT MAX(gpu_available) FROM system_samples;",
+        )
+        saw_signal = False
+        for query in queries:
+            try:
+                row = conn.execute(query).fetchone()
+            except Exception:
+                continue
+            if not row:
+                continue
+            value = row[0]
+            if value is None:
+                continue
+            saw_signal = True
+            try:
+                if bool(int(value)):
+                    return True
+            except Exception:
+                if bool(value):
+                    return True
+        if saw_signal:
+            return False
+        return None
+
     def fetch_rank_step_maps(
         self,
         conn: sqlite3.Connection,
@@ -140,6 +176,34 @@ class StepMemoryMetricsDB:
 
         return rank_to_steps, rank_to_device
 
+    def count_rows_for_completed_window(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        start_step: int,
+        end_step: int,
+    ) -> int:
+        """
+        Count step-memory rows across the bounded completed-step window.
+
+        This includes rows whose memory values are NULL, which is important for
+        distinguishing:
+        - "still waiting for first completed step"
+        - "completed steps exist, but GPU step-memory telemetry is not
+          applicable for this run"
+        """
+        row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM step_memory_samples
+            WHERE rank IS NOT NULL
+              AND step IS NOT NULL
+              AND step BETWEEN ? AND ?;
+            """,
+            (int(start_step), int(end_step)),
+        ).fetchone()
+        return int(row[0] or 0) if row else 0
+
 
 def build_step_memory_combined_result(
     conn: sqlite3.Connection,
@@ -158,12 +222,13 @@ def build_step_memory_combined_result(
     - Keep all values in bytes.
     """
     ws = max(1, int(window_size))
+    gpu_available = db.detect_gpu_available(conn)
     latest_per_rank = db.fetch_latest_step_per_rank(conn)
 
     if not latest_per_rank:
         return StepMemoryCombinedResult(
             metrics=[],
-            status_message="No ranks available",
+            status_message="Waiting for first fully completed step across all ranks…",
         )
 
     world_size = len(latest_per_rank)
@@ -172,6 +237,11 @@ def build_step_memory_combined_result(
     # Scan slightly wider than window to tolerate sparse/missing steps.
     scan_span = max(ws * 20, ws + 1)
     start_step = max(0, int(completed_step) - scan_span + 1)
+    rows_in_window = db.count_rows_for_completed_window(
+        conn,
+        start_step=start_step,
+        end_step=int(completed_step),
+    )
 
     out: List[StepMemoryCombinedMetric] = []
 
@@ -268,7 +338,13 @@ def build_step_memory_combined_result(
     return StepMemoryCombinedResult(
         metrics=out,
         status_message=(
-            "OK" if out else "No complete memory metrics available"
+            "OK"
+            if out
+            else (
+                "No GPU detected. Step memory uses torch-based GPU memory telemetry."
+                if gpu_available is False and rows_in_window > 0
+                else "No complete memory metrics available"
+            )
         ),
     )
 
