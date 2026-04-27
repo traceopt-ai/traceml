@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from traceml.initialization import TraceMLInitConfig
-from traceml.summary_client import final_summary as _final_summary
+from traceml.sdk.initial import TraceMLInitConfig
+from traceml.sdk.summary_client import final_summary as _final_summary
 
 
 def trace_step(*args: Any, **kwargs: Any) -> Any:
@@ -27,7 +27,7 @@ def trace_step(*args: Any, **kwargs: Any) -> Any:
     model expects callers to opt into automatic patching explicitly via
     `traceml.init(...)`.
     """
-    from traceml.instrumentation import trace_step as _trace_step
+    from traceml.sdk.instrumentation import trace_step as _trace_step
 
     return _trace_step(*args, **kwargs)
 
@@ -36,7 +36,7 @@ def trace_model_instance(*args: Any, **kwargs: Any) -> Any:
     """
     Lazily resolve and invoke TraceML model hook attachment.
     """
-    from traceml.instrumentation import (
+    from traceml.sdk.instrumentation import (
         trace_model_instance as _trace_model_instance,
     )
 
@@ -65,7 +65,7 @@ def wrap_dataloader_fetch(*args: Any, **kwargs: Any) -> Any:
     """
     Lazily resolve and apply TraceML dataloader-fetch wrapping.
     """
-    from traceml.wrappers import (
+    from traceml.sdk.wrappers import (
         wrap_dataloader_fetch as _wrap_dataloader_fetch,
     )
 
@@ -76,7 +76,7 @@ def wrap_forward(*args: Any, **kwargs: Any) -> Any:
     """
     Lazily resolve and apply TraceML forward wrapping.
     """
-    from traceml.wrappers import wrap_forward as _wrap_forward
+    from traceml.sdk.wrappers import wrap_forward as _wrap_forward
 
     return _wrap_forward(*args, **kwargs)
 
@@ -85,7 +85,7 @@ def wrap_backward(*args: Any, **kwargs: Any) -> Any:
     """
     Lazily resolve and apply TraceML backward wrapping.
     """
-    from traceml.wrappers import wrap_backward as _wrap_backward
+    from traceml.sdk.wrappers import wrap_backward as _wrap_backward
 
     return _wrap_backward(*args, **kwargs)
 
@@ -94,7 +94,7 @@ def wrap_optimizer(*args: Any, **kwargs: Any) -> Any:
     """
     Lazily resolve and apply TraceML optimizer-step wrapping.
     """
-    from traceml.wrappers import wrap_optimizer as _wrap_optimizer
+    from traceml.sdk.wrappers import wrap_optimizer as _wrap_optimizer
 
     return _wrap_optimizer(*args, **kwargs)
 
@@ -136,7 +136,7 @@ def init(
     - `mode="manual"` patches none of them.
     - `mode="selective"` patches only the explicitly enabled subset.
     """
-    from traceml.initialization import init as _init
+    from traceml.sdk.initial import init as _init
 
     return _init(
         mode=mode,
@@ -156,7 +156,7 @@ def start(
     """
     Alias for `traceml.init(...)` during the transition.
     """
-    from traceml.initialization import start as _start
+    from traceml.sdk.initial import start as _start
 
     return _start(
         mode=mode,

@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from traceml.decorators import trace_model_instance, trace_step
+from traceml.sdk.decorators_compat import trace_model_instance, trace_step
 
 # Setup logging
 logger = logging.getLogger(__name__)
