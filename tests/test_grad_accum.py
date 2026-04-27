@@ -1,5 +1,7 @@
-import lightning as L
-import torch
+import pytest
+
+L = pytest.importorskip("lightning")
+torch = pytest.importorskip("torch")
 from torch.utils.data import DataLoader, TensorDataset
 
 

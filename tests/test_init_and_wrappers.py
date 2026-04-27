@@ -14,19 +14,19 @@ if str(SRC) not in sys.path:
 
 
 def _reload_initialization_module():
-    import traceml.initialization as initialization
+    import traceml.sdk.initial as initialization
 
     return importlib.reload(initialization)
 
 
 def _reload_instrumentation_module():
-    import traceml.instrumentation as instrumentation
+    import traceml.sdk.instrumentation as instrumentation
 
     return importlib.reload(instrumentation)
 
 
 def _reload_wrappers_module():
-    import traceml.wrappers as wrappers
+    import traceml.sdk.wrappers as wrappers
 
     return importlib.reload(wrappers)
 
@@ -36,9 +36,9 @@ def test_init_auto_enables_all_supported_patches(monkeypatch):
 
     calls = []
 
-    import traceml.utils.patches.backward_auto_timer_patch as backward_patch
-    import traceml.utils.patches.dataloader_patch as dataloader_patch
-    import traceml.utils.patches.forward_auto_timer_patch as forward_patch
+    import traceml.patches.backward_auto_timer_patch as backward_patch
+    import traceml.patches.dataloader_patch as dataloader_patch
+    import traceml.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         dataloader_patch,
@@ -81,9 +81,9 @@ def test_init_selective_only_installs_requested_patches(monkeypatch):
 
     calls = []
 
-    import traceml.utils.patches.backward_auto_timer_patch as backward_patch
-    import traceml.utils.patches.dataloader_patch as dataloader_patch
-    import traceml.utils.patches.forward_auto_timer_patch as forward_patch
+    import traceml.patches.backward_auto_timer_patch as backward_patch
+    import traceml.patches.dataloader_patch as dataloader_patch
+    import traceml.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         dataloader_patch,
@@ -149,7 +149,7 @@ def test_init_custom_alias_maps_to_selective(monkeypatch):
 
     calls = []
 
-    import traceml.utils.patches.forward_auto_timer_patch as forward_patch
+    import traceml.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         forward_patch,
@@ -199,8 +199,11 @@ def test_decorators_import_preserves_legacy_auto_init(monkeypatch):
         lambda: calls.append("legacy"),
     )
 
+    # Import-time compatibility behavior lives in the module body, so clear
+    # both public and SDK compatibility paths to force a fresh import.
     sys.modules.pop("traceml.decorators", None)
-    import traceml.decorators as decorators
+    sys.modules.pop("traceml.sdk.decorators_compat", None)
+    import traceml.sdk.decorators_compat as decorators
 
     importlib.reload(decorators)
 
