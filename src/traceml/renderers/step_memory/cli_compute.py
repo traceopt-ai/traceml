@@ -48,6 +48,10 @@ class StepMemoryCLIComputer:
             return self._return_stale_or_empty("STALE (exception)")
 
         if not out.metrics:
+            if "No GPU detected" in str(out.status_message):
+                self._last_ok = None
+                self._last_ok_ts = 0.0
+                return out
             return self._return_stale_or_empty("STALE (no metrics this tick)")
 
         self._last_ok = out

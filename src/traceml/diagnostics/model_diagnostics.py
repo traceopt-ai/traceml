@@ -99,6 +99,7 @@ def build_model_diagnostics_payload(
     *,
     step_time_metrics: Sequence[StepCombinedTimeMetric],
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
+    step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
 ) -> ModelDiagnosticsPayload:
     """
@@ -141,32 +142,51 @@ def build_model_diagnostics_payload(
         )
 
     try:
-        step_memory_diag = build_step_memory_diagnosis(
-            step_memory_metrics,
-            gpu_total_bytes=gpu_total_bytes,
-        )
-        items.append(
-            ModelDiagnosisItem(
-                source="step_memory",
-                title="Step Memory",
-                kind=str(step_memory_diag.kind),
-                severity=str(step_memory_diag.severity),
-                status=str(step_memory_diag.status),
-                reason=str(step_memory_diag.reason),
-                action=str(step_memory_diag.action),
-                note=getattr(step_memory_diag, "note", None),
-                confidence=getattr(step_memory_diag, "confidence", None),
-                confidence_label=_confidence_label(
-                    getattr(step_memory_diag, "confidence", None)
-                ),
-                steps_used=getattr(step_memory_diag, "steps_used", None),
-                worst_rank=getattr(step_memory_diag, "worst_rank", None),
-                evidence=_build_step_memory_evidence(
-                    step_memory_metrics,
-                    gpu_total_bytes=gpu_total_bytes,
-                ),
+        if (
+            not step_memory_metrics
+            and isinstance(step_memory_status_message, str)
+            and "No GPU detected" in step_memory_status_message
+        ):
+            items.append(
+                ModelDiagnosisItem(
+                    source="step_memory",
+                    title="Step Memory",
+                    kind="NO_GPU",
+                    severity="info",
+                    status="NO GPU",
+                    reason=(
+                        "No GPU found. Step memory uses torch-based GPU memory telemetry."
+                    ),
+                    action="",
+                )
             )
-        )
+        else:
+            step_memory_diag = build_step_memory_diagnosis(
+                step_memory_metrics,
+                gpu_total_bytes=gpu_total_bytes,
+            )
+            items.append(
+                ModelDiagnosisItem(
+                    source="step_memory",
+                    title="Step Memory",
+                    kind=str(step_memory_diag.kind),
+                    severity=str(step_memory_diag.severity),
+                    status=str(step_memory_diag.status),
+                    reason=str(step_memory_diag.reason),
+                    action=str(step_memory_diag.action),
+                    note=getattr(step_memory_diag, "note", None),
+                    confidence=getattr(step_memory_diag, "confidence", None),
+                    confidence_label=_confidence_label(
+                        getattr(step_memory_diag, "confidence", None)
+                    ),
+                    steps_used=getattr(step_memory_diag, "steps_used", None),
+                    worst_rank=getattr(step_memory_diag, "worst_rank", None),
+                    evidence=_build_step_memory_evidence(
+                        step_memory_metrics,
+                        gpu_total_bytes=gpu_total_bytes,
+                    ),
+                )
+            )
     except Exception:
         items.append(
             ModelDiagnosisItem(
