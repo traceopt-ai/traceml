@@ -1,7 +1,6 @@
 import shutil
 from typing import Optional
 
-from IPython.display import HTML
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -104,9 +103,6 @@ class LayerCombinedTimeRenderer(BaseRenderer):
         Dashboard consumes the typed dataclass directly.
         """
         return self._service.compute_display_data()
-
-    def get_notebook_renderable(self) -> HTML:
-        pass
 
     def log_summary(self, path) -> None:
         pass

@@ -26,7 +26,7 @@ from traceml.aggregator.display_drivers.layout import (
     SYSTEM_LAYOUT,
 )
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.base_renderer import CLIRenderer
 from traceml.renderers.layer_combined_memory.renderer import (
     LayerCombinedMemoryRenderer,
 )
@@ -97,7 +97,7 @@ class CLIDisplayDriver(BaseDisplayDriver):
 
         # CLI chooses its renderer set (can differ from dashboard)
         # Watch profile
-        self._renderers: List[BaseRenderer] = [
+        self._renderers: List[CLIRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
             StdoutStderrRenderer(db_path=self._settings.db_path),

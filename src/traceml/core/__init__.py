@@ -7,6 +7,7 @@ SQLite helpers, or TraceML runtime modules.
 """
 
 from .lifecycle import Startable, Stoppable, Tickable
+from .registry import Registry
 from .rendering import Formatter, RenderContext, Renderer
 from .summaries import ReportGenerator, SummaryResult, SummarySection
 from .telemetry import MetricComputer, ProjectionWriter, TelemetryPayload
@@ -18,6 +19,7 @@ __all__ = [
     "Formatter",
     "RenderContext",
     "Renderer",
+    "Registry",
     "ReportGenerator",
     "SummaryResult",
     "SummarySection",

@@ -1,34 +1,51 @@
-from typing import Any, Dict
+from __future__ import annotations
+
+from abc import ABC
+from typing import Any, Dict, Protocol, runtime_checkable
 
 
-class BaseRenderer:
+class BaseRenderer(ABC):
     """
-    Base class for specific stdout loggers. Each logger is responsible for
-    providing data for a specific part of the shared display.
+    Shared metadata/state base for live renderers.
+
+    Display-specific contracts are intentionally separate:
+    - CLIRenderer: implements get_panel_renderable()
+    - DashboardRenderer: implements get_dashboard_renderable()
     """
 
-    def __init__(self, name: str, layout_section_name: str):
+    def __init__(self, name: str, layout_section_name: str) -> None:
         self.name = name
         self.layout_section_name = layout_section_name
         self._latest_data: Dict[str, Any] = {}
 
-    def get_panel_renderable(
-        self,
-    ) -> Any:  # This will be implemented by subclasses
-        """
-        Abstract method: Subclasses must implement this to return a Rich Renderable
-        (e.g., Panel, Table, Text) based on their `_latest_data`.
-        """
-        raise NotImplementedError(
-            "Subclasses must implement _get_panel_renderable to provide content for the shared display."
-        )
 
-    def get_notebook_renderable(self) -> Any:
-        """
-        Subclasses implement this to return an HTML representation
-        (IPython.display.HTML) based on `get_data()`.
-        Used in Jupyter/Notebook display.
-        """
-        raise NotImplementedError(
-            "Subclasses must implement get_notebook_renderable()"
-        )
+@runtime_checkable
+class RendererMetadata(Protocol):
+    """Shared renderer metadata required by display drivers."""
+
+    name: str
+    layout_section_name: str
+
+
+@runtime_checkable
+class CLIRenderer(RendererMetadata, Protocol):
+    """Renderer contract used by the Rich CLI display driver."""
+
+    def get_panel_renderable(self) -> Any:
+        """Return a Rich-compatible renderable for the CLI layout."""
+
+
+@runtime_checkable
+class DashboardRenderer(RendererMetadata, Protocol):
+    """Renderer contract used by the NiceGUI dashboard display driver."""
+
+    def get_dashboard_renderable(self) -> Any:
+        """Return a dashboard payload for the subscribed layout section."""
+
+
+__all__ = [
+    "BaseRenderer",
+    "RendererMetadata",
+    "CLIRenderer",
+    "DashboardRenderer",
+]

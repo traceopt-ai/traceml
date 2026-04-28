@@ -54,7 +54,7 @@ from traceml.aggregator.display_drivers.nicegui_sections.pages import (
     define_pages,
 )
 from traceml.database.remote_database_store import RemoteDBStore
-from traceml.renderers.base_renderer import BaseRenderer
+from traceml.renderers.base_renderer import DashboardRenderer
 from traceml.renderers.layer_combined_memory.renderer import (
     LayerCombinedMemoryRenderer,
 )
@@ -127,7 +127,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._registered: bool = False
 
         # ---- Renderers ----
-        self._renderers: List[BaseRenderer] = [
+        self._renderers: List[DashboardRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
             StepCombinedRenderer(db_path=self._settings.db_path),
@@ -370,7 +370,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
 
         for r in self._renderers:
 
-            def register(rr: BaseRenderer = r) -> None:
+            def register(rr: DashboardRenderer = r) -> None:
                 fn = getattr(rr, "get_dashboard_renderable", None)
                 if fn is None:
                     raise AttributeError(
