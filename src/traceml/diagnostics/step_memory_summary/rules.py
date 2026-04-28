@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from traceml.diagnostics.framework import DiagnosticIssue, DiagnosticRule
+from traceml.diagnostics.common import DiagnosticIssue, DiagnosticRule
 from traceml.diagnostics.step_memory import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,

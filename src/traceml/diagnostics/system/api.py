@@ -11,8 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ..common import BaseDiagnosis, Severity
-from ..framework import DiagnosticResult, sort_issues
+from ..common import BaseDiagnosis, DiagnosticResult, Severity, sort_issues
 from .context import SystemSummarySignals, build_system_summary_signals
 from .rules import run_system_rules
 
@@ -90,7 +89,7 @@ def build_system_diagnosis_result(
     gpu_power_avg_w: Optional[float],
     gpu_power_peak_w: Optional[float],
     per_gpu: Dict[int, Dict[str, Optional[float]]],
-) -> DiagnosticResult:
+) -> DiagnosticResult[SystemDiagnosis]:
     """
     Build one rich system diagnosis result from summary-level system signals.
     """

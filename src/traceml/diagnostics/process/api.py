@@ -11,8 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ..common import BaseDiagnosis, Severity
-from ..framework import DiagnosticResult, sort_issues
+from ..common import BaseDiagnosis, DiagnosticResult, Severity, sort_issues
 from .context import ProcessSummarySignals, build_process_summary_signals
 from .rules import run_process_rules
 
@@ -91,7 +90,7 @@ def build_process_diagnosis_result(
     gpu_mem_reserved_peak_bytes: Optional[float],
     gpu_mem_total_bytes: Optional[float],
     per_rank: Dict[int, Dict[str, Optional[float]]],
-) -> DiagnosticResult:
+) -> DiagnosticResult[ProcessDiagnosis]:
     """
     Build one rich process diagnosis result from summary-level process signals.
     """

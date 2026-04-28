@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from ..framework import DiagnosticIssue, DiagnosticRule
+from ..common import DiagnosticIssue, DiagnosticRule
 from .context import ProcessSummarySignals
 
 
