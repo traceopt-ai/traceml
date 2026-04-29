@@ -11,9 +11,16 @@ from .common import (
     diagnosis_to_dict,
 )
 from .model_diagnostics import (
+    DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
     ModelDiagnosisItem,
     ModelDiagnosticsPayload,
     build_model_diagnostics_payload,
+)
+from .registry import (
+    DiagnosticDomainRegistry,
+    DiagnosticDomainSpec,
+    ModelDiagnosticBuilder,
+    ModelDiagnosticContext,
 )
 
 __all__ = [
@@ -23,6 +30,11 @@ __all__ = [
     "DiagnosticResult",
     "DiagnosticRule",
     "diagnosis_to_dict",
+    "DiagnosticDomainRegistry",
+    "DiagnosticDomainSpec",
+    "ModelDiagnosticBuilder",
+    "ModelDiagnosticContext",
+    "DEFAULT_MODEL_DIAGNOSTIC_REGISTRY",
     "ModelDiagnosisItem",
     "ModelDiagnosticsPayload",
     "build_model_diagnostics_payload",

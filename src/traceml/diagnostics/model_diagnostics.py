@@ -20,9 +20,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
+from traceml.diagnostics.registry import (
+    DiagnosticDomainRegistry,
+    DiagnosticDomainSpec,
+    ModelDiagnosticContext,
+)
 from traceml.diagnostics.step_memory import build_step_memory_diagnosis
 from traceml.diagnostics.step_time import build_step_diagnosis
 from traceml.diagnostics.trends import DEFAULT_TREND_CONFIG, compute_trend_pct
+from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml.renderers.step_time.schema import StepCombinedTimeMetric
 
@@ -95,110 +101,56 @@ class ModelDiagnosticsPayload:
         }
 
 
+def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
+    """
+    Log domain failures without breaking dashboard/runtime rendering.
+
+    Model diagnostics are advisory and run on the aggregator/UI side. A broken
+    domain should produce a fallback item and be visible in TraceML's error log,
+    but it must not blank the dashboard or interrupt the user's training job.
+    """
+    try:
+        get_error_logger("ModelDiagnostics").exception("[TraceML] %s", message)
+    except Exception:
+        pass
+
+
 def build_model_diagnostics_payload(
     *,
     step_time_metrics: Sequence[StepCombinedTimeMetric],
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
+    registry: Optional[DiagnosticDomainRegistry] = None,
 ) -> ModelDiagnosticsPayload:
     """
-    Build one combined model diagnostics payload from step-time and step-memory inputs.
+    Build one combined model diagnostics payload from registered domains.
+
+    Domain builders are isolated behind ``DiagnosticDomainRegistry`` so future
+    domains can be added by registering a builder that accepts
+    ``ModelDiagnosticContext`` and returns a ``ModelDiagnosisItem``.
     """
     items: List[ModelDiagnosisItem] = []
+    context = ModelDiagnosticContext(
+        step_time_metrics=step_time_metrics,
+        step_memory_metrics=step_memory_metrics,
+        step_memory_status_message=step_memory_status_message,
+        gpu_total_bytes=gpu_total_bytes,
+    )
+    domain_registry = registry or DEFAULT_MODEL_DIAGNOSTIC_REGISTRY
 
-    try:
-        step_time_diag = build_step_diagnosis(step_time_metrics)
-        items.append(
-            ModelDiagnosisItem(
-                source="step_time",
-                title="Step Time",
-                kind=str(step_time_diag.kind),
-                severity=str(step_time_diag.severity),
-                status=str(step_time_diag.status),
-                reason=str(step_time_diag.reason),
-                action=str(step_time_diag.action),
-                note=getattr(step_time_diag, "note", None),
-                confidence=getattr(step_time_diag, "confidence", None),
-                confidence_label=_confidence_label(
-                    getattr(step_time_diag, "confidence", None)
-                ),
-                steps_used=getattr(step_time_diag, "steps_used", None),
-                worst_rank=getattr(step_time_diag, "worst_rank", None),
-                evidence=_build_step_time_evidence(step_time_metrics),
+    for domain in domain_registry.all():
+        try:
+            item = domain.build(context)
+        except Exception as exc:
+            _log_model_diagnostic_error(
+                f"Model diagnostic domain failed: {domain.name}",
+                exc,
             )
-        )
-    except Exception:
-        items.append(
-            ModelDiagnosisItem(
-                source="step_time",
-                title="Step Time",
-                kind="NO_DATA",
-                severity="info",
-                status="NO DATA",
-                reason="Step-time diagnosis is unavailable on this tick.",
-                action="Wait for more complete samples.",
-            )
-        )
+            item = _fallback_item(domain)
 
-    try:
-        if (
-            not step_memory_metrics
-            and isinstance(step_memory_status_message, str)
-            and "No GPU detected" in step_memory_status_message
-        ):
-            items.append(
-                ModelDiagnosisItem(
-                    source="step_memory",
-                    title="Step Memory",
-                    kind="NO_GPU",
-                    severity="info",
-                    status="NO GPU",
-                    reason=(
-                        "No GPU found. Step memory uses torch-based GPU memory telemetry."
-                    ),
-                    action="",
-                )
-            )
-        else:
-            step_memory_diag = build_step_memory_diagnosis(
-                step_memory_metrics,
-                gpu_total_bytes=gpu_total_bytes,
-            )
-            items.append(
-                ModelDiagnosisItem(
-                    source="step_memory",
-                    title="Step Memory",
-                    kind=str(step_memory_diag.kind),
-                    severity=str(step_memory_diag.severity),
-                    status=str(step_memory_diag.status),
-                    reason=str(step_memory_diag.reason),
-                    action=str(step_memory_diag.action),
-                    note=getattr(step_memory_diag, "note", None),
-                    confidence=getattr(step_memory_diag, "confidence", None),
-                    confidence_label=_confidence_label(
-                        getattr(step_memory_diag, "confidence", None)
-                    ),
-                    steps_used=getattr(step_memory_diag, "steps_used", None),
-                    worst_rank=getattr(step_memory_diag, "worst_rank", None),
-                    evidence=_build_step_memory_evidence(
-                        step_memory_metrics,
-                        gpu_total_bytes=gpu_total_bytes,
-                    ),
-                )
-            )
-    except Exception:
-        items.append(
-            ModelDiagnosisItem(
-                source="step_memory",
-                title="Step Memory",
-                kind="NO_DATA",
-                severity="info",
-                status="NO DATA",
-                reason="Step-memory diagnosis is unavailable on this tick.",
-                action="Wait for more complete samples.",
-            )
-        )
+        if item is not None:
+            items.append(item)
 
     overall = (
         _max_severity([item.severity for item in items]) if items else "info"
@@ -211,6 +163,112 @@ def build_model_diagnostics_payload(
         items=items,
         status_message=status,
     )
+
+
+def _build_step_time_item(
+    context: ModelDiagnosticContext,
+) -> ModelDiagnosisItem:
+    """Build the registered step-time model diagnostic item."""
+    step_time_diag = build_step_diagnosis(context.step_time_metrics)
+    return ModelDiagnosisItem(
+        source="step_time",
+        title="Step Time",
+        kind=str(step_time_diag.kind),
+        severity=str(step_time_diag.severity),
+        status=str(step_time_diag.status),
+        reason=str(step_time_diag.reason),
+        action=str(step_time_diag.action),
+        note=getattr(step_time_diag, "note", None),
+        confidence=getattr(step_time_diag, "confidence", None),
+        confidence_label=_confidence_label(
+            getattr(step_time_diag, "confidence", None)
+        ),
+        steps_used=getattr(step_time_diag, "steps_used", None),
+        worst_rank=getattr(step_time_diag, "worst_rank", None),
+        evidence=_build_step_time_evidence(context.step_time_metrics),
+    )
+
+
+def _build_step_memory_item(
+    context: ModelDiagnosticContext,
+) -> ModelDiagnosisItem:
+    """Build the registered step-memory model diagnostic item."""
+    if (
+        not context.step_memory_metrics
+        and isinstance(context.step_memory_status_message, str)
+        and "No GPU detected" in context.step_memory_status_message
+    ):
+        return ModelDiagnosisItem(
+            source="step_memory",
+            title="Step Memory",
+            kind="NO_GPU",
+            severity="info",
+            status="NO GPU",
+            reason=(
+                "No GPU found. Step memory uses torch-based GPU memory telemetry."
+            ),
+            action="",
+        )
+
+    step_memory_diag = build_step_memory_diagnosis(
+        context.step_memory_metrics,
+        gpu_total_bytes=context.gpu_total_bytes,
+    )
+    return ModelDiagnosisItem(
+        source="step_memory",
+        title="Step Memory",
+        kind=str(step_memory_diag.kind),
+        severity=str(step_memory_diag.severity),
+        status=str(step_memory_diag.status),
+        reason=str(step_memory_diag.reason),
+        action=str(step_memory_diag.action),
+        note=getattr(step_memory_diag, "note", None),
+        confidence=getattr(step_memory_diag, "confidence", None),
+        confidence_label=_confidence_label(
+            getattr(step_memory_diag, "confidence", None)
+        ),
+        steps_used=getattr(step_memory_diag, "steps_used", None),
+        worst_rank=getattr(step_memory_diag, "worst_rank", None),
+        evidence=_build_step_memory_evidence(
+            context.step_memory_metrics,
+            gpu_total_bytes=context.gpu_total_bytes,
+        ),
+    )
+
+
+def _fallback_item(domain: DiagnosticDomainSpec) -> ModelDiagnosisItem:
+    """Return a stable fallback item for a failed registered domain."""
+    return ModelDiagnosisItem(
+        source=domain.name,
+        title=domain.title,
+        kind="NO_DATA",
+        severity="info",
+        status="NO DATA",
+        reason=f"{domain.title} diagnosis is unavailable on this tick.",
+        action="Wait for more complete samples.",
+    )
+
+
+DEFAULT_MODEL_DIAGNOSTIC_REGISTRY = DiagnosticDomainRegistry(
+    (
+        (
+            "step_time",
+            DiagnosticDomainSpec(
+                name="step_time",
+                title="Step Time",
+                builder=_build_step_time_item,
+            ),
+        ),
+        (
+            "step_memory",
+            DiagnosticDomainSpec(
+                name="step_memory",
+                title="Step Memory",
+                builder=_build_step_memory_item,
+            ),
+        ),
+    )
+)
 
 
 def _build_step_time_evidence(
@@ -408,6 +466,7 @@ def _max_severity(values: Sequence[str]) -> Severity:
 
 
 __all__ = [
+    "DEFAULT_MODEL_DIAGNOSTIC_REGISTRY",
     "ModelDiagnosisItem",
     "ModelDiagnosticsPayload",
     "build_model_diagnostics_payload",
