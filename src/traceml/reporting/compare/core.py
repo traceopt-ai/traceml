@@ -16,6 +16,23 @@ from traceml.sdk.protocol import utc_now_iso
 
 _STEP_PHASES = ("dataloader", "forward", "backward", "optimizer")
 
+# Compatibility note
+# ------------------
+# Compare currently accepts both the canonical nested summary schema and the
+# older flat schema emitted by pre-sectionized summaries. All legacy reads are
+# deliberately kept in the small helpers below:
+#   - _system_value
+#   - _process_value
+#   - _step_memory_primary
+#   - _diagnosis_block
+#   - _step_time_primary
+#   - _step_time_split
+#
+# When old final_summary.json artifacts no longer need compare support, remove
+# only the fallback branches in those helpers plus the legacy-schema regression
+# test in tests/test_compare_missing.py. Do not change formatter or verdict
+# policy code for that cleanup.
+
 
 def _as_float(value: Any) -> Optional[float]:
     """
@@ -49,6 +66,19 @@ def _as_dict(value: Any) -> Optional[Dict[str, Any]]:
     return value if isinstance(value, dict) else None
 
 
+def _first_present(*values: Any) -> Any:
+    """
+    Return the first value that is not None.
+
+    This is intentionally not implemented with ``or`` because zero and False
+    are valid telemetry values.
+    """
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
 def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
     """
     Safe nested dictionary access.
@@ -63,37 +93,62 @@ def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
 
 def _system_value(summary: Dict[str, Any], key: str) -> Any:
     """
-    Read one system summary value from the canonical nested schema.
+    Read one system summary value.
 
-    This keeps compare payload shape stable even if the final summary JSON uses
-    a cleaner nested system structure.
+    The canonical schema is ``system.global.*``. The top-level reads are
+    temporary compatibility for older final_summary.json artifacts.
     """
+    system = _nested_get(summary, "system")
     if key == "cpu_avg_percent":
-        return _nested_get(summary, "system", "global", "cpu", "avg_percent")
+        return _first_present(
+            _nested_get(summary, "system", "global", "cpu", "avg_percent"),
+            _nested_get(system, "cpu_avg_percent"),
+        )
     if key == "ram_peak_gb":
-        return _nested_get(summary, "system", "global", "ram", "peak_gb")
+        return _first_present(
+            _nested_get(summary, "system", "global", "ram", "peak_gb"),
+            _nested_get(system, "ram_peak_gb"),
+        )
     if key == "gpu_available":
-        return _nested_get(
+        value = _nested_get(
             summary, "system", "global", "gpu_rollup", "available"
         )
+        return (
+            value
+            if value is not None
+            else _nested_get(system, "gpu_available")
+        )
     if key == "gpu_count":
-        return _nested_get(summary, "system", "global", "gpu_rollup", "count")
+        return _first_present(
+            _nested_get(summary, "system", "global", "gpu_rollup", "count"),
+            _nested_get(system, "gpu_count"),
+        )
     return None
 
 
 def _process_value(summary: Dict[str, Any], key: str) -> Any:
     """
-    Read one process summary value from the canonical nested schema.
+    Read one process summary value.
 
-    This keeps compare payload shape stable even if the final summary JSON uses
-    a cleaner nested process structure.
+    The canonical schema is ``process.global.*``. The top-level reads are
+    temporary compatibility for older final_summary.json artifacts.
     """
+    process = _nested_get(summary, "process")
     if key == "cpu_avg_percent":
-        return _nested_get(summary, "process", "global", "cpu", "avg_percent")
+        return _first_present(
+            _nested_get(summary, "process", "global", "cpu", "avg_percent"),
+            _nested_get(process, "cpu_avg_percent"),
+        )
     if key == "ram_peak_gb":
-        return _nested_get(summary, "process", "global", "ram", "peak_gb")
+        return _first_present(
+            _nested_get(summary, "process", "global", "ram", "peak_gb"),
+            _nested_get(process, "ram_peak_gb"),
+        )
     if key == "takeaway":
-        return _nested_get(summary, "process", "global", "takeaway")
+        return _first_present(
+            _nested_get(summary, "process", "global", "takeaway"),
+            _nested_get(process, "takeaway"),
+        )
     return None
 
 
@@ -101,11 +156,30 @@ def _step_memory_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
     """
     Read the canonical primary step-memory block.
 
-    Prefer the explicit `global.primary_metric` block and fall back to an empty
-    dictionary when unavailable.
+    Prefer the explicit ``global.primary_metric`` block. The top-level
+    ``primary_metric`` fallback is temporary compatibility for older
+    final_summary.json artifacts.
     """
     primary = _nested_get(summary, "global", "primary_metric")
+    if not isinstance(primary, dict):
+        primary = summary.get("primary_metric")
     return primary if isinstance(primary, dict) else {}
+
+
+def _diagnosis_block(summary: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Return the canonical or legacy presented diagnosis block for a section.
+
+    ``primary_diagnosis`` is canonical. ``diagnosis_presented`` is a temporary
+    compatibility fallback for older final_summary.json artifacts.
+    """
+    block = summary.get("primary_diagnosis")
+    if isinstance(block, dict):
+        return block
+    block = summary.get("diagnosis_presented")
+    if isinstance(block, dict):
+        return block
+    return None
 
 
 def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
@@ -114,11 +188,11 @@ def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
     compare output stable.
     """
     if key == "status":
-        return _nested_get(summary, "primary_diagnosis", "status")
+        return _nested_get(_diagnosis_block(summary) or {}, "status")
     if key == "reason":
-        return _nested_get(summary, "primary_diagnosis", "reason")
+        return _nested_get(_diagnosis_block(summary) or {}, "reason")
     if key == "action":
-        return _nested_get(summary, "primary_diagnosis", "action")
+        return _nested_get(_diagnosis_block(summary) or {}, "action")
 
     primary = _step_memory_primary(summary)
 
@@ -137,8 +211,14 @@ def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
 def _step_time_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
     """
     Read the canonical primary step-time rollup.
+
+    ``global.typical`` is canonical. ``timing_primary`` is a temporary
+    compatibility fallback for older final_summary.json artifacts.
     """
     primary = _nested_get(summary, "global", "typical")
+    if isinstance(primary, dict):
+        return primary
+    primary = summary.get("timing_primary")
     if isinstance(primary, dict):
         return primary
     return {}
@@ -150,7 +230,7 @@ def _step_time_value(summary: Dict[str, Any], key: str) -> Any:
     preserving compare stability.
     """
     if key == "status":
-        return _nested_get(summary, "primary_diagnosis", "status")
+        return _nested_get(_diagnosis_block(summary) or {}, "status")
 
     primary = _step_time_primary(summary)
 
@@ -173,9 +253,17 @@ def _step_time_split(
 ) -> Dict[str, Any]:
     """
     Read one canonical step-time split dictionary.
+
+    ``global.typical.{split_key}`` is canonical. ``median_{split_key}`` is a
+    temporary compatibility fallback for older final_summary.json artifacts.
     """
     primary = _step_time_primary(summary)
     split = primary.get(split_key)
+    if isinstance(split, dict):
+        return split
+
+    legacy_key = f"median_{split_key}"
+    split = summary.get(legacy_key)
     return split if isinstance(split, dict) else {}
 
 
@@ -296,8 +384,8 @@ def build_compare_payload(
         _step_time_value(lhs_step_time, "step_avg_ms"),
         _step_time_value(rhs_step_time, "step_avg_ms"),
     )
-    lhs_step_status = _nested_get(lhs_step_time, "primary_diagnosis", "status")
-    rhs_step_status = _nested_get(rhs_step_time, "primary_diagnosis", "status")
+    lhs_step_status = _step_time_value(lhs_step_time, "status")
+    rhs_step_status = _step_time_value(rhs_step_time, "status")
 
     payload: Dict[str, Any] = {
         "schema_version": 1,
@@ -343,8 +431,8 @@ def build_compare_payload(
                 rhs_step_status,
             ),
             "step_memory_status": _value_change(
-                _nested_get(lhs_step_memory, "primary_diagnosis", "status"),
-                _nested_get(rhs_step_memory, "primary_diagnosis", "status"),
+                _step_memory_value(lhs_step_memory, "status"),
+                _step_memory_value(rhs_step_memory, "status"),
             ),
         },
         "system": {
@@ -381,12 +469,12 @@ def build_compare_payload(
         },
         "step_time": {
             "status": _value_change(
-                _nested_get(lhs_step_time, "primary_diagnosis", "status"),
-                _nested_get(rhs_step_time, "primary_diagnosis", "status"),
+                _step_time_value(lhs_step_time, "status"),
+                _step_time_value(rhs_step_time, "status"),
             ),
             "presented": {
-                "lhs": _as_dict(lhs_step_time.get("primary_diagnosis")),
-                "rhs": _as_dict(rhs_step_time.get("primary_diagnosis")),
+                "lhs": _diagnosis_block(lhs_step_time),
+                "rhs": _diagnosis_block(rhs_step_time),
             },
             "step_avg_ms": step_avg,
             "wait_share_pct": _value_delta(
@@ -426,8 +514,8 @@ def build_compare_payload(
                 _step_memory_value(rhs_step_memory, "action"),
             ),
             "presented": {
-                "lhs": _as_dict(lhs_step_memory.get("primary_diagnosis")),
-                "rhs": _as_dict(rhs_step_memory.get("primary_diagnosis")),
+                "lhs": _diagnosis_block(lhs_step_memory),
+                "rhs": _diagnosis_block(rhs_step_memory),
             },
             "primary_metric": _value_change(
                 _step_memory_value(lhs_step_memory, "primary_metric"),

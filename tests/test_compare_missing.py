@@ -3,6 +3,7 @@ from typing import Optional
 
 from traceml.reporting.compare import build_compare_payload
 from traceml.reporting.compare import build_compare_text
+from traceml.reporting.compare.formatters import CompareTextFormatter
 
 
 def _base_payload() -> dict:
@@ -120,6 +121,96 @@ def _payload_with_sections(
     return payload
 
 
+def _legacy_payload(
+    *,
+    ranks_seen: int,
+    step_avg_ms: float,
+    wait_share_pct: float,
+    status: Optional[str],
+    cpu_avg_percent: float,
+    process_cpu_avg_percent: float,
+    ram_peak_gb: float = 9.8,
+    process_ram_peak_gb: float = 2.5,
+) -> dict:
+    diagnosis = (
+        None
+        if status is None
+        else {
+            "status": status,
+            "reason": "legacy diagnosis reason",
+            "action": "legacy diagnosis action",
+            "note": None,
+        }
+    )
+    return {
+        "duration_s": 34.1,
+        "system": {
+            "cpu_avg_percent": cpu_avg_percent,
+            "ram_peak_gb": ram_peak_gb,
+            "gpu_available": False,
+            "gpu_count": 0,
+        },
+        "process": {
+            "cpu_avg_percent": process_cpu_avg_percent,
+            "ram_peak_gb": process_ram_peak_gb,
+            "takeaway": "stable overall",
+        },
+        "step_time": {
+            "ranks_seen": ranks_seen,
+            "diagnosis_presented": diagnosis,
+            "timing_primary": {
+                "step_avg_ms": step_avg_ms,
+                "compute_share_pct": 98.0,
+                "wait_share_pct": wait_share_pct,
+                "dominant_phase": "backward",
+                "split_ms": {
+                    "dataloader": 1.0,
+                    "forward": 2.0,
+                    "backward": 3.0,
+                    "optimizer": 4.0,
+                },
+                "split_pct": {
+                    "dataloader": 10.0,
+                    "forward": 20.0,
+                    "backward": 30.0,
+                    "optimizer": 40.0,
+                },
+            },
+            "median_split_ms": {
+                "dataloader": 1.0,
+                "forward": 2.0,
+                "backward": 3.0,
+                "optimizer": 4.0,
+            },
+            "median_split_pct": {
+                "dataloader": 10.0,
+                "forward": 20.0,
+                "backward": 30.0,
+                "optimizer": 40.0,
+            },
+        },
+        "step_memory": {
+            "diagnosis_presented": {
+                "status": "NO DATA",
+                "reason": "Need more aligned steps.",
+                "action": "Too little aligned memory data was collected.",
+                "note": None,
+            },
+            "primary_metric": {
+                "metric": "peak_allocated",
+                "worst_peak_bytes": 0.0,
+                "median_peak_bytes": 0.0,
+                "worst_rank": 0,
+                "skew_pct": 0.0,
+                "trend": {
+                    "worst": {"delta_bytes": None},
+                    "median": {"delta_bytes": None},
+                },
+            },
+        },
+    }
+
+
 def _build_compare(lhs: dict, rhs: dict) -> dict:
     return build_compare_payload(
         lhs_payload=lhs,
@@ -196,6 +287,78 @@ def test_compare_render_shows_unavailable_in_a_for_missing_numeric_fields() -> (
     assert "Step avg: unavailable in A; B = 296.5ms" in text
     assert "Wait share: unavailable in A; B = 13.5%" in text
     assert "Worst peak: unavailable in A; B = 194 MB" in text
+
+
+def test_compare_reads_legacy_flat_final_summary_schema() -> None:
+    """
+    Compare should read older flat final_summary.json artifacts while users may
+    still compare historical runs.
+
+    Remove this test when the legacy fallback readers in
+    traceml.reporting.compare.core are intentionally deleted.
+    """
+    lhs = _legacy_payload(
+        ranks_seen=3,
+        step_avg_ms=2499.7,
+        wait_share_pct=0.6,
+        status=None,
+        cpu_avg_percent=42.5,
+        process_cpu_avg_percent=70.8,
+    )
+    rhs = _legacy_payload(
+        ranks_seen=1,
+        step_avg_ms=621.1,
+        wait_share_pct=1.5,
+        status="COMPUTE-BOUND",
+        cpu_avg_percent=23.2,
+        process_cpu_avg_percent=143.9,
+        ram_peak_gb=10.9,
+        process_ram_peak_gb=4.0,
+    )
+
+    compare_payload = _build_compare(lhs, rhs)
+    text = build_compare_text(compare_payload)
+
+    assert compare_payload["step_time"]["step_avg_ms"]["lhs"] == 2499.7
+    assert compare_payload["step_time"]["step_avg_ms"]["rhs"] == 621.1
+    assert compare_payload["step_time"]["wait_share_pct"]["lhs"] == 0.6
+    assert compare_payload["step_time"]["wait_share_pct"]["rhs"] == 1.5
+    assert compare_payload["system"]["cpu_avg_percent"]["lhs"] == 42.5
+    assert compare_payload["system"]["cpu_avg_percent"]["rhs"] == 23.2
+    assert compare_payload["process"]["cpu_avg_percent"]["lhs"] == 70.8
+    assert compare_payload["process"]["cpu_avg_percent"]["rhs"] == 143.9
+    assert "Step avg: 2499.7ms -> 621.1ms" in text
+    assert "unavailable in both runs" not in text
+
+
+def test_compare_text_formatter_matches_public_wrapper() -> None:
+    lhs = _payload_with_sections()
+    rhs = _payload_with_sections(
+        step_time=_step_time_section(step_avg_ms=330.0),
+    )
+    compare_payload = _build_compare(lhs, rhs)
+
+    assert CompareTextFormatter().format(
+        compare_payload
+    ) == build_compare_text(compare_payload)
+
+
+def test_compare_text_wrapper_returns_fallback_if_formatter_fails(
+    monkeypatch,
+) -> None:
+    lhs = _payload_with_sections()
+    rhs = _payload_with_sections()
+    compare_payload = _build_compare(lhs, rhs)
+
+    def _raise(_self, _payload):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(CompareTextFormatter, "format", _raise)
+
+    text = build_compare_text(compare_payload)
+
+    assert "TraceML Compare" in text
+    assert "detailed compare text formatting failed" in text
 
 
 def test_compare_partial_step_time_stays_unclear_and_surfaces_partial_comparability() -> (
