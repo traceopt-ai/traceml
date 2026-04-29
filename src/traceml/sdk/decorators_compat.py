@@ -20,7 +20,9 @@ process, matching the legacy user experience.
 
 from traceml.sdk.initial import enable_legacy_decorator_auto_init
 from traceml.sdk.instrumentation import (
+    TraceSessionState,
     TraceState,
+    get_trace_session_state,
     trace_model_instance,
     trace_step,
     trace_time,
@@ -29,7 +31,9 @@ from traceml.sdk.instrumentation import (
 enable_legacy_decorator_auto_init()
 
 __all__ = [
+    "TraceSessionState",
     "TraceState",
+    "get_trace_session_state",
     "trace_step",
     "trace_model_instance",
     "trace_time",

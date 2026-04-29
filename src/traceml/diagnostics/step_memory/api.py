@@ -23,12 +23,13 @@ Diagnosis priority
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Sequence
+from typing import Any, Dict, Literal, Optional, Sequence
 
+from traceml.diagnostics.common import DiagnosticResult, sort_issues
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 
-from .common import BaseDiagnosis, Severity, validate_confidence
-from .trends import TrendConfig, compute_trend_evidence
+from ..common import BaseDiagnosis, Severity, validate_confidence
+from ..trends import TrendConfig, compute_trend_evidence
 
 StepMemoryDiagnosisKind = Literal[
     "NO_DATA",
@@ -82,6 +83,24 @@ class StepMemoryDiagnosisThresholds:
 
 
 DEFAULT_STEP_MEMORY_THRESHOLDS = StepMemoryDiagnosisThresholds()
+
+
+def _log_step_memory_diagnostic_error(message: str, exc: Exception) -> None:
+    """
+    Log diagnostic enrichment failures without blocking training/reporting.
+
+    Step-memory diagnostics are advisory. A rule or adapter failure should be
+    visible to TraceML maintainers through the shared error logger, but it must
+    not prevent a final summary from being produced.
+    """
+    try:
+        from traceml.loggers.error_log import get_error_logger
+
+        get_error_logger("StepMemoryDiagnostics").exception(
+            "[TraceML] %s", message
+        )
+    except Exception:
+        pass
 
 
 @dataclass(frozen=True)
@@ -281,6 +300,92 @@ def build_step_memory_diagnosis(
         reason="No clear pressure, imbalance, or creep signal.",
         action="Keep monitoring.",
         confidence=0.75,
+    )
+
+
+def build_step_memory_summary_diagnosis_result(
+    metrics: Sequence[StepMemoryCombinedMetric],
+    *,
+    gpu_total_bytes: Optional[float] = None,
+    per_rank: Optional[Dict[str, Any]] = None,
+    thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS,
+) -> DiagnosticResult[StepMemoryDiagnosis]:
+    """
+    Build the summary-oriented step-memory diagnosis result.
+
+    The primary diagnosis intentionally uses the same live diagnosis engine as
+    CLI/dashboard step-memory rendering. Summary-specific rules add a richer
+    issue list and metric attribution for final-report JSON without changing
+    live diagnosis policy.
+    """
+    from .adapters import build_step_memory_summary_signals
+    from .rules import run_step_memory_summary_rules
+
+    primary = build_step_memory_diagnosis(
+        metrics,
+        gpu_total_bytes=gpu_total_bytes,
+        thresholds=thresholds,
+    )
+
+    try:
+        signals = build_step_memory_summary_signals(
+            metrics,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
+
+        issues = []
+        metric_attribution: Dict[str, Any] = {}
+        for metric in metrics:
+            signal = signals.get(metric.metric)
+            if signal is None:
+                continue
+            issues.extend(run_step_memory_summary_rules(signal))
+            metric_attribution[metric.metric] = {
+                "metric": signal.metric,
+                "device": signal.device,
+                "steps_used": signal.steps_used,
+                "window_size": signal.window_size,
+                "completed_step": signal.completed_step,
+                "ranks_seen": signal.ranks_seen,
+                "worst_rank": signal.worst_rank,
+                "worst_peak_bytes": signal.worst_peak_bytes,
+                "median_peak_bytes": signal.median_peak_bytes,
+                "skew_ratio": signal.skew_ratio,
+                "skew_pct": signal.skew_pct,
+                "pressure_frac": signal.pressure_frac,
+                "trend": {
+                    "eligible": signal.trend.eligible,
+                    "baseline_avg_bytes": signal.trend.baseline_avg_bytes,
+                    "mid_avg_bytes": signal.trend.mid_avg_bytes,
+                    "recent_avg_bytes": signal.trend.recent_avg_bytes,
+                    "overall_abs_delta_bytes": (
+                        signal.trend.overall_abs_delta_bytes
+                    ),
+                    "overall_worst_growth_pct": (
+                        signal.trend.overall_worst_growth_pct
+                    ),
+                    "overall_median_growth_pct": (
+                        signal.trend.overall_median_growth_pct
+                    ),
+                    "early": signal.trend.early,
+                    "confirmed": signal.trend.confirmed,
+                    "score": signal.trend.score,
+                },
+            }
+    except Exception as exc:
+        _log_step_memory_diagnostic_error(
+            "Step-memory summary diagnostic enrichment failed",
+            exc,
+        )
+        issues = []
+        metric_attribution = {}
+
+    return DiagnosticResult(
+        primary=primary,
+        issues=sort_issues(issues),
+        metric_attribution=metric_attribution,
+        per_rank=dict(per_rank or {}),
     )
 
 
@@ -584,4 +689,5 @@ __all__ = [
     "DEFAULT_STEP_MEMORY_THRESHOLDS",
     "StepMemoryDiagnosis",
     "build_step_memory_diagnosis",
+    "build_step_memory_summary_diagnosis_result",
 ]
