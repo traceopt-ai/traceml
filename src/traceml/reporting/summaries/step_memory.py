@@ -22,16 +22,9 @@ Design goals
 import sqlite3
 from typing import Any, Dict, Optional
 
-from traceml.diagnostics.step_memory import (
-    StepMemoryDiagnosis,
-    build_step_memory_diagnosis,
-    build_step_memory_summary_diagnosis_result,
-)
+from traceml.diagnostics.step_memory import StepMemoryDiagnosis
 from traceml.diagnostics.trends import compute_trend_evidence
-from traceml.renderers.step_memory.common import (
-    StepMemoryMetricsDB,
-    build_step_memory_combined_result,
-)
+from traceml.renderers.step_memory.common import StepMemoryMetricsDB
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml.reporting.summaries.diagnosis_presentation import (
     diagnosis_presentation_to_json,
@@ -755,60 +748,11 @@ def generate_step_memory_summary_card(
     - Diagnosis is reused from the shared step-memory diagnosis engine to keep
       live CLI, dashboard, and end-of-run summaries consistent.
     """
-    window_size = min(max(1, int(window_size)), MAX_SUMMARY_WINDOW_ROWS)
-    db = StepMemoryMetricsDB(db_path=db_path)
-    conn = db.connect()
+    from traceml.reporting.sections.step_memory import StepMemorySummarySection
 
-    try:
-        latest_step_observed = _latest_step_observed(conn)
-        training_steps = (
-            latest_step_observed + 1 if latest_step_observed is not None else 0
-        )
-
-        gpu_total_bytes = _gpu_total_bytes(conn)
-        gpu_available = db.detect_gpu_available(conn)
-
-        result = build_step_memory_combined_result(
-            conn,
-            db=db,
-            window_size=window_size,
-        )
-        metrics = sorted(result.metrics, key=_metric_sort_key)
-
-        diagnosis = None
-        if metrics:
-            diagnosis = build_step_memory_diagnosis(
-                metrics,
-                gpu_total_bytes=gpu_total_bytes,
-            )
-
-        per_rank = _load_per_rank_summary(
-            conn,
-            db=db,
-            metrics=metrics,
-            window_size=window_size,
-        )
-        diagnosis_result = None
-        if metrics:
-            diagnosis_result = build_step_memory_summary_diagnosis_result(
-                metrics,
-                gpu_total_bytes=gpu_total_bytes,
-                per_rank=per_rank,
-            )
-    finally:
-        conn.close()
-
-    card, step_memory_summary = _build_step_memory_card(
-        training_steps=training_steps,
-        latest_step_observed=latest_step_observed,
-        metrics=metrics,
-        diagnosis=diagnosis,
-        diagnosis_result=diagnosis_result,
-        no_gpu_detected=bool(
-            gpu_available is False and latest_step_observed is not None
-        ),
-        per_rank=per_rank,
-    )
+    result = StepMemorySummarySection(window_size=window_size).build(db_path)
+    card = result.text
+    step_memory_summary = result.payload
 
     append_text(db_path + "_summary_card.txt", card)
 

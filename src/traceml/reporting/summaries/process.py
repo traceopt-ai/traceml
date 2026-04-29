@@ -800,23 +800,14 @@ def generate_process_summary_card(
     Dict[str, Any]
         Structured summary JSON including the rendered `card`.
     """
-    max_process_rows = min(max(1, int(max_process_rows)), MAX_SUMMARY_ROWS)
-    conn = sqlite3.connect(db_path)
-    try:
-        agg = _load_process_summary_agg(
-            conn,
-            rank=rank,
-            max_process_rows=max_process_rows,
-        )
-        per_rank = _load_per_rank_process_summary(
-            conn,
-            rank=rank,
-            max_process_rows=max_process_rows,
-        )
-    finally:
-        conn.close()
+    from traceml.reporting.sections.process import ProcessSummarySection
 
-    card, process_summary = _build_process_card(agg, per_rank=per_rank)
+    result = ProcessSummarySection(
+        rank=rank,
+        max_process_rows=max_process_rows,
+    ).build(db_path)
+    card = result.text
+    process_summary = result.payload
 
     append_text(db_path + "_summary_card.txt", card)
 

@@ -631,23 +631,14 @@ def generate_system_summary_card(
     Dict[str, Any]
         Structured summary JSON including the rendered `card` text.
     """
-    max_system_rows = min(max(1, int(max_system_rows)), MAX_SUMMARY_ROWS)
-    conn = sqlite3.connect(db_path)
-    try:
-        agg = _load_system_summary_agg(
-            conn,
-            rank=rank,
-            max_system_rows=max_system_rows,
-        )
-        per_gpu = _load_per_gpu_summary(
-            conn,
-            rank=rank,
-            max_system_rows=max_system_rows,
-        )
-    finally:
-        conn.close()
+    from traceml.reporting.sections.system import SystemSummarySection
 
-    card, summary = _build_system_card(agg, per_gpu=per_gpu)
+    result = SystemSummarySection(
+        rank=rank,
+        max_system_rows=max_system_rows,
+    ).build(db_path)
+    card = result.text
+    summary = result.payload
 
     with open(db_path + "_summary_card.txt", "w", encoding="utf-8") as f:
         f.write(card + "\n")

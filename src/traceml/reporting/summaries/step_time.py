@@ -879,50 +879,11 @@ def generate_step_time_summary_card(
     - Diagnosis is intentionally reused from the shared step-time diagnosis
       engine so live views and end-of-run summaries stay consistent.
     """
-    max_rows = min(max(1, int(max_rows)), MAX_SUMMARY_WINDOW_ROWS)
-    conn = sqlite3.connect(db_path)
+    from traceml.reporting.sections.step_time import StepTimeSummarySection
 
-    try:
-        latest_step_observed_row = conn.execute(
-            "SELECT MAX(step) FROM step_time_samples;"
-        ).fetchone()
-        latest_step_observed = (
-            int(latest_step_observed_row[0])
-            if latest_step_observed_row[0] is not None
-            else None
-        )
-        training_steps = (
-            latest_step_observed + 1 if latest_step_observed is not None else 0
-        )
-
-        rank_rows = conn.execute(
-            "SELECT DISTINCT rank FROM step_time_samples ORDER BY rank ASC;"
-        ).fetchall()
-        ranks_present = [int(r[0]) for r in rank_rows if r[0] is not None]
-
-        per_rank_summary: Dict[int, RankStepSummary] = {}
-        per_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]] = {}
-
-        for rank in ranks_present:
-            step_rows = _load_rank_step_rows(
-                conn,
-                rank=rank,
-                max_rows=max_rows,
-            )
-            analysis = _build_rank_summary(step_rows)
-            if analysis is not None:
-                per_rank_summary[rank] = analysis.summary
-                per_rank_step_metrics[rank] = analysis.per_step_metrics
-    finally:
-        conn.close()
-
-    card, step_summary = _build_step_time_card(
-        training_steps=training_steps,
-        latest_step_observed=latest_step_observed,
-        per_rank_summary=per_rank_summary,
-        per_rank_step_metrics=per_rank_step_metrics,
-        max_rows=max_rows,
-    )
+    result = StepTimeSummarySection(max_rows=max_rows).build(db_path)
+    card = result.text
+    step_summary = result.payload
 
     append_text(db_path + "_summary_card.txt", card)
 

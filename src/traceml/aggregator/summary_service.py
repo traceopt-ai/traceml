@@ -9,7 +9,7 @@ and publishes a small response file for the requesting process to read.
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from traceml.aggregator.final_summary import generate_summary
+from traceml.reporting.final import generate_summary
 from traceml.sdk.protocol import (
     FinalSummaryResponse,
     get_final_summary_json_path,
