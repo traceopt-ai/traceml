@@ -29,24 +29,9 @@ from typing import Any, Callable, List, Optional
 
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.runtime.config import config
+from traceml.runtime.sampler_registry import build_samplers
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.samplers.layer_backward_memory_sampler import (
-    LayerBackwardMemorySampler,
-)
-from traceml.samplers.layer_backward_time_sampler import (
-    LayerBackwardTimeSampler,
-)
-from traceml.samplers.layer_forward_memory_sampler import (
-    LayerForwardMemorySampler,
-)
-from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
-from traceml.samplers.layer_memory_sampler import LayerMemorySampler
-from traceml.samplers.process_sampler import ProcessSampler
-from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
-from traceml.samplers.step_memory_sampler import StepMemorySampler
-from traceml.samplers.step_time_sampler import StepTimeSampler
-from traceml.samplers.system_sampler import SystemSampler
 from traceml.transport.distributed import get_ddp_info
 from traceml.transport.tcp_transport import TCPClient, TCPConfig
 
@@ -119,43 +104,16 @@ class TraceMLRuntime:
 
     def _build_samplers(self) -> List[BaseSampler]:
         """
-        Build samplers for this rank based on profile and UI mode.
-
-        Profiles
-        --------
-        - watch: system + process (+ stdout/stderr in CLI mode)
-        - run: watch + step samplers
-        - deep: run + layerwise memory/time samplers
+        Build samplers for this rank based on profile and UI mode using the
+        runtime sampler registry.
         """
-        samplers: List[BaseSampler] = []
-
-        # Host/system metrics only once (rank 0) in DDP
-        if not (self.is_ddp and self.local_rank != 0):
-            samplers.append(SystemSampler())
-
-        samplers.append(ProcessSampler())
-
-        if self.mode == "cli":
-            samplers.append(StdoutStderrSampler())
-
-        # Core bottleneck profile
-        if self.profile in ["run", "deep"]:
-            samplers += [
-                StepTimeSampler(),
-                StepMemorySampler(),
-            ]
-
-        # Deep profile adds layerwise telemetry
-        if self.profile == "deep":
-            samplers += [
-                LayerMemorySampler(),
-                LayerForwardMemorySampler(),
-                LayerBackwardMemorySampler(),
-                LayerForwardTimeSampler(),
-                LayerBackwardTimeSampler(),
-            ]
-
-        return samplers
+        return build_samplers(
+            profile=self.profile,
+            mode=self.mode,
+            is_ddp=self.is_ddp,
+            local_rank=self.local_rank,
+            logger=self._logger,
+        )
 
     def _attach_senders(self) -> None:
         """
