@@ -1,7 +1,6 @@
 import shutil
 from typing import Any, Optional
 
-from IPython.display import HTML
 from rich.console import Group
 from rich.panel import Panel
 from rich.table import Table
@@ -124,9 +123,6 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
         Return the typed compute result directly to dashboard consumers.
         """
         return self._compute_service.compute_display_data()
-
-    def get_notebook_renderable(self) -> HTML:
-        pass
 
     def log_summary(self, path) -> None:
         pass

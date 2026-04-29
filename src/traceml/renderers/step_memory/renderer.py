@@ -28,19 +28,15 @@ This table is intentionally stable and low-noise.
 Per-step volatility belongs in plots, not summaries.
 """
 
-import shutil
 from typing import Optional
 
-from rich.console import Group
 from rich.panel import Panel
-from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import MODEL_MEMORY_LAYOUT
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.utils.formatting import fmt_mem_new
 
 from .computer import StepMemoryMetricsComputer
-from .diagnostics import build_step_memory_diagnosis, format_cli_diagnosis
+from .formatter import StepMemoryRichFormatter
 from .schema import StepMemoryCombinedResult
 
 
@@ -62,6 +58,7 @@ class StepMemoryRenderer(BaseRenderer):
             layout_section_name=MODEL_MEMORY_LAYOUT,
         )
         self._computer = StepMemoryMetricsComputer(db_path=db_path)
+        self._formatter = StepMemoryRichFormatter()
         self._cached: Optional[StepMemoryCombinedResult] = None
 
     def _payload(self) -> Optional[StepMemoryCombinedResult]:
@@ -92,159 +89,16 @@ class StepMemoryRenderer(BaseRenderer):
         """
         payload = self._payload()
 
-        if payload is None or not payload.metrics:
-            return Panel(
-                (
-                    payload.status_message
-                    if payload is not None and payload.status_message
-                    else "Waiting for first fully completed step across all ranks…"
+        return self._formatter.format(
+            payload
+            if payload is not None
+            else StepMemoryCombinedResult(
+                metrics=[],
+                status_message=(
+                    "Waiting for first fully completed step across all ranks…"
                 ),
-                title="Model Step Memory",
             )
-
-        metrics = payload.metrics
-
-        diag = build_step_memory_diagnosis(metrics)
-        diag_text = format_cli_diagnosis(diag)
-
-        # Stable order: allocated then reserved (if present)
-        def _sort_key(m) -> int:
-            if m.metric == "peak_allocated":
-                return 0
-            if m.metric == "peak_reserved":
-                return 1
-            return 99
-
-        metrics = sorted(metrics, key=_sort_key)
-
-        # All metrics share the same window size by construction
-        K = metrics[0].summary.steps_used
-        single_rank = bool(
-            metrics[0].coverage.world_size <= 1
-            or metrics[0].coverage.ranks_present <= 1
         )
-
-        table = Table(
-            show_header=True,
-            header_style="bold blue",
-            box=None,
-            expand=False,
-        )
-
-        table.add_column("Metric", style="magenta")
-
-        for m in metrics:
-            if m.metric == "peak_allocated":
-                title = "Peak Allocated"
-            elif m.metric == "peak_reserved":
-                title = "Peak Reserved"
-            else:
-                title = m.metric.replace("_", " ").title()
-
-            table.add_column(title, justify="right")
-
-        # Window-peak rows (bytes formatted via fmt_mem_new)
-        if single_rank:
-            table.add_row(
-                f"Peak (max/{K})",
-                *[fmt_mem_new(m.summary.worst_peak) for m in metrics],
-            )
-        else:
-            table.add_row(
-                f"Median Peak (max/{K})",
-                *[fmt_mem_new(m.summary.median_peak) for m in metrics],
-            )
-
-            table.add_row(
-                f"Worst Peak (max/{K})",
-                *[fmt_mem_new(m.summary.worst_peak) for m in metrics],
-            )
-
-            table.add_row(
-                "Worst Rank",
-                *[
-                    (
-                        f"r{m.summary.worst_rank}"
-                        if m.summary.worst_rank is not None
-                        else "—"
-                    )
-                    for m in metrics
-                ],
-            )
-
-            table.add_row(
-                "Skew (%)",
-                *[f"+{m.summary.skew_pct * 100:.1f}%" for m in metrics],
-            )
-
-        # Optional: low-noise trend (use worst series delta)
-        # This is helpful for spotting monotonic growth / fragmentation.
-        table.add_row("")
-        table.add_row(
-            "Head/Tail Delta" if single_rank else "Head/Tail Delta (worst)",
-            *[
-                self._format_worst_trend_delta(m, single_rank=single_rank)
-                for m in metrics
-            ],
-        )
-
-        subtitle = (
-            f"Peaks over last {K} fully completed steps"
-            if K > 0
-            else "Waiting for first fully completed step"
-        )
-
-        cols, _ = shutil.get_terminal_size()
-        width = min(max(100, int(cols * 0.75)), 120)
-
-        footer = (
-            "\n\n[dim]Peaks = max over last K aligned steps for the only rank.[/dim]"
-            if single_rank
-            else "\n\n[dim]Peaks = per-rank max over last K; median/worst = across ranks.[/dim]"
-        )
-
-        return Panel(
-            Group(
-                diag_text,
-                "",
-                table,
-                footer,
-            ),
-            title=f"Model Step Memory ({subtitle})",
-            border_style="cyan",
-            width=width,
-        )
-
-    @staticmethod
-    def _format_worst_trend_delta(m, *, single_rank: bool = False) -> str:
-        """
-        Format a stable head-vs-tail delta for the displayed series.
-
-        Multi-rank mode uses the worst series; single-rank mode uses the only
-        rank series, which is stored identically in both median and worst.
-        """
-        series = m.series
-        values_source = series.median if single_rank else series.worst
-        if not series.steps or not values_source:
-            return "—"
-
-        values = [float(v) for v in values_source]
-        n = len(values)
-        if n < 2:
-            return "—"
-
-        segment = max(4, int(round(n * 0.20)))
-        segment = min(segment, max(1, n // 2))
-
-        head_avg = sum(values[:segment]) / segment
-        tail_avg = sum(values[-segment:]) / segment
-        delta = tail_avg - head_avg
-
-        if delta == 0.0:
-            return fmt_mem_new(0.0)
-
-        sign = "+" if delta > 0.0 else "-"
-        return f"{sign}{fmt_mem_new(abs(delta))}"
 
     def get_dashboard_renderable(self) -> StepMemoryCombinedResult:
         """
