@@ -8,14 +8,18 @@ Importing ``traceml.decorators`` historically enabled TraceML's legacy
 """
 
 from traceml.sdk.decorators_compat import (
+    TraceSessionState,
     TraceState,
+    get_trace_session_state,
     trace_model_instance,
     trace_step,
     trace_time,
 )
 
 __all__ = [
+    "TraceSessionState",
     "TraceState",
+    "get_trace_session_state",
     "trace_step",
     "trace_model_instance",
     "trace_time",

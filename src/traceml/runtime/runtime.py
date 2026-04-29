@@ -30,6 +30,7 @@ from typing import Any, Callable, List, Optional
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.runtime.config import config
 from traceml.runtime.sampler_registry import build_samplers
+from traceml.runtime.sender import TelemetryPublisher
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.transport.distributed import get_ddp_info
@@ -93,7 +94,12 @@ class TraceMLRuntime:
                 host=self._settings.tcp.host, port=int(self._settings.tcp.port)
             )
         )
-        self._attach_senders()
+        self._publisher = TelemetryPublisher(
+            tcp_client=self._tcp_client,
+            rank=self.local_rank,
+            logger=self._logger,
+        )
+        self._publisher.attach_senders(self._samplers)
 
         # Sampler thread (per-rank)
         self._sampler_thread = threading.Thread(
@@ -115,38 +121,19 @@ class TraceMLRuntime:
             logger=self._logger,
         )
 
-    def _attach_senders(self) -> None:
-        """
-        Attach DBIncrementalSender to sampler DBs that support sending.
-
-        All ranks attach senders, including rank0, so that rank0 sends its own
-        rows through the same TCP pipeline as worker ranks.
-        """
-        for sampler in self._samplers:
-            if not getattr(sampler, "sender", None):
-                continue
-            # sender has attributes: sender.sender (transport) and sender.rank
-            sampler.sender.sender = self._tcp_client
-            sampler.sender.rank = self.local_rank
-
     def _tick(self) -> None:
         """
-        Run all samplers once and flush local writers + telemetry senders.
+        Run all samplers once and delegate publishing.
 
         Phase 1 — Sample + local DB write
         ----------------------------------
         Each sampler collects its metrics and writes to the local DB.
-        This is identical to the previous behaviour.
+        Sampling failures are logged and skipped so user training continues.
 
-        Phase 2 — Batch TCP send
-        ------------------------
-        Instead of each sender calling ``TCPClient.send()`` independently
-        (N syscalls per tick), all ready payloads are collected first and
-        sent together with a single ``TCPClient.send_batch()`` call (1 syscall).
-
-        Samplers whose GPU events have not yet resolved return ``None`` from
-        ``collect_payload()`` and are silently skipped; their data is picked up
-        on the next tick — identical to the previous per-sender behaviour.
+        Phase 2 — Publish
+        -----------------
+        TelemetryPublisher flushes sampler writers, collects incremental
+        payloads, and sends a single TCP batch.
         """
         for sampler in self._samplers:
             _safe(
@@ -155,34 +142,7 @@ class TraceMLRuntime:
                 sampler.sample,
             )
 
-            db = getattr(sampler, "db", None)
-            if db is not None:
-                _safe(
-                    self._logger,
-                    f"{sampler.sampler_name}.writer.flush failed",
-                    db.writer.flush,
-                )
-
-        batch: List[Any] = []
-        for sampler in self._samplers:
-            sender = getattr(sampler, "sender", None)
-            if sender is None:
-                continue
-            try:
-                payload = sender.collect_payload()
-                if payload is not None:
-                    batch.append(payload)
-            except Exception as e:
-                self._logger.error(
-                    f"[TraceML] {sampler.sampler_name}.collect_payload failed: {e}"
-                )
-
-        if batch:
-            _safe(
-                self._logger,
-                "TCPClient.send_batch failed",
-                lambda: self._tcp_client.send_batch(batch),
-            )
+        self._publisher.publish(self._samplers)
 
     def _sampler_loop(self) -> None:
         """Sampler loop (all ranks)."""
@@ -236,7 +196,7 @@ class TraceMLRuntime:
             )
 
         # close client last
-        _safe(self._logger, "TCPClient.close failed", self._tcp_client.close)
+        self._publisher.close()
 
         # restore stdout/stderr
         if self.mode == "cli":

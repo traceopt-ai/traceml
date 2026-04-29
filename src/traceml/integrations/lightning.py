@@ -3,7 +3,7 @@ import sys
 
 from lightning.pytorch.callbacks import Callback
 
-from traceml.sdk.decorators_compat import TraceState
+from traceml.runtime.state import get_trace_session_state
 from traceml.utils.flush_buffers import flush_step_events
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.timing import (
@@ -14,6 +14,26 @@ from traceml.utils.timing import (
 )
 
 TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
+
+
+def _log_lightning_error(message: str, exc: Exception) -> None:
+    """
+    Log TraceML callback failures without interrupting Lightning training.
+
+    The callback is best-effort instrumentation. TraceML launcher runs configure
+    the shared error logger; direct callback users still get the previous stderr
+    fallback if logging has not been configured.
+    """
+    try:
+        from traceml.loggers.error_log import get_error_logger
+
+        get_error_logger("LightningIntegration").exception(
+            "[TraceML] %s", message
+        )
+    except Exception:
+        pass
+
+    print(f"[TraceML] {message}: {exc}", file=sys.stderr)
 
 
 class TraceMLCallback(Callback):
@@ -54,7 +74,7 @@ class TraceMLCallback(Callback):
             mem_tracker.reset()
             self._mem_tracker = mem_tracker
         except Exception as e:
-            print(f"[TraceML] memory reset failed: {e}", file=sys.stderr)
+            _log_lightning_error("memory reset failed", e)
             self._mem_tracker = None
 
         # Start timing the forward pass (ends in on_before_backward)
@@ -158,12 +178,13 @@ class TraceMLCallback(Callback):
             try:
                 self._mem_tracker.record()
             except Exception as e:
-                print(f"[TraceML] record failed: {e}", file=sys.stderr)
+                _log_lightning_error("record failed", e)
 
         # Advance step counter and flush (treating every micro-batch as a step
         # to preserve fine-grained forward/backward times)
-        TraceState.step += 1
+        trace_state = get_trace_session_state()
+        trace_state.advance_step()
         try:
-            flush_step_events(pl_module, TraceState.step)
+            flush_step_events(pl_module, trace_state.step)
         except Exception as e:
-            print(f"[TraceML] flush failed: {e}", file=sys.stderr)
+            _log_lightning_error("flush failed", e)

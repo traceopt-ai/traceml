@@ -25,8 +25,6 @@ from typing import Any, Dict, Optional
 from traceml.diagnostics.step_memory import (
     StepMemoryDiagnosis,
     build_step_memory_diagnosis,
-)
-from traceml.diagnostics.step_memory_summary import (
     build_step_memory_summary_diagnosis_result,
 )
 from traceml.diagnostics.trends import compute_trend_evidence
