@@ -90,8 +90,14 @@ def _metric_block(
 def _presented_block(summary: Dict[str, Any], section: str) -> Dict[str, Any]:
     """
     Return a summary-side presented diagnosis block or an empty mapping.
+
+    ``primary_diagnosis`` is canonical. ``diagnosis_presented`` is retained as
+    a temporary fallback for older final_summary.json artifacts and can be
+    removed with the compare/core.py legacy readers.
     """
     block = _nested_get(summary, section, "primary_diagnosis")
+    if not isinstance(block, dict):
+        block = _nested_get(summary, section, "diagnosis_presented")
     return block if isinstance(block, dict) else {}
 
 
@@ -270,13 +276,13 @@ def _supported_memory_status_shift(
 
     Notes
     -----
-    - `MEMORY CREEP (EARLY)` is treated conservatively and does not count as a
+    - `MEMORY RISING` is treated conservatively and does not count as a
       clear regression unless the trend itself is already material.
     """
     if not worsened or not rhs_status:
         return False
 
-    if rhs_status == "MEMORY CREEP (EARLY)":
+    if rhs_status == "MEMORY RISING":
         return trend_sig == "material"
 
     if rhs_status in {"HIGH PRESSURE", "IMBALANCE", "MEMORY CREEP"}:
@@ -615,16 +621,16 @@ def build_compare_verdict(
     for a strict v1.
     """
     lhs_step_status = _as_str(
-        _nested_get(lhs_payload, "step_time", "primary_diagnosis", "status")
+        _presented_block(lhs_payload, "step_time").get("status")
     )
     rhs_step_status = _as_str(
-        _nested_get(rhs_payload, "step_time", "primary_diagnosis", "status")
+        _presented_block(rhs_payload, "step_time").get("status")
     )
     lhs_mem_status = _as_str(
-        _nested_get(lhs_payload, "step_memory", "primary_diagnosis", "status")
+        _presented_block(lhs_payload, "step_memory").get("status")
     )
     rhs_mem_status = _as_str(
-        _nested_get(rhs_payload, "step_memory", "primary_diagnosis", "status")
+        _presented_block(rhs_payload, "step_memory").get("status")
     )
 
     rhs_step_presented = _presented_block(rhs_payload, "step_time")

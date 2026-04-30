@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from ..framework import DiagnosticIssue, DiagnosticRule
+from ..common import DiagnosticIssue, DiagnosticRule
 from .context import SystemSummarySignals
 
 
@@ -246,5 +246,9 @@ def run_system_rules(
 
 __all__ = [
     "DEFAULT_SYSTEM_RULES",
+    "GPUUtilImbalanceRule",
+    "HighCPUPressureRule",
+    "HighRAMPressureRule",
+    "LowGPUUtilizationRule",
     "run_system_rules",
 ]

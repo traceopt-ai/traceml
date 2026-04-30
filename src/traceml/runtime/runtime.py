@@ -29,24 +29,10 @@ from typing import Any, Callable, List, Optional
 
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.runtime.config import config
+from traceml.runtime.sampler_registry import build_samplers
+from traceml.runtime.sender import TelemetryPublisher
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.samplers.layer_backward_memory_sampler import (
-    LayerBackwardMemorySampler,
-)
-from traceml.samplers.layer_backward_time_sampler import (
-    LayerBackwardTimeSampler,
-)
-from traceml.samplers.layer_forward_memory_sampler import (
-    LayerForwardMemorySampler,
-)
-from traceml.samplers.layer_forward_time_sampler import LayerForwardTimeSampler
-from traceml.samplers.layer_memory_sampler import LayerMemorySampler
-from traceml.samplers.process_sampler import ProcessSampler
-from traceml.samplers.stdout_stderr_sampler import StdoutStderrSampler
-from traceml.samplers.step_memory_sampler import StepMemorySampler
-from traceml.samplers.step_time_sampler import StepTimeSampler
-from traceml.samplers.system_sampler import SystemSampler
 from traceml.transport.distributed import get_ddp_info
 from traceml.transport.tcp_transport import TCPClient, TCPConfig
 
@@ -108,7 +94,12 @@ class TraceMLRuntime:
                 host=self._settings.tcp.host, port=int(self._settings.tcp.port)
             )
         )
-        self._attach_senders()
+        self._publisher = TelemetryPublisher(
+            tcp_client=self._tcp_client,
+            rank=self.local_rank,
+            logger=self._logger,
+        )
+        self._publisher.attach_senders(self._samplers)
 
         # Sampler thread (per-rank)
         self._sampler_thread = threading.Thread(
@@ -119,76 +110,30 @@ class TraceMLRuntime:
 
     def _build_samplers(self) -> List[BaseSampler]:
         """
-        Build samplers for this rank based on profile and UI mode.
-
-        Profiles
-        --------
-        - watch: system + process (+ stdout/stderr in CLI mode)
-        - run: watch + step samplers
-        - deep: run + layerwise memory/time samplers
+        Build samplers for this rank based on profile and UI mode using the
+        runtime sampler registry.
         """
-        samplers: List[BaseSampler] = []
-
-        # Host/system metrics only once (rank 0) in DDP
-        if not (self.is_ddp and self.local_rank != 0):
-            samplers.append(SystemSampler())
-
-        samplers.append(ProcessSampler())
-
-        if self.mode == "cli":
-            samplers.append(StdoutStderrSampler())
-
-        # Core bottleneck profile
-        if self.profile in ["run", "deep"]:
-            samplers += [
-                StepTimeSampler(),
-                StepMemorySampler(),
-            ]
-
-        # Deep profile adds layerwise telemetry
-        if self.profile == "deep":
-            samplers += [
-                LayerMemorySampler(),
-                LayerForwardMemorySampler(),
-                LayerBackwardMemorySampler(),
-                LayerForwardTimeSampler(),
-                LayerBackwardTimeSampler(),
-            ]
-
-        return samplers
-
-    def _attach_senders(self) -> None:
-        """
-        Attach DBIncrementalSender to sampler DBs that support sending.
-
-        All ranks attach senders, including rank0, so that rank0 sends its own
-        rows through the same TCP pipeline as worker ranks.
-        """
-        for sampler in self._samplers:
-            if not getattr(sampler, "sender", None):
-                continue
-            # sender has attributes: sender.sender (transport) and sender.rank
-            sampler.sender.sender = self._tcp_client
-            sampler.sender.rank = self.local_rank
+        return build_samplers(
+            profile=self.profile,
+            mode=self.mode,
+            is_ddp=self.is_ddp,
+            local_rank=self.local_rank,
+            logger=self._logger,
+        )
 
     def _tick(self) -> None:
         """
-        Run all samplers once and flush local writers + telemetry senders.
+        Run all samplers once and delegate publishing.
 
         Phase 1 — Sample + local DB write
         ----------------------------------
         Each sampler collects its metrics and writes to the local DB.
-        This is identical to the previous behaviour.
+        Sampling failures are logged and skipped so user training continues.
 
-        Phase 2 — Batch TCP send
-        ------------------------
-        Instead of each sender calling ``TCPClient.send()`` independently
-        (N syscalls per tick), all ready payloads are collected first and
-        sent together with a single ``TCPClient.send_batch()`` call (1 syscall).
-
-        Samplers whose GPU events have not yet resolved return ``None`` from
-        ``collect_payload()`` and are silently skipped; their data is picked up
-        on the next tick — identical to the previous per-sender behaviour.
+        Phase 2 — Publish
+        -----------------
+        TelemetryPublisher flushes sampler writers, collects incremental
+        payloads, and sends a single TCP batch.
         """
         for sampler in self._samplers:
             _safe(
@@ -197,34 +142,7 @@ class TraceMLRuntime:
                 sampler.sample,
             )
 
-            db = getattr(sampler, "db", None)
-            if db is not None:
-                _safe(
-                    self._logger,
-                    f"{sampler.sampler_name}.writer.flush failed",
-                    db.writer.flush,
-                )
-
-        batch: List[Any] = []
-        for sampler in self._samplers:
-            sender = getattr(sampler, "sender", None)
-            if sender is None:
-                continue
-            try:
-                payload = sender.collect_payload()
-                if payload is not None:
-                    batch.append(payload)
-            except Exception as e:
-                self._logger.error(
-                    f"[TraceML] {sampler.sampler_name}.collect_payload failed: {e}"
-                )
-
-        if batch:
-            _safe(
-                self._logger,
-                "TCPClient.send_batch failed",
-                lambda: self._tcp_client.send_batch(batch),
-            )
+        self._publisher.publish(self._samplers)
 
     def _sampler_loop(self) -> None:
         """Sampler loop (all ranks)."""
@@ -278,7 +196,7 @@ class TraceMLRuntime:
             )
 
         # close client last
-        _safe(self._logger, "TCPClient.close failed", self._tcp_client.close)
+        self._publisher.close()
 
         # restore stdout/stderr
         if self.mode == "cli":

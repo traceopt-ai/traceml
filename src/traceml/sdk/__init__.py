@@ -7,7 +7,9 @@ from traceml.sdk.initial import (
     start,
 )
 from traceml.sdk.instrumentation import (
+    TraceSessionState,
     TraceState,
+    get_trace_session_state,
     trace_model_instance,
     trace_step,
     trace_time,
@@ -27,7 +29,9 @@ __all__ = [
     "enable_legacy_decorator_auto_init",
     "init",
     "start",
+    "TraceSessionState",
     "TraceState",
+    "get_trace_session_state",
     "trace_step",
     "trace_model_instance",
     "trace_time",

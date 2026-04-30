@@ -34,10 +34,9 @@ from traceml.aggregator.sqlite_writer import (
 )
 from traceml.aggregator.summary_service import FinalSummaryService
 from traceml.database.remote_database_store import RemoteDBStore
+from traceml.reporting.final import generate_summary
 from traceml.runtime.settings import TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
-
-from .final_summary import generate_summary
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:

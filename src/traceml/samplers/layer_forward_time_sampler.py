@@ -4,7 +4,7 @@ import time
 from collections import deque
 from typing import Deque
 
-from traceml.hooks.layer_forward_time_hooks import (
+from traceml.instrumentation.hooks.layer_forward_time_hooks import (
     LayerForwardTimeStepEvent,
     get_layer_forward_time_queue,
 )

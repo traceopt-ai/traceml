@@ -28,21 +28,28 @@ from typing import Callable, List, Optional
 
 import torch.nn as nn
 
-from traceml.hooks.layer_backward_memory_hooks import (
+from traceml.instrumentation.hooks.layer_backward_memory_hooks import (
     attach_layer_backward_memory_hooks,
 )
-from traceml.hooks.layer_backward_time_hooks import (
+from traceml.instrumentation.hooks.layer_backward_time_hooks import (
     attach_layer_backward_time_hooks,
 )
-from traceml.hooks.layer_forward_memory_hooks import (
+from traceml.instrumentation.hooks.layer_forward_memory_hooks import (
     attach_layer_forward_memory_hooks,
 )
-from traceml.hooks.layer_forward_time_hooks import (
+from traceml.instrumentation.hooks.layer_forward_time_hooks import (
     attach_layer_forward_time_hooks,
 )
-from traceml.hooks.optimizer_hooks import ensure_optimizer_timing_installed
-from traceml.patches.backward_auto_timer_patch import backward_auto_timer
-from traceml.patches.forward_auto_timer_patch import forward_auto_timer
+from traceml.instrumentation.hooks.optimizer_hooks import (
+    ensure_optimizer_timing_installed,
+)
+from traceml.instrumentation.patches.backward_auto_timer_patch import (
+    backward_auto_timer,
+)
+from traceml.instrumentation.patches.forward_auto_timer_patch import (
+    forward_auto_timer,
+)
+from traceml.runtime.state import TraceSessionState, get_trace_session_state
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_step_events
 from traceml.utils.layer_parameter_memory import (
@@ -51,6 +58,27 @@ from traceml.utils.layer_parameter_memory import (
 )
 from traceml.utils.step_memory import StepMemoryTracker
 from traceml.utils.timing import timed_region
+
+
+def _log_instrumentation_error(message: str, exc: Exception) -> None:
+    """
+    Log instrumentation failures without interrupting user training.
+
+    The TraceML runtime configures the file-backed error logger when running
+    under the launcher. Direct SDK users may not have configured it, so stderr
+    remains as a tiny fallback signal for the same behavior this module had
+    before the state refactor.
+    """
+    try:
+        from traceml.loggers.error_log import get_error_logger
+
+        get_error_logger("TraceInstrumentation").exception(
+            "[TraceML] %s", message
+        )
+    except Exception:
+        pass
+
+    print(f"[TraceML] {message}: {exc}", file=sys.stderr)
 
 
 def _traceml_disabled() -> bool:
@@ -91,16 +119,40 @@ def _should_auto_install_optimizer_timing() -> bool:
     return getattr(cfg, "mode", "auto") == "auto"
 
 
-class TraceState:
-    """
-    Shared process-local TraceML step counter.
+class _TraceStateMeta(type):
+    @property
+    def step(cls) -> int:
+        return get_trace_session_state().step
 
-    This state is intentionally tiny and explicit so integrations such as the
-    Lightning callback can coordinate step flushing with the same semantic step
-    numbering used by the decorator-style tracing path.
+    @step.setter
+    def step(cls, value: int) -> None:
+        get_trace_session_state().set_step(value)
+
+
+class TraceState(metaclass=_TraceStateMeta):
+    """
+    Compatibility facade for TraceML's process-local step counter.
+
+    New code should use ``traceml.runtime.state.TraceSessionState`` or
+    ``get_trace_session_state()``. This class stays intentionally small so
+    existing imports and assignments such as ``TraceState.step += 1`` continue
+    to resolve to the same underlying session state.
     """
 
-    step = 0
+    @classmethod
+    def session(cls) -> TraceSessionState:
+        """Return the active TraceML session state."""
+        return get_trace_session_state()
+
+    @classmethod
+    def reset(cls, step: int = 0) -> int:
+        """Reset the active TraceML step counter."""
+        return get_trace_session_state().reset(step)
+
+    @classmethod
+    def advance(cls, delta: int = 1) -> int:
+        """Advance the active TraceML step counter."""
+        return get_trace_session_state().advance_step(delta)
 
 
 @contextmanager
@@ -133,13 +185,14 @@ def trace_step(model: nn.Module):
         yield
         return
 
+    trace_state = get_trace_session_state()
     mem_tracker = StepMemoryTracker(model)
     step_completed = False
 
     try:
         mem_tracker.reset()
     except Exception as exc:
-        print(f"[TraceML] reset failed: {exc}", file=sys.stderr)
+        _log_instrumentation_error("reset failed", exc)
 
     try:
         with timed_region(
@@ -152,17 +205,17 @@ def trace_step(model: nn.Module):
                 step_completed = True
     finally:
         if step_completed:
-            TraceState.step += 1
+            trace_state.advance_step()
 
         try:
             mem_tracker.record()
         except Exception as exc:
-            print(f"[TraceML] record failed: {exc}", file=sys.stderr)
+            _log_instrumentation_error("record failed", exc)
 
         try:
-            flush_step_events(model, TraceState.step)
+            flush_step_events(model, trace_state.step)
         except Exception as exc:
-            print(f"[TraceML] flush failed: {exc}", file=sys.stderr)
+            _log_instrumentation_error("flush failed", exc)
 
 
 def trace_model_instance(
@@ -234,9 +287,9 @@ def trace_model_instance(
             attach_execution_entry_hooks(model)
 
     except Exception as exc:
-        print(
-            f"[TraceML] Failed to trace model instance: {exc}",
-            file=sys.stderr,
+        _log_instrumentation_error(
+            "Failed to trace model instance",
+            exc,
         )
 
 
@@ -280,6 +333,8 @@ def trace_time(
 
 __all__ = [
     "TraceState",
+    "TraceSessionState",
+    "get_trace_session_state",
     "trace_step",
     "trace_model_instance",
     "trace_time",

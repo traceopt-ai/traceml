@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from ..framework import DiagnosticIssue, DiagnosticRule
+from ..common import DiagnosticIssue, DiagnosticRule
 from .context import ProcessSummarySignals
 
 
@@ -343,5 +343,10 @@ def run_process_rules(
 
 __all__ = [
     "DEFAULT_PROCESS_RULES",
+    "GPUMemoryReservedOverhangRule",
+    "HighCPUProcessPressureRule",
+    "HighGPUMemoryPressureRule",
+    "HighRSSPressureRule",
+    "RankGPUMemoryImbalanceRule",
     "run_process_rules",
 ]

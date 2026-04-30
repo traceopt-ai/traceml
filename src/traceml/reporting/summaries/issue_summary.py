@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from traceml.diagnostics.framework import DiagnosticIssue, sort_issues
+from traceml.diagnostics.common import DiagnosticIssue, sort_issues
 
 
 def _rank_label(rank: int) -> str:

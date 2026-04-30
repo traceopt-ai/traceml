@@ -25,8 +25,14 @@ from typing import Any, Dict, Literal, Optional, Sequence
 
 from traceml.renderers.step_time.schema import StepCombinedTimeMetric
 
-from ..common import BaseDiagnosis, Severity, validate_confidence
-from ..framework import DiagnosticIssue, DiagnosticResult, sort_issues
+from ..common import (
+    BaseDiagnosis,
+    DiagnosticIssue,
+    DiagnosticResult,
+    Severity,
+    sort_issues,
+    validate_confidence,
+)
 from .context import (
     ComputeSignal,
     build_step_time_context,
@@ -478,7 +484,7 @@ def build_step_diagnosis_result(
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
-) -> DiagnosticResult:
+) -> DiagnosticResult[StepDiagnosis]:
     """
     Build a rich step-time diagnosis result from one analyzed window.
 

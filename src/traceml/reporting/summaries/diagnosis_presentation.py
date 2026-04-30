@@ -110,7 +110,7 @@ def present_step_memory_summary_diagnosis(
         "BALANCED": ("No pressure, skew, or creep signal."),
         "HIGH PRESSURE": ("Peak memory is close to capacity."),
         "IMBALANCE": ("Memory usage differs across ranks."),
-        "MEMORY CREEP (EARLY)": ("Memory is rising in the tail window."),
+        "MEMORY RISING": ("Memory is rising from early to recent steps."),
         "MEMORY CREEP": ("Memory keeps rising over time."),
         "NO GPU": ("Step memory is not applicable for this run."),
         "NO DATA": ("Too little aligned memory data was collected."),

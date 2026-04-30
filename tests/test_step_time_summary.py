@@ -4,6 +4,10 @@ import sqlite3
 from traceml.reporting.summaries.step_time import (
     generate_step_time_summary_card,
 )
+from traceml.reporting.sections.step_time import StepTimeSummarySection
+from traceml.reporting.sections.step_time.loader import (
+    load_step_time_section_data,
+)
 
 
 def _create_step_time_db(path: str) -> None:
@@ -95,6 +99,24 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
     assert summary["global"]["typical"]["steps_analyzed"] == 2
     assert summary["global"]["typical"]["step_avg_ms"] == 31.0
     assert "Global: n/a" not in summary["card"]
+
+
+def test_step_time_section_loader_and_builder_use_sqlite_fixture(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "telemetry"
+    _create_step_time_db(str(db_path))
+
+    data = load_step_time_section_data(str(db_path))
+    result = StepTimeSummarySection().build(str(db_path))
+
+    assert data.training_steps == 3
+    assert data.latest_step_observed == 2
+    assert data.per_rank_summary[0].steps_analyzed == 2
+    assert result.section == "step_time"
+    assert result.payload["overview"]["ranks_seen"] == 1
+    assert result.payload["global"]["typical"]["step_avg_ms"] == 31.0
+    assert "TraceML Step Timing Summary" in result.text
 
 
 def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:

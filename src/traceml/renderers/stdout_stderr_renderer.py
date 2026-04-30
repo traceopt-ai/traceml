@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import List
 
-from IPython.display import HTML
 from rich.panel import Panel
 from rich.text import Text
 
@@ -86,14 +85,6 @@ class StdoutStderrRenderer(BaseRenderer):
             content,
             title=f"[bold cyan]STDOUT / STDERR (RANK {self._rank})[/bold cyan]",
             border_style="cyan",
-        )
-
-    def get_notebook_renderable(self) -> HTML:
-        """
-        Notebook mode is not currently supported for this renderer.
-        """
-        return HTML(
-            "<pre>Stdout/Stderr renderer disabled in notebook mode.</pre>"
         )
 
     def log_summary(self, path: str) -> None:

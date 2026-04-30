@@ -8,6 +8,12 @@ human-readable text summary.
 
 from traceml.reporting.compare.command import compare_summaries
 from traceml.reporting.compare.core import build_compare_payload
+from traceml.reporting.compare.formatters import CompareTextFormatter
 from traceml.reporting.compare.render import build_compare_text
 
-__all__ = ["build_compare_payload", "build_compare_text", "compare_summaries"]
+__all__ = [
+    "CompareTextFormatter",
+    "build_compare_payload",
+    "build_compare_text",
+    "compare_summaries",
+]
