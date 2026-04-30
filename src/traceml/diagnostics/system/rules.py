@@ -246,5 +246,9 @@ def run_system_rules(
 
 __all__ = [
     "DEFAULT_SYSTEM_RULES",
+    "GPUUtilImbalanceRule",
+    "HighCPUPressureRule",
+    "HighRAMPressureRule",
+    "LowGPUUtilizationRule",
     "run_system_rules",
 ]
