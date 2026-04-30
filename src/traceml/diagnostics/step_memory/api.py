@@ -1,24 +1,4 @@
-"""
-Step-memory diagnosis logic shared by live renderers and summaries.
-
-Design goals
-------------
-- Work directly from the current aligned renderer window.
-- Keep the live policy simple, explainable, and stable.
-- Be conservative enough for production, while still surfacing clear drift.
-- Avoid GPU-size-specific behavior by combining:
-  - absolute growth
-  - relative growth
-  - optional device-capacity scaling when available
-
-Diagnosis priority
-------------------
-1. HIGH_PRESSURE
-2. IMBALANCE
-3. CREEP_CONFIRMED
-4. CREEP_EARLY (shown as MEMORY RISING)
-5. BALANCED
-"""
+"""Step-memory diagnosis shared by live renderers and summaries."""
 
 from __future__ import annotations
 
@@ -53,23 +33,7 @@ _STATUS_BY_KIND = {
 
 @dataclass(frozen=True)
 class StepMemoryDiagnosisThresholds:
-    """
-    Thresholds for live step-memory diagnosis.
-
-    Memory trend / creep uses the shared trend engine and metric-specific byte
-    thresholds. This keeps the trend definition centralized while preserving
-    memory-specific policy in this module.
-
-    The dataclass is intentionally the single policy surface for step-memory
-    diagnosis so a future YAML/config loader can populate these knobs without
-    changing the diagnostic engine.
-
-    Trend policy:
-    - before `min_steps_for_diag`, report that more data is needed
-    - after that, baseline < middle < recent is reported as MEMORY RISING
-    - if the same rising shape crosses `creep_confirmed_delta_bytes`, report
-      MEMORY CREEP
-    """
+    """Thresholds for live step-memory diagnosis."""
 
     min_steps_for_diag: int = 50
 

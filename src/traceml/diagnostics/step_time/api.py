@@ -1,22 +1,4 @@
-"""
-Step-time diagnosis logic shared by live renderers and post-run summaries.
-
-Semantics
----------
-- `step_time` excludes dataloader fetch time.
-- `wait_proxy = step_time - (forward + backward + optimizer_step)`.
-- Straggler attribution is based on excess local burden on the worst rank,
-  normalized by a typical local burden:
-      max(0, worst - median) / (median_dataloader + median_compute)
-
-Design goals
-------------
-- Keep the public API backward compatible for runtime callers.
-- Move reusable normalization into a dedicated context builder.
-- Evaluate modular diagnosis rules over the same prepared dataset.
-- Preserve one primary diagnosis for compact runtime UX.
-- Expose a richer diagnosis result for final summaries and future dashboards.
-"""
+"""Step-time diagnosis shared by live renderers and summaries."""
 
 from __future__ import annotations
 

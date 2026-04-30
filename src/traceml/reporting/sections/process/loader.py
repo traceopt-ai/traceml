@@ -1,6 +1,4 @@
-"""
-SQLite loader for the final-report process section.
-"""
+"""SQLite loader for the final-report process section."""
 
 from __future__ import annotations
 

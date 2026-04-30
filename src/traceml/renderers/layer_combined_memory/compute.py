@@ -97,25 +97,7 @@ class ModelSnapshotStatus:
 
 
 class LayerCombinedMemoryData:
-    """
-    Computes **layer-wise combined memory** (DDP capacity view):
-        param_memory + forward_activations + backward_activations
-
-    Responsibilities:
-    - Aggregator-only: reads ALL rank data from `RemoteDBStore`
-    - Validates that all ranks reported the same model snapshot (by signature)
-    - Selects a *safe step* that is step-aligned across ranks
-    - Computes:
-        * current memory: worst rank at safe_step
-        * peak memory: worst rank across time up to safe_step
-    - Produces a renderer-ready data structure
-
-    - "current"  is **layer-wise worst across ranks**
-    - "peak"     is **max of those worst values over time**
-    - Rows DO NOT correspond to a single rank
-    - This is a *capacity / safety* view
-    - Returns a typed result object: `LayerCombinedMemoryResult`.
-    """
+    """Computes layer-wise combined memory for the DDP capacity view."""
 
     LAYER_MEMORY_NAME = "LayerMemory"
     LAYER_FORWARD_NAME = "LayerForwardMemory"

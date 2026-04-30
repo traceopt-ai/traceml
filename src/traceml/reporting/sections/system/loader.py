@@ -1,11 +1,4 @@
-"""
-SQLite loader for the final-report system section.
-
-This module is the single section-level entry point for reading system summary
-inputs. The underlying SQL implementation is intentionally reused from the
-existing summary builder during the section migration so Ticket 15 does not
-change query semantics.
-"""
+"""SQLite loader for the final-report system section."""
 
 from __future__ import annotations
 

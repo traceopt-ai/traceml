@@ -1,15 +1,4 @@
-"""
-Public TraceML module-level API.
-
-This module provides the stable user-facing entrypoints exposed at
-`import traceml`.
-
-Design goals
-------------
-- Keep the public API simple and discoverable
-- Preserve backward compatibility with existing decorator imports
-- Support an explicit initialization model
-"""
+"""Public TraceML module-level API."""
 
 from __future__ import annotations
 
@@ -20,22 +9,14 @@ from traceml.sdk.summary_client import final_summary as _final_summary
 
 
 def trace_step(*args: Any, **kwargs: Any) -> Any:
-    """
-    Lazily resolve and return the TraceML step tracing context manager.
-
-    This path intentionally avoids import-time patch installation. The new
-    model expects callers to opt into automatic patching explicitly via
-    `traceml.init(...)`.
-    """
+    """Return the TraceML step tracing context manager."""
     from traceml.sdk.instrumentation import trace_step as _trace_step
 
     return _trace_step(*args, **kwargs)
 
 
 def trace_model_instance(*args: Any, **kwargs: Any) -> Any:
-    """
-    Lazily resolve and invoke TraceML model hook attachment.
-    """
+    """Attach TraceML model hooks."""
     from traceml.sdk.instrumentation import (
         trace_model_instance as _trace_model_instance,
     )
@@ -62,9 +43,7 @@ def final_summary(
 
 
 def wrap_dataloader_fetch(*args: Any, **kwargs: Any) -> Any:
-    """
-    Lazily resolve and apply TraceML dataloader-fetch wrapping.
-    """
+    """Wrap dataloader fetch timing."""
     from traceml.sdk.wrappers import (
         wrap_dataloader_fetch as _wrap_dataloader_fetch,
     )
@@ -73,27 +52,21 @@ def wrap_dataloader_fetch(*args: Any, **kwargs: Any) -> Any:
 
 
 def wrap_forward(*args: Any, **kwargs: Any) -> Any:
-    """
-    Lazily resolve and apply TraceML forward wrapping.
-    """
+    """Wrap forward-pass timing."""
     from traceml.sdk.wrappers import wrap_forward as _wrap_forward
 
     return _wrap_forward(*args, **kwargs)
 
 
 def wrap_backward(*args: Any, **kwargs: Any) -> Any:
-    """
-    Lazily resolve and apply TraceML backward wrapping.
-    """
+    """Wrap backward-pass timing."""
     from traceml.sdk.wrappers import wrap_backward as _wrap_backward
 
     return _wrap_backward(*args, **kwargs)
 
 
 def wrap_optimizer(*args: Any, **kwargs: Any) -> Any:
-    """
-    Lazily resolve and apply TraceML optimizer-step wrapping.
-    """
+    """Wrap optimizer-step timing."""
     from traceml.sdk.wrappers import wrap_optimizer as _wrap_optimizer
 
     return _wrap_optimizer(*args, **kwargs)
@@ -106,36 +79,7 @@ def init(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
 ) -> TraceMLInitConfig:
-    """
-    Initialize TraceML instrumentation for the current process.
-
-    Parameters
-    ----------
-    mode:
-        One of:
-        - "auto"
-        - "manual"
-        - "selective"
-
-        The alias "custom" is also accepted and maps to "selective".
-    patch_dataloader:
-        Selective-mode-only override controlling automatic DataLoader patching.
-    patch_forward:
-        Selective-mode-only override controlling automatic forward patching.
-    patch_backward:
-        Selective-mode-only override controlling automatic backward patching.
-
-    Returns
-    -------
-    TraceMLInitConfig
-        The effective init config for this process.
-
-    Notes
-    -----
-    - `mode="auto"` patches all supported automatic instrumentation points.
-    - `mode="manual"` patches none of them.
-    - `mode="selective"` patches only the explicitly enabled subset.
-    """
+    """Initialize TraceML instrumentation for this process."""
     from traceml.sdk.initial import init as _init
 
     return _init(
@@ -153,9 +97,7 @@ def start(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
 ) -> TraceMLInitConfig:
-    """
-    Alias for `traceml.init(...)` during the transition.
-    """
+    """Alias for `traceml.init(...)`."""
     from traceml.sdk.initial import start as _start
 
     return _start(

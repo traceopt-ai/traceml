@@ -1,17 +1,4 @@
-"""
-Shared UI helpers for the NiceGUI overview dashboard.
-
-This module stays presentation-only and centralizes:
-- shared card styling
-- compact metric rendering
-- lightweight formatting helpers for KPI rows
-
-Design goals
-------------
-- Stable card sizes from first render
-- Dense but readable cards on standard laptop screens
-- Minimal repeated CSS across sections
-"""
+"""Shared UI helpers for the NiceGUI overview dashboard."""
 
 from __future__ import annotations
 

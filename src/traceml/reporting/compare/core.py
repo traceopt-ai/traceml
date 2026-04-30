@@ -1,9 +1,4 @@
-"""
-Structured comparison logic for TraceML final summary JSON artifacts.
-
-This module compares two already-loaded final summary payloads and produces
-a stable compare-friendly JSON payload that can be rendered, saved, or logged.
-"""
+"""Structured comparison logic for TraceML final-summary JSON."""
 
 from __future__ import annotations
 
@@ -16,28 +11,12 @@ from traceml.sdk.protocol import utc_now_iso
 
 _STEP_PHASES = ("dataloader", "forward", "backward", "optimizer")
 
-# Compatibility note
-# ------------------
-# Compare currently accepts both the canonical nested summary schema and the
-# older flat schema emitted by pre-sectionized summaries. All legacy reads are
-# deliberately kept in the small helpers below:
-#   - _system_value
-#   - _process_value
-#   - _step_memory_primary
-#   - _diagnosis_block
-#   - _step_time_primary
-#   - _step_time_split
-#
-# When old final_summary.json artifacts no longer need compare support, remove
-# only the fallback branches in those helpers plus the legacy-schema regression
-# test in tests/test_compare_missing.py. Do not change formatter or verdict
-# policy code for that cleanup.
+# Legacy summary-schema reads are kept in the small helpers below. Remove those
+# fallback branches together when old final_summary.json artifacts are dropped.
 
 
 def _as_float(value: Any) -> Optional[float]:
-    """
-    Best-effort float conversion for optional metrics.
-    """
+    """Best-effort float conversion."""
     try:
         if value is None:
             return None
@@ -47,9 +26,7 @@ def _as_float(value: Any) -> Optional[float]:
 
 
 def _as_str(value: Any) -> Optional[str]:
-    """
-    Best-effort string conversion for optional display fields.
-    """
+    """Best-effort string conversion."""
     if value is None:
         return None
     try:
@@ -60,29 +37,21 @@ def _as_str(value: Any) -> Optional[str]:
 
 
 def _as_dict(value: Any) -> Optional[Dict[str, Any]]:
-    """
-    Return a dictionary value if present, otherwise None.
-    """
+    """Return a dictionary value if present."""
     return value if isinstance(value, dict) else None
 
 
 def _first_present(*values: Any) -> Any:
-    """
-    Return the first value that is not None.
-
-    This is intentionally not implemented with ``or`` because zero and False
-    are valid telemetry values.
-    """
+    """Return the first value that is not None."""
     for value in values:
+        # Do not use ``or`` here: 0 and False are valid telemetry values.
         if value is not None:
             return value
     return None
 
 
 def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
-    """
-    Safe nested dictionary access.
-    """
+    """Safe nested dictionary access."""
     cur: Any = obj
     for key in keys:
         if not isinstance(cur, dict):
@@ -92,12 +61,7 @@ def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
 
 
 def _system_value(summary: Dict[str, Any], key: str) -> Any:
-    """
-    Read one system summary value.
-
-    The canonical schema is ``system.global.*``. The top-level reads are
-    temporary compatibility for older final_summary.json artifacts.
-    """
+    """Read one system summary value."""
     system = _nested_get(summary, "system")
     if key == "cpu_avg_percent":
         return _first_present(
@@ -127,12 +91,7 @@ def _system_value(summary: Dict[str, Any], key: str) -> Any:
 
 
 def _process_value(summary: Dict[str, Any], key: str) -> Any:
-    """
-    Read one process summary value.
-
-    The canonical schema is ``process.global.*``. The top-level reads are
-    temporary compatibility for older final_summary.json artifacts.
-    """
+    """Read one process summary value."""
     process = _nested_get(summary, "process")
     if key == "cpu_avg_percent":
         return _first_present(
@@ -153,13 +112,7 @@ def _process_value(summary: Dict[str, Any], key: str) -> Any:
 
 
 def _step_memory_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Read the canonical primary step-memory block.
-
-    Prefer the explicit ``global.primary_metric`` block. The top-level
-    ``primary_metric`` fallback is temporary compatibility for older
-    final_summary.json artifacts.
-    """
+    """Read the primary step-memory block."""
     primary = _nested_get(summary, "global", "primary_metric")
     if not isinstance(primary, dict):
         primary = summary.get("primary_metric")
@@ -167,12 +120,7 @@ def _step_memory_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _diagnosis_block(summary: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """
-    Return the canonical or legacy presented diagnosis block for a section.
-
-    ``primary_diagnosis`` is canonical. ``diagnosis_presented`` is a temporary
-    compatibility fallback for older final_summary.json artifacts.
-    """
+    """Return the section diagnosis block."""
     block = summary.get("primary_diagnosis")
     if isinstance(block, dict):
         return block
@@ -183,10 +131,7 @@ def _diagnosis_block(summary: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
-    """
-    Read one step-memory summary value from the canonical schema while keeping
-    compare output stable.
-    """
+    """Read one step-memory summary value."""
     if key == "status":
         return _nested_get(_diagnosis_block(summary) or {}, "status")
     if key == "reason":
@@ -209,12 +154,7 @@ def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
 
 
 def _step_time_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Read the canonical primary step-time rollup.
-
-    ``global.typical`` is canonical. ``timing_primary`` is a temporary
-    compatibility fallback for older final_summary.json artifacts.
-    """
+    """Read the primary step-time rollup."""
     primary = _nested_get(summary, "global", "typical")
     if isinstance(primary, dict):
         return primary
@@ -225,10 +165,7 @@ def _step_time_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _step_time_value(summary: Dict[str, Any], key: str) -> Any:
-    """
-    Read one step-time summary value from the canonical nested schema while
-    preserving compare stability.
-    """
+    """Read one step-time summary value."""
     if key == "status":
         return _nested_get(_diagnosis_block(summary) or {}, "status")
 
@@ -251,12 +188,7 @@ def _step_time_split(
     *,
     split_key: str,
 ) -> Dict[str, Any]:
-    """
-    Read one canonical step-time split dictionary.
-
-    ``global.typical.{split_key}`` is canonical. ``median_{split_key}`` is a
-    temporary compatibility fallback for older final_summary.json artifacts.
-    """
+    """Read one step-time split dictionary."""
     primary = _step_time_primary(summary)
     split = primary.get(split_key)
     if isinstance(split, dict):

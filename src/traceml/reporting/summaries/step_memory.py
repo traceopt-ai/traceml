@@ -1,23 +1,4 @@
-"""
-Compact end-of-run step-memory summary generation.
-
-This module reads aligned step-memory telemetry from `step_memory_samples`,
-reuses the shared step-memory diagnosis engine, and produces:
-
-1. a compact text summary for end-of-run display and sharing
-2. a structured JSON payload for automation
-
-Design goals
-------------
-- Keep the printed summary short and actionable
-- Reuse the same diagnosis logic as live CLI and dashboard views
-- Use the schema 1.2 section contract:
-  - `overview` for scope metadata
-  - `primary_diagnosis` for the concise user-facing diagnosis
-  - `global` for primary metric, metric rollups, trend, and imbalance data
-  - `per_rank` for rank detail
-- Preserve richer machine-readable fields in JSON
-"""
+"""End-of-run step-memory summary generation."""
 
 import sqlite3
 from typing import Any, Dict, Optional
@@ -133,13 +114,7 @@ def _gpu_total_bytes(conn: sqlite3.Connection) -> Optional[float]:
 
 
 def _head_tail_trend(series: list[float]) -> Dict[str, Optional[float]]:
-    """
-    Compute the canonical trend summary for one memory series.
-
-    Compatibility note:
-    - `head_avg_bytes` maps to the canonical baseline average
-    - `tail_avg_bytes` maps to the canonical recent average
-    """
+    """Compute a head/tail trend summary for one memory series."""
     values = [max(0.0, safe_float(v)) for v in series]
     evidence = compute_trend_evidence(values)
 
@@ -458,15 +433,7 @@ def _build_global_rollup(
     primary: Optional[StepMemoryCombinedMetric],
     diagnosis: Optional[StepMemoryDiagnosis],
 ) -> Dict[str, Any]:
-    """
-    Build the canonical global memory rollup for the analyzed window.
-
-    Semantics
-    ---------
-    - `typical` describes the median-across-ranks memory behavior
-    - `bottleneck` describes the worst-across-ranks memory behavior
-    - `imbalance` captures how far the gating rank is from the typical rank
-    """
+    """Build the global memory rollup for the analyzed window."""
     if primary is None:
         return _empty_global_rollup()
 
@@ -518,18 +485,7 @@ def _build_step_memory_card(
     no_gpu_detected: bool,
     per_rank: Dict[str, Any],
 ) -> tuple[str, Dict[str, Any]]:
-    """
-    Build a compact, shareable end-of-run step-memory summary.
-
-    The printed summary is intentionally concise:
-    - scope
-    - diagnosis
-    - primary metric details
-    - one stable trend hint
-
-    The JSON payload is richer than the printed text and is the canonical
-    machine-readable representation for compare, logging, and dashboards.
-    """
+    """Build the end-of-run step-memory summary payload and text card."""
     sorted_metrics = sorted(metrics, key=_metric_sort_key)
     primary = _primary_metric(sorted_metrics, diagnosis)
     diagnosis_presented = present_step_memory_summary_diagnosis(diagnosis)
@@ -721,33 +677,7 @@ def generate_step_memory_summary_card(
     window_size: int = 400,
     print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Generate a compact STEP MEMORY summary from `step_memory_samples`.
-
-    Parameters
-    ----------
-    db_path:
-        Path to the SQLite DB file.
-    window_size:
-        Number of aligned tail steps to use for end-of-run memory diagnosis and
-        summary. A larger default than live CLI helps make end summaries more
-        stable without switching to a misleading full-run average.
-    print_to_stdout:
-        If True, print the rendered summary.
-
-    Returns
-    -------
-    Dict[str, Any]
-        Structured summary JSON including the rendered `card`.
-
-    Notes
-    -----
-    - This summary intentionally uses a stable aligned tail window rather than
-      a naive whole-run average. Memory issues are often end-heavy, so tail
-      behavior is more actionable than full-run dilution.
-    - Diagnosis is reused from the shared step-memory diagnosis engine to keep
-      live CLI, dashboard, and end-of-run summaries consistent.
-    """
+    """Generate the end-of-run step-memory summary."""
     from traceml.reporting.sections.step_memory import StepMemorySummarySection
 
     result = StepMemorySummarySection(window_size=window_size).build(db_path)

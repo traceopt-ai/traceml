@@ -1,25 +1,4 @@
-"""
-Compact end-of-run step-time summary generation.
-
-This module reads `step_time_samples`, builds per-rank timing summaries, and
-produces:
-
-1. a compact text summary for end-of-run display and sharing
-2. a structured JSON payload for automation, comparison, and future dashboards
-
-Design goals
-------------
-- Keep the printed summary concise and easy to scan
-- Keep the exported schema rank-centric and stable
-- Preserve a clean canonical rollup for platform consumers
-
-Notes
------
-- The printed text intentionally remains compact.
-- The JSON summary is the richer source of truth for downstream systems.
-- The current persistent step-time data is rank-based, so this module exposes
-  `per_rank` as the canonical detailed dimension today.
-"""
+"""End-of-run step-time summary generation."""
 
 import json
 import sqlite3
@@ -64,18 +43,7 @@ def _finite_float(x: Any) -> float:
 
 
 def _event_total_ms(by_dev: Any) -> float:
-    """
-    Sum duration_ms across all devices for one event.
-
-    Expected restricted JSON shape:
-        {
-            "<device>": {
-                "is_gpu": bool | null,
-                "duration_ms": float | null,
-                "n_calls": int | null
-            }
-        }
-    """
+    """Sum ``duration_ms`` across all devices for one event."""
     if not isinstance(by_dev, dict):
         return 0.0
 
@@ -88,17 +56,7 @@ def _event_total_ms(by_dev: Any) -> float:
 
 
 def _event_bucket(name: str) -> Optional[str]:
-    """
-    Map raw event names to canonical step-time buckets.
-
-    Returns one of:
-      - dataloader
-      - forward
-      - backward
-      - optimizer
-      - step_time
-      - None
-    """
+    """Map a raw event name to a step-time bucket."""
     n = str(name).lower()
 
     if "step_time" in n:
@@ -157,9 +115,7 @@ def _closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
 
 @dataclass
 class RankStepSummary:
-    """
-    Per-rank averaged step-time summary over the analyzed step window.
-    """
+    """Per-rank averaged step-time summary."""
 
     steps_analyzed: int
     avg_dataloader_ms: float
@@ -173,19 +129,7 @@ class RankStepSummary:
 
 @dataclass
 class RankStepAnalysis:
-    """
-    Per-rank summary plus per-step canonical metrics.
-
-    `per_step_metrics` shape:
-      step -> {
-        "dataloader_fetch": ms,
-        "forward": ms,
-        "backward": ms,
-        "optimizer_step": ms,
-        "step_time": ms,
-        "wait_proxy": ms,
-      }
-    """
+    """Per-rank summary plus per-step metrics."""
 
     summary: RankStepSummary
     per_step_metrics: Dict[int, Dict[str, float]]
@@ -464,18 +408,7 @@ def _empty_timing_rollup() -> Dict[str, Any]:
 def _timing_rollup_from_summary(
     summary: Optional[RankStepSummary],
 ) -> Dict[str, Any]:
-    """
-    Build one canonical timing rollup from a per-rank summary.
-
-    The chosen metrics are intentionally conservative and user-oriented:
-    - average milliseconds per phase over the analyzed window
-    - percentage share of the average total step
-    - dominant phase
-    - derived wait proxy
-
-    This avoids noisy sums and preserves the fields most useful for diagnosis,
-    run-to-run comparison, and future dashboards.
-    """
+    """Build one timing rollup from a per-rank summary."""
     if summary is None:
         return _empty_timing_rollup()
 
@@ -502,13 +435,7 @@ def _rank_entry_to_json(
     rank: int,
     summary: RankStepSummary,
 ) -> Dict[str, Any]:
-    """
-    Serialize one rank summary into the canonical machine-readable structure.
-
-    Device identity is intentionally nullable today because the current
-    `step_time_samples` projection is rank-based and does not reliably persist
-    canonical GPU identity for end-of-run timing summaries.
-    """
+    """Serialize one rank summary."""
     return {
         "identity": {
             "rank": int(rank),
@@ -538,23 +465,7 @@ def _build_global_rollup(
     bottleneck_rank: Optional[int],
     imbalance_gap_pct: Optional[float],
 ) -> Dict[str, Any]:
-    """
-    Build the canonical top-level step-time rollup for the analyzed run window.
-
-    Semantics
-    ---------
-    - `typical` is the representative rank for the run window. In distributed
-      runs this is the rank closest to the median average step time. In
-      single-rank runs it is the only available rank.
-    - `bottleneck` is the slowest rank in the analyzed window.
-    - `imbalance_gap_pct` captures worst-vs-typical spread and is one of the
-      most useful signals for distributed straggler diagnosis.
-
-    Notes
-    -----
-    This is intentionally rank-based today and keeps the exported schema
-    centered on per-rank timing summaries.
-    """
+    """Build the top-level step-time rollup for the run window."""
     if not per_rank_summary:
         return {
             "mode": "no_data",
@@ -594,16 +505,7 @@ def _build_overview(
     *,
     per_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[str, Any]:
-    """
-    Build high-level comparison-friendly overview fields from per-rank timing
-    summaries.
-
-    Notes
-    -----
-    The overview intentionally centers on representative-vs-bottleneck behavior
-    rather than cross-rank mean values. For distributed training, bottlenecks
-    and imbalance matter more than arithmetic averages across ranks.
-    """
+    """Build high-level overview fields from per-rank timing summaries."""
     if not per_rank_summary:
         return {
             "mode": "no_data",
@@ -660,32 +562,7 @@ def _build_step_time_card(
     per_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]],
     max_rows: int,
 ) -> tuple[str, Dict[str, Any]]:
-    """
-    Build a compact, shareable end-of-run step-time summary.
-
-    Printed output is intentionally concise:
-    - one scope line
-    - one timing line
-    - optional distributed comparison lines
-    - one dominant-phase takeaway
-    - diagnosis + next action
-
-    The JSON payload is richer than the printed text and is the canonical
-    machine-readable representation for compare, logging, and dashboards.
-
-    Schema notes
-    ------------
-    The canonical structured blocks are:
-    - `overview`
-    - `global`
-    - `per_rank`
-    - `primary_diagnosis`
-
-    Compatibility notes
-    -------------------
-    Schema version 1.2 keeps cards compact and moves platform data into a small
-    set of stable JSON blocks that compare can read consistently.
-    """
+    """Build the end-of-run step-time summary payload and text card."""
     ranks_present = sorted(per_rank_summary.keys())
     overview = _build_overview(per_rank_summary=per_rank_summary)
 
@@ -855,30 +732,7 @@ def generate_step_time_summary_card(
     max_rows: int = MAX_SUMMARY_WINDOW_ROWS,
     print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Generate a compact STEP TIME summary from `step_time_samples`.
-
-    Parameters
-    ----------
-    db_path:
-        Path to the SQLite DB file.
-    max_rows:
-        Maximum number of latest steps analyzed per rank.
-    print_to_stdout:
-        If True, print the rendered summary.
-
-    Returns
-    -------
-    Dict[str, Any]
-        Structured summary JSON including the rendered `card`.
-
-    Notes
-    -----
-    - Uses `step_time_samples`, not raw event transport tables.
-    - Assumes one projected row per step per rank.
-    - Diagnosis is intentionally reused from the shared step-time diagnosis
-      engine so live views and end-of-run summaries stay consistent.
-    """
+    """Generate the end-of-run step-time summary."""
     from traceml.reporting.sections.step_time import StepTimeSummarySection
 
     result = StepTimeSummarySection(max_rows=max_rows).build(db_path)
