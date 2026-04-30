@@ -2,16 +2,16 @@ import os
 
 import torch.nn as nn
 
-from traceml.hooks.layer_backward_memory_hooks import (
+from traceml.instrumentation.hooks.layer_backward_memory_hooks import (
     flush_layer_backward_memory_buffers,
 )
-from traceml.hooks.layer_backward_time_hooks import (
+from traceml.instrumentation.hooks.layer_backward_time_hooks import (
     flush_layer_backward_time_buffers,
 )
-from traceml.hooks.layer_forward_memory_hooks import (
+from traceml.instrumentation.hooks.layer_forward_memory_hooks import (
     flush_layer_forward_memory_buffers,
 )
-from traceml.hooks.layer_forward_time_hooks import (
+from traceml.instrumentation.hooks.layer_forward_time_hooks import (
     flush_layer_forward_time_buffers,
 )
 

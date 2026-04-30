@@ -49,12 +49,12 @@ def test_trace_state_facade_uses_runtime_session_state():
     assert TraceState.reset() == 0
 
 
-def test_legacy_instrumentation_import_path_shares_trace_state():
-    import traceml.instrumentation as legacy_instrumentation
+def test_decorators_import_path_shares_trace_state():
+    import traceml.decorators as decorators
 
     TraceState.reset()
-    legacy_instrumentation.TraceState.step += 2
+    decorators.TraceState.step += 2
 
     assert TraceState.step == 2
-    assert legacy_instrumentation.TraceState.step == 2
-    assert legacy_instrumentation.trace_step is not None
+    assert decorators.TraceState.step == 2
+    assert decorators.trace_step is not None

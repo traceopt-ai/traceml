@@ -343,5 +343,10 @@ def run_process_rules(
 
 __all__ = [
     "DEFAULT_PROCESS_RULES",
+    "GPUMemoryReservedOverhangRule",
+    "HighCPUProcessPressureRule",
+    "HighGPUMemoryPressureRule",
+    "HighRSSPressureRule",
+    "RankGPUMemoryImbalanceRule",
     "run_process_rules",
 ]

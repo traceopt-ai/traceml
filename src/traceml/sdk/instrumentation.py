@@ -28,21 +28,27 @@ from typing import Callable, List, Optional
 
 import torch.nn as nn
 
-from traceml.hooks.layer_backward_memory_hooks import (
+from traceml.instrumentation.hooks.layer_backward_memory_hooks import (
     attach_layer_backward_memory_hooks,
 )
-from traceml.hooks.layer_backward_time_hooks import (
+from traceml.instrumentation.hooks.layer_backward_time_hooks import (
     attach_layer_backward_time_hooks,
 )
-from traceml.hooks.layer_forward_memory_hooks import (
+from traceml.instrumentation.hooks.layer_forward_memory_hooks import (
     attach_layer_forward_memory_hooks,
 )
-from traceml.hooks.layer_forward_time_hooks import (
+from traceml.instrumentation.hooks.layer_forward_time_hooks import (
     attach_layer_forward_time_hooks,
 )
-from traceml.hooks.optimizer_hooks import ensure_optimizer_timing_installed
-from traceml.patches.backward_auto_timer_patch import backward_auto_timer
-from traceml.patches.forward_auto_timer_patch import forward_auto_timer
+from traceml.instrumentation.hooks.optimizer_hooks import (
+    ensure_optimizer_timing_installed,
+)
+from traceml.instrumentation.patches.backward_auto_timer_patch import (
+    backward_auto_timer,
+)
+from traceml.instrumentation.patches.forward_auto_timer_patch import (
+    forward_auto_timer,
+)
 from traceml.runtime.state import TraceSessionState, get_trace_session_state
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_step_events

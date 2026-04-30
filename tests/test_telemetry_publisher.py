@@ -15,8 +15,14 @@ class _FakeLogger:
 
 
 class _FakeTCPClient:
-    def __init__(self, *, fail_send: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_send: bool = False,
+        fail_close: bool = False,
+    ) -> None:
         self.fail_send = fail_send
+        self.fail_close = fail_close
         self.sent_batches: list[list[object]] = []
         self.closed = False
 
@@ -26,7 +32,19 @@ class _FakeTCPClient:
         self.sent_batches.append(payloads)
 
     def close(self) -> None:
+        if self.fail_close:
+            raise RuntimeError("close failed")
         self.closed = True
+
+
+class _AttachRejectingSender:
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in {"sender", "rank"}:
+            raise RuntimeError("attach failed")
+        super().__setattr__(name, value)
+
+    def collect_payload(self) -> object | None:
+        return None
 
 
 class _FakeWriter:
@@ -94,6 +112,27 @@ def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
     assert sender.rank == 3
 
 
+def test_publisher_logs_sender_attach_failures_and_continues() -> None:
+    tcp_client = _FakeTCPClient()
+    logger = _FakeLogger()
+    bad_sender = _AttachRejectingSender()
+    good_sender = _FakeSender(payload={"rows": [1]})
+    bad_sampler = _FakeSampler("BadSampler", sender=bad_sender)
+    good_sampler = _FakeSampler("GoodSampler", sender=good_sender)
+    publisher = TelemetryPublisher(
+        tcp_client=tcp_client,
+        rank=2,
+        logger=logger,
+    )
+
+    publisher.attach_senders([bad_sampler, good_sampler])
+
+    assert good_sender.sender is tcp_client
+    assert good_sender.rank == 2
+    assert len(logger.exceptions) == 1
+    assert "sender attach failed" in logger.exceptions[0][0]
+
+
 def test_publisher_flushes_collects_and_sends_one_batch() -> None:
     tcp_client = _FakeTCPClient()
     writer = _FakeWriter()
@@ -116,6 +155,23 @@ def test_publisher_flushes_collects_and_sends_one_batch() -> None:
 
     assert writer.flush_count == 1
     assert tcp_client.sent_batches == [[{"sampler": "a"}]]
+
+
+def test_publisher_collects_empty_mapping_payloads() -> None:
+    tcp_client = _FakeTCPClient()
+    sampler = _FakeSampler(
+        "SamplerA",
+        sender=_FakeSender(payload={}),
+    )
+    publisher = TelemetryPublisher(
+        tcp_client=tcp_client,
+        rank=0,
+        logger=_FakeLogger(),
+    )
+
+    publisher.publish([sampler])
+
+    assert tcp_client.sent_batches == [[{}]]
 
 
 def test_publisher_does_not_send_empty_batch() -> None:
@@ -178,3 +234,39 @@ def test_publisher_close_delegates_to_tcp_client() -> None:
     publisher.close()
 
     assert tcp_client.closed is True
+
+
+def test_publisher_close_failure_is_logged_not_raised() -> None:
+    tcp_client = _FakeTCPClient(fail_close=True)
+    logger = _FakeLogger()
+    publisher = TelemetryPublisher(
+        tcp_client=tcp_client,
+        rank=0,
+        logger=logger,
+    )
+
+    publisher.close()
+
+    assert len(logger.exceptions) == 1
+    assert "TCPClient.close failed" in logger.exceptions[0][0]
+
+
+def test_publisher_uses_error_logger_fallback_when_exception_missing() -> None:
+    class _ErrorOnlyLogger:
+        def __init__(self) -> None:
+            self.errors: list[str] = []
+
+        def error(self, message: str) -> None:
+            self.errors.append(message)
+
+    logger = _ErrorOnlyLogger()
+    publisher = TelemetryPublisher(
+        tcp_client=_FakeTCPClient(fail_send=True),
+        rank=0,
+        logger=logger,
+    )
+
+    publisher.send_batch([{"rows": [1]}])
+
+    assert len(logger.errors) == 1
+    assert "TCPClient.send_batch failed" in logger.errors[0]
