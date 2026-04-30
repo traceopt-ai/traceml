@@ -191,9 +191,12 @@ class CreepEarlyRule(_BaseStepMemorySummaryRule):
             return None
         return self._issue(
             kind="CREEP_EARLY",
-            status="MEMORY CREEP (EARLY)",
+            status="MEMORY RISING",
             severity="info",
-            summary=f"{_metric_label(context.metric)} is trending upward.",
+            summary=(
+                f"{_metric_label(context.metric)} is rising from early "
+                "to recent steps."
+            ),
             action="Watch the next window.",
             metric=context,
             score=context.trend.score,

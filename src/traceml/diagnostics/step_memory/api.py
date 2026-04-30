@@ -16,7 +16,7 @@ Diagnosis priority
 1. HIGH_PRESSURE
 2. IMBALANCE
 3. CREEP_CONFIRMED
-4. CREEP_EARLY
+4. CREEP_EARLY (shown as MEMORY RISING)
 5. BALANCED
 """
 
@@ -46,7 +46,7 @@ _STATUS_BY_KIND = {
     "BALANCED": "BALANCED",
     "HIGH_PRESSURE": "HIGH PRESSURE",
     "IMBALANCE": "IMBALANCE",
-    "CREEP_EARLY": "MEMORY CREEP (EARLY)",
+    "CREEP_EARLY": "MEMORY RISING",
     "CREEP_CONFIRMED": "MEMORY CREEP",
 }
 
@@ -59,6 +59,16 @@ class StepMemoryDiagnosisThresholds:
     Memory trend / creep uses the shared trend engine and metric-specific byte
     thresholds. This keeps the trend definition centralized while preserving
     memory-specific policy in this module.
+
+    The dataclass is intentionally the single policy surface for step-memory
+    diagnosis so a future YAML/config loader can populate these knobs without
+    changing the diagnostic engine.
+
+    Trend policy:
+    - before `min_steps_for_diag`, report that more data is needed
+    - after that, baseline < middle < recent is reported as MEMORY RISING
+    - if the same rising shape crosses `creep_confirmed_delta_bytes`, report
+      MEMORY CREEP
     """
 
     min_steps_for_diag: int = 50
@@ -69,16 +79,11 @@ class StepMemoryDiagnosisThresholds:
     imbalance_skew_warn: float = 0.12
     imbalance_skew_crit: float = 0.20
 
-    creep_watch_delta_bytes: float = 100.0 * 1024.0 * 1024.0
+    creep_score_delta_scale_bytes: float = 100.0 * 1024.0 * 1024.0
     creep_confirmed_delta_bytes: float = 1024.0 * 1024.0 * 1024.0
 
-    early_overall_worst_growth_min: float = 0.02
-    early_overall_median_growth_min: float = 0.01
-    confirmed_overall_worst_growth_min: float = 0.05
-    confirmed_overall_median_growth_min: float = 0.03
-
     require_recent_gt_mid: bool = True
-    require_mid_ge_baseline: bool = False
+    require_mid_ge_baseline: bool = True
 
     trend: TrendConfig = field(
         default_factory=lambda: TrendConfig(
@@ -130,6 +135,10 @@ class StepMemoryDiagnosis(BaseDiagnosis):
 class WindowCreepEvidence:
     """
     Memory creep evidence derived from the shared trend engine.
+
+    `early` means the memory bands are strictly increasing
+    (baseline < middle < recent). `confirmed` means that same rising shape has
+    also crossed the configured absolute-growth threshold.
     """
 
     eligible: bool
@@ -204,14 +213,15 @@ def build_step_memory_diagnosis(
     ]
     if not ready:
         best = max(assessments, key=lambda item: item.steps_used)
+        min_steps = int(thresholds.min_steps_for_diag)
         return _mk_diag(
             kind="NO_DATA",
             severity="info",
             metric=best.metric.metric,
             steps_used=best.steps_used,
             worst_rank=best.worst_rank,
-            reason="Need more aligned steps.",
-            action="Wait for a fuller window.",
+            reason=f"Need at least {min_steps} completed steps.",
+            action="Keep monitoring.",
             confidence=0.0,
         )
 
@@ -276,7 +286,7 @@ def build_step_memory_diagnosis(
             steps_used=best.steps_used,
             worst_rank=best.worst_rank,
             reason=f"{_metric_label(best.metric.metric)} is rising across the window.",
-            action="Check retained tensors or caches.",
+            action="Check retained tensors or caches; continued growth can lead to OOM.",
             note=_format_creep_note(best.creep),
             confidence=0.88,
         )
@@ -290,7 +300,10 @@ def build_step_memory_diagnosis(
             metric=best.metric.metric,
             steps_used=best.steps_used,
             worst_rank=best.worst_rank,
-            reason=f"{_metric_label(best.metric.metric)} is trending upward.",
+            reason=(
+                f"{_metric_label(best.metric.metric)} is rising "
+                "from early to recent steps."
+            ),
             action="Watch the next window.",
             note=_format_creep_note(best.creep),
             confidence=0.60,
@@ -485,8 +498,8 @@ def _compute_window_creep_evidence(
     direction_recent_mid = (
         worst_ev.delta_vs_mid > 0.0 and median_ev.delta_vs_mid > 0.0
     )
-    direction_mid_base = (worst_ev.mid_avg >= worst_ev.baseline_avg) and (
-        median_ev.mid_avg >= median_ev.baseline_avg
+    direction_mid_base = (worst_ev.mid_avg > worst_ev.baseline_avg) and (
+        median_ev.mid_avg > median_ev.baseline_avg
     )
 
     direction_ok = True
@@ -495,29 +508,16 @@ def _compute_window_creep_evidence(
     if thresholds.require_mid_ge_baseline:
         direction_ok = direction_ok and direction_mid_base
 
-    early = bool(
-        direction_ok
-        and abs_delta >= float(thresholds.creep_watch_delta_bytes)
-        and worst_growth is not None
-        and median_growth is not None
-        and worst_growth >= float(thresholds.early_overall_worst_growth_min)
-        and median_growth >= float(thresholds.early_overall_median_growth_min)
-    )
+    early = bool(direction_ok and abs_delta > 0.0)
 
     confirmed = bool(
         direction_ok
         and abs_delta >= float(thresholds.creep_confirmed_delta_bytes)
-        and worst_growth is not None
-        and median_growth is not None
-        and worst_growth
-        >= float(thresholds.confirmed_overall_worst_growth_min)
-        and median_growth
-        >= float(thresholds.confirmed_overall_median_growth_min)
     )
 
     score = (
         max(0.0, abs_delta)
-        / max(1.0, float(thresholds.creep_watch_delta_bytes))
+        / max(1.0, float(thresholds.creep_score_delta_scale_bytes))
         + max(0.0, float(worst_growth or 0.0)) * 10.0
         + max(0.0, float(median_growth or 0.0)) * 6.0
     )
@@ -604,6 +604,7 @@ def _format_creep_note(evidence: WindowCreepEvidence) -> Optional[str]:
     """
     if not evidence.eligible:
         return None
+    prefix = "Memory creep detected" if evidence.confirmed else "Memory rising"
 
     if (
         evidence.avg_growth_bytes_per_step is not None
@@ -612,7 +613,7 @@ def _format_creep_note(evidence: WindowCreepEvidence) -> Optional[str]:
         and evidence.trend_window_steps >= 2
     ):
         return (
-            "Memory creep detected: increasing by "
+            f"{prefix}: increasing by "
             f"~{_fmt_bytes(evidence.avg_growth_bytes_per_step)} / step "
             f"over the last {int(evidence.trend_window_steps)} steps."
         )
@@ -624,7 +625,7 @@ def _format_creep_note(evidence: WindowCreepEvidence) -> Optional[str]:
         parts.append(f"(~{evidence.overall_worst_growth_pct * 100.0:.0f}%)")
     if not parts:
         return None
-    return "Memory creep detected: " + " ".join(parts)
+    return f"{prefix}: " + " ".join(parts)
 
 
 def _metric_label(metric_name: str) -> str:

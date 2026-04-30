@@ -23,6 +23,9 @@ from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 class StepMemorySummaryTrendSignals:
     """
     Trend evidence for one summary metric.
+
+    `early` means baseline < middle < recent. `confirmed` means the same
+    rising shape has also crossed the configured absolute-growth threshold.
     """
 
     eligible: bool
@@ -136,8 +139,8 @@ def _build_trend_signals(
     direction_recent_mid = (
         worst_ev.delta_vs_mid > 0.0 and median_ev.delta_vs_mid > 0.0
     )
-    direction_mid_base = (worst_ev.mid_avg >= worst_ev.baseline_avg) and (
-        median_ev.mid_avg >= median_ev.baseline_avg
+    direction_mid_base = (worst_ev.mid_avg > worst_ev.baseline_avg) and (
+        median_ev.mid_avg > median_ev.baseline_avg
     )
 
     direction_ok = True
@@ -146,28 +149,15 @@ def _build_trend_signals(
     if thresholds.require_mid_ge_baseline:
         direction_ok = direction_ok and direction_mid_base
 
-    early = bool(
-        direction_ok
-        and abs_delta >= float(thresholds.creep_watch_delta_bytes)
-        and worst_growth is not None
-        and median_growth is not None
-        and worst_growth >= float(thresholds.early_overall_worst_growth_min)
-        and median_growth >= float(thresholds.early_overall_median_growth_min)
-    )
+    early = bool(direction_ok and abs_delta > 0.0)
     confirmed = bool(
         direction_ok
         and abs_delta >= float(thresholds.creep_confirmed_delta_bytes)
-        and worst_growth is not None
-        and median_growth is not None
-        and worst_growth
-        >= float(thresholds.confirmed_overall_worst_growth_min)
-        and median_growth
-        >= float(thresholds.confirmed_overall_median_growth_min)
     )
 
     score = (
         max(0.0, abs_delta)
-        / max(1.0, float(thresholds.creep_watch_delta_bytes))
+        / max(1.0, float(thresholds.creep_score_delta_scale_bytes))
         + max(0.0, float(worst_growth or 0.0)) * 10.0
         + max(0.0, float(median_growth or 0.0)) * 6.0
     )

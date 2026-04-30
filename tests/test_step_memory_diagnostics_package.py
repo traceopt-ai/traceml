@@ -112,6 +112,30 @@ def test_step_memory_package_exports_live_and_summary_builders():
     assert summary.metric_attribution["peak_reserved"]["steps_used"] == 60
 
 
+def test_step_memory_reports_threshold_before_trend_window_is_ready():
+    diagnosis = build_step_memory_diagnosis([_metric(steps_used=49)])
+
+    assert diagnosis.kind == "NO_DATA"
+    assert diagnosis.reason == "Need at least 50 completed steps."
+
+
+def test_step_memory_fifty_step_window_reports_memory_rising():
+    diagnosis = build_step_memory_diagnosis(
+        [
+            _rising_metric(
+                start_bytes=4.0 * 1024.0 * 1024.0 * 1024.0,
+                end_bytes=4.1 * 1024.0 * 1024.0 * 1024.0,
+            )
+        ]
+    )
+
+    assert diagnosis.kind == "CREEP_EARLY"
+    assert diagnosis.status == "MEMORY RISING"
+    assert diagnosis.reason == (
+        "peak reserved is rising from early to recent steps."
+    )
+
+
 def test_step_memory_fifty_step_window_detects_large_creep():
     diagnosis = build_step_memory_diagnosis([_rising_metric()])
 

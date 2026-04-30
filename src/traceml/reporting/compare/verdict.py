@@ -276,13 +276,13 @@ def _supported_memory_status_shift(
 
     Notes
     -----
-    - `MEMORY CREEP (EARLY)` is treated conservatively and does not count as a
+    - `MEMORY RISING` is treated conservatively and does not count as a
       clear regression unless the trend itself is already material.
     """
     if not worsened or not rhs_status:
         return False
 
-    if rhs_status == "MEMORY CREEP (EARLY)":
+    if rhs_status == "MEMORY RISING":
         return trend_sig == "material"
 
     if rhs_status in {"HIGH PRESSURE", "IMBALANCE", "MEMORY CREEP"}:
