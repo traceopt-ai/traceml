@@ -25,6 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Literal, Optional, Sequence
 
+from traceml.analytics.trends import TrendBands
 from traceml.diagnostics.common import DiagnosticResult, sort_issues
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 
@@ -60,7 +61,7 @@ class StepMemoryDiagnosisThresholds:
     memory-specific policy in this module.
     """
 
-    min_steps_for_diag: int = 48
+    min_steps_for_diag: int = 50
 
     pressure_warn_fraction: float = 0.92
     pressure_crit_fraction: float = 0.97
@@ -79,7 +80,12 @@ class StepMemoryDiagnosisThresholds:
     require_recent_gt_mid: bool = True
     require_mid_ge_baseline: bool = False
 
-    trend: TrendConfig = field(default_factory=lambda: TrendConfig())
+    trend: TrendConfig = field(
+        default_factory=lambda: TrendConfig(
+            min_points=50,
+            bands=TrendBands(warmup_frac=0.0),
+        )
+    )
 
 
 DEFAULT_STEP_MEMORY_THRESHOLDS = StepMemoryDiagnosisThresholds()

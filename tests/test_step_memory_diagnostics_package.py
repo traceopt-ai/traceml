@@ -62,6 +62,45 @@ def _metric(
     )
 
 
+def _rising_metric(
+    name: str = "peak_reserved",
+    *,
+    steps_used: int = 50,
+    start_bytes: float = 4.0 * 1024.0 * 1024.0 * 1024.0,
+    end_bytes: float = 7.4 * 1024.0 * 1024.0 * 1024.0,
+) -> StepMemoryCombinedMetric:
+    values = [
+        start_bytes + (end_bytes - start_bytes) * (idx / float(steps_used - 1))
+        for idx in range(steps_used)
+    ]
+    return StepMemoryCombinedMetric(
+        metric=name,
+        device="cuda:0",
+        series=StepMemoryCombinedSeries(
+            steps=list(range(steps_used)),
+            median=values,
+            worst=values,
+        ),
+        summary=StepMemoryCombinedSummary(
+            window_size=steps_used,
+            steps_used=steps_used,
+            median_peak=max(values),
+            worst_peak=max(values),
+            worst_rank=0,
+            skew_ratio=0.0,
+            skew_pct=0.0,
+        ),
+        coverage=StepMemoryCombinedCoverage(
+            expected_steps=steps_used,
+            steps_used=steps_used,
+            completed_step=steps_used,
+            world_size=1,
+            ranks_present=1,
+            incomplete=False,
+        ),
+    )
+
+
 def test_step_memory_package_exports_live_and_summary_builders():
     metrics = [_metric()]
 
@@ -71,6 +110,13 @@ def test_step_memory_package_exports_live_and_summary_builders():
     assert live.kind == "BALANCED"
     assert summary.primary.kind == "BALANCED"
     assert summary.metric_attribution["peak_reserved"]["steps_used"] == 60
+
+
+def test_step_memory_fifty_step_window_detects_large_creep():
+    diagnosis = build_step_memory_diagnosis([_rising_metric()])
+
+    assert diagnosis.kind == "CREEP_CONFIRMED"
+    assert diagnosis.reason == "peak reserved is rising across the window."
 
 
 def test_step_memory_summary_adapters_and_rules_are_importable():
