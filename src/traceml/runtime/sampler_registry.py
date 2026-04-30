@@ -1,18 +1,4 @@
-"""
-Runtime sampler registry.
-
-This module owns the mapping from TraceML profiles/modes to sampler classes.
-The runtime agent asks for sampler instances; it does not need to know which
-sampler classes belong to each profile.
-
-Extension notes
----------------
-To add a sampler:
-1. Add a ``SamplerSpec`` to ``DEFAULT_SAMPLER_REGISTRY``.
-2. Add a SQLite projection and renderer/summary support only if the sampler is
-   user-facing.
-3. Add selection tests for profile, mode, and DDP rank behavior.
-"""
+"""Runtime sampler registry."""
 
 from __future__ import annotations
 
@@ -44,24 +30,7 @@ SamplerFactory = Callable[[], BaseSampler]
 
 @dataclass(frozen=True)
 class SamplerSpec:
-    """
-    Declarative sampler registration.
-
-    Attributes
-    ----------
-    key:
-        Stable internal registry key.
-    factory:
-        Zero-argument callable that builds the sampler instance.
-    profiles:
-        Profiles where this sampler is enabled. ``None`` means all profiles.
-    modes:
-        Display/runtime modes where this sampler is enabled. ``None`` means all
-        modes.
-    rank_zero_only:
-        If True, run the sampler only on rank 0 in DDP. This is used for host
-        telemetry where duplicate per-rank sampling adds noise without value.
-    """
+    """Declarative sampler registration."""
 
     key: str
     factory: SamplerFactory
@@ -95,9 +64,7 @@ def _spec(
     modes: Optional[Iterable[str]] = None,
     rank_zero_only: bool = False,
 ) -> tuple[str, SamplerSpec]:
-    """
-    Build one registry item with the key stored inside the spec as well.
-    """
+    """Build one registry item with the key stored inside the spec."""
     spec = SamplerSpec(
         key=key,
         factory=factory,
@@ -146,12 +113,7 @@ def select_sampler_specs(
     local_rank: int,
     registry: Registry[SamplerSpec] = DEFAULT_SAMPLER_REGISTRY,
 ) -> tuple[SamplerSpec, ...]:
-    """
-    Select sampler specs for the rank without instantiating samplers.
-
-    Keeping selection pure gives contributors a fast unit-test target and keeps
-    profile/mode semantics independent from sampler constructor side effects.
-    """
+    """Select sampler specs without instantiating sampler classes."""
     normalized_profile = str(profile or "run")
     normalized_mode = str(mode or "cli")
     return tuple(
@@ -175,14 +137,7 @@ def build_samplers(
     registry: Registry[SamplerSpec] = DEFAULT_SAMPLER_REGISTRY,
     logger=None,
 ) -> list[BaseSampler]:
-    """
-    Instantiate samplers for the rank.
-
-    Sampler construction is fail-open. If an optional sampler cannot be created
-    because a host library, device API, or filesystem path is unavailable, the
-    error is logged and the runtime continues with the remaining samplers. This
-    preserves TraceML's core guarantee: telemetry must not break user training.
-    """
+    """Instantiate samplers for the rank."""
     log = logger or get_error_logger("TraceMLSamplerRegistry")
     samplers: list[BaseSampler] = []
     for spec in select_sampler_specs(

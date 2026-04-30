@@ -1,7 +1,3 @@
-"""Hook installers and hook state used by TraceML instrumentation.
-
-Hooks are intentionally grouped under ``traceml.instrumentation`` so runtime,
-SDK, and sampler code share one canonical import path.
-"""
+"""Hook installers and hook state used by TraceML instrumentation."""
 
 __all__: list[str] = []

@@ -1,10 +1,4 @@
-"""
-SQLite loader for the final-report step-memory section.
-
-The loader owns database access, aligned-window computation, and diagnosis
-inputs for step-memory summaries. It reuses the established renderer/summary
-helpers so this section split does not alter memory-analysis semantics.
-"""
+"""SQLite loader for the final-report step-memory section."""
 
 from __future__ import annotations
 

@@ -1,28 +1,4 @@
-"""
-Compact end-of-run process summary generation.
-
-This module reads traced workload process metrics from the `process_samples`
-projection table and produces:
-
-1. a compact text summary for end-of-run display and sharing
-2. a structured JSON payload for automation, logging, and future dashboard use
-
-Design goals
-------------
-- Keep the printed summary short and easy to scan
-- Use one clear canonical schema for process summary data
-- Preserve richer machine-readable fields in JSON
-- Use the schema 1.2 section contract:
-  - `overview` for scope metadata
-  - `primary_diagnosis` for the concise user-facing diagnosis
-  - `global` for workload-level CPU, RAM, GPU, and takeaway data
-  - `per_rank` for traced-rank detail
-
-Notes
------
-- The printed text intentionally remains compact.
-- The JSON summary is the richer source of truth for downstream systems.
-"""
+"""End-of-run process summary generation."""
 
 import sqlite3
 from dataclasses import dataclass

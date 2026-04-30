@@ -1,20 +1,4 @@
-"""
-Unified model-level diagnostics composer.
-
-This module combines domain-specific diagnosis engines into one structured payload
-for dashboard presentation. It is intentionally presentation-agnostic.
-
-Current domains
----------------
-- step_time
-- step_memory
-
-Design goals
-------------
-- Provides one stable, extendable payload for "Model Diagnostics" UI.
-- Adds compact evidence metadata without duplicating renderer logic.
-- Never raises to callers; always returns a usable payload.
-"""
+"""Model-level diagnostics composer."""
 
 import time
 from dataclasses import dataclass, field
@@ -37,17 +21,7 @@ Severity = str  # "info" | "warn" | "crit"
 
 @dataclass(frozen=True)
 class ModelDiagnosisItem:
-    """
-    One diagnosis entry in the unified model diagnostics payload.
-
-    Fields
-    ------
-    evidence:
-        Compact, renderer-friendly metadata for quick scanning. Intended for
-        short labels such as window size, worst rank, gap, trend, or pressure.
-    confidence_label:
-        Human-friendly label derived from confidence score.
-    """
+    """One diagnosis entry in the model diagnostics payload."""
 
     source: str
     title: str
@@ -66,9 +40,7 @@ class ModelDiagnosisItem:
 
 @dataclass(frozen=True)
 class ModelDiagnosticsPayload:
-    """
-    Unified payload consumed by the Model Diagnostics dashboard card.
-    """
+    """Payload consumed by the Model Diagnostics dashboard card."""
 
     generated_at_s: float
     overall_severity: Severity

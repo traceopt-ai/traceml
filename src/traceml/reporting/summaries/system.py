@@ -1,28 +1,4 @@
-"""
-Compact end-of-run system summary generation.
-
-This module reads aggregated host and GPU system metrics from the
-`system_samples` and `system_gpu_samples` projection tables and produces:
-
-1. a compact text summary for end-of-run display and sharing
-2. a structured JSON payload for automation, logging, and future dashboard use
-
-Design goals
-------------
-- Keep the printed summary short and easy to scan
-- Preserve richer machine-readable fields in JSON
-- Use one clear canonical schema for system summary data
-- Use the schema 1.2 section contract:
-  - `overview` for scope metadata
-  - `primary_diagnosis` for the concise user-facing diagnosis
-  - `global` for run-level CPU, RAM, and GPU rollups
-  - `per_gpu` for device detail
-
-Notes
------
-- The printed text intentionally remains compact.
-- The JSON summary is the richer source of truth for downstream systems.
-"""
+"""End-of-run system summary generation."""
 
 import sqlite3
 from dataclasses import dataclass

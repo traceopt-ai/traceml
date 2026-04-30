@@ -1,10 +1,4 @@
-"""
-SQLite loader for the final-report step-time section.
-
-The loader owns database access and row normalization for step-time summaries.
-It deliberately reuses the existing rank-analysis helpers during this migration
-so Ticket 13 changes structure without changing timing semantics.
-"""
+"""SQLite loader for the final-report step-time section."""
 
 from __future__ import annotations
 

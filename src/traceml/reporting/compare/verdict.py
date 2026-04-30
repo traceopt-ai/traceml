@@ -1,16 +1,4 @@
-"""
-Decision-grade interpretation helpers for TraceML run comparison.
-
-This module turns structured run-to-run diffs into a conservative verdict layer
-for both human-readable compare output and future automation.
-
-Design goals
-------------
-- Reuse the existing summary schema instead of inventing new diagnosis truth.
-- Stay conservative: prefer "unclear" over a wrong regression/improvement call.
-- Keep the output machine-readable for future CI or monitoring use.
-- Keep the output semantically ranked instead of mechanically sorted by delta.
-"""
+"""Verdict helpers for TraceML run comparison."""
 
 from __future__ import annotations
 
@@ -41,9 +29,7 @@ _COMPUTE_PHASES = {"forward", "backward", "optimizer"}
 
 
 def _as_float(value: Any) -> Optional[float]:
-    """
-    Best-effort float conversion for optional metrics.
-    """
+    """Best-effort float conversion."""
     try:
         if value is None:
             return None
@@ -53,9 +39,7 @@ def _as_float(value: Any) -> Optional[float]:
 
 
 def _as_str(value: Any) -> Optional[str]:
-    """
-    Best-effort string conversion for optional text fields.
-    """
+    """Best-effort string conversion."""
     if value is None:
         return None
     try:
@@ -66,9 +50,7 @@ def _as_str(value: Any) -> Optional[str]:
 
 
 def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
-    """
-    Safe nested dictionary access.
-    """
+    """Safe nested dictionary access."""
     cur: Any = obj
     for key in keys:
         if not isinstance(cur, dict):
@@ -80,21 +62,13 @@ def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
 def _metric_block(
     compare_payload: Dict[str, Any], *keys: str
 ) -> Dict[str, Any]:
-    """
-    Return a compare metric block or an empty mapping if unavailable.
-    """
+    """Return a compare metric block or an empty mapping."""
     value = _nested_get(compare_payload, *keys)
     return value if isinstance(value, dict) else {}
 
 
 def _presented_block(summary: Dict[str, Any], section: str) -> Dict[str, Any]:
-    """
-    Return a summary-side presented diagnosis block or an empty mapping.
-
-    ``primary_diagnosis`` is canonical. ``diagnosis_presented`` is retained as
-    a temporary fallback for older final_summary.json artifacts and can be
-    removed with the compare/core.py legacy readers.
-    """
+    """Return a summary-side diagnosis block."""
     block = _nested_get(summary, section, "primary_diagnosis")
     if not isinstance(block, dict):
         block = _nested_get(summary, section, "diagnosis_presented")
@@ -102,9 +76,7 @@ def _presented_block(summary: Dict[str, Any], section: str) -> Dict[str, Any]:
 
 
 def _format_signed_pct(value: Optional[float]) -> str:
-    """
-    Format a signed percent value.
-    """
+    """Format a signed percent value."""
     if value is None:
         return "n/a"
     sign = "+" if value >= 0 else "-"
@@ -112,9 +84,7 @@ def _format_signed_pct(value: Optional[float]) -> str:
 
 
 def _format_signed_pp(value: Optional[float]) -> str:
-    """
-    Format a signed percentage-point value.
-    """
+    """Format a signed percentage-point value."""
     if value is None:
         return "n/a"
     sign = "+" if value >= 0 else "-"
@@ -131,11 +101,7 @@ def _make_change(
     detail: Optional[str] = None,
     delta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Build one structured top-change entry.
-
-    `importance` is semantic rather than purely numeric.
-    """
+    """Build one structured top-change entry."""
     return {
         "importance": int(importance),
         "domain": domain,
@@ -148,9 +114,7 @@ def _make_change(
 
 
 def _sort_changes(changes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Sort change entries by semantic importance first, then significance.
-    """
+    """Sort change entries by importance, then significance."""
     return sorted(
         changes,
         key=lambda item: (
@@ -162,9 +126,7 @@ def _sort_changes(changes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def _phase_deltas(compare_payload: Dict[str, Any]) -> Dict[str, float]:
-    """
-    Return available step split percentage-point deltas by phase.
-    """
+    """Return available step split percentage-point deltas by phase."""
     split_pct = _metric_block(compare_payload, "step_time", "split_pct")
     out: Dict[str, float] = {}
 
