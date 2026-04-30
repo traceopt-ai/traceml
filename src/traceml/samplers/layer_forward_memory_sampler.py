@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from traceml.hooks.layer_forward_memory_hooks import (
+from traceml.instrumentation.hooks.layer_forward_memory_hooks import (
     get_layer_forward_memory_queue,
 )
 from traceml.samplers.base_sampler import BaseSampler
