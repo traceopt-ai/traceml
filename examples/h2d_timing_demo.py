@@ -27,7 +27,7 @@ import glob
 import json
 import os
 import sqlite3
-
+import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -68,7 +68,16 @@ def find_db() -> str | None:
     session_id = os.environ.get("TRACEML_SESSION_ID", "").strip()
     logs_dir = os.environ.get("TRACEML_LOGS_DIR", "").strip()
     if session_id and logs_dir:
-        db = os.path.join(logs_dir, session_id, "aggregator", "telemetry")
+        # logs_dir may be relative — resolve from cwd set by the launcher
+        launch_cwd = (
+            os.environ.get("TRACEML_LAUNCH_CWD", "").strip() or os.getcwd()
+        )
+        logs_dir_abs = (
+            os.path.join(launch_cwd, logs_dir)
+            if not os.path.isabs(logs_dir)
+            else logs_dir
+        )
+        db = os.path.join(logs_dir_abs, session_id, "aggregator", "telemetry")
         if os.path.exists(db):
             return db
 
@@ -185,14 +194,23 @@ def main():
     print("\nTraining done. Waiting for final summary...")
     traceml.final_summary(print_text=True)
 
-    # Find the session DB and print H2D timings
+    # Print the DB path to stderr so it appears in the terminal AFTER the TUI
+    # exits (TUI captures stdout; stderr goes to the panel but the path line
+    # will also be echoed to the terminal by the launcher).
     db_path = find_db()
     if db_path:
-        print(f"\nDB: {db_path}")
+        print(f"\n[H2D demo] DB path: {db_path}", file=sys.stderr)
+        print(
+            "[H2D demo] Query H2D timings with:\n"
+            f"  sqlite3 {db_path} "
+            '"SELECT step, events_json FROM step_time_samples ORDER BY step;"',
+            file=sys.stderr,
+        )
         print_h2d_results(db_path)
     else:
         print(
-            "DB not found. Make sure you ran with: traceml run examples/h2d_timing_demo.py"
+            "DB not found. Make sure you ran with: traceml run examples/h2d_timing_demo.py",
+            file=sys.stderr,
         )
 
 
