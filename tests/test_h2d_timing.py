@@ -339,19 +339,27 @@ class TestWrapH2D:
 
 
 class TestInitConfigH2D:
-    def test_auto_mode_enables_h2d(self):
+    def test_auto_mode_enables_h2d(self, monkeypatch):
         initialization = _reload_initialization()
+        monkeypatch.setattr(
+            initialization, "_apply_requested_patches", lambda cfg: None
+        )
         cfg = initialization.init(mode="auto")
         assert cfg.patch_h2d is True
 
-    def test_manual_mode_disables_h2d(self):
+    def test_manual_mode_disables_h2d(self, monkeypatch):
         initialization = _reload_initialization()
+        monkeypatch.setattr(
+            initialization, "_apply_requested_patches", lambda cfg: None
+        )
         cfg = initialization.init(mode="manual")
         assert cfg.patch_h2d is False
 
     def test_selective_mode_with_h2d_true(self, monkeypatch):
         initialization = _reload_initialization()
-        monkeypatch.setattr(h2d_patch, "patch_h2d", lambda: None)
+        monkeypatch.setattr(
+            initialization, "_apply_requested_patches", lambda cfg: None
+        )
 
         cfg = initialization.init(mode="selective", patch_h2d=True)
         assert cfg.patch_h2d is True
@@ -360,7 +368,9 @@ class TestInitConfigH2D:
         self, monkeypatch
     ):
         initialization = _reload_initialization()
-        monkeypatch.setattr(fwd_patch, "patch_forward", lambda: None)
+        monkeypatch.setattr(
+            initialization, "_apply_requested_patches", lambda cfg: None
+        )
 
         cfg = initialization.init(
             mode="selective", patch_forward=True, patch_h2d=False
@@ -370,7 +380,9 @@ class TestInitConfigH2D:
 
     def test_selective_mode_h2d_only(self, monkeypatch):
         initialization = _reload_initialization()
-        monkeypatch.setattr(h2d_patch, "patch_h2d", lambda: None)
+        monkeypatch.setattr(
+            initialization, "_apply_requested_patches", lambda cfg: None
+        )
 
         cfg = initialization.init(mode="selective", patch_h2d=True)
         assert cfg.mode == "selective"
