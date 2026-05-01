@@ -4,8 +4,10 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from traceml.diagnostics.bands import Band
 from traceml.diagnostics.common import diagnosis_to_dict
 from traceml.diagnostics.system import build_system_diagnosis_result
+from traceml.diagnostics.system.policy import DEFAULT_SYSTEM_POLICY
 from traceml.reporting.summaries.issue_summary import (
     issues_by_metric_json,
     issues_by_rank_json,
@@ -23,6 +25,37 @@ from traceml.reporting.summaries.summary_io import (
 )
 
 MAX_SUMMARY_ROWS = 10_000
+
+
+def _table_has_column(
+    conn: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table_name});").fetchall()
+    return any(str(row[1]) == column_name for row in rows)
+
+
+def _percent(
+    numerator: Optional[float],
+    denominator: Optional[float],
+) -> Optional[float]:
+    if numerator is None or denominator is None or float(denominator) <= 0.0:
+        return None
+    return max(0.0, float(numerator) / float(denominator) * 100.0)
+
+
+def _band_name(band: Optional[Band]) -> Optional[str]:
+    return None if band is None else str(band)
+
+
+def _format_percent_stat(
+    label: str,
+    value: Optional[float],
+) -> Optional[str]:
+    if value is None:
+        return None
+    return f"{label} {float(value):.0f}%"
 
 
 @dataclass
@@ -91,6 +124,7 @@ class PerGPUSummary:
 
     power_avg_w: Optional[float] = None
     power_peak_w: Optional[float] = None
+    power_limit_w: Optional[float] = None
 
 
 def _load_system_summary_agg(
@@ -236,6 +270,12 @@ def _load_per_gpu_summary(
         where_clause = "WHERE s.rank = ?"
         params.append(int(rank))
 
+    power_limit_expr = (
+        "MAX(g.power_limit_w)"
+        if _table_has_column(conn, "system_gpu_samples", "power_limit_w")
+        else "NULL"
+    )
+
     sql = f"""
         SELECT
             g.gpu_idx,
@@ -251,7 +291,8 @@ def _load_per_gpu_summary(
             MAX(g.temperature_c),
 
             AVG(g.power_usage_w),
-            MAX(g.power_usage_w)
+            MAX(g.power_usage_w),
+            {power_limit_expr}
 
         FROM system_gpu_samples AS g
         INNER JOIN (
@@ -283,55 +324,38 @@ def _load_per_gpu_summary(
             temp_peak_c=float(row[7]) if row[7] is not None else None,
             power_avg_w=float(row[8]) if row[8] is not None else None,
             power_peak_w=float(row[9]) if row[9] is not None else None,
+            power_limit_w=float(row[10]) if row[10] is not None else None,
         )
     return out
 
 
-def _build_gpu_line(
+def _highest_gpu_memory_percent(
+    per_gpu: Dict[int, PerGPUSummary],
+) -> Optional[float]:
+    values = [
+        _percent(item.mem_peak_bytes, item.mem_total_bytes)
+        for item in per_gpu.values()
+    ]
+    values = [value for value in values if value is not None]
+    return max(values) if values else None
+
+
+def _build_stats_line(
+    agg: SystemSummaryAgg,
     *,
-    gpu_available: Optional[bool],
-    gpu_count: Optional[int],
-    gpu_util_avg_percent: Optional[float],
-    gpu_util_peak_percent: Optional[float],
-    gpu_mem_peak_gb: Optional[float],
-    gpu_temp_peak_c: Optional[float],
+    per_gpu: Dict[int, PerGPUSummary],
 ) -> str:
-    """
-    Build one compact GPU line for the printed summary.
+    ram_peak_percent = _percent(agg.ram_peak_bytes, agg.ram_total_bytes)
+    gpu_mem_peak_percent = _highest_gpu_memory_percent(per_gpu)
 
-    The printed end-of-run summary is intentionally compact. We therefore keep:
-    - availability / absence
-    - utilization
-    - peak memory
-    - peak temperature
-
-    More detailed GPU fields remain available in JSON.
-    """
-    if gpu_util_avg_percent is not None:
-        parts = [
-            f"util avg {format_optional(gpu_util_avg_percent, '%', 1)}",
-            f"peak {format_optional(gpu_util_peak_percent, '%', 1)}",
-        ]
-
-        if gpu_mem_peak_gb is not None:
-            parts.append(
-                f"mem peak {format_optional(gpu_mem_peak_gb, ' GB', 1)}"
-            )
-
-        if gpu_temp_peak_c is not None:
-            parts.append(
-                f"temp peak {format_optional(gpu_temp_peak_c, ' C', 1)}"
-            )
-
-        return "GPU: " + " | ".join(parts)
-
-    if gpu_available is False:
-        return "GPU: unavailable"
-
-    if (gpu_count or 0) > 0:
-        return "GPU: detected, but no per-GPU samples were recorded"
-
-    return "GPU: n/a"
+    parts = [
+        _format_percent_stat("CPU avg", agg.cpu_avg_percent),
+        _format_percent_stat("RAM peak", ram_peak_percent),
+        _format_percent_stat("GPU util avg", agg.gpu_util_avg_percent),
+        _format_percent_stat("GPU memory peak", gpu_mem_peak_percent),
+    ]
+    rendered = [part for part in parts if part is not None]
+    return " | ".join(rendered) if rendered else "unavailable"
 
 
 def _per_gpu_to_json(
@@ -343,16 +367,44 @@ def _per_gpu_to_json(
     out: Dict[str, Dict[str, Optional[float]]] = {}
 
     for gpu_idx, item in sorted(per_gpu.items()):
+        mem_peak_percent = _percent(item.mem_peak_bytes, item.mem_total_bytes)
+        power_avg_limit_percent = _percent(
+            item.power_avg_w,
+            item.power_limit_w,
+        )
         out[str(gpu_idx)] = {
             "util_avg_percent": item.util_avg_percent,
             "util_peak_percent": item.util_peak_percent,
+            "util_avg_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_util_avg_percent.classify(
+                    item.util_avg_percent
+                )
+            ),
             "mem_avg_gb": bytes_to_gb(item.mem_avg_bytes),
             "mem_peak_gb": bytes_to_gb(item.mem_peak_bytes),
             "mem_total_gb": bytes_to_gb(item.mem_total_bytes),
+            "mem_peak_percent": mem_peak_percent,
+            "mem_peak_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_memory_peak_percent.classify(
+                    mem_peak_percent
+                )
+            ),
             "temp_avg_c": item.temp_avg_c,
             "temp_peak_c": item.temp_peak_c,
+            "temp_peak_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_temp_peak_c.classify(
+                    item.temp_peak_c
+                )
+            ),
             "power_avg_w": item.power_avg_w,
             "power_peak_w": item.power_peak_w,
+            "power_limit_w": item.power_limit_w,
+            "power_avg_limit_percent": power_avg_limit_percent,
+            "power_avg_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_power_avg_limit_percent.classify(
+                    power_avg_limit_percent
+                )
+            ),
         }
 
     return out
@@ -383,6 +435,7 @@ def _per_gpu_to_diagnosis_input(
             "temp_peak_c": item.temp_peak_c,
             "power_avg_w": item.power_avg_w,
             "power_peak_w": item.power_peak_w,
+            "power_limit_w": item.power_limit_w,
         }
 
     return out
@@ -439,9 +492,22 @@ def _build_system_card(
     ram_avg_gb = bytes_to_gb(agg.ram_avg_bytes)
     ram_peak_gb = bytes_to_gb(agg.ram_peak_bytes)
     ram_total_gb = bytes_to_gb(agg.ram_total_bytes)
+    ram_peak_percent = _percent(agg.ram_peak_bytes, agg.ram_total_bytes)
 
     gpu_mem_avg_gb = bytes_to_gb(agg.gpu_mem_avg_bytes)
     gpu_mem_peak_gb = bytes_to_gb(agg.gpu_mem_peak_bytes)
+    gpu_mem_peak_percent = _highest_gpu_memory_percent(per_gpu)
+    gpu_power_avg_limit_percent = max(
+        (
+            value
+            for value in (
+                _percent(item.power_avg_w, item.power_limit_w)
+                for item in per_gpu.values()
+            )
+            if value is not None
+        ),
+        default=None,
+    )
     per_gpu_for_diagnosis = _per_gpu_to_diagnosis_input(per_gpu)
 
     hottest_gpu_idx = _best_gpu_idx(per_gpu, "temp_peak_c")
@@ -497,25 +563,9 @@ def _build_system_card(
     lines = [
         f"TraceML System Summary | duration {format_optional(duration_s, 's', 1)} | samples {agg.system_samples}",
         "System",
-        f"- CPU: avg {format_optional(agg.cpu_avg_percent, '%', 1)}, peak {format_optional(agg.cpu_peak_percent, '%', 1)}",
-        (
-            f"- RAM: avg {format_optional(ram_avg_gb, ' GB', 1)}, "
-            f"peak {format_optional(ram_peak_gb, ' GB', 1)} / {format_optional(ram_total_gb, ' GB', 1)}"
-        ),
-        (
-            "- "
-            + _build_gpu_line(
-                gpu_available=agg.gpu_available,
-                gpu_count=agg.gpu_count,
-                gpu_util_avg_percent=agg.gpu_util_avg_percent,
-                gpu_util_peak_percent=agg.gpu_util_peak_percent,
-                gpu_mem_peak_gb=gpu_mem_peak_gb,
-                gpu_temp_peak_c=agg.gpu_temp_peak_c,
-            )
-        ),
         f"- Diagnosis: {primary_diagnosis.status}",
+        f"- Stats: {_build_stats_line(agg, per_gpu=per_gpu)}",
         f"- Why: {primary_diagnosis.reason}",
-        f"- Next: {primary_diagnosis.action}",
     ]
     issue_text = issues_compact_text(issues, max_items=4)
     if issue_text:
@@ -526,23 +576,56 @@ def _build_system_card(
         "cpu": {
             "avg_percent": agg.cpu_avg_percent,
             "peak_percent": agg.cpu_peak_percent,
+            "avg_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.cpu_avg_percent.classify(
+                    agg.cpu_avg_percent
+                )
+            ),
         },
         "ram": {
             "avg_gb": ram_avg_gb,
             "peak_gb": ram_peak_gb,
             "total_gb": ram_total_gb,
+            "peak_percent": ram_peak_percent,
+            "peak_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.ram_peak_percent.classify(
+                    ram_peak_percent
+                )
+            ),
         },
         "gpu_rollup": {
             "available": agg.gpu_available,
             "count": agg.gpu_count,
             "util_avg_percent": agg.gpu_util_avg_percent,
             "util_peak_percent": agg.gpu_util_peak_percent,
+            "util_avg_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_util_avg_percent.classify(
+                    agg.gpu_util_avg_percent
+                )
+            ),
             "mem_avg_gb": gpu_mem_avg_gb,
             "mem_peak_gb": gpu_mem_peak_gb,
+            "mem_peak_percent": gpu_mem_peak_percent,
+            "mem_peak_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_memory_peak_percent.classify(
+                    gpu_mem_peak_percent
+                )
+            ),
             "temp_avg_c": agg.gpu_temp_avg_c,
             "temp_peak_c": agg.gpu_temp_peak_c,
+            "temp_peak_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_temp_peak_c.classify(
+                    agg.gpu_temp_peak_c
+                )
+            ),
             "power_avg_w": agg.gpu_power_avg_w,
             "power_peak_w": agg.gpu_power_peak_w,
+            "power_avg_limit_percent": gpu_power_avg_limit_percent,
+            "power_avg_band": _band_name(
+                DEFAULT_SYSTEM_POLICY.gpu_power_avg_limit_percent.classify(
+                    gpu_power_avg_limit_percent
+                )
+            ),
             "hottest_gpu_idx": hottest_gpu_idx,
             "hottest_gpu_temp_peak_c": hottest_gpu_temp_peak_c,
             "highest_mem_gpu_idx": highest_mem_gpu_idx,
@@ -562,6 +645,7 @@ def _build_system_card(
         "primary_diagnosis": diagnosis_to_dict(
             primary_diagnosis,
             drop_none=True,
+            include_action=False,
         ),
         "issues": issues_to_json(issues),
         "issues_by_rank": issues_by_rank,

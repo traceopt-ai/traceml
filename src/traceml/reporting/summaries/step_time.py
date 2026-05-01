@@ -682,7 +682,6 @@ def _build_step_time_card(
     if summary_diag_presented is not None:
         lines.append(f"- Diagnosis: {summary_diag_presented.status}")
         lines.append(f"- Why: {summary_diag_presented.reason}")
-        lines.append(f"- Next: {summary_diag_presented.action}")
         if summary_diag_presented.note:
             lines.append(f"- Note: {summary_diag_presented.note}")
 
@@ -713,7 +712,8 @@ def _build_step_time_card(
             "steps_analyzed_per_rank": steps_analyzed_by_rank,
         },
         "primary_diagnosis": diagnosis_presentation_to_json(
-            summary_diag_presented
+            summary_diag_presented,
+            include_action=False,
         ),
         "issues": issues_to_json(issues),
         "issues_by_rank": issues_by_rank,

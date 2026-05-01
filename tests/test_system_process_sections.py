@@ -112,6 +112,17 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.section == "system"
     assert result.payload["overview"]["samples"] == 1
     assert "TraceML System Summary" in result.text
+    assert "- Diagnosis: NORMAL" in result.text
+    assert (
+        "- Stats: CPU avg 40% | RAM peak 50% | "
+        "GPU util avg 55% | GPU memory peak 50%"
+    ) in result.text
+    assert "GPU:" not in result.text
+    assert result.payload["global"]["cpu"]["avg_band"] == "normal"
+    assert result.payload["global"]["ram"]["peak_band"] == "normal"
+    assert result.payload["global"]["gpu_rollup"]["util_avg_band"] == "normal"
+    assert result.payload["global"]["gpu_rollup"]["mem_peak_band"] == "normal"
+    assert result.payload["per_gpu"]["0"]["mem_peak_percent"] == 50.0
 
 
 def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):

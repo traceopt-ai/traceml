@@ -681,7 +681,6 @@ def _build_process_card(
         f"- Takeaway: {takeaway}",
         f"- Diagnosis: {primary_diagnosis.status}",
         f"- Why: {primary_diagnosis.reason}",
-        f"- Next: {primary_diagnosis.action}",
     ]
     issue_text = issues_compact_text(issues, max_items=4)
     if issue_text:
@@ -734,6 +733,7 @@ def _build_process_card(
         "primary_diagnosis": diagnosis_to_dict(
             primary_diagnosis,
             drop_none=True,
+            include_action=False,
         ),
         "issues": issues_to_json(issues),
         "issues_by_rank": issues_by_rank,

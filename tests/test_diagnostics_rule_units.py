@@ -37,10 +37,13 @@ from traceml.diagnostics.step_time.rules import (
 from traceml.diagnostics.system.api import build_system_diagnosis_result
 from traceml.diagnostics.system.context import build_system_summary_signals
 from traceml.diagnostics.system.rules import (
-    GPUUtilImbalanceRule,
-    HighCPUPressureRule,
-    HighRAMPressureRule,
+    HighCPURule,
+    HighGPUMemoryRule,
+    HighGPUPowerRule,
+    HighGPUTemperatureRule,
+    HighHostMemoryRule,
     LowGPUUtilizationRule,
+    VeryHighGPUMemoryRule,
 )
 from traceml.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
@@ -418,8 +421,16 @@ def _system_signals(**overrides):
         gpu_power_avg_w=None,
         gpu_power_peak_w=None,
         per_gpu={
-            0: {"util_avg_percent": 70.0, "mem_peak_bytes": 200.0},
-            1: {"util_avg_percent": 68.0, "mem_peak_bytes": 210.0},
+            0: {
+                "util_avg_percent": 70.0,
+                "mem_peak_bytes": 200.0,
+                "mem_total_bytes": 1000.0,
+            },
+            1: {
+                "util_avg_percent": 68.0,
+                "mem_peak_bytes": 210.0,
+                "mem_total_bytes": 1000.0,
+            },
         },
     )
     values.update(overrides)
@@ -441,41 +452,96 @@ def test_system_rules_trigger_and_no_trigger_cases() -> None:
     )
 
     assert (
-        HighCPUPressureRule()
-        .evaluate(_system_signals(cpu_avg_percent=95.0))
-        .kind
-        == "HIGH_CPU_PRESSURE"
+        HighCPURule().evaluate(_system_signals(cpu_avg_percent=95.0)).kind
+        == "HIGH_CPU"
     )
     assert (
-        HighCPUPressureRule().evaluate(_system_signals(cpu_avg_percent=50.0))
-        is None
+        HighCPURule().evaluate(_system_signals(cpu_avg_percent=50.0)) is None
     )
 
     assert (
-        HighRAMPressureRule()
+        HighHostMemoryRule()
         .evaluate(_system_signals(ram_peak_bytes=930.0))
         .kind
-        == "HIGH_RAM_PRESSURE"
+        == "HIGH_HOST_MEMORY"
     )
     assert (
-        HighRAMPressureRule().evaluate(_system_signals(ram_peak_bytes=500.0))
+        HighHostMemoryRule().evaluate(_system_signals(ram_peak_bytes=500.0))
         is None
     )
 
     assert (
-        GPUUtilImbalanceRule()
+        HighGPUMemoryRule()
         .evaluate(
             _system_signals(
                 per_gpu={
-                    0: {"util_avg_percent": 90.0, "mem_peak_bytes": 200.0},
-                    1: {"util_avg_percent": 40.0, "mem_peak_bytes": 210.0},
+                    0: {
+                        "util_avg_percent": 70.0,
+                        "mem_peak_bytes": 850.0,
+                        "mem_total_bytes": 1000.0,
+                    },
                 }
             )
         )
         .kind
-        == "GPU_UTIL_IMBALANCE"
+        == "HIGH_GPU_MEMORY"
     )
-    assert GPUUtilImbalanceRule().evaluate(_system_signals()) is None
+    assert HighGPUMemoryRule().evaluate(_system_signals()) is None
+
+    assert (
+        VeryHighGPUMemoryRule()
+        .evaluate(
+            _system_signals(
+                per_gpu={
+                    0: {
+                        "util_avg_percent": 70.0,
+                        "mem_peak_bytes": 930.0,
+                        "mem_total_bytes": 1000.0,
+                    },
+                }
+            )
+        )
+        .kind
+        == "VERY_HIGH_GPU_MEMORY"
+    )
+
+    assert (
+        HighGPUTemperatureRule()
+        .evaluate(
+            _system_signals(
+                gpu_temp_peak_c=90.0,
+                per_gpu={
+                    0: {
+                        "util_avg_percent": 70.0,
+                        "mem_peak_bytes": 200.0,
+                        "mem_total_bytes": 1000.0,
+                        "temp_peak_c": 90.0,
+                    },
+                },
+            )
+        )
+        .kind
+        == "HIGH_GPU_TEMPERATURE"
+    )
+
+    assert (
+        HighGPUPowerRule()
+        .evaluate(
+            _system_signals(
+                per_gpu={
+                    0: {
+                        "util_avg_percent": 70.0,
+                        "mem_peak_bytes": 200.0,
+                        "mem_total_bytes": 1000.0,
+                        "power_avg_w": 90.0,
+                        "power_limit_w": 100.0,
+                    },
+                }
+            )
+        )
+        .kind
+        == "HIGH_GPU_POWER"
+    )
 
 
 def test_system_primary_selection_uses_highest_severity_issue() -> None:
@@ -492,15 +558,21 @@ def test_system_primary_selection_uses_highest_severity_issue() -> None:
         gpu_util_avg_percent=70.0,
         gpu_util_peak_percent=90.0,
         gpu_mem_avg_bytes=100.0,
-        gpu_mem_peak_bytes=200.0,
+        gpu_mem_peak_bytes=950.0,
         gpu_temp_avg_c=None,
         gpu_temp_peak_c=None,
         gpu_power_avg_w=None,
         gpu_power_peak_w=None,
-        per_gpu={},
+        per_gpu={
+            0: {
+                "util_avg_percent": 70.0,
+                "mem_peak_bytes": 950.0,
+                "mem_total_bytes": 1000.0,
+            },
+        },
     )
 
-    assert result.primary.kind == "HIGH_CPU_PRESSURE"
+    assert result.primary.kind == "VERY_HIGH_GPU_MEMORY"
     assert result.primary.severity == "crit"
 
 

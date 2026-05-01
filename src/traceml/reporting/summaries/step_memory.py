@@ -528,11 +528,6 @@ def _build_step_memory_card(
                     if no_gpu_diagnosis is not None
                     else "- Why: No step-memory data was collected."
                 ),
-                (
-                    f"- Next: {no_gpu_diagnosis['action']}"
-                    if no_gpu_diagnosis is not None
-                    else "- Next: Run longer or collect more memory steps."
-                ),
             ]
         )
 
@@ -545,7 +540,10 @@ def _build_step_memory_card(
                 "window_size": None,
                 "steps_used": 0,
             },
-            "primary_diagnosis": no_gpu_presented,
+            "primary_diagnosis": diagnosis_presentation_to_json(
+                no_gpu_presented,
+                include_action=False,
+            ),
             "issues": [],
             "issues_by_rank": {},
             "issues_by_metric": {},
@@ -578,7 +576,6 @@ def _build_step_memory_card(
     if diagnosis_presented is not None:
         lines.append(f"- Diagnosis: {diagnosis_presented.status}")
         lines.append(f"- Why: {diagnosis_presented.reason}")
-        lines.append(f"- Next: {diagnosis_presented.action}")
 
     if single_rank:
         lines.append(
@@ -657,7 +654,8 @@ def _build_step_memory_card(
             "completed_step": primary.coverage.completed_step,
         },
         "primary_diagnosis": diagnosis_presentation_to_json(
-            diagnosis_presented
+            diagnosis_presented,
+            include_action=False,
         ),
         "issues": issues_to_json(issues),
         "issues_by_rank": issues_by_rank,

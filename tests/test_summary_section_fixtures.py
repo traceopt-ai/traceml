@@ -472,6 +472,8 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
 
     assert payload["overview"]["training_steps"] == 2
     assert payload["primary_diagnosis"]["status"] == "NO GPU"
+    assert "action" not in payload["primary_diagnosis"]
+    assert "- Next:" not in payload["card"]
     assert payload["global"]["analysis_window"]["steps_used"] == 0
     assert payload["issues"] == []
 
@@ -520,3 +522,10 @@ def test_final_summary_fixture_schema_contains_all_sections(
         assert "overview" in payload[key]
         assert "card" in payload[key]
         assert "primary_diagnosis" in payload[key]
+        assert "- Next:" not in payload[key]["card"]
+        diagnosis = payload[key]["primary_diagnosis"]
+        if diagnosis is not None:
+            assert "action" not in diagnosis
+    assert payload["system"]["primary_diagnosis"]["status"] == "NORMAL"
+    assert "NO GPU" not in payload["system"]["card"]
+    assert "- Next:" not in payload["text"]
