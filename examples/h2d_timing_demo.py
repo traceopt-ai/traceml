@@ -192,7 +192,7 @@ def main():
             print(f"Step {step}/{NUM_STEPS} | loss: {loss.item():.4f}")
 
     print("\nTraining done. Waiting for final summary...")
-    traceml.final_summary(print_text=True)
+    traceml.final_summary()
 
     # Print the DB path to stderr so it appears in the terminal AFTER the TUI
     # exits (TUI captures stdout; stderr goes to the panel but the path line
