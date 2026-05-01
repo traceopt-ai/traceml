@@ -49,9 +49,7 @@ from traceml.instrumentation.patches.backward_auto_timer_patch import (
 from traceml.instrumentation.patches.forward_auto_timer_patch import (
     forward_auto_timer,
 )
-from traceml.instrumentation.patches.h2d_auto_timer_patch import (
-    h2d_auto_timer,
-)
+from traceml.instrumentation.patches.h2d_auto_timer_patch import h2d_auto_timer
 from traceml.runtime.state import TraceSessionState, get_trace_session_state
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_step_events
