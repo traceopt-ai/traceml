@@ -17,7 +17,7 @@ timings per step so you can see the data with no extra tooling.
 
 Usage
 -----
-    python examples/h2d_timing_demo.py
+    traceml run examples/h2d_timing_demo.py
 
 Requires a CUDA GPU for meaningful H2D timings (works on CPU too, timings
 will just be near-zero).
@@ -57,12 +57,35 @@ class TinyMLP(nn.Module):
         return self.net(x)
 
 
-def find_db(session_dir: str) -> str | None:
-    """Return path to traceml.db inside a session directory."""
-    matches = glob.glob(
-        os.path.join(session_dir, "**", "traceml.db"), recursive=True
-    )
-    return matches[0] if matches else None
+def find_db() -> str | None:
+    """
+    Locate the TraceML SQLite DB for this session.
+
+    The aggregator writes to ``{session_root}/aggregator/telemetry`` (no
+    .db extension). The launcher sets TRACEML_SESSION_ID and TRACEML_LOGS_DIR
+    in the executor environment, so we can derive the path directly.
+    """
+    session_id = os.environ.get("TRACEML_SESSION_ID", "").strip()
+    logs_dir = os.environ.get("TRACEML_LOGS_DIR", "").strip()
+    if session_id and logs_dir:
+        db = os.path.join(logs_dir, session_id, "aggregator", "telemetry")
+        if os.path.exists(db):
+            return db
+
+    # Fallback: scan common log roots for any 'telemetry' file
+    for root in [
+        os.path.join(os.path.dirname(__file__), "logs"),
+        os.path.join(os.getcwd(), "logs"),
+    ]:
+        matches = sorted(
+            glob.glob(
+                os.path.join(root, "**/aggregator/telemetry"), recursive=True
+            )
+        )
+        if matches:
+            return matches[-1]  # most recent session
+
+    return None
 
 
 def print_h2d_results(db_path: str) -> None:
@@ -160,26 +183,17 @@ def main():
             print(f"Step {step}/{NUM_STEPS} | loss: {loss.item():.4f}")
 
     print("\nTraining done. Waiting for final summary...")
-    summary = traceml.final_summary(print_text=True)
+    traceml.final_summary(print_text=True)
 
     # Find the session DB and print H2D timings
-    if summary and "session_dir" in summary:
-        db_path = find_db(summary["session_dir"])
-        if db_path:
-            print(f"\nDB: {db_path}")
-            print_h2d_results(db_path)
-        else:
-            print("DB not found in session dir.")
+    db_path = find_db()
+    if db_path:
+        print(f"\nDB: {db_path}")
+        print_h2d_results(db_path)
     else:
-        # Fallback: search under examples/logs/
-        log_root = os.path.join(os.path.dirname(__file__), "logs")
-        dbs = sorted(
-            glob.glob(os.path.join(log_root, "**/traceml.db"), recursive=True)
+        print(
+            "DB not found. Make sure you ran with: traceml run examples/h2d_timing_demo.py"
         )
-        if dbs:
-            db_path = dbs[-1]  # most recent
-            print(f"\nDB: {db_path}")
-            print_h2d_results(db_path)
 
 
 if __name__ == "__main__":
