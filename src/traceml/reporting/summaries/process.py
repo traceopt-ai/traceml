@@ -4,12 +4,13 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from traceml.diagnostics.bands import Band
 from traceml.diagnostics.common import diagnosis_to_dict
 from traceml.diagnostics.process import build_process_diagnosis_result
+from traceml.diagnostics.process.policy import DEFAULT_PROCESS_POLICY
 from traceml.reporting.summaries.issue_summary import (
     issues_by_metric_json,
     issues_by_rank_json,
-    issues_compact_text,
     issues_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import (
@@ -25,6 +26,31 @@ from traceml.reporting.summaries.summary_io import (
 )
 
 MAX_SUMMARY_ROWS = 10_000
+
+
+def _band_name(band: Optional[Band]) -> Optional[str]:
+    return None if band is None else str(band)
+
+
+def _format_percent_stat(
+    label: str,
+    value: Optional[float],
+) -> Optional[str]:
+    if value is None:
+        return None
+    return f"{label} {float(value):.0f}%"
+
+
+def _format_memory_stat(
+    label: str,
+    value_gb: Optional[float],
+    total_gb: Optional[float],
+) -> Optional[str]:
+    if value_gb is None:
+        return None
+    if total_gb is None:
+        return f"{label} {float(value_gb):.1f} GB"
+    return f"{label} {float(value_gb):.1f} / {float(total_gb):.1f} GB"
 
 
 @dataclass
@@ -64,6 +90,7 @@ class ProcessSummaryAgg:
     gpu_mem_reserved_avg_bytes: Optional[float] = None
     gpu_mem_reserved_peak_bytes: Optional[float] = None
     gpu_mem_total_bytes: Optional[float] = None
+    gpu_mem_reserved_overhang_ratio: Optional[float] = None
 
 
 @dataclass
@@ -102,6 +129,7 @@ class PerRankProcessSummary:
     gpu_mem_reserved_avg_bytes: Optional[float] = None
     gpu_mem_reserved_peak_bytes: Optional[float] = None
     gpu_mem_total_bytes: Optional[float] = None
+    gpu_mem_reserved_overhang_ratio: Optional[float] = None
 
 
 def _load_process_summary_agg(
@@ -274,7 +302,16 @@ def _load_per_rank_process_summary(
             MAX(gpu_mem_used_bytes),
             AVG(gpu_mem_reserved_bytes),
             MAX(gpu_mem_reserved_bytes),
-            MAX(gpu_mem_total_bytes)
+            MAX(gpu_mem_total_bytes),
+            MAX(
+                CASE
+                    WHEN gpu_mem_used_bytes IS NOT NULL
+                     AND gpu_mem_used_bytes > 0
+                     AND gpu_mem_reserved_bytes IS NOT NULL
+                    THEN gpu_mem_reserved_bytes / gpu_mem_used_bytes
+                    ELSE NULL
+                END
+            )
 
         FROM (
             SELECT *
@@ -320,111 +357,51 @@ def _load_per_rank_process_summary(
             gpu_mem_total_bytes=(
                 float(row[15]) if row[15] is not None else None
             ),
+            gpu_mem_reserved_overhang_ratio=(
+                float(row[16]) if row[16] is not None else None
+            ),
         )
     return out
 
 
-def _build_takeaway(agg: ProcessSummaryAgg) -> str:
-    """
-    Build one concise process-centric takeaway line.
-
-    The goal is to highlight a useful process-local interpretation rather than
-    merely restating raw averages.
-    """
-    if agg.process_samples <= 0:
-        return "n/a"
-
-    if agg.gpu_available and agg.gpu_mem_total_bytes is not None:
-        used_peak_pct = share_percent(
-            agg.gpu_mem_used_peak_bytes,
-            agg.gpu_mem_total_bytes,
-        )
-        if (
-            agg.gpu_mem_reserved_peak_bytes is not None
-            and agg.gpu_mem_used_peak_bytes is not None
-            and agg.gpu_mem_reserved_peak_bytes
-            > agg.gpu_mem_used_peak_bytes * 1.25
-        ):
-            return "reserved GPU memory exceeds active use."
-
-        if used_peak_pct is not None and used_peak_pct >= 90.0:
-            return "GPU memory use is close to capacity"
-        if used_peak_pct is not None and used_peak_pct <= 20.0:
-            return "GPU memory use stayed low"
-
+def _cpu_capacity_percent(agg: ProcessSummaryAgg) -> Optional[float]:
     if (
-        agg.cpu_avg_percent is not None
-        and agg.cpu_logical_core_count is not None
-        and agg.cpu_logical_core_count > 0
+        agg.cpu_avg_percent is None
+        or agg.cpu_logical_core_count is None
+        or agg.cpu_logical_core_count <= 0
     ):
-        approx_single_core_pct = 100.0 / agg.cpu_logical_core_count
-        if agg.cpu_avg_percent <= approx_single_core_pct * 1.5:
-            return "CPU usage stayed low"
+        return None
+    return max(
+        0.0,
+        float(agg.cpu_avg_percent)
+        / (100.0 * float(agg.cpu_logical_core_count))
+        * 100.0,
+    )
 
-    return "stable overall"
 
-
-def _build_gpu_line(
+def _build_stats_line(
+    agg: ProcessSummaryAgg,
     *,
-    gpu_available: Optional[bool],
-    gpu_count: Optional[int],
-    gpu_device_index: Optional[int],
-    gpu_mem_used_peak_gb: Optional[float],
-    gpu_mem_total_gb: Optional[float],
+    ram_peak_gb: Optional[float],
+    ram_total_gb: Optional[float],
     gpu_mem_used_peak_pct: Optional[float],
-    gpu_mem_reserved_peak_gb: Optional[float],
     gpu_mem_reserved_peak_pct: Optional[float],
 ) -> str:
-    """
-    Build one compact GPU line for the printed summary.
-
-    This keeps the printed summary concise while still surfacing the process
-    GPU memory information that matters most for performance and efficiency:
-    - whether the process touched a GPU
-    - which device it reported against
-    - peak used memory
-    - how close peak used memory came to the limit
-    - whether reserved memory materially exceeded used memory
-    """
-    if gpu_available and gpu_mem_total_gb is not None:
-        device_text = (
-            f"device {gpu_device_index}"
-            if gpu_device_index is not None
-            else "device n/a"
-        )
-        parts = [
-            device_text,
-            f"used peak {format_optional(gpu_mem_used_peak_gb, ' GB', 1)}"
-            f" / {format_optional(gpu_mem_total_gb, ' GB', 1)}",
-        ]
-
-        if gpu_mem_used_peak_pct is not None:
-            parts.append(
-                f"{format_optional(gpu_mem_used_peak_pct, '%', 1)} of limit"
-            )
-
-        if (
-            gpu_mem_reserved_peak_gb is not None
-            and gpu_mem_used_peak_gb is not None
-            and gpu_mem_reserved_peak_gb > gpu_mem_used_peak_gb * 1.25
-        ):
-            parts.append(
-                f"reserved peak {format_optional(gpu_mem_reserved_peak_gb, ' GB', 1)}"
-            )
-            if gpu_mem_reserved_peak_pct is not None:
-                parts.append(
-                    f"reserved {format_optional(gpu_mem_reserved_peak_pct, '%', 1)}"
-                )
-
-        return "GPU: " + " | ".join(parts)
-
-    if gpu_available is False:
-        return "GPU: no GPU process samples were recorded"
-
-    if (gpu_count or 0) > 0:
-        return "GPU: detected, but no process GPU memory samples were recorded"
-
-    return "GPU: n/a"
+    gpu_pct = gpu_mem_reserved_peak_pct or gpu_mem_used_peak_pct
+    gpu_label = (
+        "GPU reserved peak"
+        if gpu_mem_reserved_peak_pct is not None
+        else "GPU used peak"
+    )
+    parts = [
+        f"ranks {agg.distinct_ranks}",
+        f"pids {agg.distinct_pids}",
+        _format_percent_stat("CPU avg", agg.cpu_avg_percent),
+        _format_memory_stat("RSS peak", ram_peak_gb, ram_total_gb),
+        _format_percent_stat(gpu_label, gpu_pct),
+    ]
+    rendered = [part for part in parts if part is not None]
+    return " | ".join(rendered) if rendered else "unavailable"
 
 
 def _per_rank_to_json(
@@ -444,6 +421,7 @@ def _per_rank_to_json(
             item.gpu_mem_reserved_peak_bytes,
             item.gpu_mem_total_bytes,
         )
+        ram_peak_pct = share_percent(item.ram_peak_bytes, item.ram_total_bytes)
 
         total_gb = bytes_to_gb(item.gpu_mem_total_bytes)
         used_peak_gb = bytes_to_gb(item.gpu_mem_used_peak_bytes)
@@ -461,6 +439,10 @@ def _per_rank_to_json(
             "ram_avg_gb": bytes_to_gb(item.ram_avg_bytes),
             "ram_peak_gb": bytes_to_gb(item.ram_peak_bytes),
             "ram_total_gb": bytes_to_gb(item.ram_total_bytes),
+            "ram_peak_percent": ram_peak_pct,
+            "ram_peak_band": _band_name(
+                DEFAULT_PROCESS_POLICY.rss_peak_percent.classify(ram_peak_pct)
+            ),
             "gpu_mem_used_avg_gb": bytes_to_gb(item.gpu_mem_used_avg_bytes),
             "gpu_mem_used_peak_gb": used_peak_gb,
             "gpu_mem_reserved_avg_gb": bytes_to_gb(
@@ -469,7 +451,25 @@ def _per_rank_to_json(
             "gpu_mem_reserved_peak_gb": reserved_peak_gb,
             "gpu_mem_total_gb": total_gb,
             "gpu_mem_used_peak_pct": used_peak_pct,
+            "gpu_mem_used_peak_band": _band_name(
+                DEFAULT_PROCESS_POLICY.gpu_memory_peak_percent.classify(
+                    used_peak_pct
+                )
+            ),
             "gpu_mem_reserved_peak_pct": reserved_peak_pct,
+            "gpu_mem_reserved_peak_band": _band_name(
+                DEFAULT_PROCESS_POLICY.gpu_memory_peak_percent.classify(
+                    reserved_peak_pct
+                )
+            ),
+            "gpu_mem_reserved_overhang_ratio": (
+                item.gpu_mem_reserved_overhang_ratio
+            ),
+            "gpu_mem_reserved_overhang_band": _band_name(
+                DEFAULT_PROCESS_POLICY.gpu_reserved_overhang_ratio.classify(
+                    item.gpu_mem_reserved_overhang_ratio
+                )
+            ),
             "gpu_mem_headroom_gb": (
                 max(total_gb - reserved_peak_gb, 0.0)
                 if total_gb is not None and reserved_peak_gb is not None
@@ -512,6 +512,9 @@ def _per_rank_to_diagnosis_input(
             "gpu_mem_reserved_avg_bytes": item.gpu_mem_reserved_avg_bytes,
             "gpu_mem_reserved_peak_bytes": item.gpu_mem_reserved_peak_bytes,
             "gpu_mem_total_bytes": item.gpu_mem_total_bytes,
+            "gpu_mem_reserved_overhang_ratio": (
+                item.gpu_mem_reserved_overhang_ratio
+            ),
         }
     return out
 
@@ -583,7 +586,21 @@ def _build_process_card(
         agg.gpu_mem_reserved_peak_bytes,
         agg.gpu_mem_total_bytes,
     )
+    cpu_capacity_percent = _cpu_capacity_percent(agg)
+    ram_peak_percent = share_percent(agg.ram_peak_bytes, agg.ram_total_bytes)
     per_rank_for_diagnosis = _per_rank_to_diagnosis_input(per_rank)
+    gpu_reserved_overhang_ratio = max(
+        (
+            item.gpu_mem_reserved_overhang_ratio
+            for item in per_rank.values()
+            if item.gpu_mem_reserved_overhang_ratio is not None
+        ),
+        default=None,
+    )
+    highest_overhang_rank = _best_rank_idx(
+        per_rank,
+        "gpu_mem_reserved_overhang_ratio",
+    )
 
     highest_used_rank = _best_rank_idx(per_rank, "gpu_mem_used_peak_bytes")
     highest_reserved_rank = _best_rank_idx(
@@ -615,7 +632,6 @@ def _build_process_card(
             least_headroom_rank = int(rank_id)
             least_headroom_gb = headroom_gb
 
-    takeaway = _build_takeaway(agg)
     diagnosis_result = build_process_diagnosis_result(
         duration_s=duration_s,
         process_samples=agg.process_samples,
@@ -651,40 +667,19 @@ def _build_process_card(
     lines = [
         f"TraceML Process Summary | duration {format_optional(duration_s, 's', 1)} | samples {agg.process_samples}",
         "Process",
-        (f"- Scope: ranks {agg.distinct_ranks} | pids {agg.distinct_pids}"),
+        f"- Diagnosis: {primary_diagnosis.status}",
         (
-            f"- CPU: avg {format_optional(agg.cpu_avg_percent, '%', 1)}, "
-            f"peak {format_optional(agg.cpu_peak_percent, '%', 1)}"
-            + (
-                f" | cores {format_optional(float(agg.cpu_logical_core_count), '', 0)}"
-                if agg.cpu_logical_core_count is not None
-                else ""
-            )
-        ),
-        (
-            f"- RSS: avg {format_optional(ram_avg_gb, ' GB', 1)}, "
-            f"peak {format_optional(ram_peak_gb, ' GB', 1)} / {format_optional(ram_total_gb, ' GB', 1)}"
-        ),
-        (
-            "- "
-            + _build_gpu_line(
-                gpu_available=agg.gpu_available,
-                gpu_count=agg.gpu_count,
-                gpu_device_index=agg.gpu_device_index,
-                gpu_mem_used_peak_gb=gpu_mem_used_peak_gb,
-                gpu_mem_total_gb=gpu_mem_total_gb,
+            "- Stats: "
+            + _build_stats_line(
+                agg,
+                ram_peak_gb=ram_peak_gb,
+                ram_total_gb=ram_total_gb,
                 gpu_mem_used_peak_pct=gpu_mem_used_peak_pct,
-                gpu_mem_reserved_peak_gb=gpu_mem_reserved_peak_gb,
                 gpu_mem_reserved_peak_pct=gpu_mem_reserved_peak_pct,
             )
         ),
-        f"- Takeaway: {takeaway}",
-        f"- Diagnosis: {primary_diagnosis.status}",
         f"- Why: {primary_diagnosis.reason}",
     ]
-    issue_text = issues_compact_text(issues, max_items=4)
-    if issue_text:
-        lines.append(f"- Issues: {issue_text}")
     card = "\n".join(lines)
 
     global_summary = {
@@ -696,11 +691,23 @@ def _build_process_card(
             "avg_percent": agg.cpu_avg_percent,
             "peak_percent": agg.cpu_peak_percent,
             "logical_core_count": agg.cpu_logical_core_count,
+            "capacity_percent": cpu_capacity_percent,
+            "capacity_band": _band_name(
+                DEFAULT_PROCESS_POLICY.cpu_capacity_percent.classify(
+                    cpu_capacity_percent
+                )
+            ),
         },
         "ram": {
             "avg_gb": ram_avg_gb,
             "peak_gb": ram_peak_gb,
             "total_gb": ram_total_gb,
+            "peak_percent": ram_peak_percent,
+            "peak_band": _band_name(
+                DEFAULT_PROCESS_POLICY.rss_peak_percent.classify(
+                    ram_peak_percent
+                )
+            ),
         },
         "gpu_rollup": {
             "available": agg.gpu_available,
@@ -712,7 +719,24 @@ def _build_process_card(
             "reserved_peak_gb": gpu_mem_reserved_peak_gb,
             "total_gb": gpu_mem_total_gb,
             "used_peak_pct": gpu_mem_used_peak_pct,
+            "used_peak_band": _band_name(
+                DEFAULT_PROCESS_POLICY.gpu_memory_peak_percent.classify(
+                    gpu_mem_used_peak_pct
+                )
+            ),
             "reserved_peak_pct": gpu_mem_reserved_peak_pct,
+            "reserved_peak_band": _band_name(
+                DEFAULT_PROCESS_POLICY.gpu_memory_peak_percent.classify(
+                    gpu_mem_reserved_peak_pct
+                )
+            ),
+            "reserved_overhang_ratio": gpu_reserved_overhang_ratio,
+            "reserved_overhang_band": _band_name(
+                DEFAULT_PROCESS_POLICY.gpu_reserved_overhang_ratio.classify(
+                    gpu_reserved_overhang_ratio
+                )
+            ),
+            "highest_overhang_rank": highest_overhang_rank,
             "highest_used_rank": highest_used_rank,
             "highest_used_peak_gb": highest_used_peak_gb,
             "highest_reserved_rank": highest_reserved_rank,
@@ -720,7 +744,6 @@ def _build_process_card(
             "least_headroom_rank": least_headroom_rank,
             "least_headroom_gb": least_headroom_gb,
         },
-        "takeaway": takeaway,
     }
 
     summary = {

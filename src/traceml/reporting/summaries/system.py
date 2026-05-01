@@ -11,7 +11,6 @@ from traceml.diagnostics.system.policy import DEFAULT_SYSTEM_POLICY
 from traceml.reporting.summaries.issue_summary import (
     issues_by_metric_json,
     issues_by_rank_json,
-    issues_compact_text,
     issues_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import (
@@ -567,9 +566,6 @@ def _build_system_card(
         f"- Stats: {_build_stats_line(agg, per_gpu=per_gpu)}",
         f"- Why: {primary_diagnosis.reason}",
     ]
-    issue_text = issues_compact_text(issues, max_items=4)
-    if issue_text:
-        lines.append(f"- Issues: {issue_text}")
     card = "\n".join(lines)
 
     global_summary = {
