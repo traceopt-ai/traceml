@@ -15,7 +15,7 @@ from traceml.reporting.sections.system.formatter import (
     format_system_section_text,
 )
 from traceml.reporting.sections.system.loader import load_system_section_data
-from traceml.reporting.summaries.system import MAX_SUMMARY_ROWS
+from traceml.reporting.sections.system.model import MAX_SUMMARY_ROWS
 
 
 @dataclass(frozen=True)

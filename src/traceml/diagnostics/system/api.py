@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ..common import BaseDiagnosis, DiagnosticResult, Severity, sort_issues
+from ..common import BaseDiagnosis, DiagnosticResult, Severity
 from .context import SystemSummarySignals, build_system_summary_signals
 from .rules import run_system_rules
 
@@ -46,25 +46,37 @@ def _mk_diag(
 
 
 def _default_primary(signals: SystemSummarySignals) -> SystemDiagnosis:
-    """
-    Build the default non-issue system diagnosis.
-    """
-    if signals.gpu_available is False:
+    """Build the default non-issue system diagnosis."""
+    if signals.samples <= 0:
         return _mk_diag(
-            kind="NO_GPU",
+            kind="NO_DATA",
             severity="info",
-            status="NO GPU",
-            reason="No GPU telemetry was recorded for this summary window.",
-            action="Treat CPU and RAM context as the main system signals.",
+            status="NO DATA",
+            reason="No system telemetry was recorded.",
+            action="Collect system telemetry for host-level context.",
             samples_used=signals.samples,
         )
 
+    has_gpu_metrics = any(
+        value is not None
+        for value in (
+            signals.gpu_util_avg_percent,
+            signals.gpu_mem_peak_percent,
+            signals.gpu_temp_peak_c,
+            signals.gpu_power_avg_limit_percent,
+        )
+    )
+    reason = (
+        "CPU, RAM, and GPU showed no system pressure."
+        if has_gpu_metrics
+        else "CPU and RAM showed no system pressure."
+    )
     return _mk_diag(
-        kind="HEALTHY",
+        kind="NORMAL",
         severity="info",
-        status="HEALTHY",
-        reason="No dominant host or GPU system pressure signal is visible.",
-        action="Treat the system context as normal unless training metrics disagree.",
+        status="NORMAL",
+        reason=reason,
+        action="Use training diagnostics for model-level bottlenecks.",
         samples_used=signals.samples,
     )
 
@@ -114,7 +126,7 @@ def build_system_diagnosis_result(
         per_gpu=per_gpu,
     )
 
-    issues = sort_issues(run_system_rules(signals))
+    issues = run_system_rules(signals) if signals.samples > 0 else ()
     if issues:
         primary_issue = issues[0]
         primary = _mk_diag(
@@ -138,6 +150,7 @@ def build_system_diagnosis_result(
             "peak_bytes": signals.ram_peak_bytes,
             "total_bytes": signals.ram_total_bytes,
             "pressure_frac": signals.ram_pressure_frac,
+            "peak_percent": signals.ram_peak_percent,
         },
         "gpu_rollup": {
             "available": signals.gpu_available,
@@ -150,6 +163,8 @@ def build_system_diagnosis_result(
             "temp_peak_c": signals.gpu_temp_peak_c,
             "power_avg_w": signals.gpu_power_avg_w,
             "power_peak_w": signals.gpu_power_peak_w,
+            "mem_peak_percent": signals.gpu_mem_peak_percent,
+            "power_avg_limit_percent": signals.gpu_power_avg_limit_percent,
             "util_imbalance_pct": signals.gpu_util_imbalance_pct,
             "mem_imbalance_pct": signals.gpu_mem_imbalance_pct,
             "lowest_util_gpu_idx": signals.lowest_util_gpu_idx,

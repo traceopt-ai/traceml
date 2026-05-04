@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Literal, Optional, Sequence
+from typing import Any, Dict, Literal, Optional, Sequence, cast
 
 from traceml.analytics.trends import TrendBands
-from traceml.diagnostics.common import DiagnosticResult, sort_issues
+from traceml.diagnostics.common import DiagnosticResult
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 
 from ..common import BaseDiagnosis, Severity, validate_confidence
@@ -250,7 +250,10 @@ def build_step_memory_diagnosis(
             steps_used=best.steps_used,
             worst_rank=best.worst_rank,
             reason=f"{_metric_label(best.metric.metric)} is rising across the window.",
-            action="Check retained tensors or caches; continued growth can lead to OOM.",
+            action=(
+                "Check retained tensors or caches; continued growth can "
+                "lead to OOM."
+            ),
             note=_format_creep_note(best.creep),
             confidence=0.88,
         )
@@ -296,18 +299,14 @@ def build_step_memory_summary_diagnosis_result(
     """
     Build the summary-oriented step-memory diagnosis result.
 
-    The primary diagnosis intentionally uses the same live diagnosis engine as
-    CLI/dashboard step-memory rendering. Summary-specific rules add a richer
-    issue list and metric attribution for final-report JSON without changing
-    live diagnosis policy.
+    Summary diagnosis is rule-first: normalized metric signals are evaluated by
+    modular rules, sorted by priority, and the top issue becomes primary. The
+    live renderer path keeps using `build_step_memory_diagnosis()`.
     """
     from .adapters import build_step_memory_summary_signals
-    from .rules import run_step_memory_summary_rules
-
-    primary = build_step_memory_diagnosis(
-        metrics,
-        gpu_total_bytes=gpu_total_bytes,
-        thresholds=thresholds,
+    from .rules import (
+        run_step_memory_summary_rules,
+        sort_step_memory_summary_issues,
     )
 
     try:
@@ -361,15 +360,152 @@ def build_step_memory_summary_diagnosis_result(
             "Step-memory summary diagnostic enrichment failed",
             exc,
         )
-        issues = []
+        primary = build_step_memory_diagnosis(
+            metrics,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
         metric_attribution = {}
+        issues = []
+    else:
+        issues = list(sort_step_memory_summary_issues(issues))
+        primary = _summary_primary_from_rule_result(
+            metrics=metrics,
+            issues=issues,
+            metric_attribution=metric_attribution,
+            thresholds=thresholds,
+        )
 
     return DiagnosticResult(
         primary=primary,
-        issues=sort_issues(issues),
+        issues=tuple(issues),
         metric_attribution=metric_attribution,
         per_rank=dict(per_rank or {}),
     )
+
+
+def _summary_primary_from_rule_result(
+    *,
+    metrics: Sequence[StepMemoryCombinedMetric],
+    issues: Sequence[Any],
+    metric_attribution: Dict[str, Any],
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> StepMemoryDiagnosis:
+    """Build the summary primary diagnosis from sorted rule issues."""
+    if issues:
+        return _summary_primary_from_issue(
+            issue=issues[0],
+            metric_attribution=metric_attribution,
+        )
+
+    return _summary_fallback_primary(
+        metrics=metrics,
+        metric_attribution=metric_attribution,
+        thresholds=thresholds,
+    )
+
+
+def _summary_primary_from_issue(
+    *,
+    issue: Any,
+    metric_attribution: Dict[str, Any],
+) -> StepMemoryDiagnosis:
+    metric = str(getattr(issue, "metric", None) or "peak_reserved")
+    signal = metric_attribution.get(metric, {})
+    steps_used = int(signal.get("steps_used") or 0)
+    ranks = tuple(getattr(issue, "ranks", ()) or ())
+    worst_rank = int(ranks[0]) if ranks else signal.get("worst_rank")
+    note = None
+    evidence = getattr(issue, "evidence", None)
+    if isinstance(evidence, dict):
+        raw_note = evidence.get("note")
+        note = str(raw_note) if raw_note else None
+
+    confidence_by_kind = {
+        "HIGH_PRESSURE": 0.9 if issue.severity == "crit" else 0.8,
+        "IMBALANCE": 0.85 if issue.severity == "crit" else 0.75,
+        "CREEP_CONFIRMED": 0.88,
+        "CREEP_EARLY": 0.60,
+    }
+
+    return _mk_diag(
+        kind=cast(StepMemoryDiagnosisKind, issue.kind),
+        severity=issue.severity,
+        metric=metric,
+        steps_used=steps_used,
+        worst_rank=worst_rank,
+        reason=issue.summary,
+        action=issue.action,
+        note=note,
+        confidence=confidence_by_kind.get(issue.kind),
+    )
+
+
+def _summary_fallback_primary(
+    *,
+    metrics: Sequence[StepMemoryCombinedMetric],
+    metric_attribution: Dict[str, Any],
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> StepMemoryDiagnosis:
+    """Return NO_DATA or BALANCED when no summary rule fires."""
+    if not metrics:
+        return _mk_diag(
+            kind="NO_DATA",
+            severity="info",
+            metric="peak_reserved",
+            steps_used=0,
+            reason="No step-memory data yet.",
+            action="Wait for more completed steps.",
+            confidence=0.0,
+        )
+
+    signals = list(metric_attribution.values())
+    if not signals:
+        return build_step_memory_diagnosis(metrics, thresholds=thresholds)
+
+    ready = [
+        signal
+        for signal in signals
+        if int(signal.get("steps_used") or 0)
+        >= int(thresholds.min_steps_for_diag)
+    ]
+    if not ready:
+        best = max(signals, key=lambda item: int(item.get("steps_used") or 0))
+        min_steps = int(thresholds.min_steps_for_diag)
+        return _mk_diag(
+            kind="NO_DATA",
+            severity="info",
+            metric=str(best.get("metric") or "peak_reserved"),
+            steps_used=int(best.get("steps_used") or 0),
+            worst_rank=best.get("worst_rank"),
+            reason=f"Need at least {min_steps} completed steps.",
+            action="Keep monitoring.",
+            confidence=0.0,
+        )
+
+    baseline = _pick_summary_balanced_signal(ready)
+    return _mk_diag(
+        kind="BALANCED",
+        severity="info",
+        metric=str(baseline.get("metric") or "peak_reserved"),
+        steps_used=int(baseline.get("steps_used") or 0),
+        worst_rank=baseline.get("worst_rank"),
+        reason="No clear pressure, imbalance, or creep signal.",
+        action="Keep monitoring.",
+        confidence=0.75,
+    )
+
+
+def _pick_summary_balanced_signal(
+    signals: Sequence[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Prefer reserved memory for neutral summary wording."""
+    by_metric = {str(item.get("metric")): item for item in signals}
+    if "peak_reserved" in by_metric:
+        return by_metric["peak_reserved"]
+    if "peak_allocated" in by_metric:
+        return by_metric["peak_allocated"]
+    return max(signals, key=lambda item: float(item.get("steps_used") or 0))
 
 
 def _assess_metric(

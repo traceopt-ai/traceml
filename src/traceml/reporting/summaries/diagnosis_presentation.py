@@ -13,7 +13,7 @@ To keep the architecture clean, this module does not change diagnosis truth or
 threshold logic. It only rewrites wording for summary presentation.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, Dict, Optional
 
 
@@ -43,13 +43,22 @@ class SummaryDiagnosisPresentation:
 
 def diagnosis_presentation_to_json(
     presentation: Optional[SummaryDiagnosisPresentation],
+    *,
+    include_action: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
     Serialize a summary diagnosis presentation into JSON.
     """
     if presentation is None:
         return None
-    return asdict(presentation)
+    out = (
+        asdict(presentation)
+        if is_dataclass(presentation)
+        else dict(presentation)
+    )
+    if not include_action:
+        out.pop("action", None)
+    return out
 
 
 def present_step_time_summary_diagnosis(

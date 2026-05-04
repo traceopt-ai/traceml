@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from traceml.reporting.summaries.system import (
+from traceml.reporting.sections.system.model import (
     MAX_SUMMARY_ROWS,
     PerGPUSummary,
     SystemSummaryAgg,

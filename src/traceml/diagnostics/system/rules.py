@@ -1,10 +1,4 @@
-"""
-Summary-oriented system diagnosis rules.
-
-These rules are intentionally conservative. System metrics are useful context,
-but they are often less directly actionable than step-time diagnostics, so the
-rules below favor precision and low noise.
-"""
+"""System diagnosis rules."""
 
 from __future__ import annotations
 
@@ -13,40 +7,21 @@ from typing import Optional, Sequence, Tuple
 
 from ..common import DiagnosticIssue, DiagnosticRule
 from .context import SystemSummarySignals
+from .policy import DEFAULT_SYSTEM_POLICY, SystemDiagnosisPolicy
 
 
-def _severity(value: float, crit_threshold: float) -> str:
-    """
-    Map a scalar signal to warn or crit severity.
-    """
-    return "crit" if float(value) >= float(crit_threshold) else "warn"
+def _fmt_pct(value: Optional[float]) -> str:
+    return "n/a" if value is None else f"{float(value):.1f}%"
 
 
-def _pct(value: Optional[float]) -> str:
-    """
-    Format one ratio-like value as a percentage string.
-    """
-    if value is None:
-        return "n/a"
-    return f"{float(value) * 100.0:.1f}%"
-
-
-def _opt_pct(value: Optional[float]) -> Optional[float]:
-    """
-    Normalize an optional percentage-like value stored in `[0, 100]`.
-    """
-    if value is None:
-        return None
-    return max(0.0, float(value) / 100.0)
+def _fmt_gpu_suffix(gpu_idx: Optional[int]) -> str:
+    return "" if gpu_idx is None else f" on gpu{int(gpu_idx)}"
 
 
 @dataclass(frozen=True)
 class _BaseSystemRule(DiagnosticRule[SystemSummarySignals]):
-    """
-    Small shared helper for system rules.
-    """
-
     name: str
+    policy: SystemDiagnosisPolicy = DEFAULT_SYSTEM_POLICY
 
     def _issue(
         self,
@@ -77,153 +52,247 @@ class _BaseSystemRule(DiagnosticRule[SystemSummarySignals]):
 
 
 @dataclass(frozen=True)
-class LowGPUUtilizationRule(_BaseSystemRule):
-    """
-    Detect low overall GPU utilization over the analyzed summary window.
-    """
-
-    name: str = "low_gpu_utilization"
-    warn_threshold_pct: float = 30.0
-    crit_threshold_pct: float = 15.0
+class VeryHighGPUMemoryRule(_BaseSystemRule):
+    name: str = "very_high_gpu_memory"
 
     def evaluate(
         self, context: SystemSummarySignals
     ) -> Optional[DiagnosticIssue]:
-        util = context.gpu_util_avg_percent
-        if util is None or util >= self.warn_threshold_pct:
+        pct = context.gpu_mem_peak_percent
+        if self.policy.gpu_memory_peak_percent.classify(pct) != "very_high":
             return None
 
-        lowest_gpu = context.lowest_util_gpu_idx
-        severity = _severity(
-            self.warn_threshold_pct - float(util),
-            self.warn_threshold_pct - self.crit_threshold_pct,
-        )
+        gpu_idx = context.highest_mem_pressure_gpu_idx
         return self._issue(
-            kind="LOW_GPU_UTILIZATION",
-            status="LOW GPU UTILIZATION",
-            severity=severity,
-            summary=f"Average GPU utilization is only {float(util):.1f}%.",
-            action="Check whether host-side work or input throughput is limiting the run.",
-            metric="gpu_util_avg_percent",
-            phase="gpu",
-            score=max(0.0, self.warn_threshold_pct - float(util)),
-            ranks=(() if lowest_gpu is None else (lowest_gpu,)),
+            kind="VERY_HIGH_GPU_MEMORY",
+            status="VERY HIGH GPU MEMORY",
+            severity="crit",
+            summary=(
+                "GPU memory was very high, peaking at "
+                f"{_fmt_pct(pct)}{_fmt_gpu_suffix(gpu_idx)}."
+            ),
+            action="Reduce GPU memory pressure before scaling this run.",
+            metric="gpu_mem_peak_percent",
+            phase="gpu_memory",
+            score=pct,
+            ranks=(() if gpu_idx is None else (gpu_idx,)),
             evidence={
-                "gpu_util_avg_percent": float(util),
-                "lowest_util_gpu_idx": lowest_gpu,
+                "gpu_mem_peak_percent": pct,
+                "gpu_idx": gpu_idx,
             },
         )
 
 
 @dataclass(frozen=True)
-class HighCPUPressureRule(_BaseSystemRule):
-    """
-    Detect sustained high host CPU usage.
-    """
-
-    name: str = "high_cpu_pressure"
-    warn_threshold_pct: float = 80.0
-    crit_threshold_pct: float = 90.0
+class HighGPUMemoryRule(_BaseSystemRule):
+    name: str = "high_gpu_memory"
 
     def evaluate(
         self, context: SystemSummarySignals
     ) -> Optional[DiagnosticIssue]:
-        cpu = context.cpu_avg_percent
-        if cpu is None or cpu < self.warn_threshold_pct:
+        pct = context.gpu_mem_peak_percent
+        if self.policy.gpu_memory_peak_percent.classify(pct) != "high":
+            return None
+
+        gpu_idx = context.highest_mem_pressure_gpu_idx
+        return self._issue(
+            kind="HIGH_GPU_MEMORY",
+            status="HIGH GPU MEMORY",
+            severity="warn",
+            summary=(
+                "GPU memory was high, peaking at "
+                f"{_fmt_pct(pct)}{_fmt_gpu_suffix(gpu_idx)}."
+            ),
+            action="Watch GPU memory headroom for larger batches or models.",
+            metric="gpu_mem_peak_percent",
+            phase="gpu_memory",
+            score=pct,
+            ranks=(() if gpu_idx is None else (gpu_idx,)),
+            evidence={
+                "gpu_mem_peak_percent": pct,
+                "gpu_idx": gpu_idx,
+            },
+        )
+
+
+@dataclass(frozen=True)
+class HighGPUTemperatureRule(_BaseSystemRule):
+    name: str = "high_gpu_temperature"
+
+    def evaluate(
+        self, context: SystemSummarySignals
+    ) -> Optional[DiagnosticIssue]:
+        temp = context.gpu_temp_peak_c
+        if self.policy.gpu_temp_peak_c.classify(temp) != "high":
+            return None
+
+        gpu_idx = context.highest_temp_gpu_idx
+        return self._issue(
+            kind="HIGH_GPU_TEMPERATURE",
+            status="HIGH GPU TEMPERATURE",
+            severity="crit",
+            summary=(
+                "GPU temperature was high, peaking at "
+                f"{float(temp):.1f} C{_fmt_gpu_suffix(gpu_idx)}."
+            ),
+            action="Check cooling and thermal throttling risk.",
+            metric="gpu_temp_peak_c",
+            phase="gpu_temperature",
+            score=float(temp),
+            ranks=(() if gpu_idx is None else (gpu_idx,)),
+            evidence={
+                "gpu_temp_peak_c": float(temp),
+                "gpu_idx": gpu_idx,
+            },
+        )
+
+
+@dataclass(frozen=True)
+class HighGPUPowerRule(_BaseSystemRule):
+    name: str = "high_gpu_power"
+
+    def evaluate(
+        self, context: SystemSummarySignals
+    ) -> Optional[DiagnosticIssue]:
+        pct = context.gpu_power_avg_limit_percent
+        if self.policy.gpu_power_avg_limit_percent.classify(pct) != "high":
+            return None
+
+        gpu_idx = context.highest_power_gpu_idx
+        return self._issue(
+            kind="HIGH_GPU_POWER",
+            status="HIGH GPU POWER",
+            severity="warn",
+            summary=(
+                "GPU power was high, averaging "
+                f"{_fmt_pct(pct)} of limit{_fmt_gpu_suffix(gpu_idx)}."
+            ),
+            action="Review power headroom if this run is unstable.",
+            metric="gpu_power_avg_limit_percent",
+            phase="gpu_power",
+            score=pct,
+            ranks=(() if gpu_idx is None else (gpu_idx,)),
+            evidence={
+                "gpu_power_avg_limit_percent": pct,
+                "gpu_idx": gpu_idx,
+            },
+        )
+
+
+@dataclass(frozen=True)
+class HighHostMemoryRule(_BaseSystemRule):
+    name: str = "high_host_memory"
+
+    def evaluate(
+        self, context: SystemSummarySignals
+    ) -> Optional[DiagnosticIssue]:
+        pct = context.ram_peak_percent
+        if self.policy.ram_peak_percent.classify(pct) != "high":
             return None
 
         return self._issue(
-            kind="HIGH_CPU_PRESSURE",
-            status="HIGH CPU PRESSURE",
-            severity=_severity(float(cpu), self.crit_threshold_pct),
-            summary=f"Average host CPU usage is {float(cpu):.1f}%.",
-            action="Inspect data loading, CPU-side preprocessing, or host contention.",
+            kind="HIGH_HOST_MEMORY",
+            status="HIGH HOST MEMORY",
+            severity="warn",
+            summary=(
+                "Host RAM usage was high, peaking at "
+                f"{_fmt_pct(pct)} of total."
+            ),
+            action="Reduce host memory pressure or inspect data workers.",
+            metric="ram_peak_percent",
+            phase="ram",
+            score=pct,
+            evidence={"ram_peak_percent": pct},
+        )
+
+
+@dataclass(frozen=True)
+class HighCPURule(_BaseSystemRule):
+    name: str = "high_cpu"
+
+    def evaluate(
+        self, context: SystemSummarySignals
+    ) -> Optional[DiagnosticIssue]:
+        pct = context.cpu_avg_percent
+        if self.policy.cpu_avg_percent.classify(pct) != "high":
+            return None
+
+        return self._issue(
+            kind="HIGH_CPU",
+            status="HIGH CPU",
+            severity="warn",
+            summary=f"CPU usage was high, averaging {_fmt_pct(pct)}.",
+            action="Inspect CPU-side preprocessing or host contention.",
             metric="cpu_avg_percent",
             phase="cpu",
-            score=float(cpu),
-            evidence={"cpu_avg_percent": float(cpu)},
+            score=pct,
+            evidence={"cpu_avg_percent": pct},
         )
 
 
 @dataclass(frozen=True)
-class HighRAMPressureRule(_BaseSystemRule):
-    """
-    Detect high host RAM pressure relative to total system memory.
-    """
-
-    name: str = "high_ram_pressure"
-    warn_fraction: float = 0.85
-    crit_fraction: float = 0.92
+class LowGPUUtilizationRule(_BaseSystemRule):
+    name: str = "low_gpu_utilization"
 
     def evaluate(
         self, context: SystemSummarySignals
     ) -> Optional[DiagnosticIssue]:
-        pressure = context.ram_pressure_frac
-        if pressure is None or pressure < self.warn_fraction:
+        pct = context.gpu_util_avg_percent
+        if self.policy.gpu_util_avg_percent.classify(pct) != "low":
             return None
 
+        gpu_idx = context.lowest_util_gpu_idx
         return self._issue(
-            kind="HIGH_RAM_PRESSURE",
-            status="HIGH RAM PRESSURE",
-            severity=_severity(float(pressure), self.crit_fraction),
-            summary=f"Peak host RAM reached {_pct(pressure)} of system capacity.",
-            action="Reduce host memory pressure or check for dataset/process growth.",
-            metric="ram_peak_bytes",
-            phase="ram",
-            score=float(pressure),
-            evidence={"ram_pressure_frac": float(pressure)},
-        )
-
-
-@dataclass(frozen=True)
-class GPUUtilImbalanceRule(_BaseSystemRule):
-    """
-    Detect materially uneven average GPU utilization across devices.
-    """
-
-    name: str = "gpu_util_imbalance"
-    warn_fraction: float = 0.20
-    crit_fraction: float = 0.35
-
-    def evaluate(
-        self, context: SystemSummarySignals
-    ) -> Optional[DiagnosticIssue]:
-        imbalance = context.gpu_util_imbalance_pct
-        if imbalance is None or imbalance < self.warn_fraction:
-            return None
-
-        ranks: Tuple[int, ...] = tuple(
-            gpu_idx
-            for gpu_idx in (
-                context.lowest_util_gpu_idx,
-                context.highest_util_gpu_idx,
-            )
-            if gpu_idx is not None
-        )
-        return self._issue(
-            kind="GPU_UTIL_IMBALANCE",
-            status="GPU UTIL IMBALANCE",
-            severity=_severity(float(imbalance), self.crit_fraction),
-            summary=f"Average GPU utilization differs by {_pct(imbalance)} across devices.",
-            action="Inspect device-level workload balance and rank placement.",
+            kind="LOW_GPU_UTILIZATION",
+            status="LOW GPU UTILIZATION",
+            severity="info",
+            summary=f"GPU utilization was low, averaging {_fmt_pct(pct)}.",
+            action="Use step-time diagnostics to check host or input stalls.",
             metric="gpu_util_avg_percent",
-            phase="gpu",
-            score=float(imbalance),
-            ranks=ranks,
+            phase="gpu_utilization",
+            score=100.0 - float(pct),
+            ranks=(() if gpu_idx is None else (gpu_idx,)),
             evidence={
-                "gpu_util_imbalance_pct": float(imbalance),
-                "lowest_util_gpu_idx": context.lowest_util_gpu_idx,
-                "highest_util_gpu_idx": context.highest_util_gpu_idx,
+                "gpu_util_avg_percent": pct,
+                "lowest_util_gpu_idx": gpu_idx,
             },
         )
 
 
 DEFAULT_SYSTEM_RULES = (
+    VeryHighGPUMemoryRule(),
+    HighGPUTemperatureRule(),
+    HighGPUMemoryRule(),
+    HighGPUPowerRule(),
+    HighHostMemoryRule(),
+    HighCPURule(),
     LowGPUUtilizationRule(),
-    HighCPUPressureRule(),
-    HighRAMPressureRule(),
-    GPUUtilImbalanceRule(),
 )
+
+
+_ISSUE_PRIORITY = {
+    "VERY_HIGH_GPU_MEMORY": 0,
+    "HIGH_GPU_TEMPERATURE": 1,
+    "HIGH_GPU_MEMORY": 2,
+    "HIGH_GPU_POWER": 3,
+    "HIGH_HOST_MEMORY": 4,
+    "HIGH_CPU": 5,
+    "LOW_GPU_UTILIZATION": 6,
+}
+
+
+def sort_system_issues(
+    issues: Sequence[DiagnosticIssue],
+) -> Tuple[DiagnosticIssue, ...]:
+    return tuple(
+        sorted(
+            issues,
+            key=lambda issue: (
+                _ISSUE_PRIORITY.get(issue.kind, 999),
+                -(float(issue.score or 0.0)),
+            ),
+        )
+    )
 
 
 def run_system_rules(
@@ -233,22 +302,23 @@ def run_system_rules(
         DiagnosticRule[SystemSummarySignals]
     ] = DEFAULT_SYSTEM_RULES,
 ) -> Tuple[DiagnosticIssue, ...]:
-    """
-    Run all registered system rules over one summary analysis context.
-    """
     out = []
     for rule in rules:
         issue = rule.evaluate(context)
         if issue is not None:
             out.append(issue)
-    return tuple(out)
+    return sort_system_issues(out)
 
 
 __all__ = [
     "DEFAULT_SYSTEM_RULES",
-    "GPUUtilImbalanceRule",
-    "HighCPUPressureRule",
-    "HighRAMPressureRule",
+    "HighCPURule",
+    "HighGPUMemoryRule",
+    "HighGPUPowerRule",
+    "HighGPUTemperatureRule",
+    "HighHostMemoryRule",
     "LowGPUUtilizationRule",
+    "VeryHighGPUMemoryRule",
     "run_system_rules",
+    "sort_system_issues",
 ]

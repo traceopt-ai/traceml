@@ -120,10 +120,10 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
 
 
 def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
-    from traceml.reporting.summaries.step_time import (
-        RankStepSummary,
-        _build_step_time_card,
+    from traceml.reporting.sections.step_time.builder import (
+        build_step_time_card,
     )
+    from traceml.reporting.summaries.step_time import RankStepSummary
 
     per_rank = {
         rank: RankStepSummary(
@@ -139,7 +139,7 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         for rank in range(4)
     }
 
-    card, summary = _build_step_time_card(
+    card, summary = build_step_time_card(
         training_steps=129,
         latest_step_observed=128,
         per_rank_summary=per_rank,

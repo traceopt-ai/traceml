@@ -42,12 +42,19 @@ class SystemSummarySignals:
     per_gpu: Dict[int, Dict[str, Optional[float]]]
 
     ram_pressure_frac: Optional[float]
+    ram_peak_percent: Optional[float]
     gpu_mem_pressure_frac: Optional[float]
+    gpu_mem_peak_percent: Optional[float]
+    gpu_power_avg_limit_frac: Optional[float]
+    gpu_power_avg_limit_percent: Optional[float]
     gpu_util_imbalance_pct: Optional[float]
     gpu_mem_imbalance_pct: Optional[float]
     lowest_util_gpu_idx: Optional[int]
     highest_util_gpu_idx: Optional[int]
     highest_mem_gpu_idx: Optional[int]
+    highest_mem_pressure_gpu_idx: Optional[int]
+    highest_temp_gpu_idx: Optional[int]
+    highest_power_gpu_idx: Optional[int]
 
 
 def _safe_float(value: Optional[float]) -> Optional[float]:
@@ -147,6 +154,41 @@ def _gpu_memory_pressure_frac(
     return max(fractions)
 
 
+def _gpu_power_limit_frac(
+    per_gpu: Dict[int, Dict[str, Optional[float]]],
+) -> Optional[float]:
+    fractions = []
+    for item in per_gpu.values():
+        pressure = _fraction(
+            item.get("power_avg_w"),
+            item.get("power_limit_w"),
+        )
+        if pressure is not None:
+            fractions.append(pressure)
+    if not fractions:
+        return None
+    return max(fractions)
+
+
+def _best_gpu_pressure_idx(
+    per_gpu: Dict[int, Dict[str, Optional[float]]],
+    numerator_key: str,
+    denominator_key: str,
+) -> Optional[int]:
+    best_idx: Optional[int] = None
+    best_value: Optional[float] = None
+
+    for gpu_idx, item in per_gpu.items():
+        value = _fraction(item.get(numerator_key), item.get(denominator_key))
+        if value is None:
+            continue
+        if best_value is None or value > best_value:
+            best_idx = int(gpu_idx)
+            best_value = value
+
+    return best_idx
+
+
 def build_system_summary_signals(
     *,
     duration_s: Optional[float],
@@ -171,6 +213,10 @@ def build_system_summary_signals(
     """
     Build the normalized signal bundle shared by system diagnosis rules.
     """
+    ram_pressure_frac = _fraction(ram_peak_bytes, ram_total_bytes)
+    gpu_mem_pressure_frac = _gpu_memory_pressure_frac(per_gpu)
+    gpu_power_avg_limit_frac = _gpu_power_limit_frac(per_gpu)
+
     return SystemSummarySignals(
         duration_s=duration_s,
         samples=int(samples),
@@ -190,8 +236,24 @@ def build_system_summary_signals(
         gpu_power_avg_w=gpu_power_avg_w,
         gpu_power_peak_w=gpu_power_peak_w,
         per_gpu=per_gpu,
-        ram_pressure_frac=_fraction(ram_peak_bytes, ram_total_bytes),
-        gpu_mem_pressure_frac=_gpu_memory_pressure_frac(per_gpu),
+        ram_pressure_frac=ram_pressure_frac,
+        ram_peak_percent=(
+            ram_pressure_frac * 100.0
+            if ram_pressure_frac is not None
+            else None
+        ),
+        gpu_mem_pressure_frac=gpu_mem_pressure_frac,
+        gpu_mem_peak_percent=(
+            gpu_mem_pressure_frac * 100.0
+            if gpu_mem_pressure_frac is not None
+            else None
+        ),
+        gpu_power_avg_limit_frac=gpu_power_avg_limit_frac,
+        gpu_power_avg_limit_percent=(
+            gpu_power_avg_limit_frac * 100.0
+            if gpu_power_avg_limit_frac is not None
+            else None
+        ),
         gpu_util_imbalance_pct=_imbalance_pct(per_gpu, "util_avg_percent"),
         gpu_mem_imbalance_pct=_imbalance_pct(per_gpu, "mem_peak_bytes"),
         lowest_util_gpu_idx=_best_gpu_idx(
@@ -208,6 +270,21 @@ def build_system_summary_signals(
             per_gpu,
             "mem_peak_bytes",
             highest=True,
+        ),
+        highest_mem_pressure_gpu_idx=_best_gpu_pressure_idx(
+            per_gpu,
+            "mem_peak_bytes",
+            "mem_total_bytes",
+        ),
+        highest_temp_gpu_idx=_best_gpu_idx(
+            per_gpu,
+            "temp_peak_c",
+            highest=True,
+        ),
+        highest_power_gpu_idx=_best_gpu_pressure_idx(
+            per_gpu,
+            "power_avg_w",
+            "power_limit_w",
         ),
     )
 

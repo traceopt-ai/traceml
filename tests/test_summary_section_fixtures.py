@@ -360,6 +360,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     assert step_time["overview"]["mode"] == "single_rank"
     assert step_time["overview"]["ranks_seen"] == 1
     assert step_time["global"]["typical"]["steps_analyzed"] == 4
+    assert step_time["units"] == {"time": "ms"}
     assert step_memory["overview"]["ranks_seen"] == 1
     assert step_memory["overview"]["steps_used"] == 4
     assert set(step_memory["global"]["metric_rollup"]) == {
@@ -472,6 +473,15 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
 
     assert payload["overview"]["training_steps"] == 2
     assert payload["primary_diagnosis"]["status"] == "NO GPU"
+    assert "action" not in payload["primary_diagnosis"]
+    assert "- Next:" not in payload["card"]
+    assert payload["card"].index("- Diagnosis:") < payload["card"].index(
+        "- Scope:"
+    )
+    assert payload["card"].index("- Scope:") < payload["card"].index(
+        "- Stats:"
+    )
+    assert payload["card"].index("- Stats:") < payload["card"].index("- Why:")
     assert payload["global"]["analysis_window"]["steps_used"] == 0
     assert payload["issues"] == []
 
@@ -520,3 +530,10 @@ def test_final_summary_fixture_schema_contains_all_sections(
         assert "overview" in payload[key]
         assert "card" in payload[key]
         assert "primary_diagnosis" in payload[key]
+        assert "- Next:" not in payload[key]["card"]
+        diagnosis = payload[key]["primary_diagnosis"]
+        if diagnosis is not None:
+            assert "action" not in diagnosis
+    assert payload["system"]["primary_diagnosis"]["status"] == "NORMAL"
+    assert "NO GPU" not in payload["system"]["card"]
+    assert "- Next:" not in payload["text"]
