@@ -15,7 +15,7 @@ from traceml.renderers.step_memory.common import (
     build_step_memory_combined_result,
 )
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
-from traceml.reporting.summaries.step_memory import (
+from traceml.reporting.sections.step_memory.model import (
     MAX_SUMMARY_WINDOW_ROWS,
     _gpu_total_bytes,
     _latest_step_observed,

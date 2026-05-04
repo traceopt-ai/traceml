@@ -8,17 +8,7 @@ from traceml.diagnostics.common import diagnosis_to_dict
 from traceml.diagnostics.system import build_system_diagnosis_result
 from traceml.diagnostics.system.policy import DEFAULT_SYSTEM_POLICY
 from traceml.reporting.sections.system.loader import SystemSectionData
-from traceml.reporting.summaries.issue_summary import (
-    issues_by_metric_json,
-    issues_by_rank_json,
-    issues_to_json,
-)
-from traceml.reporting.summaries.summary_formatting import (
-    bytes_to_gb,
-    duration_from_bounds,
-    format_optional,
-)
-from traceml.reporting.summaries.system import (
+from traceml.reporting.sections.system.model import (
     PerGPUSummary,
     SystemSummaryAgg,
     _band_name,
@@ -28,6 +18,16 @@ from traceml.reporting.summaries.system import (
     _per_gpu_to_diagnosis_input,
     _per_gpu_to_json,
     _percent,
+)
+from traceml.reporting.summaries.issue_summary import (
+    issues_by_metric_json,
+    issues_by_rank_json,
+    issues_to_json,
+)
+from traceml.reporting.summaries.summary_formatting import (
+    bytes_to_gb,
+    duration_from_bounds,
+    format_optional,
 )
 
 

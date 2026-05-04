@@ -8,12 +8,7 @@ from traceml.diagnostics.common import diagnosis_to_dict
 from traceml.diagnostics.process import build_process_diagnosis_result
 from traceml.diagnostics.process.policy import DEFAULT_PROCESS_POLICY
 from traceml.reporting.sections.process.loader import ProcessSectionData
-from traceml.reporting.summaries.issue_summary import (
-    issues_by_metric_json,
-    issues_by_rank_json,
-    issues_to_json,
-)
-from traceml.reporting.summaries.process import (
+from traceml.reporting.sections.process.model import (
     PerRankProcessSummary,
     ProcessSummaryAgg,
     _band_name,
@@ -22,6 +17,11 @@ from traceml.reporting.summaries.process import (
     _cpu_capacity_percent,
     _per_rank_to_diagnosis_input,
     _per_rank_to_json,
+)
+from traceml.reporting.summaries.issue_summary import (
+    issues_by_metric_json,
+    issues_by_rank_json,
+    issues_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import (
     bytes_to_gb,

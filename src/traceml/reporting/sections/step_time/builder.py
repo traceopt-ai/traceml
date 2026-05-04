@@ -7,17 +7,11 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from traceml.reporting.sections.step_time.diagnosis import (
+    build_summary_step_diagnosis_result,
+)
 from traceml.reporting.sections.step_time.loader import StepTimeSectionData
-from traceml.reporting.summaries.diagnosis_presentation import (
-    diagnosis_presentation_to_json,
-    present_step_time_summary_diagnosis,
-)
-from traceml.reporting.summaries.issue_summary import (
-    issues_by_metric_json,
-    issues_by_rank_json,
-    issues_to_json,
-)
-from traceml.reporting.summaries.step_time import (
+from traceml.reporting.sections.step_time.model import (
     RankStepSummary,
     _build_global_rollup,
     _build_overview,
@@ -28,8 +22,14 @@ from traceml.reporting.summaries.step_time import (
     _timing_rollup_from_summary,
     _to_rank_signals,
 )
-from traceml.reporting.summaries.step_time_diagnosis import (
-    build_summary_step_diagnosis_result,
+from traceml.reporting.summaries.diagnosis_presentation import (
+    diagnosis_presentation_to_json,
+    present_step_time_summary_diagnosis,
+)
+from traceml.reporting.summaries.issue_summary import (
+    issues_by_metric_json,
+    issues_by_rank_json,
+    issues_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import format_ms
 

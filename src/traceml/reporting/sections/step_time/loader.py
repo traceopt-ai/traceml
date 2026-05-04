@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from traceml.reporting.summaries.step_time import (
+from traceml.reporting.sections.step_time.model import (
     MAX_SUMMARY_WINDOW_ROWS,
     RankStepSummary,
     _build_rank_summary,
