@@ -360,6 +360,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     assert step_time["overview"]["mode"] == "single_rank"
     assert step_time["overview"]["ranks_seen"] == 1
     assert step_time["global"]["typical"]["steps_analyzed"] == 4
+    assert step_time["units"] == {"time": "ms"}
     assert step_memory["overview"]["ranks_seen"] == 1
     assert step_memory["overview"]["steps_used"] == 4
     assert set(step_memory["global"]["metric_rollup"]) == {
@@ -474,6 +475,13 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
     assert payload["primary_diagnosis"]["status"] == "NO GPU"
     assert "action" not in payload["primary_diagnosis"]
     assert "- Next:" not in payload["card"]
+    assert payload["card"].index("- Diagnosis:") < payload["card"].index(
+        "- Scope:"
+    )
+    assert payload["card"].index("- Scope:") < payload["card"].index(
+        "- Stats:"
+    )
+    assert payload["card"].index("- Stats:") < payload["card"].index("- Why:")
     assert payload["global"]["analysis_window"]["steps_used"] == 0
     assert payload["issues"] == []
 

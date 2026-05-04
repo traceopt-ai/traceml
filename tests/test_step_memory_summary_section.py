@@ -72,6 +72,17 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.payload["overview"]["ranks_seen"] == 1
     assert result.payload["overview"]["steps_used"] == 3
     assert "TraceML Step Memory Summary" in result.text
+    assert "- Diagnosis:" in result.text
+    assert "- Scope:" in result.text
+    assert "- Stats:" in result.text
+    assert "- Why:" in result.text
+    assert result.text.index("- Diagnosis:") < result.text.index("- Scope:")
+    assert result.text.index("- Scope:") < result.text.index("- Stats:")
+    assert result.text.index("- Stats:") < result.text.index("- Why:")
+    assert "- Primary:" not in result.text
+    assert "- Trend:" not in result.text
+    assert "- Note:" not in result.text
+    assert "- Issues:" not in result.text
 
 
 def test_step_memory_legacy_wrapper_delegates_to_section_path(tmp_path):

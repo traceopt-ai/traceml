@@ -14,7 +14,6 @@ from traceml.reporting.summaries.diagnosis_presentation import (
 from traceml.reporting.summaries.issue_summary import (
     issues_by_metric_json,
     issues_by_rank_json,
-    issues_compact_text,
     issues_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import (
@@ -510,24 +509,27 @@ def _build_step_memory_card(
         no_gpu_presented = (
             _no_gpu_diagnosis_presented() if no_gpu_detected else None
         )
+        diagnosis_status = (
+            no_gpu_diagnosis["status"]
+            if no_gpu_diagnosis is not None
+            else "NO DATA"
+        )
+        diagnosis_reason = (
+            no_gpu_diagnosis["reason"]
+            if no_gpu_diagnosis is not None
+            else "No step-memory data was collected."
+        )
+        latest_step_text = (
+            latest_step_observed if latest_step_observed is not None else "n/a"
+        )
         card = "\n".join(
             [
                 f"TraceML Step Memory Summary | steps {training_steps} | ranks 0",
                 "Step Memory",
-                (
-                    f"- Scope: latest step "
-                    f"{latest_step_observed if latest_step_observed is not None else 'n/a'}"
-                ),
-                (
-                    f"- Diagnosis: {no_gpu_diagnosis['status']}"
-                    if no_gpu_diagnosis is not None
-                    else "- Diagnosis: NO DATA"
-                ),
-                (
-                    f"- Why: {no_gpu_diagnosis['reason']}"
-                    if no_gpu_diagnosis is not None
-                    else "- Why: No step-memory data was collected."
-                ),
+                f"- Diagnosis: {diagnosis_status}",
+                f"- Scope: latest step {latest_step_text}",
+                "- Stats: n/a",
+                f"- Why: {diagnosis_reason}",
             ]
         )
 
@@ -567,50 +569,41 @@ def _build_step_memory_card(
     ranks_seen = int(primary.coverage.ranks_present)
     single_rank = ranks_seen <= 1
 
-    lines = [
-        f"TraceML Step Memory Summary | steps {training_steps} | ranks {ranks_seen}",
-        "Step Memory",
-        f"- Scope: last {steps_used} aligned steps",
-    ]
-
-    if diagnosis_presented is not None:
-        lines.append(f"- Diagnosis: {diagnosis_presented.status}")
-        lines.append(f"- Why: {diagnosis_presented.reason}")
-
+    diagnosis_status = (
+        diagnosis_presented.status
+        if diagnosis_presented is not None
+        else "NO DATA"
+    )
+    diagnosis_reason = (
+        diagnosis_presented.reason
+        if diagnosis_presented is not None
+        else "Need more step-memory samples."
+    )
+    title = (
+        f"TraceML Step Memory Summary | steps {training_steps} | "
+        f"ranks {ranks_seen}"
+    )
+    lines = [title, "Step Memory"]
+    lines.append(f"- Diagnosis: {diagnosis_status}")
+    lines.append(f"- Scope: last {steps_used} aligned steps")
     if single_rank:
-        lines.append(
-            f"- Primary: {_metric_label(primary.metric)} | "
-            f"peak {fmt_mem_new(primary.summary.worst_peak)}"
+        stats_text = (
+            f"{_metric_label(primary.metric)} peak "
+            f"{fmt_mem_new(primary.summary.worst_peak)}"
         )
     else:
-        lines.append(
-            (
-                f"- Primary: {_metric_label(primary.metric)} | "
-                f"worst {fmt_mem_new(primary.summary.worst_peak)}"
-                f" on r{primary.summary.worst_rank if primary.summary.worst_rank is not None else 'n/a'} | "
-                f"skew {format_ratio_percent(primary.summary.skew_pct)}"
-            )
+        worst_rank = (
+            f"r{primary.summary.worst_rank}"
+            if primary.summary.worst_rank is not None
+            else "rn/a"
         )
-
-    if primary_trend_worst["delta_bytes"] is not None:
-        trend_subject = "" if single_rank else "worst "
-        trend_text = (
-            f"- Trend: {trend_subject}"
-            f"{'+' if float(primary_trend_worst['delta_bytes']) >= 0.0 else '-'}"
-            f"{fmt_mem_new(abs(float(primary_trend_worst['delta_bytes'])))}"
+        stats_text = (
+            f"{_metric_label(primary.metric)} worst "
+            f"{fmt_mem_new(primary.summary.worst_peak)} on {worst_rank} | "
+            f"skew {format_ratio_percent(primary.summary.skew_pct)}"
         )
-        if primary_trend_worst["growth_pct"] is not None:
-            trend_text += (
-                f" (~{float(primary_trend_worst['growth_pct']) * 100.0:.0f}%)"
-            )
-        lines.append(trend_text)
-
-    if diagnosis_presented is not None and diagnosis_presented.note:
-        lines.append(f"- Note: {diagnosis_presented.note}")
-
-    issue_text = issues_compact_text(issues, max_items=4)
-    if issue_text:
-        lines.append(f"- Issues: {issue_text}")
+    lines.append(f"- Stats: {stats_text}")
+    lines.append(f"- Why: {diagnosis_reason}")
 
     card = "\n".join(lines)
 
