@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 from traceml.core.rendering import Formatter
+from traceml.reporting.summaries.summary_layout import border, row, wrap_lines
 from traceml.utils.formatting import fmt_mem_new
+
+COMPARE_WIDTH = 88
+COMPARE_INNER_WIDTH = COMPARE_WIDTH - 4
 
 
 def _as_float(value: Any) -> Optional[float]:
@@ -132,9 +136,18 @@ def _rows_for_section(
     return rows
 
 
-def _format_table(rows: Iterable[tuple[str, str, str, str]]) -> list[str]:
+def _section_title(section_name: str) -> str:
+    return {
+        "step_time": "Step Time",
+        "step_memory": "Step Memory",
+        "process": "Process",
+        "system": "System",
+    }[section_name]
+
+
+def _format_table_rows(rows: Iterable[tuple[str, str, str, str]]) -> list[str]:
     rows = list(rows)
-    widths = [30, 16, 16, 22]
+    widths = [30, 16, 16, 17]
     out = [
         f"{'Metric':<{widths[0]}} "
         f"{'A':<{widths[1]}} "
@@ -151,6 +164,15 @@ def _format_table(rows: Iterable[tuple[str, str, str, str]]) -> list[str]:
     return out
 
 
+def _append_card_line(lines: List[str], text: str = "") -> None:
+    lines.append(row(text, width=COMPARE_WIDTH))
+
+
+def _append_wrapped_card_line(lines: List[str], text: str) -> None:
+    for wrapped in wrap_lines(text, COMPARE_INNER_WIDTH):
+        _append_card_line(lines, wrapped)
+
+
 class CompareTextFormatter(Formatter[Dict[str, Any], str]):
     """Render compare JSON as a compact table."""
 
@@ -163,17 +185,22 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
         sections = payload.get("sections", {})
 
         lines: List[str] = [
-            "TraceML Compare",
-            f"A: {lhs.get('label', 'A')}",
-            f"B: {rhs.get('label', 'B')}",
-            "Delta: B - A",
-            "",
-            f"Verdict: {verdict.get('status', 'INCONCLUSIVE')}",
-            f"Why: {verdict.get('why', 'n/a')}",
-            "",
+            border(width=COMPARE_WIDTH),
+            row("TraceML Compare", width=COMPARE_WIDTH),
+            border(width=COMPARE_WIDTH),
+            row(width=COMPARE_WIDTH),
         ]
 
-        rows: list[tuple[str, str, str, str]] = []
+        _append_wrapped_card_line(lines, f"A: {lhs.get('label', 'A')}")
+        _append_wrapped_card_line(lines, f"B: {rhs.get('label', 'B')}")
+        _append_card_line(lines, "Delta: B - A")
+        _append_card_line(lines)
+        _append_wrapped_card_line(
+            lines,
+            f"Verdict: {verdict.get('status', 'INCONCLUSIVE')}",
+        )
+        _append_wrapped_card_line(lines, f"Why: {verdict.get('why', 'n/a')}")
+
         for section_name in (
             "step_time",
             "step_memory",
@@ -182,14 +209,21 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
         ):
             section = sections.get(section_name)
             if isinstance(section, dict):
-                rows.extend(_rows_for_section(section_name, section))
-
-        lines.extend(_format_table(rows))
+                _append_card_line(lines)
+                _append_card_line(lines, _section_title(section_name))
+                for text in _format_table_rows(
+                    _rows_for_section(section_name, section)
+                ):
+                    _append_wrapped_card_line(lines, text)
 
         notes = self._notes(payload)
         if notes:
-            lines.extend(["", "Notes"])
-            lines.extend(f"- {note}" for note in notes)
+            _append_card_line(lines)
+            _append_card_line(lines, "Notes")
+            for note in notes:
+                _append_wrapped_card_line(lines, f"- {note}")
+
+        lines.append(border(width=COMPARE_WIDTH))
 
         return "\n".join(lines)
 
