@@ -3,20 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from traceml.reporting.compare.io import derive_compare_labels
+from traceml.reporting.compare.sections import SECTION_COMPARERS
 from traceml.reporting.compare.verdict import build_compare_verdict
 from traceml.sdk.protocol import utc_now_iso
 
-_STEP_PHASES = ("dataloader", "forward", "backward", "optimizer")
 
-# Legacy summary-schema reads are kept in the small helpers below. Remove those
-# fallback branches together when old final_summary.json artifacts are dropped.
-
-
-def _as_float(value: Any) -> Optional[float]:
-    """Best-effort float conversion."""
+def _as_float(value: Any) -> float | None:
     try:
         if value is None:
             return None
@@ -25,271 +20,67 @@ def _as_float(value: Any) -> Optional[float]:
         return None
 
 
-def _as_str(value: Any) -> Optional[str]:
-    """Best-effort string conversion."""
-    if value is None:
-        return None
-    try:
-        text = str(value).strip()
-    except Exception:
-        return None
-    return text or None
+def _metric_alias(section: Dict[str, Any], key: str) -> Dict[str, Any]:
+    metric = section.get("metrics", {}).get(key)
+    return metric if isinstance(metric, dict) else {}
 
 
-def _as_dict(value: Any) -> Optional[Dict[str, Any]]:
-    """Return a dictionary value if present."""
-    return value if isinstance(value, dict) else None
-
-
-def _first_present(*values: Any) -> Any:
-    """Return the first value that is not None."""
-    for value in values:
-        # Do not use ``or`` here: 0 and False are valid telemetry values.
-        if value is not None:
-            return value
-    return None
-
-
-def _nested_get(obj: Dict[str, Any], *keys: str) -> Any:
-    """Safe nested dictionary access."""
-    cur: Any = obj
-    for key in keys:
-        if not isinstance(cur, dict):
-            return None
-        cur = cur.get(key)
-    return cur
-
-
-def _system_value(summary: Dict[str, Any], key: str) -> Any:
-    """Read one system summary value."""
-    system = _nested_get(summary, "system")
-    if key == "cpu_avg_percent":
-        return _first_present(
-            _nested_get(summary, "system", "global", "cpu", "avg_percent"),
-            _nested_get(system, "cpu_avg_percent"),
-        )
-    if key == "ram_peak_gb":
-        return _first_present(
-            _nested_get(summary, "system", "global", "ram", "peak_gb"),
-            _nested_get(system, "ram_peak_gb"),
-        )
-    if key == "gpu_available":
-        value = _nested_get(
-            summary, "system", "global", "gpu_rollup", "available"
-        )
-        return (
-            value
-            if value is not None
-            else _nested_get(system, "gpu_available")
-        )
-    if key == "gpu_count":
-        return _first_present(
-            _nested_get(summary, "system", "global", "gpu_rollup", "count"),
-            _nested_get(system, "gpu_count"),
-        )
-    return None
-
-
-def _process_value(summary: Dict[str, Any], key: str) -> Any:
-    """Read one process summary value."""
-    process = _nested_get(summary, "process")
-    if key == "cpu_avg_percent":
-        return _first_present(
-            _nested_get(summary, "process", "global", "cpu", "avg_percent"),
-            _nested_get(process, "cpu_avg_percent"),
-        )
-    if key == "ram_peak_gb":
-        return _first_present(
-            _nested_get(summary, "process", "global", "ram", "peak_gb"),
-            _nested_get(process, "ram_peak_gb"),
-        )
-    if key == "takeaway":
-        return _first_present(
-            _nested_get(summary, "process", "global", "takeaway"),
-            _nested_get(process, "takeaway"),
-        )
-    return None
-
-
-def _step_memory_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
-    """Read the primary step-memory block."""
-    primary = _nested_get(summary, "global", "primary_metric")
-    if not isinstance(primary, dict):
-        primary = summary.get("primary_metric")
-    return primary if isinstance(primary, dict) else {}
-
-
-def _diagnosis_block(summary: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Return the section diagnosis block."""
-    block = summary.get("primary_diagnosis")
-    if isinstance(block, dict):
-        return block
-    block = summary.get("diagnosis_presented")
-    if isinstance(block, dict):
-        return block
-    return None
-
-
-def _step_memory_value(summary: Dict[str, Any], key: str) -> Any:
-    """Read one step-memory summary value."""
-    if key == "status":
-        return _nested_get(_diagnosis_block(summary) or {}, "status")
-    if key == "reason":
-        return _nested_get(_diagnosis_block(summary) or {}, "reason")
-    if key == "action":
-        return _nested_get(_diagnosis_block(summary) or {}, "action")
-
-    primary = _step_memory_primary(summary)
-
-    if key == "primary_metric":
-        return primary.get("metric")
-    if key == "worst_peak_bytes":
-        return primary.get("worst_peak_bytes")
-    if key == "skew_pct":
-        return primary.get("skew_pct")
-    if key == "trend_worst_delta_bytes":
-        return _nested_get(primary, "trend", "worst", "delta_bytes")
-
-    return None
-
-
-def _step_time_primary(summary: Dict[str, Any]) -> Dict[str, Any]:
-    """Read the primary step-time rollup."""
-    primary = _nested_get(summary, "global", "typical")
-    if isinstance(primary, dict):
-        return primary
-    primary = summary.get("timing_primary")
-    if isinstance(primary, dict):
-        return primary
-    return {}
-
-
-def _step_time_value(summary: Dict[str, Any], key: str) -> Any:
-    """Read one step-time summary value."""
-    if key == "status":
-        return _nested_get(_diagnosis_block(summary) or {}, "status")
-
-    primary = _step_time_primary(summary)
-
-    if key == "step_avg_ms":
-        return primary.get("step_avg_ms")
-    if key == "wait_share_pct":
-        return primary.get("wait_share_pct")
-    if key == "compute_share_pct":
-        return primary.get("compute_share_pct")
-    if key == "dominant_phase":
-        return primary.get("dominant_phase")
-
-    return None
-
-
-def _step_time_split(
-    summary: Dict[str, Any],
-    *,
-    split_key: str,
-) -> Dict[str, Any]:
-    """Read one step-time split dictionary."""
-    primary = _step_time_primary(summary)
-    split = primary.get(split_key)
-    if isinstance(split, dict):
-        return split
-
-    legacy_key = f"median_{split_key}"
-    split = summary.get(legacy_key)
-    return split if isinstance(split, dict) else {}
-
-
-def _value_delta(lhs: Any, rhs: Any) -> Dict[str, Optional[float]]:
-    """
-    Compare two numeric values and return lhs/rhs/delta/pct_change.
-
-    `pct_change` is computed relative to the left-hand side and is omitted when
-    the left value is missing or zero.
-    """
-    lhs_f = _as_float(lhs)
-    rhs_f = _as_float(rhs)
-
-    if lhs_f is None or rhs_f is None:
-        return {
-            "lhs": lhs_f,
-            "rhs": rhs_f,
-            "delta": None,
-            "pct_change": None,
-        }
-
-    delta = rhs_f - lhs_f
-    pct_change = None if abs(lhs_f) < 1e-12 else (100.0 * delta / lhs_f)
+def _legacy_section_aliases(
+    sections: Dict[str, Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """Expose historical top-level compare keys while callers migrate."""
+    step_time = sections.get("step_time", {})
+    step_memory = sections.get("step_memory", {})
+    process = sections.get("process", {})
+    system = sections.get("system", {})
 
     return {
-        "lhs": lhs_f,
-        "rhs": rhs_f,
-        "delta": delta,
-        "pct_change": pct_change,
+        "step_time": {
+            "status": step_time.get("diagnosis", {}),
+            "presented": {
+                "lhs": {"status": step_time.get("diagnosis", {}).get("lhs")},
+                "rhs": {"status": step_time.get("diagnosis", {}).get("rhs")},
+            },
+            "step_avg_ms": _metric_alias(step_time, "step_avg_ms"),
+            "wait_share_pct": _metric_alias(step_time, "wait_share_pct"),
+            "compute_ms": _metric_alias(step_time, "compute_ms"),
+            "wait_ms": _metric_alias(step_time, "wait_ms"),
+            "input_ms": _metric_alias(step_time, "input_ms"),
+            "dominant_phase": _metric_alias(step_time, "dominant_phase"),
+        },
+        "step_memory": {
+            "status": step_memory.get("diagnosis", {}),
+            "presented": {
+                "lhs": {"status": step_memory.get("diagnosis", {}).get("lhs")},
+                "rhs": {"status": step_memory.get("diagnosis", {}).get("rhs")},
+            },
+            "worst_peak_bytes": _metric_alias(
+                step_memory,
+                "peak_reserved_bytes",
+            ),
+            "skew_pct": _metric_alias(step_memory, "memory_skew_pct"),
+            "trend_worst_delta_bytes": _metric_alias(
+                step_memory,
+                "trend_worst_delta_bytes",
+            ),
+        },
+        "process": {
+            "cpu_avg_percent": _metric_alias(process, "cpu_avg_percent"),
+            "ram_peak_gb": _metric_alias(process, "rss_peak_gb"),
+        },
+        "system": {
+            "cpu_avg_percent": _metric_alias(system, "cpu_avg_percent"),
+            "ram_peak_gb": _metric_alias(system, "ram_peak_gb"),
+            "gpu_util_avg_percent": _metric_alias(
+                system,
+                "gpu_util_avg_percent",
+            ),
+            "gpu_memory_peak_percent": _metric_alias(
+                system,
+                "gpu_memory_peak_percent",
+            ),
+        },
     }
-
-
-def _value_change(lhs: Any, rhs: Any) -> Dict[str, Any]:
-    """
-    Compare two textual or categorical values.
-    """
-    lhs_s = _as_str(lhs)
-    rhs_s = _as_str(rhs)
-    return {
-        "lhs": lhs_s,
-        "rhs": rhs_s,
-        "changed": lhs_s != rhs_s,
-    }
-
-
-def _compare_step_splits(
-    lhs_summary: Dict[str, Any],
-    rhs_summary: Dict[str, Any],
-    *,
-    split_key: str,
-) -> Dict[str, Dict[str, Optional[float]]]:
-    """
-    Compare step split dictionaries phase-by-phase.
-    """
-    out: Dict[str, Dict[str, Optional[float]]] = {}
-
-    lhs_split = _step_time_split(lhs_summary, split_key=split_key)
-    rhs_split = _step_time_split(rhs_summary, split_key=split_key)
-
-    for phase in _STEP_PHASES:
-        out[phase] = _value_delta(lhs_split.get(phase), rhs_split.get(phase))
-
-    return out
-
-
-def _section_available(summary: Any) -> bool:
-    """
-    Return True when a top-level summary section is present as a dictionary.
-    """
-    return isinstance(summary, dict)
-
-
-def _build_headline(
-    *,
-    lhs_label: str,
-    rhs_label: str,
-    step_avg: Dict[str, Optional[float]],
-    lhs_step_status: Optional[str],
-    rhs_step_status: Optional[str],
-) -> str:
-    """
-    Build one concise compare headline for the top of the report.
-    """
-    pct = step_avg.get("pct_change")
-    if pct is not None and pct >= 5.0:
-        return f"{rhs_label} is slower than {lhs_label} on average step time."
-    if pct is not None and pct <= -5.0:
-        return f"{rhs_label} is faster than {lhs_label} on average step time."
-    if lhs_step_status != rhs_step_status and rhs_step_status:
-        return (
-            f"Average step time is similar, but the diagnosis changed to "
-            f"{rhs_step_status}."
-        )
-    return "Average step time is broadly similar between the two runs."
 
 
 def build_compare_payload(
@@ -299,28 +90,19 @@ def build_compare_payload(
     lhs_path: str | Path,
     rhs_path: str | Path,
 ) -> Dict[str, Any]:
-    """
-    Build a structured compare payload from two final summary JSON objects.
-    """
+    """Build a structured compare payload from two final summary JSON files."""
     lhs_path = Path(lhs_path).expanduser().resolve()
     rhs_path = Path(rhs_path).expanduser().resolve()
-
     lhs_label, rhs_label = derive_compare_labels(lhs_path, rhs_path)
 
-    lhs_step_time = lhs_payload.get("step_time", {})
-    rhs_step_time = rhs_payload.get("step_time", {})
-    lhs_step_memory = lhs_payload.get("step_memory", {})
-    rhs_step_memory = rhs_payload.get("step_memory", {})
-
-    step_avg = _value_delta(
-        _step_time_value(lhs_step_time, "step_avg_ms"),
-        _step_time_value(rhs_step_time, "step_avg_ms"),
-    )
-    lhs_step_status = _step_time_value(lhs_step_time, "status")
-    rhs_step_status = _step_time_value(rhs_step_time, "status")
+    section_results = [
+        comparer.compare(lhs_payload, rhs_payload)
+        for comparer in SECTION_COMPARERS
+    ]
+    sections = {result.name: result.to_dict() for result in section_results}
 
     payload: Dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "generated_at": utc_now_iso(),
         "lhs": {
             "path": str(lhs_path),
@@ -336,139 +118,21 @@ def build_compare_payload(
             "parent_name": rhs_path.parent.name,
             "duration_s": _as_float(rhs_payload.get("duration_s")),
         },
+        "sections": sections,
         "availability": {
-            "system": _section_available(lhs_payload.get("system"))
-            or _section_available(rhs_payload.get("system")),
-            "process": _section_available(lhs_payload.get("process"))
-            or _section_available(rhs_payload.get("process")),
-            "step_time": _section_available(lhs_payload.get("step_time"))
-            or _section_available(rhs_payload.get("step_time")),
-            "step_memory": _section_available(lhs_payload.get("step_memory"))
-            or _section_available(rhs_payload.get("step_memory")),
+            name: section.get("available", False)
+            for name, section in sections.items()
         },
         "overview": {
-            "headline": _build_headline(
-                lhs_label=lhs_label,
-                rhs_label=rhs_label,
-                step_avg=step_avg,
-                lhs_step_status=_as_str(lhs_step_status),
-                rhs_step_status=_as_str(rhs_step_status),
-            ),
-            "duration_s": _value_delta(
-                lhs_payload.get("duration_s"),
-                rhs_payload.get("duration_s"),
-            ),
-            "step_time_status": _value_change(
-                lhs_step_status,
-                rhs_step_status,
-            ),
-            "step_memory_status": _value_change(
-                _step_memory_value(lhs_step_memory, "status"),
-                _step_memory_value(rhs_step_memory, "status"),
-            ),
-        },
-        "system": {
-            "cpu_avg_percent": _value_delta(
-                _system_value(lhs_payload, "cpu_avg_percent"),
-                _system_value(rhs_payload, "cpu_avg_percent"),
-            ),
-            "ram_peak_gb": _value_delta(
-                _system_value(lhs_payload, "ram_peak_gb"),
-                _system_value(rhs_payload, "ram_peak_gb"),
-            ),
-            "gpu_available": _value_change(
-                _system_value(lhs_payload, "gpu_available"),
-                _system_value(rhs_payload, "gpu_available"),
-            ),
-            "gpu_count": _value_delta(
-                _system_value(lhs_payload, "gpu_count"),
-                _system_value(rhs_payload, "gpu_count"),
-            ),
-        },
-        "process": {
-            "cpu_avg_percent": _value_delta(
-                _process_value(lhs_payload, "cpu_avg_percent"),
-                _process_value(rhs_payload, "cpu_avg_percent"),
-            ),
-            "ram_peak_gb": _value_delta(
-                _process_value(lhs_payload, "ram_peak_gb"),
-                _process_value(rhs_payload, "ram_peak_gb"),
-            ),
-            "takeaway": _value_change(
-                _process_value(lhs_payload, "takeaway"),
-                _process_value(rhs_payload, "takeaway"),
-            ),
-        },
-        "step_time": {
-            "status": _value_change(
-                _step_time_value(lhs_step_time, "status"),
-                _step_time_value(rhs_step_time, "status"),
-            ),
-            "presented": {
-                "lhs": _diagnosis_block(lhs_step_time),
-                "rhs": _diagnosis_block(rhs_step_time),
+            "duration_s": {
+                "lhs": _as_float(lhs_payload.get("duration_s")),
+                "rhs": _as_float(rhs_payload.get("duration_s")),
             },
-            "step_avg_ms": step_avg,
-            "wait_share_pct": _value_delta(
-                _step_time_value(lhs_step_time, "wait_share_pct"),
-                _step_time_value(rhs_step_time, "wait_share_pct"),
-            ),
-            "compute_share_pct": _value_delta(
-                _step_time_value(lhs_step_time, "compute_share_pct"),
-                _step_time_value(rhs_step_time, "compute_share_pct"),
-            ),
-            "dominant_phase": _value_change(
-                _step_time_value(lhs_step_time, "dominant_phase"),
-                _step_time_value(rhs_step_time, "dominant_phase"),
-            ),
-            "split_ms": _compare_step_splits(
-                lhs_step_time,
-                rhs_step_time,
-                split_key="split_ms",
-            ),
-            "split_pct": _compare_step_splits(
-                lhs_step_time,
-                rhs_step_time,
-                split_key="split_pct",
-            ),
-        },
-        "step_memory": {
-            "status": _value_change(
-                _step_memory_value(lhs_step_memory, "status"),
-                _step_memory_value(rhs_step_memory, "status"),
-            ),
-            "reason": _value_change(
-                _step_memory_value(lhs_step_memory, "reason"),
-                _step_memory_value(rhs_step_memory, "reason"),
-            ),
-            "action": _value_change(
-                _step_memory_value(lhs_step_memory, "action"),
-                _step_memory_value(rhs_step_memory, "action"),
-            ),
-            "presented": {
-                "lhs": _diagnosis_block(lhs_step_memory),
-                "rhs": _diagnosis_block(rhs_step_memory),
-            },
-            "primary_metric": _value_change(
-                _step_memory_value(lhs_step_memory, "primary_metric"),
-                _step_memory_value(rhs_step_memory, "primary_metric"),
-            ),
-            "worst_peak_bytes": _value_delta(
-                _step_memory_value(lhs_step_memory, "worst_peak_bytes"),
-                _step_memory_value(rhs_step_memory, "worst_peak_bytes"),
-            ),
-            "skew_pct": _value_delta(
-                _step_memory_value(lhs_step_memory, "skew_pct"),
-                _step_memory_value(rhs_step_memory, "skew_pct"),
-            ),
-            "trend_worst_delta_bytes": _value_delta(
-                _step_memory_value(lhs_step_memory, "trend_worst_delta_bytes"),
-                _step_memory_value(rhs_step_memory, "trend_worst_delta_bytes"),
-            ),
         },
         "text": "",
     }
 
+    payload.update(_legacy_section_aliases(sections))
     payload["verdict"] = build_compare_verdict(
         lhs_payload=lhs_payload,
         rhs_payload=rhs_payload,
@@ -476,3 +140,6 @@ def build_compare_payload(
     )
 
     return payload
+
+
+__all__ = ["build_compare_payload"]
