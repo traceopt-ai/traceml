@@ -94,9 +94,9 @@ To keep the project focused, we are currently **not** accepting:
 
 - Bugs and features: GitHub Issues
 - Design discussions: GitHub Discussions
-- Security issues: email abhinav@traceopt.ai
+- Security issues: email support@traceopt.ai
 
-Maintainer: Abhinav Srivastav
+Maintainer: OptAI UG (haftungsbeschränkt)
 
 ---
 

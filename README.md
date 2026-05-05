@@ -245,3 +245,5 @@ Contributions are welcome, especially:
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
+
+TraceOpt is a trademark of OptAI UG (haftungsbeschränkt).
