@@ -28,6 +28,7 @@ from .context import (
     non_negative_finite,
     share,
 )
+from .policy import DEFAULT_THRESHOLDS, DiagnosisThresholds
 from .rules import run_step_time_rules
 from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
@@ -61,52 +62,6 @@ _PRIMARY_KIND_PRIORITY: dict[str, int] = {
     "WAIT_HEAVY": 20,
     "COMPUTE_BOUND": 10,
 }
-
-
-@dataclass(frozen=True)
-class DiagnosisThresholds:
-    """
-    Thresholds controlling diagnosis selection.
-
-    Design notes
-    ------------
-    - Straggler attribution uses excess burden on the worst rank relative to the
-      median rank:
-          max(0, worst - median) / typical_local_burden
-    - `typical_local_burden` is:
-          median_dataloader + median_compute
-    - This avoids step-time / wait cancellation effects in DDP.
-    - Explicit straggler types are used when one local phase is materially
-      uneven:
-          INPUT_STRAGGLER
-          COMPUTE_STRAGGLER
-    - Generic STRAGGLER is used when both input and compute are materially
-      uneven in the same window.
-    - Bound states are used when one phase dominates but cross-rank skew stays low.
-    """
-
-    input_straggler_score_warn: float = 0.10
-    input_straggler_score_crit: float = 0.20
-
-    compute_straggler_score_warn: float = 0.10
-    compute_straggler_score_crit: float = 0.20
-
-    input_share_warn: float = 0.25
-    input_share_crit: float = 0.35
-
-    wait_share_warn: float = 0.15
-    wait_share_crit: float = 0.25
-
-    input_bound_max_skew: float = 0.06
-    compute_bound_max_skew: float = 0.06
-
-    compute_bound_share_warn: float = 0.85
-    compute_bound_share_crit: float = 0.92
-
-    min_steps_for_confident_diag: int = 20
-
-
-DEFAULT_THRESHOLDS = DiagnosisThresholds()
 
 
 @dataclass(frozen=True)
@@ -360,7 +315,10 @@ def _per_rank_diagnostics(
                         wait_share, thresholds.wait_share_crit
                     ),
                     "summary": f"WAIT* is {_pct(wait_share)} of the local step.",
-                    "action": f"Inspect synchronization or stalls on {_rank_str(rank)}.",
+                    "action": (
+                        "Inspect synchronization or stalls on "
+                        f"{_rank_str(rank)}."
+                    ),
                 }
             )
 
