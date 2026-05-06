@@ -7,7 +7,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -176,6 +176,17 @@ def test_init_is_idempotent_for_same_config_and_rejects_conflicts():
 
     with pytest.raises(RuntimeError, match="already been initialized"):
         initialization.init(mode="auto")
+
+
+def test_start_is_alias_for_init():
+    initialization = _reload_initialization_module()
+
+    cfg = initialization.start(mode="manual")
+
+    assert cfg.mode == "manual"
+    assert cfg.patch_dataloader is False
+    assert cfg.patch_forward is False
+    assert cfg.patch_backward is False
 
 
 def test_api_import_does_not_initialize_implicitly():
