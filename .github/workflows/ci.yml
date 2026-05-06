@@ -55,6 +55,7 @@ jobs:
             tests/core \
             tests/diagnostics/test_bands.py \
             tests/diagnostics/test_common.py \
+            tests/telemetry/test_distributed.py \
             tests/telemetry/test_msgpack.py \
             tests/telemetry/test_sender_sequence.py \
             -q
