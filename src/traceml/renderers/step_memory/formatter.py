@@ -11,9 +11,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.core import Formatter
+from traceml.diagnostics.step_memory import build_step_memory_diagnosis
+from traceml.diagnostics.step_memory_formatters import format_cli_diagnosis
 from traceml.utils.formatting import fmt_mem_new
 
-from .diagnostics import build_step_memory_diagnosis, format_cli_diagnosis
 from .schema import StepMemoryCombinedMetric, StepMemoryCombinedResult
 
 

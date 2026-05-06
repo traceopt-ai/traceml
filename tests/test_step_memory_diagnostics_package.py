@@ -1,5 +1,7 @@
 from traceml.diagnostics.step_memory import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
+    LIVE_STEP_MEMORY_POLICY,
+    SUMMARY_STEP_MEMORY_POLICY,
     StepMemoryDiagnosisThresholds,
     build_step_memory_diagnosis,
     build_step_memory_summary_diagnosis_result,
@@ -10,12 +12,6 @@ from traceml.diagnostics.step_memory.adapters import (
 from traceml.diagnostics.step_memory.rules import (
     DEFAULT_STEP_MEMORY_SUMMARY_RULES,
     run_step_memory_summary_rules,
-)
-from traceml.diagnostics.step_memory_summary import (
-    build_step_memory_summary_diagnosis_result as legacy_summary_builder,
-)
-from traceml.diagnostics.step_memory_trend import (
-    evaluate_step_memory_creep as legacy_trend_builder,
 )
 from traceml.diagnostics.step_memory.trend import evaluate_step_memory_creep
 from traceml.renderers.step_memory.schema import (
@@ -163,9 +159,10 @@ def test_step_memory_summary_adapters_and_rules_are_importable():
     assert issues[0].kind == "HIGH_PRESSURE"
 
 
-def test_step_memory_legacy_import_paths_are_thin_shims():
-    assert legacy_summary_builder is build_step_memory_summary_diagnosis_result
-    assert legacy_trend_builder is evaluate_step_memory_creep
+def test_step_memory_policies_are_explicit():
+    assert LIVE_STEP_MEMORY_POLICY.name == "live"
+    assert SUMMARY_STEP_MEMORY_POLICY.name == "summary"
+    assert DEFAULT_STEP_MEMORY_THRESHOLDS is LIVE_STEP_MEMORY_POLICY.thresholds
     assert isinstance(
         DEFAULT_STEP_MEMORY_THRESHOLDS,
         StepMemoryDiagnosisThresholds,

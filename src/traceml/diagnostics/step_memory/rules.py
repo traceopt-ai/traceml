@@ -16,7 +16,7 @@ from traceml.diagnostics.common import (
     DiagnosticRule,
     severity_rank,
 )
-from traceml.diagnostics.step_memory import (
+from traceml.diagnostics.step_memory.policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
 )
