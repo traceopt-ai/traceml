@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence
 
-from traceml.diagnostics.step_memory import (
+from traceml.diagnostics.step_memory.policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
 )

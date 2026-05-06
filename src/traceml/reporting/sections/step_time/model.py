@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from traceml.reporting.sections.step_time.diagnosis import RankStepSignals
+from traceml.diagnostics.step_time.adapters import RankStepSignals
 from traceml.reporting.summaries.summary_formatting import (
     safe_float,
     share_percent,

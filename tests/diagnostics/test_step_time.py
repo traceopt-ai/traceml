@@ -4,7 +4,16 @@ from traceml.diagnostics.step_time.api import (
     DEFAULT_THRESHOLDS,
     build_step_diagnosis_result,
 )
+from traceml.diagnostics.step_time.adapters import (
+    DEFAULT_SUMMARY_DIAG_CONFIG,
+    RankStepSignals,
+    build_summary_step_diagnosis_result,
+)
 from traceml.diagnostics.step_time.context import build_step_time_context
+from traceml.diagnostics.step_time.policy import (
+    LIVE_STEP_TIME_POLICY,
+    SUMMARY_STEP_TIME_POLICY,
+)
 from traceml.diagnostics.step_time.rules import (
     ComputeBoundRule,
     ComputeStragglerRule,
@@ -228,3 +237,52 @@ def test_step_time_primary_selection_combines_input_and_compute_stragglers() -> 
         "COMPUTE_STRAGGLER",
         "STRAGGLER",
     }
+
+
+def test_step_time_live_and_summary_policies_are_explicit() -> None:
+    assert LIVE_STEP_TIME_POLICY.name == "live"
+    assert SUMMARY_STEP_TIME_POLICY.name == "summary"
+    assert DEFAULT_THRESHOLDS == LIVE_STEP_TIME_POLICY.thresholds
+    assert DEFAULT_SUMMARY_DIAG_CONFIG == SUMMARY_STEP_TIME_POLICY
+    assert (
+        SUMMARY_STEP_TIME_POLICY.thresholds.wait_share_warn
+        > LIVE_STEP_TIME_POLICY.thresholds.wait_share_warn
+    )
+    assert (
+        SUMMARY_STEP_TIME_POLICY.min_steps_for_diag
+        > LIVE_STEP_TIME_POLICY.min_steps_for_diag
+    )
+
+
+def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
+    rank_signals = {
+        0: RankStepSignals(
+            steps_analyzed=40,
+            dataloader_ms=1.0,
+            forward_ms=20.0,
+            backward_ms=60.0,
+            optimizer_ms=10.0,
+            step_cpu_ms=100.0,
+        )
+    }
+
+    assert (
+        build_summary_step_diagnosis_result(rank_signals, max_rows=100) is None
+    )
+
+    rank_signals[0] = RankStepSignals(
+        steps_analyzed=60,
+        dataloader_ms=1.0,
+        forward_ms=20.0,
+        backward_ms=60.0,
+        optimizer_ms=10.0,
+        step_cpu_ms=100.0,
+    )
+
+    result = build_summary_step_diagnosis_result(
+        rank_signals,
+        max_rows=100,
+    )
+
+    assert result is not None
+    assert result.primary.steps_used == 60

@@ -1,5 +1,6 @@
 import sqlite3
 
+from traceml.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
 from traceml.reporting.sections.step_memory import StepMemorySummarySection
 from traceml.reporting.sections.step_memory.loader import (
     load_step_memory_section_data,
@@ -83,6 +84,45 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "- Trend:" not in result.text
     assert "- Note:" not in result.text
     assert "- Issues:" not in result.text
+
+
+def test_step_memory_section_loader_uses_summary_policy(
+    tmp_path,
+    monkeypatch,
+):
+    import traceml.reporting.sections.step_memory.loader as loader_module
+
+    db_path = tmp_path / "memory.db"
+    _create_step_memory_db(str(db_path))
+    captured = {}
+
+    def fake_primary(metrics, *, thresholds, **kwargs):
+        captured["primary_thresholds"] = thresholds
+        return None
+
+    def fake_result(metrics, *, thresholds, **kwargs):
+        captured["result_thresholds"] = thresholds
+        return None
+
+    monkeypatch.setattr(
+        loader_module,
+        "build_step_memory_diagnosis",
+        fake_primary,
+    )
+    monkeypatch.setattr(
+        loader_module,
+        "build_step_memory_summary_diagnosis_result",
+        fake_result,
+    )
+
+    load_step_memory_section_data(str(db_path), window_size=3)
+
+    assert (
+        captured["primary_thresholds"] is SUMMARY_STEP_MEMORY_POLICY.thresholds
+    )
+    assert (
+        captured["result_thresholds"] is SUMMARY_STEP_MEMORY_POLICY.thresholds
+    )
 
 
 def test_step_memory_legacy_wrapper_delegates_to_section_path(tmp_path):

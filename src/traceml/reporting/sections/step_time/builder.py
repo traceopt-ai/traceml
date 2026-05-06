@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from traceml.reporting.sections.step_time.diagnosis import (
+from traceml.diagnostics.step_time.adapters import (
     build_summary_step_diagnosis_result,
 )
 from traceml.reporting.sections.step_time.loader import StepTimeSectionData

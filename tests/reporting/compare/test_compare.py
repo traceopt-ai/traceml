@@ -283,10 +283,12 @@ def test_compare_render_shows_unavailable_in_a_for_missing_numeric_fields() -> (
     compare_payload = _build_compare(lhs, rhs)
     text = build_compare_text(compare_payload)
 
-    assert "No clear comparison outcome." in text
-    assert "Step avg: unavailable in A; B = 296.5ms" in text
-    assert "Wait share: unavailable in A; B = 13.5%" in text
-    assert "Worst peak: unavailable in A; B = 194 MB" in text
+    assert "Verdict: INCONCLUSIVE" in text
+    assert "Step avg" in text
+    assert "n/a" in text
+    assert "296.5 ms" in text
+    assert "Peak reserved" in text
+    assert "194 MB" in text
 
 
 def test_compare_reads_legacy_flat_final_summary_schema() -> None:
@@ -327,7 +329,9 @@ def test_compare_reads_legacy_flat_final_summary_schema() -> None:
     assert compare_payload["system"]["cpu_avg_percent"]["rhs"] == 23.2
     assert compare_payload["process"]["cpu_avg_percent"]["lhs"] == 70.8
     assert compare_payload["process"]["cpu_avg_percent"]["rhs"] == 143.9
-    assert "Step avg: 2499.7ms -> 621.1ms" in text
+    assert "Step avg" in text
+    assert "2499.7 ms" in text
+    assert "621.1 ms" in text
     assert "unavailable in both runs" not in text
 
 
@@ -361,9 +365,7 @@ def test_compare_text_wrapper_returns_fallback_if_formatter_fails(
     assert "detailed compare text formatting failed" in text
 
 
-def test_compare_partial_step_time_stays_unclear_and_surfaces_partial_comparability() -> (
-    None
-):
+def test_compare_partial_step_time_stays_unclear() -> None:
     lhs = _payload_with_sections(
         step_time={
             "primary_diagnosis": {
@@ -418,11 +420,7 @@ def test_compare_partial_step_time_stays_unclear_and_surfaces_partial_comparabil
 
     top_changes = verdict["top_changes"]
     assert top_changes
-    assert any(
-        item["domain"] == "compare"
-        and "partially comparable" in item["summary"]
-        for item in top_changes
-    )
+    assert any("partial" in item["summary"].lower() for item in top_changes)
 
 
 def test_compare_fully_comparable_stable_runs_can_still_be_equivalent() -> (
@@ -503,3 +501,90 @@ def test_compare_one_comparable_domain_and_one_missing_domain_is_not_equivalent(
     assert verdict["comparability"]["overall"]["state"] == "partial"
     assert verdict["outcome"] == "unclear"
     assert verdict["outcome"] != "equivalent"
+
+
+def test_compare_payload_has_section_based_json_and_table_text() -> None:
+    lhs = _payload_with_sections(
+        step_time=_step_time_section(
+            status="COMPUTE-BOUND",
+            step_avg_ms=621.1,
+            wait_share_pct=1.4,
+            split_ms={
+                "dataloader": 1.3,
+                "forward": 228.4,
+                "backward": 313.4,
+                "optimizer": 69.0,
+            },
+        ),
+        step_memory=_step_memory_section(
+            status="NORMAL",
+            worst_peak_bytes=6.2 * 1024.0 * 1024.0 * 1024.0,
+            skew_pct=4.0,
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_time=_step_time_section(
+            status="COMPUTE-BOUND",
+            step_avg_ms=735.2,
+            wait_share_pct=1.6,
+            split_ms={
+                "dataloader": 1.9,
+                "forward": 300.0,
+                "backward": 350.0,
+                "optimizer": 70.0,
+            },
+        ),
+        step_memory=_step_memory_section(
+            status="HIGH MEMORY",
+            worst_peak_bytes=8.9 * 1024.0 * 1024.0 * 1024.0,
+            skew_pct=12.0,
+        ),
+    )
+
+    compare_payload = _build_compare(lhs, rhs)
+    text = build_compare_text(compare_payload)
+
+    assert compare_payload["schema_version"] == 2
+    assert set(compare_payload["sections"]) == {
+        "step_time",
+        "step_memory",
+        "process",
+        "system",
+    }
+    assert (
+        compare_payload["sections"]["step_time"]["metrics"]["step_avg_ms"][
+            "pct_change"
+        ]
+        == compare_payload["step_time"]["step_avg_ms"]["pct_change"]
+    )
+    assert compare_payload["verdict"]["status"] == "REGRESSION"
+    assert compare_payload["verdict"]["primary_domain"] == "step_time"
+    assert "Metric" in text
+    assert "Step time diagnosis" in text
+    assert "Step avg" in text
+    assert "621.1 ms" in text
+    assert "735.2 ms" in text
+    assert "+114.1 ms (+18.4%)" in text
+    assert "Peak reserved" in text
+    assert "+2.70 GB (+43.5%)" in text
+
+
+def test_compare_verdict_uses_priority_for_mixed_primary_signals() -> None:
+    lhs = _payload_with_sections(
+        step_time=_step_time_section(step_avg_ms=700.0),
+        step_memory=_step_memory_section(
+            worst_peak_bytes=4.0 * 1024.0 * 1024.0 * 1024.0,
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_time=_step_time_section(step_avg_ms=600.0),
+        step_memory=_step_memory_section(
+            worst_peak_bytes=6.0 * 1024.0 * 1024.0 * 1024.0,
+        ),
+    )
+
+    verdict = _build_compare(lhs, rhs)["verdict"]
+
+    assert verdict["status"] == "MIXED"
+    assert verdict["outcome"] == "mixed"
+    assert verdict["findings"][0]["status"] == "MIXED"

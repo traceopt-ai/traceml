@@ -13,22 +13,30 @@ while organizing the implementation into smaller modules:
 """
 
 from .api import (
-    DEFAULT_THRESHOLDS,
     ComputeSignal,
     DiagnosisKind,
-    DiagnosisThresholds,
     Severity,
     StepDiagnosis,
     build_step_diagnosis,
     build_step_diagnosis_result,
 )
 from .formatters import format_cli_diagnosis, format_dashboard_diagnosis
+from .policy import (
+    DEFAULT_THRESHOLDS,
+    LIVE_STEP_TIME_POLICY,
+    SUMMARY_STEP_TIME_POLICY,
+    DiagnosisThresholds,
+    StepTimeDiagnosisPolicy,
+)
 
 __all__ = [
     "Severity",
     "DiagnosisKind",
     "DiagnosisThresholds",
     "DEFAULT_THRESHOLDS",
+    "LIVE_STEP_TIME_POLICY",
+    "SUMMARY_STEP_TIME_POLICY",
+    "StepTimeDiagnosisPolicy",
     "StepDiagnosis",
     "ComputeSignal",
     "build_step_diagnosis",

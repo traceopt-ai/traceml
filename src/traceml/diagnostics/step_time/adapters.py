@@ -1,32 +1,28 @@
-"""
-Summary-mode diagnosis adapter for STEP TIME post-run reports.
+"""Adapters that feed summary step-time data into shared diagnosis rules."""
 
-This module converts per-rank summary aggregates into the same metric schema used
-by live step-time diagnostics, so one diagnosis engine can be reused across
-renderers and summaries.
-
-It supports optional step-aligned series generation for trend-aware diagnosis
-notes. If step-level data is missing or cannot be aligned, it gracefully falls
-back to summary-only diagnosis (no trend notes).
-"""
-
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 
 from traceml.diagnostics.common import DiagnosticResult, diagnosis_to_dict
-from traceml.diagnostics.step_time import (
-    DiagnosisThresholds,
+from traceml.diagnostics.step_time.api import (
     StepDiagnosis,
     build_step_diagnosis_result,
 )
+from traceml.diagnostics.step_time.policy import (
+    SUMMARY_STEP_TIME_POLICY,
+    StepTimeDiagnosisPolicy,
+)
+from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
     StepCombinedTimeMetric,
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
+
+_LOGGER = get_error_logger("StepTimeDiagnostics")
 
 
 @dataclass(frozen=True)
@@ -46,40 +42,19 @@ class RankStepSignals:
     step_cpu_ms: float
 
 
-@dataclass(frozen=True)
-class SummaryDiagnosisConfig:
-    """
-    Configuration for summary-mode diagnosis behavior.
-
-    Summary thresholds are slightly stricter than live diagnostics because
-    post-run summaries should favor precision over sensitivity.
-    """
-
-    thresholds: DiagnosisThresholds = field(
-        default_factory=lambda: DiagnosisThresholds(
-            input_straggler_score_warn=0.10,
-            input_straggler_score_crit=0.18,
-            compute_straggler_score_warn=0.10,
-            compute_straggler_score_crit=0.18,
-            input_share_warn=0.30,
-            input_share_crit=0.40,
-            wait_share_warn=0.18,
-            wait_share_crit=0.28,
-            input_bound_max_skew=0.05,
-            compute_bound_max_skew=0.05,
-            compute_bound_share_warn=0.88,
-            compute_bound_share_crit=0.94,
-            min_steps_for_confident_diag=20,
-        )
-    )
-    min_steps_for_diag: int = 50
-
-
-DEFAULT_SUMMARY_DIAG_CONFIG = SummaryDiagnosisConfig()
+DEFAULT_SUMMARY_DIAG_CONFIG = SUMMARY_STEP_TIME_POLICY
 
 # Per-rank per-step canonical metrics map:
 # rank -> step -> metric_key -> value_ms
 RankStepMetricSeries = Dict[int, Dict[int, Dict[str, float]]]
+
+
+def _log_adapter_error(message: str, exc: Exception) -> None:
+    """Log adapter failures without blocking final summary generation."""
+    try:
+        _LOGGER.exception("[TraceML] %s", message)
+    except Exception:
+        pass
 
 
 def _finite_float(x: Any) -> float:
@@ -118,7 +93,8 @@ def _common_suffix_steps(
         if max_rows > 0:
             steps = steps[-int(max_rows) :]
         return steps
-    except Exception:
+    except Exception as exc:
+        _log_adapter_error("Step-time summary step alignment failed.", exc)
         return []
 
 
@@ -159,15 +135,16 @@ def _build_metric_series(
                 median_vals.append(float(np.median(arr)))
                 worst_vals.append(float(np.max(arr)))
 
-        # For compatibility with schema (sum list exists but isn't used by diagnosis),
-        # fill `sum` with zeros of matching length.
+        # The schema carries a `sum` series for renderers; diagnosis does not
+        # need it here, so keep it shape-compatible with zeros.
         return StepCombinedTimeSeries(
             steps=list(steps),
             median=median_vals,
             worst=worst_vals,
             sum=[0.0] * len(steps),
         )
-    except Exception:
+    except Exception as exc:
+        _log_adapter_error("Step-time summary series preparation failed.", exc)
         return None
 
 
@@ -266,7 +243,7 @@ def build_summary_step_diagnosis_result(
     *,
     max_rows: int,
     per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
-    config: SummaryDiagnosisConfig = DEFAULT_SUMMARY_DIAG_CONFIG,
+    policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG,
 ) -> Optional[DiagnosticResult]:
     """
     Build rich summary-mode diagnosis from per-rank averaged timing signals.
@@ -282,7 +259,7 @@ def build_summary_step_diagnosis_result(
 
     ranks = sorted(rank_signals.keys())
     min_steps = min(s.steps_analyzed for s in rank_signals.values())
-    if min_steps < int(config.min_steps_for_diag):
+    if min_steps < int(policy.min_steps_for_diag):
         return None
 
     # Optional step-aligned series support (for trend notes).
@@ -372,7 +349,7 @@ def build_summary_step_diagnosis_result(
 
     return build_step_diagnosis_result(
         metrics,
-        thresholds=config.thresholds,
+        thresholds=policy.thresholds,
         per_rank_timing=_build_summary_per_rank_timing(rank_signals),
     )
 
@@ -382,7 +359,7 @@ def build_summary_step_diagnosis(
     *,
     max_rows: int,
     per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
-    config: SummaryDiagnosisConfig = DEFAULT_SUMMARY_DIAG_CONFIG,
+    policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG,
 ) -> Optional[StepDiagnosis]:
     """
     Backward-compatible summary-mode primary diagnosis builder.
@@ -391,7 +368,7 @@ def build_summary_step_diagnosis(
         rank_signals,
         max_rows=max_rows,
         per_rank_step_metrics=per_rank_step_metrics,
-        config=config,
+        policy=policy,
     )
     return result.primary if result is not None else None
 

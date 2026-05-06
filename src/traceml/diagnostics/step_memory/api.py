@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, Sequence, cast
 
-from traceml.analytics.trends import TrendBands
 from traceml.diagnostics.common import DiagnosticResult
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 
 from ..common import BaseDiagnosis, Severity, validate_confidence
-from ..trends import TrendConfig, compute_trend_evidence
+from ..trends import compute_trend_evidence
+from .policy import (
+    DEFAULT_STEP_MEMORY_THRESHOLDS,
+    StepMemoryDiagnosisThresholds,
+)
 
 StepMemoryDiagnosisKind = Literal[
     "NO_DATA",
@@ -29,35 +32,6 @@ _STATUS_BY_KIND = {
     "CREEP_EARLY": "MEMORY RISING",
     "CREEP_CONFIRMED": "MEMORY CREEP",
 }
-
-
-@dataclass(frozen=True)
-class StepMemoryDiagnosisThresholds:
-    """Thresholds for live step-memory diagnosis."""
-
-    min_steps_for_diag: int = 50
-
-    pressure_warn_fraction: float = 0.92
-    pressure_crit_fraction: float = 0.97
-
-    imbalance_skew_warn: float = 0.12
-    imbalance_skew_crit: float = 0.20
-
-    creep_score_delta_scale_bytes: float = 100.0 * 1024.0 * 1024.0
-    creep_confirmed_delta_bytes: float = 1024.0 * 1024.0 * 1024.0
-
-    require_recent_gt_mid: bool = True
-    require_mid_ge_baseline: bool = True
-
-    trend: TrendConfig = field(
-        default_factory=lambda: TrendConfig(
-            min_points=50,
-            bands=TrendBands(warmup_frac=0.0),
-        )
-    )
-
-
-DEFAULT_STEP_MEMORY_THRESHOLDS = StepMemoryDiagnosisThresholds()
 
 
 def _log_step_memory_diagnostic_error(message: str, exc: Exception) -> None:
