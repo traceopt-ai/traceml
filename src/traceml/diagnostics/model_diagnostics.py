@@ -9,7 +9,10 @@ from traceml.diagnostics.registry import (
     DiagnosticDomainSpec,
     ModelDiagnosticContext,
 )
-from traceml.diagnostics.step_memory import build_step_memory_diagnosis
+from traceml.diagnostics.step_memory import (
+    LIVE_STEP_MEMORY_POLICY,
+    build_step_memory_diagnosis,
+)
 from traceml.diagnostics.step_time import build_step_diagnosis
 from traceml.diagnostics.trends import DEFAULT_TREND_CONFIG, compute_trend_pct
 from traceml.loggers.error_log import get_error_logger
@@ -185,6 +188,7 @@ def _build_step_memory_item(
     step_memory_diag = build_step_memory_diagnosis(
         context.step_memory_metrics,
         gpu_total_bytes=context.gpu_total_bytes,
+        thresholds=LIVE_STEP_MEMORY_POLICY.thresholds,
     )
     return ModelDiagnosisItem(
         source="step_memory",

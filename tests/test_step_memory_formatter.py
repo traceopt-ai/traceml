@@ -1,6 +1,7 @@
 from rich.console import Console
 from rich.panel import Panel
 
+from traceml.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
 from traceml.renderers.step_memory.formatter import StepMemoryRichFormatter
 from traceml.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
@@ -73,6 +74,42 @@ def test_step_memory_formatter_renders_empty_state() -> None:
     assert isinstance(panel, Panel)
     assert "Model Step Memory" in _render_text(panel)
     assert "Waiting for memory samples" in _render_text(panel)
+
+
+def test_step_memory_formatter_uses_live_policy(monkeypatch) -> None:
+    import traceml.renderers.step_memory.formatter as formatter_module
+
+    captured = {}
+
+    def fake_diagnosis(metrics, *, thresholds, **kwargs):
+        captured["thresholds"] = thresholds
+        return object()
+
+    monkeypatch.setattr(
+        formatter_module,
+        "build_step_memory_diagnosis",
+        fake_diagnosis,
+    )
+    monkeypatch.setattr(
+        formatter_module,
+        "format_cli_diagnosis",
+        lambda diagnosis: "Diagnosis: TEST",
+    )
+
+    StepMemoryRichFormatter().format(
+        StepMemoryCombinedResult(
+            metrics=[
+                _metric(
+                    "peak_reserved",
+                    world_size=1,
+                    ranks_present=1,
+                )
+            ],
+            status_message="",
+        )
+    )
+
+    assert captured["thresholds"] is LIVE_STEP_MEMORY_POLICY.thresholds
 
 
 def test_step_memory_formatter_renders_single_rank_shape() -> None:

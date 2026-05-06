@@ -11,7 +11,10 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.core import Formatter
-from traceml.diagnostics.step_memory import build_step_memory_diagnosis
+from traceml.diagnostics.step_memory import (
+    LIVE_STEP_MEMORY_POLICY,
+    build_step_memory_diagnosis,
+)
 from traceml.diagnostics.step_memory_formatters import format_cli_diagnosis
 from traceml.utils.formatting import fmt_mem_new
 
@@ -39,7 +42,10 @@ class StepMemoryRichFormatter(Formatter[StepMemoryCombinedResult, Panel]):
 
         metrics = self._sort_metrics(payload.metrics)
 
-        diag = build_step_memory_diagnosis(metrics)
+        diag = build_step_memory_diagnosis(
+            metrics,
+            thresholds=LIVE_STEP_MEMORY_POLICY.thresholds,
+        )
         diag_text = format_cli_diagnosis(diag)
 
         # All metrics share the same window size by construction.

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from traceml.diagnostics.step_memory import (
+    SUMMARY_STEP_MEMORY_POLICY,
     StepMemoryDiagnosis,
     build_step_memory_diagnosis,
     build_step_memory_summary_diagnosis_result,
@@ -70,6 +71,7 @@ def load_step_memory_section_data(
             diagnosis = build_step_memory_diagnosis(
                 metrics,
                 gpu_total_bytes=gpu_total_bytes,
+                thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
             )
 
         per_rank = _load_per_rank_summary(
@@ -85,6 +87,7 @@ def load_step_memory_section_data(
                 metrics,
                 gpu_total_bytes=gpu_total_bytes,
                 per_rank=per_rank,
+                thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
             )
     finally:
         conn.close()
