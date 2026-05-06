@@ -67,6 +67,8 @@ When contributing, please ensure:
 
 If in doubt, open an issue before implementing.
 
+For code extension points, see [`docs/extending-traceml.md`](docs/extending-traceml.md).
+
 ---
 
 ## Pull Request Guidelines
