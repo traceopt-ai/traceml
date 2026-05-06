@@ -199,6 +199,20 @@ for your workflow, please let us know in [GitHub issues](https://github.com/trac
 
 ---
 
+## Roadmap
+
+TraceML is focused on making distributed training slowdowns easier to diagnose while the job is still running.
+
+Current priorities:
+
+- stronger barrier and communication diagnostics for DDP/FSDP, with clearer separation of compute, communication, and synchronization wait
+- multi-node training support, including common launch environments such as Slurm and Ray
+- more structured final summary JSON for experiment trackers, CI workflows, and run-to-run comparisons
+- broader coverage across common training stacks, including Hugging Face Trainer, PyTorch Lightning, FSDP, and potentially DeepSpeed
+- streaming telemetry export for live consumers, starting with simple JSONL-style events and keeping OpenTelemetry compatibility in mind
+
+---
+
 ## Learn more
 
 - [Quickstart](docs/quickstart.md)
