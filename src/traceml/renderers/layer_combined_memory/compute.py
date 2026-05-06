@@ -1,25 +1,7 @@
-"""
-Layer-wise combined memory computation (aggregator-side).
-This module computes a **capacity-oriented** view of memory usage by layer:
-    total_memory =
-        parameter_memory
-      + forward_activation_memory
-      + backward_activation_memory
-
-Key semantics
-------------------------
-- Aggregator-only: reads ALL rank data from `RemoteDBStore`
-- Validates that all ranks reported the same model snapshot (by signature)
-- Selects a *safe step* that is step-aligned across ranks
-- Computes:
-    * current memory: worst rank at safe_step
-    * peak memory: worst rank across time up to safe_step
-- Produces a renderer-facing **typed result object** (no dict spelunking)
-
-"""
+"""Live compute for the optional deep layer-memory profiler."""
 
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
 from traceml.database.database import Database
 from traceml.database.remote_database_store import RemoteDBStore
@@ -38,22 +20,7 @@ from traceml.transport.distributed import get_ddp_info
 
 @dataclass(frozen=True)
 class DDPJoinStatus:
-    """
-    Metadata describing how well layer memory data is aligned across ranks.
-
-    Attributes
-    ----------
-    safe_step : Optional[int]
-        Step index used for the current snapshot.
-    incomplete : bool
-        True if at least one rank was missing data for `safe_step`.
-    missing_ranks : List[int]
-        Ranks that did not report data for `safe_step`.
-    world_size : int
-        Inferred number of ranks.
-
-    - A snapshot can be incomplete if at least one rank did not report for the chosen step.
-    """
+    """Alignment state for the deep layer-memory live snapshot."""
 
     safe_step: Optional[int]
     incomplete: bool
@@ -63,15 +30,7 @@ class DDPJoinStatus:
 
 @dataclass(frozen=True)
 class ModelSnapshotStatus:
-    """
-    Aggregator-side view of model snapshot availability across ranks.
-
-    Semantics
-    ---------
-    - We expect a single "model snapshot" per rank (layer table) for the current run.
-    - The snapshot is considered "ready" only if ALL ranks have reported it AND
-      the model signatures match across ranks.
-    """
+    """Model snapshot availability across ranks."""
 
     ready: bool
     canonical_rank: Optional[int]
@@ -97,7 +56,13 @@ class ModelSnapshotStatus:
 
 
 class LayerCombinedMemoryData:
-    """Computes layer-wise combined memory for the DDP capacity view."""
+    """
+    Compute the live deep-profile layer memory view.
+
+    This class is intentionally scoped to the ``deep`` profile. It joins static
+    parameter memory with forward/backward activation samples and uses the worst
+    rank for a capacity-oriented view.
+    """
 
     LAYER_MEMORY_NAME = "LayerMemory"
     LAYER_FORWARD_NAME = "LayerForwardMemory"
@@ -111,8 +76,6 @@ class LayerCombinedMemoryData:
         self._remote_store = remote_store
         self._top_n = int(top_n_layers)
 
-        # Cache structure (unchanged):
-        #   layer -> {"current": float, "global": float}
         self._forward_cache: Dict[str, Dict[str, float]] = {}
         self._backward_cache: Dict[str, Dict[str, float]] = {}
 
@@ -127,24 +90,7 @@ class LayerCombinedMemoryData:
         sample_cls,
         min_step: int,
     ):
-        """
-        Load schema objects from wire rows, scanning backwards.
-        Stops early once rows fall below `min_step`.
-
-        Parameters
-        ----------
-        rows : Iterable[dict]
-            Wire-format rows (append-only, step-ordered).
-        sample_cls : type
-            Schema class with `from_wire`.
-        min_step : int
-            Lower bound on step index to load.
-
-        Returns
-        -------
-        List[Any]
-            Samples with step >= min_step, newest-first.
-        """
+        """Load schema objects from recent wire rows, newest first."""
         out = []
         for r in reversed(rows or []):
             try:
@@ -157,23 +103,10 @@ class LayerCombinedMemoryData:
         return out
 
     def compute_display_data(self) -> LayerCombinedMemoryResult:
-        """
-        Compute all layer-wise memory metrics required by renderers.
-
-        Returns
-        -------
-        LayerCombinedMemoryResult
-            Renderer-facing typed payload:
-              - per-layer current & peak memory
-              - top-N layers + "other"
-              - DDP join metadata
-              - status message
-        """
+        """Return the typed payload consumed by CLI and dashboard renderers."""
         model_status = self._get_model_snapshot_status()
         world_size = model_status.world_size
 
-        # Even when model is not ready, we keep the output contract stable.
-        # Renderers can show "waiting" states based on `status_message`.
         if not model_status.ready:
             self._join_status = self._build_join_status(
                 None, model_status.missing_ranks
@@ -226,7 +159,7 @@ class LayerCombinedMemoryData:
                 safe_step_candidate, missing
             )
         elif self._last_safe_step >= 0:
-            # Fall back to last known safe step for a stable UI during transient gaps.
+            # Keep deep UI stable during transient rank gaps.
             fwd_snapshot, _, fwd_missing = self._compute_step_snapshot(
                 sampler_name=self.LAYER_FORWARD_NAME + "Sampler",
                 step=self._last_safe_step,
@@ -260,8 +193,6 @@ class LayerCombinedMemoryData:
 
         join = self._join_status
 
-        # Status message: show missing ranks if any data is incomplete; otherwise
-        # provide the "ready" message so UI can display a green state if desired.
         status_message = model_status.message()
         if join and join.incomplete:
             status_message = (
@@ -284,22 +215,7 @@ class LayerCombinedMemoryData:
         )
 
     def _get_model_snapshot_status(self) -> ModelSnapshotStatus:
-        """
-        Validate model snapshot availability and consistency across ranks.
-
-        Strategy
-        --------------------
-        - Each rank is expected to publish its model snapshot to `LayerMemorySampler`.
-        - We use the latest row per rank.
-        - A "ready" snapshot requires:
-            * all ranks present
-            * all signatures identical
-        - Canonical source is the first rank that provides a snapshot.
-
-        Returns
-        -------
-        ModelSnapshotStatus
-        """
+        """Validate that all ranks reported the same model snapshot."""
         world_size = self._world_size()
         canonical_rank: Optional[int] = None
         canonical_sig: Optional[str] = None
@@ -319,7 +235,6 @@ class LayerCombinedMemoryData:
                 missing.append(rank)
                 continue
 
-            # Contract: load using schema
             try:
                 sample = LayerMemorySample.from_wire(last)
             except Exception:
@@ -335,7 +250,6 @@ class LayerCombinedMemoryData:
                 )
             )
 
-            # First valid snapshot becomes canonical.
             if canonical_rank is None:
                 canonical_rank = rank
                 canonical_sig = sig
@@ -345,7 +259,6 @@ class LayerCombinedMemoryData:
                 )
                 continue
 
-            # Any inconsistency should be surfaced (DDP expects identical models).
             if sig != canonical_sig or layer_memory != canonical_layer_memory:
                 mismatched.append(rank)
 
@@ -364,14 +277,7 @@ class LayerCombinedMemoryData:
         )
 
     def _compute_candidate_safe_step(self, world_size: int) -> int:
-        """
-        Compute the largest step index that *should* be present on all ranks.
-
-        Notes
-        -----
-        - This is a candidate only; availability is verified per-rank in `_compute_step_snapshot`.
-        - We consider both forward and backward samplers and take the minimum across ranks.
-        """
+        """Return the largest step that should exist for all ranks."""
 
         def last_step(db: Optional[Database]) -> int:
             if not db:
@@ -405,21 +311,7 @@ class LayerCombinedMemoryData:
         step: int,
         world_size: int,
     ) -> Tuple[Dict[str, Dict[str, float]], bool, List[int]]:
-        """
-        Compute per-layer current & peak memory up to `step`.
-
-        Semantics (unchanged)
-        ---------------------
-        - "current_peak" : worst-rank value at exactly `step`
-        - "global_peak"  : worst-rank max over all steps <= `step`
-
-        Returns
-        -------
-        snapshot : Dict[layer, {"current_peak", "global_peak"}]
-        ok : bool
-            True if all expected ranks had data for `step`
-        missing_ranks : List[int]
-        """
+        """Compute worst-rank current and peak memory up to ``step``."""
         if step < 0:
             return {}, False, list(range(world_size) if world_size > 1 else [])
 
@@ -435,12 +327,10 @@ class LayerCombinedMemoryData:
 
             rows = next(iter(rdb.all_tables().values()), [])
 
-            # Contract: parse rows into schema objects once
             samples = self._load_samples_backwards(
                 rows, LayerForwardBackwardMemorySample, step
             )
 
-            # Current at step
             cur_sample: Optional[LayerForwardBackwardMemorySample] = next(
                 (s for s in reversed(samples) if s.step == step),
                 None,
@@ -457,7 +347,6 @@ class LayerCombinedMemoryData:
             else:
                 missing.append(rank)
 
-            # Peak up to step
             for s in samples:
                 if s.step > step:
                     continue
@@ -480,11 +369,7 @@ class LayerCombinedMemoryData:
         return snapshot, not missing, missing
 
     def _world_size(self) -> int:
-        """
-        Obtain world size from the distributed runtime.
-
-        We keep this as a function to make it easy to evolve later.
-        """
+        """Return the active distributed world size, defaulting to one."""
         _, _, world_size = get_ddp_info()
         return max(int(world_size), 1)
 
@@ -497,12 +382,7 @@ class LayerCombinedMemoryData:
 
     @staticmethod
     def _row_at_step(rows: Deque, step: int) -> Optional[dict]:
-        """
-        Find the latest row exactly at `step`.
-
-        NOTE: kept for compatibility with existing call sites/tests.
-        The schema-based path no longer requires this function.
-        """
+        """Find the latest raw row exactly at ``step``."""
         for r in reversed(rows):
             if r.get("step") == step:
                 return r
@@ -515,13 +395,7 @@ class LayerCombinedMemoryData:
         cache: Dict[str, Dict[str, float]],
         snapshot: Dict[str, Dict[str, float]],
     ):
-        """
-        Merge an incremental snapshot into the running cache.
-
-        Cache semantics (unchanged):
-        - "current": the latest value for the chosen safe step
-        - "global": max observed up to that safe step (monotone)
-        """
+        """Merge one snapshot into the live cache."""
         for layer, v in snapshot.items():
             if layer not in cache:
                 cache[layer] = {
@@ -537,14 +411,7 @@ class LayerCombinedMemoryData:
     def _build_rows(
         self, param_layers: Dict[str, float]
     ) -> List[LayerCombinedMemoryRow]:
-        """
-        Build per-layer rows with current & peak totals.
-
-        Notes (unchanged)
-        -----------------
-        - Param memory is considered static.
-        - Forward/backward values come from caches and reflect the latest safe-step join.
-        """
+        """Build per-layer rows from static params and live caches."""
         rows: List[LayerCombinedMemoryRow] = []
         total_current_sum = 0.0
 
@@ -578,7 +445,6 @@ class LayerCombinedMemoryData:
             )
             total_current_sum += current
 
-        # Fill pct
         out: List[LayerCombinedMemoryRow] = []
         for r in rows:
             pct = (
@@ -604,10 +470,7 @@ class LayerCombinedMemoryData:
     def _aggregate_other(
         self, rows: List[LayerCombinedMemoryRow], total_current_sum: float
     ) -> LayerCombinedOther:
-        """
-        Aggregate non-top layers into a single "other" bucket.
-        This keeps the UI readable while preserving accurate totals.
-        """
+        """Aggregate non-top layers into one renderer row."""
         cur = sum(r.total_current_memory for r in rows)
         return LayerCombinedOther(
             param_memory=sum(r.param_memory for r in rows),
@@ -624,9 +487,7 @@ class LayerCombinedMemoryData:
     def _build_join_status(
         self, step: Optional[int], missing: List[int]
     ) -> DDPJoinStatus:
-        """
-        Create a stable join-status object for renderers.
-        """
+        """Create a stable join-status object for renderers."""
         world_size = self._world_size()
         return DDPJoinStatus(
             safe_step=step,
@@ -636,147 +497,8 @@ class LayerCombinedMemoryData:
         )
 
 
-# TODO: WE SHOULD READ ALL RANKS AND ENTIRE DB AND COMPUTE SUMMARY (v1)
-class LayerCombinedMemorySummary:
-    """
-    Computes coarse, global statistics for logging and reports (aggregator-side).
-
-    Design (unchanged)
-    ------------------
-    - Reads from RemoteDBStore only.
-    - Intended for *historical* questions, not real-time joins.
-    - Avoids step-alignment semantics; it scans available DB content.
-
-    Notes
-    -----
-    This summary is best-effort:
-    - If some ranks have not reported yet, stats will be partial.
-    """
-
-    def __init__(
-        self,
-        remote_store: RemoteDBStore,
-        *,
-        layer_memory_name: str = "LayerMemory",
-        layer_forward_name: str = "LayerForwardMemory",
-        layer_backward_name: str = "LayerBackwardMemory",
-    ):
-        self._remote_store = remote_store
-        self.layer_memory_name = layer_memory_name
-        self.layer_forward_name = layer_forward_name
-        self.layer_backward_name = layer_backward_name
-        self.logger = get_error_logger("LayerCombinedMemorySummary")
-
-    def compute_layer_memory_summary(self) -> Dict[str, Any]:
-        """
-        Summarize static model memory usage based on layer tables.
-
-        Returns
-        -------
-        Dict[str, Any]
-            - total_models_seen: number of distinct signatures seen across ranks
-            - model_memory: average total parameter memory across available snapshots
-
-        NOTE
-        ----
-        This function keeps the return type as a dict because it is used for
-        logging/reporting and is not part of the renderer contract.
-        """
-        signatures: Set[str] = set()
-        totals: List[float] = []
-
-        for rank in self._remote_store.ranks():
-            db = self._safe_get_db(rank, self.layer_memory_name + "Sampler")
-            if not db:
-                continue
-
-            rows = db.get_table(self.layer_memory_name + "Table")
-            if not rows:
-                continue
-
-            try:
-                last = LayerMemorySample.from_wire(rows[-1])
-            except Exception:
-                continue
-
-            if last.model_signature:
-                signatures.add(last.model_signature)
-            totals.append(float(last.total_param_bytes))
-
-        return {
-            "total_models_seen": len(signatures),
-            "model_memory": (sum(totals) / len(totals)) if totals else 0.0,
-        }
-
-    def compute_global_peaks(self, is_forward: bool) -> Dict[str, float]:
-        """
-        Compute global (time-unbounded) peak memory per layer across all ranks.
-
-        Parameters
-        ----------
-        is_forward : bool
-            If True, scan forward sampler; otherwise scan backward sampler.
-
-        Returns
-        -------
-        Dict[str, float]
-            Mapping: layer name -> peak memory (bytes)
-
-        NOTE
-        ----
-        This keeps a dict return because it's a utility output for logs/reports.
-        """
-        sampler = (
-            self.layer_forward_name if is_forward else self.layer_backward_name
-        )
-        sampler_db_name = sampler + "Sampler"
-
-        peaks: Dict[str, float] = {}
-
-        for rank in self._remote_store.ranks():
-            db = self._safe_get_db(rank, sampler_db_name)
-            if not db:
-                continue
-
-            rows = db.get_table(sampler + "Table")
-            if not rows:
-                continue
-
-            samples = LayerCombinedMemoryData._load_samples_backwards(
-                rows, LayerForwardBackwardMemorySample, 0
-            )
-            for s in samples:
-                for layer, mem in zip(
-                    s.payload.layer_names,
-                    s.payload.layer_memory_bytes,
-                ):
-                    peaks[layer] = max(peaks.get(layer, 0.0), float(mem))
-
-        return peaks
-
-    @staticmethod
-    def top_n_from_dict(d: Dict[str, float], n: int = 3):
-        """
-        Return top-N items from a dict sorted by descending value.
-        """
-        return (
-            sorted(d.items(), key=lambda x: x[1], reverse=True)[:n]
-            if d
-            else []
-        )
-
-    def _safe_get_db(self, rank: int, sampler_name: str) -> Optional[Database]:
-        """
-        Safely fetch a per-rank database from the remote store.
-
-        Returns None if the database has not arrived yet or if an
-        unexpected error occurs.
-        """
-        try:
-            return self._remote_store.get_db(rank, sampler_name)
-        except Exception:
-            self.logger.exception(
-                "Failed to fetch rank DB from remote store",
-                extra={"rank": rank, "sampler_name": sampler_name},
-            )
-            return None
+__all__ = [
+    "DDPJoinStatus",
+    "LayerCombinedMemoryData",
+    "ModelSnapshotStatus",
+]
