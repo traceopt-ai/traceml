@@ -1,20 +1,4 @@
-"""
-Unified model-level diagnostics composer.
-
-This module combines domain-specific diagnosis engines into one structured payload
-for dashboard presentation. It is intentionally presentation-agnostic.
-
-Current domains
----------------
-- step_time
-- step_memory
-
-Design goals
-------------
-- Provides one stable, extendable payload for "Model Diagnostics" UI.
-- Adds compact evidence metadata without duplicating renderer logic.
-- Never raises to callers; always returns a usable payload.
-"""
+"""Model-level diagnostics composer."""
 
 import time
 from dataclasses import dataclass, field
@@ -25,7 +9,10 @@ from traceml.diagnostics.registry import (
     DiagnosticDomainSpec,
     ModelDiagnosticContext,
 )
-from traceml.diagnostics.step_memory import build_step_memory_diagnosis
+from traceml.diagnostics.step_memory import (
+    LIVE_STEP_MEMORY_POLICY,
+    build_step_memory_diagnosis,
+)
 from traceml.diagnostics.step_time import build_step_diagnosis
 from traceml.diagnostics.trends import DEFAULT_TREND_CONFIG, compute_trend_pct
 from traceml.loggers.error_log import get_error_logger
@@ -37,17 +24,7 @@ Severity = str  # "info" | "warn" | "crit"
 
 @dataclass(frozen=True)
 class ModelDiagnosisItem:
-    """
-    One diagnosis entry in the unified model diagnostics payload.
-
-    Fields
-    ------
-    evidence:
-        Compact, renderer-friendly metadata for quick scanning. Intended for
-        short labels such as window size, worst rank, gap, trend, or pressure.
-    confidence_label:
-        Human-friendly label derived from confidence score.
-    """
+    """One diagnosis entry in the model diagnostics payload."""
 
     source: str
     title: str
@@ -66,9 +43,7 @@ class ModelDiagnosisItem:
 
 @dataclass(frozen=True)
 class ModelDiagnosticsPayload:
-    """
-    Unified payload consumed by the Model Diagnostics dashboard card.
-    """
+    """Payload consumed by the Model Diagnostics dashboard card."""
 
     generated_at_s: float
     overall_severity: Severity
@@ -213,6 +188,7 @@ def _build_step_memory_item(
     step_memory_diag = build_step_memory_diagnosis(
         context.step_memory_metrics,
         gpu_total_bytes=context.gpu_total_bytes,
+        thresholds=LIVE_STEP_MEMORY_POLICY.thresholds,
     )
     return ModelDiagnosisItem(
         source="step_memory",

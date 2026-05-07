@@ -1,15 +1,4 @@
-"""
-CLI compute for system telemetry.
-
-This module computes a compact latest snapshot for CLI rendering directly from
-SQLite projection tables.
-
-Design goals
-------------
-- Keep compute fast with one latest-sample read plus one exact GPU read
-- Preserve stale-cache behavior to avoid CLI flicker
-- Keep output schema unchanged for existing renderers
-"""
+"""CLI compute for system telemetry."""
 
 import time
 from typing import Any, Dict, Optional
@@ -18,19 +7,7 @@ from .common import SystemCLISnapshot, SystemMetricsDB
 
 
 class SystemCLIComputer:
-    """
-    Compute the latest CLI system telemetry snapshot.
-
-    Parameters
-    ----------
-    db_path:
-        Path to the SQLite database file.
-    rank:
-        Optional rank filter.
-    stale_ttl_s:
-        Maximum age in seconds for returning the last known good snapshot on
-        transient failure. When None, stale data may be reused indefinitely.
-    """
+    """Compute the latest CLI system telemetry snapshot."""
 
     def __init__(
         self,

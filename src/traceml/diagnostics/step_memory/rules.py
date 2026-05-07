@@ -11,8 +11,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Sequence, Tuple
 
-from traceml.diagnostics.common import DiagnosticIssue, DiagnosticRule
-from traceml.diagnostics.step_memory import (
+from traceml.diagnostics.common import (
+    DiagnosticIssue,
+    DiagnosticRule,
+    severity_rank,
+)
+from traceml.diagnostics.step_memory.policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
 )
@@ -220,6 +224,35 @@ DEFAULT_STEP_MEMORY_SUMMARY_RULES = (
     CreepEarlyRule(),
 )
 
+_ISSUE_PRIORITY = {
+    "HIGH_PRESSURE": 0,
+    "IMBALANCE": 1,
+    "CREEP_CONFIRMED": 2,
+    "CREEP_EARLY": 3,
+}
+
+
+def sort_step_memory_summary_issues(
+    issues: Sequence[DiagnosticIssue],
+) -> Tuple[DiagnosticIssue, ...]:
+    """
+    Sort step-memory summary issues by user impact.
+
+    Immediate pressure wins over imbalance, confirmed creep, and early rising.
+    Within a kind, severity and score decide which metric becomes primary.
+    """
+    return tuple(
+        sorted(
+            issues,
+            key=lambda issue: (
+                _ISSUE_PRIORITY.get(issue.kind, 100),
+                -severity_rank(issue.severity),
+                -float(issue.score or 0.0),
+                str(issue.metric or ""),
+            ),
+        )
+    )
+
 
 def run_step_memory_summary_rules(
     metric: StepMemorySummaryMetricSignals,
@@ -236,7 +269,7 @@ def run_step_memory_summary_rules(
         issue = rule.evaluate(metric)
         if issue is not None:
             out.append(issue)
-    return tuple(out)
+    return sort_step_memory_summary_issues(out)
 
 
 __all__ = [
@@ -246,4 +279,5 @@ __all__ = [
     "HighPressureRule",
     "ImbalanceRule",
     "run_step_memory_summary_rules",
+    "sort_step_memory_summary_issues",
 ]

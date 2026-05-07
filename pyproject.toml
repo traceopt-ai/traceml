@@ -1,9 +1,10 @@
 [project]
 name = "traceml-ai"
-version = "0.2.13"
+version = "0.2.14"
 
 description = "TraceML: Lightweight runtime bottleneck diagnostics for PyTorch training."
-authors = [{ name = "Abhinav Srivastav", email = "abhinav@traceopt.ai" }]
+authors = [{ name = "OptAI UG (haftungsbeschränkt)", email = "support@traceopt.ai" }]
+maintainers = [{ name = "OptAI UG (haftungsbeschränkt)", email = "support@traceopt.ai" }]
 readme = "README.md"
 license = { text = "Apache 2.0" }
 requires-python = ">=3.10"
@@ -50,6 +51,14 @@ hf = [
 
 lightning = [
     "lightning>=2.6.0",
+]
+
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+    "mkdocs-autorefs>=1.2",
+    "mkdocs-include-markdown-plugin>=7.0",
 ]
 
 

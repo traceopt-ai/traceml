@@ -1,10 +1,4 @@
-"""
-Final end-of-run report orchestration for TraceML.
-
-Reporting owns final-summary assembly. Aggregator code is responsible for
-deciding *when* to request a summary; this module owns *how* summary sections
-are built, combined, written, and optionally printed.
-"""
+"""Final end-of-run report orchestration."""
 
 from __future__ import annotations
 
@@ -47,12 +41,7 @@ def _log_final_report_error(message: str, exc: Exception) -> None:
 
 @dataclass(frozen=True)
 class FunctionSummarySection:
-    """
-    Summary section backed by an existing ``generate_*_summary_card`` function.
-
-    This adapter lets Ticket 12 introduce the ``SummarySection`` orchestration
-    without rewriting the large section builders in the same change.
-    """
+    """Summary section backed by a function."""
 
     name: str
     builder: Callable[..., Dict[str, Any]]
@@ -68,9 +57,7 @@ class FunctionSummarySection:
 
 
 def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
-    """
-    Pick the first valid duration from the available summary sections.
-    """
+    """Pick the first valid duration from the available sections."""
     for section in sections:
         if not isinstance(section, dict):
             continue

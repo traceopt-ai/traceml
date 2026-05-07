@@ -1,10 +1,4 @@
-"""
-SQLite loader for the final-report step-memory section.
-
-The loader owns database access, aligned-window computation, and diagnosis
-inputs for step-memory summaries. It reuses the established renderer/summary
-helpers so this section split does not alter memory-analysis semantics.
-"""
+"""SQLite loader for the final-report step-memory section."""
 
 from __future__ import annotations
 
@@ -12,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from traceml.diagnostics.step_memory import (
+    SUMMARY_STEP_MEMORY_POLICY,
     StepMemoryDiagnosis,
     build_step_memory_diagnosis,
     build_step_memory_summary_diagnosis_result,
@@ -21,7 +16,7 @@ from traceml.renderers.step_memory.common import (
     build_step_memory_combined_result,
 )
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
-from traceml.reporting.summaries.step_memory import (
+from traceml.reporting.sections.step_memory.model import (
     MAX_SUMMARY_WINDOW_ROWS,
     _gpu_total_bytes,
     _latest_step_observed,
@@ -76,6 +71,7 @@ def load_step_memory_section_data(
             diagnosis = build_step_memory_diagnosis(
                 metrics,
                 gpu_total_bytes=gpu_total_bytes,
+                thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
             )
 
         per_rank = _load_per_rank_summary(
@@ -91,6 +87,7 @@ def load_step_memory_section_data(
                 metrics,
                 gpu_total_bytes=gpu_total_bytes,
                 per_rank=per_rank,
+                thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
             )
     finally:
         conn.close()

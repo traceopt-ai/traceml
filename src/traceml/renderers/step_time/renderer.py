@@ -16,6 +16,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml.aggregator.display_drivers.layout import MODEL_COMBINED_LAYOUT
+from traceml.diagnostics.step_time import (
+    LIVE_STEP_TIME_POLICY,
+    build_step_diagnosis,
+    format_cli_diagnosis,
+)
 from traceml.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -25,7 +30,6 @@ from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.utils import fmt_time_run
 
 from .compute import StepCombinedComputer
-from .diagnostics import build_step_diagnosis, format_cli_diagnosis
 from .schema import StepCombinedTimeResult
 
 
@@ -62,7 +66,10 @@ class StepCombinedRenderer(BaseRenderer):
             )
 
         metrics = payload.metrics
-        diag = build_step_diagnosis(metrics)
+        diag = build_step_diagnosis(
+            metrics,
+            thresholds=LIVE_STEP_TIME_POLICY.thresholds,
+        )
         diag_text = format_cli_diagnosis(diag)
 
         step_metric = next(

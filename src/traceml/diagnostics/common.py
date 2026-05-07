@@ -137,6 +137,7 @@ def diagnosis_to_dict(
     diagnosis: Optional[Any],
     *,
     drop_none: bool = False,
+    include_action: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
     Convert a diagnosis dataclass to a JSON-serializable dictionary.
@@ -147,6 +148,8 @@ def diagnosis_to_dict(
         raise TypeError("diagnosis_to_dict expects a dataclass instance")
 
     out: Dict[str, Any] = asdict(diagnosis)
+    if not include_action:
+        out.pop("action", None)
     if drop_none:
         out = {k: v for k, v in out.items() if v is not None}
     return out

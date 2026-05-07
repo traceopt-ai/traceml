@@ -1,6 +1,4 @@
-"""
-SQLite loader for the final-report process section.
-"""
+"""SQLite loader for the final-report process section."""
 
 from __future__ import annotations
 
@@ -8,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from traceml.reporting.summaries.process import (
+from traceml.reporting.sections.process.model import (
     MAX_SUMMARY_ROWS,
     PerRankProcessSummary,
     ProcessSummaryAgg,
