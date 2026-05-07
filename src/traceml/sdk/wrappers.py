@@ -94,14 +94,6 @@ def _ensure_optimizer_wrapper_allowed() -> None:
         )
 
 
-def _ensure_h2d_wrapper_allowed() -> None:
-    if getattr(torch.Tensor, "_traceml_h2d_patched", False):
-        _raise_duplicate_instrumentation(
-            "h2d transfer",
-            "torch.Tensor.to() has already been patched for H2D timing.",
-        )
-
-
 class _WrappedDataLoaderIterator:
     """
     Iterator proxy that times `next(...)` as TraceML dataloader fetch.
@@ -363,14 +355,13 @@ def wrap_h2d(obj: Any) -> "_WrappedH2D":
 
     Notes
     -----
-    - Raises if the automatic H2D patch is already active to prevent double
-      counting.
     - The wrapper does not need the object to be a ``torch.Tensor``; any
       object with a ``.to(...)`` method is accepted (e.g. custom batch
       containers).
     - If ``traceml.init(patch_h2d=True)`` is called *after* this wrapper was
-      created, the wrapper defers gracefully on ``.to()`` to avoid
-      double-counting (the auto-patch handles timing).
+      created, the wrapper defers gracefully on ``.to()`` — the auto-patch
+      handles timing and the proxy becomes a pass-through, so no event is
+      double-counted.
     """
     to_fn = getattr(obj, "to", None)
     if to_fn is None or not callable(to_fn):

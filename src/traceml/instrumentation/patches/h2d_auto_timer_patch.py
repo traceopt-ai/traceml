@@ -19,10 +19,13 @@ patches:
 
 GPU timing
 ----------
-CUDA events are recorded around the ``.to()`` call via ``timed_region``.
-``try_resolve()`` calls ``elapsed_time()`` which blocks until both CUDA events
-have completed, so the measurement reflects actual GPU DMA time for both
-blocking (``non_blocking=False``) and async (``non_blocking=True``) transfers.
+CUDA events are recorded on the current stream around the ``.to()`` call.
+``start.record()`` enqueues a timestamp marker before the DMA op;
+``end.record()`` enqueues one after.  Once ``end`` fires (resolved later via
+``event.query()`` in the sampler — see ``utils/timing.py::TimeEvent.try_resolve``),
+``start.elapsed_time(end)`` returns the GPU-side wall-clock duration between
+the two markers — including the asynchronous DMA itself.  Accuracy is the
+same for ``non_blocking=True`` and ``non_blocking=False``.
 
 Filtering
 ---------
@@ -38,7 +41,7 @@ Event name
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, Optional
 
 import torch
 
@@ -58,6 +61,20 @@ def _enabled() -> bool:
 # Device-target detection
 
 
+def _device_type(value: Any) -> Optional[str]:
+    """Return the device type string for a value, or None if not recognisable."""
+    if isinstance(value, torch.device):
+        return value.type
+    if isinstance(value, torch.Tensor):
+        return value.device.type
+    if isinstance(value, str):
+        try:
+            return torch.device(value).type
+        except (RuntimeError, TypeError):
+            return None
+    return None
+
+
 def _is_cuda_target(args: tuple, kwargs: dict) -> bool:
     """
     Return True when the ``.to()`` call is moving data to a CUDA device.
@@ -69,28 +86,10 @@ def _is_cuda_target(args: tuple, kwargs: dict) -> bool:
       tensor.to(other_cuda_tensor)   # copies device from other_tensor
     """
     first = args[0] if args else None
-
-    if isinstance(first, str):
-        try:
-            if torch.device(first).type == "cuda":
-                return True
-        except RuntimeError:
-            pass
-    if isinstance(first, torch.device) and first.type == "cuda":
+    if _device_type(first) == "cuda":
         return True
-    if isinstance(first, torch.Tensor) and first.is_cuda:
+    if _device_type(kwargs.get("device")) == "cuda":
         return True
-
-    device = kwargs.get("device")
-    if isinstance(device, str):
-        try:
-            if torch.device(device).type == "cuda":
-                return True
-        except RuntimeError:
-            pass
-    if isinstance(device, torch.device) and device.type == "cuda":
-        return True
-
     return False
 
 
@@ -98,18 +97,18 @@ def _is_cuda_target(args: tuple, kwargs: dict) -> bool:
 
 
 def _traceml_tensor_to(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
-    if not _enabled() or not _is_cuda_target(args, kwargs):
+    if not _enabled():
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
-
-    # skip D2D source tensor is already on a CUDA device.
+    # D2D — source is already on CUDA; skip before parsing the destination.
     if self.is_cuda:
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
-
-    # skip Parameter receivers model.to(device) moves every parameter,
-    # which would inflate n_calls by the number of model parameters rather than the number of data-batch transfers.
+    #  _apply traversal — model.to(device) calls tensor.to() once per
+    # Parameter, inflating n_calls by the parameter count.
     if isinstance(self, torch.nn.Parameter):
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
-
+    # Destination check last — involves torch.device() parsing.
+    if not _is_cuda_target(args, kwargs):
+        return _ORIG_TENSOR_TO(self, *args, **kwargs)
     with timed_region(
         "_traceml_internal:h2d_time",
         scope="step",
