@@ -219,6 +219,6 @@ Use compare when:
 ## Related docs
 
 - [Quickstart](quickstart.md)
-- [How to Read TraceML Output](how-to-read-output.md)
-- [Use TraceML with W&B / MLflow](use-with-wandb-mlflow.md)
+- [How to Read TraceML Output](reading-output.md)
+- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
 - [FAQ](faq.md)
