@@ -43,6 +43,9 @@ from traceml.instrumentation.hooks.layer_forward_time_hooks import (
 from traceml.instrumentation.hooks.optimizer_hooks import (
     ensure_optimizer_timing_installed,
 )
+from traceml.instrumentation.patches.all_reduce_auto_timer_patch import (
+    all_reduce_auto_timer,
+)
 from traceml.instrumentation.patches.backward_auto_timer_patch import (
     backward_auto_timer,
 )
@@ -198,7 +201,11 @@ def trace_step(model: nn.Module):
         with timed_region(
             "_traceml_internal:step_time", scope="step", use_gpu=False
         ):
-            with forward_auto_timer(), backward_auto_timer():
+            with (
+                forward_auto_timer(),
+                backward_auto_timer(),
+                all_reduce_auto_timer(),
+            ):
                 if _should_auto_install_optimizer_timing():
                     ensure_optimizer_timing_installed()
                 yield

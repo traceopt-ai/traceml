@@ -36,6 +36,7 @@ def test_init_auto_enables_all_supported_patches(monkeypatch):
 
     calls = []
 
+    import traceml.instrumentation.patches.all_reduce_auto_timer_patch as all_reduce_patch
     import traceml.instrumentation.patches.backward_auto_timer_patch as backward_patch
     import traceml.instrumentation.patches.dataloader_patch as dataloader_patch
     import traceml.instrumentation.patches.forward_auto_timer_patch as forward_patch
@@ -55,6 +56,11 @@ def test_init_auto_enables_all_supported_patches(monkeypatch):
         "patch_backward",
         lambda: calls.append("backward"),
     )
+    monkeypatch.setattr(
+        all_reduce_patch,
+        "patch_all_reduce",
+        lambda: calls.append("all_reduce"),
+    )
 
     cfg = initialization.init(mode="auto")
 
@@ -62,7 +68,8 @@ def test_init_auto_enables_all_supported_patches(monkeypatch):
     assert cfg.patch_dataloader is True
     assert cfg.patch_forward is True
     assert cfg.patch_backward is True
-    assert calls == ["dataloader", "forward", "backward"]
+    assert cfg.patch_all_reduce is True
+    assert calls == ["dataloader", "forward", "backward", "all_reduce"]
 
 
 def test_init_manual_installs_no_patches():
@@ -74,6 +81,7 @@ def test_init_manual_installs_no_patches():
     assert cfg.patch_dataloader is False
     assert cfg.patch_forward is False
     assert cfg.patch_backward is False
+    assert cfg.patch_all_reduce is False
 
 
 def test_init_selective_only_installs_requested_patches(monkeypatch):
@@ -81,6 +89,7 @@ def test_init_selective_only_installs_requested_patches(monkeypatch):
 
     calls = []
 
+    import traceml.instrumentation.patches.all_reduce_auto_timer_patch as all_reduce_patch
     import traceml.instrumentation.patches.backward_auto_timer_patch as backward_patch
     import traceml.instrumentation.patches.dataloader_patch as dataloader_patch
     import traceml.instrumentation.patches.forward_auto_timer_patch as forward_patch
@@ -100,18 +109,25 @@ def test_init_selective_only_installs_requested_patches(monkeypatch):
         "patch_backward",
         lambda: calls.append("backward"),
     )
+    monkeypatch.setattr(
+        all_reduce_patch,
+        "patch_all_reduce",
+        lambda: calls.append("all_reduce"),
+    )
 
     cfg = initialization.init(
         mode="selective",
         patch_dataloader=True,
         patch_forward=False,
         patch_backward=True,
+        patch_all_reduce=False,
     )
 
     assert cfg.mode == "selective"
     assert cfg.patch_dataloader is True
     assert cfg.patch_forward is False
     assert cfg.patch_backward is True
+    assert cfg.patch_all_reduce is False
     assert calls == ["dataloader", "backward"]
 
 
@@ -141,6 +157,7 @@ def test_init_selective_requires_meaningful_overrides():
             patch_dataloader=False,
             patch_forward=False,
             patch_backward=False,
+            patch_all_reduce=False,
         )
 
 
@@ -163,6 +180,7 @@ def test_init_custom_alias_maps_to_selective(monkeypatch):
     assert cfg.patch_dataloader is False
     assert cfg.patch_forward is True
     assert cfg.patch_backward is False
+    assert cfg.patch_all_reduce is False
     assert calls == ["forward"]
 
 
@@ -235,6 +253,7 @@ def _run_trace_step_once(*, mode, monkeypatch):
         patch_forward=(False if mode == "selective" else None),
         patch_backward=(False if mode == "selective" else None),
         patch_dataloader=(True if mode == "selective" else None),
+        patch_all_reduce=(False if mode == "selective" else None),
     )
 
     calls = []
@@ -252,6 +271,11 @@ def _run_trace_step_once(*, mode, monkeypatch):
     monkeypatch.setattr(
         instrumentation,
         "backward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "all_reduce_auto_timer",
         _noop_context_manager,
     )
     monkeypatch.setattr(
