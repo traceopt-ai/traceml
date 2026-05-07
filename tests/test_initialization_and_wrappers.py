@@ -28,6 +28,7 @@ def test_auto_mode_enables_all_supported_patches(monkeypatch):
 
     calls = []
 
+    import traceml.instrumentation.patches.all_reduce_auto_timer_patch as all_reduce_patch
     import traceml.instrumentation.patches.backward_auto_timer_patch as backward_patch
     import traceml.instrumentation.patches.dataloader_patch as dataloader_patch
     import traceml.instrumentation.patches.forward_auto_timer_patch as forward_patch
@@ -47,6 +48,11 @@ def test_auto_mode_enables_all_supported_patches(monkeypatch):
         "patch_backward",
         lambda: calls.append("backward"),
     )
+    monkeypatch.setattr(
+        all_reduce_patch,
+        "patch_all_reduce",
+        lambda: calls.append("all_reduce"),
+    )
 
     cfg = initialization.init(mode="auto")
 
@@ -54,7 +60,8 @@ def test_auto_mode_enables_all_supported_patches(monkeypatch):
     assert cfg.patch_dataloader is True
     assert cfg.patch_forward is True
     assert cfg.patch_backward is True
-    assert calls == ["dataloader", "forward", "backward"]
+    assert cfg.patch_all_reduce is True
+    assert calls == ["dataloader", "forward", "backward", "all_reduce"]
 
 
 def test_manual_mode_installs_no_patches():
@@ -66,6 +73,7 @@ def test_manual_mode_installs_no_patches():
     assert cfg.patch_dataloader is False
     assert cfg.patch_forward is False
     assert cfg.patch_backward is False
+    assert cfg.patch_all_reduce is False
 
 
 def test_auto_mode_rejects_patch_overrides():
@@ -98,6 +106,7 @@ def test_selective_mode_requires_at_least_one_enabled_patch():
             patch_dataloader=False,
             patch_forward=False,
             patch_backward=False,
+            patch_all_reduce=False,
         )
 
 
@@ -120,6 +129,7 @@ def test_custom_alias_maps_to_selective(monkeypatch):
     assert cfg.patch_forward is True
     assert cfg.patch_dataloader is False
     assert cfg.patch_backward is False
+    assert cfg.patch_all_reduce is False
     assert calls == ["forward"]
 
 
@@ -150,6 +160,7 @@ def test_start_is_alias_for_init():
     assert cfg.patch_dataloader is False
     assert cfg.patch_forward is False
     assert cfg.patch_backward is False
+    assert cfg.patch_all_reduce is False
 
 
 def test_api_import_does_not_initialize_implicitly():

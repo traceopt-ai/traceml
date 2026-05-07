@@ -49,6 +49,11 @@ class TraceMLInitConfig:
         Whether forward timing patching is enabled.
     patch_backward:
         Whether backward timing patching is enabled.
+    patch_all_reduce:
+        Whether ``torch.distributed.all_reduce`` communication timing
+        patching is enabled. Captures user-issued comm calls inside
+        ``trace_step``; does NOT capture DDP gradient-sync all-reduce
+        (which the C++ Reducer dispatches without re-entering Python).
     source:
         Human-readable source label for diagnostics and conflict messages.
     """
@@ -57,6 +62,7 @@ class TraceMLInitConfig:
     patch_dataloader: bool
     patch_forward: bool
     patch_backward: bool
+    patch_all_reduce: bool
     source: str = "user"
 
     def same_effective_configuration(self, other: "TraceMLInitConfig") -> bool:
@@ -68,6 +74,7 @@ class TraceMLInitConfig:
             and self.patch_dataloader == other.patch_dataloader
             and self.patch_forward == other.patch_forward
             and self.patch_backward == other.patch_backward
+            and self.patch_all_reduce == other.patch_all_reduce
         )
 
 
@@ -98,6 +105,7 @@ def _build_config(
     patch_dataloader: Optional[bool],
     patch_forward: Optional[bool],
     patch_backward: Optional[bool],
+    patch_all_reduce: Optional[bool],
     source: str,
 ) -> TraceMLInitConfig:
     """
@@ -108,13 +116,14 @@ def _build_config(
         patch_dataloader,
         patch_forward,
         patch_backward,
+        patch_all_reduce,
     )
     has_overrides = any(value is not None for value in override_values)
 
     if canonical_mode in {"auto", "manual"} and has_overrides:
         raise ValueError(
-            "patch_dataloader, patch_forward, and patch_backward may only be "
-            "provided when mode='selective'. "
+            "patch_dataloader, patch_forward, patch_backward, and "
+            "patch_all_reduce may only be provided when mode='selective'. "
             f"Received overrides with mode={canonical_mode!r}."
         )
 
@@ -124,6 +133,7 @@ def _build_config(
             patch_dataloader=True,
             patch_forward=True,
             patch_backward=True,
+            patch_all_reduce=True,
             source=source,
         )
 
@@ -133,6 +143,7 @@ def _build_config(
             patch_dataloader=False,
             patch_forward=False,
             patch_backward=False,
+            patch_all_reduce=False,
             source=source,
         )
 
@@ -145,8 +156,9 @@ def _build_config(
     dl = bool(patch_dataloader) if patch_dataloader is not None else False
     fwd = bool(patch_forward) if patch_forward is not None else False
     bwd = bool(patch_backward) if patch_backward is not None else False
+    ar = bool(patch_all_reduce) if patch_all_reduce is not None else False
 
-    if not any((dl, fwd, bwd)):
+    if not any((dl, fwd, bwd, ar)):
         raise ValueError(
             "mode='selective' must enable at least one automatic patch. "
             "Use mode='manual' when you want zero automatic patches."
@@ -157,6 +169,7 @@ def _build_config(
         patch_dataloader=dl,
         patch_forward=fwd,
         patch_backward=bwd,
+        patch_all_reduce=ar,
         source=source,
     )
 
@@ -174,6 +187,7 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
             config.patch_dataloader,
             config.patch_forward,
             config.patch_backward,
+            config.patch_all_reduce,
         )
     ):
         return
@@ -199,6 +213,13 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
             )
 
             patch_backward()
+
+        if config.patch_all_reduce:
+            from traceml.instrumentation.patches.all_reduce_auto_timer_patch import (
+                patch_all_reduce,
+            )
+
+            patch_all_reduce()
     except Exception as exc:
         raise RuntimeError(
             "TraceML initialization failed while installing automatic "
@@ -229,6 +250,7 @@ def init(
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_all_reduce: Optional[bool] = None,
     _source: str = "user",
 ) -> TraceMLInitConfig:
     """
@@ -248,6 +270,9 @@ def init(
         Selective-mode-only override controlling forward timing patching.
     patch_backward:
         Selective-mode-only override controlling backward timing patching.
+    patch_all_reduce:
+        Selective-mode-only override controlling
+        ``torch.distributed.all_reduce`` communication timing patching.
 
     Returns
     -------
@@ -274,6 +299,7 @@ def init(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_all_reduce=patch_all_reduce,
         source=_source,
     )
 
@@ -291,11 +317,13 @@ def init(
                 f"patch_dataloader={_INIT_CONFIG.patch_dataloader}, "
                 f"patch_forward={_INIT_CONFIG.patch_forward}, "
                 f"patch_backward={_INIT_CONFIG.patch_backward}, "
+                f"patch_all_reduce={_INIT_CONFIG.patch_all_reduce}, "
                 f"source={_INIT_CONFIG.source!r}. "
                 f"Requested config: mode={requested.mode!r}, "
                 f"patch_dataloader={requested.patch_dataloader}, "
                 f"patch_forward={requested.patch_forward}, "
                 f"patch_backward={requested.patch_backward}, "
+                f"patch_all_reduce={requested.patch_all_reduce}, "
                 f"source={requested.source!r}. "
                 "Initialize TraceML exactly once per process with the intended "
                 "mode at the start of the run."
@@ -312,6 +340,7 @@ def start(
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_all_reduce: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """
     Alias for `init()` for the current transition period.
@@ -324,6 +353,7 @@ def start(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_all_reduce=patch_all_reduce,
         _source="user",
     )
 

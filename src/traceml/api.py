@@ -105,6 +105,7 @@ def init(
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_all_reduce: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """
     Initialize TraceML instrumentation for the current process.
@@ -124,6 +125,9 @@ def init(
         Selective-mode-only override controlling automatic forward patching.
     patch_backward:
         Selective-mode-only override controlling automatic backward patching.
+    patch_all_reduce:
+        Selective-mode-only override controlling automatic
+        ``torch.distributed.all_reduce`` communication timing patching.
 
     Returns
     -------
@@ -143,6 +147,7 @@ def init(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_all_reduce=patch_all_reduce,
     )
 
 
@@ -152,6 +157,7 @@ def start(
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_all_reduce: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """
     Alias for `traceml.init(...)` during the transition.
@@ -163,6 +169,7 @@ def start(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_all_reduce=patch_all_reduce,
     )
 
 
