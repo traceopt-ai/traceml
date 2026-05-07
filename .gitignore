@@ -56,3 +56,16 @@ Thumbs.db
 # Jupyter
 
 .ipynb_checkpoints/
+
+# Claude Code (machine-specific settings)
+.claude/settings.local.json
+
+# MkDocs build output
+site/
+.cache/
+
+# Internal planning artifacts (do not ship to upstream)
+specs/
+
+# Claude Code project instructions (local-only, not upstream)
+CLAUDE.md

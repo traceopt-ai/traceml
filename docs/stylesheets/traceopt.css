@@ -1,0 +1,96 @@
+/* TraceOpt brand palette — keep in sync with traceopt.ai */
+:root {
+  --traceopt-orange: #FF8C00;
+  --traceopt-dark-orange: #D2691E;
+  --traceopt-warm-bg: #fffdfa;
+  --traceopt-text: #1f2937;
+  --traceopt-muted: #6b7280;
+}
+
+/* ─── Light scheme ─────────────────────────────────────────────── */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--traceopt-orange);
+  --md-primary-fg-color--light: #ffa94d;
+  --md-primary-fg-color--dark: var(--traceopt-dark-orange);
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: rgba(255, 255, 255, 0.7);
+
+  --md-accent-fg-color: var(--traceopt-dark-orange);
+  --md-accent-fg-color--transparent: rgba(210, 105, 30, 0.1);
+  --md-accent-bg-color: #ffffff;
+  --md-accent-bg-color--light: rgba(255, 255, 255, 0.7);
+
+  --md-default-bg-color: var(--traceopt-warm-bg);
+  --md-default-fg-color: var(--traceopt-text);
+  --md-default-fg-color--light: var(--traceopt-muted);
+
+  --md-typeset-a-color: var(--traceopt-dark-orange);
+}
+
+/* Warm radial gradient background matching traceopt.ai hero */
+[data-md-color-scheme="default"] body {
+  background:
+    radial-gradient(1000px 520px at 10% -10%, rgba(255, 140, 0, 0.13), transparent 60%),
+    radial-gradient(900px 460px at 95% 5%, rgba(210, 105, 30, 0.09), transparent 56%),
+    var(--traceopt-warm-bg);
+  background-attachment: fixed;
+}
+
+/* Translucent white header (not orange) — matches traceopt.ai nav */
+[data-md-color-scheme="default"] .md-header,
+[data-md-color-scheme="default"] .md-tabs {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: saturate(180%) blur(10px);
+  -webkit-backdrop-filter: saturate(180%) blur(10px);
+  color: var(--traceopt-text);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: none;
+}
+[data-md-color-scheme="default"] .md-header__title,
+[data-md-color-scheme="default"] .md-header__button,
+[data-md-color-scheme="default"] .md-tabs__link {
+  color: var(--traceopt-text);
+}
+[data-md-color-scheme="default"] .md-tabs__link:hover,
+[data-md-color-scheme="default"] .md-tabs__link--active {
+  color: var(--traceopt-dark-orange);
+  opacity: 1;
+}
+
+/* Gradient primary button — mirrors traceopt.ai CTA */
+.md-typeset .md-button--primary {
+  background: linear-gradient(135deg, var(--traceopt-orange), var(--traceopt-dark-orange));
+  border-color: transparent;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(255, 140, 0, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.md-typeset .md-button--primary:hover,
+.md-typeset .md-button--primary:focus {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(255, 140, 0, 0.35);
+  background: linear-gradient(135deg, var(--traceopt-orange), var(--traceopt-dark-orange));
+  color: #ffffff !important;
+}
+
+/* Native system font stack (matches traceopt.ai) */
+body,
+.md-typeset {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* ─── Dark scheme ──────────────────────────────────────────────── */
+/* Keep Material's slate background, recolor accents to match brand */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--traceopt-orange);
+  --md-primary-fg-color--light: #ffa94d;
+  --md-primary-fg-color--dark: var(--traceopt-dark-orange);
+
+  --md-accent-fg-color: #ffa94d;
+  --md-typeset-a-color: #ffa94d;
+}
+[data-md-color-scheme="slate"] .md-tabs__link:hover,
+[data-md-color-scheme="slate"] .md-tabs__link--active {
+  color: #ffa94d;
+  opacity: 1;
+}
