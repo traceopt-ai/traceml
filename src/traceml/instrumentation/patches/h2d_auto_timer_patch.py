@@ -105,9 +105,8 @@ def _traceml_tensor_to(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
     if self.is_cuda:
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
 
-    # skip Parameter receivers — model.to(device) moves every parameter,
-    # which would inflate n_calls by the number of model parameters rather
-    # than the number of data-batch transfers.
+    # skip Parameter receivers model.to(device) moves every parameter,
+    # which would inflate n_calls by the number of model parameters rather than the number of data-batch transfers.
     if isinstance(self, torch.nn.Parameter):
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
 
