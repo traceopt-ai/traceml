@@ -49,6 +49,7 @@ from traceml.instrumentation.patches.backward_auto_timer_patch import (
 from traceml.instrumentation.patches.forward_auto_timer_patch import (
     forward_auto_timer,
 )
+from traceml.instrumentation.patches.h2d_auto_timer_patch import h2d_auto_timer
 from traceml.runtime.state import TraceSessionState, get_trace_session_state
 from traceml.utils.entry_hook import attach_execution_entry_hooks
 from traceml.utils.flush_buffers import flush_step_events
@@ -198,7 +199,7 @@ def trace_step(model: nn.Module):
         with timed_region(
             "_traceml_internal:step_time", scope="step", use_gpu=False
         ):
-            with forward_auto_timer(), backward_auto_timer():
+            with forward_auto_timer(), backward_auto_timer(), h2d_auto_timer():
                 if _should_auto_install_optimizer_timing():
                     ensure_optimizer_timing_installed()
                 yield
