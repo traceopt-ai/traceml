@@ -5,7 +5,7 @@ Short answers to common questions before or during adoption.
 If you are new to TraceML, start with:
 
 - [Quickstart](quickstart.md)
-- [How to Read TraceML Output](how-to-read-output.md)
+- [How to Read TraceML Output](reading-output.md)
 - [Compare Runs](compare.md)
 
 ---
@@ -33,7 +33,7 @@ Use TraceML for:
 
 See:
 
-- [Use TraceML with W&B / MLflow](use-with-wandb-mlflow.md)
+- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
 
 ---
 
@@ -135,7 +135,7 @@ Yes.
 
 See:
 
-- [Hugging Face Trainer](huggingface.md)
+- [Hugging Face Trainer](integrations/huggingface.md)
 
 ---
 
@@ -145,7 +145,7 @@ Yes.
 
 See:
 
-- [PyTorch Lightning](lightning.md)
+- [PyTorch Lightning](integrations/lightning.md)
 
 ---
 
@@ -280,7 +280,7 @@ recommended low-noise path is:
 
 See:
 
-- [Use TraceML with W&B / MLflow](use-with-wandb-mlflow.md)
+- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
 
 ---
 
@@ -304,7 +304,7 @@ A common cause is retaining tensors across steps, for example by storing graph-b
 
 See:
 
-- [How to Read TraceML Output](how-to-read-output.md)
+- [How to Read TraceML Output](reading-output.md)
 
 ---
 
@@ -320,7 +320,7 @@ Common causes:
 
 See:
 
-- [How to Read TraceML Output](how-to-read-output.md)
+- [How to Read TraceML Output](reading-output.md)
 
 ---
 
@@ -336,7 +336,7 @@ Common causes:
 
 See:
 
-- [How to Read TraceML Output](how-to-read-output.md)
+- [How to Read TraceML Output](reading-output.md)
 
 ---
 
