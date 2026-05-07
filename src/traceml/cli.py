@@ -1,10 +1,4 @@
-"""Public console entrypoint for TraceML.
-
-The launcher implementation lives under :mod:`traceml.launcher`.  This module
-stays intentionally small so packaging entrypoints and existing developer
-imports can continue to target ``traceml.cli`` without pulling launcher
-concerns back into one large file.
-"""
+"""Public console entrypoint for TraceML."""
 
 from traceml.launcher.cli import build_parser, main
 from traceml.launcher.commands import (

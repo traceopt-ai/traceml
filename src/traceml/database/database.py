@@ -5,47 +5,12 @@ from .database_writer import DatabaseWriter
 
 
 class Database:
-    """
-    Lightweight in-memory database for sampler-side telemetry.
-
-    This class acts as a bounded, append-only storage layer for time-series
-    or step-wise telemetry emitted by samplers (e.g., memory usage, timing,
-    queue depths).
-
-    Design goals
-    ------------
-    - Bounded memory usage per table
-    - O(1) append and O(1) eviction of old records
-    - Minimal overhead suitable for long-running training jobs
-
-    Implementation notes
-    --------------------
-    - Each "table" is backed by a `collections.deque` with a fixed `maxlen`.
-      Once the limit is reached, the oldest records are automatically dropped.
-    - Tables are created lazily on first use.
-    - This database is intentionally simple and in-memory only; persistence
-      and export are handled by `DatabaseWriter`.
-    """
+    """Bounded in-memory table store for sampler telemetry."""
 
     DEFAULT_MAX_ROWS = 3000
 
     def __init__(self, sampler_name, max_rows: Optional[int] = None):
-        """
-        Initialize the in-memory database.
-
-        Parameters
-        ----------
-        sampler_name : str
-            Name of the sampler owning this database. Used for labeling
-            and downstream writers/exporters.
-        max_rows : Optional[int]
-            Maximum number of rows per table. If None, DEFAULT_MAX_ROWS is used.
-
-        Raises
-        ------
-        ValueError
-            If `max_rows` is provided and is <= 0.
-        """
+        """Initialize the in-memory database."""
         self.sampler_name = sampler_name
 
         # Resolve max row limit

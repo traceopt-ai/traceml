@@ -157,30 +157,7 @@ class TraceState(metaclass=_TraceStateMeta):
 
 @contextmanager
 def trace_step(model: nn.Module):
-    """
-    Define a single training step boundary.
-
-    Responsibilities
-    ----------------
-    - Mark the semantic start/end of a training step
-    - Attribute step-scoped timing events
-    - Advance the global step counter
-    - Trigger step-end memory sampling
-    - Flush buffered step timing events
-
-    Important
-    ---------
-    This function does not install automatic framework patches on its own.
-    The new SDK path expects callers to choose an explicit init policy via
-    `traceml.init(...)`. Legacy `traceml.decorators` imports still preserve
-    automatic patch installation for backward compatibility.
-
-    Safety
-    ------
-    - Never blocks training
-    - Never swallows user exceptions
-    - Best-effort instrumentation only
-    """
+    """Define a single training step boundary."""
     if _traceml_disabled():
         yield
         return

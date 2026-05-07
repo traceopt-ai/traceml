@@ -1,23 +1,4 @@
-"""
-Shared models and SQLite helpers for system telemetry compute.
-
-This module contains:
-- Output payload dataclasses shared by CLI and dashboard compute
-- Lightweight SQLite access helpers
-- Shared row-grouping utilities
-
-Design goals
-------------
-- Keep SQLite reads short-lived and bounded
-- Keep shared logic small, predictable, and fast
-- Provide a clean common layer for CLI and dashboard compute
-
-Notes
------
-- Memory values is in raw bytes.
-- GPU rows are matched to system samples using (rank, seq)
-  for the current SystemSampler because `seq` is monotonic per rank.
-"""
+"""Shared models and SQLite helpers for system telemetry."""
 
 import sqlite3
 from dataclasses import dataclass
@@ -26,9 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 @dataclass(frozen=True)
 class SystemCLISnapshot:
-    """
-    Compact CLI snapshot for system telemetry.
-    """
+    """Compact CLI snapshot for system telemetry."""
 
     cpu: float
     ram_used: float
@@ -69,12 +48,7 @@ class SystemCLISnapshot:
 
 @dataclass(frozen=True)
 class SystemDashboardPayload:
-    """
-    Dashboard payload for system telemetry.
-
-    Output schema is intentionally unchanged so existing rendering code can
-    continue to work without modification.
-    """
+    """Dashboard payload for system telemetry."""
 
     window_len: int
     gpu_available: bool

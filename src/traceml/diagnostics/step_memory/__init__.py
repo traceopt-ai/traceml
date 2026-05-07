@@ -12,17 +12,25 @@ implementation is split into:
 """
 
 from .api import (
-    DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosis,
     StepMemoryDiagnosisKind,
-    StepMemoryDiagnosisThresholds,
     build_step_memory_diagnosis,
     build_step_memory_summary_diagnosis_result,
+)
+from .policy import (
+    DEFAULT_STEP_MEMORY_THRESHOLDS,
+    LIVE_STEP_MEMORY_POLICY,
+    SUMMARY_STEP_MEMORY_POLICY,
+    StepMemoryDiagnosisPolicy,
+    StepMemoryDiagnosisThresholds,
 )
 
 __all__ = [
     "StepMemoryDiagnosisKind",
+    "StepMemoryDiagnosisPolicy",
     "StepMemoryDiagnosisThresholds",
+    "LIVE_STEP_MEMORY_POLICY",
+    "SUMMARY_STEP_MEMORY_POLICY",
     "DEFAULT_STEP_MEMORY_THRESHOLDS",
     "StepMemoryDiagnosis",
     "build_step_memory_diagnosis",

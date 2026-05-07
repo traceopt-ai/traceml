@@ -28,11 +28,13 @@ class ProcessSummarySignals:
     cpu_peak_percent: Optional[float]
     cpu_logical_core_count: Optional[int]
     cpu_pressure_frac: Optional[float]
+    cpu_capacity_percent: Optional[float]
 
     ram_avg_bytes: Optional[float]
     ram_peak_bytes: Optional[float]
     ram_total_bytes: Optional[float]
     ram_pressure_frac: Optional[float]
+    ram_peak_percent: Optional[float]
 
     gpu_available: Optional[bool]
     gpu_count: Optional[int]
@@ -46,7 +48,10 @@ class ProcessSummarySignals:
 
     gpu_mem_used_peak_frac: Optional[float]
     gpu_mem_reserved_peak_frac: Optional[float]
+    gpu_mem_used_peak_percent: Optional[float]
+    gpu_mem_reserved_peak_percent: Optional[float]
     gpu_mem_reserved_overhang_ratio: Optional[float]
+    highest_overhang_rank: Optional[int]
 
     per_rank: Dict[int, Dict[str, Optional[float]]]
 
@@ -58,6 +63,8 @@ class ProcessSummarySignals:
     rank_rss_imbalance_pct: Optional[float]
     rank_gpu_used_imbalance_pct: Optional[float]
     rank_gpu_reserved_imbalance_pct: Optional[float]
+    rank_gpu_used_imbalance_percent: Optional[float]
+    rank_gpu_reserved_imbalance_percent: Optional[float]
 
 
 def _safe_float(value: Optional[float]) -> Optional[float]:
@@ -154,6 +161,29 @@ def _least_headroom(
     return best_rank, best_headroom
 
 
+def _peak_reserved_overhang(
+    per_rank: Dict[int, Dict[str, Optional[float]]],
+) -> tuple[Optional[float], Optional[int]]:
+    """Return the largest rank-local reserved/used peak ratio."""
+    best_ratio: Optional[float] = None
+    best_rank: Optional[int] = None
+
+    for rank_id, item in per_rank.items():
+        ratio = _safe_float(item.get("gpu_mem_reserved_overhang_ratio"))
+        if ratio is None:
+            ratio = _fraction(
+                item.get("gpu_mem_reserved_peak_bytes"),
+                item.get("gpu_mem_used_peak_bytes"),
+            )
+        if ratio is None:
+            continue
+        if best_ratio is None or ratio > best_ratio:
+            best_ratio = ratio
+            best_rank = int(rank_id)
+
+    return best_ratio, best_rank
+
+
 def build_process_summary_signals(
     *,
     duration_s: Optional[float],
@@ -180,6 +210,9 @@ def build_process_summary_signals(
     Build the normalized signal bundle shared by process diagnosis rules.
     """
     least_headroom_rank, least_headroom_bytes = _least_headroom(per_rank)
+    reserved_overhang_ratio, highest_overhang_rank = _peak_reserved_overhang(
+        per_rank
+    )
 
     cpu_pressure_frac = None
     if (
@@ -192,23 +225,17 @@ def build_process_summary_signals(
             float(cpu_avg_percent) / (100.0 * float(cpu_logical_core_count)),
         )
 
+    ram_pressure_frac = _fraction(ram_peak_bytes, ram_total_bytes)
     used_peak_frac = _fraction(gpu_mem_used_peak_bytes, gpu_mem_total_bytes)
     reserved_peak_frac = _fraction(
         gpu_mem_reserved_peak_bytes,
         gpu_mem_total_bytes,
     )
-    reserved_overhang_ratio = None
-    if (
-        gpu_mem_reserved_peak_bytes is not None
-        and gpu_mem_used_peak_bytes is not None
-        and float(gpu_mem_used_peak_bytes) > 0.0
-    ):
-        reserved_overhang_ratio = max(
-            0.0,
-            float(gpu_mem_reserved_peak_bytes)
-            / float(gpu_mem_used_peak_bytes),
-        )
-
+    used_imbalance = _imbalance_pct(per_rank, "gpu_mem_used_peak_bytes")
+    reserved_imbalance = _imbalance_pct(
+        per_rank,
+        "gpu_mem_reserved_peak_bytes",
+    )
     return ProcessSummarySignals(
         duration_s=duration_s,
         samples=int(samples),
@@ -218,10 +245,20 @@ def build_process_summary_signals(
         cpu_peak_percent=cpu_peak_percent,
         cpu_logical_core_count=cpu_logical_core_count,
         cpu_pressure_frac=cpu_pressure_frac,
+        cpu_capacity_percent=(
+            cpu_pressure_frac * 100.0
+            if cpu_pressure_frac is not None
+            else None
+        ),
         ram_avg_bytes=ram_avg_bytes,
         ram_peak_bytes=ram_peak_bytes,
         ram_total_bytes=ram_total_bytes,
-        ram_pressure_frac=_fraction(ram_peak_bytes, ram_total_bytes),
+        ram_pressure_frac=ram_pressure_frac,
+        ram_peak_percent=(
+            ram_pressure_frac * 100.0
+            if ram_pressure_frac is not None
+            else None
+        ),
         gpu_available=gpu_available,
         gpu_count=gpu_count,
         gpu_device_index=gpu_device_index,
@@ -232,7 +269,16 @@ def build_process_summary_signals(
         gpu_mem_total_bytes=gpu_mem_total_bytes,
         gpu_mem_used_peak_frac=used_peak_frac,
         gpu_mem_reserved_peak_frac=reserved_peak_frac,
+        gpu_mem_used_peak_percent=(
+            used_peak_frac * 100.0 if used_peak_frac is not None else None
+        ),
+        gpu_mem_reserved_peak_percent=(
+            reserved_peak_frac * 100.0
+            if reserved_peak_frac is not None
+            else None
+        ),
         gpu_mem_reserved_overhang_ratio=reserved_overhang_ratio,
+        highest_overhang_rank=highest_overhang_rank,
         per_rank=per_rank,
         highest_rss_rank=_best_rank_idx(per_rank, "ram_peak_bytes"),
         highest_used_rank=_best_rank_idx(per_rank, "gpu_mem_used_peak_bytes"),
@@ -243,13 +289,15 @@ def build_process_summary_signals(
         least_headroom_rank=least_headroom_rank,
         least_headroom_bytes=least_headroom_bytes,
         rank_rss_imbalance_pct=_imbalance_pct(per_rank, "ram_peak_bytes"),
-        rank_gpu_used_imbalance_pct=_imbalance_pct(
-            per_rank,
-            "gpu_mem_used_peak_bytes",
+        rank_gpu_used_imbalance_pct=used_imbalance,
+        rank_gpu_reserved_imbalance_pct=reserved_imbalance,
+        rank_gpu_used_imbalance_percent=(
+            used_imbalance * 100.0 if used_imbalance is not None else None
         ),
-        rank_gpu_reserved_imbalance_pct=_imbalance_pct(
-            per_rank,
-            "gpu_mem_reserved_peak_bytes",
+        rank_gpu_reserved_imbalance_percent=(
+            reserved_imbalance * 100.0
+            if reserved_imbalance is not None
+            else None
         ),
     )
 

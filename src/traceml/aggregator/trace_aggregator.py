@@ -1,23 +1,4 @@
-"""
-TraceML Aggregator (out-of-process telemetry server + UI driver).
-
-Responsibilities
-----------------
-- Receive telemetry rows from all ranks over TCP
-- Ingest only legacy live-view rows into RemoteDBStore
-- Optionally persist telemetry to SQLite history
-- Drive a display driver (CLI / NiceGUI / summary-only) that owns live
-  rendering behavior
-
-
-Key invariants
---------------
-- Renderers currently read from SQLite-backed history in most places, with a
-  small number of legacy deep-profile views still reading from RemoteDBStore.
-- Over time, SQLite-backed history is expected to replace the remaining
-  RemoteDBStore read path entirely.
-- The aggregator MUST NOT know about UI sections, layouts, or renderer methods.
-"""
+"""Out-of-process telemetry server and display driver host."""
 
 import threading
 import time
@@ -40,13 +21,7 @@ from traceml.transport.tcp_transport import TCPConfig, TCPServer
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
-    """
-    Execute ``fn()`` and never raise.
-
-    This helper is intended for cleanup paths, UI ticking, and telemetry
-    ingestion paths where failures should be logged but should not crash the
-    already-running aggregator process.
-    """
+    """Execute ``fn()`` and log failures without raising."""
     try:
         return fn()
     except Exception:
@@ -62,17 +37,7 @@ _DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
 
 
 class TraceMLAggregator:
-    """
-    Telemetry aggregator process.
-
-    Owns
-    ----
-    - TCPServer: receives messages from training ranks
-    - RemoteDBStore: temporary live store for legacy renderers still migrating
-      to SQLite-backed reads
-    - SQLiteWriterSimple: optional history persistence
-    - Display driver: backend-specific driver that owns live rendering behavior
-    """
+    """Telemetry aggregator process."""
 
     _REMOTE_STORE_SAMPLERS = frozenset(
         {

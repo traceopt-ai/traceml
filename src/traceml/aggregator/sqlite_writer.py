@@ -1,32 +1,4 @@
-"""
-SQLite telemetry writer for TraceML (simple + sampler metadata).
-
-This module provides an asynchronous, low-overhead SQLite writer intended for
-telemetry persistence in the TraceML aggregator process.
-
-Design goals
------------
-- Non-blocking ingestion: `ingest()` never blocks the caller.
-- Simple timing model: writer wakes every `flush_interval_sec` and flushes.
-- Single-writer SQLite: one background thread owns the sqlite connection.
-- Bounded memory: internal queue is bounded; overflow is dropped (telemetry-first).
-- Minimal schema + filterability:
-  Store raw MessagePack payloads, and also persist rank + sampler columns so you
-  can query by sampler without decoding everything.
-
-Storage model
--------------
-- All incoming telemetry messages are persisted to `raw_messages` as raw
-  MessagePack payloads.
-- A selected subset of samplers is also projected into structured SQLite tables
-  for faster query patterns and gradual migration away from raw decoding.
-
-Notes
------
-- Best-effort: if disk falls behind, messages may be dropped (queue overflow).
-- This writer does not depend on UI/RemoteDBStore/TCP.
-- Depends only on stdlib sqlite3 + msgspec.
-"""
+"""Asynchronous SQLite telemetry writer."""
 
 import queue
 import sqlite3
@@ -59,37 +31,14 @@ _PROJECTION_WRITERS = [
 
 @dataclass(frozen=True)
 class _FlushBarrier:
-    """
-    Internal queue item used to establish a flush barrier.
-
-    When the writer thread processes this barrier, all messages enqueued before
-    it have been written to SQLite.
-    """
+    """Queue item used to establish a flush barrier."""
 
     done: threading.Event
 
 
 @dataclass(frozen=True)
 class SQLiteWriterConfig:
-    """
-    Configuration for SQLiteWriterSimple.
-
-    Parameters
-    ----------
-    path:
-        Output SQLite DB path (one DB per session is recommended).
-    enabled:
-        If False, this writer becomes a no-op.
-    max_queue:
-        Maximum number of pending messages buffered in RAM before dropping.
-    flush_interval_sec:
-        Writer wakes up every X seconds and flushes pending messages.
-    max_flush_items:
-        Upper bound on how many messages are written per wake-up.
-    synchronous:
-        SQLite synchronous level. "NORMAL" is a good default for telemetry.
-        Use "FULL" for strongest durability at higher overhead.
-    """
+    """Configuration for SQLiteWriterSimple."""
 
     path: str
     enabled: bool = True
@@ -100,20 +49,7 @@ class SQLiteWriterConfig:
 
 
 class SQLiteWriterSimple:
-    """
-    Asynchronous SQLite telemetry writer (sleep-based).
-
-    API
-    ---
-    - start(): start writer thread
-    - ingest(msg): enqueue a dict message (non-blocking)
-    - stop(): request stop and flush best-effort
-
-    Threading
-    ---------
-    - Any thread may call ingest().
-    - The writer thread is the only thread that touches sqlite.
-    """
+    """Asynchronous SQLite telemetry writer."""
 
     def __init__(
         self, cfg: SQLiteWriterConfig, logger: Optional[Any] = None

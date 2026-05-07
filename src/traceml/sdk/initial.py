@@ -1,29 +1,4 @@
-"""
-TraceML initialization and instrumentation patch policy.
-
-This module owns the explicit initialization path for TraceML.
-
-Design goals
-------------
-- Make instrumentation patch policy explicit and validated.
-- Preserve backward compatibility for legacy `traceml.decorators` imports.
-- Fail fast with clear errors when initialization is invalid or patching fails.
-- Keep the API extensible for future configuration without changing call sites.
-
-Modes
------
-- auto:
-    Install all supported automatic patches.
-- manual:
-    Install no automatic patches. Intended for explicit wrapper-based usage.
-- selective:
-    Install only the explicitly requested patches.
-
-Compatibility
--------------
-`mode="custom"` is accepted as an alias for `mode="selective"` so the naming
-can evolve without breaking callers during the transition.
-"""
+"""TraceML initialization and patch policy."""
 
 from __future__ import annotations
 
@@ -36,22 +11,7 @@ TraceMLInitMode = Literal["auto", "manual", "selective"]
 
 @dataclass(frozen=True)
 class TraceMLInitConfig:
-    """
-    Frozen initialization result returned by `traceml.init()`.
-
-    Fields
-    ------
-    mode:
-        Canonical mode selected by the caller.
-    patch_dataloader:
-        Whether DataLoader fetch patching is enabled.
-    patch_forward:
-        Whether forward timing patching is enabled.
-    patch_backward:
-        Whether backward timing patching is enabled.
-    source:
-        Human-readable source label for diagnostics and conflict messages.
-    """
+    """Effective initialization config returned by `traceml.init()`."""
 
     mode: TraceMLInitMode
     patch_dataloader: bool
@@ -76,9 +36,7 @@ _INIT_CONFIG: Optional[TraceMLInitConfig] = None
 
 
 def _canonical_mode(mode: str) -> TraceMLInitMode:
-    """
-    Normalize a user-provided mode string to the canonical enum-like value.
-    """
+    """Normalize a user-provided mode string."""
     text = str(mode or "").strip().lower()
     if text == "custom":
         return "selective"
@@ -100,9 +58,7 @@ def _build_config(
     patch_backward: Optional[bool],
     source: str,
 ) -> TraceMLInitConfig:
-    """
-    Validate user input and return the canonical initialization config.
-    """
+    """Validate user input and return the initialization config."""
     canonical_mode = _canonical_mode(mode)
     override_values = (
         patch_dataloader,
@@ -162,13 +118,7 @@ def _build_config(
 
 
 def _apply_requested_patches(config: TraceMLInitConfig) -> None:
-    """
-    Apply the patch set requested by the validated config.
-
-    This function imports patch modules lazily so that `import traceml`
-    remains lightweight in environments that do not need torch-backed
-    instrumentation.
-    """
+    """Apply the patch set requested by the validated config."""
     if not any(
         (
             config.patch_dataloader,

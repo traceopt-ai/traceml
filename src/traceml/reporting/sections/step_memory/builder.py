@@ -7,7 +7,9 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from traceml.reporting.sections.step_memory.loader import StepMemorySectionData
-from traceml.reporting.summaries.step_memory import _build_step_memory_card
+from traceml.reporting.sections.step_memory.model import (
+    _build_step_memory_card,
+)
 
 
 def build_step_memory_section_payload(

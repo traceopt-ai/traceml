@@ -48,37 +48,7 @@ DEFAULT_HEATMAP_KEYS: Tuple[str, ...] = (
 
 
 class StepCombinedComputer:
-    """
-    Compute rank-combined step timing summaries directly from SQLite.
-
-    Data source
-    -----------
-    Reads from the SQLite projection table `step_time_samples`, which contains:
-    - rank
-    - step
-    - sample_ts_s
-    - seq
-    - events_json
-
-    Output compatibility
-    --------------------
-    Output objects are intentionally kept identical to the previous
-    RemoteDBStore-backed implementation so existing renderers can continue
-    to work without modification.
-
-    Design goals
-    ------------
-    - Avoid dependence on RemoteDBStore
-    - Keep reads bounded to recent rows for predictable latency
-    - Preserve stale-cache behavior to avoid dashboard flicker
-    - Keep logic close to the previous implementation for easier review
-
-    Notes
-    -----
-    - The compute still uses the last common suffix of steps across ranks.
-    - Dynamic event names remain inside JSON and are parsed only for the
-      recent rows involved in the current compute window.
-    """
+    """Compute rank-combined step timing summaries from SQLite."""
 
     def __init__(
         self,

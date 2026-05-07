@@ -1,16 +1,4 @@
-"""
-Dashboard compute for system telemetry.
-
-This module computes dashboard rollups and short history series directly from
-SQLite projection tables.
-
-Design goals
-------------
-- Keep compute fast with bounded reads over a recent window
-- Bulk-fetch all GPU rows for the window once, then group in Python
-- Preserve stale-cache behavior to avoid UI flicker or blanking
-- Keep output schema stable for existing renderers
-"""
+"""Dashboard compute for system telemetry."""
 
 from __future__ import annotations
 
@@ -24,20 +12,7 @@ from .common import SystemDashboardPayload, SystemMetricsDB
 
 
 class SystemDashboardComputer:
-    """
-    Compute dashboard rollups and short time-series for system telemetry.
-
-    Parameters
-    ----------
-    db_path:
-        Path to the SQLite database file.
-    rank:
-        Optional rank filter.
-    stale_ttl_s:
-        Maximum age in seconds for returning the last known good payload on
-        transient failure or empty-window reads. When None, stale data may be
-        reused indefinitely.
-    """
+    """Compute dashboard rollups and short time-series."""
 
     def __init__(
         self,

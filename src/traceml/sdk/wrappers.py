@@ -1,24 +1,4 @@
-"""
-Official TraceML manual instrumentation wrappers.
-
-This module provides the manual counterparts to TraceML's automatic
-patch-based instrumentation. The wrappers emit the same internal event names
-used by the automatic path so that downstream samplers, summaries, and
-diagnostics continue to work unchanged.
-
-Design goals
-------------
-- Keep wrappers explicit and easy to use in custom training loops
-- Preserve object identity where that matters operationally
-- Refuse ambiguous or duplicate instrumentation configurations
-- Remain safe for large production training workflows
-
-Important
----------
-These wrappers are intended for `manual` or `selective` initialization modes.
-They should not be used for a feature whose automatic patch or hook is already
-active in the current process.
-"""
+"""Manual instrumentation wrappers."""
 
 from __future__ import annotations
 
