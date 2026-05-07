@@ -19,10 +19,10 @@ patches:
 
 GPU timing
 ----------
-CUDA events are recorded around the ``.to()`` call via ``timed_region``.  For
-blocking transfers (``non_blocking=False``, the default) this accurately
-captures DMA time.  For ``non_blocking=True`` the events bound the time until
-the DMA is queued on the current stream, which is a useful lower bound.
+CUDA events are recorded around the ``.to()`` call via ``timed_region``.
+``try_resolve()`` calls ``elapsed_time()`` which blocks until both CUDA events
+have completed, so the measurement reflects actual GPU DMA time for both
+blocking (``non_blocking=False``) and async (``non_blocking=True``) transfers.
 
 Filtering
 ---------
@@ -70,16 +70,24 @@ def _is_cuda_target(args: tuple, kwargs: dict) -> bool:
     """
     first = args[0] if args else None
 
-    if isinstance(first, str) and "cuda" in first:
-        return True
+    if isinstance(first, str):
+        try:
+            if torch.device(first).type == "cuda":
+                return True
+        except RuntimeError:
+            pass
     if isinstance(first, torch.device) and first.type == "cuda":
         return True
     if isinstance(first, torch.Tensor) and first.is_cuda:
         return True
 
     device = kwargs.get("device")
-    if isinstance(device, str) and "cuda" in device:
-        return True
+    if isinstance(device, str):
+        try:
+            if torch.device(device).type == "cuda":
+                return True
+        except RuntimeError:
+            pass
     if isinstance(device, torch.device) and device.type == "cuda":
         return True
 
@@ -91,6 +99,16 @@ def _is_cuda_target(args: tuple, kwargs: dict) -> bool:
 
 def _traceml_tensor_to(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
     if not _enabled() or not _is_cuda_target(args, kwargs):
+        return _ORIG_TENSOR_TO(self, *args, **kwargs)
+
+    # skip D2D source tensor is already on a CUDA device.
+    if self.is_cuda:
+        return _ORIG_TENSOR_TO(self, *args, **kwargs)
+
+    # skip Parameter receivers — model.to(device) moves every parameter,
+    # which would inflate n_calls by the number of model parameters rather
+    # than the number of data-batch transfers.
+    if isinstance(self, torch.nn.Parameter):
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
 
     with timed_region(

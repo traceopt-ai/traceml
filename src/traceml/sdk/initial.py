@@ -59,7 +59,7 @@ class TraceMLInitConfig:
     patch_dataloader: bool
     patch_forward: bool
     patch_backward: bool
-    patch_h2d: bool = False
+    patch_h2d: bool
     source: str = "user"
 
     def same_effective_configuration(self, other: "TraceMLInitConfig") -> bool:
