@@ -38,4 +38,4 @@ traceml run <script>      # run script with minimal instrumentation
 traceml deep <script>     # run with full instrumentation (step + memory + layer)
 ```
 
-See the [CLI module reference](../developer_guide/subsystems/cli.md) for the implementation.
+See `traceml --help` for the full set of options.

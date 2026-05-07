@@ -38,7 +38,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Integrations | `src/traceml/integrations/` | Hugging Face + Lightning adapters |
 | Utils | `src/traceml/utils/` | Hooks, patches, memory/timing helpers |
 
-Auto-generated API reference is available for the [CLI](subsystems/cli.md) and [Decorators](subsystems/decorators.md). Narrative docs for the other subsystems are on the roadmap — in the meantime, the source tree above is the canonical reference: start from the entry points and follow the imports.
+For the user-facing API surface (`trace_step`, `TraceMLTrainer`, `TraceMLCallback`, CLI usage), see the [Public API](../user_guide/public-api.md). The source tree above is the canonical reference for internals — start from the entry points and follow the imports.
 
 ## Design principles
 

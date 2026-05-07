@@ -85,7 +85,4 @@ nav:
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
       - Extending TraceML: developer_guide/extending.md
-      - API reference:
-          - CLI: developer_guide/subsystems/cli.md
-          - Decorators: developer_guide/subsystems/decorators.md
       - Contributing: developer_guide/contributing.md
