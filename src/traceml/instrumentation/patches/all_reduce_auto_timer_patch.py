@@ -28,6 +28,13 @@ What this patch does NOT catch
   bucket).
 - Convenience APIs that bypass the Python symbol (e.g. a hypothetical future
   in-place ``tensor.all_reduce_()``). None exist on PyTorch 2.x today.
+- Callers that resolve the function via the internal module path
+  ``from torch.distributed.distributed_c10d import all_reduce`` (instead of
+  ``import torch.distributed as dist; dist.all_reduce(...)``). Reassigning
+  ``torch.distributed.all_reduce`` does NOT update
+  ``torch.distributed.distributed_c10d.all_reduce``. The public re-export
+  ``dist.all_reduce`` is the dominant call path (including FSDP and standard
+  user code) and IS caught.
 - Other collectives (``reduce_scatter``, ``all_gather``, ``barrier``). Each
   collective gets its own patch + wire-name in the planned v1 expansion.
 
@@ -81,9 +88,7 @@ def _traceml_all_reduce(*args: Any, **kwargs: Any) -> Any:
     if not _enabled():
         return _ORIG_ALL_REDUCE(*args, **kwargs)
 
-    with timed_region(
-        "_traceml_comm:all_reduce", scope="step", use_gpu=True
-    ):
+    with timed_region("_traceml_comm:all_reduce", scope="step", use_gpu=True):
         return _ORIG_ALL_REDUCE(*args, **kwargs)
 
 

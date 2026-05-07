@@ -309,6 +309,9 @@ def test_trace_step_installs_optimizer_hooks_only_in_auto(monkeypatch):
     monkeypatch.setattr(instrumentation, "timed_region", fake_timed_region)
     monkeypatch.setattr(instrumentation, "forward_auto_timer", FakeAutoTimer)
     monkeypatch.setattr(instrumentation, "backward_auto_timer", FakeAutoTimer)
+    monkeypatch.setattr(
+        instrumentation, "all_reduce_auto_timer", FakeAutoTimer
+    )
     monkeypatch.setattr(instrumentation, "StepMemoryTracker", FakeMemTracker)
     monkeypatch.setattr(
         instrumentation,
@@ -362,6 +365,9 @@ def test_trace_step_does_not_install_optimizer_hooks_in_manual(monkeypatch):
     monkeypatch.setattr(instrumentation, "timed_region", fake_timed_region)
     monkeypatch.setattr(instrumentation, "forward_auto_timer", FakeAutoTimer)
     monkeypatch.setattr(instrumentation, "backward_auto_timer", FakeAutoTimer)
+    monkeypatch.setattr(
+        instrumentation, "all_reduce_auto_timer", FakeAutoTimer
+    )
     monkeypatch.setattr(instrumentation, "StepMemoryTracker", FakeMemTracker)
     monkeypatch.setattr(
         instrumentation,

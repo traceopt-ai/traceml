@@ -69,9 +69,7 @@ def _make_fake_timed_region(calls):
 
 def test_patch_all_reduce_is_idempotent():
     """Second call to patch_all_reduce must be a no-op."""
-    assert (
-        getattr(dist, "_traceml_all_reduce_patched", False) is True
-    )
+    assert getattr(dist, "_traceml_all_reduce_patched", False) is True
     first_func = dist.all_reduce
 
     ar.patch_all_reduce()  # already installed by fixture; must short-circuit
@@ -116,9 +114,7 @@ def _ensure_gloo_pg():
     os.environ.setdefault("MASTER_PORT", "29555")
     os.environ.setdefault("RANK", "0")
     os.environ.setdefault("WORLD_SIZE", "1")
-    dist.init_process_group(
-        backend="gloo", rank=0, world_size=1
-    )
+    dist.init_process_group(backend="gloo", rank=0, world_size=1)
 
 
 def test_patch_does_not_record_when_gate_false(monkeypatch):
@@ -126,9 +122,7 @@ def test_patch_does_not_record_when_gate_false(monkeypatch):
     timed_region."""
     _ensure_gloo_pg()
     calls: list = []
-    monkeypatch.setattr(
-        ar, "timed_region", _make_fake_timed_region(calls)
-    )
+    monkeypatch.setattr(ar, "timed_region", _make_fake_timed_region(calls))
 
     t = torch.zeros(4)
     dist.all_reduce(t)
@@ -141,9 +135,7 @@ def test_patch_records_event_inside_activator(monkeypatch):
     timed_region with the expected wire-name/scope/use_gpu."""
     _ensure_gloo_pg()
     calls: list = []
-    monkeypatch.setattr(
-        ar, "timed_region", _make_fake_timed_region(calls)
-    )
+    monkeypatch.setattr(ar, "timed_region", _make_fake_timed_region(calls))
 
     t = torch.zeros(4)
     with ar.all_reduce_auto_timer():
@@ -157,9 +149,7 @@ def test_activator_exit_resets_gate_on_exception(monkeypatch):
     exit so subsequent dist.all_reduce calls fast-path."""
     _ensure_gloo_pg()
     calls: list = []
-    monkeypatch.setattr(
-        ar, "timed_region", _make_fake_timed_region(calls)
-    )
+    monkeypatch.setattr(ar, "timed_region", _make_fake_timed_region(calls))
 
     with pytest.raises(RuntimeError, match="boom"):
         with ar.all_reduce_auto_timer():
@@ -188,9 +178,7 @@ def test_positional_and_kwarg_forms_route_through_patch(monkeypatch):
     """
     _ensure_gloo_pg()
     calls: list = []
-    monkeypatch.setattr(
-        ar, "timed_region", _make_fake_timed_region(calls)
-    )
+    monkeypatch.setattr(ar, "timed_region", _make_fake_timed_region(calls))
 
     t1 = torch.zeros(2)
     t2 = torch.zeros(2)
@@ -200,9 +188,7 @@ def test_positional_and_kwarg_forms_route_through_patch(monkeypatch):
         dist.all_reduce(t2, op=dist.ReduceOp.SUM)  # mixed pos + kwarg
 
     assert len(calls) == 2
-    assert all(
-        c == ("_traceml_comm:all_reduce", "step", True) for c in calls
-    )
+    assert all(c == ("_traceml_comm:all_reduce", "step", True) for c in calls)
 
 
 def test_kwarg_forwarding_to_original_is_lossless(monkeypatch):
@@ -243,9 +229,7 @@ def test_async_op_true_records_one_event_per_call(monkeypatch):
     """
     _ensure_gloo_pg()
     calls: list = []
-    monkeypatch.setattr(
-        ar, "timed_region", _make_fake_timed_region(calls)
-    )
+    monkeypatch.setattr(ar, "timed_region", _make_fake_timed_region(calls))
 
     t = torch.zeros(2)
     with ar.all_reduce_auto_timer():
@@ -479,16 +463,27 @@ dist.destroy_process_group()
 def _torchrun_available() -> bool:
     """True when torchrun + gloo are usable in this environment."""
     try:
-        import torch.distributed as _d  # noqa: F401
+        import torch.distributed as _d
     except Exception:
+        return False
+    # `torch.distributed.is_available()` returns False on torch builds
+    # without distributed support compiled in (e.g. some CPU-only wheels);
+    # don't try to spawn torchrun in that case.
+    if not _d.is_available():
         return False
     # torchrun is shipped with torch.
     return True
 
 
+_DIST_TESTS_ENABLED = os.environ.get("TRACEML_RUN_DIST_TESTS") == "1"
+
+
 @pytest.mark.skipif(
-    not _torchrun_available(),
-    reason="torch.distributed not importable; skipping 2-rank smoke",
+    not _DIST_TESTS_ENABLED or not _torchrun_available(),
+    reason=(
+        "2-rank smoke is opt-in: set TRACEML_RUN_DIST_TESTS=1 to run "
+        "(also requires torch.distributed.is_available())."
+    ),
 )
 def test_two_rank_torchrun_gloo_ddp_bypasses_python_all_reduce(tmp_path):
     """LOCK-3 Probe-2 verification: confirm DDP gradient sync bypasses
@@ -511,9 +506,7 @@ def test_two_rank_torchrun_gloo_ddp_bypasses_python_all_reduce(tmp_path):
     """
     repo_root = Path(__file__).resolve().parents[1]
     script = tmp_path / "smoke.py"
-    script.write_text(
-        SMOKE_SCRIPT_TEMPLATE.format(root=str(repo_root))
-    )
+    script.write_text(SMOKE_SCRIPT_TEMPLATE.format(root=str(repo_root)))
 
     cmd = [
         sys.executable,

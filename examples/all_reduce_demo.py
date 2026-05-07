@@ -46,7 +46,7 @@ HIDDEN_DIM = 128
 OUTPUT_DIM = 10
 
 BATCH_SIZE = 32
-NUM_STEPS = 50
+NUM_STEPS = 5000
 
 
 class TinyMLP(nn.Module):
@@ -82,9 +82,7 @@ def main() -> None:
     use_cuda = torch.cuda.is_available()
     backend = "nccl" if use_cuda else "gloo"
 
-    dist.init_process_group(
-        backend=backend, rank=rank, world_size=world_size
-    )
+    dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
 
     if use_cuda:
         torch.cuda.set_device(local_rank)
