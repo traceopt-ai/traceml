@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](docs/quickstart.md) • [**Compare Runs**](docs/compare.md) • [**How to Read Output**](docs/how-to-read-output.md) • [**FAQ**](docs/faq.md) • [**Use with W&B / MLflow**](docs/use-with-wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Quickstart**](docs/user_guide/quickstart.md) • [**Compare Runs**](docs/user_guide/compare.md) • [**How to Read Output**](docs/user_guide/reading-output.md) • [**FAQ**](docs/user_guide/faq.md) • [**Use with W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
 
 </div>
 
@@ -40,7 +40,7 @@ Initialize TraceML and wrap your training step:
 ```python
 import traceml
 
-traceml.init(mode="auto")
+traceml.init()
 
 for batch in dataloader:
     with traceml.trace_step(model):
@@ -67,22 +67,7 @@ At the end of the run, it prints a compact summary you can review or share.
 
 Start with `traceml run train.py`. Most users do not need `watch` or `deep` first.
 
-> Legacy imports from `traceml.decorators` still work for backward compatibility.
-> The preferred interface is now the top-level `traceml.*`.
-> Legacy decorator imports are planned for deprecation starting in `v0.3.0`.
-
-TraceML supports three initialization modes:
-
-- `traceml.init(mode="auto")` for the default patch-based workflow
-- `traceml.init(mode="manual")` for fully explicit wrapper-based instrumentation
-- `traceml.init(mode="selective", ...)` when you want part automatic and part explicit
-
-Manual and selective flows can use:
-
-- `traceml.wrap_dataloader_fetch(...)`
-- `traceml.wrap_forward(...)`
-- `traceml.wrap_backward(...)`
-- `traceml.wrap_optimizer(...)`
+For custom training loops, manual and selective instrumentation are available in the [Quickstart](docs/user_guide/quickstart.md).
 
 ---
 
@@ -108,7 +93,6 @@ Then call `traceml.final_summary()` near the end of your script.
 
 TraceML also writes canonical summary artifacts for the run, including `final_summary.json`, which is the intended machine-readable output for downstream logging and later run comparison.
 
-
 ### 3. Compare two runs
 
 If you have `final_summary.json` from two runs, compare them directly:
@@ -119,19 +103,18 @@ traceml compare run_a.json run_b.json
 
 TraceML writes both a structured compare JSON and a compact text report.
 
-See [docs/compare.md](docs/compare.md).
+See [docs/user_guide/compare.md](docs/user_guide/compare.md).
 
 ---
 
 ## What TraceML helps you see
 
-TraceML is currently strongest at surfacing:
+TraceML helps answer questions like:
 
-- step-time slowdowns while training is still running
-- whether the pattern looks input-bound, compute-bound, or wait-heavy
-- whether work is uneven across distributed ranks
-- whether memory is drifting upward over time
-- where time is showing up across dataloader, forward, backward, and optimizer phases
+- Is the run input-bound, compute-bound, wait-heavy, or memory-constrained?
+- Are some distributed ranks slower than others?
+- Is memory usage drifting upward over time?
+- Where is time showing up across dataloader, forward, backward, and optimizer phases?
 
 It is designed to help you decide quickly whether a run looks healthy or whether it is worth digging deeper.
 
@@ -159,25 +142,11 @@ Reach for `torch.profiler` once you know where to dig deeper.
 
 ## How it fits with your stack
 
-TraceML is designed to work alongside tools like W&B, MLflow, and TensorBoard.
+TraceML is designed to work alongside tools like W&B, MLflow, and TensorBoard, not replace them.
 
-Use those for:
+Use experiment trackers for dashboards, artifacts, and team reporting. Use TraceML for live bottleneck diagnosis, structured final summaries, and simple run-to-run comparison from saved TraceML summary JSON files.
 
-- experiment tracking
-- artifacts
-- dashboards
-- team reporting
-
-Use TraceML for:
-
-- bottleneck diagnosis while a run is still in progress
-- spotting throughput drift during a run
-- checking for rank imbalance or straggler patterns
-- checking for memory creep or pressure signals
-- structured final summaries you can forward into W&B or MLflow
-- simple run-to-run comparison from saved TraceML summary JSON files
-
-See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
+See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md).
 
 ---
 
@@ -188,43 +157,24 @@ See [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md).
 - single GPU
 - single-node DDP/FSDP
 
-**Not yet:**
+**Next:**
 
-- multi-node
-- tensor parallel
-- pipeline parallel
-
-`deep` remains available for deeper follow-up inspection. If `deep` is important
-for your workflow, please let us know in [GitHub issues](https://github.com/traceopt-ai/traceml/issues).
-
----
-
-## Roadmap
-
-TraceML is focused on making distributed training slowdowns easier to diagnose while the job is still running.
-
-Current priorities:
-
-- stronger barrier and communication diagnostics for DDP/FSDP, with clearer separation of compute, communication, and synchronization wait
-- multi-node training support, including common launch environments such as Slurm and Ray
-- more structured final summary JSON for experiment trackers, CI workflows, and run-to-run comparisons
-- broader coverage across common training stacks, including Hugging Face Trainer, PyTorch Lightning, FSDP, and potentially DeepSpeed
-- streaming telemetry export for live consumers, starting with simple JSONL-style events and keeping OpenTelemetry compatibility in mind
+- multi-node training support
 
 ---
 
 ## Learn more
 
-- [Quickstart](docs/quickstart.md)
-- [Compare Runs](docs/compare.md)
+- [Quickstart](docs/user_guide/quickstart.md)
+- [Compare Runs](docs/user_guide/compare.md)
 - [Examples](examples/README.md)
-- [How to Read TraceML Output](docs/how-to-read-output.md)
-- [FAQ](docs/faq.md)
-- [Use TraceML with W&B / MLflow](docs/use-with-wandb-mlflow.md)
-- Hugging Face integration: `docs/huggingface.md`
-- PyTorch Lightning integration: `docs/lightning.md`
+- [How to Read TraceML Output](docs/user_guide/reading-output.md)
+- [FAQ](docs/user_guide/faq.md)
+- [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md)
+- [Hugging Face integration](docs/user_guide/integrations/huggingface.md)
+- [PyTorch Lightning integration](docs/user_guide/integrations/lightning.md)
 
-Need a lighter zero-code first look or a deeper follow-up run? See the Quickstart and FAQ for `watch` and `deep`.
+Need a lighter zero-code first look or a deeper follow-up run? See the [Quickstart](docs/user_guide/quickstart.md) and [FAQ](docs/user_guide/faq.md) for `watch` and `deep`.
 
 ---
 
