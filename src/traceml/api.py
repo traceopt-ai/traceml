@@ -32,7 +32,9 @@ def final_summary(
     rank0_only: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
-    Return a finalized TraceML summary for the active session.
+    Return a finalized TraceML summary for the active session, or ``None``
+    if the summary is not available (history disabled, aggregator error, or
+    timeout).  A :mod:`warnings` message is emitted for all soft-failure cases.
     """
     return _final_summary(
         timeout_sec=timeout_sec,
