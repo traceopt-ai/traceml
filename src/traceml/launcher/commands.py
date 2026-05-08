@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from traceml.launcher.manifest import (
     collect_existing_artifacts,
@@ -76,7 +76,22 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     launch_context = LaunchContext.capture()
 
     config_path = find_config_file(Path(launch_context.launch_cwd))
-    yaml_cfg = load_yaml_config(config_path) if config_path is not None else {}
+    try:
+        yaml_cfg = (
+            load_yaml_config(config_path) if config_path is not None else {}
+        )
+    except (ValueError, OSError) as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+    # Normalize the deprecated TRACEML_MODE env var to TRACEML_UI_MODE so that
+    # resolve_config sees it. Matches the fallback logic in executor and aggregator.
+    launcher_env: Mapping[str, str] = os.environ
+    if "TRACEML_UI_MODE" not in os.environ and "TRACEML_MODE" in os.environ:
+        launcher_env = {
+            **os.environ,
+            "TRACEML_UI_MODE": os.environ["TRACEML_MODE"],
+        }
 
     # None = flag not supplied; resolver falls through to env/yaml/default.
     # --no-history inverts history_enabled: True flag → False override, absent → None.
@@ -96,7 +111,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
 
     cfg = resolve_config(
         cli_overrides=cli_overrides,
-        parent_env=os.environ,
+        parent_env=launcher_env,
         yaml_config=yaml_cfg,
         defaults=BUILT_IN_DEFAULTS,
     )

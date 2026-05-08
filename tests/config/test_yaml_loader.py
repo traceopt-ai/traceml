@@ -156,6 +156,12 @@ def test_load_yaml_config_top_level_not_mapping(tmp_path: Path) -> None:
         load_yaml_config(p)
 
 
+def test_load_yaml_config_malformed_yaml(tmp_path: Path) -> None:
+    p = _write(tmp_path, "mode: [unclosed\n")
+    with pytest.raises(ValueError, match="YAML syntax error"):
+        load_yaml_config(p)
+
+
 # resolve_config  — precedence rules
 
 
@@ -247,7 +253,74 @@ def test_resolve_config_history_disabled_via_cli() -> None:
     assert result["history_enabled"] is False
 
 
+def test_load_yaml_config_unreadable_file(tmp_path: Path) -> None:
+    """A file that exists but cannot be read raises OSError with a clear message."""
+    import os
+    import sys
+
+    if sys.platform == "win32":
+        pytest.skip("chmod is not enforced the same way on Windows")
+
+    p = _write(tmp_path, "mode: cli\n")
+    p.chmod(0o000)
+    try:
+        with pytest.raises(OSError, match="Cannot read config file"):
+            load_yaml_config(p)
+    finally:
+        p.chmod(0o644)
+
+
+def test_coerce_env_malformed_int_raises_value_error() -> None:
+    """A malformed TRACEML_* int env var gives a clear error, not a raw Python one."""
+    from traceml.config.yaml_loader import _coerce_env
+
+    with pytest.raises(ValueError, match="TRACEML_TCP_PORT"):
+        _coerce_env("tcp_port", "not_a_number")
+
+
+def test_coerce_env_malformed_float_raises_value_error() -> None:
+    from traceml.config.yaml_loader import _coerce_env
+
+    with pytest.raises(ValueError, match="TRACEML_INTERVAL"):
+        _coerce_env("interval", "bad")
+
+
 def test_resolve_config_all_keys_present_in_result() -> None:
     """resolve_config must always return a value for every schema key."""
     result = resolve_config(_no_cli(), _no_env(), _no_yaml(), _defaults())
     assert set(result.keys()) == set(YAML_KEY_SCHEMA.keys())
+
+
+def test_resolve_config_deprecated_traceml_mode_env_var() -> None:
+    """TRACEML_MODE (deprecated) must be normalised to TRACEML_UI_MODE before
+    resolve_config is called. This test verifies the normalisation logic used
+    in launch_process produces the right resolved value."""
+    cli = _no_cli()
+    # Simulate the normalisation done by launch_process:
+    # TRACEML_UI_MODE absent, TRACEML_MODE present → copy to TRACEML_UI_MODE.
+    raw_env = {"TRACEML_MODE": "summary"}
+    if "TRACEML_UI_MODE" not in raw_env and "TRACEML_MODE" in raw_env:
+        normalised_env = {
+            **raw_env,
+            "TRACEML_UI_MODE": raw_env["TRACEML_MODE"],
+        }
+    else:
+        normalised_env = raw_env
+    result = resolve_config(cli, normalised_env, _no_yaml(), _defaults())
+    assert result["mode"] == "summary"
+
+
+def test_resolve_config_ui_mode_takes_priority_over_deprecated_mode() -> None:
+    """When both env vars are set, TRACEML_UI_MODE wins (no double-set case)."""
+    cli = _no_cli()
+    # If TRACEML_UI_MODE is already set, normalisation leaves env unchanged.
+    raw_env = {"TRACEML_UI_MODE": "dashboard", "TRACEML_MODE": "summary"}
+    if "TRACEML_UI_MODE" not in raw_env and "TRACEML_MODE" in raw_env:
+        normalised_env = {
+            **raw_env,
+            "TRACEML_UI_MODE": raw_env["TRACEML_MODE"],
+        }
+    else:
+        normalised_env = raw_env
+    result = resolve_config(cli, normalised_env, _no_yaml(), _defaults())
+    assert result["mode"] == "dashboard"

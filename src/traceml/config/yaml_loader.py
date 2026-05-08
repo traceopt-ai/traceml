@@ -52,8 +52,6 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "history_enabled": True,
 }
 
-_VALID_MODES = frozenset({"cli", "dashboard", "summary"})
-
 # Env var strings treated as True for bool fields.
 _BOOL_ENV_TRUE = frozenset({"1", "true", "yes"})
 
@@ -85,8 +83,17 @@ def load_yaml_config(path: Path) -> dict[str, Any]:
         )
         return {}
 
-    with open(path, encoding="utf-8") as f:
-        raw = yaml.safe_load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except OSError as exc:
+        raise OSError(
+            f"[TraceML] Cannot read config file {path}: {exc}"
+        ) from exc
+    except yaml.YAMLError as exc:
+        raise ValueError(
+            f"[TraceML] {path}: YAML syntax error — {exc}"
+        ) from exc
 
     if raw is None:
         return {}  # empty file
@@ -161,13 +168,23 @@ def _validate_and_coerce(
 
 def _coerce_env(key: str, raw_env: str) -> Any:
     """Convert a TRACEML_* env var string to the correct Python type."""
-    _, expected_type = YAML_KEY_SCHEMA[key]
+    env_var, expected_type = YAML_KEY_SCHEMA[key]
     if expected_type is bool:
         return raw_env.strip().lower() in _BOOL_ENV_TRUE
     if expected_type is int:
-        return int(raw_env)
+        try:
+            return int(raw_env)
+        except ValueError:
+            raise ValueError(
+                f"[TraceML] env var {env_var}={raw_env!r} is not a valid integer."
+            ) from None
     if expected_type is float:
-        return float(raw_env)
+        try:
+            return float(raw_env)
+        except ValueError:
+            raise ValueError(
+                f"[TraceML] env var {env_var}={raw_env!r} is not a valid number."
+            ) from None
     return raw_env  # str
 
 
