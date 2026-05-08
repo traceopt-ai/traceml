@@ -7,7 +7,6 @@ aggregator process and reads the published summary artifact.
 """
 
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -57,30 +56,23 @@ def final_summary(
     Returns
     -------
     Optional[Dict[str, Any]]
-        Parsed final summary JSON, or ``None`` when the summary is not
-        available (non-zero rank, history disabled, aggregator error, or
-        timeout).  A :mod:`warnings` message is emitted for all soft-failure
-        cases so the caller can inspect what happened without crashing the
-        training run.
+        Parsed final summary JSON, or ``None`` on non-zero ranks when
+        `rank0_only=True`.
+
+    Raises
+    ------
+    RuntimeError
+        If TraceML session context is unavailable, history is disabled, the
+        aggregator reports an error, or the request times out.
     """
     if rank0_only and not is_primary_rank():
         return None
 
-    try:
-        ctx = resolve_session_context_from_env()
-    except RuntimeError as exc:
-        warnings.warn(
-            f"[TraceML] final_summary: session context unavailable — {exc}",
-            stacklevel=2,
-        )
-        return None
-
+    ctx = resolve_session_context_from_env()
     if not ctx.history_enabled:
-        warnings.warn(
-            "[TraceML] final_summary: history is disabled; returning None.",
-            stacklevel=2,
+        raise RuntimeError(
+            "TraceML final_summary() requires history to be enabled."
         )
-        return None
 
     request = build_final_summary_request()
     request_path = get_final_summary_request_path(ctx.session_root)
@@ -94,33 +86,22 @@ def final_summary(
         if response and response.get("request_id") == request.request_id:
             status = str(response.get("status", "")).strip().lower()
             if status != "ok":
-                error = (
+                raise RuntimeError(
                     response.get("error")
                     or "Aggregator failed to generate final summary."
                 )
-                warnings.warn(
-                    f"[TraceML] final_summary: {error}",
-                    stacklevel=2,
-                )
-                return None
 
             summary_json_path = response.get("summary_json_path")
             if not summary_json_path:
-                warnings.warn(
-                    "[TraceML] final_summary: aggregator response missing "
-                    "summary_json_path.",
-                    stacklevel=2,
+                raise RuntimeError(
+                    "Aggregator response did not include summary_json_path."
                 )
-                return None
 
             summary = load_json_or_none(Path(summary_json_path))
             if summary is None:
-                warnings.warn(
-                    f"[TraceML] final_summary: could not read summary JSON "
-                    f"from {summary_json_path}.",
-                    stacklevel=2,
+                raise RuntimeError(
+                    f"Final summary JSON could not be read: {summary_json_path}"
                 )
-                return None
 
             if print_text:
                 summary_txt_path = response.get("summary_txt_path")
@@ -133,9 +114,6 @@ def final_summary(
 
         time.sleep(float(poll_interval_sec))
 
-    warnings.warn(
-        "[TraceML] final_summary: timed out waiting for aggregator response; "
-        "returning None.",
-        stacklevel=2,
+    raise RuntimeError(
+        "Timed out waiting for TraceML final summary from the aggregator."
     )
-    return None
