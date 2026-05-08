@@ -20,7 +20,7 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--mode",
         type=str,
-        default="cli",
+        default=None,
         choices=["cli", "dashboard", "summary"],
         help=(
             "TraceML display mode to launch. "
@@ -30,51 +30,53 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--interval",
         type=float,
-        default=2.0,
+        default=None,
         help="Polling interval in seconds.",
     )
     parser.add_argument(
         "--enable-logging",
-        action="store_true",
+        action="store_const",
+        const=True,
+        default=None,
         help="Enable TraceML logging output.",
     )
     parser.add_argument(
         "--logs-dir",
         type=str,
-        default="./logs",
+        default=None,
         help="Directory for TraceML session logs.",
     )
     parser.add_argument(
         "--num-display-layers",
         type=int,
-        default=5,
+        default=None,
         help="Maximum number of model layers to display in the live UI.",
     )
     parser.add_argument(
         "--session-id",
         type=str,
-        default="",
+        default=None,
         help="Optional explicit session id.",
     )
     parser.add_argument(
         "--tcp-host",
         type=str,
-        default="127.0.0.1",
+        default=None,
         help="Aggregator bind host.",
     )
     parser.add_argument(
-        "--tcp-port", type=int, default=29765, help="Aggregator bind port."
+        "--tcp-port", type=int, default=None, help="Aggregator bind port."
     )
     parser.add_argument(
         "--remote-max-rows",
         type=int,
-        default=200,
+        default=None,
         help="Maximum number of rows returned by remote telemetry queries.",
     )
     parser.add_argument(
         "--nproc-per-node",
         type=int,
-        default=1,
+        default=None,
         help="torchrun nproc_per_node value.",
     )
     parser.add_argument(
@@ -87,12 +89,16 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--no-history",
-        action="store_true",
+        action="store_const",
+        const=True,
+        default=None,
         help="Disable history saving (live view only; summaries and comparisons unavailable).",
     )
     parser.add_argument(
         "--disable-traceml",
-        action="store_true",
+        action="store_const",
+        const=True,
+        default=None,
         help="Disable TraceML telemetry and run the script natively via torchrun.",
     )
 

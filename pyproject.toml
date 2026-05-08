@@ -23,6 +23,7 @@ dependencies = [
     "nicegui",
     "plotly",
     "msgspec",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

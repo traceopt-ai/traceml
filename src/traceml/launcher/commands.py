@@ -66,6 +66,56 @@ def validate_launch_args(args: argparse.Namespace) -> None:
 
 def launch_process(script_path: str, args: argparse.Namespace) -> None:
     """Launch the TraceML aggregator and target training process."""
+    from traceml.config.yaml_loader import (
+        BUILT_IN_DEFAULTS,
+        find_config_file,
+        load_yaml_config,
+        resolve_config,
+    )
+
+    launch_context = LaunchContext.capture()
+
+    config_path = find_config_file(Path(launch_context.launch_cwd))
+    yaml_cfg = load_yaml_config(config_path) if config_path is not None else {}
+
+    # None = flag not supplied; resolver falls through to env/yaml/default.
+    # --no-history inverts history_enabled: True flag → False override, absent → None.
+    cli_overrides = {
+        "mode": args.mode,
+        "interval": args.interval,
+        "enable_logging": args.enable_logging,
+        "logs_dir": args.logs_dir,
+        "num_display_layers": args.num_display_layers,
+        "session_id": args.session_id,
+        "tcp_host": args.tcp_host,
+        "tcp_port": args.tcp_port,
+        "remote_max_rows": args.remote_max_rows,
+        "nproc_per_node": args.nproc_per_node,
+        "history_enabled": (False if args.no_history else None),
+    }
+
+    cfg = resolve_config(
+        cli_overrides=cli_overrides,
+        parent_env=os.environ,
+        yaml_config=yaml_cfg,
+        defaults=BUILT_IN_DEFAULTS,
+    )
+
+    # Cross-field validation after all sources are merged.
+    if cfg["mode"] == "summary" and not cfg["history_enabled"]:
+        raise SystemExit(
+            "[TraceML] ERROR: mode=summary requires history to be enabled. "
+            "Remove --no-history (or set history_enabled: true in traceml.yaml) "
+            "to enable final summary generation."
+        )
+
+    supported_modes = {"cli", "dashboard", "summary"}
+    if cfg["mode"] not in supported_modes:
+        raise SystemExit(
+            f"[TraceML] ERROR: invalid mode '{cfg['mode']}'. "
+            f"Valid modes: {sorted(supported_modes)}"
+        )
+
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
@@ -74,26 +124,25 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     )
     env["TRACEML_PROFILE"] = getattr(args, "profile", "watch")
     env["TRACEML_SCRIPT_PATH"] = script_path
-    env["TRACEML_UI_MODE"] = args.mode
-    env["TRACEML_INTERVAL"] = str(args.interval)
-    env["TRACEML_ENABLE_LOGGING"] = "1" if args.enable_logging else "0"
-    env["TRACEML_LOGS_DIR"] = args.logs_dir
-    env["TRACEML_NUM_DISPLAY_LAYERS"] = str(args.num_display_layers)
+    env["TRACEML_UI_MODE"] = cfg["mode"]
+    env["TRACEML_INTERVAL"] = str(cfg["interval"])
+    env["TRACEML_ENABLE_LOGGING"] = "1" if cfg["enable_logging"] else "0"
+    env["TRACEML_LOGS_DIR"] = cfg["logs_dir"]
+    env["TRACEML_NUM_DISPLAY_LAYERS"] = str(cfg["num_display_layers"])
     env["TRACEML_SESSION_ID"] = (
-        args.session_id if args.session_id else get_session_id()
+        cfg["session_id"] if cfg["session_id"] else get_session_id()
     )
-    env["TRACEML_TCP_HOST"] = args.tcp_host
-    env["TRACEML_TCP_PORT"] = str(args.tcp_port)
-    env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
-    env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
-    env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
+    env["TRACEML_TCP_HOST"] = cfg["tcp_host"]
+    env["TRACEML_TCP_PORT"] = str(cfg["tcp_port"])
+    env["TRACEML_REMOTE_MAX_ROWS"] = str(cfg["remote_max_rows"])
+    env["TRACEML_NPROC_PER_NODE"] = str(cfg["nproc_per_node"])
+    env["TRACEML_HISTORY_ENABLED"] = "1" if cfg["history_enabled"] else "0"
 
-    launch_context = LaunchContext.capture()
     env.update(launch_context.to_env())
     execution_cwd = launch_context.launch_cwd
 
     session_id = env["TRACEML_SESSION_ID"]
-    session_root = Path(args.logs_dir).resolve() / session_id
+    session_root = Path(cfg["logs_dir"]).resolve() / session_id
     aggregator_dir = session_root / "aggregator"
     db_path = aggregator_dir / "telemetry"
 
@@ -107,12 +156,12 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         session_id=session_id,
         script_path=script_path,
         profile=env["TRACEML_PROFILE"],
-        ui_mode=args.mode,
-        logs_dir=args.logs_dir,
-        tcp_host=args.tcp_host,
-        tcp_port=args.tcp_port,
-        nproc_per_node=args.nproc_per_node,
-        history_enabled=not args.no_history,
+        ui_mode=cfg["mode"],
+        logs_dir=cfg["logs_dir"],
+        tcp_host=cfg["tcp_host"],
+        tcp_port=cfg["tcp_port"],
+        nproc_per_node=cfg["nproc_per_node"],
+        history_enabled=cfg["history_enabled"],
         status="starting",
         launch_cwd=execution_cwd,
         aggregator_dir=aggregator_dir,
@@ -133,7 +182,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             "[TraceML] TraceML is disabled via --disable-traceml. Running natively."
         )
         train_cmd = [
-            *build_torchrun_base_cmd(args.nproc_per_node),
+            *build_torchrun_base_cmd(cfg["nproc_per_node"]),
             str(script_path),
             *script_args,
         ]
@@ -150,15 +199,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         update_run_manifest(manifest_path, status=final_status)
         raise SystemExit(train_proc.returncode)
 
-    supported_modes = {"cli", "dashboard", "summary"}
-    if args.mode not in supported_modes:
-        raise ValueError(
-            f"Invalid display mode '{args.mode}'. "
-            f"Supported modes: {sorted(supported_modes)}"
-        )
-
     train_cmd = [
-        *build_torchrun_base_cmd(args.nproc_per_node),
+        *build_torchrun_base_cmd(cfg["nproc_per_node"]),
         runner_path,
         "--",
         *script_args,
@@ -172,8 +214,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     )
 
     print(
-        f"[TraceML] Starting aggregator on {args.tcp_host}:{args.tcp_port} "
-        f"(ui={args.mode}, profile={env['TRACEML_PROFILE']})"
+        f"[TraceML] Starting aggregator on {cfg['tcp_host']}:{cfg['tcp_port']} "
+        f"(ui={cfg['mode']}, profile={env['TRACEML_PROFILE']})"
     )
     try:
         agg_proc = start_aggregator_process(env=env, cwd=execution_cwd)
@@ -186,8 +228,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
 
     ready = wait_for_tcp_listen(
-        host=args.tcp_host,
-        port=int(args.tcp_port),
+        host=cfg["tcp_host"],
+        port=int(cfg["tcp_port"]),
         proc=agg_proc,
         timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
     )
@@ -195,7 +237,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         rc = agg_proc.poll()
         print(
             f"[TraceML] ERROR: aggregator failed to start or bind on "
-            f"{args.tcp_host}:{args.tcp_port} (exit={rc}). See output above for details.",
+            f"{cfg['tcp_host']}:{cfg['tcp_port']} (exit={rc}). See output above for details.",
             file=sys.stderr,
         )
         terminate_process_group(agg_proc, timeout_sec=3.0)
