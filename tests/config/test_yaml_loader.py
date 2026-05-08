@@ -16,10 +16,7 @@ from traceml.config.yaml_loader import (
     resolve_config,
 )
 
-
-# ---------------------------------------------------------------------------
 # find_config_file
-# ---------------------------------------------------------------------------
 
 
 def test_find_config_file_not_present(tmp_path: Path) -> None:
@@ -54,9 +51,7 @@ def test_find_config_file_stops_at_nearest_ancestor(tmp_path: Path) -> None:
     assert find_config_file(deep) == mid_cfg
 
 
-# ---------------------------------------------------------------------------
 # load_yaml_config
-# ---------------------------------------------------------------------------
 
 
 def _write(tmp_path: Path, content: str) -> Path:
@@ -161,9 +156,7 @@ def test_load_yaml_config_top_level_not_mapping(tmp_path: Path) -> None:
         load_yaml_config(p)
 
 
-# ---------------------------------------------------------------------------
 # resolve_config  — precedence rules
-# ---------------------------------------------------------------------------
 
 
 def _defaults() -> dict:
