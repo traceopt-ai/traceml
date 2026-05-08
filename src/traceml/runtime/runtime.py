@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Per-rank TraceML runtime agent."""
 
 import threading
@@ -5,11 +11,11 @@ from typing import Any, Callable, List, Optional
 
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.runtime.config import config
+from traceml.runtime.identity import resolve_runtime_identity
 from traceml.runtime.sampler_registry import build_samplers
 from traceml.runtime.sender import TelemetryPublisher
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.transport.distributed import get_ddp_info
 from traceml.transport.tcp_transport import TCPClient, TCPConfig
 
 from .settings import TraceMLSettings
@@ -44,8 +50,13 @@ class TraceMLRuntime:
         setup_error_logger()
         self._logger = get_error_logger("TraceMLRuntime")
 
-        # DDP identity
-        self.is_ddp, self.local_rank, self.world_size = get_ddp_info()
+        # Runtime identity. ``rank`` remains local-rank based for now to keep
+        # current single-node behavior stable while multi-node metadata lands.
+        self.identity = resolve_runtime_identity()
+        self.is_ddp = self.identity.is_distributed
+        self.local_rank = self.identity.local_rank
+        self.global_rank = self.identity.global_rank
+        self.world_size = self.identity.world_size
 
         # Stop event shared by all internal threads in this process
         self._stop_event = threading.Event()
@@ -61,7 +72,7 @@ class TraceMLRuntime:
         )
         self._publisher = TelemetryPublisher(
             tcp_client=self._tcp_client,
-            rank=self.local_rank,
+            rank=self.identity.rank,
             logger=self._logger,
         )
         self._publisher.attach_senders(self._samplers)
