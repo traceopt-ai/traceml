@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from ..common import BaseDiagnosis, DiagnosticResult, Severity, sort_issues
+from ..common import BaseDiagnosis, DiagnosticResult, Severity
 from .context import ProcessSummarySignals, build_process_summary_signals
 from .rules import run_process_rules
 
@@ -46,25 +46,35 @@ def _mk_diag(
 
 
 def _default_primary(signals: ProcessSummarySignals) -> ProcessDiagnosis:
-    """
-    Build the default non-issue process diagnosis.
-    """
-    if signals.gpu_available is False:
+    """Build the default non-issue process diagnosis."""
+    if signals.samples <= 0:
         return _mk_diag(
-            kind="CPU_PROCESS_CONTEXT_ONLY",
+            kind="NO_DATA",
             severity="info",
-            status="CPU PROCESS CONTEXT ONLY",
-            reason="No traced GPU process telemetry was recorded for this summary window.",
-            action="Treat CPU and RSS context as the main process-local signals.",
+            status="NO DATA",
+            reason="No traced process telemetry was recorded.",
+            action="Collect process telemetry for workload-local context.",
             samples_used=signals.samples,
         )
 
+    has_gpu_memory = any(
+        value is not None
+        for value in (
+            signals.gpu_mem_used_peak_percent,
+            signals.gpu_mem_reserved_peak_percent,
+        )
+    )
+    reason = (
+        "Process CPU, RSS, and GPU memory showed no pressure."
+        if has_gpu_memory
+        else "Process CPU and RSS showed no pressure."
+    )
     return _mk_diag(
-        kind="HEALTHY",
+        kind="NORMAL",
         severity="info",
-        status="HEALTHY",
-        reason="No dominant process-local CPU, RSS, or GPU memory pressure signal is visible.",
-        action="Treat the process context as normal unless training metrics disagree.",
+        status="NORMAL",
+        reason=reason,
+        action="Use training diagnostics for model-level bottlenecks.",
         samples_used=signals.samples,
     )
 
@@ -116,7 +126,7 @@ def build_process_diagnosis_result(
         per_rank=per_rank,
     )
 
-    issues = sort_issues(run_process_rules(signals))
+    issues = run_process_rules(signals) if signals.samples > 0 else ()
     if issues:
         primary_issue = issues[0]
         primary = _mk_diag(
@@ -140,12 +150,14 @@ def build_process_diagnosis_result(
             "peak_percent": signals.cpu_peak_percent,
             "logical_core_count": signals.cpu_logical_core_count,
             "pressure_frac": signals.cpu_pressure_frac,
+            "capacity_percent": signals.cpu_capacity_percent,
         },
         "ram": {
             "avg_bytes": signals.ram_avg_bytes,
             "peak_bytes": signals.ram_peak_bytes,
             "total_bytes": signals.ram_total_bytes,
             "pressure_frac": signals.ram_pressure_frac,
+            "peak_percent": signals.ram_peak_percent,
             "highest_rss_rank": signals.highest_rss_rank,
             "rank_imbalance_pct": signals.rank_rss_imbalance_pct,
         },
@@ -160,7 +172,10 @@ def build_process_diagnosis_result(
             "total_bytes": signals.gpu_mem_total_bytes,
             "used_peak_frac": signals.gpu_mem_used_peak_frac,
             "reserved_peak_frac": signals.gpu_mem_reserved_peak_frac,
+            "used_peak_percent": signals.gpu_mem_used_peak_percent,
+            "reserved_peak_percent": signals.gpu_mem_reserved_peak_percent,
             "reserved_overhang_ratio": signals.gpu_mem_reserved_overhang_ratio,
+            "highest_overhang_rank": signals.highest_overhang_rank,
             "highest_used_rank": signals.highest_used_rank,
             "highest_reserved_rank": signals.highest_reserved_rank,
             "least_headroom_rank": signals.least_headroom_rank,
@@ -168,6 +183,12 @@ def build_process_diagnosis_result(
             "rank_gpu_used_imbalance_pct": signals.rank_gpu_used_imbalance_pct,
             "rank_gpu_reserved_imbalance_pct": (
                 signals.rank_gpu_reserved_imbalance_pct
+            ),
+            "rank_gpu_used_imbalance_percent": (
+                signals.rank_gpu_used_imbalance_percent
+            ),
+            "rank_gpu_reserved_imbalance_percent": (
+                signals.rank_gpu_reserved_imbalance_percent
             ),
         },
     }

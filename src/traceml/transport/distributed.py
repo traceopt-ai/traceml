@@ -1,6 +1,14 @@
 import os
+from typing import Any, Optional
 
-import torch
+
+def _load_torch() -> Optional[Any]:
+    """Import torch only when distributed state needs it."""
+    try:
+        import torch
+    except ModuleNotFoundError:
+        return None
+    return torch
 
 
 def get_ddp_info():
@@ -18,13 +26,19 @@ def get_ddp_info():
 
     # Additional safety: PyTorch launcher may set RANK even if LOCAL_RANK missing
     rank = int(os.environ.get("RANK", "-1"))
+    torch = _load_torch()
+    torch_dist_ready = False
+    if torch is not None:
+        try:
+            torch_dist_ready = bool(
+                torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            )
+        except Exception:
+            torch_dist_ready = False
 
     is_ddp = (
-        world_size > 1
-        or local_rank != -1
-        or rank != -1
-        or torch.distributed.is_available()
-        and torch.distributed.is_initialized()
+        world_size > 1 or local_rank != -1 or rank != -1 or torch_dist_ready
     )
 
     # local_rank assignment if missing but DDP detected
@@ -33,6 +47,8 @@ def get_ddp_info():
             # torchrun always sets LOCAL_RANK
             # mp.spawn often sets RANK
             try:
+                if torch is None:
+                    raise RuntimeError("torch unavailable")
                 local_rank = (
                     int(os.environ["RANK"]) % torch.cuda.device_count()
                 )

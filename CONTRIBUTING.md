@@ -67,6 +67,8 @@ When contributing, please ensure:
 
 If in doubt, open an issue before implementing.
 
+For code extension points, see [`docs/extending-traceml.md`](docs/extending-traceml.md).
+
 ---
 
 ## Pull Request Guidelines
@@ -94,9 +96,9 @@ To keep the project focused, we are currently **not** accepting:
 
 - Bugs and features: GitHub Issues
 - Design discussions: GitHub Discussions
-- Security issues: email abhinav@traceopt.ai
+- Security issues: email support@traceopt.ai
 
-Maintainer: Abhinav Srivastav
+Maintainer: OptAI UG (haftungsbeschränkt)
 
 ---
 

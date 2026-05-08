@@ -16,7 +16,7 @@ from traceml.reporting.sections.step_time.formatter import (
 from traceml.reporting.sections.step_time.loader import (
     load_step_time_section_data,
 )
-from traceml.reporting.summaries.step_time import MAX_SUMMARY_WINDOW_ROWS
+from traceml.reporting.sections.step_time.model import MAX_SUMMARY_WINDOW_ROWS
 
 
 @dataclass(frozen=True)

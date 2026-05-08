@@ -1,26 +1,4 @@
-"""
-TraceML executor
-
-This module is the execution wrapper used by TraceML to run user scripts
-in a controlled environment.
-
-Responsibilities:
-- Read TraceML configuration from environment variables
-- Start and stop the TraceML runtime lifecycle
-- Execute the user script in-process via runpy
-- Capture crashes and persist error reports to session log files
-
-This module intentionally runs in the same Python process as the user
-script so that hooks, stack traces, and execution context remain accurate.
-
-Error reporting policy
-----------------------
-- User-script failures are written to: torchrun_error.log
-- TraceML runtime / executor internal failures are written to: runtime_error.log
-
-This keeps user-code failures separate from TraceML infrastructure failures
-and avoids relying on terminal output that may be overwritten by the Rich UI.
-"""
+"""Execute a user script inside the TraceML runtime."""
 
 import os
 import runpy
@@ -57,15 +35,7 @@ def _utc_now_iso() -> str:
 
 
 def _get_session_dir(cfg: Dict[str, Any]) -> Path:
-    """
-    Return the TraceML session directory for the current run.
-
-    The directory is:
-        <logs_dir>/<session_id>
-
-    If no session id is available, a fallback directory name is used so that
-    error logging can still succeed.
-    """
+    """Return the TraceML session directory for the current run."""
     logs_dir = Path(str(cfg.get("logs_dir", DEFAULT_LOGS_DIR)))
     session_id = str(cfg.get("session_id", "") or "no_session")
     return logs_dir / session_id

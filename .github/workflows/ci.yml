@@ -34,25 +34,34 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e .
+          pip install pytest
 
       - name: Run core tests
         run: |
-          pytest tests/test_msgpack_roundtrip.py -v
+          pytest \
+            tests/core \
+            tests/diagnostics/test_bands.py \
+            tests/diagnostics/test_common.py \
+            tests/telemetry/test_distributed.py \
+            tests/telemetry/test_msgpack.py \
+            tests/telemetry/test_sender_sequence.py \
+            -q
 
   test-integration:
-    name: Integration Tests
+    name: Integration Smoke Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,12 +69,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: "pip"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,torch]"
+          pip install -e ".[torch]"
+          pip install pytest
 
       - name: Run integration tests
         run: |
-          pytest tests/test_seq_counter.py -v
+          pytest \
+            tests/runtime/test_sampler_registry.py \
+            tests/runtime/test_telemetry_publisher.py \
+            tests/reporting/compare \
+            -q

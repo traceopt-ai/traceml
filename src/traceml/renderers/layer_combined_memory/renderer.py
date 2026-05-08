@@ -11,7 +11,6 @@ from traceml.aggregator.display_drivers.layout import (
 from traceml.renderers.base_renderer import BaseRenderer
 from traceml.renderers.layer_combined_memory.compute import (
     LayerCombinedMemoryData,
-    LayerCombinedMemorySummary,
 )
 from traceml.renderers.layer_combined_memory.schema import (
     LayerCombinedMemoryResult,
@@ -23,14 +22,10 @@ from traceml.utils.formatting import fmt_mem_new
 
 class LayerCombinedMemoryRenderer(BaseRenderer):
     """
-    Renderer for combined per-layer memory usage.
-    This renderer displays a *capacity-oriented* view of memory:
-        total_current = param + forward_current + backward_current
-        total_peak    = param + forward_peak    + backward_peak
+    Deep-profile renderer for per-layer memory usage.
 
-    Notes
-    -----
-    - Uses the typed `LayerCombinedMemoryResult` contract
+    Normal ``run`` and ``watch`` profiles do not register this renderer. It is
+    kept as an advanced capacity view for debugging model internals.
     """
 
     def __init__(
@@ -45,9 +40,6 @@ class LayerCombinedMemoryRenderer(BaseRenderer):
 
         self._compute_service = LayerCombinedMemoryData(
             top_n_layers=top_n_layers,
-            remote_store=remote_store,
-        )
-        self._summary_service = LayerCombinedMemorySummary(
             remote_store=remote_store,
         )
 

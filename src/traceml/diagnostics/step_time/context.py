@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Dict, Optional, Sequence
 from traceml.renderers.step_time.schema import StepCombinedTimeMetric
 
 if TYPE_CHECKING:
-    from .api import DiagnosisThresholds
+    from .policy import DiagnosisThresholds
 
 
 @dataclass(frozen=True)

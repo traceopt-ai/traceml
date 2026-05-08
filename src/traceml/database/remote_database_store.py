@@ -7,46 +7,10 @@ from .database import Database
 
 
 class RemoteDBStore:
-    """
-    Rank-0–only in-memory store for telemetry received from remote workers.
-
-    This class maintains a bounded `Database` per `(rank, sampler_name)` pair
-    and is intended to run exclusively on the coordinator (rank-0) process.
-
-    Internal layout
-    ---------------
-        self._dbs[rank][sampler_name] -> Database(max_rows=self.max_rows)
-
-    Design goals
-    ------------
-    - Reuse the same `Database` abstraction as local samplers
-    - Enforce bounded memory usage per remote worker and sampler
-    - Keep ingestion logic simple and synchronous
-    - Avoid any persistence or I/O at this layer
-
-    Concurrency model
-    -----------------
-    - In typical usage, ingestion happens on a single runtime thread
-      on rank-0.
-    - No internal locking is performed.
-
-    Notes
-    -----
-    - Databases are created lazily on first ingestion.
-    - `last_seen(rank)` tracks the last time telemetry was received
-      from a given rank (epoch seconds).
-    """
+    """Bounded in-memory store for telemetry received from workers."""
 
     def __init__(self, max_rows: int = 500):
-        """
-        Initialize the remote database store.
-
-        Parameters
-        ----------
-        max_rows : int, optional
-            Maximum number of rows retained per table in each remote database.
-            Must be > 0.
-        """
+        """Initialize the remote database store."""
         if max_rows <= 0:
             raise ValueError(f"max_rows must be > 0, got {max_rows}")
         self.max_rows = int(max_rows)
@@ -59,23 +23,7 @@ class RemoteDBStore:
         self.logger = get_error_logger("RemoteDBStore")
 
     def _get_or_create_db(self, rank: int, sampler_name: str) -> Database:
-        """
-        Return the bounded Database for a given (rank, sampler).
-
-        The database is created lazily if it does not already exist.
-
-        Parameters
-        ----------
-        rank : int
-            Global rank of the remote worker.
-        sampler_name : str
-            Name of the sampler emitting telemetry.
-
-        Returns
-        -------
-        Database
-            The corresponding in-memory database.
-        """
+        """Return the bounded Database for a given rank and sampler."""
         if rank not in self._dbs:
             self._dbs[rank] = {}
 

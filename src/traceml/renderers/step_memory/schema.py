@@ -1,15 +1,4 @@
-"""
-Renderer-facing schema for step memory combined.
-
-This schema represents a *capacity / tail-risk oriented* view of
-step-level peak memory aggregated across DDP ranks.
-
-Design goals
-------------
-- Renderer/UI consumes ONLY these dataclasses
-- Stable, explicit semantics (bytes)
-- Step alignment across ranks (intersection-based)
-"""
+"""Renderer-facing schema for combined step memory."""
 
 from dataclasses import dataclass
 from typing import List, Optional
@@ -17,15 +6,7 @@ from typing import List, Optional
 
 @dataclass(frozen=True)
 class StepMemoryCombinedSeries:
-    """
-    Per-step aggregated memory time series (renderer-facing).
-
-    Semantics
-    ---------
-    - Aggregated across ranks per step
-    - `median` = typical rank memory
-    - `worst`  = maximum across ranks (tail / gating rank)
-    """
+    """Per-step aggregated memory time series."""
 
     steps: List[int]
     median: List[float]
@@ -34,16 +15,7 @@ class StepMemoryCombinedSeries:
 
 @dataclass(frozen=True)
 class StepMemoryCombinedSummary:
-    """
-    Window-level summary over last N complete steps.
-
-    Semantics
-    ---------
-    - `median_peak_mb` is the median across ranks of their max(memory) over the window.
-    - `worst_peak_mb` is the max across ranks of their max(memory) over the window.
-    - `worst_rank` is the rank achieving `worst_peak_mb`.
-    - `skew_pct` measures imbalance between worst and median peak.
-    """
+    """Window-level summary over the latest complete steps."""
 
     window_size: int
     steps_used: int

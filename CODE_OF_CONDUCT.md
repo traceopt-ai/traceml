@@ -46,7 +46,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project maintainer at:
 
-**abhinav@traceopt.ai**
+**support@traceopt.ai**
 
 All complaints will be reviewed and investigated promptly and fairly.
 

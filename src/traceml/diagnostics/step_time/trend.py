@@ -1,12 +1,4 @@
-"""
-Conservative trend heuristics for step-time diagnosis.
-
-Design goals
-------------
-- Never break diagnosis flow.
-- Trend should annotate, not dominate, the primary diagnosis.
-- Work with the live renderer window instead of requiring very long history.
-"""
+"""Trend notes for step-time diagnosis."""
 
 from __future__ import annotations
 
@@ -25,9 +17,7 @@ from ..trends import (
 
 @dataclass(frozen=True)
 class StepTrendHeuristicConfig:
-    """
-    Conservative gates for trend-based diagnosis annotations.
-    """
+    """Gates for trend-based diagnosis annotations."""
 
     enabled: bool = True
     min_steps: int = 100

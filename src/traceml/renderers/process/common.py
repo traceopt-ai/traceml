@@ -1,34 +1,4 @@
-# common.py
-"""
-Shared models and SQLite helpers for process telemetry compute.
-
-This module contains:
-- output dataclasses shared by CLI and dashboard compute
-- SQLite access helpers
-- small, process-specific utility helpers
-
-Design goals
-------------
-- Keep all SQL access in one place
-- Keep compute paths fast and bounded
-- Preserve the process metric semantics from the previous in-memory version
-- Keep renderer/UI-facing payload shapes stable
-
-Process semantics
------------------
-Process telemetry is written by multiple ranks/processes into the same
-`process_samples` table.
-
-This is different from purely local process views:
-- CLI snapshots are computed from the latest sequence completed by all ranks
-- Dashboard history is also seq-aligned across ranks
-
-Storage notes
--------------
-All memory values remain in raw bytes because formatters/renderers typically
-expect bytes at this layer.
-"""
-
+"""Shared models and SQLite helpers for process telemetry."""
 
 import sqlite3
 from dataclasses import dataclass
@@ -37,15 +7,7 @@ from typing import Any, Dict, List, Optional
 
 @dataclass(frozen=True)
 class ProcessCLISnapshot:
-    """
-    Compact terminal snapshot for process telemetry.
-
-    Semantics
-    ---------
-    - `cpu_used`: worst rank CPU at latest globally committed seq
-    - `gpu_*`: least-headroom rank at latest globally committed seq
-    - `gpu_used_imbalance`: max(mem_used) - min(mem_used) across ranks
-    """
+    """Compact terminal snapshot for process telemetry."""
 
     seq: Optional[int]
     cpu_used: float

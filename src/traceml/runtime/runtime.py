@@ -1,28 +1,4 @@
-"""
-TraceML runtime  (per-rank agent).
-
-This module implements the *per-rank* TraceML runtime that runs alongside the
-user's training code (inside the torchrun worker process). It is responsible
-for:
-
-- Periodically running samplers in a dedicated background thread
-- Flushing sampler writers (temporary legacy path; can be removed later)
-- Shipping incremental telemetry rows to an out-of-process aggregator via TCP
-
-Design notes
-------------
-- The runtime is intentionally "agent-only": it does NOT run a TCP server,
-  it does NOT own the unified store, and it does NOT render UI.
-- Cross-process communication is TCP. The aggregator (separate process) owns:
-  TCPServer + RemoteDBStore + renderers + display.
-- Even for WORLD_SIZE=1, telemetry is sent over loopback TCP to keep the same
-  code-path and allow future remote aggregators without refactoring.
-
-Failure behavior
-----------------
-If the aggregator becomes unavailable during training, sender flush failures are
-logged and ignored. Training should proceed normally.
-"""
+"""Per-rank TraceML runtime agent."""
 
 import threading
 from typing import Any, Callable, List, Optional
@@ -49,18 +25,7 @@ def _safe(logger, label: str, fn: Callable[[], Any]) -> Any:
 
 
 class TraceMLRuntime:
-    """
-    Per-rank TraceML runtime (agent).
-
-    Responsibilities:
-    - Creates samplers and runs them periodically.
-    - Attaches DBIncrementalSender to sampler DBs that support sending.
-    - Flushes senders every tick (rank0 sends to rank0 as well).
-
-    This runtime intentionally does not share data structures with the
-    aggregator. The aggregator is an out-of-process component that receives
-    rows over TCP and renders UI from a unified RemoteDBStore.
-    """
+    """Runs samplers and publishes telemetry from one training rank."""
 
     def __init__(
         self,
