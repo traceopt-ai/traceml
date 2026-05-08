@@ -76,6 +76,11 @@ class TraceMLRuntime:
             identity=SenderIdentity(
                 global_rank=self.identity.global_rank,
                 local_rank=self.identity.local_rank,
+                world_size=self.identity.world_size,
+                local_world_size=self.identity.local_world_size,
+                node_rank=self.identity.node_rank,
+                hostname=self.identity.hostname,
+                pid=self.identity.pid,
             ),
             logger=self._logger,
         )

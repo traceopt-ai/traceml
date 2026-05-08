@@ -189,7 +189,6 @@ class TestDBIncrementalSender:
         db = Database(sampler_name="test")
         sender, transport = self._make_sender(db)
         sender.identity = SenderIdentity(global_rank=5, local_rank=1)
-        sender.rank = 5
 
         db.add_record("t1", {"v": 1})
         sender.flush()
@@ -198,6 +197,11 @@ class TestDBIncrementalSender:
         assert payload["rank"] == 5
         assert payload["global_rank"] == 5
         assert payload["local_rank"] == 1
+        assert payload["world_size"] == 1
+        assert payload["local_world_size"] == 1
+        assert payload["node_rank"] == 0
+        assert payload["hostname"] == ""
+        assert payload["pid"] == 0
 
     def test_collect_payload_requires_attached_rank(self):
         from traceml.database.database_sender import DBIncrementalSender

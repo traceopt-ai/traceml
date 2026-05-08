@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 import sqlite3
 
 from traceml.reporting.sections.process import ProcessSummarySection
@@ -13,7 +19,13 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE system_samples (
             id INTEGER PRIMARY KEY,
-            rank INTEGER,
+            global_rank INTEGER,
+            local_rank INTEGER,
+            world_size INTEGER,
+            local_world_size INTEGER,
+            node_rank INTEGER,
+            hostname TEXT,
+            pid INTEGER,
             seq INTEGER,
             sample_ts_s REAL,
             cpu_percent REAL,
@@ -36,7 +48,13 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
         """
         CREATE TABLE system_gpu_samples (
             id INTEGER PRIMARY KEY,
-            rank INTEGER,
+            global_rank INTEGER,
+            local_rank INTEGER,
+            world_size INTEGER,
+            local_world_size INTEGER,
+            node_rank INTEGER,
+            hostname TEXT,
+            pid INTEGER,
             seq INTEGER,
             gpu_idx INTEGER,
             util REAL,
@@ -50,7 +68,8 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO system_samples VALUES (
-            1, 0, 1, 10.0, 40.0, 8.0, 16.0, 1, 1,
+            1, 0, 0, 1, 1, 0, 'worker-0', 123, 1, 10.0,
+            40.0, 8.0, 16.0, 1, 1,
             55.0, 70.0, 4.0, 5.0, 60.0, 68.0, 100.0, 120.0
         )
         """
@@ -58,7 +77,8 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO system_gpu_samples VALUES (
-            1, 0, 1, 0, 70.0, 5.0, 10.0, 68.0, 120.0
+            1, 0, 0, 1, 1, 0, 'worker-0', 123, 1, 0,
+            70.0, 5.0, 10.0, 68.0, 120.0
         )
         """
     )

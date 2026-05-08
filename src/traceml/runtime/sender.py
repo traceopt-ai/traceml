@@ -9,22 +9,46 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from traceml.loggers.error_log import get_error_logger
 
 
 @dataclass(frozen=True)
 class SenderIdentity:
-    """Rank identity attached to outbound sampler payloads."""
+    """
+    Runtime identity attached to outbound sampler payloads.
+
+    ``global_rank`` is the stable cross-job worker identity used by storage and
+    aggregation. ``local_rank`` and ``local_world_size`` describe node-local
+    placement, which is useful for device mapping and multi-node debugging.
+    """
 
     global_rank: int
     local_rank: int
+    world_size: int = 1
+    local_world_size: int = 1
+    node_rank: int = 0
+    hostname: str = ""
+    pid: int = 0
 
     @property
     def rank(self) -> int:
         """Compatibility rank used by existing aggregator/storage code."""
         return self.global_rank
+
+    def to_payload_fields(self) -> Dict[str, Any]:
+        """Return flat identity fields for the current transport envelope."""
+        return {
+            "rank": self.rank,
+            "global_rank": self.global_rank,
+            "local_rank": self.local_rank,
+            "world_size": self.world_size,
+            "local_world_size": self.local_world_size,
+            "node_rank": self.node_rank,
+            "hostname": self.hostname,
+            "pid": self.pid,
+        }
 
 
 class TelemetryPublisher:
@@ -56,7 +80,6 @@ class TelemetryPublisher:
             try:
                 sender.sender = self._tcp_client
                 sender.identity = self._identity
-                sender.rank = self._identity.rank
             except Exception as exc:
                 self._log_exception(
                     f"{self._sampler_name(sampler)}.sender attach failed",
