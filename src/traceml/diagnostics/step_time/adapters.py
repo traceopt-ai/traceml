@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Adapters that feed summary step-time data into shared diagnosis rules."""
 
 from dataclasses import dataclass
@@ -9,6 +15,7 @@ from traceml.diagnostics.common import DiagnosticResult, diagnosis_to_dict
 from traceml.diagnostics.step_time.api import (
     StepDiagnosis,
     build_step_diagnosis_result,
+    build_step_warmup_diagnosis,
 )
 from traceml.diagnostics.step_time.policy import (
     SUMMARY_STEP_TIME_POLICY,
@@ -259,8 +266,13 @@ def build_summary_step_diagnosis_result(
 
     ranks = sorted(rank_signals.keys())
     min_steps = min(s.steps_analyzed for s in rank_signals.values())
+    max_steps = max(s.steps_analyzed for s in rank_signals.values())
     if min_steps < int(policy.min_steps_for_diag):
-        return None
+        return build_step_warmup_diagnosis(
+            steps_used=int(min_steps),
+            max_steps_used=int(max_steps),
+            required_steps=int(policy.min_steps_for_diag),
+        )
 
     # Optional step-aligned series support (for trend notes).
     common_steps: List[int] = []

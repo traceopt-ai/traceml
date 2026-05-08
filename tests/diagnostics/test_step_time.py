@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 from traceml.diagnostics.step_time.api import (
@@ -266,8 +272,12 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
         )
     }
 
+    warmup = build_summary_step_diagnosis_result(rank_signals, max_rows=100)
+    assert warmup is not None
+    assert warmup.primary.kind == "WARMUP"
     assert (
-        build_summary_step_diagnosis_result(rank_signals, max_rows=100) is None
+        warmup.primary.reason
+        == "Only 40 steps per rank available; summary diagnosis requires 50."
     )
 
     rank_signals[0] = RankStepSignals(

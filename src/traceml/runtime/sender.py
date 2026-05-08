@@ -8,9 +8,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional
 
 from traceml.loggers.error_log import get_error_logger
+
+
+@dataclass(frozen=True)
+class SenderIdentity:
+    """Rank identity attached to outbound sampler payloads."""
+
+    global_rank: int
+    local_rank: int
+
+    @property
+    def rank(self) -> int:
+        """Compatibility rank used by existing aggregator/storage code."""
+        return self.global_rank
 
 
 class TelemetryPublisher:
@@ -26,15 +40,11 @@ class TelemetryPublisher:
         self,
         *,
         tcp_client: Any,
-        global_rank: Optional[int] = None,
-        rank: Optional[int] = None,
+        identity: SenderIdentity,
         logger: Optional[Any] = None,
     ) -> None:
         self._tcp_client = tcp_client
-        self._rank = self._resolve_sender_rank(
-            global_rank=global_rank,
-            legacy_rank=rank,
-        )
+        self._identity = identity
         self._logger = logger or get_error_logger("TelemetryPublisher")
 
     def attach_senders(self, samplers: Iterable[Any]) -> None:
@@ -45,7 +55,8 @@ class TelemetryPublisher:
                 continue
             try:
                 sender.sender = self._tcp_client
-                sender.rank = self._rank
+                sender.identity = self._identity
+                sender.rank = self._identity.rank
             except Exception as exc:
                 self._log_exception(
                     f"{self._sampler_name(sampler)}.sender attach failed",
@@ -132,26 +143,8 @@ class TelemetryPublisher:
             )
         )
 
-    @staticmethod
-    def _resolve_sender_rank(
-        *,
-        global_rank: Optional[int],
-        legacy_rank: Optional[int],
-    ) -> int:
-        """
-        Return the rank value attached to outbound telemetry.
-
-        ``global_rank`` is the canonical argument. ``rank`` is accepted as a
-        compatibility shim for existing internal tests/callers and should not be
-        used by new code.
-        """
-        if global_rank is not None:
-            return int(global_rank)
-        if legacy_rank is not None:
-            return int(legacy_rank)
-        raise ValueError("TelemetryPublisher requires global_rank")
-
 
 __all__ = [
+    "SenderIdentity",
     "TelemetryPublisher",
 ]

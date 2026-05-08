@@ -10,6 +10,7 @@ import time
 from typing import Any, Optional, Protocol
 
 from traceml.loggers.error_log import get_error_logger
+from traceml.runtime.sender import SenderIdentity
 
 
 class AppendOnlyDatabase(Protocol):
@@ -51,6 +52,8 @@ class DBIncrementalSender:
 
     {
         "rank": <int>,          # globally unique runtime rank
+        "global_rank": <int>,
+        "local_rank": <int>,
         "sampler": <str>,
         "timestamp": <float>,
         "tables": {
@@ -81,6 +84,7 @@ class DBIncrementalSender:
         self.sampler_name = str(sampler_name)
         self.sender = sender
         self.rank = rank
+        self.identity: Optional[SenderIdentity] = None
         self.max_rows_per_flush = int(max_rows_per_flush)
 
         self._last_sent_seq: dict[str, int] = {}
@@ -100,6 +104,20 @@ class DBIncrementalSender:
                 "collecting payloads."
             )
         return int(self.rank)
+
+    def _payload_identity(self) -> SenderIdentity:
+        """
+        Return the rank identity for outbound payloads.
+
+        ``identity`` is attached by TelemetryPublisher. The ``rank`` fallback
+        keeps direct unit-test and legacy construction paths working, but new
+        runtime payloads should always include explicit global/local rank.
+        """
+        if self.identity is not None:
+            return self.identity
+
+        rank = self._payload_rank()
+        return SenderIdentity(global_rank=rank, local_rank=rank)
 
     def collect_payload(self) -> dict | None:
         """
@@ -137,9 +155,12 @@ class DBIncrementalSender:
 
         if not tables_payload:
             return None
+        identity = self._payload_identity()
 
         return {
-            "rank": self._payload_rank(),
+            "rank": identity.rank,
+            "global_rank": identity.global_rank,
+            "local_rank": identity.local_rank,
             "sampler": self.sampler_name,
             "timestamp": time.time(),
             "tables": tables_payload,

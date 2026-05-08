@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from traceml.database.database import Database
+from traceml.runtime.sender import SenderIdentity
 from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 # Database.get_append_count() tests
@@ -187,6 +188,7 @@ class TestDBIncrementalSender:
     def test_payload_rank_uses_attached_runtime_rank(self):
         db = Database(sampler_name="test")
         sender, transport = self._make_sender(db)
+        sender.identity = SenderIdentity(global_rank=5, local_rank=1)
         sender.rank = 5
 
         db.add_record("t1", {"v": 1})
@@ -194,6 +196,8 @@ class TestDBIncrementalSender:
 
         payload = transport.send.call_args[0][0]
         assert payload["rank"] == 5
+        assert payload["global_rank"] == 5
+        assert payload["local_rank"] == 1
 
     def test_collect_payload_requires_attached_rank(self):
         from traceml.database.database_sender import DBIncrementalSender

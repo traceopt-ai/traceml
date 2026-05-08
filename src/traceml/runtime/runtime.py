@@ -13,7 +13,7 @@ from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.runtime.config import config
 from traceml.runtime.identity import resolve_runtime_identity
 from traceml.runtime.sampler_registry import build_samplers
-from traceml.runtime.sender import TelemetryPublisher
+from traceml.runtime.sender import SenderIdentity, TelemetryPublisher
 from traceml.runtime.stdout_stderr_capture import StreamCapture
 from traceml.samplers.base_sampler import BaseSampler
 from traceml.transport.tcp_transport import TCPClient, TCPConfig
@@ -73,7 +73,10 @@ class TraceMLRuntime:
         )
         self._publisher = TelemetryPublisher(
             tcp_client=self._tcp_client,
-            global_rank=self.identity.global_rank,
+            identity=SenderIdentity(
+                global_rank=self.identity.global_rank,
+                local_rank=self.identity.local_rank,
+            ),
             logger=self._logger,
         )
         self._publisher.attach_senders(self._samplers)
