@@ -50,8 +50,9 @@ class TraceMLRuntime:
         setup_error_logger()
         self._logger = get_error_logger("TraceMLRuntime")
 
-        # Runtime identity. ``rank`` remains local-rank based for now to keep
-        # current single-node behavior stable while multi-node metadata lands.
+        # Runtime identity separates local device rank from globally unique
+        # telemetry rank. Sampler selection still needs local rank, while
+        # outbound payloads must identify the worker by global rank.
         self.identity = resolve_runtime_identity()
         self.is_ddp = self.identity.is_distributed
         self.local_rank = self.identity.local_rank
@@ -72,7 +73,7 @@ class TraceMLRuntime:
         )
         self._publisher = TelemetryPublisher(
             tcp_client=self._tcp_client,
-            rank=self.identity.rank,
+            global_rank=self.identity.global_rank,
             logger=self._logger,
         )
         self._publisher.attach_senders(self._samplers)

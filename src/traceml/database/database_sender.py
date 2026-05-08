@@ -1,8 +1,27 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 import time
+from typing import Any, Optional, Protocol
 
 from traceml.loggers.error_log import get_error_logger
+
+
+class AppendOnlyDatabase(Protocol):
+    """Minimal database surface needed by DBIncrementalSender."""
+
+    def all_tables(self) -> dict[str, Any]:
+        """Return table-name to rows mapping."""
+        ...
+
+    def get_append_count(self, table_name: str) -> int:
+        """Return the monotonic append count for a table."""
+        ...
 
 
 class DBIncrementalSender:
@@ -31,7 +50,7 @@ class DBIncrementalSender:
     This class returns a single payload dict from `collect_payload()`:
 
     {
-        "rank": <int>,
+        "rank": <int>,          # globally unique runtime rank
         "sampler": <str>,
         "timestamp": <float>,
         "tables": {
@@ -45,23 +64,42 @@ class DBIncrementalSender:
 
     def __init__(
         self,
-        db,
-        sampler_name,
-        sender=None,
-        rank=None,
+        db: AppendOnlyDatabase,
+        sampler_name: str,
+        sender: Optional[Any] = None,
+        rank: Optional[int] = None,
         max_rows_per_flush: int = -1,
-    ):
+    ) -> None:
         """
         Initialize the incremental sender.
+
+        ``rank`` is usually attached by TelemetryPublisher after sampler
+        construction. New runtime code should attach the global rank so
+        downstream storage can group multi-node telemetry without collisions.
         """
         self.db = db
-        self.sampler_name = sampler_name
+        self.sampler_name = str(sampler_name)
         self.sender = sender
         self.rank = rank
         self.max_rows_per_flush = int(max_rows_per_flush)
 
         self._last_sent_seq: dict[str, int] = {}
         self.logger = get_error_logger("DBIncrementalSender")
+
+    def _payload_rank(self) -> int:
+        """
+        Return the globally unique rank for outbound payloads.
+
+        A missing rank means the sender was not attached by the runtime
+        publisher. Failing fast here prevents malformed telemetry from reaching
+        the aggregator with ``rank=None``.
+        """
+        if self.rank is None:
+            raise RuntimeError(
+                "DBIncrementalSender requires an attached runtime rank before "
+                "collecting payloads."
+            )
+        return int(self.rank)
 
     def collect_payload(self) -> dict | None:
         """
@@ -101,7 +139,7 @@ class DBIncrementalSender:
             return None
 
         return {
-            "rank": self.rank,
+            "rank": self._payload_rank(),
             "sampler": self.sampler_name,
             "timestamp": time.time(),
             "tables": tables_payload,

@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Telemetry publishing for the per-rank runtime agent."""
 
 from __future__ import annotations
@@ -8,17 +14,27 @@ from traceml.loggers.error_log import get_error_logger
 
 
 class TelemetryPublisher:
-    """Best-effort publisher for sampler payloads."""
+    """
+    Best-effort publisher for sampler payloads.
+
+    The publisher owns the rank identity attached to outbound sampler senders.
+    That identity must be globally unique for multi-node jobs; samplers can
+    still receive local rank separately when they need node-local device state.
+    """
 
     def __init__(
         self,
         *,
         tcp_client: Any,
-        rank: int,
+        global_rank: Optional[int] = None,
+        rank: Optional[int] = None,
         logger: Optional[Any] = None,
     ) -> None:
         self._tcp_client = tcp_client
-        self._rank = int(rank)
+        self._rank = self._resolve_sender_rank(
+            global_rank=global_rank,
+            legacy_rank=rank,
+        )
         self._logger = logger or get_error_logger("TelemetryPublisher")
 
     def attach_senders(self, samplers: Iterable[Any]) -> None:
@@ -115,6 +131,25 @@ class TelemetryPublisher:
                 sampler.__class__.__name__,
             )
         )
+
+    @staticmethod
+    def _resolve_sender_rank(
+        *,
+        global_rank: Optional[int],
+        legacy_rank: Optional[int],
+    ) -> int:
+        """
+        Return the rank value attached to outbound telemetry.
+
+        ``global_rank`` is the canonical argument. ``rank`` is accepted as a
+        compatibility shim for existing internal tests/callers and should not be
+        used by new code.
+        """
+        if global_rank is not None:
+            return int(global_rank)
+        if legacy_rank is not None:
+            return int(legacy_rank)
+        raise ValueError("TelemetryPublisher requires global_rank")
 
 
 __all__ = [

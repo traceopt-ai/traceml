@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from traceml.runtime.sender import TelemetryPublisher
 
 
@@ -110,6 +116,34 @@ def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
 
     assert sender.sender is tcp_client
     assert sender.rank == 3
+
+
+def test_publisher_prefers_global_rank_for_sender_identity() -> None:
+    tcp_client = _FakeTCPClient()
+    sender = _FakeSender(payload={"rows": [1]})
+    sampler = _FakeSampler("SamplerA", sender=sender)
+    publisher = TelemetryPublisher(
+        tcp_client=tcp_client,
+        global_rank=5,
+        rank=1,
+        logger=_FakeLogger(),
+    )
+
+    publisher.attach_senders([sampler])
+
+    assert sender.rank == 5
+
+
+def test_publisher_requires_rank_identity() -> None:
+    try:
+        TelemetryPublisher(
+            tcp_client=_FakeTCPClient(),
+            logger=_FakeLogger(),
+        )
+    except ValueError as exc:
+        assert "global_rank" in str(exc)
+    else:
+        raise AssertionError("TelemetryPublisher accepted missing rank")
 
 
 def test_publisher_logs_sender_attach_failures_and_continues() -> None:
