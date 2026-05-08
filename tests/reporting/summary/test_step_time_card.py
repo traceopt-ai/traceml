@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 from traceml.reporting.summaries.step_time import (
@@ -56,6 +62,26 @@ def test_step_time_no_data_card_is_compact() -> None:
     assert "- Diagnosis: NO DATA" in payload["card"]
     assert "- Stats: n/a" in payload["card"]
     assert "- Why: Need more step-time samples." in payload["card"]
+    _assert_compact_card(payload["card"])
+
+
+def test_step_time_warmup_card_explains_partial_summary_window() -> None:
+    payload = _summary(
+        {
+            0: _rank(steps=38),
+            1: _rank(steps=39),
+        }
+    )
+
+    assert payload["primary_diagnosis"]["status"] == "WARMUP"
+    assert "- Diagnosis: WARMUP" in payload["card"]
+    assert (
+        "- Scope: compared over last 38-39 steps per rank" in payload["card"]
+    )
+    assert (
+        "- Why: Only 38-39 steps per rank available; summary diagnosis "
+        "requires 50."
+    ) in payload["card"]
     _assert_compact_card(payload["card"])
 
 

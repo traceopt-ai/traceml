@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Payload builder for the final-report step-time section."""
 
 from __future__ import annotations
@@ -219,6 +225,8 @@ def _step_time_card_reason(
     kind = str(getattr(diagnosis, "kind", "") or "")
     if diagnosis is None or kind == "NO_DATA":
         return "Need more step-time samples."
+    if kind == "WARMUP":
+        return str(getattr(diagnosis, "reason", "") or "").strip()
     if stats is None:
         return str(getattr(diagnosis, "reason", "") or "n/a")
 

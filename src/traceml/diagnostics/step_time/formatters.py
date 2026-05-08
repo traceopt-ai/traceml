@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Formatting helpers for step-time diagnosis.
 
@@ -13,7 +19,7 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
     """Render a colored status label for Rich CLI output."""
     if diagnosis.kind == "BALANCED":
         style = "bold green"
-    elif diagnosis.kind == "NO_DATA":
+    elif diagnosis.kind in {"NO_DATA", "WARMUP"}:
         style = "bold bright_black"
     elif diagnosis.kind in {"INPUT_BOUND", "COMPUTE_BOUND"}:
         style = "bold yellow"

@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Step-time diagnosis shared by live renderers and summaries."""
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
 DiagnosisKind = Literal[
     "NO_DATA",
+    "WARMUP",
     "BALANCED",
     "STRAGGLER",
     "INPUT_STRAGGLER",
@@ -45,6 +52,7 @@ DiagnosisKind = Literal[
 
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "NO_DATA": "NO DATA",
+    "WARMUP": "WARMUP",
     "BALANCED": "BALANCED",
     "STRAGGLER": "STRAGGLER",
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
@@ -100,6 +108,37 @@ def _mk_diag(
         worst_rank=worst_rank,
         note=note,
     )
+
+
+def build_step_warmup_diagnosis(
+    *,
+    steps_used: int,
+    required_steps: int,
+    max_steps_used: Optional[int] = None,
+) -> DiagnosticResult[StepDiagnosis]:
+    """
+    Build the explicit partial-data diagnosis for a non-empty timing window.
+
+    ``NO_DATA`` is reserved for missing or unusable timing data. ``WARMUP``
+    means TraceML has timing samples, but fewer than the configured minimum for
+    a stable summary diagnosis.
+    """
+    low = max(0, int(steps_used))
+    high = max(low, int(max_steps_used if max_steps_used is not None else low))
+    required = max(1, int(required_steps))
+    available = f"{low}" if low == high else f"{low}-{high}"
+    suffix = "step" if high == 1 else "steps"
+    primary = _mk_diag(
+        kind="WARMUP",
+        severity="info",
+        reason=(
+            f"Only {available} {suffix} per rank available; summary "
+            f"diagnosis requires {required}."
+        ),
+        action="Use a longer run for a stable timing diagnosis.",
+        steps_used=low,
+    )
+    return DiagnosticResult(primary=primary)
 
 
 def _merge_note(base: Optional[str], extra: Optional[str]) -> Optional[str]:
@@ -475,15 +514,13 @@ def build_step_diagnosis_result(
         return DiagnosticResult(primary=primary)
 
     if steps_used < thresholds.min_steps_for_confident_diag:
-        primary = _mk_diag(
-            kind="NO_DATA",
-            severity="info",
-            reason=f"Only {steps_used} steps available.",
-            action="Wait for a fuller window.",
+        result = build_step_warmup_diagnosis(
             steps_used=steps_used,
-            worst_rank=overall_worst_rank,
+            required_steps=thresholds.min_steps_for_confident_diag,
         )
-        return DiagnosticResult(primary=primary)
+        return DiagnosticResult(
+            primary=replace(result.primary, worst_rank=overall_worst_rank)
+        )
 
     context = build_step_time_context(
         metrics=metrics,
@@ -797,6 +834,7 @@ __all__ = [
     "DEFAULT_THRESHOLDS",
     "StepDiagnosis",
     "ComputeSignal",
+    "build_step_warmup_diagnosis",
     "build_step_diagnosis",
     "build_step_diagnosis_result",
 ]

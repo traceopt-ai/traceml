@@ -1,4 +1,10 @@
-from traceml.runtime.sender import TelemetryPublisher
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
+from traceml.runtime.sender import SenderIdentity, TelemetryPublisher
 
 
 class _FakeLogger:
@@ -74,6 +80,7 @@ class _FakeSender:
         self.fail_collect = fail_collect
         self.sender = None
         self.rank = None
+        self.identity = None
         self.collect_count = 0
 
     def collect_payload(self) -> object | None:
@@ -102,7 +109,7 @@ def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
     sampler = _FakeSampler("SamplerA", sender=sender)
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=3,
+        identity=SenderIdentity(global_rank=3, local_rank=3),
         logger=_FakeLogger(),
     )
 
@@ -110,6 +117,23 @@ def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
 
     assert sender.sender is tcp_client
     assert sender.rank == 3
+    assert sender.identity == SenderIdentity(global_rank=3, local_rank=3)
+
+
+def test_publisher_prefers_global_rank_for_sender_identity() -> None:
+    tcp_client = _FakeTCPClient()
+    sender = _FakeSender(payload={"rows": [1]})
+    sampler = _FakeSampler("SamplerA", sender=sender)
+    publisher = TelemetryPublisher(
+        tcp_client=tcp_client,
+        identity=SenderIdentity(global_rank=5, local_rank=1),
+        logger=_FakeLogger(),
+    )
+
+    publisher.attach_senders([sampler])
+
+    assert sender.rank == 5
+    assert sender.identity == SenderIdentity(global_rank=5, local_rank=1)
 
 
 def test_publisher_logs_sender_attach_failures_and_continues() -> None:
@@ -121,7 +145,7 @@ def test_publisher_logs_sender_attach_failures_and_continues() -> None:
     good_sampler = _FakeSampler("GoodSampler", sender=good_sender)
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=2,
+        identity=SenderIdentity(global_rank=2, local_rank=2),
         logger=logger,
     )
 
@@ -147,7 +171,7 @@ def test_publisher_flushes_collects_and_sends_one_batch() -> None:
     )
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=0,
+        identity=SenderIdentity(global_rank=0, local_rank=0),
         logger=_FakeLogger(),
     )
 
@@ -165,7 +189,7 @@ def test_publisher_collects_empty_mapping_payloads() -> None:
     )
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=0,
+        identity=SenderIdentity(global_rank=0, local_rank=0),
         logger=_FakeLogger(),
     )
 
@@ -182,7 +206,7 @@ def test_publisher_does_not_send_empty_batch() -> None:
     )
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=0,
+        identity=SenderIdentity(global_rank=0, local_rank=0),
         logger=_FakeLogger(),
     )
 
@@ -210,7 +234,7 @@ def test_publisher_logs_failures_and_continues() -> None:
     )
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=0,
+        identity=SenderIdentity(global_rank=0, local_rank=0),
         logger=logger,
     )
 
@@ -227,7 +251,7 @@ def test_publisher_close_delegates_to_tcp_client() -> None:
     tcp_client = _FakeTCPClient()
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=0,
+        identity=SenderIdentity(global_rank=0, local_rank=0),
         logger=_FakeLogger(),
     )
 
@@ -241,7 +265,7 @@ def test_publisher_close_failure_is_logged_not_raised() -> None:
     logger = _FakeLogger()
     publisher = TelemetryPublisher(
         tcp_client=tcp_client,
-        rank=0,
+        identity=SenderIdentity(global_rank=0, local_rank=0),
         logger=logger,
     )
 
@@ -262,7 +286,7 @@ def test_publisher_uses_error_logger_fallback_when_exception_missing() -> None:
     logger = _ErrorOnlyLogger()
     publisher = TelemetryPublisher(
         tcp_client=_FakeTCPClient(fail_send=True),
-        rank=0,
+        identity=SenderIdentity(global_rank=0, local_rank=0),
         logger=logger,
     )
 

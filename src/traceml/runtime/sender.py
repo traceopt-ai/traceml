@@ -1,24 +1,50 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Telemetry publishing for the per-rank runtime agent."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Iterable, List, Optional
 
 from traceml.loggers.error_log import get_error_logger
 
 
+@dataclass(frozen=True)
+class SenderIdentity:
+    """Rank identity attached to outbound sampler payloads."""
+
+    global_rank: int
+    local_rank: int
+
+    @property
+    def rank(self) -> int:
+        """Compatibility rank used by existing aggregator/storage code."""
+        return self.global_rank
+
+
 class TelemetryPublisher:
-    """Best-effort publisher for sampler payloads."""
+    """
+    Best-effort publisher for sampler payloads.
+
+    The publisher owns the rank identity attached to outbound sampler senders.
+    That identity must be globally unique for multi-node jobs; samplers can
+    still receive local rank separately when they need node-local device state.
+    """
 
     def __init__(
         self,
         *,
         tcp_client: Any,
-        rank: int,
+        identity: SenderIdentity,
         logger: Optional[Any] = None,
     ) -> None:
         self._tcp_client = tcp_client
-        self._rank = int(rank)
+        self._identity = identity
         self._logger = logger or get_error_logger("TelemetryPublisher")
 
     def attach_senders(self, samplers: Iterable[Any]) -> None:
@@ -29,7 +55,8 @@ class TelemetryPublisher:
                 continue
             try:
                 sender.sender = self._tcp_client
-                sender.rank = self._rank
+                sender.identity = self._identity
+                sender.rank = self._identity.rank
             except Exception as exc:
                 self._log_exception(
                     f"{self._sampler_name(sampler)}.sender attach failed",
@@ -118,5 +145,6 @@ class TelemetryPublisher:
 
 
 __all__ = [
+    "SenderIdentity",
     "TelemetryPublisher",
 ]

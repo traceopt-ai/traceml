@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Policy helpers for decision-grade TraceML run comparison.
 
@@ -25,6 +31,7 @@ _SIGNIFICANCE_ORDER = {
 
 _STEP_TIME_STATUS_RANK = {
     "NO DATA": 0,
+    "WARMUP": 0,
     "BALANCED": 1,
     "INPUT-BOUND": 2,
     "COMPUTE-BOUND": 2,
