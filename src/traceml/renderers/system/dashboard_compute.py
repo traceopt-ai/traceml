@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Dashboard compute for system telemetry."""
 
 from __future__ import annotations
@@ -82,12 +88,12 @@ class SystemDashboardComputer:
         gpu_rows = self._db.fetch_gpu_rows_for_samples(
             conn,
             sample_keys=[
-                (sample["rank"], sample["seq"])
+                (sample["global_rank"], sample["seq"])
                 for sample in samples
                 if sample["seq"] is not None
             ],
         )
-        gpu_rows_by_key = self._db.group_gpu_rows_by_rank_seq(gpu_rows)
+        gpu_rows_by_key = self._db.group_gpu_rows_by_global_rank_seq(gpu_rows)
 
         n = len(samples)
         gpu_avg = np.zeros(n, dtype=np.float64)
@@ -97,7 +103,7 @@ class SystemDashboardComputer:
         temp_max = np.zeros(n, dtype=np.float64)
 
         for i, sample in enumerate(samples):
-            key = (sample["rank"], sample["seq"])
+            key = (sample["global_rank"], sample["seq"])
             rows = gpu_rows_by_key.get(key, [])
 
             if rows:

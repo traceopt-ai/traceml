@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """SQLite fixture coverage for final-report summary sections.
 
 These tests keep section assertions schema-oriented instead of snapshotting full
@@ -48,7 +54,13 @@ def _insert_system_sample(
         """
         INSERT INTO system_samples(
             recv_ts_ns,
-            rank,
+            global_rank,
+            local_rank,
+            world_size,
+            local_world_size,
+            node_rank,
+            hostname,
+            pid,
             sample_ts_s,
             seq,
             cpu_percent,
@@ -65,11 +77,17 @@ def _insert_system_sample(
             gpu_power_avg_w,
             gpu_power_peak_w
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
             rank,
+            0,
+            2,
+            1,
+            rank,
+            f"worker-{rank}",
+            10_000 + rank,
             ts,
             row_id,
             30.0 + rank,
@@ -92,7 +110,13 @@ def _insert_system_sample(
             """
             INSERT INTO system_gpu_samples(
                 recv_ts_ns,
-                rank,
+                global_rank,
+                local_rank,
+                world_size,
+                local_world_size,
+                node_rank,
+                hostname,
+                pid,
                 sample_ts_s,
                 seq,
                 gpu_idx,
@@ -103,11 +127,17 @@ def _insert_system_sample(
                 power_usage_w,
                 power_limit_w
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 row_id,
                 rank,
+                0,
+                2,
+                1,
+                rank,
+                f"worker-{rank}",
+                10_000 + rank,
                 ts,
                 row_id,
                 rank,

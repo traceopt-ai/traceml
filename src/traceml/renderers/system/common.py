@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Shared models and SQLite helpers for system telemetry."""
 
 import sqlite3
@@ -77,7 +83,8 @@ class SystemMetricsDB:
     db_path:
         Path to the SQLite database file.
     rank:
-        Optional rank filter. When set, all reads are restricted to that rank.
+        Optional global-rank filter. When set, reads are restricted to that
+        globally unique worker identity.
 
     Notes
     -----
@@ -97,13 +104,13 @@ class SystemMetricsDB:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def rank_filter(self) -> tuple[str, tuple]:
+    def global_rank_filter(self) -> tuple[str, tuple]:
         """
-        Return SQL WHERE fragment and bound params for rank filtering.
+        Return SQL WHERE fragment and bound params for global-rank filtering.
         """
         if self._rank is None:
             return "", ()
-        return "WHERE rank = ?", (int(self._rank),)
+        return "WHERE global_rank = ?", (int(self._rank),)
 
     def fetch_latest_system_sample(
         self,
@@ -112,7 +119,7 @@ class SystemMetricsDB:
         """
         Fetch the latest system sample for the configured rank filter.
         """
-        where_sql, params = self.rank_filter()
+        where_sql, params = self.global_rank_filter()
         sql = f"""
             SELECT *
             FROM system_samples
@@ -133,7 +140,7 @@ class SystemMetricsDB:
         The inner query limits the read size first, then the outer query
         restores ascending order for downstream time-series compute.
         """
-        where_sql, params = self.rank_filter()
+        where_sql, params = self.global_rank_filter()
         sql = f"""
             SELECT *
             FROM (
@@ -151,23 +158,23 @@ class SystemMetricsDB:
         self,
         conn: sqlite3.Connection,
         *,
-        rank: Optional[int],
+        global_rank: Optional[int],
         seq: Optional[int],
     ) -> List[sqlite3.Row]:
         """
         Fetch GPU rows for one exact system sample.
 
-        Sample identity is matched by (rank, seq). This is valid for the
-        current SystemSampler because `seq` is monotonic per rank.
+        Sample identity is matched by (global_rank, seq), which is unique for
+        multi-node jobs because `seq` is monotonic within each worker.
         """
         if seq is None:
             return []
 
-        if rank is None:
+        if global_rank is None:
             sql = """
                 SELECT *
                 FROM system_gpu_samples
-                WHERE rank IS NULL
+                WHERE global_rank IS NULL
                   AND seq = ?
                 ORDER BY gpu_idx ASC;
             """
@@ -176,11 +183,11 @@ class SystemMetricsDB:
             sql = """
                 SELECT *
                 FROM system_gpu_samples
-                WHERE rank = ?
+                WHERE global_rank = ?
                   AND seq = ?
                 ORDER BY gpu_idx ASC;
             """
-            params = (int(rank), int(seq))
+            params = (int(global_rank), int(seq))
 
         return conn.execute(sql, params).fetchall()
 
@@ -195,7 +202,7 @@ class SystemMetricsDB:
         Parameters
         ----------
         sample_keys:
-            List of (rank, seq) keys identifying system samples.
+            List of (global_rank, seq) keys identifying system samples.
 
         Returns
         -------
@@ -210,28 +217,28 @@ class SystemMetricsDB:
         if not sample_keys:
             return []
 
-        non_null_rank_keys = [
-            (int(rank), int(seq))
-            for rank, seq in sample_keys
-            if rank is not None
+        non_null_global_rank_keys = [
+            (int(global_rank), int(seq))
+            for global_rank, seq in sample_keys
+            if global_rank is not None
         ]
-        null_rank_seqs = [
-            int(seq) for rank, seq in sample_keys if rank is None
+        null_global_rank_seqs = [
+            int(seq) for global_rank, seq in sample_keys if global_rank is None
         ]
 
         clauses: List[str] = []
         params: List[Any] = []
 
-        if non_null_rank_keys:
-            pair_clause = ",".join("(?, ?)" for _ in non_null_rank_keys)
-            clauses.append(f"(rank, seq) IN ({pair_clause})")
-            for rank, seq in non_null_rank_keys:
-                params.extend([rank, seq])
+        if non_null_global_rank_keys:
+            pair_clause = ",".join("(?, ?)" for _ in non_null_global_rank_keys)
+            clauses.append(f"(global_rank, seq) IN ({pair_clause})")
+            for global_rank, seq in non_null_global_rank_keys:
+                params.extend([global_rank, seq])
 
-        if null_rank_seqs:
-            seq_clause = ",".join("?" for _ in null_rank_seqs)
-            clauses.append(f"(rank IS NULL AND seq IN ({seq_clause}))")
-            params.extend(null_rank_seqs)
+        if null_global_rank_seqs:
+            seq_clause = ",".join("?" for _ in null_global_rank_seqs)
+            clauses.append(f"(global_rank IS NULL AND seq IN ({seq_clause}))")
+            params.extend(null_global_rank_seqs)
 
         if not clauses:
             return []
@@ -245,11 +252,11 @@ class SystemMetricsDB:
         return conn.execute(sql, tuple(params)).fetchall()
 
     @staticmethod
-    def group_gpu_rows_by_rank_seq(
+    def group_gpu_rows_by_global_rank_seq(
         rows: List[sqlite3.Row],
     ) -> Dict[Tuple[Optional[int], int], List[sqlite3.Row]]:
         """
-        Group GPU rows by (rank, seq) for fast per-sample lookup.
+        Group GPU rows by (global_rank, seq) for fast per-sample lookup.
 
         This avoids repeated scans of the GPU row list during dashboard compute.
         """
@@ -258,6 +265,6 @@ class SystemMetricsDB:
             seq = row["seq"]
             if seq is None:
                 continue
-            key = (row["rank"], int(seq))
+            key = (row["global_rank"], int(seq))
             out.setdefault(key, []).append(row)
         return out

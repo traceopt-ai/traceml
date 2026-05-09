@@ -93,4 +93,9 @@ def test_runtime_uses_local_rank_for_samplers_and_global_rank_for_publisher(
     assert _FakePublisher.instances[0].identity == SenderIdentity(
         global_rank=5,
         local_rank=1,
+        world_size=8,
+        local_world_size=4,
+        node_rank=1,
+        hostname=runtime.identity.hostname,
+        pid=runtime.identity.pid,
     )

@@ -54,6 +54,11 @@ class DBIncrementalSender:
         "rank": <int>,          # globally unique runtime rank
         "global_rank": <int>,
         "local_rank": <int>,
+        "world_size": <int>,
+        "local_world_size": <int>,
+        "node_rank": <int>,
+        "hostname": <str>,
+        "pid": <int>,
         "sampler": <str>,
         "timestamp": <float>,
         "tables": {
@@ -158,9 +163,7 @@ class DBIncrementalSender:
         identity = self._payload_identity()
 
         return {
-            "rank": identity.rank,
-            "global_rank": identity.global_rank,
-            "local_rank": identity.local_rank,
+            **identity.to_payload_fields(),
             "sampler": self.sampler_name,
             "timestamp": time.time(),
             "tables": tables_payload,

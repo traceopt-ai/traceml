@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """System aggregation helpers for the final-report section."""
 
 import sqlite3
@@ -125,7 +131,7 @@ def _load_system_summary_agg(
     conn:
         Open SQLite connection.
     rank:
-        Optional rank filter. If None, aggregates across all ranks.
+        Optional global-rank filter. If None, aggregates across all ranks.
     max_system_rows:
         Safety cap on rows included in aggregation.
 
@@ -138,7 +144,7 @@ def _load_system_summary_agg(
     params: list[Any] = []
 
     if rank is not None:
-        where_clause = "WHERE rank = ?"
+        where_clause = "WHERE global_rank = ?"
         params.append(int(rank))
 
     count_sql = f"""
@@ -231,7 +237,7 @@ def _load_per_gpu_summary(
     conn:
         Open SQLite connection.
     rank:
-        Optional rank filter. If None, aggregates across all ranks.
+        Optional global-rank filter. If None, aggregates across all ranks.
     max_system_rows:
         Safety cap on the number of parent `system_samples` rows included in the
         summary window. Per-GPU rows are restricted to those parent rows.
@@ -251,7 +257,7 @@ def _load_per_gpu_summary(
     params: list[Any] = []
 
     if rank is not None:
-        where_clause = "WHERE s.rank = ?"
+        where_clause = "WHERE s.global_rank = ?"
         params.append(int(rank))
 
     power_limit_expr = (
@@ -280,13 +286,13 @@ def _load_per_gpu_summary(
 
         FROM system_gpu_samples AS g
         INNER JOIN (
-            SELECT s.rank, s.seq
+            SELECT s.global_rank, s.seq
             FROM system_samples AS s
             {where_clause}
             ORDER BY s.id ASC
             LIMIT ?
         ) AS recent
-            ON g.rank IS recent.rank
+            ON g.global_rank IS recent.global_rank
            AND g.seq = recent.seq
         GROUP BY g.gpu_idx
         ORDER BY g.gpu_idx ASC;

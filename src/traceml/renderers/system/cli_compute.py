@@ -1,13 +1,29 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """CLI compute for system telemetry."""
 
+from __future__ import annotations
+
+import sqlite3
 import time
 from typing import Any, Dict, Optional
 
+from .cli_cluster import CLI_CLUSTER_WINDOW_ROWS, SystemCLIClusterBuilder
 from .common import SystemCLISnapshot, SystemMetricsDB
 
 
 class SystemCLIComputer:
-    """Compute the latest CLI system telemetry snapshot."""
+    """
+    Compute terminal-friendly system telemetry.
+
+    Single-node output stays compact. Multi-node output is delegated to
+    `SystemCLIClusterBuilder`, which compares node samples only within an
+    aligned sampler sequence.
+    """
 
     def __init__(
         self,
@@ -16,6 +32,7 @@ class SystemCLIComputer:
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
         self._db = SystemMetricsDB(db_path=db_path, rank=rank)
+        self._cluster = SystemCLIClusterBuilder(self._db)
         self._last_ok: Optional[Dict[str, Any]] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
@@ -39,14 +56,32 @@ class SystemCLIComputer:
         self._last_ok_ts = time.time()
         return out
 
-    def _compute_impl(self, conn) -> Dict[str, Any]:
-        latest = self._db.fetch_latest_system_sample(conn)
-        if latest is None:
+    def _compute_impl(self, conn: sqlite3.Connection) -> Dict[str, Any]:
+        rows = self._db.fetch_recent_system_samples(
+            conn,
+            limit=CLI_CLUSTER_WINDOW_ROWS,
+        )
+        if not rows:
             return self._empty_snapshot()
 
+        selection = self._cluster.select(rows)
+        if len(selection.rows) > 1:
+            cluster = self._cluster.build(conn, selection)
+            if cluster is not None:
+                return cluster
+
+        latest = selection.rows[-1]
+        return self._build_single_node_snapshot(conn, latest)
+
+    def _build_single_node_snapshot(
+        self,
+        conn: sqlite3.Connection,
+        latest: Any,
+    ) -> Dict[str, Any]:
+        """Build the single-node terminal payload from one system row."""
         gpu_rows = self._db.fetch_gpu_rows_for_sample(
             conn,
-            rank=latest["rank"],
+            global_rank=latest["global_rank"],
             seq=latest["seq"],
         )
 
@@ -57,16 +92,17 @@ class SystemCLIComputer:
             temp_max = 0.0
             power_total = 0.0
             power_limit_total = 0.0
+            gpu_util_skew: Optional[float]
 
             util_min: Optional[float] = None
             util_max: Optional[float] = None
             headroom_min: Optional[float] = None
             headroom_min_idx: Optional[int] = None
 
-            for idx, g in enumerate(gpu_rows):
-                util = float(g["util"] or 0.0)
-                mem_used = float(g["mem_used_bytes"] or 0.0)
-                mem_total = float(g["mem_total_bytes"] or 0.0)
+            for idx, gpu in enumerate(gpu_rows):
+                util = float(gpu["util"] or 0.0)
+                mem_used = float(gpu["mem_used_bytes"] or 0.0)
+                mem_total = float(gpu["mem_total_bytes"] or 0.0)
 
                 util_total += util
                 mem_used_total += mem_used
@@ -80,17 +116,17 @@ class SystemCLIComputer:
                     if headroom_min is None or headroom < headroom_min:
                         headroom_min = headroom
                         headroom_min_idx = (
-                            int(g["gpu_idx"])
-                            if g["gpu_idx"] is not None
+                            int(gpu["gpu_idx"])
+                            if gpu["gpu_idx"] is not None
                             else idx
                         )
 
-                temp_val = float(g["temperature_c"] or 0.0)
+                temp_val = float(gpu["temperature_c"] or 0.0)
                 if temp_val > temp_max:
                     temp_max = temp_val
 
-                power_total += float(g["power_usage_w"] or 0.0)
-                power_limit_total += float(g["power_limit_w"] or 0.0)
+                power_total += float(gpu["power_usage_w"] or 0.0)
+                power_limit_total += float(gpu["power_limit_w"] or 0.0)
 
             gpu_util_skew = (
                 util_max - util_min

@@ -45,7 +45,7 @@ class _FakeTCPClient:
 
 class _AttachRejectingSender:
     def __setattr__(self, name: str, value: object) -> None:
-        if name in {"sender", "rank"}:
+        if name == "sender":
             raise RuntimeError("attach failed")
         super().__setattr__(name, value)
 
@@ -116,7 +116,7 @@ def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
     publisher.attach_senders([sampler])
 
     assert sender.sender is tcp_client
-    assert sender.rank == 3
+    assert sender.rank is None
     assert sender.identity == SenderIdentity(global_rank=3, local_rank=3)
 
 
@@ -132,7 +132,7 @@ def test_publisher_prefers_global_rank_for_sender_identity() -> None:
 
     publisher.attach_senders([sampler])
 
-    assert sender.rank == 5
+    assert sender.rank is None
     assert sender.identity == SenderIdentity(global_rank=5, local_rank=1)
 
 
@@ -152,7 +152,7 @@ def test_publisher_logs_sender_attach_failures_and_continues() -> None:
     publisher.attach_senders([bad_sampler, good_sampler])
 
     assert good_sender.sender is tcp_client
-    assert good_sender.rank == 2
+    assert good_sender.rank is None
     assert len(logger.exceptions) == 1
     assert "sender attach failed" in logger.exceptions[0][0]
 
