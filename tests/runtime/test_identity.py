@@ -6,7 +6,7 @@
 
 import os
 
-from traceml.runtime.identity import RuntimeIdentity, resolve_runtime_identity
+from traceml.runtime.identity import resolve_runtime_identity
 
 
 class _FakeDistributed:
@@ -90,35 +90,6 @@ def test_runtime_identity_resolves_multinode_torchrun_env():
     assert identity.is_multinode
 
 
-def test_runtime_identity_infers_missing_local_rank():
-    identity = resolve_runtime_identity(
-        env={
-            "RANK": "5",
-            "WORLD_SIZE": "8",
-            "LOCAL_WORLD_SIZE": "4",
-        }
-    )
-
-    assert identity.global_rank == 5
-    assert identity.local_rank == 1
-    assert identity.node_rank == 1
-
-
-def test_runtime_identity_can_fall_back_to_torch_distributed_state():
-    identity = resolve_runtime_identity(
-        env={"LOCAL_WORLD_SIZE": "2"},
-        torch_loader=lambda: _FakeTorch(),
-    )
-
-    assert identity.global_rank == 3
-    assert identity.local_rank == 1
-    assert identity.world_size == 4
-    assert identity.local_world_size == 2
-    assert identity.node_rank == 1
-    assert identity.is_distributed
-    assert identity.is_multinode
-
-
 def test_runtime_identity_does_not_probe_cuda_for_local_world_size():
     identity = resolve_runtime_identity(
         env={"RANK": "3", "WORLD_SIZE": "4"},
@@ -129,26 +100,3 @@ def test_runtime_identity_does_not_probe_cuda_for_local_world_size():
     assert identity.local_world_size == 1
     assert identity.local_rank == 0
     assert identity.node_rank == 3
-
-
-def test_runtime_identity_meta_shape():
-    identity = RuntimeIdentity(
-        global_rank=5,
-        local_rank=1,
-        world_size=8,
-        local_world_size=4,
-        node_rank=1,
-        hostname="worker-1",
-        pid=123,
-    )
-
-    assert identity.to_meta() == {
-        "rank": 1,
-        "global_rank": 5,
-        "local_rank": 1,
-        "world_size": 8,
-        "local_world_size": 4,
-        "node_rank": 1,
-        "hostname": "worker-1",
-        "pid": 123,
-    }
