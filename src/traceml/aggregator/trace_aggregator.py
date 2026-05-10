@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Out-of-process telemetry server and display driver host."""
 
 import threading
@@ -66,7 +72,7 @@ class TraceMLAggregator:
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
             TCPConfig(
-                host=str(settings.tcp.host),
+                host=str(settings.tcp.bind_host),
                 port=int(settings.tcp.port),
             )
         )

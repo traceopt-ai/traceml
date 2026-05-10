@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Execute a user script inside the TraceML runtime."""
 
 import os
@@ -18,7 +24,8 @@ from traceml.utils.shared_utils import EXECUTION_LAYER
 
 INTERRUPTED_EXIT_CODE = 130
 DEFAULT_LOGS_DIR = "./logs"
-DEFAULT_TCP_HOST = "127.0.0.1"
+DEFAULT_TCP_CONNECT_HOST = "127.0.0.1"
+DEFAULT_TCP_BIND_HOST = "127.0.0.1"
 DEFAULT_TCP_PORT = 29765
 DEFAULT_PROFILE = "run"
 DEFAULT_UI_MODE = "cli"
@@ -201,7 +208,14 @@ def read_traceml_env() -> Dict[str, Any]:
                 str(DEFAULT_NUM_DISPLAY_LAYERS),
             )
         ),
-        "tcp_host": os.environ.get("TRACEML_TCP_HOST", DEFAULT_TCP_HOST),
+        "tcp_connect_host": os.environ.get(
+            "TRACEML_TCP_CONNECT_HOST",
+            DEFAULT_TCP_CONNECT_HOST,
+        ),
+        "tcp_bind_host": os.environ.get(
+            "TRACEML_TCP_BIND_HOST",
+            DEFAULT_TCP_BIND_HOST,
+        ),
         "tcp_port": int(
             os.environ.get("TRACEML_TCP_PORT", str(DEFAULT_TCP_PORT))
         ),
@@ -248,7 +262,8 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
         tcp=TraceMLTCPSettings(
-            host=str(cfg["tcp_host"]),
+            connect_host=str(cfg["tcp_connect_host"]),
+            bind_host=str(cfg["tcp_bind_host"]),
             port=int(cfg["tcp_port"]),
         ),
     )

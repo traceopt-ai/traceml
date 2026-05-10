@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Run manifest and static code-manifest helpers for the TraceML launcher."""
 
 from __future__ import annotations
@@ -125,8 +131,13 @@ def write_run_manifest(
     profile: str,
     ui_mode: str,
     logs_dir: str,
-    tcp_host: str,
+    aggregator_host: str,
+    aggregator_bind_host: str,
     tcp_port: int,
+    nnodes: int,
+    node_rank: int,
+    master_addr: str,
+    master_port: int,
     nproc_per_node: int,
     history_enabled: bool,
     status: str,
@@ -151,9 +162,14 @@ def write_run_manifest(
             "profile": str(profile),
             "ui_mode": str(ui_mode),
             "logs_dir": str(Path(logs_dir).resolve()),
-            "tcp_host": str(tcp_host),
+            "aggregator_host": str(aggregator_host),
+            "aggregator_bind_host": str(aggregator_bind_host),
             "tcp_port": int(tcp_port),
+            "nnodes": int(nnodes),
             "nproc_per_node": int(nproc_per_node),
+            "node_rank": int(node_rank),
+            "master_addr": str(master_addr),
+            "master_port": int(master_port),
             "history_enabled": bool(history_enabled),
             "launch_cwd": str(Path(launch_cwd).resolve()),
         },

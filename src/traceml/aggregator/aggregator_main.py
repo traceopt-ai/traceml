@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 TraceML aggregator process entrypoint.
 
@@ -104,7 +110,14 @@ def read_traceml_env() -> dict[str, Any]:
         "num_display_layers": int(
             os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
         ),
-        "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
+        "tcp_connect_host": os.environ.get(
+            "TRACEML_TCP_CONNECT_HOST",
+            "127.0.0.1",
+        ),
+        "tcp_bind_host": os.environ.get(
+            "TRACEML_TCP_BIND_HOST",
+            "127.0.0.1",
+        ),
         "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
         "remote_max_rows": int(
             os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
@@ -171,7 +184,8 @@ def main() -> None:
             session_id=session_id,
             history_enabled=bool(cfg["history_enabled"]),
             tcp=TraceMLTCPSettings(
-                host=str(cfg["tcp_host"]),
+                connect_host=str(cfg["tcp_connect_host"]),
+                bind_host=str(cfg["tcp_bind_host"]),
                 port=int(cfg["tcp_port"]),
             ),
             db_path=str(db_path),

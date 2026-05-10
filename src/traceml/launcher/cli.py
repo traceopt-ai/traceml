@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Argparse wiring for the TraceML launcher."""
 
 from __future__ import annotations
@@ -57,12 +63,6 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="Optional explicit session id.",
     )
     parser.add_argument(
-        "--tcp-host",
-        type=str,
-        default="127.0.0.1",
-        help="Aggregator bind host.",
-    )
-    parser.add_argument(
         "--tcp-port", type=int, default=29765, help="Aggregator bind port."
     )
     parser.add_argument(
@@ -76,6 +76,48 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=1,
         help="torchrun nproc_per_node value.",
+    )
+    parser.add_argument(
+        "--nnodes",
+        type=int,
+        default=1,
+        help="torchrun nnodes value.",
+    )
+    parser.add_argument(
+        "--node-rank",
+        type=int,
+        default=0,
+        help="torchrun node_rank value for this machine.",
+    )
+    parser.add_argument(
+        "--master-addr",
+        type=str,
+        default="127.0.0.1",
+        help="torchrun master_addr value, usually node 0's address.",
+    )
+    parser.add_argument(
+        "--master-port",
+        type=int,
+        default=29500,
+        help="torchrun master_port value.",
+    )
+    parser.add_argument(
+        "--aggregator-host",
+        type=str,
+        default=None,
+        help=(
+            "Address workers use to send TraceML telemetry. Defaults to "
+            "--master-addr."
+        ),
+    )
+    parser.add_argument(
+        "--aggregator-bind-host",
+        type=str,
+        default=None,
+        help=(
+            "Address the owner node binds the TraceML aggregator to. Use "
+            "0.0.0.0 when other nodes must connect."
+        ),
     )
     parser.add_argument(
         "--args",
