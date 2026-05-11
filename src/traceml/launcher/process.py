@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Subprocess lifecycle helpers for the TraceML launcher."""
 
 from __future__ import annotations
@@ -16,16 +22,6 @@ from traceml.launcher.manifest import update_run_manifest
 DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
 INTERRUPTED_EXIT_CODE = 130
-
-
-def build_torchrun_base_cmd(nproc_per_node: int) -> list[str]:
-    """Build a torchrun command using the current Python interpreter."""
-    return [
-        sys.executable,
-        "-m",
-        "torch.distributed.run",
-        f"--nproc_per_node={int(nproc_per_node)}",
-    ]
 
 
 def terminate_process_group(
@@ -62,7 +58,7 @@ def terminate_process_group(
 def wait_for_tcp_listen(
     host: str,
     port: int,
-    proc: subprocess.Popen,
+    proc: Optional[subprocess.Popen] = None,
     timeout_sec: float = DEFAULT_TCP_READY_TIMEOUT_SEC,
     poll_interval_sec: float = 0.05,
 ) -> bool:
@@ -71,7 +67,7 @@ def wait_for_tcp_listen(
     last_err: Optional[Exception] = None
 
     while time.time() < deadline:
-        if proc.poll() is not None:
+        if proc is not None and proc.poll() is not None:
             return False
         try:
             with socket.create_connection((host, int(port)), timeout=0.25):

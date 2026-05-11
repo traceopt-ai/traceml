@@ -136,7 +136,7 @@ class TestCliInspect:
 
     def test_inspect_prints_json(self, tmp_path, capsys):
         """traceml inspect should print each record as pretty JSON."""
-        from traceml.cli import run_inspect
+        from traceml.launcher.commands import run_inspect
 
         path = tmp_path / "data.msgpack"
         records = [{"step": 1, "loss": 0.9}, {"step": 2, "loss": 0.7}]

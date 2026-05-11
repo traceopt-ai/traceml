@@ -68,7 +68,8 @@ class TraceMLRuntime:
         # Transport: every rank has a TCP client
         self._tcp_client = TCPClient(
             TCPConfig(
-                host=self._settings.tcp.host, port=int(self._settings.tcp.port)
+                host=self._settings.tcp.connect_host,
+                port=int(self._settings.tcp.port),
             )
         )
         self._publisher = TelemetryPublisher(

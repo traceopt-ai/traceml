@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Shared utility helpers for TraceML samplers.
 
@@ -14,6 +20,8 @@ from collections import deque
 from pathlib import Path
 from queue import Empty
 from typing import Any
+
+from traceml.runtime.session import rank_dir_name
 
 
 def drain_queue_nowait(queue_obj: Any, *, skip_none: bool = True) -> list[Any]:
@@ -93,9 +101,12 @@ def ensure_session_dir(
 ) -> Path:
     """
     Return a session directory path and ensure it exists.
+
+    ``rank`` is the global distributed rank. It is used only for process-owned
+    files, where local rank would collide across nodes.
     """
     root = Path(logs_dir).resolve() / session_id
     if rank is not None:
-        root = root / str(rank)
+        root = root / rank_dir_name(rank)
     root.mkdir(parents=True, exist_ok=True)
     return root

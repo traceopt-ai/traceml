@@ -74,7 +74,7 @@ target-version = ['py310']
 line-length = 79
 
 [project.scripts]
-traceml = "traceml.cli:main"
+traceml = "traceml.launcher.cli:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

@@ -134,16 +134,65 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "TraceML System Summary" in result.text
     assert "- Diagnosis: NORMAL" in result.text
     assert (
-        "- Stats: CPU avg 40% | RAM peak 50% | "
-        "GPU util avg 55% | GPU memory peak 50%"
+        "- Stats: CPU 40% | RAM 50% | GPU util 55% | "
+        "GPU memory 50% | GPU temp 68.0C"
     ) in result.text
     assert "GPU:" not in result.text
-    assert result.payload["global"]["cpu"]["avg_band"] == "normal"
-    assert result.payload["global"]["ram"]["peak_band"] == "normal"
-    assert result.payload["global"]["gpu_rollup"]["util_avg_band"] == "normal"
-    assert result.payload["global"]["gpu_rollup"]["mem_peak_band"] == "normal"
-    assert result.payload["per_gpu"]["0"]["mem_peak_percent"] == 50.0
+    assert result.payload["overview"]["nodes"]["coverage"] == "1/1"
+    assert result.payload["cluster"]["cpu"]["avg_band"] == "normal"
+    assert result.payload["cluster"]["ram"]["peak_band"] == "normal"
+    assert result.payload["cluster"]["gpu"]["util_avg_band"] == "normal"
+    assert result.payload["cluster"]["gpu"]["mem_peak_band"] == "normal"
+    assert (
+        result.payload["per_node"]["n0"]["per_gpu"]["0"]["mem_peak_percent"]
+        == 50.0
+    )
     assert "- Issues:" not in result.text
+
+
+def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
+    db_path = tmp_path / "system_multinode.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_system_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO system_samples VALUES (
+                2, 1, 0, 2, 1, 1, 'worker-1', 124, 2, 11.0,
+                41.0, 8.0, 16.0, 1, 1,
+                45.0, 80.0, 4.0, 5.0, 90.0, 95.0, 100.0, 120.0
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO system_gpu_samples VALUES (
+                2, 1, 0, 2, 1, 1, 'worker-1', 124, 2, 0,
+                45.0, 5.0, 10.0, 95.0, 120.0
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    payload = SystemSummarySection().build(str(db_path)).payload
+
+    assert payload["overview"]["nodes"]["coverage"] == "2/2"
+    assert payload["primary_diagnosis"]["kind"] == "HIGH_GPU_TEMPERATURE"
+    assert payload["primary_diagnosis"]["scope"] == {
+        "level": "gpu",
+        "node": "n1",
+        "node_rank": 1,
+        "gpu_idx": 0,
+    }
+    assert "n1 gpu0" in payload["primary_diagnosis"]["reason"]
+    assert payload["issues"][0]["scope"]["node"] == "n1"
+    assert (
+        payload["per_node"]["n1"]["primary_diagnosis"]["scope"]["level"]
+        == "gpu"
+    )
+    assert payload["node_rollup"]["gpu_temp"]["worst_node"] == "n1"
 
 
 def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):

@@ -49,6 +49,8 @@ def _insert_system_sample(
     gpu_available: bool,
     gpu_count: int,
     gpu_util: float | None = None,
+    world_size: int = 1,
+    local_world_size: int = 1,
 ) -> None:
     conn.execute(
         """
@@ -83,8 +85,8 @@ def _insert_system_sample(
             row_id,
             rank,
             0,
-            2,
-            1,
+            world_size,
+            local_world_size,
             rank,
             f"worker-{rank}",
             10_000 + rank,
@@ -133,8 +135,8 @@ def _insert_system_sample(
                 row_id,
                 rank,
                 0,
-                2,
-                1,
+                world_size,
+                local_world_size,
                 rank,
                 f"worker-{rank}",
                 10_000 + rank,
@@ -383,8 +385,11 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
         StepMemorySummarySection(window_size=4).build(str(db_path)).payload
     )
 
-    assert system["overview"]["gpu_available"] is True
-    assert system["overview"]["gpu_count"] == 1
+    assert system["overview"]["nodes"]["coverage"] == "1/1"
+    assert system["overview"]["gpus"]["observed"] == 1
+    assert system["cluster"]["gpu"]["available"] is True
+    assert system["cluster"]["gpu"]["count"] == 1
+    assert set(system["per_node"]) == {"n0"}
     assert process["overview"]["ranks_seen"] == 1
     assert process["per_rank"]["0"]["pid_count"] == 1.0
     assert step_time["overview"]["mode"] == "single_rank"
@@ -412,6 +417,8 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
                 gpu_available=True,
                 gpu_count=2,
                 gpu_util=80.0 - rank * 20.0,
+                world_size=2,
+                local_world_size=1,
             )
             _insert_process_sample(
                 conn,

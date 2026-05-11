@@ -7,8 +7,9 @@
 """System aggregation helpers for the final-report section."""
 
 import sqlite3
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from statistics import median
+from typing import Any, Dict, Iterable, Optional
 
 from traceml.diagnostics.bands import Band
 from traceml.diagnostics.system.policy import DEFAULT_SYSTEM_POLICY
@@ -115,6 +116,134 @@ class PerGPUSummary:
     power_avg_w: Optional[float] = None
     power_peak_w: Optional[float] = None
     power_limit_w: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class SystemNodeIdentity:
+    """Stable identity for one node-level SystemSampler source."""
+
+    label: str
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    local_world_size: Optional[int]
+    world_size: Optional[int]
+    pid: Optional[int]
+
+
+@dataclass(frozen=True)
+class SystemNodeSummary:
+    """Aggregated System metrics for one node."""
+
+    identity: SystemNodeIdentity
+    aggregate: SystemSummaryAgg
+    per_gpu: Dict[int, PerGPUSummary] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MetricRollup:
+    """Median/worst view for one node-level metric."""
+
+    median: Optional[float]
+    worst: Optional[float]
+    worst_node: Optional[str]
+
+
+@dataclass(frozen=True)
+class SystemClusterSummary:
+    """Cluster-shaped System summary for single-node and multi-node runs."""
+
+    aggregate: SystemSummaryAgg
+    nodes: Dict[str, SystemNodeSummary]
+    expected_nodes: int
+
+    @property
+    def observed_nodes(self) -> int:
+        """Number of nodes represented in the summary window."""
+        return len(self.nodes)
+
+    @property
+    def partial(self) -> bool:
+        """Whether fewer nodes were observed than expected."""
+        return self.observed_nodes < self.expected_nodes
+
+    @property
+    def observed_gpus(self) -> int:
+        """Number of per-node GPUs represented in detailed GPU rows."""
+        return sum(len(node.per_gpu) for node in self.nodes.values())
+
+
+def rollup_metric(
+    nodes: Dict[str, SystemNodeSummary],
+    *,
+    value_fn,
+    higher_is_worse: bool,
+) -> MetricRollup:
+    """Build median/worst values for one metric across nodes."""
+    values: list[tuple[str, float]] = []
+    for label, node in nodes.items():
+        value = value_fn(node)
+        if value is not None:
+            values.append((label, float(value)))
+    if not values:
+        return MetricRollup(median=None, worst=None, worst_node=None)
+    worst_label, worst_value = sorted(
+        values,
+        key=lambda item: (
+            item[1] if higher_is_worse else -item[1],
+            item[0],
+        ),
+        reverse=True,
+    )[0]
+    return MetricRollup(
+        median=float(median([item[1] for item in values])),
+        worst=float(worst_value),
+        worst_node=worst_label,
+    )
+
+
+def node_gpu_mem_peak_percent(node: SystemNodeSummary) -> Optional[float]:
+    """Highest GPU memory pressure observed on one node."""
+    values = [
+        _percent(gpu.mem_peak_bytes, gpu.mem_total_bytes)
+        for gpu in node.per_gpu.values()
+    ]
+    nums = [value for value in values if value is not None]
+    return max(nums) if nums else None
+
+
+def node_gpu_headroom_min_gb(node: SystemNodeSummary) -> Optional[float]:
+    """Smallest GPU memory headroom observed on one node, in GB."""
+    values = []
+    for gpu in node.per_gpu.values():
+        if gpu.mem_total_bytes is None or gpu.mem_peak_bytes is None:
+            continue
+        values.append(
+            max(0.0, float(gpu.mem_total_bytes) - float(gpu.mem_peak_bytes))
+            / 1_000_000_000.0
+        )
+    return min(values) if values else None
+
+
+def _avg(values: Iterable[Optional[float]]) -> Optional[float]:
+    nums = [float(value) for value in values if value is not None]
+    return sum(nums) / len(nums) if nums else None
+
+
+def _max(values: Iterable[Optional[float]]) -> Optional[float]:
+    nums = [float(value) for value in values if value is not None]
+    return max(nums) if nums else None
+
+
+def _max_int(values: Iterable[Optional[int]]) -> Optional[int]:
+    nums = [int(value) for value in values if value is not None]
+    return max(nums) if nums else None
+
+
+def _min_ts(values: Iterable[Optional[float]]) -> Optional[float]:
+    nums = [float(value) for value in values if value is not None]
+    return min(nums) if nums else None
 
 
 def _load_system_summary_agg(

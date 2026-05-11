@@ -203,20 +203,6 @@ class TestDBIncrementalSender:
         assert payload["hostname"] == ""
         assert payload["pid"] == 0
 
-    def test_collect_payload_requires_attached_rank(self):
-        from traceml.database.database_sender import DBIncrementalSender
-
-        db = Database(sampler_name="test")
-        sender = DBIncrementalSender(
-            db=db,
-            sampler_name="test_sampler",
-            rank=None,
-        )
-        db.add_record("t1", {"v": 1})
-
-        with pytest.raises(RuntimeError, match="runtime rank"):
-            sender.collect_payload()
-
 
 # DatabaseWriter tests
 

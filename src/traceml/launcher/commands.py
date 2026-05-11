@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Command handlers for the TraceML launcher CLI."""
 
 from __future__ import annotations
@@ -12,6 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from traceml.launcher.launch_config import DistributedLaunchConfig
 from traceml.launcher.manifest import (
     collect_existing_artifacts,
     update_run_manifest,
@@ -21,7 +28,6 @@ from traceml.launcher.manifest import (
 from traceml.launcher.process import (
     DEFAULT_SHUTDOWN_TIMEOUT_SEC,
     DEFAULT_TCP_READY_TIMEOUT_SEC,
-    build_torchrun_base_cmd,
     install_shutdown_handlers,
     start_aggregator_process,
     start_training_process,
@@ -62,10 +68,19 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "[TraceML] ERROR: --mode=summary requires history. "
             "Remove --no-history to enable final summary generation."
         )
+    try:
+        DistributedLaunchConfig.from_args(args)
+    except ValueError as exc:
+        raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
 
 
 def launch_process(script_path: str, args: argparse.Namespace) -> None:
     """Launch the TraceML aggregator and target training process."""
+    launch_cfg = DistributedLaunchConfig.from_args(args)
+    torchrun_cfg = launch_cfg.torchrun
+    aggregator_cfg = launch_cfg.aggregator
+    owns_aggregator = aggregator_cfg.is_owner(node_rank=torchrun_cfg.node_rank)
+
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
@@ -79,14 +94,19 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_ENABLE_LOGGING"] = "1" if args.enable_logging else "0"
     env["TRACEML_LOGS_DIR"] = args.logs_dir
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(args.num_display_layers)
-    env["TRACEML_SESSION_ID"] = (
-        args.session_id if args.session_id else get_session_id()
-    )
-    env["TRACEML_TCP_HOST"] = args.tcp_host
-    env["TRACEML_TCP_PORT"] = str(args.tcp_port)
+    session_id_arg = str(getattr(args, "session_id", "") or "").strip()
+    env["TRACEML_SESSION_ID"] = session_id_arg or get_session_id()
+    env["TRACEML_TCP_CONNECT_HOST"] = aggregator_cfg.connect_host
+    env["TRACEML_TCP_BIND_HOST"] = aggregator_cfg.bind_host
+    env["TRACEML_TCP_PORT"] = str(aggregator_cfg.port)
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
-    env["TRACEML_NPROC_PER_NODE"] = str(args.nproc_per_node)
+    env["TRACEML_NNODES"] = str(torchrun_cfg.nnodes)
+    env["TRACEML_NPROC_PER_NODE"] = str(torchrun_cfg.nproc_per_node)
+    env["TRACEML_NODE_RANK"] = str(torchrun_cfg.node_rank)
+    env["TRACEML_MASTER_ADDR"] = torchrun_cfg.master_addr
+    env["TRACEML_MASTER_PORT"] = str(torchrun_cfg.master_port)
     env["TRACEML_HISTORY_ENABLED"] = "0" if args.no_history else "1"
+    env["NODE_RANK"] = str(torchrun_cfg.node_rank)
 
     launch_context = LaunchContext.capture()
     env.update(launch_context.to_env())
@@ -109,9 +129,14 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         profile=env["TRACEML_PROFILE"],
         ui_mode=args.mode,
         logs_dir=args.logs_dir,
-        tcp_host=args.tcp_host,
-        tcp_port=args.tcp_port,
-        nproc_per_node=args.nproc_per_node,
+        aggregator_host=aggregator_cfg.connect_host,
+        aggregator_bind_host=aggregator_cfg.bind_host,
+        tcp_port=aggregator_cfg.port,
+        nnodes=torchrun_cfg.nnodes,
+        node_rank=torchrun_cfg.node_rank,
+        master_addr=torchrun_cfg.master_addr,
+        master_port=torchrun_cfg.master_port,
+        nproc_per_node=torchrun_cfg.nproc_per_node,
         history_enabled=not args.no_history,
         status="starting",
         launch_cwd=execution_cwd,
@@ -133,7 +158,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             "[TraceML] TraceML is disabled via --disable-traceml. Running natively."
         )
         train_cmd = [
-            *build_torchrun_base_cmd(args.nproc_per_node),
+            *torchrun_cfg.to_command(),
             str(script_path),
             *script_args,
         ]
@@ -158,7 +183,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         )
 
     train_cmd = [
-        *build_torchrun_base_cmd(args.nproc_per_node),
+        *torchrun_cfg.to_command(),
         runner_path,
         "--",
         *script_args,
@@ -171,34 +196,51 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         lambda: (train_proc, agg_proc), manifest_path=manifest_path
     )
 
-    print(
-        f"[TraceML] Starting aggregator on {args.tcp_host}:{args.tcp_port} "
-        f"(ui={args.mode}, profile={env['TRACEML_PROFILE']})"
-    )
-    try:
-        agg_proc = start_aggregator_process(env=env, cwd=execution_cwd)
-    except FileNotFoundError as exc:
-        _log_launcher_exception("aggregator entrypoint was not found", exc)
-        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
-        update_run_manifest(manifest_path, status="failed")
-        raise SystemExit(1)
-
-    print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
-
-    ready = wait_for_tcp_listen(
-        host=args.tcp_host,
-        port=int(args.tcp_port),
-        proc=agg_proc,
-        timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
-    )
-    if not ready:
-        rc = agg_proc.poll()
+    if owns_aggregator:
         print(
-            f"[TraceML] ERROR: aggregator failed to start or bind on "
-            f"{args.tcp_host}:{args.tcp_port} (exit={rc}). See output above for details.",
+            "[TraceML] Starting aggregator on "
+            f"{aggregator_cfg.bind_host}:{aggregator_cfg.port} "
+            f"(connect={aggregator_cfg.connect_host}, "
+            f"ui={args.mode}, profile={env['TRACEML_PROFILE']})"
+        )
+        try:
+            agg_proc = start_aggregator_process(env=env, cwd=execution_cwd)
+        except FileNotFoundError as exc:
+            _log_launcher_exception("aggregator entrypoint was not found", exc)
+            print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+            update_run_manifest(manifest_path, status="failed")
+            raise SystemExit(1)
+
+        print(f"[TraceML] Aggregator PID: {agg_proc.pid}")
+
+        ready = wait_for_tcp_listen(
+            host=aggregator_cfg.connect_host,
+            port=aggregator_cfg.port,
+            proc=agg_proc,
+            timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
+        )
+    else:
+        print(
+            "[TraceML] Waiting for aggregator on "
+            f"{aggregator_cfg.connect_host}:{aggregator_cfg.port} "
+            f"(node_rank={torchrun_cfg.node_rank})"
+        )
+        ready = wait_for_tcp_listen(
+            host=aggregator_cfg.connect_host,
+            port=aggregator_cfg.port,
+            timeout_sec=DEFAULT_TCP_READY_TIMEOUT_SEC,
+        )
+
+    if not ready:
+        rc = agg_proc.poll() if agg_proc is not None else None
+        print(
+            "[TraceML] ERROR: aggregator was not reachable at "
+            f"{aggregator_cfg.connect_host}:{aggregator_cfg.port} "
+            f"(exit={rc}). See output above for details.",
             file=sys.stderr,
         )
-        terminate_process_group(agg_proc, timeout_sec=3.0)
+        if agg_proc is not None:
+            terminate_process_group(agg_proc, timeout_sec=3.0)
         update_run_manifest(manifest_path, status="failed")
         raise SystemExit(1)
 

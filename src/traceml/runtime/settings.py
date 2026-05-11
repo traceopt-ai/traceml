@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 TraceML settings (shared configuration schema).
 
@@ -14,9 +20,17 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TraceMLTCPSettings:
-    """TCP configuration for TraceML telemetry transport."""
+    """
+    TCP configuration for TraceML telemetry transport.
 
-    host: str = "127.0.0.1"
+    ``connect_host`` is used by training workers. ``bind_host`` is used by the
+    aggregator process. They are the same on simple local runs, but different
+    on multi-node runs where the aggregator binds ``0.0.0.0`` and workers
+    connect to node 0's reachable address.
+    """
+
+    connect_host: str = "127.0.0.1"
+    bind_host: str = "127.0.0.1"
     port: int = 29765
 
 

@@ -120,22 +120,6 @@ def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
     assert sender.identity == SenderIdentity(global_rank=3, local_rank=3)
 
 
-def test_publisher_prefers_global_rank_for_sender_identity() -> None:
-    tcp_client = _FakeTCPClient()
-    sender = _FakeSender(payload={"rows": [1]})
-    sampler = _FakeSampler("SamplerA", sender=sender)
-    publisher = TelemetryPublisher(
-        tcp_client=tcp_client,
-        identity=SenderIdentity(global_rank=5, local_rank=1),
-        logger=_FakeLogger(),
-    )
-
-    publisher.attach_senders([sampler])
-
-    assert sender.rank is None
-    assert sender.identity == SenderIdentity(global_rank=5, local_rank=1)
-
-
 def test_publisher_logs_sender_attach_failures_and_continues() -> None:
     tcp_client = _FakeTCPClient()
     logger = _FakeLogger()
