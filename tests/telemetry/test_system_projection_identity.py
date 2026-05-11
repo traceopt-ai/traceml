@@ -13,7 +13,6 @@ from traceml.aggregator.sqlite_writers import system as system_projection
 
 def _system_payload() -> dict:
     return {
-        "rank": 5,
         "global_rank": 5,
         "local_rank": 1,
         "world_size": 8,

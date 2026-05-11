@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Final-report system section.
 """
@@ -22,14 +28,14 @@ from traceml.reporting.sections.system.model import MAX_SUMMARY_ROWS
 class SystemSummarySection:
     """Build TraceML's final-report system section."""
 
-    rank: Optional[int] = None
+    node_rank: Optional[int] = None
     max_system_rows: int = MAX_SUMMARY_ROWS
     name: str = "system"
 
     def build(self, db_path: str) -> SummaryResult:
         data = load_system_section_data(
             db_path,
-            rank=self.rank,
+            node_rank=self.node_rank,
             max_system_rows=self.max_system_rows,
         )
         payload = build_system_section_payload(data)

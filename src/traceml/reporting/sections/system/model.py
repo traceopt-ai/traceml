@@ -249,7 +249,7 @@ def _min_ts(values: Iterable[Optional[float]]) -> Optional[float]:
 def _load_system_summary_agg(
     conn: sqlite3.Connection,
     *,
-    rank: Optional[int] = None,
+    node_rank: Optional[int] = None,
     max_system_rows: int = 5_000,
 ) -> SystemSummaryAgg:
     """
@@ -259,8 +259,8 @@ def _load_system_summary_agg(
     ----------
     conn:
         Open SQLite connection.
-    rank:
-        Optional global-rank filter. If None, aggregates across all ranks.
+    node_rank:
+        Optional node-rank filter. If None, aggregates across all nodes.
     max_system_rows:
         Safety cap on rows included in aggregation.
 
@@ -272,9 +272,9 @@ def _load_system_summary_agg(
     where_clause = ""
     params: list[Any] = []
 
-    if rank is not None:
-        where_clause = "WHERE global_rank = ?"
-        params.append(int(rank))
+    if node_rank is not None:
+        where_clause = "WHERE node_rank = ?"
+        params.append(int(node_rank))
 
     count_sql = f"""
         SELECT
@@ -355,7 +355,7 @@ def _load_system_summary_agg(
 def _load_per_gpu_summary(
     conn: sqlite3.Connection,
     *,
-    rank: Optional[int] = None,
+    node_rank: Optional[int] = None,
     max_system_rows: int = 5_000,
 ) -> Dict[int, PerGPUSummary]:
     """
@@ -365,8 +365,8 @@ def _load_per_gpu_summary(
     ----------
     conn:
         Open SQLite connection.
-    rank:
-        Optional global-rank filter. If None, aggregates across all ranks.
+    node_rank:
+        Optional node-rank filter. If None, aggregates across all nodes.
     max_system_rows:
         Safety cap on the number of parent `system_samples` rows included in the
         summary window. Per-GPU rows are restricted to those parent rows.
@@ -385,9 +385,9 @@ def _load_per_gpu_summary(
     where_clause = ""
     params: list[Any] = []
 
-    if rank is not None:
-        where_clause = "WHERE s.global_rank = ?"
-        params.append(int(rank))
+    if node_rank is not None:
+        where_clause = "WHERE s.node_rank = ?"
+        params.append(int(node_rank))
 
     power_limit_expr = (
         "MAX(g.power_limit_w)"

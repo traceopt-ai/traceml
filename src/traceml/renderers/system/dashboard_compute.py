@@ -23,10 +23,10 @@ class SystemDashboardComputer:
     def __init__(
         self,
         db_path: str,
-        rank: Optional[int] = None,
+        node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
-        self._db = SystemMetricsDB(db_path=db_path, rank=rank)
+        self._db = SystemMetricsDB(db_path=db_path, node_rank=node_rank)
         self._last_ok: Optional[Dict[str, Any]] = None
         self._last_ok_ts: float = 0.0
         self._stale_ttl_s: Optional[float] = (
