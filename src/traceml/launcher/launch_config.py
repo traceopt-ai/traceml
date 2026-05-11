@@ -150,6 +150,12 @@ class DistributedLaunchConfig:
     def from_args(cls, args: Any) -> "DistributedLaunchConfig":
         """Build a complete launch config from argparse args."""
         torchrun = TorchrunLaunchConfig.from_args(args)
+        session_id = str(getattr(args, "session_id", "") or "").strip()
+        if torchrun.nnodes > 1 and not session_id:
+            raise ValueError(
+                "--session-id is required when --nnodes > 1 so all nodes "
+                "write into the same TraceML session."
+            )
         aggregator = AggregatorLaunchConfig.from_args(
             args,
             torchrun=torchrun,

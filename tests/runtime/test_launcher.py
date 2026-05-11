@@ -96,6 +96,7 @@ def test_summary_mode_requires_history() -> None:
         aggregator_host=None,
         aggregator_bind_host=None,
         tcp_port=29765,
+        session_id="test-session",
     )
 
     with pytest.raises(SystemExit):
@@ -179,6 +180,7 @@ def test_distributed_launch_config_builds_torchrun_command() -> None:
         aggregator_host=None,
         aggregator_bind_host=None,
         tcp_port=29765,
+        session_id="test-session",
     )
 
     cfg = DistributedLaunchConfig.from_args(args)

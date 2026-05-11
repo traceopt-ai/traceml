@@ -1,10 +1,16 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 import struct
 from pathlib import Path
 from typing import Dict
 
 from traceml.runtime.config import config
-from traceml.runtime.session import get_session_id
-from traceml.transport.distributed import get_ddp_info
+from traceml.runtime.identity import resolve_runtime_identity
+from traceml.runtime.session import get_session_id, rank_dir_name
 from traceml.utils.msgpack_codec import encode as encode_msgpack
 
 
@@ -12,16 +18,11 @@ def _rank_suffix() -> str:
     """
     Return a rank suffix for filesystem isolation.
 
-    NOTE:
-    This currently uses LOCAL_RANK via get_ddp_info(), which is sufficient
-    for single-node multi-GPU DDP.
-
-    TODO:
-    Switch to global RANK when enabling multi-node support to avoid
-    cross-node file collisions.
+    Global rank is unique across all nodes, which keeps local MessagePack
+    backups safe when several machines write to a shared log directory.
     """
-    _, local_rank, _ = get_ddp_info()
-    return f"rank_{local_rank}"
+    identity = resolve_runtime_identity()
+    return rank_dir_name(identity.global_rank)
 
 
 class DatabaseWriter:
@@ -42,7 +43,7 @@ class DatabaseWriter:
 
     Directory layout
     ----------------
-        <logs_dir>/<session_id>/data/<rank_suffix>/<sampler_name>/<table>.msgpack
+        <logs_dir>/<session_id>/<rank_suffix>/data/<sampler_name>/<table>.msgpack
     """
 
     def __init__(self, db, sampler_name: str, flush_every: int = 100):
@@ -67,8 +68,8 @@ class DatabaseWriter:
         self.logs_dir = (
             Path(config.logs_dir)
             / session_id
-            / "data"
             / rank_dir
+            / "data"
             / sampler_name
         )
 

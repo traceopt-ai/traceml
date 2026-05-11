@@ -94,9 +94,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_ENABLE_LOGGING"] = "1" if args.enable_logging else "0"
     env["TRACEML_LOGS_DIR"] = args.logs_dir
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(args.num_display_layers)
-    env["TRACEML_SESSION_ID"] = (
-        args.session_id if args.session_id else get_session_id()
-    )
+    session_id_arg = str(getattr(args, "session_id", "") or "").strip()
+    env["TRACEML_SESSION_ID"] = session_id_arg or get_session_id()
     env["TRACEML_TCP_CONNECT_HOST"] = aggregator_cfg.connect_host
     env["TRACEML_TCP_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_TCP_PORT"] = str(aggregator_cfg.port)

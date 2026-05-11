@@ -60,7 +60,7 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         "--session-id",
         type=str,
         default="",
-        help="Optional explicit session id.",
+        help="Optional explicit session id. Required when --nnodes > 1.",
     )
     parser.add_argument(
         "--tcp-port", type=int, default=29765, help="Aggregator bind port."

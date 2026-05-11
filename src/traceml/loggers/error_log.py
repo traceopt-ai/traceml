@@ -1,9 +1,16 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from traceml.transport.distributed import get_ddp_info
+from traceml.runtime.identity import resolve_runtime_identity
+from traceml.runtime.session import rank_dir_name
 
 
 def setup_error_logger(is_aggregator=False) -> logging.Logger:
@@ -28,10 +35,8 @@ def setup_error_logger(is_aggregator=False) -> logging.Logger:
 
     Distributed assumptions
     -----------------------
-    - Uses ``local_rank`` from ``get_ddp_info()`` to separate log files
-      for single-node, multi-GPU DDP runs.
-    - This avoids write contention between ranks on the same machine.
-    - Multi-node rank unification is intentionally deferred.
+    - Uses global rank to separate process-owned log files.
+    - This avoids write contention between ranks across all nodes.
 
     Returns
     -------
@@ -52,18 +57,18 @@ def setup_error_logger(is_aggregator=False) -> logging.Logger:
     # ----------------------------
     # File handler (ERROR+)
     # ----------------------------
-    # Use local_rank to isolate log files between DDP processes
     if is_aggregator is False:
-        _, local_rank, _ = get_ddp_info()
+        rank_dir = rank_dir_name(resolve_runtime_identity().global_rank)
     else:
-        local_rank = "aggregator"
+        rank_dir = "aggregator"
 
     logs_dir = os.environ.get("TRACEML_LOGS_DIR")
     session_id = os.environ.get("TRACEML_SESSION_ID")
 
     # Directory layout:
-    #   <logs_dir>/<session_id>/<local_rank>/traceml_errors.log
-    errors_dir = Path(logs_dir) / session_id / str(local_rank)
+    #   <logs_dir>/<session_id>/rank_<global_rank>/traceml_errors.log
+    #   <logs_dir>/<session_id>/aggregator/traceml_errors.log
+    errors_dir = Path(logs_dir) / session_id / rank_dir
 
     errors_dir.mkdir(parents=True, exist_ok=True)
 

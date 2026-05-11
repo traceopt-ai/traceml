@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Runtime context helpers shared by TraceML samplers.
 
@@ -10,6 +16,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from traceml.runtime.session import rank_dir_name
 
 
 def _env_int(name: str, default: int) -> int:
@@ -35,6 +43,11 @@ class SamplerRuntimeContext:
     world_size: int
 
     @property
+    def global_rank(self) -> int:
+        """Return the process rank that is unique across all nodes."""
+        return self.rank
+
+    @property
     def session_root(self) -> Path:
         """
         Root directory for the active TraceML session.
@@ -48,7 +61,7 @@ class SamplerRuntimeContext:
         """
         Rank-local directory under the active session root.
         """
-        return self.session_root / str(self.local_rank)
+        return self.session_root / rank_dir_name(self.global_rank)
 
     @property
     def is_ddp_intended(self) -> bool:
@@ -68,7 +81,7 @@ def resolve_runtime_context() -> SamplerRuntimeContext:
     return SamplerRuntimeContext(
         session_id=session_id,
         logs_dir=Path(logs_dir).resolve() if logs_dir else Path(),
-        rank=_env_int("RANK", -1),
+        rank=_env_int("RANK", 0),
         local_rank=_env_int("LOCAL_RANK", -1),
         world_size=_env_int("WORLD_SIZE", 1),
     )
