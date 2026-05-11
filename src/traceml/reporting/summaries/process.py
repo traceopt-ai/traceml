@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Compatibility entry point for the process final summary."""
 
 from __future__ import annotations
@@ -12,13 +18,13 @@ from traceml.reporting.sections.process.model import MAX_SUMMARY_ROWS
 def generate_process_summary_card(
     db_path: str,
     *,
-    rank: Optional[int] = None,
+    global_rank: Optional[int] = None,
     print_to_stdout: bool = True,
     max_process_rows: int = MAX_SUMMARY_ROWS,
 ) -> Dict[str, Any]:
     """Generate and persist the end-of-run process summary."""
     result = ProcessSummarySection(
-        rank=rank,
+        global_rank=global_rank,
         max_process_rows=max_process_rows,
     ).build(db_path)
     summary = result.payload

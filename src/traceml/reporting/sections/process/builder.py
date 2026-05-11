@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Payload builder for the final-report process section."""
 
 from __future__ import annotations
@@ -19,7 +25,6 @@ from traceml.reporting.sections.process.model import (
     _per_rank_to_json,
 )
 from traceml.reporting.summaries.issue_summary import (
-    issues_by_metric_json,
     issues_by_rank_json,
     issues_to_json,
 )
@@ -68,39 +73,41 @@ def build_process_card(
         ),
         default=None,
     )
-    highest_overhang_rank = _best_rank_idx(
+    highest_overhang_global_rank = _best_rank_idx(
         per_rank,
         "gpu_mem_reserved_overhang_ratio",
     )
 
-    highest_used_rank = _best_rank_idx(per_rank, "gpu_mem_used_peak_bytes")
-    highest_reserved_rank = _best_rank_idx(
+    highest_used_global_rank = _best_rank_idx(
+        per_rank, "gpu_mem_used_peak_bytes"
+    )
+    highest_reserved_global_rank = _best_rank_idx(
         per_rank, "gpu_mem_reserved_peak_bytes"
     )
 
     highest_used_peak_gb = (
-        bytes_to_gb(per_rank[highest_used_rank].gpu_mem_used_peak_bytes)
-        if highest_used_rank is not None
+        bytes_to_gb(per_rank[highest_used_global_rank].gpu_mem_used_peak_bytes)
+        if highest_used_global_rank is not None
         else None
     )
     highest_reserved_peak_gb = (
         bytes_to_gb(
-            per_rank[highest_reserved_rank].gpu_mem_reserved_peak_bytes
+            per_rank[highest_reserved_global_rank].gpu_mem_reserved_peak_bytes
         )
-        if highest_reserved_rank is not None
+        if highest_reserved_global_rank is not None
         else None
     )
 
-    least_headroom_rank = None
+    least_headroom_global_rank = None
     least_headroom_gb = None
-    for rank_id, item in per_rank.items():
+    for global_rank, item in per_rank.items():
         total_gb = bytes_to_gb(item.gpu_mem_total_bytes)
         reserved_gb = bytes_to_gb(item.gpu_mem_reserved_peak_bytes)
         if total_gb is None or reserved_gb is None:
             continue
         headroom_gb = max(total_gb - reserved_gb, 0.0)
         if least_headroom_gb is None or headroom_gb < least_headroom_gb:
-            least_headroom_rank = int(rank_id)
+            least_headroom_global_rank = int(global_rank)
             least_headroom_gb = headroom_gb
 
     diagnosis_result = build_process_diagnosis_result(
@@ -126,14 +133,13 @@ def build_process_card(
     )
     primary_diagnosis = diagnosis_result.primary
     issues = diagnosis_result.issues
-    issues_by_rank, unassigned_issues = issues_by_rank_json(
+    issues_by_global_rank, _unassigned_issues = issues_by_rank_json(
         issues,
         rank_keys=per_rank.keys(),
     )
-    issues_by_metric, metric_unassigned = issues_by_metric_json(issues)
-    per_rank_json = _per_rank_to_json(per_rank)
-    for rank_key, entry in per_rank_json.items():
-        entry["issues"] = issues_by_rank.get(rank_key, [])
+    per_global_rank_json = _per_rank_to_json(per_rank)
+    for rank_key, entry in per_global_rank_json.items():
+        entry["issues"] = issues_by_global_rank.get(rank_key, [])
 
     lines = [
         (
@@ -159,7 +165,7 @@ def build_process_card(
 
     global_summary = {
         "scope": {
-            "ranks": agg.distinct_ranks,
+            "global_ranks": agg.distinct_ranks,
             "pids": agg.distinct_pids,
         },
         "cpu": {
@@ -211,12 +217,12 @@ def build_process_card(
                     gpu_reserved_overhang_ratio
                 )
             ),
-            "highest_overhang_rank": highest_overhang_rank,
-            "highest_used_rank": highest_used_rank,
+            "highest_overhang_global_rank": highest_overhang_global_rank,
+            "highest_used_global_rank": highest_used_global_rank,
             "highest_used_peak_gb": highest_used_peak_gb,
-            "highest_reserved_rank": highest_reserved_rank,
+            "highest_reserved_global_rank": (highest_reserved_global_rank),
             "highest_reserved_peak_gb": highest_reserved_peak_gb,
-            "least_headroom_rank": least_headroom_rank,
+            "least_headroom_global_rank": least_headroom_global_rank,
             "least_headroom_gb": least_headroom_gb,
         },
     }
@@ -225,7 +231,7 @@ def build_process_card(
         "overview": {
             "duration_s": duration_s,
             "samples": agg.process_samples,
-            "ranks_seen": agg.distinct_ranks,
+            "global_ranks_seen": agg.distinct_ranks,
             "pids_seen": agg.distinct_pids,
         },
         "primary_diagnosis": diagnosis_to_dict(
@@ -234,11 +240,9 @@ def build_process_card(
             include_action=False,
         ),
         "issues": issues_to_json(issues),
-        "issues_by_rank": issues_by_rank,
-        "issues_by_metric": issues_by_metric,
-        "unassigned_issues": unassigned_issues + metric_unassigned,
+        "issues_by_global_rank": issues_by_global_rank,
         "global": global_summary,
-        "per_rank": per_rank_json,
+        "per_global_rank": per_global_rank_json,
         "units": {
             "memory": "GB",
             "cpu": "%",

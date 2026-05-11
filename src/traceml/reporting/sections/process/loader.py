@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """SQLite loader for the final-report process section."""
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ class ProcessSectionData:
 def load_process_section_data(
     db_path: str,
     *,
-    rank: Optional[int] = None,
+    global_rank: Optional[int] = None,
     max_process_rows: int = MAX_SUMMARY_ROWS,
 ) -> ProcessSectionData:
     """
@@ -37,12 +43,12 @@ def load_process_section_data(
     try:
         aggregate = _load_process_summary_agg(
             conn,
-            rank=rank,
+            global_rank=global_rank,
             max_process_rows=row_limit,
         )
         per_rank = _load_per_rank_process_summary(
             conn,
-            rank=rank,
+            global_rank=global_rank,
             max_process_rows=row_limit,
         )
     finally:

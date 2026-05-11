@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Final-report process section.
 """
@@ -22,14 +28,14 @@ from traceml.reporting.sections.process.model import MAX_SUMMARY_ROWS
 class ProcessSummarySection:
     """Build TraceML's final-report process section."""
 
-    rank: Optional[int] = None
+    global_rank: Optional[int] = None
     max_process_rows: int = MAX_SUMMARY_ROWS
     name: str = "process"
 
     def build(self, db_path: str) -> SummaryResult:
         data = load_process_section_data(
             db_path,
-            rank=self.rank,
+            global_rank=self.global_rank,
             max_process_rows=self.max_process_rows,
         )
         payload = build_process_section_payload(data)
