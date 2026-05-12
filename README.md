@@ -23,8 +23,6 @@ It records lightweight step-level signals during a run, then writes a compact fi
 - Did memory behavior change during the run?
 - Did a code, data, config, or hardware change cause a regression?
 
-**TraceML is not a replacement for PyTorch Profiler, W&B, MLflow, or TensorBoard.** It is the lightweight first pass: find the likely bottleneck, keep a useful artifact, and decide whether deeper investigation is worth it.
-
 **If TraceML helps you catch a slowdown or regression, please consider starring the repo.**
 
 > **Upcoming rename:** TraceML will transition to **TraceOpt** in a future release.
@@ -122,13 +120,9 @@ TraceML is especially useful for repeated PyTorch training and fine-tuning workf
 
 ## How It Fits With Your Stack
 
-TraceML works alongside your existing tools.
+TraceML sits before heavyweight profiling.
 
-Use:
-
-- **W&B / MLflow / TensorBoard** for experiment tracking, dashboards, metrics, and artifacts.
-- **PyTorch Profiler / Nsight** for deep operator and kernel-level investigation.
-- **TraceML** for lightweight runtime diagnosis and run-to-run efficiency comparison.
+Use TraceML to identify the likely bottleneck and preserve a run-level diagnostic artifact. Use PyTorch Profiler or Nsight when you need operator or kernel-level detail. Use W&B, MLflow, or TensorBoard for experiment tracking, dashboards, and team reporting.
 
 A common workflow:
 
