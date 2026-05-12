@@ -223,8 +223,14 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.payload["global"]["cpu"]["capacity_band"] == "low"
     assert result.payload["global"]["ram"]["peak_band"] == "low"
     assert (
-        result.payload["global"]["gpu_rollup"]["reserved_peak_band"]
-        == "normal"
+        result.payload["global"]["gpu"]["reserved_overhang_band"] == "normal"
+    )
+    assert result.payload["global"]["scope"]["samples"] == 1
+    assert (
+        result.payload["global_rank_rollup"]["gpu_mem_reserved_peak_gb"][
+            "worst_global_rank"
+        ]
+        == 0
     )
     assert "takeaway" not in result.payload["global"]
 

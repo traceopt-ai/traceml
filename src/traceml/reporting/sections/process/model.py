@@ -8,7 +8,8 @@
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from statistics import median
+from typing import Any, Callable, Dict, Optional
 
 from traceml.diagnostics.bands import Band
 from traceml.diagnostics.process.policy import DEFAULT_PROCESS_POLICY
@@ -510,22 +511,93 @@ def _per_rank_to_diagnosis_input(
     return out
 
 
-def _best_rank_idx(
+def _metric_rollup(
     per_rank: Dict[int, PerRankProcessSummary],
-    attr_name: str,
-) -> Optional[int]:
+    value: Callable[[PerRankProcessSummary], Optional[float]],
+    *,
+    higher_is_worse: bool = True,
+) -> Optional[Dict[str, Optional[float]]]:
     """
-    Return the rank id with the largest value for `attr_name`.
-    """
-    best_idx: Optional[int] = None
-    best_value: Optional[float] = None
+    Return median/worst/skew for one metric across global ranks.
 
-    for rank_id, item in per_rank.items():
-        value = getattr(item, attr_name, None)
-        if value is None:
+    ``higher_is_worse`` is false for headroom-style metrics where the smallest
+    value is the limiting case.
+    """
+    pairs: list[tuple[float, int]] = []
+    for global_rank, item in per_rank.items():
+        raw = value(item)
+        if raw is None:
             continue
-        if best_value is None or float(value) > float(best_value):
-            best_idx = int(rank_id)
-            best_value = float(value)
+        pairs.append((float(raw), int(global_rank)))
 
-    return best_idx
+    if not pairs:
+        return None
+
+    values = [metric for metric, _global_rank in pairs]
+    worst_value, worst_global_rank = (
+        max(pairs, key=lambda pair: pair[0])
+        if higher_is_worse
+        else min(pairs, key=lambda pair: pair[0])
+    )
+    median_value = float(median(values))
+
+    skew_percent: Optional[float]
+    if median_value == 0.0:
+        skew_percent = None
+    elif higher_is_worse:
+        skew_percent = (
+            (float(worst_value) - median_value) / abs(median_value) * 100.0
+        )
+    else:
+        skew_percent = (
+            (median_value - float(worst_value)) / abs(median_value) * 100.0
+        )
+
+    return {
+        "median": median_value,
+        "worst": float(worst_value),
+        "worst_global_rank": int(worst_global_rank),
+        "skew_percent": skew_percent,
+    }
+
+
+def _global_rank_rollup_to_json(
+    per_rank: Dict[int, PerRankProcessSummary],
+) -> Dict[str, Dict[str, Optional[float]]]:
+    """
+    Build comparison metrics across global ranks for Process summary JSON.
+    """
+
+    def headroom_gb(item: PerRankProcessSummary) -> Optional[float]:
+        total_gb = bytes_to_gb(item.gpu_mem_total_bytes)
+        reserved_gb = bytes_to_gb(item.gpu_mem_reserved_peak_bytes)
+        if total_gb is None or reserved_gb is None:
+            return None
+        return max(total_gb - reserved_gb, 0.0)
+
+    metrics = {
+        "cpu_avg_percent": _metric_rollup(
+            per_rank,
+            lambda item: item.cpu_avg_percent,
+        ),
+        "ram_peak_gb": _metric_rollup(
+            per_rank,
+            lambda item: bytes_to_gb(item.ram_peak_bytes),
+        ),
+        "gpu_mem_used_peak_gb": _metric_rollup(
+            per_rank,
+            lambda item: bytes_to_gb(item.gpu_mem_used_peak_bytes),
+        ),
+        "gpu_mem_reserved_peak_gb": _metric_rollup(
+            per_rank,
+            lambda item: bytes_to_gb(item.gpu_mem_reserved_peak_bytes),
+        ),
+        "gpu_mem_headroom_gb": _metric_rollup(
+            per_rank,
+            headroom_gb,
+            higher_is_worse=False,
+        ),
+    }
+    return {
+        name: rollup for name, rollup in metrics.items() if rollup is not None
+    }
