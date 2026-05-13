@@ -128,6 +128,9 @@ class GlobalRankIdentity:
     global_rank: int
     local_rank: Optional[int]
     node_rank: Optional[int]
+    hostname: Optional[str]
+    local_world_size: Optional[int]
+    world_size: Optional[int]
     gpu_idx: Optional[int] = None
 
 
@@ -195,7 +198,8 @@ def _load_global_rank_identities(
     for global_rank in global_ranks:
         row = conn.execute(
             """
-            SELECT local_rank, node_rank
+            SELECT local_rank, node_rank, hostname, local_world_size,
+                   world_size
             FROM step_time_samples
             WHERE global_rank = ?
             ORDER BY sample_ts_s DESC, id DESC
@@ -205,10 +209,16 @@ def _load_global_rank_identities(
         ).fetchone()
         local_rank = int(row[0]) if row and row[0] is not None else None
         node_rank = int(row[1]) if row and row[1] is not None else None
+        hostname = str(row[2]) if row and row[2] is not None else None
+        local_world_size = int(row[3]) if row and row[3] is not None else None
+        world_size = int(row[4]) if row and row[4] is not None else None
         identities[int(global_rank)] = GlobalRankIdentity(
             global_rank=int(global_rank),
             local_rank=local_rank,
             node_rank=node_rank,
+            hostname=hostname,
+            local_world_size=local_world_size,
+            world_size=world_size,
         )
     return identities
 
@@ -465,7 +475,11 @@ def _global_rank_entry_to_json(
             "global_rank": int(global_rank),
             "local_rank": identity.local_rank if identity else None,
             "node_rank": identity.node_rank if identity else None,
-            "gpu_idx": identity.gpu_idx if identity else None,
+            "hostname": identity.hostname if identity else None,
+            "local_world_size": (
+                identity.local_world_size if identity else None
+            ),
+            "world_size": identity.world_size if identity else None,
         },
         "timing": _timing_rollup_from_summary(summary),
     }

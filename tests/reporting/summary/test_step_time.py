@@ -159,6 +159,14 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
     assert result.section == "step_time"
     assert result.payload["overview"]["global_ranks_seen"] == 1
     assert result.payload["global"]["median_step_rank"]["step_avg_ms"] == 31.0
+    assert result.payload["per_global_rank"]["0"]["identity"] == {
+        "global_rank": 0,
+        "local_rank": 0,
+        "node_rank": 0,
+        "hostname": "worker-0",
+        "local_world_size": 1,
+        "world_size": 1,
+    }
     assert "TraceML Step Timing Summary" in result.text
 
 
