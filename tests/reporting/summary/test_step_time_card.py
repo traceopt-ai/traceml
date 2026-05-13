@@ -41,8 +41,8 @@ def _summary(per_rank: dict[int, RankStepSummary]):
     _, payload = build_step_time_card(
         training_steps=100,
         latest_step_observed=99,
-        per_rank_summary=per_rank,
-        per_rank_step_metrics={},
+        aligned_summary=per_rank,
+        aligned_step_metrics={},
         max_rows=64,
     )
     return payload
@@ -175,12 +175,11 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
     assert payload["primary_diagnosis"]["status"] == "INPUT STRAGGLER"
     assert "- Ranks: median/worst |" in payload["card"]
     assert (
-        "- Why: r1 input was slower than median rank (70.0/40.0ms)."
+        "- Why: r1 input was slower than median global rank (70.0/40.0ms)."
         in payload["card"]
     )
-    assert {issue["kind"] for issue in payload["issues_by_rank"]["1"]} == {
-        "INPUT_STRAGGLER"
-    }
+    rank_issues = payload["issues_by_global_rank"]["1"]
+    assert {issue["kind"] for issue in rank_issues} == {"INPUT_STRAGGLER"}
     _assert_compact_card(payload["card"])
 
 
@@ -194,10 +193,10 @@ def test_step_time_compute_straggler_card_shows_rank_evidence() -> None:
 
     assert payload["primary_diagnosis"]["status"] == "COMPUTE STRAGGLER"
     assert (
-        "- Why: r1 compute was slower than median rank (260.0/220.0ms)."
+        "- Why: r1 compute was slower than median global rank (260.0/220.0ms)."
         in payload["card"]
     )
-    assert len(payload["issues_by_rank"]["1"]) == 1
+    assert len(payload["issues_by_global_rank"]["1"]) == 1
     _assert_compact_card(payload["card"])
 
 
@@ -223,7 +222,8 @@ def test_step_time_combined_straggler_priority_keeps_all_rank_issues() -> None:
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
     }
-    assert {issue["kind"] for issue in payload["issues_by_rank"]["1"]} == {
+    rank_issues = payload["issues_by_global_rank"]["1"]
+    assert {issue["kind"] for issue in rank_issues} == {
         "STRAGGLER",
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",

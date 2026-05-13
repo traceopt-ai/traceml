@@ -1,9 +1,15 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Step-time aggregation helpers for the final-report section."""
 
 import json
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 
@@ -115,6 +121,16 @@ class RankStepAnalysis:
     per_step_metrics: Dict[int, Dict[str, float]]
 
 
+@dataclass(frozen=True)
+class GlobalRankIdentity:
+    """Runtime identity observed for one global rank."""
+
+    global_rank: int
+    local_rank: Optional[int]
+    node_rank: Optional[int]
+    gpu_idx: Optional[int] = None
+
+
 def _to_rank_signals(
     per_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[int, RankStepSignals]:
@@ -134,14 +150,14 @@ def _to_rank_signals(
     }
 
 
-def _load_rank_step_rows(
+def _load_global_rank_step_rows(
     conn: sqlite3.Connection,
     *,
-    rank: int,
+    global_rank: int,
     max_rows: int,
 ) -> list[Dict[str, Any]]:
     """
-    Load the latest up to `max_rows` step-time rows for one rank.
+    Load the latest up to `max_rows` step-time rows for one global rank.
 
     Assumes one projected row per step in `step_time_samples`.
     """
@@ -149,11 +165,11 @@ def _load_rank_step_rows(
         """
         SELECT step, events_json
         FROM step_time_samples
-        WHERE rank = ?
+        WHERE global_rank = ?
         ORDER BY step DESC, id DESC
         LIMIT ?;
         """,
-        (int(rank), int(max_rows)),
+        (int(global_rank), int(max_rows)),
     )
 
     rows: list[Dict[str, Any]] = []
@@ -168,6 +184,33 @@ def _load_rank_step_rows(
             continue
         rows.append({"step": int(step), "events": events})
     return rows
+
+
+def _load_global_rank_identities(
+    conn: sqlite3.Connection,
+    global_ranks: Iterable[int],
+) -> Dict[int, GlobalRankIdentity]:
+    """Load the latest runtime identity metadata for each global rank."""
+    identities: Dict[int, GlobalRankIdentity] = {}
+    for global_rank in global_ranks:
+        row = conn.execute(
+            """
+            SELECT local_rank, node_rank
+            FROM step_time_samples
+            WHERE global_rank = ?
+            ORDER BY sample_ts_s DESC, id DESC
+            LIMIT 1;
+            """,
+            (int(global_rank),),
+        ).fetchone()
+        local_rank = int(row[0]) if row and row[0] is not None else None
+        node_rank = int(row[1]) if row and row[1] is not None else None
+        identities[int(global_rank)] = GlobalRankIdentity(
+            global_rank=int(global_rank),
+            local_rank=local_rank,
+            node_rank=node_rank,
+        )
+    return identities
 
 
 def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
@@ -297,7 +340,7 @@ def _split_ms(s: RankStepSummary) -> Dict[str, float]:
 
 
 def _split_pct(s: RankStepSummary) -> Dict[str, Optional[float]]:
-    """Return the main timing split as percentage share of average total step."""
+    """Return timing split percentage share of average total step."""
     return {
         "dataloader": share_percent(s.avg_dataloader_ms, s.avg_total_step_ms),
         "forward": share_percent(s.avg_forward_ms, s.avg_total_step_ms),
@@ -411,124 +454,135 @@ def _timing_rollup_from_summary(
     }
 
 
-def _rank_entry_to_json(
-    rank: int,
+def _global_rank_entry_to_json(
+    global_rank: int,
     summary: RankStepSummary,
+    identity: Optional[GlobalRankIdentity] = None,
 ) -> Dict[str, Any]:
-    """Serialize one rank summary."""
+    """Serialize one global-rank summary."""
     return {
         "identity": {
-            "rank": int(rank),
-            "local_rank": None,
-            "gpu_idx": None,
+            "global_rank": int(global_rank),
+            "local_rank": identity.local_rank if identity else None,
+            "node_rank": identity.node_rank if identity else None,
+            "gpu_idx": identity.gpu_idx if identity else None,
         },
         "timing": _timing_rollup_from_summary(summary),
     }
 
 
-def _timing_rollup_with_rank(
-    rank: Optional[int],
+def _timing_rollup_with_global_rank(
+    global_rank: Optional[int],
     summary: Optional[RankStepSummary],
 ) -> Dict[str, Any]:
     """
-    Attach rank identity to a timing rollup block.
+    Attach global-rank identity to a timing rollup block.
     """
     rollup = _timing_rollup_from_summary(summary)
-    rollup["rank"] = int(rank) if rank is not None else None
+    rollup["global_rank"] = (
+        int(global_rank) if global_rank is not None else None
+    )
     return rollup
 
 
 def _build_global_rollup(
     *,
-    per_rank_summary: Dict[int, RankStepSummary],
-    representative_rank: Optional[int],
-    bottleneck_rank: Optional[int],
-    imbalance_gap_pct: Optional[float],
+    per_global_rank_summary: Dict[int, RankStepSummary],
+    median_global_rank: Optional[int],
+    worst_global_rank: Optional[int],
+    analysis_window: Any,
 ) -> Dict[str, Any]:
     """Build the top-level step-time rollup for the run window."""
-    if not per_rank_summary:
+    if not per_global_rank_summary:
         return {
             "mode": "no_data",
-            "ranks_seen": 0,
-            "representative_rank": None,
-            "bottleneck_rank": None,
-            "imbalance_gap_pct": None,
-            "typical": _empty_timing_rollup(),
-            "bottleneck": _empty_timing_rollup(),
+            "global_ranks_seen": 0,
+            "analysis_window": analysis_window.to_json(),
+            "median_step_rank": _timing_rollup_with_global_rank(None, None),
+            "worst_step_rank": _timing_rollup_with_global_rank(None, None),
         }
 
-    representative_summary = (
-        per_rank_summary.get(representative_rank)
-        if representative_rank is not None
+    median_summary = (
+        per_global_rank_summary.get(median_global_rank)
+        if median_global_rank is not None
         else None
     )
-    bottleneck_summary = (
-        per_rank_summary.get(bottleneck_rank)
-        if bottleneck_rank is not None
+    worst_summary = (
+        per_global_rank_summary.get(worst_global_rank)
+        if worst_global_rank is not None
         else None
     )
 
     return {
         "mode": (
-            "single_rank" if len(per_rank_summary) <= 1 else "distributed"
+            "single_rank"
+            if len(per_global_rank_summary) <= 1
+            else "distributed"
         ),
-        "ranks_seen": len(per_rank_summary),
-        "representative_rank": representative_rank,
-        "bottleneck_rank": bottleneck_rank,
-        "imbalance_gap_pct": imbalance_gap_pct,
-        "typical": _timing_rollup_from_summary(representative_summary),
-        "bottleneck": _timing_rollup_from_summary(bottleneck_summary),
+        "global_ranks_seen": len(per_global_rank_summary),
+        "analysis_window": analysis_window.to_json(),
+        "median_step_rank": _timing_rollup_with_global_rank(
+            median_global_rank,
+            median_summary,
+        ),
+        "worst_step_rank": _timing_rollup_with_global_rank(
+            worst_global_rank,
+            worst_summary,
+        ),
     }
 
 
 def _build_overview(
     *,
-    per_rank_summary: Dict[int, RankStepSummary],
+    per_global_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[str, Any]:
-    """Build high-level overview fields from per-rank timing summaries."""
-    if not per_rank_summary:
+    """Build high-level overview fields from global-rank timing summaries."""
+    if not per_global_rank_summary:
         return {
             "mode": "no_data",
-            "representative_rank": None,
-            "worst_rank": None,
-            "representative_avg_step_ms": None,
+            "median_global_rank": None,
+            "worst_global_rank": None,
+            "median_avg_step_ms": None,
             "worst_avg_step_ms": None,
-            "worst_vs_representative_pct": None,
+            "step_time_skew_percent": None,
         }
 
     avg_total_by_rank = {
-        rank: s.avg_total_step_ms for rank, s in per_rank_summary.items()
+        rank: s.avg_total_step_ms
+        for rank, s in per_global_rank_summary.items()
     }
-    worst_rank = max(avg_total_by_rank, key=avg_total_by_rank.get)
-    representative_rank = _closest_rank_to_median(avg_total_by_rank)
+    worst_global_rank = max(avg_total_by_rank, key=avg_total_by_rank.get)
+    median_global_rank = _closest_rank_to_median(avg_total_by_rank)
 
-    worst_avg_step_ms = avg_total_by_rank.get(worst_rank)
-    representative_avg_step_ms = (
-        avg_total_by_rank.get(representative_rank)
-        if representative_rank is not None
+    worst_avg_step_ms = avg_total_by_rank.get(worst_global_rank)
+    median_avg_step_ms = (
+        avg_total_by_rank.get(median_global_rank)
+        if median_global_rank is not None
         else None
     )
 
-    worst_vs_representative_pct = None
+    step_time_skew_percent = None
     if (
         worst_avg_step_ms is not None
-        and representative_avg_step_ms is not None
-        and representative_avg_step_ms > 0.0
-        and worst_rank != representative_rank
+        and median_avg_step_ms is not None
+        and median_avg_step_ms > 0.0
+        and worst_global_rank != median_global_rank
     ):
-        worst_vs_representative_pct = (
+        step_time_skew_percent = (
             100.0
-            * (worst_avg_step_ms - representative_avg_step_ms)
-            / representative_avg_step_ms
+            * (worst_avg_step_ms - median_avg_step_ms)
+            / median_avg_step_ms
         )
 
     return {
         "mode": (
-            "single_rank" if len(per_rank_summary) <= 1 else "distributed"
+            "single_rank"
+            if len(per_global_rank_summary) <= 1
+            else "distributed"
         ),
-        "representative_rank": representative_rank,
-        "worst_rank": worst_rank,
-        "representative_avg_step_ms": representative_avg_step_ms,
+        "median_global_rank": median_global_rank,
+        "worst_global_rank": worst_global_rank,
+        "median_avg_step_ms": median_avg_step_ms,
         "worst_avg_step_ms": worst_avg_step_ms,
-        "worst_vs_representative_pct": worst_vs_representative_pct,
+        "step_time_skew_percent": step_time_skew_percent,
     }
