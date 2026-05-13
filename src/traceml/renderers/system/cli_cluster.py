@@ -317,9 +317,6 @@ class SystemCLIClusterBuilder:
         node_rank = self._optional_int(row["node_rank"])
         if node_rank is not None:
             return f"node:{node_rank}"
-        hostname = str(row["hostname"] or "").strip()
-        if hostname:
-            return f"host:{hostname}"
         global_rank = self._optional_int(row["global_rank"])
         return (
             f"global:{global_rank}" if global_rank is not None else "unknown"
@@ -330,9 +327,6 @@ class SystemCLIClusterBuilder:
         node_rank = self._optional_int(row["node_rank"])
         if node_rank is not None:
             return f"n{node_rank}"
-        hostname = str(row["hostname"] or "").strip()
-        if hostname:
-            return hostname
         global_rank = self._optional_int(row["global_rank"])
         return f"g{global_rank}" if global_rank is not None else "n/a"
 
@@ -341,11 +335,8 @@ class SystemCLIClusterBuilder:
         node_rank = self._optional_int(row["node_rank"])
         if node_rank is not None:
             return (0, f"{node_rank:09d}")
-        hostname = str(row["hostname"] or "").strip()
-        if hostname:
-            return (1, hostname)
         global_rank = self._optional_int(row["global_rank"])
-        return (2, f"{global_rank:09d}" if global_rank is not None else "")
+        return (1, f"{global_rank:09d}" if global_rank is not None else "")
 
     def _optional_float(self, value: Any) -> Optional[float]:
         """Best-effort float conversion for SQLite values."""

@@ -50,6 +50,9 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.master_addr == "127.0.0.1"
     assert args.args == ["--epochs", "1"]
 
+    default_args = parser.parse_args(["watch", "train.py"])
+    assert default_args.mode == "summary"
+
 
 def test_build_parser_accepts_multinode_launch_args() -> None:
     parser = build_parser()

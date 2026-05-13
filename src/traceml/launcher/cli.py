@@ -26,11 +26,11 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--mode",
         type=str,
-        default="cli",
+        default="summary",
         choices=["cli", "dashboard", "summary"],
         help=(
             "TraceML display mode to launch. "
-            "Use 'summary' for final-summary-only runs. Default: cli."
+            "Use 'cli' or 'dashboard' for live output. Default: summary."
         ),
     )
     parser.add_argument(
@@ -124,7 +124,7 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         nargs=argparse.REMAINDER,
         help=(
             "Arguments forwarded to the target training script. "
-            "Usage: traceml <watch|run|deep> <script> --args <script args>"
+            "Usage: traceml <watch|run> <script> --args <script args>"
         ),
     )
     parser.add_argument(
@@ -148,7 +148,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  traceml watch train.py\n"
             "  traceml run train.py --args --epochs 10 --lr 1e-3\n"
-            "  traceml deep train.py --args --config config.yaml\n"
             "  traceml compare run_a.json run_b.json"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
@@ -166,12 +165,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a script with TraceML bottleneck instrumentation.",
     )
     _add_launch_args(run_parser)
-
-    deep_parser = sub.add_parser(
-        "deep",
-        help="Run a script with TraceML deep layerwise instrumentation.",
-    )
-    _add_launch_args(deep_parser)
 
     compare_parser = sub.add_parser(
         "compare",
@@ -209,15 +202,13 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    if args.command in {"watch", "run", "deep"}:
+    if args.command in {"watch", "run"}:
         validate_launch_args(args)
 
     if args.command == "watch":
         run_with_tracing(args, profile="watch")
     elif args.command == "run":
         run_with_tracing(args, profile="run")
-    elif args.command == "deep":
-        run_with_tracing(args, profile="deep")
     elif args.command == "compare":
         run_compare(args)
     elif args.command == "inspect":

@@ -82,9 +82,9 @@ class SystemMetricsDB:
     ----------
     db_path:
         Path to the SQLite database file.
-    rank:
-        Optional global-rank filter. When set, reads are restricted to that
-        globally unique worker identity.
+    node_rank:
+        Optional node-rank filter. System telemetry is node-level, so filtered
+        reads are restricted to this distributed node identity.
 
     Notes
     -----
@@ -92,9 +92,13 @@ class SystemMetricsDB:
     it keeps thread behavior simple and avoids long-lived SQLite state.
     """
 
-    def __init__(self, db_path: str, rank: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        db_path: str,
+        node_rank: Optional[int] = None,
+    ) -> None:
         self._db_path = str(db_path)
-        self._rank = rank
+        self._node_rank = node_rank
 
     def connect(self) -> sqlite3.Connection:
         """
@@ -104,22 +108,22 @@ class SystemMetricsDB:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def global_rank_filter(self) -> tuple[str, tuple]:
+    def node_rank_filter(self) -> tuple[str, tuple]:
         """
-        Return SQL WHERE fragment and bound params for global-rank filtering.
+        Return SQL WHERE fragment and bound params for node-rank filtering.
         """
-        if self._rank is None:
+        if self._node_rank is None:
             return "", ()
-        return "WHERE global_rank = ?", (int(self._rank),)
+        return "WHERE node_rank = ?", (int(self._node_rank),)
 
     def fetch_latest_system_sample(
         self,
         conn: sqlite3.Connection,
     ) -> Optional[sqlite3.Row]:
         """
-        Fetch the latest system sample for the configured rank filter.
+        Fetch the latest system sample for the configured node filter.
         """
-        where_sql, params = self.global_rank_filter()
+        where_sql, params = self.node_rank_filter()
         sql = f"""
             SELECT *
             FROM system_samples
@@ -140,7 +144,7 @@ class SystemMetricsDB:
         The inner query limits the read size first, then the outer query
         restores ascending order for downstream time-series compute.
         """
-        where_sql, params = self.global_rank_filter()
+        where_sql, params = self.node_rank_filter()
         sql = f"""
             SELECT *
             FROM (

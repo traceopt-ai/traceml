@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Compatibility entry point for the system final summary."""
 
 from __future__ import annotations
@@ -12,13 +18,13 @@ from traceml.reporting.sections.system.model import MAX_SUMMARY_ROWS
 def generate_system_summary_card(
     db_path: str,
     *,
-    rank: Optional[int] = None,
+    node_rank: Optional[int] = None,
     print_to_stdout: bool = True,
     max_system_rows: int = MAX_SUMMARY_ROWS,
 ) -> Dict[str, Any]:
     """Generate and persist the end-of-run system summary."""
     result = SystemSummarySection(
-        rank=rank,
+        node_rank=node_rank,
         max_system_rows=max_system_rows,
     ).build(db_path)
     summary = result.payload

@@ -167,6 +167,7 @@ def _insert_process_sample(
         INSERT INTO process_samples(
             recv_ts_ns,
             rank,
+            global_rank,
             sample_ts_s,
             seq,
             pid,
@@ -181,10 +182,11 @@ def _insert_process_sample(
             gpu_mem_reserved_bytes,
             gpu_mem_total_bytes
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
+            rank,
             rank,
             ts,
             row_id,
@@ -244,16 +246,30 @@ def _insert_step_time_sample(
         INSERT INTO step_time_samples(
             recv_ts_ns,
             rank,
+            global_rank,
+            local_rank,
+            world_size,
+            local_world_size,
+            node_rank,
+            hostname,
+            runtime_pid,
             sample_ts_s,
             seq,
             step,
             events_json
         )
-        VALUES (?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
             rank,
+            rank,
+            0,
+            1,
+            1,
+            rank,
+            f"worker-{rank}",
+            10_000 + rank,
             float(step),
             row_id,
             step,
@@ -390,12 +406,12 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     assert system["cluster"]["gpu"]["available"] is True
     assert system["cluster"]["gpu"]["count"] == 1
     assert set(system["per_node"]) == {"n0"}
-    assert process["overview"]["ranks_seen"] == 1
-    assert process["per_rank"]["0"]["pid_count"] == 1.0
+    assert process["overview"]["global_ranks_seen"] == 1
+    assert process["per_global_rank"]["0"]["pid_count"] == 1.0
     assert step_time["overview"]["mode"] == "single_rank"
-    assert step_time["overview"]["ranks_seen"] == 1
-    assert step_time["global"]["typical"]["steps_analyzed"] == 4
-    assert step_time["units"] == {"time": "ms"}
+    assert step_time["overview"]["global_ranks_seen"] == 1
+    assert step_time["global"]["median_step_rank"]["steps_analyzed"] == 4
+    assert step_time["units"] == {"time": "ms", "skew": "%"}
     assert step_memory["overview"]["ranks_seen"] == 1
     assert step_memory["overview"]["steps_used"] == 4
     assert set(step_memory["global"]["metric_rollup"]) == {
@@ -457,15 +473,15 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
     process = ProcessSummarySection().build(str(db_path)).payload
 
     assert step_time["overview"]["mode"] == "distributed"
-    assert step_time["overview"]["ranks_seen"] == 2
-    assert step_time["overview"]["steps_analyzed_min"] == 5
-    assert set(step_time["per_rank"]) == {"0", "1"}
+    assert step_time["overview"]["global_ranks_seen"] == 2
+    assert step_time["overview"]["aligned_steps_analyzed"] == 5
+    assert set(step_time["per_global_rank"]) == {"0", "1"}
     assert step_memory["overview"]["ranks_seen"] == 2
     assert step_memory["overview"]["steps_used"] == 5
     assert step_memory["global"]["analysis_window"]["ranks_seen"] == 2
     assert set(step_memory["per_rank"]) == {"0", "1"}
-    assert process["overview"]["ranks_seen"] == 2
-    assert set(process["per_rank"]) == {"0", "1"}
+    assert process["overview"]["global_ranks_seen"] == 2
+    assert set(process["per_global_rank"]) == {"0", "1"}
 
 
 def test_step_memory_section_reports_no_gpu_without_throwing(

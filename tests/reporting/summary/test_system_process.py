@@ -90,6 +90,7 @@ def _create_process_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE process_samples (
             id INTEGER PRIMARY KEY,
             rank INTEGER,
+            global_rank INTEGER,
             pid INTEGER,
             sample_ts_s REAL,
             cpu_percent REAL,
@@ -108,7 +109,7 @@ def _create_process_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO process_samples VALUES (
-            1, 0, 123, 10.0, 80.0, 8, 4000000000.0, 16000000000.0,
+            1, 0, 0, 123, 10.0, 80.0, 8, 4000000000.0, 16000000000.0,
             1, 1, 0, 5000000000.0, 6000000000.0, 10000000000.0
         )
         """
@@ -214,7 +215,7 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "TraceML Process Summary" in result.text
     assert "- Diagnosis: NORMAL" in result.text
     assert (
-        "- Stats: ranks 1 | pids 1 | CPU avg 80% | "
+        "- Stats: global ranks 1 | pids 1 | CPU avg 80% | "
         "RSS peak 4.0 / 16.0 GB | GPU reserved peak 60%"
     ) in result.text
     assert "- Takeaway:" not in result.text
@@ -222,8 +223,14 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.payload["global"]["cpu"]["capacity_band"] == "low"
     assert result.payload["global"]["ram"]["peak_band"] == "low"
     assert (
-        result.payload["global"]["gpu_rollup"]["reserved_peak_band"]
-        == "normal"
+        result.payload["global"]["gpu"]["reserved_overhang_band"] == "normal"
+    )
+    assert result.payload["global"]["scope"]["samples"] == 1
+    assert (
+        result.payload["global_rank_rollup"]["gpu_mem_reserved_peak_gb"][
+            "worst_global_rank"
+        ]
+        == 0
     )
     assert "takeaway" not in result.payload["global"]
 

@@ -1,8 +1,15 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Process aggregation helpers for the final-report section."""
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from statistics import median
+from typing import Any, Callable, Dict, Optional
 
 from traceml.diagnostics.bands import Band
 from traceml.diagnostics.process.policy import DEFAULT_PROCESS_POLICY
@@ -82,20 +89,19 @@ class ProcessSummaryAgg:
 @dataclass
 class PerRankProcessSummary:
     """
-    Aggregated traced-process metrics for one rank across the sampled summary
-    window.
+    Aggregated traced-process metrics for one global rank.
 
     Notes
     -----
     - Values are aggregated across all selected `process_samples` rows for the
-      rank.
+      globally unique worker rank.
     - Memory values remain in raw bytes while aggregating and are converted only
       during final summary serialization.
     - `pid_count` is included because a rank may emit from more than one traced
       process over the sampled window in some environments.
     """
 
-    rank: int
+    global_rank: int
     pid_count: int = 0
 
     cpu_avg_percent: Optional[float] = None
@@ -121,7 +127,7 @@ class PerRankProcessSummary:
 def _load_process_summary_agg(
     conn: sqlite3.Connection,
     *,
-    rank: Optional[int] = None,
+    global_rank: Optional[int] = None,
     max_process_rows: int = 10_000,
 ) -> ProcessSummaryAgg:
     """
@@ -131,8 +137,8 @@ def _load_process_summary_agg(
     ----------
     conn:
         Open SQLite connection.
-    rank:
-        Optional rank filter. If None, aggregates across all ranks.
+    global_rank:
+        Optional global-rank filter. If None, aggregates across all ranks.
     max_process_rows:
         Safety cap on rows included in aggregation.
 
@@ -144,9 +150,9 @@ def _load_process_summary_agg(
     where_clause = ""
     params: list[Any] = []
 
-    if rank is not None:
-        where_clause = "WHERE rank = ?"
-        params.append(int(rank))
+    if global_rank is not None:
+        where_clause = "WHERE global_rank = ?"
+        params.append(int(global_rank))
 
     base_sql = f"""
         FROM (
@@ -164,7 +170,7 @@ def _load_process_summary_agg(
             COUNT(*),
             MIN(sample_ts_s),
             MAX(sample_ts_s),
-            COUNT(DISTINCT rank),
+            COUNT(DISTINCT global_rank),
             COUNT(DISTINCT pid)
         {base_sql};
         """,
@@ -234,7 +240,7 @@ def _load_process_summary_agg(
 def _load_per_rank_process_summary(
     conn: sqlite3.Connection,
     *,
-    rank: Optional[int] = None,
+    global_rank: Optional[int] = None,
     max_process_rows: int = 10_000,
 ) -> Dict[int, PerRankProcessSummary]:
     """
@@ -244,15 +250,15 @@ def _load_per_rank_process_summary(
     ----------
     conn:
         Open SQLite connection.
-    rank:
-        Optional rank filter. If None, aggregates across all ranks.
+    global_rank:
+        Optional global-rank filter. If None, aggregates across all ranks.
     max_process_rows:
         Safety cap on rows included in aggregation.
 
     Returns
     -------
     Dict[int, PerRankProcessSummary]
-        Mapping rank -> aggregated traced-process metrics.
+        Mapping global rank -> aggregated traced-process metrics.
 
     Notes
     -----
@@ -263,13 +269,13 @@ def _load_per_rank_process_summary(
     where_clause = ""
     params: list[Any] = []
 
-    if rank is not None:
-        where_clause = "WHERE rank = ?"
-        params.append(int(rank))
+    if global_rank is not None:
+        where_clause = "WHERE global_rank = ?"
+        params.append(int(global_rank))
 
     sql = f"""
         SELECT
-            rank,
+            global_rank,
             COUNT(DISTINCT pid),
 
             AVG(cpu_percent),
@@ -306,9 +312,9 @@ def _load_per_rank_process_summary(
             ORDER BY id ASC
             LIMIT ?
         )
-        WHERE rank IS NOT NULL
-        GROUP BY rank
-        ORDER BY rank ASC;
+        WHERE global_rank IS NOT NULL
+        GROUP BY global_rank
+        ORDER BY global_rank ASC;
     """
 
     rows = conn.execute(sql, (*params, int(max_process_rows))).fetchall()
@@ -317,7 +323,7 @@ def _load_per_rank_process_summary(
     for row in rows:
         rank_id = int(row[0])
         out[rank_id] = PerRankProcessSummary(
-            rank=rank_id,
+            global_rank=rank_id,
             pid_count=int(row[1] or 0),
             cpu_avg_percent=float(row[2]) if row[2] is not None else None,
             cpu_peak_percent=float(row[3]) if row[3] is not None else None,
@@ -380,7 +386,7 @@ def _build_stats_line(
         else "GPU used peak"
     )
     parts = [
-        f"ranks {agg.distinct_ranks}",
+        f"global ranks {agg.distinct_ranks}",
         f"pids {agg.distinct_pids}",
         _format_percent_stat("CPU avg", agg.cpu_avg_percent),
         _format_memory_stat("RSS peak", ram_peak_gb, ram_total_gb),
@@ -505,22 +511,93 @@ def _per_rank_to_diagnosis_input(
     return out
 
 
-def _best_rank_idx(
+def _metric_rollup(
     per_rank: Dict[int, PerRankProcessSummary],
-    attr_name: str,
-) -> Optional[int]:
+    value: Callable[[PerRankProcessSummary], Optional[float]],
+    *,
+    higher_is_worse: bool = True,
+) -> Optional[Dict[str, Optional[float]]]:
     """
-    Return the rank id with the largest value for `attr_name`.
-    """
-    best_idx: Optional[int] = None
-    best_value: Optional[float] = None
+    Return median/worst/skew for one metric across global ranks.
 
-    for rank_id, item in per_rank.items():
-        value = getattr(item, attr_name, None)
-        if value is None:
+    ``higher_is_worse`` is false for headroom-style metrics where the smallest
+    value is the limiting case.
+    """
+    pairs: list[tuple[float, int]] = []
+    for global_rank, item in per_rank.items():
+        raw = value(item)
+        if raw is None:
             continue
-        if best_value is None or float(value) > float(best_value):
-            best_idx = int(rank_id)
-            best_value = float(value)
+        pairs.append((float(raw), int(global_rank)))
 
-    return best_idx
+    if not pairs:
+        return None
+
+    values = [metric for metric, _global_rank in pairs]
+    worst_value, worst_global_rank = (
+        max(pairs, key=lambda pair: pair[0])
+        if higher_is_worse
+        else min(pairs, key=lambda pair: pair[0])
+    )
+    median_value = float(median(values))
+
+    skew_percent: Optional[float]
+    if median_value == 0.0:
+        skew_percent = None
+    elif higher_is_worse:
+        skew_percent = (
+            (float(worst_value) - median_value) / abs(median_value) * 100.0
+        )
+    else:
+        skew_percent = (
+            (median_value - float(worst_value)) / abs(median_value) * 100.0
+        )
+
+    return {
+        "median": median_value,
+        "worst": float(worst_value),
+        "worst_global_rank": int(worst_global_rank),
+        "skew_percent": skew_percent,
+    }
+
+
+def _global_rank_rollup_to_json(
+    per_rank: Dict[int, PerRankProcessSummary],
+) -> Dict[str, Dict[str, Optional[float]]]:
+    """
+    Build comparison metrics across global ranks for Process summary JSON.
+    """
+
+    def headroom_gb(item: PerRankProcessSummary) -> Optional[float]:
+        total_gb = bytes_to_gb(item.gpu_mem_total_bytes)
+        reserved_gb = bytes_to_gb(item.gpu_mem_reserved_peak_bytes)
+        if total_gb is None or reserved_gb is None:
+            return None
+        return max(total_gb - reserved_gb, 0.0)
+
+    metrics = {
+        "cpu_avg_percent": _metric_rollup(
+            per_rank,
+            lambda item: item.cpu_avg_percent,
+        ),
+        "ram_peak_gb": _metric_rollup(
+            per_rank,
+            lambda item: bytes_to_gb(item.ram_peak_bytes),
+        ),
+        "gpu_mem_used_peak_gb": _metric_rollup(
+            per_rank,
+            lambda item: bytes_to_gb(item.gpu_mem_used_peak_bytes),
+        ),
+        "gpu_mem_reserved_peak_gb": _metric_rollup(
+            per_rank,
+            lambda item: bytes_to_gb(item.gpu_mem_reserved_peak_bytes),
+        ),
+        "gpu_mem_headroom_gb": _metric_rollup(
+            per_rank,
+            headroom_gb,
+            higher_is_worse=False,
+        ),
+    }
+    return {
+        name: rollup for name, rollup in metrics.items() if rollup is not None
+    }

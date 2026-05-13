@@ -29,11 +29,11 @@ Expected payload shape
 ----------------------
 Envelope:
 {
-    "global_rank": int,
+    "global_rank": int,  # process that emitted this node-level sample
     "local_rank": int,
     "world_size": int,
     "local_world_size": int,
-    "node_rank": int,
+    "node_rank": int,    # canonical System grouping identity
     "hostname": str,
     "pid": int,
     "sampler": "SystemSampler",
@@ -105,13 +105,10 @@ def _payload_identity(
     """
     Return storage identity for one payload.
 
-    System projection tables intentionally do not store the legacy ``rank``
-    field. When older payloads still provide only ``rank``, it is interpreted
-    as ``global_rank`` so old senders can still be projected safely.
+    System projection tables store explicit distributed identity fields only.
+    The legacy generic ``rank`` field is intentionally ignored.
     """
     global_rank = _optional_int(payload_dict.get("global_rank"))
-    if global_rank is None:
-        global_rank = _optional_int(payload_dict.get("rank"))
 
     return SystemPayloadIdentity(
         global_rank=global_rank,
@@ -299,13 +296,13 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_system_samples_rank_ts
-        ON system_samples(global_rank, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_system_samples_node_ts
+        ON system_samples(node_rank, sample_ts_s, id);
         """
     )
     conn.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_system_gpu_samples_rank_gpu_ts
+        CREATE INDEX IF NOT EXISTS idx_system_gpu_samples_global_gpu_ts
         ON system_gpu_samples(global_rank, gpu_idx, sample_ts_s, id);
         """
     )

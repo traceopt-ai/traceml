@@ -81,8 +81,6 @@ class _GpuRow:
 def _node_label(row: _SampleRow) -> str:
     if row.node_rank is not None:
         return f"n{int(row.node_rank)}"
-    if row.hostname:
-        return str(row.hostname)
     return f"g{int(row.global_rank or 0)}"
 
 
@@ -162,11 +160,13 @@ def _expected_nodes(rows: list[_SampleRow]) -> int:
 def _sample_rows(
     conn: sqlite3.Connection,
     *,
-    rank: Optional[int],
+    node_rank: Optional[int],
     max_system_rows: int,
 ) -> list[_SampleRow]:
-    where_clause = "WHERE global_rank = ?" if rank is not None else ""
-    params: tuple[Any, ...] = (int(rank),) if rank is not None else ()
+    where_clause = "WHERE node_rank = ?" if node_rank is not None else ""
+    params: tuple[Any, ...] = (
+        (int(node_rank),) if node_rank is not None else ()
+    )
     rows = conn.execute(
         f"""
         SELECT global_rank, local_rank, world_size, local_world_size,
@@ -214,11 +214,13 @@ def _sample_rows(
 def _gpu_rows(
     conn: sqlite3.Connection,
     *,
-    rank: Optional[int],
+    node_rank: Optional[int],
     max_system_rows: int,
 ) -> list[_GpuRow]:
-    where_clause = "WHERE s.global_rank = ?" if rank is not None else ""
-    params: tuple[Any, ...] = (int(rank),) if rank is not None else ()
+    where_clause = "WHERE s.node_rank = ?" if node_rank is not None else ""
+    params: tuple[Any, ...] = (
+        (int(node_rank),) if node_rank is not None else ()
+    )
     power_limit_expr = (
         "g.power_limit_w"
         if _table_has_column(conn, "system_gpu_samples", "power_limit_w")
@@ -262,15 +264,19 @@ def _gpu_rows(
 def _load_cluster_summary(
     conn: sqlite3.Connection,
     *,
-    rank: Optional[int],
+    node_rank: Optional[int],
     max_system_rows: int,
 ) -> SystemClusterSummary:
     samples = _sample_rows(
         conn,
-        rank=rank,
+        node_rank=node_rank,
         max_system_rows=max_system_rows,
     )
-    gpus = _gpu_rows(conn, rank=rank, max_system_rows=max_system_rows)
+    gpus = _gpu_rows(
+        conn,
+        node_rank=node_rank,
+        max_system_rows=max_system_rows,
+    )
     gpu_by_key: Dict[tuple[Optional[int], Optional[int]], list[_GpuRow]] = {}
     for row in gpus:
         gpu_by_key.setdefault((row.global_rank, row.seq), []).append(row)
@@ -302,7 +308,7 @@ def _load_cluster_summary(
 def load_system_section_data(
     db_path: str,
     *,
-    rank: Optional[int] = None,
+    node_rank: Optional[int] = None,
     max_system_rows: int = MAX_SUMMARY_ROWS,
 ) -> SystemSectionData:
     """
@@ -313,17 +319,17 @@ def load_system_section_data(
     try:
         cluster = _load_cluster_summary(
             conn,
-            rank=rank,
+            node_rank=node_rank,
             max_system_rows=row_limit,
         )
         aggregate = _load_system_summary_agg(
             conn,
-            rank=rank,
+            node_rank=node_rank,
             max_system_rows=row_limit,
         )
         per_gpu = _load_per_gpu_summary(
             conn,
-            rank=rank,
+            node_rank=node_rank,
             max_system_rows=row_limit,
         )
     finally:
