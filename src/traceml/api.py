@@ -72,12 +72,22 @@ def wrap_optimizer(*args: Any, **kwargs: Any) -> Any:
     return _wrap_optimizer(*args, **kwargs)
 
 
+def wrap_h2d(*args: Any, **kwargs: Any) -> Any:
+    """
+    Lazily resolve and apply TraceML H2D transfer wrapping.
+    """
+    from traceml.sdk.wrappers import wrap_h2d as _wrap_h2d
+
+    return _wrap_h2d(*args, **kwargs)
+
+
 def init(
     *,
     mode: str = "auto",
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_h2d: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """Initialize TraceML instrumentation for this process."""
     from traceml.sdk.initial import init as _init
@@ -87,6 +97,7 @@ def init(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_h2d=patch_h2d,
     )
 
 
@@ -96,6 +107,7 @@ def start(
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_h2d: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """Alias for `traceml.init(...)`."""
     from traceml.sdk.initial import start as _start
@@ -105,6 +117,7 @@ def start(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_h2d=patch_h2d,
     )
 
 
@@ -118,4 +131,5 @@ __all__ = [
     "wrap_forward",
     "wrap_backward",
     "wrap_optimizer",
+    "wrap_h2d",
 ]

@@ -17,6 +17,7 @@ class TraceMLInitConfig:
     patch_dataloader: bool
     patch_forward: bool
     patch_backward: bool
+    patch_h2d: bool
     source: str = "user"
 
     def same_effective_configuration(self, other: "TraceMLInitConfig") -> bool:
@@ -28,6 +29,7 @@ class TraceMLInitConfig:
             and self.patch_dataloader == other.patch_dataloader
             and self.patch_forward == other.patch_forward
             and self.patch_backward == other.patch_backward
+            and self.patch_h2d == other.patch_h2d
         )
 
 
@@ -56,6 +58,7 @@ def _build_config(
     patch_dataloader: Optional[bool],
     patch_forward: Optional[bool],
     patch_backward: Optional[bool],
+    patch_h2d: Optional[bool],
     source: str,
 ) -> TraceMLInitConfig:
     """Validate user input and return the initialization config."""
@@ -64,13 +67,14 @@ def _build_config(
         patch_dataloader,
         patch_forward,
         patch_backward,
+        patch_h2d,
     )
     has_overrides = any(value is not None for value in override_values)
 
     if canonical_mode in {"auto", "manual"} and has_overrides:
         raise ValueError(
-            "patch_dataloader, patch_forward, and patch_backward may only be "
-            "provided when mode='selective'. "
+            "patch_dataloader, patch_forward, patch_backward, and patch_h2d "
+            "may only be provided when mode='selective'. "
             f"Received overrides with mode={canonical_mode!r}."
         )
 
@@ -80,6 +84,7 @@ def _build_config(
             patch_dataloader=True,
             patch_forward=True,
             patch_backward=True,
+            patch_h2d=True,
             source=source,
         )
 
@@ -89,6 +94,7 @@ def _build_config(
             patch_dataloader=False,
             patch_forward=False,
             patch_backward=False,
+            patch_h2d=False,
             source=source,
         )
 
@@ -101,8 +107,9 @@ def _build_config(
     dl = bool(patch_dataloader) if patch_dataloader is not None else False
     fwd = bool(patch_forward) if patch_forward is not None else False
     bwd = bool(patch_backward) if patch_backward is not None else False
+    h2d = bool(patch_h2d) if patch_h2d is not None else False
 
-    if not any((dl, fwd, bwd)):
+    if not any((dl, fwd, bwd, h2d)):
         raise ValueError(
             "mode='selective' must enable at least one automatic patch. "
             "Use mode='manual' when you want zero automatic patches."
@@ -113,6 +120,7 @@ def _build_config(
         patch_dataloader=dl,
         patch_forward=fwd,
         patch_backward=bwd,
+        patch_h2d=h2d,
         source=source,
     )
 
@@ -124,6 +132,7 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
             config.patch_dataloader,
             config.patch_forward,
             config.patch_backward,
+            config.patch_h2d,
         )
     ):
         return
@@ -149,6 +158,13 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
             )
 
             patch_backward()
+
+        if config.patch_h2d:
+            from traceml.instrumentation.patches.h2d_auto_timer_patch import (
+                patch_h2d,
+            )
+
+            patch_h2d()
     except Exception as exc:
         raise RuntimeError(
             "TraceML initialization failed while installing automatic "
@@ -179,6 +195,7 @@ def init(
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_h2d: Optional[bool] = None,
     _source: str = "user",
 ) -> TraceMLInitConfig:
     """
@@ -224,6 +241,7 @@ def init(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_h2d=patch_h2d,
         source=_source,
     )
 
@@ -241,11 +259,13 @@ def init(
                 f"patch_dataloader={_INIT_CONFIG.patch_dataloader}, "
                 f"patch_forward={_INIT_CONFIG.patch_forward}, "
                 f"patch_backward={_INIT_CONFIG.patch_backward}, "
+                f"patch_h2d={_INIT_CONFIG.patch_h2d}, "
                 f"source={_INIT_CONFIG.source!r}. "
                 f"Requested config: mode={requested.mode!r}, "
                 f"patch_dataloader={requested.patch_dataloader}, "
                 f"patch_forward={requested.patch_forward}, "
                 f"patch_backward={requested.patch_backward}, "
+                f"patch_h2d={requested.patch_h2d}, "
                 f"source={requested.source!r}. "
                 "Initialize TraceML exactly once per process with the intended "
                 "mode at the start of the run."
@@ -262,6 +282,7 @@ def start(
     patch_dataloader: Optional[bool] = None,
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
+    patch_h2d: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """
     Alias for `init()` for the current transition period.
@@ -274,6 +295,7 @@ def start(
         patch_dataloader=patch_dataloader,
         patch_forward=patch_forward,
         patch_backward=patch_backward,
+        patch_h2d=patch_h2d,
         _source="user",
     )
 
