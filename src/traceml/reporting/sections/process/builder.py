@@ -79,7 +79,6 @@ def build_process_card(
         duration_s=duration_s,
         process_samples=agg.process_samples,
         distinct_ranks=agg.distinct_ranks,
-        distinct_pids=agg.distinct_pids,
         cpu_avg_percent=agg.cpu_avg_percent,
         cpu_peak_percent=agg.cpu_peak_percent,
         cpu_logical_core_count=agg.cpu_logical_core_count,
@@ -131,7 +130,6 @@ def build_process_card(
     global_summary = {
         "scope": {
             "global_ranks": agg.distinct_ranks,
-            "pids": agg.distinct_pids,
             "samples": agg.process_samples,
         },
         "cpu": {
@@ -183,7 +181,6 @@ def build_process_card(
             "duration_s": duration_s,
             "samples": agg.process_samples,
             "global_ranks_seen": agg.distinct_ranks,
-            "pids_seen": agg.distinct_pids,
         },
         "primary_diagnosis": diagnosis_to_dict(
             primary_diagnosis,

@@ -84,7 +84,6 @@ def build_process_diagnosis_result(
     duration_s: Optional[float],
     process_samples: int,
     distinct_ranks: int,
-    distinct_pids: int,
     cpu_avg_percent: Optional[float],
     cpu_peak_percent: Optional[float],
     cpu_logical_core_count: Optional[int],
@@ -108,7 +107,6 @@ def build_process_diagnosis_result(
         duration_s=duration_s,
         samples=process_samples,
         distinct_ranks=distinct_ranks,
-        distinct_pids=distinct_pids,
         cpu_avg_percent=cpu_avg_percent,
         cpu_peak_percent=cpu_peak_percent,
         cpu_logical_core_count=cpu_logical_core_count,
@@ -143,7 +141,6 @@ def build_process_diagnosis_result(
     metric_attribution: Dict[str, Any] = {
         "scope": {
             "ranks": signals.distinct_ranks,
-            "pids": signals.distinct_pids,
         },
         "cpu": {
             "avg_percent": signals.cpu_avg_percent,

@@ -47,7 +47,6 @@ class _SampleRow:
     local_world_size: Optional[int]
     node_rank: Optional[int]
     hostname: Optional[str]
-    pid: Optional[int]
     sample_ts_s: Optional[float]
     seq: Optional[int]
     cpu_percent: Optional[float]
@@ -94,7 +93,6 @@ def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
         local_rank=row.local_rank,
         local_world_size=row.local_world_size,
         world_size=row.world_size,
-        pid=row.pid,
     )
 
 
@@ -170,7 +168,7 @@ def _sample_rows(
     rows = conn.execute(
         f"""
         SELECT global_rank, local_rank, world_size, local_world_size,
-               node_rank, hostname, pid, sample_ts_s, seq, cpu_percent,
+               node_rank, hostname, sample_ts_s, seq, cpu_percent,
                ram_used_bytes, ram_total_bytes, gpu_available, gpu_count,
                gpu_util_avg, gpu_util_peak, gpu_mem_used_avg_bytes,
                gpu_mem_used_peak_bytes, gpu_temp_avg_c, gpu_temp_peak_c,
@@ -190,22 +188,21 @@ def _sample_rows(
             local_world_size=row[3],
             node_rank=row[4],
             hostname=row[5],
-            pid=row[6],
-            sample_ts_s=row[7],
-            seq=row[8],
-            cpu_percent=row[9],
-            ram_used_bytes=row[10],
-            ram_total_bytes=row[11],
-            gpu_available=bool(row[12]) if row[12] is not None else None,
-            gpu_count=row[13],
-            gpu_util_avg=row[14],
-            gpu_util_peak=row[15],
-            gpu_mem_used_avg_bytes=row[16],
-            gpu_mem_used_peak_bytes=row[17],
-            gpu_temp_avg_c=row[18],
-            gpu_temp_peak_c=row[19],
-            gpu_power_avg_w=row[20],
-            gpu_power_peak_w=row[21],
+            sample_ts_s=row[6],
+            seq=row[7],
+            cpu_percent=row[8],
+            ram_used_bytes=row[9],
+            ram_total_bytes=row[10],
+            gpu_available=bool(row[11]) if row[11] is not None else None,
+            gpu_count=row[12],
+            gpu_util_avg=row[13],
+            gpu_util_peak=row[14],
+            gpu_mem_used_avg_bytes=row[15],
+            gpu_mem_used_peak_bytes=row[16],
+            gpu_temp_avg_c=row[17],
+            gpu_temp_peak_c=row[18],
+            gpu_power_avg_w=row[19],
+            gpu_power_peak_w=row[20],
         )
         for row in rows
     ]

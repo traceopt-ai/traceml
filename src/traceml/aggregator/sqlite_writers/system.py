@@ -35,7 +35,6 @@ Envelope:
     "local_world_size": int,
     "node_rank": int,    # canonical System grouping identity
     "hostname": str,
-    "pid": int,
     "sampler": "SystemSampler",
     "timestamp": float,
     "tables": {
@@ -96,7 +95,6 @@ class SystemPayloadIdentity:
     local_world_size: Optional[int]
     node_rank: Optional[int]
     hostname: Optional[str]
-    pid: Optional[int]
 
 
 def _payload_identity(
@@ -117,7 +115,6 @@ def _payload_identity(
         local_world_size=_optional_int(payload_dict.get("local_world_size")),
         node_rank=_optional_int(payload_dict.get("node_rank")),
         hostname=_optional_str(payload_dict.get("hostname")),
-        pid=_optional_int(payload_dict.get("pid")),
     )
 
 
@@ -167,7 +164,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size       INTEGER,
             node_rank              INTEGER,
             hostname               TEXT,
-            pid                    INTEGER,
             sample_ts_s            REAL,
             seq                    INTEGER,
             cpu_percent            REAL,
@@ -197,7 +193,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size INTEGER,
             node_rank        INTEGER,
             hostname         TEXT,
-            pid              INTEGER,
             sample_ts_s      REAL,
             seq              INTEGER,
             gpu_idx          INTEGER NOT NULL,
@@ -248,12 +243,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     _ensure_column(
         conn,
-        table="system_samples",
-        column="pid",
-        definition="INTEGER",
-    )
-    _ensure_column(
-        conn,
         table="system_gpu_samples",
         column="global_rank",
         definition="INTEGER",
@@ -287,12 +276,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
         table="system_gpu_samples",
         column="hostname",
         definition="TEXT",
-    )
-    _ensure_column(
-        conn,
-        table="system_gpu_samples",
-        column="pid",
-        definition="INTEGER",
     )
     conn.execute(
         """
@@ -460,7 +443,6 @@ def build_rows(
                             identity.local_world_size,
                             identity.node_rank,
                             identity.hostname,
-                            identity.pid,
                             sample_ts_s,
                             seq,
                             gpu_idx,
@@ -499,7 +481,6 @@ def build_rows(
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    identity.pid,
                     sample_ts_s,
                     seq,
                     cpu_percent,
@@ -546,7 +527,6 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                pid,
                 sample_ts_s,
                 seq,
                 cpu_percent,
@@ -563,7 +543,7 @@ def insert_rows(
                 gpu_power_avg_w,
                 gpu_power_peak_w
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             system_rows,
         )
@@ -580,7 +560,6 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                pid,
                 sample_ts_s,
                 seq,
                 gpu_idx,
@@ -591,7 +570,7 @@ def insert_rows(
                 power_usage_w,
                 power_limit_w
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             gpu_rows,
         )

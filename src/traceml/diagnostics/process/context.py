@@ -22,7 +22,6 @@ class ProcessSummarySignals:
     samples: int
 
     distinct_ranks: int
-    distinct_pids: int
 
     cpu_avg_percent: Optional[float]
     cpu_peak_percent: Optional[float]
@@ -189,7 +188,6 @@ def build_process_summary_signals(
     duration_s: Optional[float],
     samples: int,
     distinct_ranks: int,
-    distinct_pids: int,
     cpu_avg_percent: Optional[float],
     cpu_peak_percent: Optional[float],
     cpu_logical_core_count: Optional[int],
@@ -240,7 +238,6 @@ def build_process_summary_signals(
         duration_s=duration_s,
         samples=int(samples),
         distinct_ranks=int(distinct_ranks),
-        distinct_pids=int(distinct_pids),
         cpu_avg_percent=cpu_avg_percent,
         cpu_peak_percent=cpu_peak_percent,
         cpu_logical_core_count=cpu_logical_core_count,

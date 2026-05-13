@@ -25,7 +25,6 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
             local_world_size INTEGER,
             node_rank INTEGER,
             hostname TEXT,
-            pid INTEGER,
             seq INTEGER,
             sample_ts_s REAL,
             cpu_percent REAL,
@@ -54,7 +53,6 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
             local_world_size INTEGER,
             node_rank INTEGER,
             hostname TEXT,
-            pid INTEGER,
             seq INTEGER,
             gpu_idx INTEGER,
             util REAL,
@@ -68,7 +66,7 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO system_samples VALUES (
-            1, 0, 0, 1, 1, 0, 'worker-0', 123, 1, 10.0,
+            1, 0, 0, 1, 1, 0, 'worker-0', 1, 10.0,
             40.0, 8.0, 16.0, 1, 1,
             55.0, 70.0, 4.0, 5.0, 60.0, 68.0, 100.0, 120.0
         )
@@ -77,7 +75,7 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO system_gpu_samples VALUES (
-            1, 0, 0, 1, 1, 0, 'worker-0', 123, 1, 0,
+            1, 0, 0, 1, 1, 0, 'worker-0', 1, 0,
             70.0, 5.0, 10.0, 68.0, 120.0
         )
         """
@@ -91,7 +89,11 @@ def _create_process_tables(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY,
             rank INTEGER,
             global_rank INTEGER,
-            pid INTEGER,
+            local_rank INTEGER,
+            world_size INTEGER,
+            local_world_size INTEGER,
+            node_rank INTEGER,
+            hostname TEXT,
             sample_ts_s REAL,
             cpu_percent REAL,
             cpu_logical_core_count INTEGER,
@@ -109,7 +111,8 @@ def _create_process_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO process_samples VALUES (
-            1, 0, 0, 123, 10.0, 80.0, 8, 4000000000.0, 16000000000.0,
+            1, 0, 0, 0, 1, 1, 0, 'worker-0',
+            10.0, 80.0, 8, 4000000000.0, 16000000000.0,
             1, 1, 0, 5000000000.0, 6000000000.0, 10000000000.0
         )
         """
@@ -148,6 +151,15 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         result.payload["per_node"]["n0"]["per_gpu"]["0"]["mem_peak_percent"]
         == 50.0
     )
+    assert result.payload["per_node"]["n0"]["identity"] == {
+        "node": "n0",
+        "node_rank": 0,
+        "hostname": "worker-0",
+        "global_rank": 0,
+        "local_rank": 0,
+        "local_world_size": 1,
+        "world_size": 1,
+    }
     assert "- Issues:" not in result.text
 
 
@@ -159,7 +171,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
         conn.execute(
             """
             INSERT INTO system_samples VALUES (
-                2, 1, 0, 2, 1, 1, 'worker-1', 124, 2, 11.0,
+                2, 1, 0, 2, 1, 1, 'worker-1', 2, 11.0,
                 41.0, 8.0, 16.0, 1, 1,
                 45.0, 80.0, 4.0, 5.0, 90.0, 95.0, 100.0, 120.0
             )
@@ -168,7 +180,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
         conn.execute(
             """
             INSERT INTO system_gpu_samples VALUES (
-                2, 1, 0, 2, 1, 1, 'worker-1', 124, 2, 0,
+                2, 1, 0, 2, 1, 1, 'worker-1', 2, 0,
                 45.0, 5.0, 10.0, 95.0, 120.0
             )
             """
@@ -209,13 +221,12 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     result = ProcessSummarySection().build(str(db_path))
 
     assert data.aggregate.process_samples == 1
-    assert data.per_rank[0].pid_count == 1
     assert result.section == "process"
     assert result.payload["overview"]["samples"] == 1
     assert "TraceML Process Summary" in result.text
     assert "- Diagnosis: NORMAL" in result.text
     assert (
-        "- Stats: global ranks 1 | pids 1 | CPU avg 80% | "
+        "- Stats: global ranks 1 | CPU avg 80% | "
         "RSS peak 4.0 / 16.0 GB | GPU reserved peak 60%"
     ) in result.text
     assert "- Takeaway:" not in result.text
@@ -232,6 +243,14 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         ]
         == 0
     )
+    assert result.payload["per_global_rank"]["0"]["identity"] == {
+        "global_rank": 0,
+        "local_rank": 0,
+        "node_rank": 0,
+        "hostname": "worker-0",
+        "local_world_size": 1,
+        "world_size": 1,
+    }
     assert "takeaway" not in result.payload["global"]
 
 

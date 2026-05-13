@@ -64,7 +64,6 @@ class ProcessSummaryAgg:
     process_samples: int = 0
 
     distinct_ranks: int = 0
-    distinct_pids: int = 0
 
     cpu_avg_percent: Optional[float] = None
     cpu_peak_percent: Optional[float] = None
@@ -97,12 +96,14 @@ class PerRankProcessSummary:
       globally unique worker rank.
     - Memory values remain in raw bytes while aggregating and are converted only
       during final summary serialization.
-    - `pid_count` is included because a rank may emit from more than one traced
-      process over the sampled window in some environments.
     """
 
     global_rank: int
-    pid_count: int = 0
+    local_rank: Optional[int] = None
+    world_size: Optional[int] = None
+    local_world_size: Optional[int] = None
+    node_rank: Optional[int] = None
+    hostname: Optional[str] = None
 
     cpu_avg_percent: Optional[float] = None
     cpu_peak_percent: Optional[float] = None
@@ -170,8 +171,7 @@ def _load_process_summary_agg(
             COUNT(*),
             MIN(sample_ts_s),
             MAX(sample_ts_s),
-            COUNT(DISTINCT global_rank),
-            COUNT(DISTINCT pid)
+            COUNT(DISTINCT global_rank)
         {base_sql};
         """,
         (*params, int(max_process_rows)),
@@ -181,7 +181,6 @@ def _load_process_summary_agg(
     first_ts = float(count_row[1]) if count_row[1] is not None else None
     last_ts = float(count_row[2]) if count_row[2] is not None else None
     distinct_ranks = int(count_row[3] or 0)
-    distinct_pids = int(count_row[4] or 0)
 
     row = conn.execute(
         f"""
@@ -213,7 +212,6 @@ def _load_process_summary_agg(
         last_ts=last_ts,
         process_samples=n_rows,
         distinct_ranks=distinct_ranks,
-        distinct_pids=distinct_pids,
         cpu_avg_percent=float(row[0]) if row[0] is not None else None,
         cpu_peak_percent=float(row[1]) if row[1] is not None else None,
         cpu_logical_core_count=int(row[2]) if row[2] is not None else None,
@@ -276,7 +274,11 @@ def _load_per_rank_process_summary(
     sql = f"""
         SELECT
             global_rank,
-            COUNT(DISTINCT pid),
+            MAX(local_rank),
+            MAX(world_size),
+            MAX(local_world_size),
+            MAX(node_rank),
+            MAX(hostname),
 
             AVG(cpu_percent),
             MAX(cpu_percent),
@@ -324,33 +326,37 @@ def _load_per_rank_process_summary(
         rank_id = int(row[0])
         out[rank_id] = PerRankProcessSummary(
             global_rank=rank_id,
-            pid_count=int(row[1] or 0),
-            cpu_avg_percent=float(row[2]) if row[2] is not None else None,
-            cpu_peak_percent=float(row[3]) if row[3] is not None else None,
-            cpu_logical_core_count=int(row[4]) if row[4] is not None else None,
-            ram_avg_bytes=float(row[5]) if row[5] is not None else None,
-            ram_peak_bytes=float(row[6]) if row[6] is not None else None,
-            ram_total_bytes=float(row[7]) if row[7] is not None else None,
-            gpu_available=bool(row[8]) if row[8] is not None else None,
-            gpu_count=int(row[9]) if row[9] is not None else None,
-            gpu_device_index=int(row[10]) if row[10] is not None else None,
+            local_rank=int(row[1]) if row[1] is not None else None,
+            world_size=int(row[2]) if row[2] is not None else None,
+            local_world_size=int(row[3]) if row[3] is not None else None,
+            node_rank=int(row[4]) if row[4] is not None else None,
+            hostname=str(row[5]) if row[5] is not None else None,
+            cpu_avg_percent=float(row[6]) if row[6] is not None else None,
+            cpu_peak_percent=float(row[7]) if row[7] is not None else None,
+            cpu_logical_core_count=int(row[8]) if row[8] is not None else None,
+            ram_avg_bytes=float(row[9]) if row[9] is not None else None,
+            ram_peak_bytes=float(row[10]) if row[10] is not None else None,
+            ram_total_bytes=float(row[11]) if row[11] is not None else None,
+            gpu_available=bool(row[12]) if row[12] is not None else None,
+            gpu_count=int(row[13]) if row[13] is not None else None,
+            gpu_device_index=int(row[14]) if row[14] is not None else None,
             gpu_mem_used_avg_bytes=(
-                float(row[11]) if row[11] is not None else None
-            ),
-            gpu_mem_used_peak_bytes=(
-                float(row[12]) if row[12] is not None else None
-            ),
-            gpu_mem_reserved_avg_bytes=(
-                float(row[13]) if row[13] is not None else None
-            ),
-            gpu_mem_reserved_peak_bytes=(
-                float(row[14]) if row[14] is not None else None
-            ),
-            gpu_mem_total_bytes=(
                 float(row[15]) if row[15] is not None else None
             ),
-            gpu_mem_reserved_overhang_ratio=(
+            gpu_mem_used_peak_bytes=(
                 float(row[16]) if row[16] is not None else None
+            ),
+            gpu_mem_reserved_avg_bytes=(
+                float(row[17]) if row[17] is not None else None
+            ),
+            gpu_mem_reserved_peak_bytes=(
+                float(row[18]) if row[18] is not None else None
+            ),
+            gpu_mem_total_bytes=(
+                float(row[19]) if row[19] is not None else None
+            ),
+            gpu_mem_reserved_overhang_ratio=(
+                float(row[20]) if row[20] is not None else None
             ),
         )
     return out
@@ -387,7 +393,6 @@ def _build_stats_line(
     )
     parts = [
         f"global ranks {agg.distinct_ranks}",
-        f"pids {agg.distinct_pids}",
         _format_percent_stat("CPU avg", agg.cpu_avg_percent),
         _format_memory_stat("RSS peak", ram_peak_gb, ram_total_gb),
         _format_percent_stat(gpu_label, gpu_pct),
@@ -398,7 +403,7 @@ def _build_stats_line(
 
 def _per_rank_to_json(
     per_rank: Dict[int, PerRankProcessSummary],
-) -> Dict[str, Dict[str, Optional[float]]]:
+) -> Dict[str, Dict[str, Any]]:
     """
     Convert per-rank aggregates into a JSON-friendly dictionary keyed by rank.
     """
@@ -420,7 +425,14 @@ def _per_rank_to_json(
         reserved_peak_gb = bytes_to_gb(item.gpu_mem_reserved_peak_bytes)
 
         out[str(rank_id)] = {
-            "pid_count": float(item.pid_count),
+            "identity": {
+                "global_rank": item.global_rank,
+                "local_rank": item.local_rank,
+                "node_rank": item.node_rank,
+                "hostname": item.hostname,
+                "local_world_size": item.local_world_size,
+                "world_size": item.world_size,
+            },
             "gpu_device_index": (
                 float(item.gpu_device_index)
                 if item.gpu_device_index is not None
@@ -488,7 +500,6 @@ def _per_rank_to_diagnosis_input(
 
     for rank_id, item in sorted(per_rank.items()):
         out[int(rank_id)] = {
-            "pid_count": float(item.pid_count),
             "gpu_device_index": (
                 float(item.gpu_device_index)
                 if item.gpu_device_index is not None

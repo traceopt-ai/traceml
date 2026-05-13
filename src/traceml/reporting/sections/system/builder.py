@@ -331,13 +331,17 @@ def _node_json(
             else max(0.0, gpu.mem_total_bytes - gpu.mem_peak_bytes)
             / 1_000_000_000.0
         )
-    return {
+    identity = {
+        "node": node.identity.label,
         "node_rank": node.identity.node_rank,
         "hostname": node.identity.hostname,
         "global_rank": node.identity.global_rank,
         "local_rank": node.identity.local_rank,
         "local_world_size": node.identity.local_world_size,
-        "pid": node.identity.pid,
+        "world_size": node.identity.world_size,
+    }
+    return {
+        "identity": identity,
         "samples": agg.system_samples,
         "primary_diagnosis": primary,
         "issues": issues,

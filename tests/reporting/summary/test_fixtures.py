@@ -62,7 +62,6 @@ def _insert_system_sample(
             local_world_size,
             node_rank,
             hostname,
-            pid,
             sample_ts_s,
             seq,
             cpu_percent,
@@ -79,7 +78,7 @@ def _insert_system_sample(
             gpu_power_avg_w,
             gpu_power_peak_w
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -89,7 +88,6 @@ def _insert_system_sample(
             local_world_size,
             rank,
             f"worker-{rank}",
-            10_000 + rank,
             ts,
             row_id,
             30.0 + rank,
@@ -118,7 +116,6 @@ def _insert_system_sample(
                 local_world_size,
                 node_rank,
                 hostname,
-                pid,
                 sample_ts_s,
                 seq,
                 gpu_idx,
@@ -129,7 +126,7 @@ def _insert_system_sample(
                 power_usage_w,
                 power_limit_w
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
                 row_id,
@@ -139,7 +136,6 @@ def _insert_system_sample(
                 local_world_size,
                 rank,
                 f"worker-{rank}",
-                10_000 + rank,
                 ts,
                 row_id,
                 rank,
@@ -170,7 +166,6 @@ def _insert_process_sample(
             global_rank,
             sample_ts_s,
             seq,
-            pid,
             cpu_percent,
             cpu_logical_core_count,
             ram_used_bytes,
@@ -182,7 +177,7 @@ def _insert_process_sample(
             gpu_mem_reserved_bytes,
             gpu_mem_total_bytes
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -190,7 +185,6 @@ def _insert_process_sample(
             rank,
             ts,
             row_id,
-            10_000 + rank,
             50.0 + rank,
             8,
             1_000.0 + rank * 100.0,
@@ -407,7 +401,6 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     assert system["cluster"]["gpu"]["count"] == 1
     assert set(system["per_node"]) == {"n0"}
     assert process["overview"]["global_ranks_seen"] == 1
-    assert process["per_global_rank"]["0"]["pid_count"] == 1.0
     assert step_time["overview"]["mode"] == "single_rank"
     assert step_time["overview"]["global_ranks_seen"] == 1
     assert step_time["global"]["median_step_rank"]["steps_analyzed"] == 4

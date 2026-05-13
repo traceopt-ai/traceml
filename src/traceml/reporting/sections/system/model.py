@@ -129,7 +129,6 @@ class SystemNodeIdentity:
     local_rank: Optional[int]
     local_world_size: Optional[int]
     world_size: Optional[int]
-    pid: Optional[int]
 
 
 @dataclass(frozen=True)
