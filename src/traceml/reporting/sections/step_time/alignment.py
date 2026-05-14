@@ -31,6 +31,7 @@ class AlignedStepWindow:
     steps_analyzed: int
     start_step: Optional[int]
     end_step: Optional[int]
+    window_size: int
     global_ranks_used: int
     global_ranks_observed: int
 
@@ -41,8 +42,7 @@ class AlignedStepWindow:
             "aligned_steps_analyzed": int(self.steps_analyzed),
             "start_step": self.start_step,
             "end_step": self.end_step,
-            "global_ranks_used": int(self.global_ranks_used),
-            "global_ranks_observed": int(self.global_ranks_observed),
+            "window_size": int(self.window_size),
         }
 
 
@@ -130,6 +130,7 @@ def build_aligned_step_summary(
     observed ranks. Per-rank detail can still use its own latest window.
     """
     observed = len(per_global_rank_step_metrics)
+    window_size = max(1, int(max_rows))
     common_steps = _common_suffix_steps(per_global_rank_step_metrics, max_rows)
     if not common_steps:
         return (
@@ -140,6 +141,7 @@ def build_aligned_step_summary(
                 steps_analyzed=0,
                 start_step=None,
                 end_step=None,
+                window_size=window_size,
                 global_ranks_used=0,
                 global_ranks_observed=observed,
             ),
@@ -169,6 +171,7 @@ def build_aligned_step_summary(
             steps_analyzed=len(common_steps),
             start_step=int(common_steps[0]),
             end_step=int(common_steps[-1]),
+            window_size=window_size,
             global_ranks_used=len(aligned_summary),
             global_ranks_observed=observed,
         ),

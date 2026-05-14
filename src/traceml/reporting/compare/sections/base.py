@@ -58,9 +58,7 @@ def first_present(*values: Any) -> Any:
 def diagnosis_status(section: Any) -> Optional[str]:
     if not isinstance(section, dict):
         return None
-    block = section.get("primary_diagnosis")
-    if not isinstance(block, dict):
-        block = section.get("diagnosis_presented")
+    block = section.get("diagnosis")
     if not isinstance(block, dict):
         return None
     return as_str(block.get("status"))

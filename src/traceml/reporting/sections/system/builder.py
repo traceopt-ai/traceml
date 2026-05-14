@@ -17,25 +17,28 @@ from traceml.diagnostics.common import (
     severity_rank,
 )
 from traceml.diagnostics.system import build_system_diagnosis_result
-from traceml.diagnostics.system.policy import DEFAULT_SYSTEM_POLICY
+from traceml.reporting.schema import (
+    BaseGlobal,
+    BaseGroups,
+    BaseMetadata,
+    BaseSectionPayload,
+    GlobalWindow,
+    GroupRow,
+)
 from traceml.reporting.sections.system.loader import SystemSectionData
 from traceml.reporting.sections.system.model import (
-    MetricRollup,
+    SYSTEM_METRIC_NAMES,
     SystemClusterSummary,
     SystemNodeSummary,
     SystemSummaryAgg,
-    _band_name,
-    _highest_gpu_memory_percent,
-    _per_gpu_to_diagnosis_input,
-    _per_gpu_to_json,
-    _percent,
+    average_optional,
     node_gpu_headroom_min_gb,
     node_gpu_mem_peak_percent,
-    rollup_metric,
+    per_gpu_to_diagnosis_input,
+    percent,
 )
 from traceml.reporting.summaries.issue_summary import issue_to_json
 from traceml.reporting.summaries.summary_formatting import (
-    bytes_to_gb,
     duration_from_bounds,
     format_optional,
 )
@@ -110,7 +113,7 @@ def _diagnose_aggregate(agg: SystemSummaryAgg, *, per_gpu: Dict[int, Any]):
         gpu_temp_peak_c=agg.gpu_temp_peak_c,
         gpu_power_avg_w=agg.gpu_power_avg_w,
         gpu_power_peak_w=agg.gpu_power_peak_w,
-        per_gpu=_per_gpu_to_diagnosis_input(per_gpu),
+        per_gpu=per_gpu_to_diagnosis_input(per_gpu),
     )
 
 
@@ -168,151 +171,178 @@ def _primary_from_diagnosis(
     return payload
 
 
-def _rollup_to_json(rollup: MetricRollup) -> Dict[str, Optional[float]]:
-    return {
-        "median": rollup.median,
-        "worst": rollup.worst,
-        "worst_node": rollup.worst_node,
-    }
+def _node_headroom_min_bytes(node: SystemNodeSummary) -> Optional[float]:
+    value_gb = node_gpu_headroom_min_gb(node)
+    return None if value_gb is None else float(value_gb) * 1_000_000_000.0
 
 
-def _node_rollup(cluster: SystemClusterSummary) -> Dict[str, Any]:
-    nodes = cluster.nodes
-    return {
-        "cpu": _rollup_to_json(
-            rollup_metric(
-                nodes,
-                value_fn=lambda node: node.aggregate.cpu_peak_percent,
-                higher_is_worse=True,
-            )
-        ),
-        "ram": _rollup_to_json(
-            rollup_metric(
-                nodes,
-                value_fn=lambda node: _percent(
-                    node.aggregate.ram_peak_bytes,
-                    node.aggregate.ram_total_bytes,
-                ),
-                higher_is_worse=True,
-            )
-        ),
-        "gpu_util": _rollup_to_json(
-            rollup_metric(
-                nodes,
-                value_fn=lambda node: node.aggregate.gpu_util_avg_percent,
-                higher_is_worse=False,
-            )
-        ),
-        "gpu_mem": _rollup_to_json(
-            rollup_metric(
-                nodes,
-                value_fn=node_gpu_mem_peak_percent,
-                higher_is_worse=True,
-            )
-        ),
-        "gpu_temp": _rollup_to_json(
-            rollup_metric(
-                nodes,
-                value_fn=lambda node: node.aggregate.gpu_temp_peak_c,
-                higher_is_worse=True,
-            )
-        ),
-        "gpu_headroom_gb": _rollup_to_json(
-            rollup_metric(
-                nodes,
-                value_fn=node_gpu_headroom_min_gb,
-                higher_is_worse=False,
-            )
-        ),
-    }
+def _system_mode(cluster: SystemClusterSummary) -> str:
+    """Return the topology mode represented by the System summary."""
+    if cluster.observed_nodes <= 0:
+        return "no_data"
+    if cluster.expected_nodes <= 1 and cluster.observed_nodes <= 1:
+        return "single_node"
+    return "multi_node"
 
 
-def _cluster_json(
+def _system_average(
     agg: SystemSummaryAgg, cluster: SystemClusterSummary
-) -> Dict:
+) -> Dict[str, Any]:
     per_gpu = {
         gpu_idx: gpu
         for node in cluster.nodes.values()
         for gpu_idx, gpu in node.per_gpu.items()
     }
-    gpu_mem_peak_percent = _highest_gpu_memory_percent(per_gpu)
-    gpu_power_avg_limit_percent = max(
-        (
-            value
-            for node in cluster.nodes.values()
-            for value in (
-                _percent(gpu.power_avg_w, gpu.power_limit_w)
-                for gpu in node.per_gpu.values()
-            )
-            if value is not None
-        ),
-        default=None,
+    gpu_total_bytes = sum(
+        float(gpu.mem_total_bytes)
+        for gpu in per_gpu.values()
+        if gpu.mem_total_bytes is not None
+    )
+    gpu_mem_percent = percent(
+        agg.gpu_mem_avg_bytes,
+        gpu_total_bytes if gpu_total_bytes > 0.0 else None,
+    )
+    node_headroom_values = [
+        value
+        for node in cluster.nodes.values()
+        for value in (_node_headroom_min_bytes(node),)
+        if value is not None
+    ]
+    return {
+        "cpu_percent": agg.cpu_avg_percent,
+        "ram_bytes": agg.ram_avg_bytes,
+        "ram_percent": percent(agg.ram_avg_bytes, agg.ram_total_bytes),
+        "gpu_util_percent": agg.gpu_util_avg_percent,
+        "gpu_mem_bytes": agg.gpu_mem_avg_bytes,
+        "gpu_mem_percent": gpu_mem_percent,
+        "gpu_temp_c": agg.gpu_temp_avg_c,
+        "gpu_power_w": agg.gpu_power_avg_w,
+        "gpu_headroom_bytes": average_optional(node_headroom_values),
+    }
+
+
+def _node_metric_values(node: SystemNodeSummary) -> Dict[str, Any]:
+    """Return the public row metrics for one system node."""
+    agg = node.aggregate
+    gpu_total_bytes = sum(
+        float(gpu.mem_total_bytes)
+        for gpu in node.per_gpu.values()
+        if gpu.mem_total_bytes is not None
     )
     return {
-        "cpu": {
-            "avg_percent": agg.cpu_avg_percent,
-            "peak_percent": agg.cpu_peak_percent,
-            "avg_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.cpu_avg_percent.classify(
-                    agg.cpu_avg_percent
-                )
-            ),
-        },
-        "ram": {
-            "avg_gb": bytes_to_gb(agg.ram_avg_bytes),
-            "peak_gb": bytes_to_gb(agg.ram_peak_bytes),
-            "total_gb": bytes_to_gb(agg.ram_total_bytes),
-            "peak_percent": _percent(agg.ram_peak_bytes, agg.ram_total_bytes),
-            "peak_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.ram_peak_percent.classify(
-                    _percent(agg.ram_peak_bytes, agg.ram_total_bytes)
-                )
-            ),
-        },
-        "gpu": {
-            "available": agg.gpu_available,
-            "count": cluster.observed_gpus,
-            "util_avg_percent": agg.gpu_util_avg_percent,
-            "util_peak_percent": agg.gpu_util_peak_percent,
-            "util_avg_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_util_avg_percent.classify(
-                    agg.gpu_util_avg_percent
-                )
-            ),
-            "mem_avg_gb": bytes_to_gb(agg.gpu_mem_avg_bytes),
-            "mem_peak_gb": bytes_to_gb(agg.gpu_mem_peak_bytes),
-            "mem_peak_percent": gpu_mem_peak_percent,
-            "mem_peak_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_memory_peak_percent.classify(
-                    gpu_mem_peak_percent
-                )
-            ),
-            "temp_avg_c": agg.gpu_temp_avg_c,
-            "temp_peak_c": agg.gpu_temp_peak_c,
-            "temp_peak_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_temp_peak_c.classify(
-                    agg.gpu_temp_peak_c
-                )
-            ),
-            "power_avg_w": agg.gpu_power_avg_w,
-            "power_peak_w": agg.gpu_power_peak_w,
-            "power_avg_limit_percent": gpu_power_avg_limit_percent,
-            "power_avg_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_power_avg_limit_percent.classify(
-                    gpu_power_avg_limit_percent
-                )
-            ),
-            "headroom_min_gb": min(
-                (
-                    value
-                    for node in cluster.nodes.values()
-                    for value in (node_gpu_headroom_min_gb(node),)
-                    if value is not None
-                ),
-                default=None,
-            ),
-        },
+        "cpu_percent": agg.cpu_avg_percent,
+        "ram_bytes": agg.ram_avg_bytes,
+        "ram_percent": percent(agg.ram_avg_bytes, agg.ram_total_bytes),
+        "gpu_util_percent": agg.gpu_util_avg_percent,
+        "gpu_mem_bytes": agg.gpu_mem_avg_bytes,
+        "gpu_mem_percent": percent(
+            agg.gpu_mem_avg_bytes,
+            gpu_total_bytes if gpu_total_bytes > 0.0 else None,
+        ),
+        "gpu_temp_c": agg.gpu_temp_avg_c,
+        "gpu_power_w": agg.gpu_power_avg_w,
+        "gpu_headroom_bytes": _node_headroom_min_bytes(node),
     }
+
+
+def _system_node_comparison(
+    cluster: SystemClusterSummary,
+    *,
+    field: str,
+) -> Dict[str, Any]:
+    specs = {
+        "cpu_percent": (
+            lambda node: node.aggregate.cpu_peak_percent,
+            True,
+        ),
+        "ram_bytes": (
+            lambda node: node.aggregate.ram_peak_bytes,
+            True,
+        ),
+        "ram_percent": (
+            lambda node: percent(
+                node.aggregate.ram_peak_bytes,
+                node.aggregate.ram_total_bytes,
+            ),
+            True,
+        ),
+        "gpu_util_percent": (
+            lambda node: node.aggregate.gpu_util_avg_percent,
+            False,
+        ),
+        "gpu_mem_bytes": (
+            lambda node: node.aggregate.gpu_mem_peak_bytes,
+            True,
+        ),
+        "gpu_mem_percent": (node_gpu_mem_peak_percent, True),
+        "gpu_temp_c": (
+            lambda node: node.aggregate.gpu_temp_peak_c,
+            True,
+        ),
+        "gpu_power_w": (
+            lambda node: node.aggregate.gpu_power_peak_w,
+            True,
+        ),
+        "gpu_headroom_bytes": (_node_headroom_min_bytes, False),
+    }
+    value_fn, higher_is_worse = specs[field]
+    pairs = [
+        (label, float(value))
+        for label, node in cluster.nodes.items()
+        for value in (value_fn(node),)
+        if value is not None
+    ]
+    if not pairs:
+        return {
+            "median": None,
+            "median_node_rank": None,
+            "worst": None,
+            "worst_node_rank": None,
+        }
+
+    values = [value for _label, value in pairs]
+    median_value = sorted(values)[len(values) // 2]
+    median_label, _ = min(
+        pairs,
+        key=lambda item: (abs(item[1] - median_value), item[1], item[0]),
+    )
+    worst_label, worst_value = (
+        max(pairs, key=lambda item: (item[1], item[0]))
+        if higher_is_worse
+        else min(pairs, key=lambda item: (item[1], item[0]))
+    )
+    return {
+        "median": median_value,
+        "median_node_rank": median_label,
+        "worst": worst_value,
+        "worst_node_rank": worst_label,
+    }
+
+
+def _system_median_worst(cluster: SystemClusterSummary) -> tuple[Dict, Dict]:
+    median: Dict[str, Any] = {}
+    worst: Dict[str, Any] = {}
+    for field in (
+        "cpu_percent",
+        "ram_bytes",
+        "ram_percent",
+        "gpu_util_percent",
+        "gpu_mem_bytes",
+        "gpu_mem_percent",
+        "gpu_temp_c",
+        "gpu_power_w",
+        "gpu_headroom_bytes",
+    ):
+        rollup = _system_node_comparison(cluster, field=field)
+        median[field] = {
+            "value": rollup["median"],
+            "idx": rollup["median_node_rank"],
+        }
+        worst[field] = {
+            "value": rollup["worst"],
+            "idx": rollup["worst_node_rank"],
+        }
+    return median, worst
 
 
 def _node_json(
@@ -321,52 +351,20 @@ def _node_json(
     primary: Dict[str, Any],
     issues: list[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    agg = node.aggregate
-    per_gpu_json = _per_gpu_to_json(node.per_gpu)
-    for gpu_idx, gpu in node.per_gpu.items():
-        entry = per_gpu_json[str(gpu_idx)]
-        entry["headroom_min_gb"] = (
-            None
-            if gpu.mem_total_bytes is None or gpu.mem_peak_bytes is None
-            else max(0.0, gpu.mem_total_bytes - gpu.mem_peak_bytes)
-            / 1_000_000_000.0
-        )
     identity = {
-        "node": node.identity.label,
-        "node_rank": node.identity.node_rank,
-        "hostname": node.identity.hostname,
         "global_rank": node.identity.global_rank,
         "local_rank": node.identity.local_rank,
+        "node_rank": node.identity.node_rank,
+        "hostname": node.identity.hostname,
         "local_world_size": node.identity.local_world_size,
         "world_size": node.identity.world_size,
     }
-    return {
-        "identity": identity,
-        "samples": agg.system_samples,
-        "primary_diagnosis": primary,
-        "issues": issues,
-        "cpu": {
-            "avg_percent": agg.cpu_avg_percent,
-            "peak_percent": agg.cpu_peak_percent,
-        },
-        "ram": {
-            "avg_gb": bytes_to_gb(agg.ram_avg_bytes),
-            "peak_gb": bytes_to_gb(agg.ram_peak_bytes),
-            "total_gb": bytes_to_gb(agg.ram_total_bytes),
-            "peak_percent": _percent(agg.ram_peak_bytes, agg.ram_total_bytes),
-        },
-        "gpu": {
-            "available": agg.gpu_available,
-            "count": len(node.per_gpu),
-            "util_avg_percent": agg.gpu_util_avg_percent,
-            "util_peak_percent": agg.gpu_util_peak_percent,
-            "mem_peak_gb": bytes_to_gb(agg.gpu_mem_peak_bytes),
-            "mem_peak_percent": node_gpu_mem_peak_percent(node),
-            "temp_peak_c": agg.gpu_temp_peak_c,
-            "headroom_min_gb": node_gpu_headroom_min_gb(node),
-        },
-        "per_gpu": per_gpu_json,
-    }
+    return GroupRow(
+        identity=identity,
+        diagnosis=primary,
+        issues=issues,
+        metrics=_node_metric_values(node),
+    ).to_json()
 
 
 def _fmt_pct(value: Optional[float]) -> str:
@@ -377,15 +375,21 @@ def _fmt_temp(value: Optional[float]) -> str:
     return "n/a" if value is None else f"{float(value):.1f}C"
 
 
+def _fmt_node_idx(value: Any) -> str:
+    return "n/a" if value is None else f"n{value}"
+
+
 def _card_stats(
     cluster: SystemClusterSummary,
-    rollup: Dict[str, Dict[str, Any]],
+    *,
+    median: Dict[str, Dict[str, Any]],
+    worst: Dict[str, Dict[str, Any]],
 ) -> str:
     if cluster.observed_nodes <= 1:
         node = next(iter(cluster.nodes.values()), None)
         if node is None:
             return "unavailable"
-        ram_peak_pct = _percent(
+        ram_peak_pct = percent(
             node.aggregate.ram_peak_bytes,
             node.aggregate.ram_total_bytes,
         )
@@ -406,29 +410,29 @@ def _card_stats(
     parts = [
         (
             "CPU med/worst "
-            f"{_fmt_pct(rollup['cpu']['median'])}/"
-            f"{_fmt_pct(rollup['cpu']['worst'])} "
-            f"{rollup['cpu']['worst_node']}"
+            f"{_fmt_pct(median['cpu_percent']['value'])}/"
+            f"{_fmt_pct(worst['cpu_percent']['value'])} "
+            f"{_fmt_node_idx(worst['cpu_percent']['idx'])}"
         ),
         (
             "RAM med/worst "
-            f"{_fmt_pct(rollup['ram']['median'])}/"
-            f"{_fmt_pct(rollup['ram']['worst'])} "
-            f"{rollup['ram']['worst_node']}"
+            f"{_fmt_pct(median['ram_percent']['value'])}/"
+            f"{_fmt_pct(worst['ram_percent']['value'])} "
+            f"{_fmt_node_idx(worst['ram_percent']['idx'])}"
         ),
     ]
     if cluster.aggregate.gpu_available:
         parts.append(
             "GPU util med/worst "
-            f"{_fmt_pct(rollup['gpu_util']['median'])}/"
-            f"{_fmt_pct(rollup['gpu_util']['worst'])} "
-            f"{rollup['gpu_util']['worst_node']}"
+            f"{_fmt_pct(median['gpu_util_percent']['value'])}/"
+            f"{_fmt_pct(worst['gpu_util_percent']['value'])} "
+            f"{_fmt_node_idx(worst['gpu_util_percent']['idx'])}"
         )
         parts.append(
             "GPU temp med/worst "
-            f"{_fmt_temp(rollup['gpu_temp']['median'])}/"
-            f"{_fmt_temp(rollup['gpu_temp']['worst'])} "
-            f"{rollup['gpu_temp']['worst_node']}"
+            f"{_fmt_temp(median['gpu_temp_c']['value'])}/"
+            f"{_fmt_temp(worst['gpu_temp_c']['value'])} "
+            f"{_fmt_node_idx(worst['gpu_temp_c']['idx'])}"
         )
     return " | ".join(parts)
 
@@ -477,7 +481,7 @@ def build_system_card(
         cluster.aggregate.first_ts,
         cluster.aggregate.last_ts,
     )
-    rollup = _node_rollup(cluster)
+    median, worst = _system_median_worst(cluster)
     coverage = f"{cluster.observed_nodes}/{cluster.expected_nodes}"
     card = "\n".join(
         [
@@ -489,37 +493,50 @@ def build_system_card(
             "System",
             f"- Diagnosis: {primary.get('status', 'NO DATA')}",
             f"- Scope: nodes {coverage} | samples {cluster.aggregate.system_samples}",
-            f"- Stats: {_card_stats(cluster, rollup)}",
+            f"- Stats: {_card_stats(cluster, median=median, worst=worst)}",
             f"- Why: {primary.get('reason', 'No system telemetry was recorded.')}",
         ]
     )
 
-    payload = {
-        "overview": {
-            "scope": "cluster",
-            "duration_s": duration_s,
-            "samples": cluster.aggregate.system_samples,
-            "nodes": {
-                "expected": cluster.expected_nodes,
-                "observed": cluster.observed_nodes,
-                "coverage": coverage,
-                "partial": cluster.partial,
-            },
-            "gpus": {"observed": cluster.observed_gpus},
-        },
-        "primary_diagnosis": primary,
-        "issues": issues,
-        "cluster": _cluster_json(cluster.aggregate, cluster),
-        "node_rollup": rollup,
-        "per_node": node_payloads,
-        "units": {
-            "memory": "GB",
+    metadata = BaseMetadata(
+        mode=_system_mode(cluster),
+        duration_s=duration_s,
+        samples=cluster.aggregate.system_samples,
+        nodes_expected=cluster.expected_nodes,
+        nodes_observed=cluster.observed_nodes,
+        nodes_coverage=coverage,
+        nodes_partial=cluster.partial,
+        gpus_observed=cluster.observed_gpus,
+        section_metric_names=SYSTEM_METRIC_NAMES,
+    )
+    global_summary = BaseGlobal(
+        index_by="node_rank",
+        window=GlobalWindow(
+            kind="sample_window",
+            alignment="none",
+            samples=cluster.aggregate.system_samples,
+        ).to_json(),
+        average=_system_average(cluster.aggregate, cluster),
+        median=median,
+        worst=worst,
+    )
+    payload = BaseSectionPayload(
+        metadata=metadata.to_json(),
+        diagnosis=primary,
+        issues=issues,
+        global_summary=global_summary.to_json(),
+        groups=BaseGroups(
+            by="node_rank",
+            rows=node_payloads,
+        ).to_json(),
+        units={
+            "memory": "bytes",
             "temperature": "C",
             "power": "W",
             "util": "%",
         },
-        "card": card,
-    }
+        card=card,
+    ).to_json()
     return card, payload
 
 

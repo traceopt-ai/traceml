@@ -6,7 +6,6 @@ from typing import Any, Dict
 
 from traceml.reporting.compare.model import CompareSection
 from traceml.reporting.compare.sections.base import (
-    first_present,
     nested_get,
     numeric_metric,
     section_available,
@@ -69,31 +68,28 @@ class SystemComparer:
 
     def _value(self, section: Any, key: str) -> Any:
         if key == "cpu_avg_percent":
-            return first_present(
-                nested_get(section, "global", "cpu", "avg_percent"),
-                nested_get(section, "cpu_avg_percent"),
+            return nested_get(
+                section, "aggregate", "metrics", "cpu", "avg_percent"
             )
         if key == "ram_peak_gb":
-            return first_present(
-                nested_get(section, "global", "ram", "peak_gb"),
-                nested_get(section, "ram_peak_gb"),
+            return nested_get(
+                section, "aggregate", "metrics", "ram", "peak_gb"
             )
         if key == "gpu_util_avg_percent":
-            return first_present(
-                nested_get(
-                    section, "global", "gpu_rollup", "util_avg_percent"
-                ),
-                nested_get(section, "gpu_util_avg_percent"),
+            return nested_get(
+                section,
+                "aggregate",
+                "metrics",
+                "gpu",
+                "util_avg_percent",
             )
         if key == "gpu_memory_peak_percent":
-            return first_present(
-                nested_get(
-                    section,
-                    "global",
-                    "gpu_rollup",
-                    "memory_peak_percent",
-                ),
-                nested_get(section, "gpu_memory_peak_percent"),
+            return nested_get(
+                section,
+                "aggregate",
+                "metrics",
+                "gpu",
+                "mem_peak_percent",
             )
         return None
 

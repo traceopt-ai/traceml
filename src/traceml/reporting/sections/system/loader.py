@@ -20,13 +20,11 @@ from traceml.reporting.sections.system.model import (
     SystemNodeIdentity,
     SystemNodeSummary,
     SystemSummaryAgg,
-    _avg,
-    _load_per_gpu_summary,
-    _load_system_summary_agg,
-    _max,
-    _max_int,
-    _min_ts,
-    _table_has_column,
+    average_optional,
+    max_int_optional,
+    max_optional,
+    min_timestamp,
+    table_has_column,
 )
 
 
@@ -34,8 +32,6 @@ from traceml.reporting.sections.system.model import (
 class SystemSectionData:
     """Loaded inputs for the system final-report section."""
 
-    aggregate: SystemSummaryAgg
-    per_gpu: Dict[int, PerGPUSummary]
     cluster: SystemClusterSummary
 
 
@@ -79,8 +75,8 @@ class _GpuRow:
 
 def _node_label(row: _SampleRow) -> str:
     if row.node_rank is not None:
-        return f"n{int(row.node_rank)}"
-    return f"g{int(row.global_rank or 0)}"
+        return str(int(row.node_rank))
+    return str(int(row.global_rank or 0))
 
 
 def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
@@ -98,26 +94,32 @@ def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
 
 def _aggregate_samples(rows: list[_SampleRow]) -> SystemSummaryAgg:
     return SystemSummaryAgg(
-        first_ts=_min_ts(row.sample_ts_s for row in rows),
-        last_ts=_max(row.sample_ts_s for row in rows),
+        first_ts=min_timestamp(row.sample_ts_s for row in rows),
+        last_ts=max_optional(row.sample_ts_s for row in rows),
         system_samples=len(rows),
-        cpu_avg_percent=_avg(row.cpu_percent for row in rows),
-        cpu_peak_percent=_max(row.cpu_percent for row in rows),
-        ram_avg_bytes=_avg(row.ram_used_bytes for row in rows),
-        ram_peak_bytes=_max(row.ram_used_bytes for row in rows),
-        ram_total_bytes=_max(row.ram_total_bytes for row in rows),
+        cpu_avg_percent=average_optional(row.cpu_percent for row in rows),
+        cpu_peak_percent=max_optional(row.cpu_percent for row in rows),
+        ram_avg_bytes=average_optional(row.ram_used_bytes for row in rows),
+        ram_peak_bytes=max_optional(row.ram_used_bytes for row in rows),
+        ram_total_bytes=max_optional(row.ram_total_bytes for row in rows),
         gpu_available=(
             any(bool(row.gpu_available) for row in rows) if rows else None
         ),
-        gpu_count=_max_int(row.gpu_count for row in rows),
-        gpu_util_avg_percent=_avg(row.gpu_util_avg for row in rows),
-        gpu_util_peak_percent=_max(row.gpu_util_peak for row in rows),
-        gpu_mem_avg_bytes=_avg(row.gpu_mem_used_avg_bytes for row in rows),
-        gpu_mem_peak_bytes=_max(row.gpu_mem_used_peak_bytes for row in rows),
-        gpu_temp_avg_c=_avg(row.gpu_temp_avg_c for row in rows),
-        gpu_temp_peak_c=_max(row.gpu_temp_peak_c for row in rows),
-        gpu_power_avg_w=_avg(row.gpu_power_avg_w for row in rows),
-        gpu_power_peak_w=_max(row.gpu_power_peak_w for row in rows),
+        gpu_count=max_int_optional(row.gpu_count for row in rows),
+        gpu_util_avg_percent=average_optional(
+            row.gpu_util_avg for row in rows
+        ),
+        gpu_util_peak_percent=max_optional(row.gpu_util_peak for row in rows),
+        gpu_mem_avg_bytes=average_optional(
+            row.gpu_mem_used_avg_bytes for row in rows
+        ),
+        gpu_mem_peak_bytes=max_optional(
+            row.gpu_mem_used_peak_bytes for row in rows
+        ),
+        gpu_temp_avg_c=average_optional(row.gpu_temp_avg_c for row in rows),
+        gpu_temp_peak_c=max_optional(row.gpu_temp_peak_c for row in rows),
+        gpu_power_avg_w=average_optional(row.gpu_power_avg_w for row in rows),
+        gpu_power_peak_w=max_optional(row.gpu_power_peak_w for row in rows),
     )
 
 
@@ -130,16 +132,24 @@ def _aggregate_gpu(rows: list[_GpuRow]) -> Dict[int, PerGPUSummary]:
     for gpu_idx, gpu_rows in sorted(grouped.items()):
         out[gpu_idx] = PerGPUSummary(
             gpu_idx=gpu_idx,
-            util_avg_percent=_avg(row.util for row in gpu_rows),
-            util_peak_percent=_max(row.util for row in gpu_rows),
-            mem_avg_bytes=_avg(row.mem_used_bytes for row in gpu_rows),
-            mem_peak_bytes=_max(row.mem_used_bytes for row in gpu_rows),
-            mem_total_bytes=_max(row.mem_total_bytes for row in gpu_rows),
-            temp_avg_c=_avg(row.temperature_c for row in gpu_rows),
-            temp_peak_c=_max(row.temperature_c for row in gpu_rows),
-            power_avg_w=_avg(row.power_usage_w for row in gpu_rows),
-            power_peak_w=_max(row.power_usage_w for row in gpu_rows),
-            power_limit_w=_max(row.power_limit_w for row in gpu_rows),
+            util_avg_percent=average_optional(row.util for row in gpu_rows),
+            util_peak_percent=max_optional(row.util for row in gpu_rows),
+            mem_avg_bytes=average_optional(
+                row.mem_used_bytes for row in gpu_rows
+            ),
+            mem_peak_bytes=max_optional(
+                row.mem_used_bytes for row in gpu_rows
+            ),
+            mem_total_bytes=max_optional(
+                row.mem_total_bytes for row in gpu_rows
+            ),
+            temp_avg_c=average_optional(row.temperature_c for row in gpu_rows),
+            temp_peak_c=max_optional(row.temperature_c for row in gpu_rows),
+            power_avg_w=average_optional(
+                row.power_usage_w for row in gpu_rows
+            ),
+            power_peak_w=max_optional(row.power_usage_w for row in gpu_rows),
+            power_limit_w=max_optional(row.power_limit_w for row in gpu_rows),
         )
     return out
 
@@ -220,7 +230,7 @@ def _gpu_rows(
     )
     power_limit_expr = (
         "g.power_limit_w"
-        if _table_has_column(conn, "system_gpu_samples", "power_limit_w")
+        if table_has_column(conn, "system_gpu_samples", "power_limit_w")
         else "NULL"
     )
     rows = conn.execute(
@@ -319,24 +329,10 @@ def load_system_section_data(
             node_rank=node_rank,
             max_system_rows=row_limit,
         )
-        aggregate = _load_system_summary_agg(
-            conn,
-            node_rank=node_rank,
-            max_system_rows=row_limit,
-        )
-        per_gpu = _load_per_gpu_summary(
-            conn,
-            node_rank=node_rank,
-            max_system_rows=row_limit,
-        )
     finally:
         conn.close()
 
-    return SystemSectionData(
-        aggregate=aggregate,
-        per_gpu=per_gpu,
-        cluster=cluster,
-    )
+    return SystemSectionData(cluster=cluster)
 
 
 __all__ = [

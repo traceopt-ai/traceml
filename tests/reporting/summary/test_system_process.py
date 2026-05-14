@@ -117,6 +117,15 @@ def _create_process_tables(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        INSERT INTO process_samples VALUES (
+            2, 0, 0, 0, 1, 1, 0, 'worker-0',
+            11.0, 40.0, 8, 2000000000.0, 16000000000.0,
+            1, 1, 0, 3000000000.0, 4000000000.0, 10000000000.0
+        )
+        """
+    )
 
 
 def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
@@ -131,10 +140,10 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     data = load_system_section_data(str(db_path))
     result = SystemSummarySection().build(str(db_path))
 
-    assert data.aggregate.system_samples == 1
-    assert data.per_gpu[0].util_peak_percent == 70.0
+    assert data.cluster.aggregate.system_samples == 1
+    assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 70.0
     assert result.section == "system"
-    assert result.payload["overview"]["samples"] == 1
+    assert result.payload["metadata"]["samples"] == 1
     assert "TraceML System Summary" in result.text
     assert "- Diagnosis: NORMAL" in result.text
     assert (
@@ -142,17 +151,16 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         "GPU memory 50% | GPU temp 68.0C"
     ) in result.text
     assert "GPU:" not in result.text
-    assert result.payload["overview"]["nodes"]["coverage"] == "1/1"
-    assert result.payload["cluster"]["cpu"]["avg_band"] == "normal"
-    assert result.payload["cluster"]["ram"]["peak_band"] == "normal"
-    assert result.payload["cluster"]["gpu"]["util_avg_band"] == "normal"
-    assert result.payload["cluster"]["gpu"]["mem_peak_band"] == "normal"
+    assert result.payload["metadata"]["nodes_coverage"] == "1/1"
+    assert result.payload["metadata"]["mode"] == "single_node"
+    assert result.payload["global"]["average"]["cpu_percent"] == 40.0
+    assert result.payload["global"]["average"]["ram_percent"] == 50.0
+    assert result.payload["global"]["average"]["gpu_util_percent"] == 55.0
     assert (
-        result.payload["per_node"]["n0"]["per_gpu"]["0"]["mem_peak_percent"]
-        == 50.0
+        result.payload["groups"]["rows"]["0"]["metrics"]["gpu_mem_percent"]
+        == 40.0
     )
-    assert result.payload["per_node"]["n0"]["identity"] == {
-        "node": "n0",
+    assert result.payload["groups"]["rows"]["0"]["identity"] == {
         "node_rank": 0,
         "hostname": "worker-0",
         "global_rank": 0,
@@ -191,21 +199,20 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
 
     payload = SystemSummarySection().build(str(db_path)).payload
 
-    assert payload["overview"]["nodes"]["coverage"] == "2/2"
-    assert payload["primary_diagnosis"]["kind"] == "HIGH_GPU_TEMPERATURE"
-    assert payload["primary_diagnosis"]["scope"] == {
+    assert payload["metadata"]["nodes_coverage"] == "2/2"
+    assert payload["diagnosis"]["kind"] == "HIGH_GPU_TEMPERATURE"
+    assert payload["diagnosis"]["scope"] == {
         "level": "gpu",
-        "node": "n1",
+        "node": "1",
         "node_rank": 1,
         "gpu_idx": 0,
     }
-    assert "n1 gpu0" in payload["primary_diagnosis"]["reason"]
-    assert payload["issues"][0]["scope"]["node"] == "n1"
+    assert "1 gpu0" in payload["diagnosis"]["reason"]
+    assert payload["issues"][0]["scope"]["node"] == "1"
     assert (
-        payload["per_node"]["n1"]["primary_diagnosis"]["scope"]["level"]
-        == "gpu"
+        payload["groups"]["rows"]["1"]["diagnosis"]["scope"]["level"] == "gpu"
     )
-    assert payload["node_rollup"]["gpu_temp"]["worst_node"] == "n1"
+    assert payload["global"]["worst"]["gpu_temp_c"]["idx"] == "1"
 
 
 def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
@@ -220,30 +227,39 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     data = load_process_section_data(str(db_path))
     result = ProcessSummarySection().build(str(db_path))
 
-    assert data.aggregate.process_samples == 1
+    assert data.aggregate.process_samples == 2
     assert result.section == "process"
-    assert result.payload["overview"]["samples"] == 1
+    assert result.payload["metadata"]["samples"] == 2
     assert "TraceML Process Summary" in result.text
     assert "- Diagnosis: NORMAL" in result.text
     assert (
-        "- Stats: global ranks 1 | CPU avg 80% | "
+        "- Stats: global ranks 1 | CPU avg 60% | "
         "RSS peak 4.0 / 16.0 GB | GPU reserved peak 60%"
     ) in result.text
     assert "- Takeaway:" not in result.text
     assert "- Issues:" not in result.text
-    assert result.payload["global"]["cpu"]["capacity_band"] == "low"
-    assert result.payload["global"]["ram"]["peak_band"] == "low"
+    assert result.payload["global"]["average"]["cpu_capacity_percent"] == 7.5
+    assert result.payload["global"]["average"]["ram_percent"] == 18.75
     assert (
-        result.payload["global"]["gpu"]["reserved_overhang_band"] == "normal"
+        result.payload["global"]["average"]["gpu_mem_reserved_percent"] == 50.0
     )
-    assert result.payload["global"]["scope"]["samples"] == 1
     assert (
-        result.payload["global_rank_rollup"]["gpu_mem_reserved_peak_gb"][
-            "worst_global_rank"
-        ]
-        == 0
+        result.payload["global"]["average"]["gpu_mem_headroom_bytes"]
+        == 5000000000.0
     )
-    assert result.payload["per_global_rank"]["0"]["identity"] == {
+    assert (
+        "gpu_mem_reserved_overhang_ratio"
+        not in result.payload["global"]["average"]
+    )
+    assert result.payload["metadata"]["mode"] == "single_node"
+    assert result.payload["metadata"]["global_ranks_used"] == 1
+    assert result.payload["global"]["window"]["samples"] == 2
+    assert (
+        result.payload["global"]["worst"]["gpu_mem_reserved_bytes"]["idx"]
+        == "0"
+    )
+    assert "global_rank_rollup" not in result.payload
+    assert result.payload["groups"]["rows"]["0"]["identity"] == {
         "global_rank": 0,
         "local_rank": 0,
         "node_rank": 0,
@@ -254,7 +270,7 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "takeaway" not in result.payload["global"]
 
 
-def test_legacy_summary_wrappers_delegate_to_section_paths(tmp_path):
+def test_summary_wrappers_delegate_to_section_paths(tmp_path):
     db_path = tmp_path / "combined.db"
     conn = sqlite3.connect(db_path)
     try:
@@ -269,7 +285,7 @@ def test_legacy_summary_wrappers_delegate_to_section_paths(tmp_path):
         str(db_path), print_to_stdout=False
     )
 
-    assert system["overview"]["samples"] == 1
-    assert process["overview"]["samples"] == 1
+    assert system["metadata"]["samples"] == 1
+    assert process["metadata"]["samples"] == 2
     assert (tmp_path / "combined.db_summary_card.json").exists()
     assert (tmp_path / "combined.db_summary_card.txt").exists()

@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 import sqlite3
 
 from traceml.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
@@ -19,6 +25,12 @@ def _create_step_memory_db(path: str) -> None:
                 id                   INTEGER PRIMARY KEY AUTOINCREMENT,
                 recv_ts_ns           INTEGER NOT NULL,
                 rank                 INTEGER,
+                global_rank          INTEGER,
+                local_rank           INTEGER,
+                world_size           INTEGER,
+                local_world_size     INTEGER,
+                node_rank            INTEGER,
+                hostname             TEXT,
                 sample_ts_s          REAL,
                 seq                  INTEGER,
                 model_id             INTEGER,
@@ -30,15 +42,69 @@ def _create_step_memory_db(path: str) -> None:
             """
         )
         rows = [
-            (1, 0, 1.0, 1, 10, "cuda:0", 1, 100.0, 200.0),
-            (2, 0, 2.0, 2, 10, "cuda:0", 2, 110.0, 210.0),
-            (3, 0, 3.0, 3, 10, "cuda:0", 3, 120.0, 220.0),
+            (
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                "worker-0",
+                1.0,
+                1,
+                10,
+                "cuda:0",
+                1,
+                100.0,
+                200.0,
+            ),
+            (
+                2,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                "worker-0",
+                2.0,
+                2,
+                10,
+                "cuda:0",
+                2,
+                110.0,
+                210.0,
+            ),
+            (
+                3,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                "worker-0",
+                3.0,
+                3,
+                10,
+                "cuda:0",
+                3,
+                120.0,
+                220.0,
+            ),
         ]
         conn.executemany(
             """
             INSERT INTO step_memory_samples(
                 recv_ts_ns,
                 rank,
+                global_rank,
+                local_rank,
+                world_size,
+                local_world_size,
+                node_rank,
+                hostname,
                 sample_ts_s,
                 seq,
                 model_id,
@@ -47,7 +113,7 @@ def _create_step_memory_db(path: str) -> None:
                 peak_alloc_bytes,
                 peak_reserved_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )
@@ -70,8 +136,27 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         "peak_reserved",
     ]
     assert result.section == "step_memory"
-    assert result.payload["overview"]["ranks_seen"] == 1
-    assert result.payload["overview"]["steps_used"] == 3
+    assert result.payload["metadata"]["mode"] == "single_node"
+    assert result.payload["metadata"]["global_ranks_seen"] == 1
+    assert result.payload["metadata"]["global_ranks_used"] == 1
+    assert "aligned_steps_analyzed" not in result.payload["metadata"]
+    assert "steps_used" not in result.payload["metadata"]
+    assert result.payload["global"]["window"]["steps_analyzed"] == 3
+    assert (
+        result.payload["global"]["median"]["peak_allocated_bytes"]["idx"]
+        == "0"
+    )
+    assert (
+        result.payload["global"]["median"]["peak_reserved_bytes"]["idx"] == "0"
+    )
+    assert result.payload["groups"]["rows"]["0"]["identity"] == {
+        "global_rank": 0,
+        "local_rank": 0,
+        "node_rank": 0,
+        "hostname": "worker-0",
+        "local_world_size": 1,
+        "world_size": 1,
+    }
     assert "TraceML Step Memory Summary" in result.text
     assert "- Diagnosis:" in result.text
     assert "- Scope:" in result.text
@@ -125,7 +210,7 @@ def test_step_memory_section_loader_uses_summary_policy(
     )
 
 
-def test_step_memory_legacy_wrapper_delegates_to_section_path(tmp_path):
+def test_step_memory_summary_wrapper_delegates_to_section_path(tmp_path):
     db_path = tmp_path / "memory.db"
     _create_step_memory_db(str(db_path))
 
@@ -135,7 +220,8 @@ def test_step_memory_legacy_wrapper_delegates_to_section_path(tmp_path):
         print_to_stdout=False,
     )
 
-    assert summary["overview"]["ranks_seen"] == 1
-    assert summary["overview"]["steps_used"] == 3
+    assert summary["metadata"]["global_ranks_seen"] == 1
+    assert summary["global"]["window"]["steps_analyzed"] == 3
+    assert "steps_used" not in summary["metadata"]
     assert (tmp_path / "memory.db_summary_card.json").exists()
     assert (tmp_path / "memory.db_summary_card.txt").exists()

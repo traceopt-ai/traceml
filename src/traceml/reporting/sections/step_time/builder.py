@@ -16,17 +16,25 @@ import numpy as np
 from traceml.diagnostics.step_time.adapters import (
     build_summary_step_diagnosis_result,
 )
+from traceml.reporting.schema import (
+    BaseGroups,
+    BaseSectionPayload,
+    GroupRow,
+    StepMetadata,
+)
 from traceml.reporting.sections.step_time.alignment import AlignedStepWindow
 from traceml.reporting.sections.step_time.loader import StepTimeSectionData
 from traceml.reporting.sections.step_time.model import (
+    STEP_TIME_METRIC_NAMES,
+    GlobalRankIdentity,
     RankStepSummary,
-    _build_global_rollup,
-    _build_overview,
-    _closest_rank_to_median,
-    _compute_wait_avg_ms,
-    _finite_float,
-    _global_rank_entry_to_json,
-    _to_rank_signals,
+    build_global_rollup,
+    build_overview,
+    closest_rank_to_median,
+    compute_wait_avg_ms,
+    finite_float,
+    summary_metric_values,
+    to_rank_signals,
 )
 from traceml.reporting.summaries.diagnosis_presentation import (
     diagnosis_presentation_to_json,
@@ -69,6 +77,37 @@ def _global_rank_label(global_rank: Optional[int]) -> str:
     return f"r{int(global_rank)}" if global_rank is not None else "n/a"
 
 
+def _topology_mode(
+    *,
+    global_ranks_present: list[int],
+    identities: Dict[int, Any],
+) -> str:
+    """Return run topology from observed Step Time runtime identity."""
+    if not global_ranks_present:
+        return "no_data"
+
+    node_ranks = {
+        getattr(identities.get(rank), "node_rank", None)
+        for rank in global_ranks_present
+        if getattr(identities.get(rank), "node_rank", None) is not None
+    }
+    if len(node_ranks) > 1:
+        return "multi_node"
+
+    for rank in global_ranks_present:
+        identity = identities.get(rank)
+        world_size = getattr(identity, "world_size", None)
+        local_world_size = getattr(identity, "local_world_size", None)
+        if (
+            world_size is not None
+            and local_world_size is not None
+            and world_size > local_world_size
+        ):
+            return "multi_node"
+
+    return "single_node"
+
+
 def _format_ms_pair(
     left: Optional[float],
     right: Optional[float],
@@ -95,57 +134,57 @@ def _metric_pair_from_rank_values(
         return StepTimeMetricPair(None, None, None, None)
 
     values = np.asarray(
-        [_finite_float(value) for value in rank_to_value.values()],
+        [finite_float(value) for value in rank_to_value.values()],
         dtype=np.float64,
     )
     if values.size == 0:
         return StepTimeMetricPair(None, None, None, None)
 
     median_value = float(np.median(values))
-    median_rank = _closest_rank_to_median(rank_to_value)
-    worst_rank = max(
+    median_rank = closest_rank_to_median(rank_to_value)
+    worst_global_rank = max(
         rank_to_value,
-        key=lambda rank: (_finite_float(rank_to_value[rank]), -int(rank)),
+        key=lambda rank: (finite_float(rank_to_value[rank]), -int(rank)),
     )
     return StepTimeMetricPair(
         median_ms=median_value,
-        worst_ms=_finite_float(rank_to_value[worst_rank]),
+        worst_ms=finite_float(rank_to_value[worst_global_rank]),
         median_global_rank=median_rank,
-        worst_global_rank=int(worst_rank),
+        worst_global_rank=int(worst_global_rank),
     )
 
 
 def _build_card_stats(
-    per_rank_summary: Dict[int, RankStepSummary],
+    per_global_rank_summary: Dict[int, RankStepSummary],
 ) -> Optional[StepTimeCardStats]:
     """Build the timing values rendered in the final summary card."""
-    if not per_rank_summary:
+    if not per_global_rank_summary:
         return None
 
     return StepTimeCardStats(
-        global_rank_count=len(per_rank_summary),
+        global_rank_count=len(per_global_rank_summary),
         step=_metric_pair_from_rank_values(
             {
-                int(rank): _finite_float(summary.avg_total_step_ms)
-                for rank, summary in per_rank_summary.items()
+                int(rank): finite_float(summary.avg_total_step_ms)
+                for rank, summary in per_global_rank_summary.items()
             }
         ),
         compute=_metric_pair_from_rank_values(
             {
-                int(rank): _finite_float(summary.avg_gpu_compute_ms)
-                for rank, summary in per_rank_summary.items()
+                int(rank): finite_float(summary.avg_gpu_compute_ms)
+                for rank, summary in per_global_rank_summary.items()
             }
         ),
         wait=_metric_pair_from_rank_values(
             {
-                int(rank): _compute_wait_avg_ms(summary)
-                for rank, summary in per_rank_summary.items()
+                int(rank): compute_wait_avg_ms(summary)
+                for rank, summary in per_global_rank_summary.items()
             }
         ),
         input=_metric_pair_from_rank_values(
             {
-                int(rank): _finite_float(summary.avg_dataloader_ms)
-                for rank, summary in per_rank_summary.items()
+                int(rank): finite_float(summary.avg_dataloader_ms)
+                for rank, summary in per_global_rank_summary.items()
             }
         ),
     )
@@ -213,9 +252,9 @@ def _largest_compute_phase(
     if summary is None:
         return None
     values = {
-        "forward": _finite_float(summary.avg_forward_ms),
-        "backward": _finite_float(summary.avg_backward_ms),
-        "optimizer": _finite_float(summary.avg_optimizer_ms),
+        "forward": finite_float(summary.avg_forward_ms),
+        "backward": finite_float(summary.avg_backward_ms),
+        "optimizer": finite_float(summary.avg_optimizer_ms),
     }
     return max(values, key=values.get) if values else None
 
@@ -224,7 +263,7 @@ def _step_time_card_reason(
     diagnosis: Optional[Any],
     *,
     stats: Optional[StepTimeCardStats],
-    per_rank_summary: Dict[int, RankStepSummary],
+    per_global_rank_summary: Dict[int, RankStepSummary],
 ) -> str:
     """Build the short `Why` line used only by the human card."""
     kind = str(getattr(diagnosis, "kind", "") or "")
@@ -267,7 +306,7 @@ def _step_time_card_reason(
         )
         return f"Wait time was high ({evidence})."
     if kind == "COMPUTE_BOUND":
-        summary = per_rank_summary.get(stats.compute.worst_global_rank)
+        summary = per_global_rank_summary.get(stats.compute.worst_global_rank)
         phase = _largest_compute_phase(summary)
         suffix = f"; {phase} was largest" if phase else ""
         evidence = (
@@ -280,49 +319,31 @@ def _step_time_card_reason(
     return reason or "No clear timing bottleneck."
 
 
-def _metric_rollup_to_json(metric: StepTimeMetricPair) -> Dict[str, Any]:
-    """Serialize median/worst/skew for one timing metric."""
-    skew_percent = None
-    if metric.median_ms is not None and metric.median_ms > 0.0:
-        skew_percent = (
-            100.0
-            * (_finite_float(metric.worst_ms) - metric.median_ms)
-            / metric.median_ms
-        )
-    return {
-        "median": metric.median_ms,
-        "worst": metric.worst_ms,
-        "median_global_rank": metric.median_global_rank,
-        "worst_global_rank": metric.worst_global_rank,
-        "skew_percent": skew_percent,
-    }
-
-
-def _build_global_rank_rollup(
-    per_global_rank_summary: Dict[int, RankStepSummary],
-) -> Dict[str, Dict[str, Any]]:
-    """Build metric-by-metric median/worst/skew across global ranks."""
-    stats = _build_card_stats(per_global_rank_summary)
-    if stats is None:
-        empty = _metric_rollup_to_json(
-            StepTimeMetricPair(None, None, None, None)
-        )
-        return {
-            "step_time_ms": dict(empty),
-            "compute_ms": dict(empty),
-            "wait_ms": dict(empty),
-            "input_ms": dict(empty),
-        }
-    return {
-        "step_time_ms": _metric_rollup_to_json(stats.step),
-        "compute_ms": _metric_rollup_to_json(stats.compute),
-        "wait_ms": _metric_rollup_to_json(stats.wait),
-        "input_ms": _metric_rollup_to_json(stats.input),
-    }
+def _global_rank_entry_to_json(
+    global_rank: int,
+    summary: RankStepSummary,
+    identity: Optional[GlobalRankIdentity] = None,
+) -> Dict[str, Any]:
+    """Serialize one global-rank row for the Step Time summary."""
+    return GroupRow(
+        identity={
+            "global_rank": int(global_rank),
+            "local_rank": identity.local_rank if identity else None,
+            "node_rank": identity.node_rank if identity else None,
+            "hostname": identity.hostname if identity else None,
+            "local_world_size": (
+                identity.local_world_size if identity else None
+            ),
+            "world_size": identity.world_size if identity else None,
+        },
+        metrics=summary_metric_values(summary),
+    ).to_json()
 
 
 def _default_aligned_window(
     aligned_summary: Dict[int, RankStepSummary],
+    *,
+    window_size: int,
 ) -> AlignedStepWindow:
     """Return a conservative aligned window for direct builder callers."""
     steps = [
@@ -334,6 +355,7 @@ def _default_aligned_window(
         steps_analyzed=analyzed,
         start_step=None,
         end_step=None,
+        window_size=max(1, int(window_size)),
         global_ranks_used=len(aligned_summary),
         global_ranks_observed=len(aligned_summary),
     )
@@ -351,13 +373,16 @@ def build_step_time_card(
     max_rows: int,
 ) -> tuple[str, Dict[str, Any]]:
     """Build the Step Time section payload and compact card text."""
-    per_rank_summary = per_global_rank_summary or aligned_summary
-    aligned_window = aligned_window or _default_aligned_window(aligned_summary)
+    all_rank_summary = per_global_rank_summary or aligned_summary
+    aligned_window = aligned_window or _default_aligned_window(
+        aligned_summary,
+        window_size=max_rows,
+    )
     identities = identities or {}
 
     global_ranks_present = sorted(aligned_summary.keys())
-    all_global_ranks = sorted(per_rank_summary.keys())
-    overview = _build_overview(per_global_rank_summary=aligned_summary)
+    all_global_ranks = sorted(all_rank_summary.keys())
+    overview = build_overview(per_global_rank_summary=aligned_summary)
 
     median_global_rank = overview["median_global_rank"]
     worst_global_rank = overview["worst_global_rank"]
@@ -374,7 +399,7 @@ def build_step_time_card(
     primary_summary = median_summary or worst_summary
 
     summary_diag_result = build_summary_step_diagnosis_result(
-        rank_signals=_to_rank_signals(aligned_summary),
+        rank_signals=to_rank_signals(aligned_summary),
         max_rows=max_rows,
         per_rank_step_metrics=aligned_step_metrics,
     )
@@ -390,13 +415,12 @@ def build_step_time_card(
         rank_keys=global_ranks_present,
     )
 
-    global_rollup = _build_global_rollup(
+    global_rollup = build_global_rollup(
         per_global_rank_summary=aligned_summary,
         median_global_rank=median_global_rank,
         worst_global_rank=worst_global_rank,
         analysis_window=aligned_window,
     )
-    global_rank_rollup = _build_global_rank_rollup(aligned_summary)
     card_stats = _build_card_stats(aligned_summary)
 
     title = (
@@ -412,7 +436,7 @@ def build_step_time_card(
     diagnosis_why = _step_time_card_reason(
         summary_diag,
         stats=card_stats,
-        per_rank_summary=per_rank_summary,
+        per_global_rank_summary=all_rank_summary,
     )
 
     if not aligned_summary:
@@ -463,30 +487,35 @@ def build_step_time_card(
             ),
             "issues": issues_by_global_rank.get(str(rank), []),
         }
-        for rank, s in sorted(per_rank_summary.items())
+        for rank, s in sorted(all_rank_summary.items())
     }
 
-    summary = {
-        "overview": {
-            "mode": overview["mode"],
-            "training_steps": training_steps,
-            "latest_step_observed": latest_step_observed,
-            "global_ranks_seen": len(all_global_ranks),
-            "global_ranks_used": len(global_ranks_present),
-            "aligned_steps_analyzed": int(aligned_window.steps_analyzed),
-        },
-        "primary_diagnosis": diagnosis_presentation_to_json(
+    metadata = StepMetadata(
+        mode=_topology_mode(
+            global_ranks_present=global_ranks_present,
+            identities=identities,
+        ),
+        global_ranks_seen=len(all_global_ranks),
+        global_ranks_used=len(global_ranks_present),
+        training_total_steps=training_steps,
+        training_latest_step=latest_step_observed,
+        section_metric_names=STEP_TIME_METRIC_NAMES,
+    )
+    summary = BaseSectionPayload(
+        metadata=metadata.to_json(),
+        diagnosis=diagnosis_presentation_to_json(
             summary_diag_presented,
             include_action=False,
         ),
-        "issues": issues_to_json(issues),
-        "issues_by_global_rank": issues_by_global_rank,
-        "global": global_rollup,
-        "global_rank_rollup": global_rank_rollup,
-        "per_global_rank": per_global_rank_json,
-        "units": {"time": "ms", "skew": "%"},
-        "card": card,
-    }
+        issues=issues_to_json(issues),
+        global_summary=global_rollup,
+        groups=BaseGroups(
+            by="global_rank",
+            rows=per_global_rank_json,
+        ).to_json(),
+        units={"time": "ms"},
+        card=card,
+    ).to_json()
     return card, summary
 
 

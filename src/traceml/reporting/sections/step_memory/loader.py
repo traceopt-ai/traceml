@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """SQLite loader for the final-report step-memory section."""
 
 from __future__ import annotations
@@ -18,10 +24,10 @@ from traceml.renderers.step_memory.common import (
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml.reporting.sections.step_memory.model import (
     MAX_SUMMARY_WINDOW_ROWS,
-    _gpu_total_bytes,
-    _latest_step_observed,
-    _load_per_rank_summary,
-    _metric_sort_key,
+    load_gpu_total_bytes,
+    load_latest_step_observed,
+    load_per_global_rank_summary,
+    metric_sort_key,
 )
 
 
@@ -35,7 +41,7 @@ class StepMemorySectionData:
     diagnosis: Optional[StepMemoryDiagnosis]
     diagnosis_result: Optional[Any]
     no_gpu_detected: bool
-    per_rank: Dict[str, Any]
+    per_global_rank: Dict[str, Any]
 
 
 def load_step_memory_section_data(
@@ -51,12 +57,12 @@ def load_step_memory_section_data(
     conn = db.connect()
 
     try:
-        latest_step_observed = _latest_step_observed(conn)
+        latest_step_observed = load_latest_step_observed(conn)
         training_steps = (
             latest_step_observed + 1 if latest_step_observed is not None else 0
         )
 
-        gpu_total_bytes = _gpu_total_bytes(conn)
+        gpu_total_bytes = load_gpu_total_bytes(conn)
         gpu_available = db.detect_gpu_available(conn)
 
         result = build_step_memory_combined_result(
@@ -64,7 +70,7 @@ def load_step_memory_section_data(
             db=db,
             window_size=bounded_window,
         )
-        metrics = sorted(result.metrics, key=_metric_sort_key)
+        metrics = sorted(result.metrics, key=metric_sort_key)
 
         diagnosis = None
         if metrics:
@@ -74,7 +80,7 @@ def load_step_memory_section_data(
                 thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
             )
 
-        per_rank = _load_per_rank_summary(
+        per_global_rank = load_per_global_rank_summary(
             conn,
             db=db,
             metrics=metrics,
@@ -86,7 +92,7 @@ def load_step_memory_section_data(
             diagnosis_result = build_step_memory_summary_diagnosis_result(
                 metrics,
                 gpu_total_bytes=gpu_total_bytes,
-                per_rank=per_rank,
+                per_rank=per_global_rank,
                 thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
             )
     finally:
@@ -101,7 +107,7 @@ def load_step_memory_section_data(
         no_gpu_detected=bool(
             gpu_available is False and latest_step_observed is not None
         ),
-        per_rank=per_rank,
+        per_global_rank=per_global_rank,
     )
 
 

@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Final end-of-run report orchestration."""
 
 from __future__ import annotations
@@ -8,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from traceml.core.summaries import SummaryResult
 from traceml.loggers.error_log import get_error_logger
+from traceml.reporting.schema import empty_section_payload
 from traceml.reporting.sections.base import SummarySection
 from traceml.reporting.sections.process import ProcessSummarySection
 from traceml.reporting.sections.step_memory import StepMemorySummarySection
@@ -63,7 +70,7 @@ def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
             continue
         value = section.get("duration_s")
         if value is None:
-            value = section.get("overview", {}).get("duration_s")
+            value = section.get("metadata", {}).get("duration_s")
         if value is None:
             continue
         try:
@@ -181,14 +188,12 @@ def _build_final_summary_text_from_sections(
 def _fallback_section_result(section: SummarySection) -> SummaryResult:
     """Return a stable section payload when one section fails."""
     name = str(getattr(section, "name", "unknown"))
+    index_by = "node_rank" if name == "system" else "global_rank"
+    payload = empty_section_payload(section_name=name, index_by=index_by)
     return SummaryResult(
         section=name,
-        payload={
-            "status": "NO DATA",
-            "error": "Section summary unavailable.",
-            "card": f"TraceML {name.replace('_', ' ').title()} Summary\n- Status: unavailable",
-        },
-        text=f"TraceML {name.replace('_', ' ').title()} Summary\n- Status: unavailable",
+        payload=payload,
+        text=str(payload.get("card", "")),
     )
 
 
@@ -208,8 +213,8 @@ class FinalReportGenerator:
         Generate the structured final summary payload.
 
         Section failures are isolated and logged. A failed section contributes a
-        small ``NO DATA`` payload so one broken report domain does not prevent
-        artifact generation during aggregator shutdown.
+        schema-valid ``NO DATA`` payload so one broken report domain does not
+        prevent artifact generation during aggregator shutdown.
         """
         results: Dict[str, SummaryResult] = {}
         for section in self.sections:

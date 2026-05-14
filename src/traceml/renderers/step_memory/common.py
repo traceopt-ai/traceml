@@ -1,9 +1,15 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Shared models and SQLite helpers for step-memory telemetry compute.
 
 This module centralizes:
 - SQLite read helpers
-- step/rank alignment
+- step/global-rank alignment
 - metric aggregation into StepMemoryCombinedResult
 
 """
@@ -39,31 +45,31 @@ class StepMemoryMetricsDB:
         conn.row_factory = sqlite3.Row
         return conn
 
-    def fetch_latest_step_per_rank(
+    def fetch_latest_step_per_global_rank(
         self, conn: sqlite3.Connection
     ) -> Dict[int, int]:
         """
-        Return latest observed step per rank.
+        Return latest observed step per global rank.
 
         Returns
         -------
         dict[int, int]
-            Mapping rank -> max(step), excluding NULL rank/step rows.
+            Mapping global rank -> max(step), excluding NULL rows.
         """
         rows = conn.execute(
             """
-            SELECT rank, MAX(step) AS max_step
+            SELECT global_rank, MAX(step) AS max_step
             FROM step_memory_samples
-            WHERE rank IS NOT NULL
+            WHERE global_rank IS NOT NULL
               AND step IS NOT NULL
-            GROUP BY rank
-            ORDER BY rank ASC;
+            GROUP BY global_rank
+            ORDER BY global_rank ASC;
             """
         ).fetchall()
 
         out: Dict[int, int] = {}
         for row in rows:
-            rank = row["rank"]
+            rank = row["global_rank"]
             max_step = row["max_step"]
             if rank is None or max_step is None:
                 continue
@@ -106,7 +112,7 @@ class StepMemoryMetricsDB:
             return False
         return None
 
-    def fetch_rank_step_maps(
+    def fetch_global_rank_step_maps(
         self,
         conn: sqlite3.Connection,
         *,
@@ -116,36 +122,37 @@ class StepMemoryMetricsDB:
         max_unique_steps_per_rank: int,
     ) -> Tuple[Dict[int, Dict[int, float]], Dict[int, Optional[str]]]:
         """
-        Build per-rank step->value maps for one metric in [start_step, end_step].
+        Build per-global-rank step->value maps for one metric.
 
         Dedup rule
         ---------
-        If multiple rows exist for (rank, step), keep the latest by highest `id`.
+        If multiple rows exist for (global_rank, step), keep the latest by
+        highest `id`.
 
         Returns
         -------
         tuple[dict[int, dict[int, float]], dict[int, Optional[str]]]
-            - rank -> {step -> value_bytes}
-            - rank -> device string (best-effort latest known)
+            - global rank -> {step -> value_bytes}
+            - global rank -> device string (best-effort latest known)
         """
         metric_col = _METRIC_TO_COLUMN.get(metric_key)
         if metric_col is None:
             return {}, {}
 
         query = f"""
-            SELECT rank, step, {metric_col} AS value, device, id
+            SELECT global_rank, step, {metric_col} AS value, device, id
             FROM step_memory_samples
-            WHERE rank IS NOT NULL
+            WHERE global_rank IS NOT NULL
               AND step IS NOT NULL
               AND {metric_col} IS NOT NULL
               AND step BETWEEN ? AND ?
-            ORDER BY rank ASC, step DESC, id DESC;
+            ORDER BY global_rank ASC, step DESC, id DESC;
         """
 
         rows = conn.execute(query, (int(start_step), int(end_step))).fetchall()
 
-        rank_to_steps: Dict[int, Dict[int, float]] = {}
-        rank_to_device: Dict[int, Optional[str]] = {}
+        global_rank_to_steps: Dict[int, Dict[int, float]] = {}
+        global_rank_to_device: Dict[int, Optional[str]] = {}
         seen_rank_step: set[Tuple[int, int]] = set()
         unique_count: Dict[int, int] = {}
 
@@ -153,7 +160,7 @@ class StepMemoryMetricsDB:
 
         for row in rows:
             try:
-                rank = int(row["rank"])
+                rank = int(row["global_rank"])
                 step = int(row["step"])
                 value = float(row["value"])
             except Exception:
@@ -167,14 +174,14 @@ class StepMemoryMetricsDB:
                 continue
 
             seen_rank_step.add(key)
-            rank_to_steps.setdefault(rank, {})[step] = value
+            global_rank_to_steps.setdefault(rank, {})[step] = value
             unique_count[rank] = unique_count.get(rank, 0) + 1
 
-            if rank not in rank_to_device:
+            if rank not in global_rank_to_device:
                 dev = row["device"]
-                rank_to_device[rank] = str(dev) if dev else None
+                global_rank_to_device[rank] = str(dev) if dev else None
 
-        return rank_to_steps, rank_to_device
+        return global_rank_to_steps, global_rank_to_device
 
     def count_rows_for_completed_window(
         self,
@@ -196,7 +203,7 @@ class StepMemoryMetricsDB:
             """
             SELECT COUNT(*)
             FROM step_memory_samples
-            WHERE rank IS NOT NULL
+            WHERE global_rank IS NOT NULL
               AND step IS NOT NULL
               AND step BETWEEN ? AND ?;
             """,
@@ -217,13 +224,13 @@ def build_step_memory_combined_result(
 
     Semantics
     ---------
-    - Align across ranks on completed steps only.
+    - Align across global ranks on completed steps only.
     - Use largest common suffix up to `window_size`.
     - Keep all values in bytes.
     """
     ws = max(1, int(window_size))
     gpu_available = db.detect_gpu_available(conn)
-    latest_per_rank = db.fetch_latest_step_per_rank(conn)
+    latest_per_rank = db.fetch_latest_step_per_global_rank(conn)
 
     if not latest_per_rank:
         return StepMemoryCombinedResult(
@@ -246,7 +253,7 @@ def build_step_memory_combined_result(
     out: List[StepMemoryCombinedMetric] = []
 
     for metric_key in metric_keys:
-        rank_maps, rank_devices = db.fetch_rank_step_maps(
+        rank_maps, rank_devices = db.fetch_global_rank_step_maps(
             conn,
             metric_key=metric_key,
             start_step=start_step,
