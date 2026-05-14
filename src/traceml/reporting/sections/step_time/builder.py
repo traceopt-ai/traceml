@@ -45,6 +45,7 @@ from traceml.reporting.summaries.issue_summary import (
     issues_to_json,
 )
 from traceml.reporting.summaries.summary_formatting import format_ms
+from traceml.reporting.topology import topology_mode_from_identities
 
 
 @dataclass(frozen=True)
@@ -69,43 +70,13 @@ class StepTimeCardStats:
 
     @property
     def is_multi_rank(self) -> bool:
+        """Whether the card compares more than one global rank."""
         return self.global_rank_count > 1
 
 
 def _global_rank_label(global_rank: Optional[int]) -> str:
     """Format an optional global-rank id for summary-card text."""
     return f"r{int(global_rank)}" if global_rank is not None else "n/a"
-
-
-def _topology_mode(
-    *,
-    global_ranks_present: list[int],
-    identities: Dict[int, Any],
-) -> str:
-    """Return run topology from observed Step Time runtime identity."""
-    if not global_ranks_present:
-        return "no_data"
-
-    node_ranks = {
-        getattr(identities.get(rank), "node_rank", None)
-        for rank in global_ranks_present
-        if getattr(identities.get(rank), "node_rank", None) is not None
-    }
-    if len(node_ranks) > 1:
-        return "multi_node"
-
-    for rank in global_ranks_present:
-        identity = identities.get(rank)
-        world_size = getattr(identity, "world_size", None)
-        local_world_size = getattr(identity, "local_world_size", None)
-        if (
-            world_size is not None
-            and local_world_size is not None
-            and world_size > local_world_size
-        ):
-            return "multi_node"
-
-    return "single_node"
 
 
 def _format_ms_pair(
@@ -374,6 +345,7 @@ def build_step_time_card(
 ) -> tuple[str, Dict[str, Any]]:
     """Build the Step Time section payload and compact card text."""
     all_rank_summary = per_global_rank_summary or aligned_summary
+    row_rank_summary = aligned_summary
     aligned_window = aligned_window or _default_aligned_window(
         aligned_summary,
         window_size=max_rows,
@@ -436,7 +408,7 @@ def build_step_time_card(
     diagnosis_why = _step_time_card_reason(
         summary_diag,
         stats=card_stats,
-        per_global_rank_summary=all_rank_summary,
+        per_global_rank_summary=row_rank_summary,
     )
 
     if not aligned_summary:
@@ -487,13 +459,13 @@ def build_step_time_card(
             ),
             "issues": issues_by_global_rank.get(str(rank), []),
         }
-        for rank, s in sorted(all_rank_summary.items())
+        for rank, s in sorted(row_rank_summary.items())
     }
 
     metadata = StepMetadata(
-        mode=_topology_mode(
-            global_ranks_present=global_ranks_present,
-            identities=identities,
+        mode=topology_mode_from_identities(
+            (identities.get(rank) for rank in global_ranks_present),
+            has_data=bool(global_ranks_present),
         ),
         global_ranks_seen=len(all_global_ranks),
         global_ranks_used=len(global_ranks_present),

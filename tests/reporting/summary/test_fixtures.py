@@ -147,6 +147,66 @@ def test_base_section_payload_rejects_metric_contract_mismatch() -> None:
         raise AssertionError("Expected metric contract mismatch to fail")
 
 
+def test_base_section_payload_rejects_group_index_mismatch() -> None:
+    try:
+        BaseSectionPayload(
+            metadata={"section_metric_names": ["cpu_percent"]},
+            diagnosis=None,
+            issues=[],
+            global_summary={
+                "index_by": "global_rank",
+                "window": {},
+                "average": {"cpu_percent": 1.0},
+                "median": {"cpu_percent": {"value": 1.0, "idx": "0"}},
+                "worst": {"cpu_percent": {"value": 1.0, "idx": "0"}},
+            },
+            groups={"by": "node_rank", "rows": {}},
+            units={},
+            card="",
+        ).to_json()
+    except ValueError as exc:
+        assert "groups.by" in str(exc)
+    else:
+        raise AssertionError("Expected group index mismatch to fail")
+
+
+def test_base_section_payload_rejects_group_metric_mismatch() -> None:
+    try:
+        BaseSectionPayload(
+            metadata={"section_metric_names": ["cpu_percent"]},
+            diagnosis=None,
+            issues=[],
+            global_summary={
+                "index_by": "global_rank",
+                "window": {},
+                "average": {"cpu_percent": 1.0},
+                "median": {"cpu_percent": {"value": 1.0, "idx": "0"}},
+                "worst": {"cpu_percent": {"value": 1.0, "idx": "0"}},
+            },
+            groups={
+                "by": "global_rank",
+                "rows": {
+                    "0": {
+                        "identity": {},
+                        "diagnosis": None,
+                        "issues": [],
+                        "metrics": {
+                            "cpu_percent": 1.0,
+                            "extra_metric": 2.0,
+                        },
+                    },
+                },
+            },
+            units={},
+            card="",
+        ).to_json()
+    except ValueError as exc:
+        assert "groups.rows" in str(exc)
+        assert "section_metric_names" in str(exc)
+    else:
+        raise AssertionError("Expected group metric mismatch to fail")
+
+
 def _connect_with_summary_schema(db_path: Path) -> sqlite3.Connection:
     """Create a tiny TraceML SQLite fixture with all summary tables."""
     conn = sqlite3.connect(db_path)

@@ -11,16 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-import numpy as np
-
-from traceml.reporting.sections.step_time.model import RankStepSummary
-from traceml.reporting.summaries.summary_formatting import safe_float
-
-
-def _finite_float(x: Any) -> float:
-    """Convert to float; coerce non-finite values to 0.0."""
-    v = safe_float(x)
-    return v if np.isfinite(v) else 0.0
+from traceml.reporting.sections.step_time.model import (
+    RankStepSummary,
+    finite_float,
+)
 
 
 @dataclass(frozen=True)
@@ -62,11 +56,11 @@ def _summary_from_step_metrics(
     n = 0
 
     for metrics in step_metrics.values():
-        dataloader = _finite_float(metrics.get("dataloader_fetch"))
-        forward = _finite_float(metrics.get("forward"))
-        backward = _finite_float(metrics.get("backward"))
-        optimizer = _finite_float(metrics.get("optimizer_step"))
-        step_time = _finite_float(metrics.get("step_time"))
+        dataloader = finite_float(metrics.get("dataloader_fetch"))
+        forward = finite_float(metrics.get("forward"))
+        backward = finite_float(metrics.get("backward"))
+        optimizer = finite_float(metrics.get("optimizer_step"))
+        step_time = finite_float(metrics.get("step_time"))
         compute = forward + backward + optimizer
 
         sum_dl += dataloader

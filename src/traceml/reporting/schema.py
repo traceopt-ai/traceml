@@ -52,6 +52,43 @@ def _validate_metric_sets(
             )
 
 
+def _validate_group_contract(
+    *,
+    metadata: Mapping[str, Any],
+    global_summary: Mapping[str, Any],
+    groups: Mapping[str, Any],
+) -> None:
+    """Ensure grouped rows use the same index and metric contract."""
+    index_by = global_summary.get("index_by")
+    group_by = groups.get("by")
+    if group_by != index_by:
+        raise ValueError("groups.by must match global.index_by")
+
+    rows = groups.get("rows")
+    if not isinstance(rows, Mapping):
+        raise ValueError("groups.rows must be a mapping")
+
+    metric_names = metadata.get("section_metric_names")
+    if metric_names is None:
+        return
+
+    expected = {str(metric) for metric in metric_names}
+    for row_key, row in rows.items():
+        if not isinstance(row, Mapping):
+            raise ValueError(f"groups.rows[{row_key!r}] must be a mapping")
+        metrics = row.get("metrics")
+        if not isinstance(metrics, Mapping):
+            raise ValueError(
+                f"groups.rows[{row_key!r}].metrics must be a mapping"
+            )
+        actual = {str(metric) for metric in metrics.keys()}
+        if actual != expected:
+            raise ValueError(
+                f"groups.rows[{row_key!r}].metrics keys must match "
+                "metadata.section_metric_names"
+            )
+
+
 @dataclass(frozen=True)
 class BaseMetadata:
     """Flat, table-friendly metadata shared by every report section."""
@@ -104,6 +141,7 @@ class RankMetadata(BaseMetadata):
     global_ranks_used: int = 0
 
     def to_json(self) -> JsonDict:
+        """Serialize rank-scoped section metadata."""
         payload = super().to_json()
         payload.update({"global_ranks_seen": int(self.global_ranks_seen)})
         payload.update({"global_ranks_used": int(self.global_ranks_used)})
@@ -123,6 +161,7 @@ class StepMetadata(RankMetadata):
     training_latest_step: Optional[int] = None
 
     def to_json(self) -> JsonDict:
+        """Serialize step-aware section metadata."""
         payload = super().to_json()
         payload.update(
             {
@@ -237,16 +276,22 @@ class BaseSectionPayload:
         """Serialize the final section payload in a consistent order."""
         metadata = dict(self.metadata)
         global_summary = dict(self.global_summary)
+        groups = dict(self.groups)
         _validate_metric_sets(
             metadata=metadata,
             global_summary=global_summary,
+        )
+        _validate_group_contract(
+            metadata=metadata,
+            global_summary=global_summary,
+            groups=groups,
         )
         payload: JsonDict = {
             "metadata": metadata,
             "diagnosis": _copy_mapping(self.diagnosis),
             "issues": [dict(issue) for issue in self.issues],
             "global": global_summary,
-            "groups": dict(self.groups),
+            "groups": groups,
         }
         payload.update(dict(self.extra))
         payload["units"] = dict(self.units)

@@ -7,14 +7,13 @@
 """Step-memory data shaping for the final-report section."""
 
 import math
-import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from traceml.diagnostics.step_memory import StepMemoryDiagnosis
-from traceml.renderers.step_memory.common import StepMemoryMetricsDB
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml.reporting.schema import BaseGlobal, GlobalWindow
+from traceml.reporting.topology import topology_mode_from_identities
 
 MAX_SUMMARY_WINDOW_ROWS = 10_000
 
@@ -36,6 +35,14 @@ class StepMemoryGlobalRankIdentity:
     world_size: Optional[int]
 
 
+@dataclass(frozen=True)
+class StepMemoryGlobalRankSummary:
+    """Aligned step-memory metrics for one global rank."""
+
+    identity: StepMemoryGlobalRankIdentity
+    metrics: Mapping[str, float]
+
+
 def metric_sort_key(metric: StepMemoryCombinedMetric) -> int:
     """Stable metric ordering: allocated first, reserved second."""
     if metric.metric == "peak_allocated":
@@ -54,7 +61,7 @@ def metric_label(metric_name: str) -> str:
     return metric_name.replace("_", " ")
 
 
-def _metric_output_name(metric_name: str) -> str:
+def metric_output_name(metric_name: str) -> str:
     """Return the public metric name used in summary JSON."""
     return f"{metric_name}_bytes"
 
@@ -93,36 +100,6 @@ def no_gpu_diagnosis_presented() -> Dict[str, Any]:
     }
 
 
-def load_latest_step_observed(conn: sqlite3.Connection) -> Optional[int]:
-    """Return the latest observed memory step across all ranks."""
-    row = conn.execute("SELECT MAX(step) FROM step_memory_samples;").fetchone()
-    if not row or row[0] is None:
-        return None
-    return int(row[0])
-
-
-def load_gpu_total_bytes(conn: sqlite3.Connection) -> Optional[float]:
-    """
-    Best-effort device total memory from process telemetry.
-
-    This is optional but useful for HIGH_PRESSURE diagnosis.
-    """
-    try:
-        row = conn.execute(
-            "SELECT MAX(gpu_mem_total_bytes) FROM process_samples;"
-        ).fetchone()
-    except Exception:
-        return None
-
-    if not row or row[0] is None:
-        return None
-    try:
-        value = float(row[0])
-    except Exception:
-        return None
-    return value if value > 0.0 else None
-
-
 def primary_metric(
     metrics: list[StepMemoryCombinedMetric],
     diagnosis: Optional[StepMemoryDiagnosis],
@@ -150,132 +127,6 @@ def primary_metric(
     return metrics[0]
 
 
-def _load_global_rank_identities(
-    conn: sqlite3.Connection,
-    global_ranks: list[int],
-) -> Dict[int, StepMemoryGlobalRankIdentity]:
-    """Load latest runtime identity metadata for step-memory global ranks."""
-    identities: Dict[int, StepMemoryGlobalRankIdentity] = {}
-    for global_rank in global_ranks:
-        row = conn.execute(
-            """
-            SELECT local_rank, node_rank, hostname, local_world_size,
-                   world_size
-            FROM step_memory_samples
-            WHERE global_rank = ?
-            ORDER BY sample_ts_s DESC, id DESC
-            LIMIT 1;
-            """,
-            (int(global_rank),),
-        ).fetchone()
-        if row is None:
-            continue
-        identities[int(global_rank)] = StepMemoryGlobalRankIdentity(
-            global_rank=int(global_rank),
-            local_rank=int(row[0]) if row[0] is not None else None,
-            node_rank=int(row[1]) if row[1] is not None else None,
-            hostname=str(row[2]) if row[2] is not None else None,
-            local_world_size=int(row[3]) if row[3] is not None else None,
-            world_size=int(row[4]) if row[4] is not None else None,
-        )
-    return identities
-
-
-def _identity_to_json(
-    *,
-    global_rank: int,
-    identity: Optional[StepMemoryGlobalRankIdentity],
-) -> Dict[str, Any]:
-    """Serialize the runtime identity block for one memory rank."""
-    return {
-        "global_rank": int(global_rank),
-        "local_rank": identity.local_rank if identity else None,
-        "node_rank": identity.node_rank if identity else None,
-        "hostname": identity.hostname if identity else None,
-        "local_world_size": identity.local_world_size if identity else None,
-        "world_size": identity.world_size if identity else None,
-    }
-
-
-def load_per_global_rank_summary(
-    conn: sqlite3.Connection,
-    *,
-    db: StepMemoryMetricsDB,
-    metrics: list[StepMemoryCombinedMetric],
-    window_size: int,
-) -> Dict[str, Any]:
-    """
-    Build per-global-rank summaries for the analyzed aligned tail window.
-
-    Combined worst/median summaries are excellent for end-of-run diagnosis, but
-    one often need to answer:
-    - which global rank is gating or drifting?
-    - is one global rank materially less stable than others?
-    - do allocated and reserved tell the same story?
-
-    This function reuses each combined metric's aligned step ids, so
-    `global.window` and per-rank metric averages describe the same completed
-    steps by construction.
-    """
-    latest_per_global_rank = db.fetch_latest_step_per_global_rank(conn)
-    if not latest_per_global_rank:
-        return {}
-
-    scan_span = max(int(window_size) * 20, int(window_size) + 1)
-    identities = _load_global_rank_identities(
-        conn,
-        sorted(latest_per_global_rank.keys()),
-    )
-
-    per_global_rank: Dict[str, Any] = {}
-
-    for metric in metrics:
-        common_steps = [int(step) for step in metric.series.steps]
-        if not common_steps:
-            continue
-
-        rank_maps, _ = db.fetch_global_rank_step_maps(
-            conn,
-            metric_key=metric.metric,
-            start_step=min(common_steps),
-            end_step=max(common_steps),
-            max_unique_steps_per_rank=scan_span,
-        )
-
-        if not rank_maps:
-            continue
-
-        for rank in sorted(rank_maps.keys()):
-            step_map = rank_maps.get(rank, {})
-            values = [
-                float(step_map[s]) for s in common_steps if s in step_map
-            ]
-            if len(values) != len(common_steps) or not values:
-                continue
-
-            rank_key = str(rank)
-            identity = identities.get(int(rank))
-
-            entry = per_global_rank.setdefault(
-                rank_key,
-                {
-                    "identity": _identity_to_json(
-                        global_rank=int(rank),
-                        identity=identity,
-                    ),
-                    "diagnosis": None,
-                    "issues": [],
-                    "metrics": {},
-                },
-            )
-
-            entry["metrics"][_metric_output_name(metric.metric)] = (
-                sum(values) / len(values) if values else None
-            )
-
-    return dict(sorted(per_global_rank.items(), key=lambda item: int(item[0])))
-
-
 def empty_global_rollup() -> Dict[str, Any]:
     """
     Return a stable empty global rollup for missing-data cases.
@@ -296,16 +147,15 @@ def empty_global_rollup() -> Dict[str, Any]:
 
 
 def _row_metric_values(
-    per_global_rank: Dict[str, Any],
+    per_global_rank: Mapping[str, StepMemoryGlobalRankSummary],
 ) -> Dict[str, Dict[str, float]]:
     """Return finite metric values keyed by metric name and row id."""
     values: Dict[str, Dict[str, float]] = {
         metric_name: {} for metric_name in STEP_MEMORY_METRIC_NAMES
     }
     for rank_key, entry in per_global_rank.items():
-        metrics = entry.get("metrics", {}) if isinstance(entry, dict) else {}
         for metric_name in STEP_MEMORY_METRIC_NAMES:
-            value = metrics.get(metric_name)
+            value = entry.metrics.get(metric_name)
             if value is None:
                 continue
             try:
@@ -317,7 +167,9 @@ def _row_metric_values(
     return values
 
 
-def _average_memory_by_metric(per_global_rank: Dict[str, Any]) -> Dict:
+def _average_memory_by_metric(
+    per_global_rank: Mapping[str, StepMemoryGlobalRankSummary],
+) -> Dict:
     """Average public memory metrics across per-rank memory rows."""
     values = _row_metric_values(per_global_rank)
     return {
@@ -361,7 +213,7 @@ def _closest_rank_to_median(values: Dict[str, float]) -> Optional[str]:
 
 
 def _rank_points_from_rows(
-    per_global_rank: Dict[str, Any],
+    per_global_rank: Mapping[str, StepMemoryGlobalRankSummary],
     *,
     kind: str,
 ) -> Dict[str, Dict[str, Any]]:
@@ -401,7 +253,7 @@ def build_global_rollup(
     *,
     metrics: list[StepMemoryCombinedMetric],
     diagnosis: Optional[StepMemoryDiagnosis],
-    per_global_rank: Dict[str, Any],
+    per_global_rank: Mapping[str, StepMemoryGlobalRankSummary],
 ) -> Dict[str, Any]:
     """Build the global memory rollup for the analyzed window."""
     if not metrics:
@@ -430,33 +282,37 @@ def build_global_rollup(
 def topology_mode(
     *,
     global_ranks_used: int,
-    per_global_rank: Dict[str, Any],
+    per_global_rank: Mapping[str, StepMemoryGlobalRankSummary],
 ) -> str:
     """Return run topology from observed Step Memory runtime identity."""
-    if global_ranks_used <= 0:
-        return "no_data"
+    return topology_mode_from_identities(
+        (
+            {
+                "global_rank": entry.identity.global_rank,
+                "local_rank": entry.identity.local_rank,
+                "node_rank": entry.identity.node_rank,
+                "hostname": entry.identity.hostname,
+                "local_world_size": entry.identity.local_world_size,
+                "world_size": entry.identity.world_size,
+            }
+            for entry in per_global_rank.values()
+        ),
+        has_data=global_ranks_used > 0,
+    )
 
-    identities = [
-        entry.get("identity", {})
-        for entry in per_global_rank.values()
-        if isinstance(entry, dict)
-    ]
-    node_ranks = {
-        identity.get("node_rank")
-        for identity in identities
-        if identity.get("node_rank") is not None
-    }
-    if len(node_ranks) > 1:
-        return "multi_node"
 
-    for identity in identities:
-        world_size = identity.get("world_size")
-        local_world_size = identity.get("local_world_size")
-        if (
-            world_size is not None
-            and local_world_size is not None
-            and int(world_size) > int(local_world_size)
-        ):
-            return "multi_node"
-
-    return "single_node"
+__all__ = [
+    "MAX_SUMMARY_WINDOW_ROWS",
+    "STEP_MEMORY_METRIC_NAMES",
+    "StepMemoryGlobalRankIdentity",
+    "StepMemoryGlobalRankSummary",
+    "build_global_rollup",
+    "empty_global_rollup",
+    "metric_label",
+    "metric_output_name",
+    "metric_sort_key",
+    "no_gpu_diagnosis_json",
+    "no_gpu_diagnosis_presented",
+    "primary_metric",
+    "topology_mode",
+]

@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from statistics import median
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from traceml.diagnostics.common import diagnosis_to_dict
 from traceml.diagnostics.process import build_process_diagnosis_result
@@ -27,7 +27,7 @@ from traceml.reporting.sections.process.model import (
     PerRankProcessSummary,
     ProcessSummaryAgg,
     build_process_stats_line,
-    process_cpu_capacity_percent,
+    cpu_capacity_percent,
 )
 from traceml.reporting.summaries.issue_summary import (
     issues_by_rank_json,
@@ -39,81 +39,25 @@ from traceml.reporting.summaries.summary_formatting import (
     format_optional,
     share_percent,
 )
-
-
-def _topology_mode(
-    per_global_rank: Dict[int, PerRankProcessSummary],
-) -> str:
-    """Return run topology from observed process runtime identity."""
-    if not per_global_rank:
-        return "no_data"
-
-    node_ranks = {
-        item.node_rank
-        for item in per_global_rank.values()
-        if item.node_rank is not None
-    }
-    if len(node_ranks) > 1:
-        return "multi_node"
-
-    for item in per_global_rank.values():
-        if (
-            item.world_size is not None
-            and item.local_world_size is not None
-            and item.world_size > item.local_world_size
-        ):
-            return "multi_node"
-
-    return "single_node"
+from traceml.reporting.topology import topology_mode_from_identities
 
 
 def _rank_point(
-    rollup: Dict[str, Any],
-    *,
-    kind: str,
+    value: Optional[float],
+    idx: Optional[str],
 ) -> Dict[str, Any]:
-    """Return a `{value, global_rank}` point from a rank rollup."""
-    global_rank = rollup.get(f"{kind}_global_rank")
-    return {
-        "value": rollup.get(kind),
-        "idx": str(global_rank) if global_rank is not None else None,
-    }
-
-
-def _rank_comparison_points(
-    global_rank_rollup: Dict[str, Dict[str, Any]],
-    *,
-    kind: str,
-) -> Dict[str, Any]:
-    return {
-        metric: _rank_point(global_rank_rollup.get(metric, {}), kind=kind)
-        for metric in PROCESS_METRIC_NAMES
-    }
-
-
-def _rank_cpu_capacity_percent(
-    item: PerRankProcessSummary,
-) -> Optional[float]:
-    """CPU capacity used by one traced process, normalized by host cores."""
-    if (
-        item.cpu_avg_percent is None
-        or item.cpu_logical_core_count is None
-        or item.cpu_logical_core_count <= 0
-    ):
-        return None
-    return max(
-        0.0,
-        float(item.cpu_avg_percent)
-        / (100.0 * float(item.cpu_logical_core_count))
-        * 100.0,
-    )
+    """Return a public metric comparison point."""
+    return {"value": value, "idx": idx}
 
 
 def _rank_metric_values(item: PerRankProcessSummary) -> Dict[str, Any]:
     """Return public row metrics for one global rank."""
     return {
         "cpu_percent": item.cpu_avg_percent,
-        "cpu_capacity_percent": _rank_cpu_capacity_percent(item),
+        "cpu_capacity_percent": cpu_capacity_percent(
+            item.cpu_avg_percent,
+            item.cpu_logical_core_count,
+        ),
         "ram_bytes": item.ram_avg_bytes,
         "ram_percent": share_percent(
             item.ram_avg_bytes,
@@ -138,39 +82,6 @@ def _rank_metric_values(item: PerRankProcessSummary) -> Dict[str, Any]:
     }
 
 
-def _global_average_metrics(
-    agg: ProcessSummaryAgg,
-    *,
-    cpu_capacity_percent: Optional[float],
-) -> Dict[str, Any]:
-    """Return average-valued Process metrics for the global JSON block."""
-    return {
-        "cpu_percent": agg.cpu_avg_percent,
-        "cpu_capacity_percent": cpu_capacity_percent,
-        "ram_bytes": agg.ram_avg_bytes,
-        "ram_percent": share_percent(
-            agg.ram_avg_bytes,
-            agg.ram_total_bytes,
-        ),
-        "gpu_mem_used_bytes": agg.gpu_mem_used_avg_bytes,
-        "gpu_mem_reserved_bytes": agg.gpu_mem_reserved_avg_bytes,
-        "gpu_mem_reserved_percent": share_percent(
-            agg.gpu_mem_reserved_avg_bytes,
-            agg.gpu_mem_total_bytes,
-        ),
-        "gpu_mem_headroom_bytes": (
-            max(
-                float(agg.gpu_mem_total_bytes)
-                - float(agg.gpu_mem_reserved_avg_bytes),
-                0.0,
-            )
-            if agg.gpu_mem_total_bytes is not None
-            and agg.gpu_mem_reserved_avg_bytes is not None
-            else None
-        ),
-    }
-
-
 def _per_global_rank_to_json(
     per_global_rank: Dict[int, PerRankProcessSummary],
 ) -> Dict[str, Dict[str, Any]]:
@@ -190,6 +101,84 @@ def _per_global_rank_to_json(
             metrics=_rank_metric_values(item),
         ).to_json()
     return out
+
+
+PROCESS_LOWER_IS_WORSE_METRICS = {
+    "gpu_mem_headroom_bytes",
+}
+
+
+def _metric_values_by_row(
+    row_metrics: Dict[str, Dict[str, Any]],
+    metric_names: Iterable[str],
+) -> Dict[str, list[tuple[str, float]]]:
+    """Collect finite row metric values by metric name."""
+    values: Dict[str, list[tuple[str, float]]] = {
+        metric: [] for metric in metric_names
+    }
+    for row_id, metrics in row_metrics.items():
+        for metric_name in metric_names:
+            raw = metrics.get(metric_name)
+            if raw is None:
+                continue
+            try:
+                values[metric_name].append((str(row_id), float(raw)))
+            except Exception:
+                continue
+    return values
+
+
+def _average_metrics_from_rows(
+    row_metrics: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Average each public Process metric across global-rank rows."""
+    values = _metric_values_by_row(row_metrics, PROCESS_METRIC_NAMES)
+    return {
+        metric: (
+            sum(value for _row_id, value in pairs) / len(pairs)
+            if pairs
+            else None
+        )
+        for metric, pairs in values.items()
+    }
+
+
+def _closest_row_to_median(
+    pairs: list[tuple[str, float]]
+) -> tuple[str, float]:
+    """Return the row whose value best represents the median."""
+    median_value = float(median(value for _row_id, value in pairs))
+    return min(
+        pairs,
+        key=lambda item: (abs(item[1] - median_value), item[1], item[0]),
+    )
+
+
+def _row_metric_points(
+    row_metrics: Dict[str, Dict[str, Any]],
+    *,
+    kind: str,
+) -> Dict[str, Any]:
+    """Build median or worst `{value, idx}` points from rank row metrics."""
+    values_by_metric = _metric_values_by_row(row_metrics, PROCESS_METRIC_NAMES)
+    points: Dict[str, Any] = {}
+    for metric_name, pairs in values_by_metric.items():
+        if not pairs:
+            points[metric_name] = _rank_point(None, None)
+            continue
+        if kind == "median":
+            row_id, value = _closest_row_to_median(pairs)
+        elif kind == "worst":
+            lower_is_worse = metric_name in PROCESS_LOWER_IS_WORSE_METRICS
+            row_id, value = (
+                min(pairs, key=lambda item: (item[1], item[0]))
+                if lower_is_worse
+                else max(pairs, key=lambda item: (item[1], item[0]))
+            )
+        else:
+            raise ValueError(f"Unsupported Process point kind: {kind}")
+        points[metric_name] = _rank_point(value, row_id)
+    return points
 
 
 def _per_global_rank_to_diagnosis_input(
@@ -221,112 +210,6 @@ def _per_global_rank_to_diagnosis_input(
     return out
 
 
-def _metric_rollup(
-    per_global_rank: Dict[int, PerRankProcessSummary],
-    value: Callable[[PerRankProcessSummary], Optional[float]],
-    *,
-    higher_is_worse: bool = True,
-) -> Optional[Dict[str, Optional[float]]]:
-    """Return median/worst/skew for one metric across global ranks."""
-    pairs: list[tuple[float, int]] = []
-    for global_rank, item in per_global_rank.items():
-        raw = value(item)
-        if raw is not None:
-            pairs.append((float(raw), int(global_rank)))
-
-    if not pairs:
-        return None
-
-    values = [metric for metric, _global_rank in pairs]
-    worst_value, worst_global_rank = (
-        max(pairs, key=lambda pair: pair[0])
-        if higher_is_worse
-        else min(pairs, key=lambda pair: pair[0])
-    )
-    median_value = float(median(values))
-    if median_value == 0.0:
-        skew_percent = None
-    elif higher_is_worse:
-        skew_percent = (
-            (float(worst_value) - median_value) / abs(median_value) * 100.0
-        )
-    else:
-        skew_percent = (
-            (median_value - float(worst_value)) / abs(median_value) * 100.0
-        )
-
-    median_rank = min(
-        pairs,
-        key=lambda pair: (abs(pair[0] - median_value), pair[0], pair[1]),
-    )[1]
-    return {
-        "median": median_value,
-        "worst": float(worst_value),
-        "median_global_rank": int(median_rank),
-        "worst_global_rank": int(worst_global_rank),
-        "skew_percent": skew_percent,
-    }
-
-
-def _global_rank_rollup_to_json(
-    per_global_rank: Dict[int, PerRankProcessSummary],
-) -> Dict[str, Dict[str, Optional[float]]]:
-    """Build Process median/worst points across global ranks."""
-    metrics = {
-        "cpu_percent": _metric_rollup(
-            per_global_rank,
-            lambda item: item.cpu_avg_percent,
-        ),
-        "cpu_capacity_percent": _metric_rollup(
-            per_global_rank,
-            _rank_cpu_capacity_percent,
-        ),
-        "ram_bytes": _metric_rollup(
-            per_global_rank,
-            lambda item: item.ram_peak_bytes,
-        ),
-        "ram_percent": _metric_rollup(
-            per_global_rank,
-            lambda item: share_percent(
-                item.ram_peak_bytes,
-                item.ram_total_bytes,
-            ),
-        ),
-        "gpu_mem_used_bytes": _metric_rollup(
-            per_global_rank,
-            lambda item: item.gpu_mem_used_peak_bytes,
-        ),
-        "gpu_mem_reserved_bytes": _metric_rollup(
-            per_global_rank,
-            lambda item: item.gpu_mem_reserved_peak_bytes,
-        ),
-        "gpu_mem_reserved_percent": _metric_rollup(
-            per_global_rank,
-            lambda item: share_percent(
-                item.gpu_mem_reserved_peak_bytes,
-                item.gpu_mem_total_bytes,
-            ),
-        ),
-        "gpu_mem_headroom_bytes": _metric_rollup(
-            per_global_rank,
-            lambda item: (
-                None
-                if item.gpu_mem_total_bytes is None
-                or item.gpu_mem_reserved_peak_bytes is None
-                else max(
-                    float(item.gpu_mem_total_bytes)
-                    - float(item.gpu_mem_reserved_peak_bytes),
-                    0.0,
-                )
-            ),
-            higher_is_worse=False,
-        ),
-    }
-    return {
-        name: rollup for name, rollup in metrics.items() if rollup is not None
-    }
-
-
 def build_process_card(
     agg: ProcessSummaryAgg,
     *,
@@ -346,11 +229,9 @@ def build_process_card(
         agg.gpu_mem_reserved_peak_bytes,
         agg.gpu_mem_total_bytes,
     )
-    cpu_capacity_percent = process_cpu_capacity_percent(agg)
     per_global_rank_for_diagnosis = _per_global_rank_to_diagnosis_input(
         per_global_rank
     )
-    global_rank_rollup = _global_rank_rollup_to_json(per_global_rank)
 
     diagnosis_result = build_process_diagnosis_result(
         duration_s=duration_s,
@@ -381,6 +262,10 @@ def build_process_card(
     per_global_rank_json = _per_global_rank_to_json(per_global_rank)
     for rank_key, entry in per_global_rank_json.items():
         entry["issues"] = issues_by_global_rank.get(rank_key, [])
+    row_metrics = {
+        rank_key: dict(entry.get("metrics", {}))
+        for rank_key, entry in per_global_rank_json.items()
+    }
 
     lines = [
         (
@@ -404,12 +289,11 @@ def build_process_card(
     ]
     card = "\n".join(lines)
 
-    mode = _topology_mode(per_global_rank)
-
-    average = _global_average_metrics(
-        agg,
-        cpu_capacity_percent=cpu_capacity_percent,
+    mode = topology_mode_from_identities(
+        per_global_rank.values(),
+        has_data=bool(per_global_rank),
     )
+
     global_summary = BaseGlobal(
         index_by="global_rank",
         window=GlobalWindow(
@@ -417,9 +301,9 @@ def build_process_card(
             alignment="none",
             samples=agg.process_samples,
         ).to_json(),
-        average=average,
-        median=_rank_comparison_points(global_rank_rollup, kind="median"),
-        worst=_rank_comparison_points(global_rank_rollup, kind="worst"),
+        average=_average_metrics_from_rows(row_metrics),
+        median=_row_metric_points(row_metrics, kind="median"),
+        worst=_row_metric_points(row_metrics, kind="worst"),
     )
 
     metadata = RankMetadata(

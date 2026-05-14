@@ -17,11 +17,14 @@ from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml.reporting.schema import (
     BaseGroups,
     BaseSectionPayload,
+    GroupRow,
     StepMetadata,
 )
 from traceml.reporting.sections.step_memory.loader import StepMemorySectionData
 from traceml.reporting.sections.step_memory.model import (
     STEP_MEMORY_METRIC_NAMES,
+    StepMemoryGlobalRankIdentity,
+    StepMemoryGlobalRankSummary,
     build_global_rollup,
     empty_global_rollup,
     metric_label,
@@ -43,6 +46,37 @@ from traceml.reporting.summaries.summary_formatting import format_ratio_percent
 from traceml.utils.formatting import fmt_mem_new
 
 
+def _identity_to_json(
+    identity: StepMemoryGlobalRankIdentity,
+) -> Dict[str, Any]:
+    """Serialize the distributed runtime identity for one memory rank."""
+    return {
+        "global_rank": identity.global_rank,
+        "local_rank": identity.local_rank,
+        "node_rank": identity.node_rank,
+        "hostname": identity.hostname,
+        "local_world_size": identity.local_world_size,
+        "world_size": identity.world_size,
+    }
+
+
+def _group_rows_to_json(
+    per_global_rank: Dict[str, StepMemoryGlobalRankSummary],
+    *,
+    issues_by_global_rank: Dict[str, list[Dict[str, Any]]],
+) -> Dict[str, Dict[str, Any]]:
+    """Build schema rows from typed per-rank memory summaries."""
+    return {
+        rank_key: GroupRow(
+            identity=_identity_to_json(summary.identity),
+            diagnosis=None,
+            issues=issues_by_global_rank.get(rank_key, []),
+            metrics=dict(summary.metrics),
+        ).to_json()
+        for rank_key, summary in per_global_rank.items()
+    }
+
+
 def _build_step_memory_card(
     *,
     training_steps: int,
@@ -51,7 +85,7 @@ def _build_step_memory_card(
     diagnosis: Optional[StepMemoryDiagnosis],
     diagnosis_result: Optional[Any],
     no_gpu_detected: bool,
-    per_global_rank: Dict[str, Any],
+    per_global_rank: Dict[str, StepMemoryGlobalRankSummary],
 ) -> tuple[str, Dict[str, Any]]:
     """Build the end-of-run step-memory summary payload and text card."""
     sorted_metrics = sorted(metrics, key=metric_sort_key)
@@ -62,13 +96,10 @@ def _build_step_memory_card(
         issues,
         rank_keys=per_global_rank.keys(),
     )
-    per_global_rank_with_issues = {
-        rank_key: {
-            **entry,
-            "issues": issues_by_global_rank.get(rank_key, []),
-        }
-        for rank_key, entry in per_global_rank.items()
-    }
+    group_rows = _group_rows_to_json(
+        per_global_rank,
+        issues_by_global_rank=issues_by_global_rank,
+    )
 
     if not sorted_metrics or primary is None:
         no_gpu_diagnosis = no_gpu_diagnosis_json() if no_gpu_detected else None
@@ -195,7 +226,7 @@ def _build_step_memory_card(
         global_summary=aggregate,
         groups=BaseGroups(
             by="global_rank",
-            rows=per_global_rank_with_issues,
+            rows=group_rows,
         ).to_json(),
         units={"memory": "bytes"},
         card=card,

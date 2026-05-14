@@ -183,10 +183,19 @@ def _sample_rows(
                gpu_util_avg, gpu_util_peak, gpu_mem_used_avg_bytes,
                gpu_mem_used_peak_bytes, gpu_temp_avg_c, gpu_temp_peak_c,
                gpu_power_avg_w, gpu_power_peak_w
-        FROM system_samples
-        {where_clause}
-        ORDER BY id ASC
-        LIMIT ?;
+        FROM (
+            SELECT id, global_rank, local_rank, world_size, local_world_size,
+                   node_rank, hostname, sample_ts_s, seq, cpu_percent,
+                   ram_used_bytes, ram_total_bytes, gpu_available, gpu_count,
+                   gpu_util_avg, gpu_util_peak, gpu_mem_used_avg_bytes,
+                   gpu_mem_used_peak_bytes, gpu_temp_avg_c, gpu_temp_peak_c,
+                   gpu_power_avg_w, gpu_power_peak_w
+            FROM system_samples
+            {where_clause}
+            ORDER BY id DESC
+            LIMIT ?
+        ) AS recent
+        ORDER BY id ASC;
         """,
         (*params, int(max_system_rows)),
     ).fetchall()
@@ -243,7 +252,7 @@ def _gpu_rows(
             SELECT s.global_rank, s.seq
             FROM system_samples AS s
             {where_clause}
-            ORDER BY s.id ASC
+            ORDER BY s.id DESC
             LIMIT ?
         ) AS recent
             ON g.global_rank IS recent.global_rank

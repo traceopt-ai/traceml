@@ -46,7 +46,7 @@ def load_process_summary_aggregate(
             SELECT *
             FROM process_samples
             {where_clause}
-            ORDER BY id ASC
+            ORDER BY id DESC
             LIMIT ?
         )
     """
@@ -175,7 +175,7 @@ def load_per_global_rank_process_summary(
             SELECT *
             FROM process_samples
             {where_clause}
-            ORDER BY id ASC
+            ORDER BY id DESC
             LIMIT ?
         )
         WHERE global_rank IS NOT NULL

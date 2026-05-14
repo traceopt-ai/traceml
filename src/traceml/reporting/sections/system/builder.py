@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 from traceml.diagnostics.common import (
     DiagnosticIssue,
@@ -28,6 +28,7 @@ from traceml.reporting.schema import (
 from traceml.reporting.sections.system.loader import SystemSectionData
 from traceml.reporting.sections.system.model import (
     SYSTEM_METRIC_NAMES,
+    PerGPUSummary,
     SystemClusterSummary,
     SystemNodeSummary,
     SystemSummaryAgg,
@@ -185,169 +186,142 @@ def _system_mode(cluster: SystemClusterSummary) -> str:
     return "multi_node"
 
 
-def _system_average(
-    agg: SystemSummaryAgg, cluster: SystemClusterSummary
-) -> Dict[str, Any]:
-    per_gpu = {
-        gpu_idx: gpu
-        for node in cluster.nodes.values()
-        for gpu_idx, gpu in node.per_gpu.items()
-    }
-    gpu_total_bytes = sum(
-        float(gpu.mem_total_bytes)
-        for gpu in per_gpu.values()
-        if gpu.mem_total_bytes is not None
-    )
-    gpu_mem_percent = percent(
-        agg.gpu_mem_avg_bytes,
-        gpu_total_bytes if gpu_total_bytes > 0.0 else None,
-    )
-    node_headroom_values = [
-        value
-        for node in cluster.nodes.values()
-        for value in (_node_headroom_min_bytes(node),)
-        if value is not None
-    ]
-    return {
-        "cpu_percent": agg.cpu_avg_percent,
-        "ram_bytes": agg.ram_avg_bytes,
-        "ram_percent": percent(agg.ram_avg_bytes, agg.ram_total_bytes),
-        "gpu_util_percent": agg.gpu_util_avg_percent,
-        "gpu_mem_bytes": agg.gpu_mem_avg_bytes,
-        "gpu_mem_percent": gpu_mem_percent,
-        "gpu_temp_c": agg.gpu_temp_avg_c,
-        "gpu_power_w": agg.gpu_power_avg_w,
-        "gpu_headroom_bytes": average_optional(node_headroom_values),
-    }
+def _gpu_mem_percent_from_summaries(
+    gpus: Iterable[PerGPUSummary],
+) -> Optional[float]:
+    """
+    Return average GPU memory pressure across physical GPU summaries.
+
+    GPU indices repeat on every node, so cluster-level calculations must treat
+    each node/device pair as a separate summary row.
+    """
+    used_bytes = 0.0
+    total_bytes = 0.0
+    for gpu in gpus:
+        if gpu.mem_avg_bytes is None or gpu.mem_total_bytes is None:
+            continue
+        used_bytes += float(gpu.mem_avg_bytes)
+        total_bytes += float(gpu.mem_total_bytes)
+    return percent(used_bytes, total_bytes if total_bytes > 0.0 else None)
+
+
+def _gpu_mem_avg_bytes_from_summaries(
+    gpus: Iterable[PerGPUSummary],
+) -> Optional[float]:
+    """Return average used GPU memory across physical GPU summaries."""
+    return average_optional(gpu.mem_avg_bytes for gpu in gpus)
 
 
 def _node_metric_values(node: SystemNodeSummary) -> Dict[str, Any]:
     """Return the public row metrics for one system node."""
     agg = node.aggregate
-    gpu_total_bytes = sum(
-        float(gpu.mem_total_bytes)
-        for gpu in node.per_gpu.values()
-        if gpu.mem_total_bytes is not None
-    )
+    per_gpu = list(node.per_gpu.values())
+    gpu_mem_avg_bytes = _gpu_mem_avg_bytes_from_summaries(per_gpu)
     return {
         "cpu_percent": agg.cpu_avg_percent,
         "ram_bytes": agg.ram_avg_bytes,
         "ram_percent": percent(agg.ram_avg_bytes, agg.ram_total_bytes),
         "gpu_util_percent": agg.gpu_util_avg_percent,
-        "gpu_mem_bytes": agg.gpu_mem_avg_bytes,
-        "gpu_mem_percent": percent(
-            agg.gpu_mem_avg_bytes,
-            gpu_total_bytes if gpu_total_bytes > 0.0 else None,
+        "gpu_mem_bytes": (
+            gpu_mem_avg_bytes
+            if gpu_mem_avg_bytes is not None
+            else agg.gpu_mem_avg_bytes
         ),
+        "gpu_mem_percent": _gpu_mem_percent_from_summaries(per_gpu),
         "gpu_temp_c": agg.gpu_temp_avg_c,
         "gpu_power_w": agg.gpu_power_avg_w,
         "gpu_headroom_bytes": _node_headroom_min_bytes(node),
     }
 
 
-def _system_node_comparison(
-    cluster: SystemClusterSummary,
-    *,
-    field: str,
-) -> Dict[str, Any]:
-    specs = {
-        "cpu_percent": (
-            lambda node: node.aggregate.cpu_peak_percent,
-            True,
-        ),
-        "ram_bytes": (
-            lambda node: node.aggregate.ram_peak_bytes,
-            True,
-        ),
-        "ram_percent": (
-            lambda node: percent(
-                node.aggregate.ram_peak_bytes,
-                node.aggregate.ram_total_bytes,
-            ),
-            True,
-        ),
-        "gpu_util_percent": (
-            lambda node: node.aggregate.gpu_util_avg_percent,
-            False,
-        ),
-        "gpu_mem_bytes": (
-            lambda node: node.aggregate.gpu_mem_peak_bytes,
-            True,
-        ),
-        "gpu_mem_percent": (node_gpu_mem_peak_percent, True),
-        "gpu_temp_c": (
-            lambda node: node.aggregate.gpu_temp_peak_c,
-            True,
-        ),
-        "gpu_power_w": (
-            lambda node: node.aggregate.gpu_power_peak_w,
-            True,
-        ),
-        "gpu_headroom_bytes": (_node_headroom_min_bytes, False),
-    }
-    value_fn, higher_is_worse = specs[field]
-    pairs = [
-        (label, float(value))
-        for label, node in cluster.nodes.items()
-        for value in (value_fn(node),)
-        if value is not None
-    ]
-    if not pairs:
-        return {
-            "median": None,
-            "median_node_rank": None,
-            "worst": None,
-            "worst_node_rank": None,
-        }
+SYSTEM_LOWER_IS_WORSE_METRICS = {
+    "gpu_util_percent",
+    "gpu_headroom_bytes",
+}
 
-    values = [value for _label, value in pairs]
-    median_value = sorted(values)[len(values) // 2]
-    median_label, _ = min(
+
+def _metric_values_by_row(
+    row_metrics: Dict[str, Dict[str, Any]],
+    metric_names: Iterable[str],
+) -> Dict[str, list[tuple[str, float]]]:
+    """Collect finite row metric values by metric name."""
+    values: Dict[str, list[tuple[str, float]]] = {
+        metric: [] for metric in metric_names
+    }
+    for row_id, metrics in row_metrics.items():
+        for metric_name in metric_names:
+            raw = metrics.get(metric_name)
+            if raw is None:
+                continue
+            try:
+                values[metric_name].append((str(row_id), float(raw)))
+            except Exception:
+                continue
+    return values
+
+
+def _average_metrics_from_rows(
+    row_metrics: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Average each public System metric across node rows."""
+    values = _metric_values_by_row(row_metrics, SYSTEM_METRIC_NAMES)
+    return {
+        metric: (
+            sum(value for _row_id, value in pairs) / len(pairs)
+            if pairs
+            else None
+        )
+        for metric, pairs in values.items()
+    }
+
+
+def _closest_row_to_median(
+    pairs: list[tuple[str, float]]
+) -> tuple[str, float]:
+    """Return the row whose value best represents the median."""
+    sorted_values = sorted(value for _row_id, value in pairs)
+    mid = len(sorted_values) // 2
+    if len(sorted_values) % 2:
+        median_value = sorted_values[mid]
+    else:
+        median_value = (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
+    return min(
         pairs,
         key=lambda item: (abs(item[1] - median_value), item[1], item[0]),
     )
-    worst_label, worst_value = (
-        max(pairs, key=lambda item: (item[1], item[0]))
-        if higher_is_worse
-        else min(pairs, key=lambda item: (item[1], item[0]))
-    )
-    return {
-        "median": median_value,
-        "median_node_rank": median_label,
-        "worst": worst_value,
-        "worst_node_rank": worst_label,
-    }
 
 
-def _system_median_worst(cluster: SystemClusterSummary) -> tuple[Dict, Dict]:
-    median: Dict[str, Any] = {}
-    worst: Dict[str, Any] = {}
-    for field in (
-        "cpu_percent",
-        "ram_bytes",
-        "ram_percent",
-        "gpu_util_percent",
-        "gpu_mem_bytes",
-        "gpu_mem_percent",
-        "gpu_temp_c",
-        "gpu_power_w",
-        "gpu_headroom_bytes",
-    ):
-        rollup = _system_node_comparison(cluster, field=field)
-        median[field] = {
-            "value": rollup["median"],
-            "idx": rollup["median_node_rank"],
-        }
-        worst[field] = {
-            "value": rollup["worst"],
-            "idx": rollup["worst_node_rank"],
-        }
-    return median, worst
+def _row_metric_points(
+    row_metrics: Dict[str, Dict[str, Any]],
+    *,
+    kind: str,
+) -> Dict[str, Any]:
+    """Build median or worst `{value, idx}` points from node row metrics."""
+    values_by_metric = _metric_values_by_row(row_metrics, SYSTEM_METRIC_NAMES)
+    points: Dict[str, Any] = {}
+    for metric_name, pairs in values_by_metric.items():
+        if not pairs:
+            points[metric_name] = {"value": None, "idx": None}
+            continue
+        if kind == "median":
+            row_id, value = _closest_row_to_median(pairs)
+        elif kind == "worst":
+            lower_is_worse = metric_name in SYSTEM_LOWER_IS_WORSE_METRICS
+            row_id, value = (
+                min(pairs, key=lambda item: (item[1], item[0]))
+                if lower_is_worse
+                else max(pairs, key=lambda item: (item[1], item[0]))
+            )
+        else:
+            raise ValueError(f"Unsupported System point kind: {kind}")
+        points[metric_name] = {"value": value, "idx": row_id}
+    return points
 
 
 def _node_json(
     node: SystemNodeSummary,
     *,
+    metrics: Dict[str, Any],
     primary: Dict[str, Any],
     issues: list[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -363,7 +337,7 @@ def _node_json(
         identity=identity,
         diagnosis=primary,
         issues=issues,
-        metrics=_node_metric_values(node),
+        metrics=metrics,
     ).to_json()
 
 
@@ -442,6 +416,7 @@ def build_system_card(
 ) -> tuple[str, Dict[str, Any]]:
     """Build the cluster-shaped System payload and compact card text."""
     node_payloads: Dict[str, Dict[str, Any]] = {}
+    node_metrics: Dict[str, Dict[str, Any]] = {}
     all_issue_pairs: list[tuple[DiagnosticIssue, SystemNodeSummary]] = []
 
     for label, node in cluster.nodes.items():
@@ -456,8 +431,11 @@ def build_system_card(
                 diagnosis.primary,
                 scope=_scope_for_node(node),
             )
+        metrics = _node_metric_values(node)
+        node_metrics[label] = metrics
         node_payloads[label] = _node_json(
             node,
+            metrics=metrics,
             primary=node_primary,
             issues=node_issues,
         )
@@ -481,7 +459,8 @@ def build_system_card(
         cluster.aggregate.first_ts,
         cluster.aggregate.last_ts,
     )
-    median, worst = _system_median_worst(cluster)
+    median = _row_metric_points(node_metrics, kind="median")
+    worst = _row_metric_points(node_metrics, kind="worst")
     coverage = f"{cluster.observed_nodes}/{cluster.expected_nodes}"
     card = "\n".join(
         [
@@ -516,7 +495,7 @@ def build_system_card(
             alignment="none",
             samples=cluster.aggregate.system_samples,
         ).to_json(),
-        average=_system_average(cluster.aggregate, cluster),
+        average=_average_metrics_from_rows(node_metrics),
         median=median,
         worst=worst,
     )

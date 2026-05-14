@@ -158,7 +158,7 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.payload["global"]["average"]["gpu_util_percent"] == 55.0
     assert (
         result.payload["groups"]["rows"]["0"]["metrics"]["gpu_mem_percent"]
-        == 40.0
+        == 50.0
     )
     assert result.payload["groups"]["rows"]["0"]["identity"] == {
         "node_rank": 0,
@@ -215,6 +215,40 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
     assert payload["global"]["worst"]["gpu_temp_c"]["idx"] == "1"
 
 
+def test_system_loader_uses_latest_bounded_window(tmp_path):
+    db_path = tmp_path / "system_latest.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_system_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO system_samples VALUES (
+                2, 0, 0, 1, 1, 0, 'worker-0', 2, 20.0,
+                90.0, 12.0, 16.0, 1, 1,
+                80.0, 85.0, 7.0, 8.0, 62.0, 70.0, 110.0, 130.0
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO system_gpu_samples VALUES (
+                2, 0, 0, 1, 1, 0, 'worker-0', 2, 0,
+                80.0, 8.0, 10.0, 70.0, 130.0
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = load_system_section_data(str(db_path), max_system_rows=1)
+
+    assert data.cluster.aggregate.system_samples == 1
+    assert data.cluster.aggregate.cpu_avg_percent == 90.0
+    assert data.cluster.aggregate.ram_avg_bytes == 12.0
+    assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 80.0
+
+
 def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "process.db"
     conn = sqlite3.connect(db_path)
@@ -268,6 +302,24 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
         "world_size": 1,
     }
     assert "takeaway" not in result.payload["global"]
+
+
+def test_process_loader_uses_latest_bounded_window(tmp_path):
+    db_path = tmp_path / "process_latest.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_process_tables(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = load_process_section_data(str(db_path), max_process_rows=1)
+
+    assert data.aggregate.process_samples == 1
+    assert data.aggregate.cpu_avg_percent == 40.0
+    assert data.aggregate.ram_avg_bytes == 2000000000.0
+    assert data.per_global_rank[0].cpu_avg_percent == 40.0
+    assert data.per_global_rank[0].gpu_mem_reserved_avg_bytes == 4000000000.0
 
 
 def test_summary_wrappers_delegate_to_section_paths(tmp_path):

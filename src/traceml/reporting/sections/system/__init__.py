@@ -11,7 +11,7 @@ Final-report system section.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import ClassVar, Optional
 
 from traceml.core.summaries import SummaryResult
 from traceml.reporting.sections.system.builder import (
@@ -28,11 +28,12 @@ from traceml.reporting.sections.system.model import MAX_SUMMARY_ROWS
 class SystemSummarySection:
     """Build TraceML's final-report system section."""
 
+    name: ClassVar[str] = "system"
     node_rank: Optional[int] = None
     max_system_rows: int = MAX_SUMMARY_ROWS
-    name: str = "system"
 
     def build(self, db_path: str) -> SummaryResult:
+        """Build the System summary section for a TraceML SQLite database."""
         data = load_system_section_data(
             db_path,
             node_rank=self.node_rank,

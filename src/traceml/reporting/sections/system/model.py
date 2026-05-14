@@ -8,7 +8,6 @@
 
 import sqlite3
 from dataclasses import dataclass, field
-from statistics import median
 from typing import Dict, Iterable, Optional
 
 MAX_SUMMARY_ROWS = 10_000
@@ -58,6 +57,7 @@ class SystemSummaryAgg:
     - GPU fields are optional because CPU-only runs are fully supported.
     """
 
+    # Sample timestamps are Unix seconds from the telemetry source.
     first_ts: Optional[float] = None
     last_ts: Optional[float] = None
     system_samples: int = 0
@@ -138,15 +138,6 @@ class SystemNodeSummary:
 
 
 @dataclass(frozen=True)
-class MetricRollup:
-    """Median/worst view for one node-level metric."""
-
-    median: Optional[float]
-    worst: Optional[float]
-    worst_node: Optional[str]
-
-
-@dataclass(frozen=True)
 class SystemClusterSummary:
     """Cluster-shaped System summary for single-node and multi-node runs."""
 
@@ -168,35 +159,6 @@ class SystemClusterSummary:
     def observed_gpus(self) -> int:
         """Number of per-node GPUs represented in detailed GPU rows."""
         return sum(len(node.per_gpu) for node in self.nodes.values())
-
-
-def rollup_metric(
-    nodes: Dict[str, SystemNodeSummary],
-    *,
-    value_fn,
-    higher_is_worse: bool,
-) -> MetricRollup:
-    """Build median/worst values for one metric across nodes."""
-    values: list[tuple[str, float]] = []
-    for label, node in nodes.items():
-        value = value_fn(node)
-        if value is not None:
-            values.append((label, float(value)))
-    if not values:
-        return MetricRollup(median=None, worst=None, worst_node=None)
-    worst_label, worst_value = sorted(
-        values,
-        key=lambda item: (
-            item[1] if higher_is_worse else -item[1],
-            item[0],
-        ),
-        reverse=True,
-    )[0]
-    return MetricRollup(
-        median=float(median([item[1] for item in values])),
-        worst=float(worst_value),
-        worst_node=worst_label,
-    )
 
 
 def node_gpu_mem_peak_percent(node: SystemNodeSummary) -> Optional[float]:
@@ -275,3 +237,23 @@ def per_gpu_to_diagnosis_input(
         }
 
     return out
+
+
+__all__ = [
+    "MAX_SUMMARY_ROWS",
+    "SYSTEM_METRIC_NAMES",
+    "PerGPUSummary",
+    "SystemClusterSummary",
+    "SystemNodeIdentity",
+    "SystemNodeSummary",
+    "SystemSummaryAgg",
+    "average_optional",
+    "max_int_optional",
+    "max_optional",
+    "min_timestamp",
+    "node_gpu_headroom_min_gb",
+    "node_gpu_mem_peak_percent",
+    "percent",
+    "per_gpu_to_diagnosis_input",
+    "table_has_column",
+]

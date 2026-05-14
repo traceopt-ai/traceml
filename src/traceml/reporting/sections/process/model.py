@@ -23,6 +23,25 @@ PROCESS_METRIC_NAMES = [
 ]
 
 
+def cpu_capacity_percent(
+    cpu_avg_percent: Optional[float],
+    cpu_logical_core_count: Optional[int],
+) -> Optional[float]:
+    """Return average CPU usage normalized by logical host core capacity."""
+    if (
+        cpu_avg_percent is None
+        or cpu_logical_core_count is None
+        or cpu_logical_core_count <= 0
+    ):
+        return None
+    return max(
+        0.0,
+        float(cpu_avg_percent)
+        / (100.0 * float(cpu_logical_core_count))
+        * 100.0,
+    )
+
+
 def _format_percent_stat(
     label: str,
     value: Optional[float],
@@ -57,6 +76,7 @@ class ProcessSummaryAgg:
       distributed runs.
     """
 
+    # Sample timestamps are Unix seconds from the traced process.
     first_ts: Optional[float] = None
     last_ts: Optional[float] = None
     process_samples: int = 0
@@ -80,6 +100,7 @@ class ProcessSummaryAgg:
     gpu_mem_reserved_avg_bytes: Optional[float] = None
     gpu_mem_reserved_peak_bytes: Optional[float] = None
     gpu_mem_total_bytes: Optional[float] = None
+    # Max reserved/used CUDA memory ratio observed in the selected window.
     gpu_mem_reserved_overhang_ratio: Optional[float] = None
 
 
@@ -120,22 +141,15 @@ class PerRankProcessSummary:
     gpu_mem_reserved_avg_bytes: Optional[float] = None
     gpu_mem_reserved_peak_bytes: Optional[float] = None
     gpu_mem_total_bytes: Optional[float] = None
+    # Max reserved/used CUDA memory ratio observed for this global rank.
     gpu_mem_reserved_overhang_ratio: Optional[float] = None
 
 
 def process_cpu_capacity_percent(agg: ProcessSummaryAgg) -> Optional[float]:
-    """Return average CPU usage normalized by logical host core capacity."""
-    if (
-        agg.cpu_avg_percent is None
-        or agg.cpu_logical_core_count is None
-        or agg.cpu_logical_core_count <= 0
-    ):
-        return None
-    return max(
-        0.0,
-        float(agg.cpu_avg_percent)
-        / (100.0 * float(agg.cpu_logical_core_count))
-        * 100.0,
+    """Return average CPU capacity used by the aggregate process summary."""
+    return cpu_capacity_percent(
+        agg.cpu_avg_percent,
+        agg.cpu_logical_core_count,
     )
 
 
@@ -162,3 +176,14 @@ def build_process_stats_line(
     ]
     rendered = [part for part in parts if part is not None]
     return " | ".join(rendered) if rendered else "unavailable"
+
+
+__all__ = [
+    "MAX_SUMMARY_ROWS",
+    "PROCESS_METRIC_NAMES",
+    "PerRankProcessSummary",
+    "ProcessSummaryAgg",
+    "build_process_stats_line",
+    "cpu_capacity_percent",
+    "process_cpu_capacity_percent",
+]

@@ -6,6 +6,10 @@
 
 """
 Text formatter for the final-report process section.
+
+The current text card is assembled by the builder and stored in the payload.
+Keeping this formatter as the public text boundary gives future rich text or
+terminal-specific formatting a clear place to live.
 """
 
 from __future__ import annotations
