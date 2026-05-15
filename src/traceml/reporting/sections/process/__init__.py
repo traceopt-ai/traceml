@@ -11,7 +11,7 @@ Final-report process section.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 from traceml.core.summaries import SummaryResult
 from traceml.reporting.sections.process.builder import (
@@ -29,14 +29,12 @@ class ProcessSummarySection:
     """Build TraceML's final-report process section."""
 
     name: ClassVar[str] = "process"
-    global_rank: Optional[int] = None
     max_process_rows: int = MAX_SUMMARY_ROWS
 
     def build(self, db_path: str) -> SummaryResult:
         """Build the Process summary section for a TraceML SQLite database."""
         data = load_process_section_data(
             db_path,
-            global_rank=self.global_rank,
             max_process_rows=self.max_process_rows,
         )
         payload = build_process_section_payload(data)

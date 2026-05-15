@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Dict
 
 from traceml.reporting.config import normalize_summary_window_rows
 from traceml.reporting.sections.process.model import (
@@ -28,49 +28,63 @@ class ProcessSectionData:
     per_global_rank: Dict[int, PerRankProcessSummary]
 
 
-def load_process_summary_aggregate(
-    conn: sqlite3.Connection,
-    *,
-    global_rank: Optional[int] = None,
-    max_process_rows: int = MAX_SUMMARY_ROWS,
-) -> ProcessSummaryAgg:
-    """Load aggregate process metrics from `process_samples`."""
-    where_clause = ""
-    params: list[Any] = []
+def _recent_process_samples_cte() -> str:
+    """
+    Return the CTE used for the process summary window.
 
-    if global_rank is not None:
-        where_clause = "WHERE global_rank = ?"
-        params.append(int(global_rank))
-
-    base_sql = f"""
-        FROM (
+    Process summaries keep the latest N samples per global rank, matching the
+    per-rank retention policy used by the SQLite writer.
+    """
+    return """
+        WITH recent_process_samples AS (
             SELECT *
-            FROM process_samples
-            {where_clause}
-            ORDER BY id DESC
-            LIMIT ?
+            FROM (
+                SELECT
+                    p.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(p.global_rank, p.rank, 0)
+                        ORDER BY p.id DESC
+                    ) AS row_num
+                FROM process_samples AS p
+            )
+            WHERE row_num <= ?
         )
     """
 
+
+def load_process_summary_aggregate(
+    conn: sqlite3.Connection,
+    *,
+    max_process_rows: int = MAX_SUMMARY_ROWS,
+) -> ProcessSummaryAgg:
+    """Load aggregate process metrics from `process_samples`."""
+    sample_cte = _recent_process_samples_cte()
+    params = (int(max_process_rows),)
+
+    # Read window size, time bounds, and how many ranks are represented.
     count_row = conn.execute(
-        f"""
+        sample_cte
+        + """
         SELECT
             COUNT(*),
             MIN(sample_ts_s),
             MAX(sample_ts_s),
             COUNT(DISTINCT global_rank)
-        {base_sql};
+        FROM recent_process_samples;
         """,
-        (*params, int(max_process_rows)),
+        params,
     ).fetchone()
 
     n_rows = int(count_row[0] or 0)
+    # Convert nullable SQLite scalars into typed summary fields.
     first_ts = float(count_row[1]) if count_row[1] is not None else None
     last_ts = float(count_row[2]) if count_row[2] is not None else None
     distinct_global_ranks = int(count_row[3] or 0)
 
+    # Compute aggregate CPU, RAM, and GPU process metrics over the same window.
     row = conn.execute(
-        f"""
+        sample_cte
+        + """
         SELECT
             AVG(cpu_percent),
             MAX(cpu_percent),
@@ -89,11 +103,12 @@ def load_process_summary_aggregate(
             AVG(gpu_mem_reserved_bytes),
             MAX(gpu_mem_reserved_bytes),
             MAX(gpu_mem_total_bytes)
-        {base_sql};
+        FROM recent_process_samples;
         """,
-        (*params, int(max_process_rows)),
+        params,
     ).fetchone()
 
+    # Map the SQL aggregate row into the typed process summary model.
     return ProcessSummaryAgg(
         first_ts=first_ts,
         last_ts=last_ts,
@@ -125,18 +140,14 @@ def load_process_summary_aggregate(
 def load_per_global_rank_process_summary(
     conn: sqlite3.Connection,
     *,
-    global_rank: Optional[int] = None,
     max_process_rows: int = MAX_SUMMARY_ROWS,
 ) -> Dict[int, PerRankProcessSummary]:
     """Load per-global-rank process metrics from `process_samples`."""
-    where_clause = ""
-    params: list[Any] = []
-
-    if global_rank is not None:
-        where_clause = "WHERE global_rank = ?"
-        params.append(int(global_rank))
-
-    sql = f"""
+    sample_cte = _recent_process_samples_cte()
+    params = (int(max_process_rows),)
+    sql = (
+        sample_cte
+        + """
         SELECT
             global_rank,
             MAX(local_rank),
@@ -172,19 +183,15 @@ def load_per_global_rank_process_summary(
                 END
             )
 
-        FROM (
-            SELECT *
-            FROM process_samples
-            {where_clause}
-            ORDER BY id DESC
-            LIMIT ?
-        )
+        FROM recent_process_samples
         WHERE global_rank IS NOT NULL
         GROUP BY global_rank
         ORDER BY global_rank ASC;
     """
+    )
 
-    rows = conn.execute(sql, (*params, int(max_process_rows))).fetchall()
+    # Build one typed process summary row for each observed global rank.
+    rows = conn.execute(sql, params).fetchall()
 
     out: Dict[int, PerRankProcessSummary] = {}
     for row in rows:
@@ -230,7 +237,6 @@ def load_per_global_rank_process_summary(
 def load_process_section_data(
     db_path: str,
     *,
-    global_rank: Optional[int] = None,
     max_process_rows: int = MAX_SUMMARY_ROWS,
 ) -> ProcessSectionData:
     """
@@ -241,12 +247,10 @@ def load_process_section_data(
     try:
         aggregate = load_process_summary_aggregate(
             conn,
-            global_rank=global_rank,
             max_process_rows=row_limit,
         )
         per_global_rank = load_per_global_rank_process_summary(
             conn,
-            global_rank=global_rank,
             max_process_rows=row_limit,
         )
     finally:
