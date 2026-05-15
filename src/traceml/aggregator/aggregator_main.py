@@ -36,6 +36,7 @@ from typing import Any, Optional
 
 from traceml.aggregator.trace_aggregator import TraceMLAggregator
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
 
 AGGREGATOR_ERROR_LOG_NAME = "aggregator_error.log"
@@ -125,6 +126,12 @@ def read_traceml_env() -> dict[str, Any]:
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
         "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
         == "1",
+        "summary_window_rows": int(
+            os.environ.get(
+                "TRACEML_SUMMARY_WINDOW_ROWS",
+                str(DEFAULT_SUMMARY_WINDOW_ROWS),
+            )
+        ),
     }
 
 
@@ -183,6 +190,7 @@ def main() -> None:
             remote_max_rows=int(cfg["remote_max_rows"]),
             session_id=session_id,
             history_enabled=bool(cfg["history_enabled"]),
+            summary_window_rows=int(cfg["summary_window_rows"]),
             tcp=TraceMLTCPSettings(
                 connect_host=str(cfg["tcp_connect_host"]),
                 bind_host=str(cfg["tcp_bind_host"]),

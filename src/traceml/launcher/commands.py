@@ -34,6 +34,7 @@ from traceml.launcher.process import (
     terminate_process_group,
     wait_for_tcp_listen,
 )
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.runtime.launch_context import LaunchContext
 from traceml.runtime.session import get_session_id
 from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
@@ -100,6 +101,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_TCP_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_TCP_PORT"] = str(aggregator_cfg.port)
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
+    env["TRACEML_SUMMARY_WINDOW_ROWS"] = os.environ.get(
+        "TRACEML_SUMMARY_WINDOW_ROWS",
+        str(DEFAULT_SUMMARY_WINDOW_ROWS),
+    )
     env["TRACEML_NNODES"] = str(torchrun_cfg.nnodes)
     env["TRACEML_NPROC_PER_NODE"] = str(torchrun_cfg.nproc_per_node)
     env["TRACEML_NODE_RANK"] = str(torchrun_cfg.node_rank)

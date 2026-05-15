@@ -23,6 +23,7 @@ from traceml.renderers.step_memory.common import (
     build_step_memory_combined_result,
 )
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml.reporting.config import normalize_summary_window_rows
 from traceml.reporting.sections.step_memory.model import (
     MAX_SUMMARY_WINDOW_ROWS,
     StepMemoryGlobalRankIdentity,
@@ -213,12 +214,12 @@ def _per_rank_for_diagnostics(
 def load_step_memory_section_data(
     db_path: str,
     *,
-    window_size: int = 400,
+    window_size: int = MAX_SUMMARY_WINDOW_ROWS,
 ) -> StepMemorySectionData:
     """
     Load bounded step-memory section data from the SQLite history database.
     """
-    bounded_window = min(max(1, int(window_size)), MAX_SUMMARY_WINDOW_ROWS)
+    bounded_window = normalize_summary_window_rows(window_size)
     db = StepMemoryMetricsDB(db_path=db_path)
     conn = db.connect()
 

@@ -14,9 +14,7 @@ from dataclasses import dataclass
 from typing import ClassVar, Optional
 
 from traceml.core.summaries import SummaryResult
-from traceml.reporting.sections.system.builder import (
-    build_system_section_payload,
-)
+from traceml.reporting.sections.system.builder import build_system_payload
 from traceml.reporting.sections.system.formatter import (
     format_system_section_text,
 )
@@ -39,7 +37,7 @@ class SystemSummarySection:
             node_rank=self.node_rank,
             max_system_rows=self.max_system_rows,
         )
-        payload = build_system_section_payload(data)
+        payload = build_system_payload(data.cluster)
         return SummaryResult(
             section=self.name,
             payload=payload,
@@ -49,7 +47,7 @@ class SystemSummarySection:
 
 __all__ = [
     "SystemSummarySection",
-    "build_system_section_payload",
+    "build_system_payload",
     "format_system_section_text",
     "load_system_section_data",
 ]

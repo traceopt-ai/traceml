@@ -11,8 +11,9 @@ from __future__ import annotations
 import math
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
+from traceml.reporting.config import normalize_summary_window_rows
 from traceml.reporting.sections.system.model import (
     MAX_SUMMARY_ROWS,
     PerGPUSummary,
@@ -63,6 +64,7 @@ class _SampleRow:
 @dataclass(frozen=True)
 class _GpuRow:
     global_rank: Optional[int]
+    node_rank: Optional[int]
     seq: Optional[int]
     gpu_idx: int
     util: Optional[float]
@@ -165,39 +167,58 @@ def _expected_nodes(rows: list[_SampleRow]) -> int:
     return max(1, len({_node_label(row) for row in rows}))
 
 
+def _recent_system_samples_cte(*, node_rank: Optional[int]) -> str:
+    """
+    Return the CTE used for the system summary window.
+
+    Cluster summaries keep the latest N samples per node. Scoped node
+    summaries keep the latest N samples for the requested node only.
+    """
+    where_clause = "WHERE node_rank = ?" if node_rank is not None else ""
+    return f"""
+        WITH recent_system_samples AS (
+            SELECT *
+            FROM (
+                SELECT
+                    s.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(s.node_rank, s.global_rank, 0)
+                        ORDER BY s.id DESC
+                    ) AS row_num
+                FROM system_samples AS s
+                {where_clause}
+            )
+            WHERE row_num <= ?
+        )
+    """
+
+
 def _sample_rows(
     conn: sqlite3.Connection,
     *,
     node_rank: Optional[int],
     max_system_rows: int,
 ) -> list[_SampleRow]:
-    where_clause = "WHERE node_rank = ?" if node_rank is not None else ""
-    params: tuple[Any, ...] = (
-        (int(node_rank),) if node_rank is not None else ()
+
+    sample_cte = _recent_system_samples_cte(node_rank=node_rank)
+    params = (
+        (int(node_rank), int(max_system_rows))
+        if node_rank is not None
+        else (int(max_system_rows),)
     )
     rows = conn.execute(
-        f"""
+        sample_cte
+        + """
         SELECT global_rank, local_rank, world_size, local_world_size,
                node_rank, hostname, sample_ts_s, seq, cpu_percent,
                ram_used_bytes, ram_total_bytes, gpu_available, gpu_count,
                gpu_util_avg, gpu_util_peak, gpu_mem_used_avg_bytes,
                gpu_mem_used_peak_bytes, gpu_temp_avg_c, gpu_temp_peak_c,
                gpu_power_avg_w, gpu_power_peak_w
-        FROM (
-            SELECT id, global_rank, local_rank, world_size, local_world_size,
-                   node_rank, hostname, sample_ts_s, seq, cpu_percent,
-                   ram_used_bytes, ram_total_bytes, gpu_available, gpu_count,
-                   gpu_util_avg, gpu_util_peak, gpu_mem_used_avg_bytes,
-                   gpu_mem_used_peak_bytes, gpu_temp_avg_c, gpu_temp_peak_c,
-                   gpu_power_avg_w, gpu_power_peak_w
-            FROM system_samples
-            {where_clause}
-            ORDER BY id DESC
-            LIMIT ?
-        ) AS recent
-        ORDER BY id ASC;
+        FROM recent_system_samples
+        ORDER BY COALESCE(node_rank, global_rank, 0) ASC, id ASC;
         """,
-        (*params, int(max_system_rows)),
+        params,
     ).fetchall()
     return [
         _SampleRow(
@@ -233,45 +254,44 @@ def _gpu_rows(
     node_rank: Optional[int],
     max_system_rows: int,
 ) -> list[_GpuRow]:
-    where_clause = "WHERE s.node_rank = ?" if node_rank is not None else ""
-    params: tuple[Any, ...] = (
-        (int(node_rank),) if node_rank is not None else ()
-    )
     power_limit_expr = (
         "g.power_limit_w"
         if table_has_column(conn, "system_gpu_samples", "power_limit_w")
         else "NULL"
     )
+    sample_cte = _recent_system_samples_cte(node_rank=node_rank)
+    params = (
+        (int(node_rank), int(max_system_rows))
+        if node_rank is not None
+        else (int(max_system_rows),)
+    )
     rows = conn.execute(
-        f"""
-        SELECT g.global_rank, g.seq, g.gpu_idx, g.util, g.mem_used_bytes,
-               g.mem_total_bytes, g.temperature_c, g.power_usage_w,
-               {power_limit_expr}
+        sample_cte
+        + f"""
+        SELECT g.global_rank, g.node_rank, g.seq, g.gpu_idx, g.util,
+               g.mem_used_bytes, g.mem_total_bytes, g.temperature_c,
+               g.power_usage_w, {power_limit_expr}
         FROM system_gpu_samples AS g
-        INNER JOIN (
-            SELECT s.global_rank, s.seq
-            FROM system_samples AS s
-            {where_clause}
-            ORDER BY s.id DESC
-            LIMIT ?
-        ) AS recent
+        INNER JOIN recent_system_samples AS recent
             ON g.global_rank IS recent.global_rank
-           AND g.seq = recent.seq
+           AND g.node_rank IS recent.node_rank
+           AND g.seq IS recent.seq
         ORDER BY g.global_rank ASC, g.seq ASC, g.gpu_idx ASC;
         """,
-        (*params, int(max_system_rows)),
+        params,
     ).fetchall()
     return [
         _GpuRow(
             global_rank=row[0],
-            seq=row[1],
-            gpu_idx=int(row[2]),
-            util=row[3],
-            mem_used_bytes=row[4],
-            mem_total_bytes=row[5],
-            temperature_c=row[6],
-            power_usage_w=row[7],
-            power_limit_w=row[8],
+            node_rank=row[1],
+            seq=row[2],
+            gpu_idx=int(row[3]),
+            util=row[4],
+            mem_used_bytes=row[5],
+            mem_total_bytes=row[6],
+            temperature_c=row[7],
+            power_usage_w=row[8],
+            power_limit_w=row[9],
         )
         for row in rows
     ]
@@ -283,37 +303,55 @@ def _load_cluster_summary(
     node_rank: Optional[int],
     max_system_rows: int,
 ) -> SystemClusterSummary:
+
+    # Load the bounded system rows, keeping the latest window per node.
     samples = _sample_rows(
         conn,
         node_rank=node_rank,
         max_system_rows=max_system_rows,
     )
+    # Load GPU rows that belong to the same retained system samples.
     gpus = _gpu_rows(
         conn,
         node_rank=node_rank,
         max_system_rows=max_system_rows,
     )
-    gpu_by_key: Dict[tuple[Optional[int], Optional[int]], list[_GpuRow]] = {}
-    for row in gpus:
-        gpu_by_key.setdefault((row.global_rank, row.seq), []).append(row)
 
+    # Index GPU rows by the sample identity they were emitted with.
+    gpu_by_key: Dict[
+        tuple[Optional[int], Optional[int], Optional[int]],
+        list[_GpuRow],
+    ] = {}
+
+    for row in gpus:
+        key = (row.global_rank, row.node_rank, row.seq)
+        gpu_by_key.setdefault(key, []).append(row)
+
+    # Group system samples by node so each node gets its own rollup.
     sample_groups: Dict[str, list[_SampleRow]] = {}
     for row in samples:
         sample_groups.setdefault(_node_label(row), []).append(row)
 
+    # Build one node summary at a time from its system samples and GPU rows.
     nodes: Dict[str, SystemNodeSummary] = {}
     for label, node_rows in sorted(sample_groups.items()):
+        # Collect GPU rows that match this node's retained system samples.
         node_gpu_rows: list[_GpuRow] = []
         for row in node_rows:
             node_gpu_rows.extend(
-                gpu_by_key.get((row.global_rank, row.seq), [])
+                gpu_by_key.get(
+                    (row.global_rank, row.node_rank, row.seq),
+                    [],
+                )
             )
+        # Store the final per-node identity, system rollup, and GPU rollup.
         nodes[label] = SystemNodeSummary(
             identity=_node_identity(node_rows),
             aggregate=_aggregate_samples(node_rows),
             per_gpu=_aggregate_gpu(node_gpu_rows),
         )
 
+    # Return the cluster-level rollup plus the per-node summaries.
     return SystemClusterSummary(
         aggregate=_aggregate_samples(samples),
         nodes=nodes,
@@ -330,7 +368,7 @@ def load_system_section_data(
     """
     Load bounded system-section data from the SQLite history database.
     """
-    row_limit = min(max(1, int(max_system_rows)), MAX_SUMMARY_ROWS)
+    row_limit = normalize_summary_window_rows(max_system_rows)
     conn = sqlite3.connect(db_path)
     try:
         cluster = _load_cluster_summary(

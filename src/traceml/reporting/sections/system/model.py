@@ -10,7 +10,9 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional
 
-MAX_SUMMARY_ROWS = 10_000
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+
+MAX_SUMMARY_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 
 SYSTEM_METRIC_NAMES = [
     "cpu_percent",

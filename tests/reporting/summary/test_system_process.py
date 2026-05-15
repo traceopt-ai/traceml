@@ -53,6 +53,7 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
             local_world_size INTEGER,
             node_rank INTEGER,
             hostname TEXT,
+            sample_ts_s REAL,
             seq INTEGER,
             gpu_idx INTEGER,
             util REAL,
@@ -75,7 +76,7 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         INSERT INTO system_gpu_samples VALUES (
-            1, 0, 0, 1, 1, 0, 'worker-0', 1, 0,
+            1, 0, 0, 1, 1, 0, 'worker-0', 10.0, 1, 0,
             70.0, 5.0, 10.0, 68.0, 120.0
         )
         """
@@ -188,7 +189,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
         conn.execute(
             """
             INSERT INTO system_gpu_samples VALUES (
-                2, 1, 0, 2, 1, 1, 'worker-1', 2, 0,
+                2, 1, 0, 2, 1, 1, 'worker-1', 11.0, 2, 0,
                 45.0, 5.0, 10.0, 95.0, 120.0
             )
             """
@@ -232,7 +233,7 @@ def test_system_loader_uses_latest_bounded_window(tmp_path):
         conn.execute(
             """
             INSERT INTO system_gpu_samples VALUES (
-                2, 0, 0, 1, 1, 0, 'worker-0', 2, 0,
+                2, 0, 0, 1, 1, 0, 'worker-0', 20.0, 2, 0,
                 80.0, 8.0, 10.0, 70.0, 130.0
             )
             """
@@ -247,6 +248,69 @@ def test_system_loader_uses_latest_bounded_window(tmp_path):
     assert data.cluster.aggregate.cpu_avg_percent == 90.0
     assert data.cluster.aggregate.ram_avg_bytes == 12.0
     assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 80.0
+
+
+def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
+    db_path = tmp_path / "system_latest_per_node.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_system_tables(conn)
+        conn.execute("DELETE FROM system_gpu_samples")
+        conn.execute("DELETE FROM system_samples")
+
+        row_id = 1
+        for node_rank in (0, 1):
+            for seq in (1, 2):
+                conn.execute(
+                    """
+                    INSERT INTO system_samples VALUES (
+                        ?, ?, 0, 2, 1, ?, ?, ?, ?,
+                        ?, 8.0, 16.0, 1, 1,
+                        ?, ?, 4.0, 5.0, 60.0, 68.0, 100.0, 120.0
+                    )
+                    """,
+                    (
+                        row_id,
+                        node_rank,
+                        node_rank,
+                        f"worker-{node_rank}",
+                        seq,
+                        10.0 + seq,
+                        10.0 * row_id,
+                        50.0 + row_id,
+                        60.0 + row_id,
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO system_gpu_samples VALUES (
+                        ?, ?, 0, 2, 1, ?, ?, ?, ?, 0,
+                        ?, 5.0, 10.0, 68.0, 120.0
+                    )
+                    """,
+                    (
+                        row_id,
+                        node_rank,
+                        node_rank,
+                        f"worker-{node_rank}",
+                        10.0 + seq,
+                        seq,
+                        60.0 + row_id,
+                    ),
+                )
+                row_id += 1
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = load_system_section_data(str(db_path), max_system_rows=1)
+
+    assert data.cluster.aggregate.system_samples == 2
+    assert set(data.cluster.nodes) == {"0", "1"}
+    assert data.cluster.nodes["0"].aggregate.cpu_avg_percent == 20.0
+    assert data.cluster.nodes["1"].aggregate.cpu_avg_percent == 40.0
+    assert data.cluster.nodes["0"].per_gpu[0].util_peak_percent == 62.0
+    assert data.cluster.nodes["1"].per_gpu[0].util_peak_percent == 64.0
 
 
 def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):

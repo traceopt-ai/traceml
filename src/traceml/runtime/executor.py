@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.runtime.launch_context import (
     LaunchContext,
     script_execution_context,
@@ -226,6 +227,12 @@ def read_traceml_env() -> Dict[str, Any]:
             )
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
+        "summary_window_rows": int(
+            os.environ.get(
+                "TRACEML_SUMMARY_WINDOW_ROWS",
+                str(DEFAULT_SUMMARY_WINDOW_ROWS),
+            )
+        ),
         "disable_traceml": os.environ.get("TRACEML_DISABLED", "0") == "1",
     }
 
@@ -261,6 +268,7 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
+        summary_window_rows=int(cfg["summary_window_rows"]),
         tcp=TraceMLTCPSettings(
             connect_host=str(cfg["tcp_connect_host"]),
             bind_host=str(cfg["tcp_bind_host"]),

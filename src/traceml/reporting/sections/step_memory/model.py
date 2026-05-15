@@ -12,10 +12,11 @@ from typing import Any, Dict, Mapping, Optional
 
 from traceml.diagnostics.step_memory import StepMemoryDiagnosis
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.reporting.schema import BaseGlobal, GlobalWindow
 from traceml.reporting.topology import topology_mode_from_identities
 
-MAX_SUMMARY_WINDOW_ROWS = 10_000
+MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 
 STEP_MEMORY_METRIC_NAMES = [
     "peak_allocated_bytes",

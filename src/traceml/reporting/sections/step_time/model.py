@@ -12,10 +12,11 @@ from typing import Any, Dict, Iterable, Optional
 import numpy as np
 
 from traceml.diagnostics.step_time.adapters import RankStepSignals
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.reporting.schema import BaseGlobal, GlobalWindow
 from traceml.reporting.summaries.summary_formatting import safe_float
 
-MAX_SUMMARY_WINDOW_ROWS = 10_000
+MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
     "step_time_ms",
     "dataloader_ms",

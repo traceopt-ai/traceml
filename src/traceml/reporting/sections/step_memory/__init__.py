@@ -23,6 +23,9 @@ from traceml.reporting.sections.step_memory.formatter import (
 from traceml.reporting.sections.step_memory.loader import (
     load_step_memory_section_data,
 )
+from traceml.reporting.sections.step_memory.model import (
+    MAX_SUMMARY_WINDOW_ROWS,
+)
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,7 @@ class StepMemorySummarySection:
     """Build TraceML's final-report step-memory section."""
 
     name: ClassVar[str] = "step_memory"
-    window_size: int = 400
+    window_size: int = MAX_SUMMARY_WINDOW_ROWS
 
     def build(self, db_path: str) -> SummaryResult:
         """Build the Step Memory summary section for a TraceML SQLite database."""

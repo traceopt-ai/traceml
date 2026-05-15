@@ -17,6 +17,8 @@ This module defines the shared configuration dataclasses used by:
 
 from dataclasses import dataclass
 
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+
 
 @dataclass(frozen=True)
 class TraceMLTCPSettings:
@@ -60,3 +62,4 @@ class TraceMLSettings:
     session_id: str = ""
     history_enabled: bool = True
     db_path: str = ""
+    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS

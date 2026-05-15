@@ -12,6 +12,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from traceml.reporting.config import normalize_summary_window_rows
 from traceml.reporting.sections.process.model import (
     MAX_SUMMARY_ROWS,
     PerRankProcessSummary,
@@ -235,7 +236,7 @@ def load_process_section_data(
     """
     Load bounded process-section data from the SQLite history database.
     """
-    row_limit = min(max(1, int(max_process_rows)), MAX_SUMMARY_ROWS)
+    row_limit = normalize_summary_window_rows(max_process_rows)
     conn = sqlite3.connect(db_path)
     try:
         aggregate = load_process_summary_aggregate(

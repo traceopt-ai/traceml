@@ -14,6 +14,10 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from traceml.core.summaries import SummaryResult
 from traceml.loggers.error_log import get_error_logger
+from traceml.reporting.config import (
+    DEFAULT_SUMMARY_WINDOW_ROWS,
+    normalize_summary_window_rows,
+)
 from traceml.reporting.schema import empty_section_payload
 from traceml.reporting.sections.base import SummarySection
 from traceml.reporting.sections.process import ProcessSummarySection
@@ -264,25 +268,38 @@ class FinalReportGenerator:
         }
 
 
-DEFAULT_FINAL_REPORT_GENERATOR = FinalReportGenerator(
-    sections=(
-        SystemSummarySection(),
-        ProcessSummarySection(),
-        StepTimeSummarySection(),
-        StepMemorySummarySection(),
+def build_final_report_generator(
+    *,
+    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
+) -> FinalReportGenerator:
+    """Build a final-report generator with one shared summary window."""
+    row_limit = normalize_summary_window_rows(summary_window_rows)
+    return FinalReportGenerator(
+        sections=(
+            SystemSummarySection(max_system_rows=row_limit),
+            ProcessSummarySection(max_process_rows=row_limit),
+            StepTimeSummarySection(max_rows=row_limit),
+            StepMemorySummarySection(window_size=row_limit),
+        )
     )
-)
+
+
+DEFAULT_FINAL_REPORT_GENERATOR = build_final_report_generator()
 
 
 def build_summary_payload(
     db_path: str,
     *,
-    generator: FinalReportGenerator = DEFAULT_FINAL_REPORT_GENERATOR,
+    generator: Optional[FinalReportGenerator] = None,
+    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
 ) -> Dict[str, Any]:
     """
     Build the structured final summary payload for one session database.
     """
-    return generator.generate(db_path)
+    active_generator = generator or build_final_report_generator(
+        summary_window_rows=summary_window_rows,
+    )
+    return active_generator.generate(db_path)
 
 
 def write_summary_artifacts(
@@ -324,11 +341,15 @@ def generate_summary(
     *,
     session_root: Optional[str] = None,
     print_to_stdout: bool = True,
+    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
 ) -> Dict[str, Any]:
     """
     Generate, write, and optionally print the final end-of-run summary.
     """
-    payload = build_summary_payload(db_path)
+    payload = build_summary_payload(
+        db_path,
+        summary_window_rows=summary_window_rows,
+    )
     write_summary_artifacts(
         db_path=db_path,
         payload=payload,
@@ -349,6 +370,7 @@ __all__ = [
     "StepMemorySummarySection",
     "StepTimeSummarySection",
     "SystemSummarySection",
+    "build_final_report_generator",
     "build_summary_payload",
     "generate_summary",
     "write_summary_artifacts",

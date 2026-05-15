@@ -76,6 +76,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 SAMPLER_NAME = "ProcessSampler"
+RETENTION_TABLES = ("process_samples",)
 
 
 def _optional_int(value: Any) -> Optional[int]:

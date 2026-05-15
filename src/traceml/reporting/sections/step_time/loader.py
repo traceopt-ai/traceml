@@ -13,6 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
+from traceml.reporting.config import normalize_summary_window_rows
 from traceml.reporting.sections.step_time.alignment import (
     AlignedStepWindow,
     build_aligned_step_summary,
@@ -113,7 +114,7 @@ def load_step_time_section_data(
     """
     Load bounded step-time section data from the SQLite history database.
     """
-    row_limit = min(max(1, int(max_rows)), MAX_SUMMARY_WINDOW_ROWS)
+    row_limit = normalize_summary_window_rows(max_rows)
     conn = sqlite3.connect(db_path)
 
     try:

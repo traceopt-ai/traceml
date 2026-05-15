@@ -25,7 +25,6 @@ from traceml.reporting.schema import (
     GlobalWindow,
     GroupRow,
 )
-from traceml.reporting.sections.system.loader import SystemSectionData
 from traceml.reporting.sections.system.model import (
     SYSTEM_METRIC_NAMES,
     PerGPUSummary,
@@ -84,7 +83,11 @@ def _scope_text(text: str, scope: Dict[str, Any]) -> str:
     if scope.get("level") == "gpu":
         gpu_idx = scope.get("gpu_idx")
         node = scope.get("node")
-        return text.replace(f" on gpu{gpu_idx}", f" on {node} gpu{gpu_idx}")
+        suffix = f" on {node} gpu{gpu_idx}"
+        existing = f" on gpu{gpu_idx}"
+        if existing in text:
+            return text.replace(existing, suffix)
+        return f"{text.rstrip('.')}{suffix}."
     if scope.get("level") == "node" and scope.get("node"):
         return f"{text.rstrip('.')} on {scope['node']}."
     return text
@@ -95,7 +98,11 @@ def _diagnose_node(node: SystemNodeSummary):
     return _diagnose_aggregate(agg, per_gpu=node.per_gpu)
 
 
-def _diagnose_aggregate(agg: SystemSummaryAgg, *, per_gpu: Dict[int, Any]):
+def _diagnose_aggregate(
+    agg: SystemSummaryAgg,
+    *,
+    per_gpu: Dict[int, PerGPUSummary],
+):
     return build_system_diagnosis_result(
         duration_s=duration_from_bounds(agg.first_ts, agg.last_ts),
         system_samples=agg.system_samples,
@@ -446,6 +453,7 @@ def build_system_payload(
         _scoped_issue_json(issue, node) for issue, node in ordered_issue_pairs
     ]
 
+    # Cluster diagnosis is fallback-only; node diagnoses carry GPU detail.
     cluster_diag = _diagnose_aggregate(cluster.aggregate, per_gpu={})
     if ordered_issue_pairs:
         primary = _primary_from_issue(*ordered_issue_pairs[0])
@@ -519,14 +527,6 @@ def build_system_payload(
     return payload
 
 
-def build_system_section_payload(
-    data: SystemSectionData,
-) -> Dict[str, Any]:
-    """Build the JSON-safe System section payload from loaded data."""
-    return build_system_payload(data.cluster)
-
-
 __all__ = [
     "build_system_payload",
-    "build_system_section_payload",
 ]
