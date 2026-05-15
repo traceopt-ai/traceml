@@ -77,7 +77,7 @@ def _group_rows_to_json(
     }
 
 
-def _build_step_memory_card(
+def _build_step_memory_payload(
     *,
     training_steps: int,
     latest_step_observed: Optional[int],
@@ -86,7 +86,7 @@ def _build_step_memory_card(
     diagnosis_result: Optional[Any],
     no_gpu_detected: bool,
     per_global_rank: Dict[str, StepMemoryGlobalRankSummary],
-) -> tuple[str, Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Build the end-of-run step-memory summary payload and text card."""
     sorted_metrics = sorted(metrics, key=metric_sort_key)
     primary = primary_metric(sorted_metrics, diagnosis)
@@ -154,7 +154,7 @@ def _build_step_memory_card(
             units={"memory": "bytes"},
             card=card,
         ).to_json()
-        return card, summary
+        return summary
 
     steps_used = int(primary.summary.steps_used)
     global_ranks_seen = int(primary.coverage.world_size)
@@ -231,7 +231,7 @@ def _build_step_memory_card(
         units={"memory": "bytes"},
         card=card,
     ).to_json()
-    return card, summary
+    return summary
 
 
 def build_step_memory_section_payload(
@@ -240,7 +240,7 @@ def build_step_memory_section_payload(
     """
     Build the JSON-safe step-memory section payload from loaded data.
     """
-    _, payload = _build_step_memory_card(
+    return _build_step_memory_payload(
         training_steps=data.training_steps,
         latest_step_observed=data.latest_step_observed,
         metrics=data.metrics,
@@ -249,7 +249,6 @@ def build_step_memory_section_payload(
         no_gpu_detected=data.no_gpu_detected,
         per_global_rank=data.per_global_rank,
     )
-    return payload
 
 
 __all__ = [

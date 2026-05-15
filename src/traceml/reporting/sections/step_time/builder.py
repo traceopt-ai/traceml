@@ -332,7 +332,7 @@ def _default_aligned_window(
     )
 
 
-def build_step_time_card(
+def build_step_time_payload(
     *,
     training_steps: int,
     latest_step_observed: Optional[int],
@@ -342,7 +342,7 @@ def build_step_time_card(
     aligned_window: Optional[AlignedStepWindow] = None,
     identities: Optional[Dict[int, Any]] = None,
     max_rows: int,
-) -> tuple[str, Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Build the Step Time section payload and compact card text."""
     all_rank_summary = per_global_rank_summary or aligned_summary
     row_rank_summary = aligned_summary
@@ -488,14 +488,14 @@ def build_step_time_card(
         units={"time": "ms"},
         card=card,
     ).to_json()
-    return card, summary
+    return summary
 
 
 def build_step_time_section_payload(
     data: StepTimeSectionData,
 ) -> Dict[str, Any]:
     """Build the JSON-safe step-time section payload from loaded data."""
-    _, payload = build_step_time_card(
+    return build_step_time_payload(
         training_steps=data.training_steps,
         latest_step_observed=data.latest_step_observed,
         aligned_summary=data.aligned_summary,
@@ -505,12 +505,11 @@ def build_step_time_section_payload(
         identities=data.identities,
         max_rows=data.max_rows,
     )
-    return payload
 
 
 __all__ = [
     "StepTimeCardStats",
     "StepTimeMetricPair",
-    "build_step_time_card",
+    "build_step_time_payload",
     "build_step_time_section_payload",
 ]

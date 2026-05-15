@@ -210,11 +210,11 @@ def _per_global_rank_to_diagnosis_input(
     return out
 
 
-def build_process_card(
+def build_process_payload(
     agg: ProcessSummaryAgg,
     *,
     per_global_rank: Dict[int, PerRankProcessSummary],
-) -> tuple[str, Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Build the Process section payload and its compact card text."""
     duration_s = duration_from_bounds(agg.first_ts, agg.last_ts)
 
@@ -333,21 +333,20 @@ def build_process_card(
         },
         card=card,
     ).to_json()
-    return card, summary
+    return summary
 
 
 def build_process_section_payload(
     data: ProcessSectionData,
 ) -> Dict[str, Any]:
     """Build the JSON-safe process-section payload from loaded data."""
-    _, payload = build_process_card(
+    return build_process_payload(
         data.aggregate,
         per_global_rank=data.per_global_rank,
     )
-    return payload
 
 
 __all__ = [
-    "build_process_card",
+    "build_process_payload",
     "build_process_section_payload",
 ]

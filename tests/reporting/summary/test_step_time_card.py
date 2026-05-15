@@ -9,7 +9,9 @@ from __future__ import annotations
 from traceml.reporting.summaries.step_time import (
     RankStepSummary,
 )
-from traceml.reporting.sections.step_time.builder import build_step_time_card
+from traceml.reporting.sections.step_time.builder import (
+    build_step_time_payload,
+)
 
 
 def _rank(
@@ -38,14 +40,13 @@ def _rank(
 
 
 def _summary(per_global_rank: dict[int, RankStepSummary]):
-    _, payload = build_step_time_card(
+    return build_step_time_payload(
         training_steps=100,
         latest_step_observed=99,
         aligned_summary=per_global_rank,
         aligned_step_metrics={},
         max_rows=64,
     )
-    return payload
 
 
 def _assert_compact_card(card: str) -> None:

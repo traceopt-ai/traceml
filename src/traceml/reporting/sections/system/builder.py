@@ -411,9 +411,9 @@ def _card_stats(
     return " | ".join(parts)
 
 
-def build_system_card(
+def build_system_payload(
     cluster: SystemClusterSummary,
-) -> tuple[str, Dict[str, Any]]:
+) -> Dict[str, Any]:
     """Build the cluster-shaped System payload and compact card text."""
     node_payloads: Dict[str, Dict[str, Any]] = {}
     node_metrics: Dict[str, Dict[str, Any]] = {}
@@ -516,18 +516,17 @@ def build_system_card(
         },
         card=card,
     ).to_json()
-    return card, payload
+    return payload
 
 
 def build_system_section_payload(
     data: SystemSectionData,
 ) -> Dict[str, Any]:
     """Build the JSON-safe System section payload from loaded data."""
-    _, payload = build_system_card(data.cluster)
-    return payload
+    return build_system_payload(data.cluster)
 
 
 __all__ = [
-    "build_system_card",
+    "build_system_payload",
     "build_system_section_payload",
 ]

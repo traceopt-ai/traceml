@@ -172,7 +172,7 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
 
 def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
     from traceml.reporting.sections.step_time.builder import (
-        build_step_time_card,
+        build_step_time_payload,
     )
     from traceml.reporting.summaries.step_time import RankStepSummary
 
@@ -190,13 +190,14 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         for rank in range(4)
     }
 
-    card, summary = build_step_time_card(
+    summary = build_step_time_payload(
         training_steps=129,
         latest_step_observed=128,
         aligned_summary=per_global_rank,
         aligned_step_metrics={},
         max_rows=10000,
     )
+    card = summary["card"]
 
     assert "compared over last 128 aligned steps across 4 global ranks" in card
     assert "10000 steps" not in card
