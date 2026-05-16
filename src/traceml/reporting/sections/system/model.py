@@ -210,37 +210,6 @@ def min_timestamp(values: Iterable[Optional[float]]) -> Optional[float]:
     return min(nums) if nums else None
 
 
-def per_gpu_to_diagnosis_input(
-    per_gpu: Dict[int, PerGPUSummary],
-) -> Dict[int, Dict[str, Optional[float]]]:
-    """
-    Convert per-GPU summary objects into the bytes-based shape used by system
-    diagnosis rules.
-
-    Notes
-    -----
-    Summary JSON intentionally exposes memory in GB for readability, while the
-    diagnosis layer keeps raw bytes so pressure calculations remain precise.
-    """
-    out: Dict[int, Dict[str, Optional[float]]] = {}
-
-    for gpu_idx, item in sorted(per_gpu.items()):
-        out[int(gpu_idx)] = {
-            "util_avg_percent": item.util_avg_percent,
-            "util_peak_percent": item.util_peak_percent,
-            "mem_avg_bytes": item.mem_avg_bytes,
-            "mem_peak_bytes": item.mem_peak_bytes,
-            "mem_total_bytes": item.mem_total_bytes,
-            "temp_avg_c": item.temp_avg_c,
-            "temp_peak_c": item.temp_peak_c,
-            "power_avg_w": item.power_avg_w,
-            "power_peak_w": item.power_peak_w,
-            "power_limit_w": item.power_limit_w,
-        }
-
-    return out
-
-
 __all__ = [
     "MAX_SUMMARY_ROWS",
     "SYSTEM_METRIC_NAMES",
@@ -256,6 +225,5 @@ __all__ = [
     "node_gpu_headroom_min_gb",
     "node_gpu_mem_peak_percent",
     "percent",
-    "per_gpu_to_diagnosis_input",
     "table_has_column",
 ]

@@ -1,13 +1,20 @@
 import json
 import sqlite3
 
+from traceml.diagnostics.step_time.adapters import (
+    StepTimeDiagnosisInput,
+    diagnose_step_time_summary,
+)
+from traceml.reporting.sections.step_time.alignment import AlignedStepWindow
 from traceml.reporting.summaries.step_time import (
     generate_step_time_summary_card,
 )
 from traceml.reporting.sections.step_time import StepTimeSummarySection
 from traceml.reporting.sections.step_time.loader import (
+    StepTimeSectionData,
     load_step_time_section_data,
 )
+from traceml.reporting.sections.step_time.model import to_rank_signals
 
 
 def _create_step_time_db(path: str) -> None:
@@ -190,13 +197,33 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         for rank in range(4)
     }
 
-    summary = build_step_time_payload(
+    data = StepTimeSectionData(
         training_steps=129,
         latest_step_observed=128,
         aligned_summary=per_global_rank,
         aligned_step_metrics={},
+        aligned_window=AlignedStepWindow(
+            alignment="common_steps",
+            steps_analyzed=128,
+            start_step=None,
+            end_step=None,
+            window_size=10000,
+            global_ranks_used=4,
+            global_ranks_observed=4,
+        ),
+        per_global_rank_summary=per_global_rank,
+        per_global_rank_step_metrics={},
+        identities={},
         max_rows=10000,
     )
+    diagnosis = diagnose_step_time_summary(
+        StepTimeDiagnosisInput(
+            rank_signals=to_rank_signals(per_global_rank),
+            per_rank_step_metrics={},
+            max_rows=10000,
+        )
+    )
+    summary = build_step_time_payload(data, diagnosis)
     card = summary["card"]
 
     assert "compared over last 128 aligned steps across 4 global ranks" in card

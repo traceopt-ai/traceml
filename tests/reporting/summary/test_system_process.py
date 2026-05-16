@@ -210,9 +210,8 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
     }
     assert "1 gpu0" in payload["diagnosis"]["reason"]
     assert payload["issues"][0]["scope"]["node"] == "1"
-    assert (
-        payload["groups"]["rows"]["1"]["diagnosis"]["scope"]["level"] == "gpu"
-    )
+    assert "diagnosis" not in payload["groups"]["rows"]["1"]
+    assert "issues" not in payload["groups"]["rows"]["1"]
     assert payload["global"]["worst"]["gpu_temp_c"]["idx"] == "1"
 
 
@@ -384,6 +383,31 @@ def test_process_loader_uses_latest_bounded_window(tmp_path):
     assert data.aggregate.ram_avg_bytes == 2000000000.0
     assert data.per_global_rank[0].cpu_avg_percent == 40.0
     assert data.per_global_rank[0].gpu_mem_reserved_avg_bytes == 4000000000.0
+
+
+def test_process_loader_ignores_rows_without_global_rank(tmp_path):
+    db_path = tmp_path / "process_legacy_rank.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        _create_process_tables(conn)
+        conn.execute(
+            """
+            INSERT INTO process_samples VALUES (
+                3, 9, NULL, 0, 1, 1, 0, 'legacy-worker',
+                12.0, 99.0, 8, 9000000000.0, 16000000000.0,
+                1, 1, 0, 9000000000.0, 9000000000.0, 10000000000.0
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = load_process_section_data(str(db_path))
+
+    assert data.aggregate.process_samples == 2
+    assert data.aggregate.distinct_global_ranks == 1
+    assert set(data.per_global_rank) == {0}
 
 
 def test_summary_wrappers_delegate_to_section_paths(tmp_path):

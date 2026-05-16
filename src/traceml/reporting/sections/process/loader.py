@@ -32,8 +32,8 @@ def _recent_process_samples_cte() -> str:
     """
     Return the CTE used for the process summary window.
 
-    Process summaries keep the latest N samples per global rank, matching the
-    per-rank retention policy used by the SQLite writer.
+    Process summaries keep the latest N samples per global rank. Rows without a
+    resolved global rank are ignored so aggregate and per-rank views agree.
     """
     return """
         WITH recent_process_samples AS (
@@ -42,10 +42,11 @@ def _recent_process_samples_cte() -> str:
                 SELECT
                     p.*,
                     ROW_NUMBER() OVER (
-                        PARTITION BY COALESCE(p.global_rank, p.rank, 0)
+                        PARTITION BY p.global_rank
                         ORDER BY p.id DESC
                     ) AS row_num
                 FROM process_samples AS p
+                WHERE p.global_rank IS NOT NULL
             )
             WHERE row_num <= ?
         )
@@ -96,7 +97,6 @@ def load_process_summary_aggregate(
 
             MAX(gpu_available),
             MAX(gpu_count),
-            MIN(gpu_device_index),
 
             AVG(gpu_mem_used_bytes),
             MAX(gpu_mem_used_bytes),
@@ -122,18 +122,17 @@ def load_process_summary_aggregate(
         ram_total_bytes=float(row[5]) if row[5] is not None else None,
         gpu_available=bool(row[6]) if row[6] is not None else None,
         gpu_count=int(row[7]) if row[7] is not None else None,
-        gpu_device_index=int(row[8]) if row[8] is not None else None,
-        gpu_mem_used_avg_bytes=float(row[9]) if row[9] is not None else None,
+        gpu_mem_used_avg_bytes=float(row[8]) if row[8] is not None else None,
         gpu_mem_used_peak_bytes=(
-            float(row[10]) if row[10] is not None else None
+            float(row[9]) if row[9] is not None else None
         ),
         gpu_mem_reserved_avg_bytes=(
-            float(row[11]) if row[11] is not None else None
+            float(row[10]) if row[10] is not None else None
         ),
         gpu_mem_reserved_peak_bytes=(
-            float(row[12]) if row[12] is not None else None
+            float(row[11]) if row[11] is not None else None
         ),
-        gpu_mem_total_bytes=float(row[13]) if row[13] is not None else None,
+        gpu_mem_total_bytes=float(row[12]) if row[12] is not None else None,
     )
 
 
@@ -166,7 +165,6 @@ def load_per_global_rank_process_summary(
 
             MAX(gpu_available),
             MAX(gpu_count),
-            MIN(gpu_device_index),
 
             AVG(gpu_mem_used_bytes),
             MAX(gpu_mem_used_bytes),
@@ -184,7 +182,6 @@ def load_per_global_rank_process_summary(
             )
 
         FROM recent_process_samples
-        WHERE global_rank IS NOT NULL
         GROUP BY global_rank
         ORDER BY global_rank ASC;
     """
@@ -211,24 +208,23 @@ def load_per_global_rank_process_summary(
             ram_total_bytes=float(row[11]) if row[11] is not None else None,
             gpu_available=bool(row[12]) if row[12] is not None else None,
             gpu_count=int(row[13]) if row[13] is not None else None,
-            gpu_device_index=int(row[14]) if row[14] is not None else None,
             gpu_mem_used_avg_bytes=(
-                float(row[15]) if row[15] is not None else None
+                float(row[14]) if row[14] is not None else None
             ),
             gpu_mem_used_peak_bytes=(
-                float(row[16]) if row[16] is not None else None
+                float(row[15]) if row[15] is not None else None
             ),
             gpu_mem_reserved_avg_bytes=(
-                float(row[17]) if row[17] is not None else None
+                float(row[16]) if row[16] is not None else None
             ),
             gpu_mem_reserved_peak_bytes=(
-                float(row[18]) if row[18] is not None else None
+                float(row[17]) if row[17] is not None else None
             ),
             gpu_mem_total_bytes=(
-                float(row[19]) if row[19] is not None else None
+                float(row[18]) if row[18] is not None else None
             ),
             gpu_mem_reserved_overhang_ratio=(
-                float(row[20]) if row[20] is not None else None
+                float(row[19]) if row[19] is not None else None
             ),
         )
     return out

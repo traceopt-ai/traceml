@@ -69,18 +69,26 @@ def _validate_group_contract(
         raise ValueError("groups.rows must be a mapping")
 
     metric_names = metadata.get("section_metric_names")
-    if metric_names is None:
-        return
-
-    expected = {str(metric) for metric in metric_names}
+    expected = (
+        {str(metric) for metric in metric_names}
+        if metric_names is not None
+        else None
+    )
     for row_key, row in rows.items():
         if not isinstance(row, Mapping):
             raise ValueError(f"groups.rows[{row_key!r}] must be a mapping")
+        if set(row.keys()) != {"identity", "metrics"}:
+            raise ValueError(
+                f"groups.rows[{row_key!r}] must contain only "
+                "identity and metrics"
+            )
         metrics = row.get("metrics")
         if not isinstance(metrics, Mapping):
             raise ValueError(
                 f"groups.rows[{row_key!r}].metrics must be a mapping"
             )
+        if expected is None:
+            continue
         actual = {str(metric) for metric in metrics.keys()}
         if actual != expected:
             raise ValueError(
@@ -246,15 +254,11 @@ class GroupRow:
 
     identity: Mapping[str, Any]
     metrics: Mapping[str, Any]
-    issues: Sequence[Mapping[str, Any]] = field(default_factory=tuple)
-    diagnosis: Optional[Mapping[str, Any]] = None
 
     def to_json(self) -> JsonDict:
         """Serialize one grouped row in a predictable order."""
         return {
             "identity": dict(self.identity),
-            "diagnosis": _copy_mapping(self.diagnosis),
-            "issues": [dict(issue) for issue in self.issues],
             "metrics": dict(self.metrics),
         }
 

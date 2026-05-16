@@ -15,6 +15,7 @@ from traceml.reporting.sections.step_time.model import (
     RankStepSummary,
     finite_float,
 )
+from traceml.utils.step_windows import common_suffix_steps
 
 
 @dataclass(frozen=True)
@@ -86,28 +87,6 @@ def _summary_from_step_metrics(
     )
 
 
-def _common_suffix_steps(
-    per_global_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]],
-    max_rows: int,
-) -> list[int]:
-    """Return latest common step ids present on every observed global rank."""
-    if not per_global_rank_step_metrics:
-        return []
-
-    step_sets = []
-    for step_map in per_global_rank_step_metrics.values():
-        if not step_map:
-            return []
-        step_sets.append(set(int(step) for step in step_map.keys()))
-
-    common = set.intersection(*step_sets) if step_sets else set()
-    if not common:
-        return []
-
-    steps = sorted(common)
-    return steps[-max(1, int(max_rows)) :]
-
-
 def build_aligned_step_summary(
     *,
     per_global_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]],
@@ -125,7 +104,7 @@ def build_aligned_step_summary(
     """
     observed = len(per_global_rank_step_metrics)
     window_size = max(1, int(max_rows))
-    common_steps = _common_suffix_steps(per_global_rank_step_metrics, max_rows)
+    common_steps = common_suffix_steps(per_global_rank_step_metrics, max_rows)
     if not common_steps:
         return (
             {},

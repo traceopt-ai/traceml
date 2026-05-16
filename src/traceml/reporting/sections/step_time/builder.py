@@ -13,16 +13,14 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from traceml.diagnostics.step_time.adapters import (
-    build_summary_step_diagnosis_result,
-)
+from traceml.diagnostics.common import DiagnosticResult
+from traceml.diagnostics.step_time.api import StepDiagnosis
 from traceml.reporting.schema import (
     BaseGroups,
     BaseSectionPayload,
     GroupRow,
     StepMetadata,
 )
-from traceml.reporting.sections.step_time.alignment import AlignedStepWindow
 from traceml.reporting.sections.step_time.loader import StepTimeSectionData
 from traceml.reporting.sections.step_time.model import (
     STEP_TIME_METRIC_NAMES,
@@ -34,16 +32,12 @@ from traceml.reporting.sections.step_time.model import (
     compute_wait_avg_ms,
     finite_float,
     summary_metric_values,
-    to_rank_signals,
 )
 from traceml.reporting.summaries.diagnosis_presentation import (
     diagnosis_presentation_to_json,
     present_step_time_summary_diagnosis,
 )
-from traceml.reporting.summaries.issue_summary import (
-    issues_by_rank_json,
-    issues_to_json,
-)
+from traceml.reporting.summaries.issue_summary import issues_to_json
 from traceml.reporting.summaries.summary_formatting import format_ms
 from traceml.reporting.topology import topology_mode_from_identities
 
@@ -311,49 +305,25 @@ def _global_rank_entry_to_json(
     ).to_json()
 
 
-def _default_aligned_window(
-    aligned_summary: Dict[int, RankStepSummary],
-    *,
-    window_size: int,
-) -> AlignedStepWindow:
-    """Return a conservative aligned window for direct builder callers."""
-    steps = [
-        int(summary.steps_analyzed) for summary in aligned_summary.values()
-    ]
-    analyzed = min(steps) if steps else 0
-    return AlignedStepWindow(
-        alignment="common_steps",
-        steps_analyzed=analyzed,
-        start_step=None,
-        end_step=None,
-        window_size=max(1, int(window_size)),
-        global_ranks_used=len(aligned_summary),
-        global_ranks_observed=len(aligned_summary),
-    )
-
-
 def build_step_time_payload(
-    *,
-    training_steps: int,
-    latest_step_observed: Optional[int],
-    aligned_summary: Dict[int, RankStepSummary],
-    aligned_step_metrics: Dict[int, Dict[int, Dict[str, float]]],
-    per_global_rank_summary: Optional[Dict[int, RankStepSummary]] = None,
-    aligned_window: Optional[AlignedStepWindow] = None,
-    identities: Optional[Dict[int, Any]] = None,
-    max_rows: int,
+    data: StepTimeSectionData,
+    diagnosis_result: Optional[DiagnosticResult[StepDiagnosis]],
 ) -> Dict[str, Any]:
-    """Build the Step Time section payload and compact card text."""
-    all_rank_summary = per_global_rank_summary or aligned_summary
+    """
+    Build the Step Time payload and compact card text.
+
+    Loading and diagnosis are handled by the section lifecycle. This builder
+    only formats the aligned summaries, global comparisons, issues, and card.
+    """
+    aligned_summary = data.aligned_summary
+    all_rank_summary = data.per_global_rank_summary or aligned_summary
     row_rank_summary = aligned_summary
-    aligned_window = aligned_window or _default_aligned_window(
-        aligned_summary,
-        window_size=max_rows,
-    )
-    identities = identities or {}
+    aligned_window = data.aligned_window
+    identities = data.identities
 
     global_ranks_present = sorted(aligned_summary.keys())
     all_global_ranks = sorted(all_rank_summary.keys())
+    # Step Time rows are limited to ranks with data in the common step window.
     overview = build_overview(per_global_rank_summary=aligned_summary)
 
     median_global_rank = overview["median_global_rank"]
@@ -370,22 +340,11 @@ def build_step_time_payload(
     )
     primary_summary = median_summary or worst_summary
 
-    summary_diag_result = build_summary_step_diagnosis_result(
-        rank_signals=to_rank_signals(aligned_summary),
-        max_rows=max_rows,
-        per_rank_step_metrics=aligned_step_metrics,
-    )
     summary_diag = (
-        summary_diag_result.primary
-        if summary_diag_result is not None
-        else None
+        diagnosis_result.primary if diagnosis_result is not None else None
     )
     summary_diag_presented = present_step_time_summary_diagnosis(summary_diag)
-    issues = summary_diag_result.issues if summary_diag_result else ()
-    issues_by_global_rank, _unassigned_issues = issues_by_rank_json(
-        issues,
-        rank_keys=global_ranks_present,
-    )
+    issues = diagnosis_result.issues if diagnosis_result else ()
 
     global_rollup = build_global_rollup(
         per_global_rank_summary=aligned_summary,
@@ -396,7 +355,7 @@ def build_step_time_payload(
     card_stats = _build_card_stats(aligned_summary)
 
     title = (
-        f"TraceML Step Timing Summary | steps {training_steps} | "
+        f"TraceML Step Timing Summary | steps {data.training_steps} | "
         f"global ranks {len(all_global_ranks)}"
     )
     lines = [title, "Step Time"]
@@ -412,7 +371,7 @@ def build_step_time_payload(
     )
 
     if not aligned_summary:
-        latest_step_text = latest_step_observed or "n/a"
+        latest_step_text = data.latest_step_observed or "n/a"
         lines.extend(
             [
                 f"- Diagnosis: {diagnosis_status}",
@@ -451,14 +410,11 @@ def build_step_time_payload(
 
     card = "\n".join(lines)
     per_global_rank_json = {
-        str(rank): {
-            **_global_rank_entry_to_json(
-                rank,
-                s,
-                identities.get(rank),
-            ),
-            "issues": issues_by_global_rank.get(str(rank), []),
-        }
+        str(rank): _global_rank_entry_to_json(
+            rank,
+            s,
+            identities.get(rank),
+        )
         for rank, s in sorted(row_rank_summary.items())
     }
 
@@ -469,8 +425,8 @@ def build_step_time_payload(
         ),
         global_ranks_seen=len(all_global_ranks),
         global_ranks_used=len(global_ranks_present),
-        training_total_steps=training_steps,
-        training_latest_step=latest_step_observed,
+        training_total_steps=data.training_steps,
+        training_latest_step=data.latest_step_observed,
         section_metric_names=STEP_TIME_METRIC_NAMES,
     )
     summary = BaseSectionPayload(
@@ -491,25 +447,8 @@ def build_step_time_payload(
     return summary
 
 
-def build_step_time_section_payload(
-    data: StepTimeSectionData,
-) -> Dict[str, Any]:
-    """Build the JSON-safe step-time section payload from loaded data."""
-    return build_step_time_payload(
-        training_steps=data.training_steps,
-        latest_step_observed=data.latest_step_observed,
-        aligned_summary=data.aligned_summary,
-        aligned_step_metrics=data.aligned_step_metrics,
-        aligned_window=data.aligned_window,
-        per_global_rank_summary=data.per_global_rank_summary,
-        identities=data.identities,
-        max_rows=data.max_rows,
-    )
-
-
 __all__ = [
     "StepTimeCardStats",
     "StepTimeMetricPair",
     "build_step_time_payload",
-    "build_step_time_section_payload",
 ]

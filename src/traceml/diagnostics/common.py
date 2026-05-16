@@ -75,13 +75,11 @@ class DiagnosticResult(Generic[PrimaryT]):
     such as final summaries and dashboards can additionally use:
     - `issues`
     - `metric_attribution`
-    - `per_rank`
     """
 
     primary: PrimaryT
     issues: Tuple[DiagnosticIssue, ...] = ()
     metric_attribution: Dict[str, Any] = field(default_factory=dict)
-    per_rank: Dict[str, Any] = field(default_factory=dict)
 
 
 class DiagnosticRule(Protocol, Generic[ContextT]):

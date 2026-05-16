@@ -267,7 +267,6 @@ def build_step_memory_summary_diagnosis_result(
     metrics: Sequence[StepMemoryCombinedMetric],
     *,
     gpu_total_bytes: Optional[float] = None,
-    per_rank: Optional[Dict[str, Any]] = None,
     thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS,
 ) -> DiagnosticResult[StepMemoryDiagnosis]:
     """
@@ -354,7 +353,6 @@ def build_step_memory_summary_diagnosis_result(
         primary=primary,
         issues=tuple(issues),
         metric_attribution=metric_attribution,
-        per_rank=dict(per_rank or {}),
     )
 
 

@@ -95,7 +95,6 @@ class ProcessSummaryAgg:
 
     gpu_available: Optional[bool] = None
     gpu_count: Optional[int] = None
-    gpu_device_index: Optional[int] = None
 
     gpu_mem_used_avg_bytes: Optional[float] = None
     gpu_mem_used_peak_bytes: Optional[float] = None
@@ -136,7 +135,6 @@ class PerRankProcessSummary:
 
     gpu_available: Optional[bool] = None
     gpu_count: Optional[int] = None
-    gpu_device_index: Optional[int] = None
 
     gpu_mem_used_avg_bytes: Optional[float] = None
     gpu_mem_used_peak_bytes: Optional[float] = None
@@ -145,14 +143,6 @@ class PerRankProcessSummary:
     gpu_mem_total_bytes: Optional[float] = None
     # Max reserved/used CUDA memory ratio observed for this global rank.
     gpu_mem_reserved_overhang_ratio: Optional[float] = None
-
-
-def process_cpu_capacity_percent(agg: ProcessSummaryAgg) -> Optional[float]:
-    """Return average CPU capacity used by the aggregate process summary."""
-    return cpu_capacity_percent(
-        agg.cpu_avg_percent,
-        agg.cpu_logical_core_count,
-    )
 
 
 def build_process_stats_line(
@@ -187,5 +177,4 @@ __all__ = [
     "ProcessSummaryAgg",
     "build_process_stats_line",
     "cpu_capacity_percent",
-    "process_cpu_capacity_percent",
 ]

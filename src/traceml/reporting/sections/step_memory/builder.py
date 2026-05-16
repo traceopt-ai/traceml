@@ -38,10 +38,7 @@ from traceml.reporting.summaries.diagnosis_presentation import (
     diagnosis_presentation_to_json,
     present_step_memory_summary_diagnosis,
 )
-from traceml.reporting.summaries.issue_summary import (
-    issues_by_rank_json,
-    issues_to_json,
-)
+from traceml.reporting.summaries.issue_summary import issues_to_json
 from traceml.reporting.summaries.summary_formatting import format_ratio_percent
 from traceml.utils.formatting import fmt_mem_new
 
@@ -62,15 +59,11 @@ def _identity_to_json(
 
 def _group_rows_to_json(
     per_global_rank: Dict[str, StepMemoryGlobalRankSummary],
-    *,
-    issues_by_global_rank: Dict[str, list[Dict[str, Any]]],
 ) -> Dict[str, Dict[str, Any]]:
     """Build schema rows from typed per-rank memory summaries."""
     return {
         rank_key: GroupRow(
             identity=_identity_to_json(summary.identity),
-            diagnosis=None,
-            issues=issues_by_global_rank.get(rank_key, []),
             metrics=dict(summary.metrics),
         ).to_json()
         for rank_key, summary in per_global_rank.items()
@@ -92,14 +85,7 @@ def _build_step_memory_payload(
     primary = primary_metric(sorted_metrics, diagnosis)
     diagnosis_presented = present_step_memory_summary_diagnosis(diagnosis)
     issues = tuple(getattr(diagnosis_result, "issues", ()) or ())
-    issues_by_global_rank, _unassigned_issues = issues_by_rank_json(
-        issues,
-        rank_keys=per_global_rank.keys(),
-    )
-    group_rows = _group_rows_to_json(
-        per_global_rank,
-        issues_by_global_rank=issues_by_global_rank,
-    )
+    group_rows = _group_rows_to_json(per_global_rank)
 
     if not sorted_metrics or primary is None:
         no_gpu_diagnosis = no_gpu_diagnosis_json() if no_gpu_detected else None

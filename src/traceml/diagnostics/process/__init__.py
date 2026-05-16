@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Public process diagnostics package.
 
@@ -6,12 +12,12 @@ intended primarily for end-of-run interpretation and machine-readable summary
 payloads rather than live runtime UI changes.
 """
 
-from .api import ProcessDiagnosis, build_process_diagnosis_result
+from .api import ProcessDiagnosis, diagnose_process
 from .policy import DEFAULT_PROCESS_POLICY, ProcessDiagnosisPolicy
 
 __all__ = [
     "DEFAULT_PROCESS_POLICY",
     "ProcessDiagnosisPolicy",
     "ProcessDiagnosis",
-    "build_process_diagnosis_result",
+    "diagnose_process",
 ]

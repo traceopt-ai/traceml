@@ -13,9 +13,15 @@ Each final-report section keeps top-level JSON fields non-overlapping:
   `global.window`. Keys must match `metadata.section_metric_names` exactly.
 - `groups.by`: the detail dimension, either `node_rank` or `global_rank`.
 - `groups.rows`: detailed rows keyed by that dimension. Each row has
-  `identity`, `diagnosis`, `issues`, and `metrics`.
+  only `identity` and `metrics`.
 - `groups.rows[*].metrics`: row-level average values. Keys must match
   `metadata.section_metric_names` exactly.
+
+For rank-scoped sections, `metadata.global_ranks_seen` is every observed
+global rank in the retained data, while `metadata.global_ranks_used` is the
+rank count included in `groups.rows` and the `global` comparison. In Step Time
+and Step Memory this can be lower than `seen` when alignment excludes ranks
+that do not have the common step window.
 
 The top-level section keys are intentionally strict:
 
@@ -78,8 +84,6 @@ The top-level section keys are intentionally strict:
           "local_world_size": null,
           "world_size": null
         },
-        "diagnosis": null,
-        "issues": [],
         "metrics": {
           "<metric_name>": null
         }
@@ -111,6 +115,10 @@ Every row in `groups.rows` includes the same runtime identity fields:
 
 These fields answer where the row came from in a distributed job. They are the
 shared identity contract for every section.
+
+Rows do not include row-level `diagnosis` or `issues` in this schema version.
+The section-level `diagnosis` and `issues` fields are the canonical diagnosis
+surface for the final report.
 
 ## Metric Names
 

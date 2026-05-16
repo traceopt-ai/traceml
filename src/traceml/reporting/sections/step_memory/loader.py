@@ -191,26 +191,6 @@ def _load_per_global_rank_summaries(
     return per_global_rank
 
 
-def _per_rank_for_diagnostics(
-    per_global_rank: Dict[str, StepMemoryGlobalRankSummary],
-) -> Dict[str, Any]:
-    """Expose typed rank summaries to diagnostics without leaking JSON rows."""
-    return {
-        rank_key: {
-            "metrics": dict(summary.metrics),
-            "identity": {
-                "global_rank": summary.identity.global_rank,
-                "local_rank": summary.identity.local_rank,
-                "node_rank": summary.identity.node_rank,
-                "hostname": summary.identity.hostname,
-                "local_world_size": summary.identity.local_world_size,
-                "world_size": summary.identity.world_size,
-            },
-        }
-        for rank_key, summary in per_global_rank.items()
-    }
-
-
 def load_step_memory_section_data(
     db_path: str,
     *,
@@ -259,7 +239,6 @@ def load_step_memory_section_data(
             diagnosis_result = build_step_memory_summary_diagnosis_result(
                 metrics,
                 gpu_total_bytes=gpu_total_bytes,
-                per_rank=_per_rank_for_diagnostics(per_global_rank),
                 thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
             )
     finally:

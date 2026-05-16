@@ -6,12 +6,19 @@
 
 from __future__ import annotations
 
+from traceml.diagnostics.step_time.adapters import (
+    StepTimeDiagnosisInput,
+    diagnose_step_time_summary,
+)
+from traceml.reporting.sections.step_time.alignment import AlignedStepWindow
 from traceml.reporting.summaries.step_time import (
     RankStepSummary,
 )
 from traceml.reporting.sections.step_time.builder import (
     build_step_time_payload,
 )
+from traceml.reporting.sections.step_time.loader import StepTimeSectionData
+from traceml.reporting.sections.step_time.model import to_rank_signals
 
 
 def _rank(
@@ -40,13 +47,37 @@ def _rank(
 
 
 def _summary(per_global_rank: dict[int, RankStepSummary]):
-    return build_step_time_payload(
+    window_size = 64
+    data = StepTimeSectionData(
         training_steps=100,
         latest_step_observed=99,
         aligned_summary=per_global_rank,
         aligned_step_metrics={},
-        max_rows=64,
+        aligned_window=AlignedStepWindow(
+            alignment="common_steps",
+            steps_analyzed=min(
+                (item.steps_analyzed for item in per_global_rank.values()),
+                default=0,
+            ),
+            start_step=None,
+            end_step=None,
+            window_size=window_size,
+            global_ranks_used=len(per_global_rank),
+            global_ranks_observed=len(per_global_rank),
+        ),
+        per_global_rank_summary=per_global_rank,
+        per_global_rank_step_metrics={},
+        identities={},
+        max_rows=window_size,
     )
+    diagnosis = diagnose_step_time_summary(
+        StepTimeDiagnosisInput(
+            rank_signals=to_rank_signals(per_global_rank),
+            per_rank_step_metrics={},
+            max_rows=window_size,
+        )
+    )
+    return build_step_time_payload(data, diagnosis)
 
 
 def _assert_compact_card(card: str) -> None:
@@ -179,8 +210,10 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
         "- Why: r1 input was slower than median global rank (70.0/40.0ms)."
         in payload["card"]
     )
-    rank_issues = payload["groups"]["rows"]["1"]["issues"]
-    assert {issue["kind"] for issue in rank_issues} == {"INPUT_STRAGGLER"}
+    assert "issues" not in payload["groups"]["rows"]["1"]
+    assert {issue["kind"] for issue in payload["issues"]} == {
+        "INPUT_STRAGGLER"
+    }
     _assert_compact_card(payload["card"])
 
 
@@ -197,7 +230,10 @@ def test_step_time_compute_straggler_card_shows_rank_evidence() -> None:
         "- Why: r1 compute was slower than median global rank (260.0/220.0ms)."
         in payload["card"]
     )
-    assert len(payload["groups"]["rows"]["1"]["issues"]) == 1
+    assert "issues" not in payload["groups"]["rows"]["1"]
+    assert {issue["kind"] for issue in payload["issues"]} == {
+        "COMPUTE_STRAGGLER"
+    }
     _assert_compact_card(payload["card"])
 
 
@@ -223,8 +259,8 @@ def test_step_time_combined_straggler_priority_keeps_all_rank_issues() -> None:
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
     }
-    rank_issues = payload["groups"]["rows"]["1"]["issues"]
-    assert {issue["kind"] for issue in rank_issues} == {
+    assert "issues" not in payload["groups"]["rows"]["1"]
+    assert {issue["kind"] for issue in payload["issues"]} >= {
         "STRAGGLER",
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",

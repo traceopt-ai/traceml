@@ -8,15 +8,14 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any, Dict, Iterable, Optional
 
 from traceml.diagnostics.common import (
     DiagnosticIssue,
+    DiagnosticResult,
     diagnosis_to_dict,
-    severity_rank,
 )
-from traceml.diagnostics.system import build_system_diagnosis_result
+from traceml.diagnostics.system import SystemDiagnosis
 from traceml.reporting.schema import (
     BaseGlobal,
     BaseGroups,
@@ -25,16 +24,15 @@ from traceml.reporting.schema import (
     GlobalWindow,
     GroupRow,
 )
+from traceml.reporting.sections.system.loader import SystemSectionData
 from traceml.reporting.sections.system.model import (
     SYSTEM_METRIC_NAMES,
     PerGPUSummary,
     SystemClusterSummary,
     SystemNodeSummary,
-    SystemSummaryAgg,
     average_optional,
     node_gpu_headroom_min_gb,
     node_gpu_mem_peak_percent,
-    per_gpu_to_diagnosis_input,
     percent,
 )
 from traceml.reporting.summaries.issue_summary import issue_to_json
@@ -43,139 +41,15 @@ from traceml.reporting.summaries.summary_formatting import (
     format_optional,
 )
 
-SYSTEM_ISSUE_PRIORITY = {
-    "VERY_HIGH_GPU_MEMORY": 0,
-    "HIGH_GPU_TEMPERATURE": 1,
-    "HIGH_GPU_MEMORY": 2,
-    "HIGH_GPU_POWER": 3,
-    "HIGH_HOST_MEMORY": 4,
-    "HIGH_CPU": 5,
-    "LOW_GPU_UTILIZATION": 6,
-}
 
-
-def _scope_for_issue(
-    issue: DiagnosticIssue,
-    node: SystemNodeSummary,
-) -> Dict[str, Any]:
-    """Return node/gpu scope for one System issue."""
-    base: Dict[str, Any] = {
-        "level": "node",
-        "node": node.identity.label,
-        "node_rank": node.identity.node_rank,
-    }
-    if issue.ranks:
-        base["level"] = "gpu"
-        base["gpu_idx"] = int(issue.ranks[0])
-    return base
-
-
-def _scope_for_node(node: SystemNodeSummary) -> Dict[str, Any]:
-    return {
-        "level": "node",
-        "node": node.identity.label,
-        "node_rank": node.identity.node_rank,
-    }
-
-
-def _scope_text(text: str, scope: Dict[str, Any]) -> str:
-    """Add node context to issue text without making normal text noisy."""
-    if scope.get("level") == "gpu":
-        gpu_idx = scope.get("gpu_idx")
-        node = scope.get("node")
-        suffix = f" on {node} gpu{gpu_idx}"
-        existing = f" on gpu{gpu_idx}"
-        if existing in text:
-            return text.replace(existing, suffix)
-        return f"{text.rstrip('.')}{suffix}."
-    if scope.get("level") == "node" and scope.get("node"):
-        return f"{text.rstrip('.')} on {scope['node']}."
-    return text
-
-
-def _diagnose_node(node: SystemNodeSummary):
-    agg = node.aggregate
-    return _diagnose_aggregate(agg, per_gpu=node.per_gpu)
-
-
-def _diagnose_aggregate(
-    agg: SystemSummaryAgg,
-    *,
-    per_gpu: Dict[int, PerGPUSummary],
-):
-    return build_system_diagnosis_result(
-        duration_s=duration_from_bounds(agg.first_ts, agg.last_ts),
-        system_samples=agg.system_samples,
-        cpu_avg_percent=agg.cpu_avg_percent,
-        cpu_peak_percent=agg.cpu_peak_percent,
-        ram_avg_bytes=agg.ram_avg_bytes,
-        ram_peak_bytes=agg.ram_peak_bytes,
-        ram_total_bytes=agg.ram_total_bytes,
-        gpu_available=agg.gpu_available,
-        gpu_count=agg.gpu_count,
-        gpu_util_avg_percent=agg.gpu_util_avg_percent,
-        gpu_util_peak_percent=agg.gpu_util_peak_percent,
-        gpu_mem_avg_bytes=agg.gpu_mem_avg_bytes,
-        gpu_mem_peak_bytes=agg.gpu_mem_peak_bytes,
-        gpu_temp_avg_c=agg.gpu_temp_avg_c,
-        gpu_temp_peak_c=agg.gpu_temp_peak_c,
-        gpu_power_avg_w=agg.gpu_power_avg_w,
-        gpu_power_peak_w=agg.gpu_power_peak_w,
-        per_gpu=per_gpu_to_diagnosis_input(per_gpu),
-    )
-
-
-def _scoped_issue_json(
-    issue: DiagnosticIssue,
-    node: SystemNodeSummary,
-) -> Dict[str, Any]:
-    scope = _scope_for_issue(issue, node)
-    scoped = replace(issue, summary=_scope_text(issue.summary, scope))
-    payload = issue_to_json(scoped)
+def _issue_to_scoped_json(issue: DiagnosticIssue) -> Dict[str, Any]:
+    """Serialize a System issue with public node/GPU scope."""
+    payload = issue_to_json(issue)
+    scope = payload.get("evidence", {}).pop("scope", None)
+    payload.get("evidence", {}).pop("samples_used", None)
     payload.pop("ranks", None)
-    payload["scope"] = scope
-    return payload
-
-
-def _issue_sort_key(item: tuple[DiagnosticIssue, SystemNodeSummary]) -> tuple:
-    issue, node = item
-    return (
-        SYSTEM_ISSUE_PRIORITY.get(issue.kind, 999),
-        -severity_rank(issue.severity),
-        -float(issue.score or 0.0),
-        node.identity.label,
-    )
-
-
-def _primary_from_issue(
-    issue: DiagnosticIssue,
-    node: SystemNodeSummary,
-) -> Dict[str, Any]:
-    scope = _scope_for_issue(issue, node)
-    return {
-        "severity": issue.severity,
-        "status": issue.status,
-        "reason": _scope_text(issue.summary, scope),
-        "kind": issue.kind,
-        "samples_used": node.aggregate.system_samples,
-        "scope": scope,
-    }
-
-
-def _primary_from_diagnosis(
-    diagnosis: Any,
-    *,
-    scope: Dict[str, Any],
-) -> Dict[str, Any]:
-    payload = (
-        diagnosis_to_dict(
-            diagnosis,
-            drop_none=True,
-            include_action=False,
-        )
-        or {}
-    )
-    payload["scope"] = scope
+    if scope is not None:
+        payload["scope"] = scope
     return payload
 
 
@@ -329,8 +203,6 @@ def _node_json(
     node: SystemNodeSummary,
     *,
     metrics: Dict[str, Any],
-    primary: Dict[str, Any],
-    issues: list[Dict[str, Any]],
 ) -> Dict[str, Any]:
     identity = {
         "global_rank": node.identity.global_rank,
@@ -342,8 +214,6 @@ def _node_json(
     }
     return GroupRow(
         identity=identity,
-        diagnosis=primary,
-        issues=issues,
         metrics=metrics,
     ).to_json()
 
@@ -419,49 +289,35 @@ def _card_stats(
 
 
 def build_system_payload(
-    cluster: SystemClusterSummary,
+    data: SystemSectionData,
+    diagnosis_result: DiagnosticResult[SystemDiagnosis],
 ) -> Dict[str, Any]:
-    """Build the cluster-shaped System payload and compact card text."""
+    """
+    Build the cluster-shaped System payload and compact card text.
+
+    The section pipeline owns loading and diagnosis. This function only turns
+    the loaded cluster summary plus diagnosis result into JSON and card text.
+    """
+    cluster = data.cluster
     node_payloads: Dict[str, Dict[str, Any]] = {}
     node_metrics: Dict[str, Dict[str, Any]] = {}
-    all_issue_pairs: list[tuple[DiagnosticIssue, SystemNodeSummary]] = []
+    primary_diagnosis = diagnosis_result.primary
+    issues = [
+        _issue_to_scoped_json(issue) for issue in diagnosis_result.issues
+    ]
 
     for label, node in cluster.nodes.items():
-        diagnosis = _diagnose_node(node)
-        node_issues = [
-            _scoped_issue_json(issue, node) for issue in diagnosis.issues
-        ]
-        if diagnosis.issues:
-            node_primary = _primary_from_issue(diagnosis.issues[0], node)
-        else:
-            node_primary = _primary_from_diagnosis(
-                diagnosis.primary,
-                scope=_scope_for_node(node),
-            )
         metrics = _node_metric_values(node)
         node_metrics[label] = metrics
         node_payloads[label] = _node_json(
             node,
             metrics=metrics,
-            primary=node_primary,
-            issues=node_issues,
         )
-        all_issue_pairs.extend((issue, node) for issue in diagnosis.issues)
-
-    ordered_issue_pairs = sorted(all_issue_pairs, key=_issue_sort_key)
-    issues = [
-        _scoped_issue_json(issue, node) for issue, node in ordered_issue_pairs
-    ]
-
-    # Cluster diagnosis is fallback-only; node diagnoses carry GPU detail.
-    cluster_diag = _diagnose_aggregate(cluster.aggregate, per_gpu={})
-    if ordered_issue_pairs:
-        primary = _primary_from_issue(*ordered_issue_pairs[0])
-    else:
-        primary = _primary_from_diagnosis(
-            cluster_diag.primary,
-            scope={"level": "cluster"},
-        )
+    primary = diagnosis_to_dict(
+        primary_diagnosis,
+        drop_none=True,
+        include_action=False,
+    )
 
     duration_s = duration_from_bounds(
         cluster.aggregate.first_ts,
