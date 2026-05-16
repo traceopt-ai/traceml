@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from traceml.diagnostics.common import DiagnosticResult
 from traceml.diagnostics.step_memory import StepMemoryDiagnosis
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml.reporting.schema import (
@@ -75,13 +76,14 @@ def _build_step_memory_payload(
     training_steps: int,
     latest_step_observed: Optional[int],
     metrics: list[StepMemoryCombinedMetric],
-    diagnosis: Optional[StepMemoryDiagnosis],
-    diagnosis_result: Optional[Any],
+    diagnosis_result: DiagnosticResult[StepMemoryDiagnosis],
     no_gpu_detected: bool,
     per_global_rank: Dict[str, StepMemoryGlobalRankSummary],
+    global_ranks_seen_fallback: int = 0,
 ) -> Dict[str, Any]:
     """Build the end-of-run step-memory summary payload and text card."""
     sorted_metrics = sorted(metrics, key=metric_sort_key)
+    diagnosis = diagnosis_result.primary
     primary = primary_metric(sorted_metrics, diagnosis)
     diagnosis_presented = present_step_memory_summary_diagnosis(diagnosis)
     issues = tuple(getattr(diagnosis_result, "issues", ()) or ())
@@ -108,7 +110,8 @@ def _build_step_memory_payload(
         card = "\n".join(
             [
                 "TraceML Step Memory Summary | "
-                f"steps {training_steps} | global ranks 0",
+                f"steps {training_steps} | "
+                f"global ranks {global_ranks_seen_fallback}",
                 "Step Memory",
                 f"- Diagnosis: {diagnosis_status}",
                 f"- Scope: latest step {latest_step_text}",
@@ -119,7 +122,7 @@ def _build_step_memory_payload(
 
         metadata = StepMetadata(
             mode="no_data",
-            global_ranks_seen=0,
+            global_ranks_seen=int(global_ranks_seen_fallback),
             global_ranks_used=0,
             training_total_steps=training_steps,
             training_latest_step=latest_step_observed,
@@ -188,7 +191,6 @@ def _build_step_memory_payload(
 
     aggregate = build_global_rollup(
         metrics=sorted_metrics,
-        diagnosis=diagnosis,
         per_global_rank=per_global_rank,
     )
     metadata = StepMetadata(
@@ -222,6 +224,7 @@ def _build_step_memory_payload(
 
 def build_step_memory_section_payload(
     data: StepMemorySectionData,
+    diagnosis_result: DiagnosticResult[StepMemoryDiagnosis],
 ) -> Dict[str, Any]:
     """
     Build the JSON-safe step-memory section payload from loaded data.
@@ -230,10 +233,10 @@ def build_step_memory_section_payload(
         training_steps=data.training_steps,
         latest_step_observed=data.latest_step_observed,
         metrics=data.metrics,
-        diagnosis=data.diagnosis,
-        diagnosis_result=data.diagnosis_result,
+        diagnosis_result=diagnosis_result,
         no_gpu_detected=data.no_gpu_detected,
         per_global_rank=data.per_global_rank,
+        global_ranks_seen_fallback=data.aligned_window.global_ranks_seen,
     )
 
 

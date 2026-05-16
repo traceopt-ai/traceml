@@ -171,43 +171,131 @@ def test_step_memory_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert "- Issues:" not in result.text
 
 
-def test_step_memory_section_loader_uses_summary_policy(
-    tmp_path,
-    monkeypatch,
-):
-    import traceml.reporting.sections.step_memory.loader as loader_module
-
+def test_step_memory_section_diagnosis_input_uses_summary_policy(tmp_path):
     db_path = tmp_path / "memory.db"
     _create_step_memory_db(str(db_path))
-    captured = {}
 
-    def fake_primary(metrics, *, thresholds, **kwargs):
-        captured["primary_thresholds"] = thresholds
-        return None
+    section = StepMemorySummarySection(window_size=3)
+    data = section.load(str(db_path))
+    diagnosis_input = section.to_diagnosis_input(data)
 
-    def fake_result(metrics, *, thresholds, **kwargs):
-        captured["result_thresholds"] = thresholds
-        return None
+    assert diagnosis_input.thresholds is SUMMARY_STEP_MEMORY_POLICY.thresholds
+    assert len(diagnosis_input.metrics) == 2
 
-    monkeypatch.setattr(
-        loader_module,
-        "build_step_memory_diagnosis",
-        fake_primary,
-    )
-    monkeypatch.setattr(
-        loader_module,
-        "build_step_memory_summary_diagnosis_result",
-        fake_result,
-    )
 
-    load_step_memory_section_data(str(db_path), window_size=3)
+def test_step_memory_section_reports_no_gpu_without_memory_rows(tmp_path):
+    db_path = tmp_path / "memory.db"
+    _create_step_memory_db(str(db_path))
 
-    assert (
-        captured["primary_thresholds"] is SUMMARY_STEP_MEMORY_POLICY.thresholds
-    )
-    assert (
-        captured["result_thresholds"] is SUMMARY_STEP_MEMORY_POLICY.thresholds
-    )
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("DELETE FROM step_memory_samples;")
+        conn.execute("CREATE TABLE system_samples (gpu_available INTEGER);")
+        conn.execute("INSERT INTO system_samples(gpu_available) VALUES (0);")
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = StepMemorySummarySection(window_size=3).build(str(db_path))
+
+    assert result.payload["metadata"]["mode"] == "no_data"
+    assert result.payload["diagnosis"]["status"] == "NO GPU"
+    assert result.payload["card"].find("Diagnosis: NO GPU") > -1
+
+
+def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
+    db_path = tmp_path / "memory.db"
+    _create_step_memory_db(str(db_path))
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        rows = [
+            (
+                4,
+                1,
+                1,
+                0,
+                2,
+                1,
+                0,
+                "worker-0",
+                2.0,
+                1,
+                10,
+                "cuda:0",
+                2,
+                210.0,
+                310.0,
+            ),
+            (
+                5,
+                1,
+                1,
+                0,
+                2,
+                1,
+                0,
+                "worker-0",
+                3.0,
+                2,
+                10,
+                "cuda:0",
+                3,
+                220.0,
+                320.0,
+            ),
+            (
+                6,
+                1,
+                1,
+                0,
+                2,
+                1,
+                0,
+                "worker-0",
+                4.0,
+                3,
+                10,
+                "cuda:0",
+                4,
+                230.0,
+                330.0,
+            ),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO step_memory_samples(
+                recv_ts_ns,
+                rank,
+                global_rank,
+                local_rank,
+                world_size,
+                local_world_size,
+                node_rank,
+                hostname,
+                sample_ts_s,
+                seq,
+                model_id,
+                device,
+                step,
+                peak_alloc_bytes,
+                peak_reserved_bytes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    data = load_step_memory_section_data(str(db_path), window_size=2)
+
+    assert data.aligned_window.steps == (2, 3)
+    assert data.aligned_window.global_ranks_seen == 2
+    assert data.aligned_window.global_ranks_used == 2
+    assert data.per_global_rank["0"].metrics["peak_allocated_bytes"] == 115.0
+    assert data.per_global_rank["1"].metrics["peak_allocated_bytes"] == 215.0
 
 
 def test_step_memory_summary_wrapper_delegates_to_section_path(tmp_path):

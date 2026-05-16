@@ -1,10 +1,17 @@
-# Final Report Section Shape
+# Final Summary JSON Schema
+
+This document describes the section shape used by TraceML's end-of-run summary
+JSON. The goal is one structured file that can be stored, diffed, and read by
+tooling after a distributed training job finishes.
 
 Each final-report section keeps top-level JSON fields non-overlapping:
 
 - `metadata`: flat, table-friendly section context. Every section emits the
   same keys and uses `null` when a field does not apply.
-- `diagnosis`: the single section-level diagnosis shown in the text card.
+- `diagnosis`: the single section-level diagnosis shown in the text card. It is
+  selected from the highest-priority issue, or from the section's normal/no-data
+  fallback when no issue fires.
+- `issues`: all material issues found for the section, sorted by priority.
 - `global.window`: flat window metadata for the run-level calculation. Every
   section emits the same window keys.
 - `global.average`: average values over `global.window`. Keys must match
@@ -98,6 +105,23 @@ The top-level section keys are intentionally strict:
 This split keeps the JSON stable for downstream tools and avoids storing the
 same meaning in multiple places.
 
+## Sections
+
+The current final summary contains four section keys:
+
+- `system`: host/node-level CPU, RAM, GPU utilization, GPU memory, temperature,
+  power, and GPU memory headroom.
+- `process`: traced process-level CPU, RSS, and GPU memory pressure across
+  global ranks.
+- `step_time`: aligned training-step timing across global ranks.
+- `step_memory`: aligned per-step peak allocated/reserved memory across global
+  ranks.
+
+`step_time.global.window.alignment` and `step_memory.global.window.alignment`
+are `common_steps`, so run-level comparisons are made over steps that are
+present for every included rank. `system` and `process` use `sample_window`
+because they are periodic telemetry streams rather than step-indexed metrics.
+
 ## Group Identity
 
 Every row in `groups.rows` includes the same runtime identity fields:
@@ -183,6 +207,16 @@ Current section metric names:
   ]
 }
 ```
+
+For Step Time, `wait_ms` is a residual timing proxy:
+
+```text
+wait_ms = step_time_ms - dataloader_ms - forward_ms - backward_ms - optimizer_ms
+```
+
+It means local step time not explained by the instrumented phases. It can
+include synchronization, host stalls, device transfer stalls, or other gaps, so
+it should not be interpreted as NCCL/synchronization overhead by itself.
 
 `global.median` and `global.worst` use one `idx` per metric. The meaning of
 `idx` is defined by `global.index_by`, and it points to a key in `groups.rows`.

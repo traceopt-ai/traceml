@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Conservative trend heuristics for step-memory diagnostics.
 
@@ -16,6 +22,10 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 import numpy as np
+
+from traceml.diagnostics.trends import compute_trend_evidence
+
+from .policy import StepMemoryDiagnosisThresholds
 
 
 @dataclass(frozen=True)
@@ -66,6 +76,30 @@ class StepMemoryTrendEvidence:
 
     abs_delta_bytes: Optional[float]
     weak_recovery: Optional[bool]
+
+
+@dataclass(frozen=True)
+class StepMemoryWindowCreepEvidence:
+    """
+    Shared creep evidence for worst/median memory bands.
+
+    The score is only a ranking signal between already-eligible metrics. The
+    actual early/confirmed decisions come from the direction and absolute
+    growth gates.
+    """
+
+    eligible: bool
+    baseline_avg_bytes: Optional[float]
+    mid_avg_bytes: Optional[float]
+    recent_avg_bytes: Optional[float]
+    overall_abs_delta_bytes: Optional[float]
+    overall_worst_growth_pct: Optional[float]
+    overall_median_growth_pct: Optional[float]
+    trend_window_steps: Optional[int]
+    avg_growth_bytes_per_step: Optional[float]
+    early: bool
+    confirmed: bool
+    score: float
 
 
 def evaluate_step_memory_creep(
@@ -166,6 +200,100 @@ def evaluate_step_memory_creep(
         )
 
 
+def evaluate_step_memory_window_creep(
+    *,
+    worst_series_bytes: Sequence[float],
+    median_series_bytes: Sequence[float],
+    steps_used: int,
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> StepMemoryWindowCreepEvidence:
+    """
+    Evaluate summary-window creep evidence for one memory metric.
+
+    Both live and final-summary diagnosis use this helper so the direction
+    gates and score formula cannot drift between paths.
+    """
+    if int(steps_used) < int(thresholds.min_steps_for_diag):
+        return _empty_window_creep_evidence()
+
+    worst = _as_non_negative_list(worst_series_bytes)
+    median = _as_non_negative_list(median_series_bytes)
+
+    worst_ev = compute_trend_evidence(worst, config=thresholds.trend)
+    median_ev = compute_trend_evidence(median, config=thresholds.trend)
+    if worst_ev is None or median_ev is None:
+        return _empty_window_creep_evidence()
+
+    abs_delta = float(worst_ev.delta_vs_baseline)
+    worst_growth = worst_ev.delta_pct_vs_baseline
+    median_growth = median_ev.delta_pct_vs_baseline
+
+    direction_recent_mid = (
+        worst_ev.delta_vs_mid > 0.0 and median_ev.delta_vs_mid > 0.0
+    )
+    direction_mid_base = (worst_ev.mid_avg > worst_ev.baseline_avg) and (
+        median_ev.mid_avg > median_ev.baseline_avg
+    )
+
+    direction_ok = True
+    if thresholds.require_recent_gt_mid:
+        direction_ok = direction_ok and direction_recent_mid
+    if thresholds.require_mid_ge_baseline:
+        direction_ok = direction_ok and direction_mid_base
+
+    early = bool(direction_ok and abs_delta > 0.0)
+    confirmed = bool(
+        direction_ok
+        and abs_delta >= float(thresholds.creep_confirmed_delta_bytes)
+    )
+
+    score = (
+        max(0.0, abs_delta)
+        / max(1.0, float(thresholds.creep_score_delta_scale_bytes))
+        + max(0.0, float(worst_growth or 0.0)) * 10.0
+        + max(0.0, float(median_growth or 0.0)) * 6.0
+    )
+
+    trend_window_steps = min(len(worst), 1000)
+    avg_growth_bytes_per_step = None
+    if trend_window_steps >= 2:
+        tail = worst[-trend_window_steps:]
+        total_delta = float(tail[-1] - tail[0])
+        avg_growth_bytes_per_step = total_delta / float(trend_window_steps - 1)
+
+    return StepMemoryWindowCreepEvidence(
+        eligible=True,
+        baseline_avg_bytes=worst_ev.baseline_avg,
+        mid_avg_bytes=worst_ev.mid_avg,
+        recent_avg_bytes=worst_ev.recent_avg,
+        overall_abs_delta_bytes=abs_delta,
+        overall_worst_growth_pct=worst_growth,
+        overall_median_growth_pct=median_growth,
+        trend_window_steps=trend_window_steps,
+        avg_growth_bytes_per_step=avg_growth_bytes_per_step,
+        early=early,
+        confirmed=confirmed,
+        score=score,
+    )
+
+
+def _empty_window_creep_evidence() -> StepMemoryWindowCreepEvidence:
+    return StepMemoryWindowCreepEvidence(
+        eligible=False,
+        baseline_avg_bytes=None,
+        mid_avg_bytes=None,
+        recent_avg_bytes=None,
+        overall_abs_delta_bytes=None,
+        overall_worst_growth_pct=None,
+        overall_median_growth_pct=None,
+        trend_window_steps=None,
+        avg_growth_bytes_per_step=None,
+        early=False,
+        confirmed=False,
+        score=0.0,
+    )
+
+
 def _as_non_negative_array(values: Sequence[float]) -> np.ndarray:
     out = []
     for v in values:
@@ -179,6 +307,19 @@ def _as_non_negative_array(values: Sequence[float]) -> np.ndarray:
     if not out:
         return np.asarray([], dtype=np.float64)
     return np.asarray(out, dtype=np.float64)
+
+
+def _as_non_negative_list(values: Sequence[float]) -> list[float]:
+    out = []
+    for value in values:
+        try:
+            number = float(value)
+        except Exception:
+            number = 0.0
+        if not np.isfinite(number):
+            number = 0.0
+        out.append(max(0.0, number))
+    return out
 
 
 def _trend_pct(arr: np.ndarray, *, short_n: int) -> Optional[float]:
@@ -223,3 +364,13 @@ def _weak_recovery(arr: np.ndarray, *, pullback_max: float) -> Optional[bool]:
     post_min = float(np.min(arr[peak_idx:]))
     pullback = (peak - post_min) / peak
     return bool(pullback <= float(pullback_max))
+
+
+__all__ = [
+    "DEFAULT_STEP_MEMORY_TREND_HEURISTICS",
+    "StepMemoryTrendEvidence",
+    "StepMemoryTrendHeuristics",
+    "StepMemoryWindowCreepEvidence",
+    "evaluate_step_memory_creep",
+    "evaluate_step_memory_window_creep",
+]

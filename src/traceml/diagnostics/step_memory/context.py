@@ -13,11 +13,16 @@ from .adapters import (
     StepMemorySummaryTrendSignals,
     build_step_memory_summary_signals,
 )
-from .api import MetricAssessment, WindowCreepEvidence
+from .api import (
+    MetricAssessment,
+    StepMemoryDiagnosisInput,
+    WindowCreepEvidence,
+)
 
 __all__ = [
     "WindowCreepEvidence",
     "MetricAssessment",
+    "StepMemoryDiagnosisInput",
     "StepMemorySummaryTrendSignals",
     "StepMemorySummaryMetricSignals",
     "build_step_memory_summary_signals",

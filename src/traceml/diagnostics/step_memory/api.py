@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Step-memory diagnosis shared by live renderers and summaries."""
 
 from __future__ import annotations
@@ -9,10 +15,13 @@ from traceml.diagnostics.common import DiagnosticResult
 from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
 
 from ..common import BaseDiagnosis, Severity, validate_confidence
-from ..trends import compute_trend_evidence
 from .policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
+)
+from .trend import (
+    StepMemoryWindowCreepEvidence,
+    evaluate_step_memory_window_creep,
 )
 
 StepMemoryDiagnosisKind = Literal[
@@ -67,6 +76,15 @@ class StepMemoryDiagnosis(BaseDiagnosis):
 
     def __post_init__(self) -> None:
         validate_confidence(self.confidence)
+
+
+@dataclass(frozen=True)
+class StepMemoryDiagnosisInput:
+    """Structured input for final-summary Step Memory diagnosis."""
+
+    metrics: Sequence[StepMemoryCombinedMetric]
+    gpu_total_bytes: Optional[float]
+    thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS
 
 
 @dataclass(frozen=True)
@@ -346,6 +364,7 @@ def build_step_memory_summary_diagnosis_result(
             metrics=metrics,
             issues=issues,
             metric_attribution=metric_attribution,
+            gpu_total_bytes=gpu_total_bytes,
             thresholds=thresholds,
         )
 
@@ -356,11 +375,23 @@ def build_step_memory_summary_diagnosis_result(
     )
 
 
+def diagnose_step_memory_summary(
+    data: StepMemoryDiagnosisInput,
+) -> DiagnosticResult[StepMemoryDiagnosis]:
+    """Run final-summary Step Memory diagnosis from the typed input contract."""
+    return build_step_memory_summary_diagnosis_result(
+        data.metrics,
+        gpu_total_bytes=data.gpu_total_bytes,
+        thresholds=data.thresholds,
+    )
+
+
 def _summary_primary_from_rule_result(
     *,
     metrics: Sequence[StepMemoryCombinedMetric],
     issues: Sequence[Any],
     metric_attribution: Dict[str, Any],
+    gpu_total_bytes: Optional[float],
     thresholds: StepMemoryDiagnosisThresholds,
 ) -> StepMemoryDiagnosis:
     """Build the summary primary diagnosis from sorted rule issues."""
@@ -373,6 +404,7 @@ def _summary_primary_from_rule_result(
     return _summary_fallback_primary(
         metrics=metrics,
         metric_attribution=metric_attribution,
+        gpu_total_bytes=gpu_total_bytes,
         thresholds=thresholds,
     )
 
@@ -417,6 +449,7 @@ def _summary_fallback_primary(
     *,
     metrics: Sequence[StepMemoryCombinedMetric],
     metric_attribution: Dict[str, Any],
+    gpu_total_bytes: Optional[float],
     thresholds: StepMemoryDiagnosisThresholds,
 ) -> StepMemoryDiagnosis:
     """Return NO_DATA or BALANCED when no summary rule fires."""
@@ -433,7 +466,11 @@ def _summary_fallback_primary(
 
     signals = list(metric_attribution.values())
     if not signals:
-        return build_step_memory_diagnosis(metrics, thresholds=thresholds)
+        return build_step_memory_diagnosis(
+            metrics,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
 
     ready = [
         signal
@@ -496,7 +533,6 @@ def _assess_metric(
         worst_series_bytes=metric.series.worst,
         median_series_bytes=metric.series.median,
         steps_used=steps_used,
-        gpu_total_bytes=gpu_total_bytes,
         thresholds=thresholds,
     )
 
@@ -516,103 +552,37 @@ def _compute_window_creep_evidence(
     worst_series_bytes: Sequence[float],
     median_series_bytes: Sequence[float],
     steps_used: int,
-    gpu_total_bytes: Optional[float],
     thresholds: StepMemoryDiagnosisThresholds,
 ) -> WindowCreepEvidence:
     """
-    Compute memory creep evidence from the shared trend engine.
-
-    The trend definition is common across TraceML. Memory-specific thresholds
-    remain local here because memory uses bytes-based alerting semantics.
+    Adapt shared window creep evidence to the live diagnosis payload.
     """
-    if int(steps_used) < int(thresholds.min_steps_for_diag):
-        return WindowCreepEvidence(
-            eligible=False,
-            baseline_avg_bytes=None,
-            mid_avg_bytes=None,
-            recent_avg_bytes=None,
-            overall_abs_delta_bytes=None,
-            overall_worst_growth_pct=None,
-            overall_median_growth_pct=None,
-            trend_window_steps=None,
-            avg_growth_bytes_per_step=None,
-            early=False,
-            confirmed=False,
-            score=0.0,
-        )
-
-    worst = _clean_series(worst_series_bytes)
-    median = _clean_series(median_series_bytes)
-
-    worst_ev = compute_trend_evidence(worst, config=thresholds.trend)
-    median_ev = compute_trend_evidence(median, config=thresholds.trend)
-
-    if worst_ev is None or median_ev is None:
-        return WindowCreepEvidence(
-            eligible=False,
-            baseline_avg_bytes=None,
-            mid_avg_bytes=None,
-            recent_avg_bytes=None,
-            overall_abs_delta_bytes=None,
-            overall_worst_growth_pct=None,
-            overall_median_growth_pct=None,
-            trend_window_steps=None,
-            avg_growth_bytes_per_step=None,
-            early=False,
-            confirmed=False,
-            score=0.0,
-        )
-
-    abs_delta = float(worst_ev.delta_vs_baseline)
-    worst_growth = worst_ev.delta_pct_vs_baseline
-    median_growth = median_ev.delta_pct_vs_baseline
-
-    direction_recent_mid = (
-        worst_ev.delta_vs_mid > 0.0 and median_ev.delta_vs_mid > 0.0
+    evidence = evaluate_step_memory_window_creep(
+        worst_series_bytes=worst_series_bytes,
+        median_series_bytes=median_series_bytes,
+        steps_used=steps_used,
+        thresholds=thresholds,
     )
-    direction_mid_base = (worst_ev.mid_avg > worst_ev.baseline_avg) and (
-        median_ev.mid_avg > median_ev.baseline_avg
-    )
+    return _window_creep_evidence_to_diagnosis(evidence)
 
-    direction_ok = True
-    if thresholds.require_recent_gt_mid:
-        direction_ok = direction_ok and direction_recent_mid
-    if thresholds.require_mid_ge_baseline:
-        direction_ok = direction_ok and direction_mid_base
 
-    early = bool(direction_ok and abs_delta > 0.0)
-
-    confirmed = bool(
-        direction_ok
-        and abs_delta >= float(thresholds.creep_confirmed_delta_bytes)
-    )
-
-    score = (
-        max(0.0, abs_delta)
-        / max(1.0, float(thresholds.creep_score_delta_scale_bytes))
-        + max(0.0, float(worst_growth or 0.0)) * 10.0
-        + max(0.0, float(median_growth or 0.0)) * 6.0
-    )
-    trend_window_steps = min(len(worst), 1000)
-    avg_growth_bytes_per_step = None
-    if trend_window_steps >= 2:
-        tail = worst[-trend_window_steps:]
-        total_delta = float(tail[-1] - tail[0])
-        avg_growth_bytes_per_step = total_delta / float(trend_window_steps - 1)
-
+def _window_creep_evidence_to_diagnosis(
+    evidence: StepMemoryWindowCreepEvidence,
+) -> WindowCreepEvidence:
+    """Convert shared creep evidence into the API-local dataclass."""
     return WindowCreepEvidence(
-        eligible=True,
-        baseline_avg_bytes=worst_ev.baseline_avg,
-        mid_avg_bytes=worst_ev.mid_avg,
-        recent_avg_bytes=worst_ev.recent_avg,
-        overall_abs_delta_bytes=abs_delta,
-        overall_worst_growth_pct=worst_growth,
-        overall_median_growth_pct=median_growth,
-        trend_window_steps=trend_window_steps,
-        avg_growth_bytes_per_step=avg_growth_bytes_per_step,
-        early=early,
-        confirmed=confirmed,
-        score=score,
+        eligible=evidence.eligible,
+        baseline_avg_bytes=evidence.baseline_avg_bytes,
+        mid_avg_bytes=evidence.mid_avg_bytes,
+        recent_avg_bytes=evidence.recent_avg_bytes,
+        overall_abs_delta_bytes=evidence.overall_abs_delta_bytes,
+        overall_worst_growth_pct=evidence.overall_worst_growth_pct,
+        overall_median_growth_pct=evidence.overall_median_growth_pct,
+        trend_window_steps=evidence.trend_window_steps,
+        avg_growth_bytes_per_step=evidence.avg_growth_bytes_per_step,
+        early=evidence.early,
+        confirmed=evidence.confirmed,
+        score=evidence.score,
     )
 
 
@@ -641,30 +611,6 @@ def _pressure_fraction(
     if total <= 0.0:
         return None
     return max(0.0, float(worst_peak_bytes) / total)
-
-
-def _avg(values: Sequence[float]) -> float:
-    if not values:
-        return 0.0
-    return float(sum(float(v) for v in values) / max(1, len(values)))
-
-
-def _growth_pct(start: float, end: float) -> Optional[float]:
-    base = float(start)
-    if base <= 0.0:
-        return None
-    return (float(end) - base) / base
-
-
-def _clean_series(values: Sequence[float]) -> list[float]:
-    out = []
-    for value in values:
-        try:
-            number = float(value)
-        except Exception:
-            number = 0.0
-        out.append(max(0.0, number))
-    return out
 
 
 def _format_creep_note(evidence: WindowCreepEvidence) -> Optional[str]:
@@ -767,6 +713,8 @@ __all__ = [
     "StepMemoryDiagnosisThresholds",
     "DEFAULT_STEP_MEMORY_THRESHOLDS",
     "StepMemoryDiagnosis",
+    "StepMemoryDiagnosisInput",
     "build_step_memory_diagnosis",
     "build_step_memory_summary_diagnosis_result",
+    "diagnose_step_memory_summary",
 ]

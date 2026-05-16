@@ -8,12 +8,20 @@
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence
 
 from traceml.diagnostics.step_memory import StepMemoryDiagnosis
-from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
+from traceml.renderers.step_memory.schema import (
+    StepMemoryCombinedCoverage,
+    StepMemoryCombinedMetric,
+    StepMemoryCombinedSeries,
+    StepMemoryCombinedSummary,
+)
 from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.reporting.schema import BaseGlobal, GlobalWindow
+from traceml.reporting.summaries.diagnosis_presentation import (
+    SummaryDiagnosisPresentation,
+)
 from traceml.reporting.topology import topology_mode_from_identities
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
@@ -44,6 +52,43 @@ class StepMemoryGlobalRankSummary:
     metrics: Mapping[str, float]
 
 
+@dataclass(frozen=True)
+class StepMemoryStepMetrics:
+    """Memory metrics captured for one completed training step."""
+
+    peak_allocated_bytes: float
+    peak_reserved_bytes: float
+
+
+@dataclass(frozen=True)
+class StepMemoryRankWindow:
+    """Aligned step-memory time series for one global rank."""
+
+    identity: StepMemoryGlobalRankIdentity
+    device: Optional[str]
+    step_metrics: Mapping[int, StepMemoryStepMetrics]
+
+
+@dataclass(frozen=True)
+class StepMemoryAlignedWindow:
+    """Latest common step-memory window shared by observed global ranks."""
+
+    steps: tuple[int, ...]
+    per_global_rank: Mapping[int, StepMemoryRankWindow]
+    window_size: int
+    global_ranks_seen: int
+
+    @property
+    def global_ranks_used(self) -> int:
+        """Return global ranks included in the aligned memory window."""
+        return len(self.per_global_rank)
+
+    @property
+    def completed_step(self) -> Optional[int]:
+        """Return latest aligned step, if any."""
+        return self.steps[-1] if self.steps else None
+
+
 def metric_sort_key(metric: StepMemoryCombinedMetric) -> int:
     """Stable metric ordering: allocated first, reserved second."""
     if metric.metric == "peak_allocated":
@@ -62,9 +107,143 @@ def metric_label(metric_name: str) -> str:
     return metric_name.replace("_", " ")
 
 
-def metric_output_name(metric_name: str) -> str:
-    """Return the public metric name used in summary JSON."""
-    return f"{metric_name}_bytes"
+def _metric_value(
+    metrics: StepMemoryStepMetrics,
+    metric_name: str,
+) -> float:
+    """Read one internal step-memory metric by canonical metric name."""
+    if metric_name == "peak_allocated":
+        return float(metrics.peak_allocated_bytes)
+    if metric_name == "peak_reserved":
+        return float(metrics.peak_reserved_bytes)
+    raise ValueError(f"Unsupported Step Memory metric: {metric_name}")
+
+
+def _majority_device(devices: Iterable[Optional[str]]) -> Optional[str]:
+    """Return the most common non-empty device label."""
+    clean = [str(device) for device in devices if device]
+    if not clean:
+        return None
+    return max(set(clean), key=clean.count)
+
+
+def _median(values: Sequence[float]) -> float:
+    """Return the median of a non-empty numeric sequence."""
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return 0.0
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def build_combined_metrics_from_window(
+    aligned_window: StepMemoryAlignedWindow,
+    *,
+    metric_names: Sequence[str] = ("peak_allocated", "peak_reserved"),
+) -> list[StepMemoryCombinedMetric]:
+    """Build diagnosis-ready combined metrics from one aligned window."""
+    steps = list(aligned_window.steps)
+    ranks = sorted(aligned_window.per_global_rank.keys())
+    if not steps or not ranks:
+        return []
+
+    out: list[StepMemoryCombinedMetric] = []
+    for metric_name in metric_names:
+        values_by_rank: list[list[float]] = []
+        devices: list[Optional[str]] = []
+
+        for rank in ranks:
+            rank_window = aligned_window.per_global_rank[rank]
+            row_values = [
+                _metric_value(rank_window.step_metrics[step], metric_name)
+                for step in steps
+            ]
+            values_by_rank.append(row_values)
+            devices.append(rank_window.device)
+
+        if not values_by_rank:
+            continue
+
+        columns = list(zip(*values_by_rank))
+        median_series = [
+            float(_median([float(value) for value in column]))
+            for column in columns
+        ]
+        worst_series = [
+            float(max(float(value) for value in column)) for column in columns
+        ]
+        rank_peaks = [max(values) for values in values_by_rank]
+        median_peak = float(_median(rank_peaks))
+        worst_peak = float(max(rank_peaks))
+        worst_idx = rank_peaks.index(worst_peak)
+        worst_rank = int(ranks[worst_idx])
+        skew_ratio = worst_peak / median_peak if median_peak > 0.0 else 0.0
+        skew_pct = (
+            (worst_peak - median_peak) / median_peak
+            if median_peak > 0.0
+            else 0.0
+        )
+
+        out.append(
+            StepMemoryCombinedMetric(
+                metric=str(metric_name),
+                device=_majority_device(devices),
+                series=StepMemoryCombinedSeries(
+                    steps=[int(step) for step in steps],
+                    median=median_series,
+                    worst=worst_series,
+                ),
+                summary=StepMemoryCombinedSummary(
+                    window_size=int(aligned_window.window_size),
+                    steps_used=len(steps),
+                    median_peak=median_peak,
+                    worst_peak=worst_peak,
+                    worst_rank=worst_rank,
+                    skew_ratio=float(skew_ratio),
+                    skew_pct=float(skew_pct),
+                ),
+                coverage=StepMemoryCombinedCoverage(
+                    expected_steps=int(aligned_window.window_size),
+                    steps_used=len(steps),
+                    completed_step=aligned_window.completed_step,
+                    world_size=int(aligned_window.global_ranks_seen),
+                    ranks_present=int(aligned_window.global_ranks_used),
+                    incomplete=(
+                        aligned_window.global_ranks_used
+                        < aligned_window.global_ranks_seen
+                    ),
+                ),
+            )
+        )
+
+    return out
+
+
+def build_global_rank_summaries_from_window(
+    aligned_window: StepMemoryAlignedWindow,
+) -> Dict[str, StepMemoryGlobalRankSummary]:
+    """Build JSON row summaries from the same aligned memory window."""
+    out: Dict[str, StepMemoryGlobalRankSummary] = {}
+    for rank, rank_window in sorted(aligned_window.per_global_rank.items()):
+        values = list(rank_window.step_metrics.values())
+        if not values:
+            continue
+        out[str(rank)] = StepMemoryGlobalRankSummary(
+            identity=rank_window.identity,
+            metrics={
+                "peak_allocated_bytes": (
+                    sum(item.peak_allocated_bytes for item in values)
+                    / len(values)
+                ),
+                "peak_reserved_bytes": (
+                    sum(item.peak_reserved_bytes for item in values)
+                    / len(values)
+                ),
+            },
+        )
+    return out
 
 
 def no_gpu_diagnosis_json() -> Dict[str, Any]:
@@ -87,18 +266,18 @@ def no_gpu_diagnosis_json() -> Dict[str, Any]:
     }
 
 
-def no_gpu_diagnosis_presented() -> Dict[str, Any]:
+def no_gpu_diagnosis_presented() -> SummaryDiagnosisPresentation:
     """
     Stable end-of-run presentation block for CPU-only / no-GPU runs.
     """
-    return {
-        "status": "NO GPU",
-        "reason": (
+    return SummaryDiagnosisPresentation(
+        status="NO GPU",
+        reason=(
             "No GPU detected. Step memory uses torch-based GPU memory telemetry."
         ),
-        "action": "Step memory is not applicable for this run.",
-        "note": None,
-    }
+        action="Step memory is not applicable for this run.",
+        note=None,
+    )
 
 
 def primary_metric(
@@ -253,7 +432,6 @@ def _empty_rank_points() -> Dict[str, Dict[str, Any]]:
 def build_global_rollup(
     *,
     metrics: list[StepMemoryCombinedMetric],
-    diagnosis: Optional[StepMemoryDiagnosis],
     per_global_rank: Mapping[str, StepMemoryGlobalRankSummary],
 ) -> Dict[str, Any]:
     """Build the global memory rollup for the analyzed window."""
@@ -305,12 +483,16 @@ def topology_mode(
 __all__ = [
     "MAX_SUMMARY_WINDOW_ROWS",
     "STEP_MEMORY_METRIC_NAMES",
+    "StepMemoryAlignedWindow",
     "StepMemoryGlobalRankIdentity",
     "StepMemoryGlobalRankSummary",
+    "StepMemoryRankWindow",
+    "StepMemoryStepMetrics",
+    "build_combined_metrics_from_window",
     "build_global_rollup",
+    "build_global_rank_summaries_from_window",
     "empty_global_rollup",
     "metric_label",
-    "metric_output_name",
     "metric_sort_key",
     "no_gpu_diagnosis_json",
     "no_gpu_diagnosis_presented",
