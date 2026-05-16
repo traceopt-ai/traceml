@@ -73,5 +73,5 @@ specs/
 
 # Claude Code project instructions (local-only, not upstream)
 CLAUDE.md
-SCHEMA.md
-SCHEMA.md
+src/traceml/reporting/SCHEMA.md
+src/traceml/reporting/SCHEMA.md
