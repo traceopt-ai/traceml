@@ -20,69 +20,6 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
-def _metric_alias(section: Dict[str, Any], key: str) -> Dict[str, Any]:
-    metric = section.get("metrics", {}).get(key)
-    return metric if isinstance(metric, dict) else {}
-
-
-def _legacy_section_aliases(
-    sections: Dict[str, Dict[str, Any]],
-) -> Dict[str, Dict[str, Any]]:
-    """Expose historical top-level compare keys while callers migrate."""
-    step_time = sections.get("step_time", {})
-    step_memory = sections.get("step_memory", {})
-    process = sections.get("process", {})
-    system = sections.get("system", {})
-
-    return {
-        "step_time": {
-            "status": step_time.get("diagnosis", {}),
-            "presented": {
-                "lhs": {"status": step_time.get("diagnosis", {}).get("lhs")},
-                "rhs": {"status": step_time.get("diagnosis", {}).get("rhs")},
-            },
-            "step_avg_ms": _metric_alias(step_time, "step_avg_ms"),
-            "wait_share_pct": _metric_alias(step_time, "wait_share_pct"),
-            "compute_ms": _metric_alias(step_time, "compute_ms"),
-            "wait_ms": _metric_alias(step_time, "wait_ms"),
-            "input_ms": _metric_alias(step_time, "input_ms"),
-            "dominant_phase": _metric_alias(step_time, "dominant_phase"),
-        },
-        "step_memory": {
-            "status": step_memory.get("diagnosis", {}),
-            "presented": {
-                "lhs": {"status": step_memory.get("diagnosis", {}).get("lhs")},
-                "rhs": {"status": step_memory.get("diagnosis", {}).get("rhs")},
-            },
-            "worst_peak_bytes": _metric_alias(
-                step_memory,
-                "peak_reserved_bytes",
-            ),
-            "skew_pct": _metric_alias(step_memory, "memory_skew_pct"),
-            "trend_worst_delta_bytes": _metric_alias(
-                step_memory,
-                "trend_worst_delta_bytes",
-            ),
-        },
-        "process": {
-            "cpu_avg_percent": _metric_alias(process, "cpu_avg_percent"),
-            "ram_peak_gb": _metric_alias(process, "rss_peak_gb"),
-        },
-        "system": {
-            "cpu_avg_percent": _metric_alias(system, "cpu_avg_percent"),
-            "ram_peak_gb": _metric_alias(system, "ram_peak_gb"),
-            "gpu_util_avg_percent": _metric_alias(
-                system,
-                "gpu_util_avg_percent",
-            ),
-            "gpu_memory_peak_percent": _metric_alias(
-                system,
-                "gpu_memory_peak_percent",
-            ),
-        },
-    }
-
-
 def build_compare_payload(
     *,
     lhs_payload: Dict[str, Any],
@@ -132,7 +69,6 @@ def build_compare_payload(
         "text": "",
     }
 
-    payload.update(_legacy_section_aliases(sections))
     payload["verdict"] = build_compare_verdict(
         lhs_payload=lhs_payload,
         rhs_payload=rhs_payload,

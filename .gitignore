@@ -38,6 +38,10 @@ htmlcov/
 .tox/
 .mypy_cache/
 
+# Local training outputs / generated telemetry
+
+logs/
+
 
 # IDE / Editor
 
@@ -69,3 +73,5 @@ specs/
 
 # Claude Code project instructions (local-only, not upstream)
 CLAUDE.md
+src/traceml/reporting/SCHEMA.md
+src/traceml/reporting/SCHEMA.md

@@ -186,3 +186,27 @@ def test_step_memory_summary_enrichment_fails_open(monkeypatch):
     assert result.primary.kind == "BALANCED"
     assert result.issues == ()
     assert result.metric_attribution == {}
+
+
+def test_step_memory_summary_fails_open_preserves_pressure_capacity(
+    monkeypatch,
+):
+    import traceml.diagnostics.step_memory.adapters as adapters
+
+    def broken_adapter(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        adapters,
+        "build_step_memory_summary_signals",
+        broken_adapter,
+    )
+
+    result = build_step_memory_summary_diagnosis_result(
+        [_metric(worst_peak=96.0, median_peak=80.0)],
+        gpu_total_bytes=100.0,
+    )
+
+    assert result.primary.kind == "HIGH_PRESSURE"
+    assert result.issues == ()
+    assert result.metric_attribution == {}

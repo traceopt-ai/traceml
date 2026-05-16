@@ -81,10 +81,7 @@ class StepTimeComparer:
         )
 
     def _primary(self, section: Any) -> Dict[str, Any]:
-        primary = nested_get(section, "global", "typical")
-        if isinstance(primary, dict):
-            return primary
-        primary = nested_get(section, "timing_primary")
+        primary = nested_get(section, "aggregate", "median")
         return primary if isinstance(primary, dict) else {}
 
     def _value(self, section: Any, key: str) -> Any:
@@ -107,8 +104,6 @@ class StepTimeComparer:
         primary = self._primary(section)
         split = primary.get(split_key)
         if not isinstance(split, dict):
-            split = nested_get(section, f"median_{split_key}")
-        if not isinstance(split, dict):
             return None
         return split.get(phase)
 
@@ -118,8 +113,6 @@ class StepTimeComparer:
         if value is not None:
             return value
         split = primary.get("split_ms")
-        if not isinstance(split, dict):
-            split = nested_get(section, "median_split_ms")
         if not isinstance(split, dict):
             return None
         values = [

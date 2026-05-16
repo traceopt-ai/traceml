@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Summary-oriented system diagnosis API.
 
@@ -8,12 +14,23 @@ runtime rendering behavior.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field, replace
+from typing import Any, Dict, Tuple
 
-from ..common import BaseDiagnosis, DiagnosticResult, Severity
-from .context import SystemSummarySignals, build_system_summary_signals
-from .rules import run_system_rules
+from ..common import (
+    BaseDiagnosis,
+    DiagnosticIssue,
+    DiagnosticResult,
+    Severity,
+    severity_rank,
+)
+from .context import (
+    SystemDiagnosisInput,
+    SystemNodeDiagnosisInput,
+    SystemSummarySignals,
+    build_system_summary_signals,
+)
+from .rules import SYSTEM_ISSUE_PRIORITY, run_system_rules
 
 
 @dataclass(frozen=True)
@@ -24,6 +41,7 @@ class SystemDiagnosis(BaseDiagnosis):
 
     kind: str
     samples_used: int
+    scope: Dict[str, Any] = field(default_factory=dict)
 
 
 def _mk_diag(
@@ -34,6 +52,7 @@ def _mk_diag(
     reason: str,
     action: str,
     samples_used: int,
+    scope: Dict[str, Any] | None = None,
 ) -> SystemDiagnosis:
     return SystemDiagnosis(
         kind=str(kind),
@@ -42,6 +61,7 @@ def _mk_diag(
         reason=str(reason),
         action=str(action),
         samples_used=int(samples_used),
+        scope=dict(scope or {}),
     )
 
 
@@ -55,6 +75,7 @@ def _default_primary(signals: SystemSummarySignals) -> SystemDiagnosis:
             reason="No system telemetry was recorded.",
             action="Collect system telemetry for host-level context.",
             samples_used=signals.samples,
+            scope={"level": "cluster"},
         )
 
     has_gpu_metrics = any(
@@ -78,118 +99,117 @@ def _default_primary(signals: SystemSummarySignals) -> SystemDiagnosis:
         reason=reason,
         action="Use training diagnostics for model-level bottlenecks.",
         samples_used=signals.samples,
+        scope={"level": "cluster"},
     )
 
 
-def build_system_diagnosis_result(
-    *,
-    duration_s: Optional[float],
-    system_samples: int,
-    cpu_avg_percent: Optional[float],
-    cpu_peak_percent: Optional[float],
-    ram_avg_bytes: Optional[float],
-    ram_peak_bytes: Optional[float],
-    ram_total_bytes: Optional[float],
-    gpu_available: Optional[bool],
-    gpu_count: Optional[int],
-    gpu_util_avg_percent: Optional[float],
-    gpu_util_peak_percent: Optional[float],
-    gpu_mem_avg_bytes: Optional[float],
-    gpu_mem_peak_bytes: Optional[float],
-    gpu_temp_avg_c: Optional[float],
-    gpu_temp_peak_c: Optional[float],
-    gpu_power_avg_w: Optional[float],
-    gpu_power_peak_w: Optional[float],
-    per_gpu: Dict[int, Dict[str, Optional[float]]],
+def _node_scope(
+    node: SystemNodeDiagnosisInput,
+    issue: DiagnosticIssue | None = None,
+) -> Dict[str, Any]:
+    """Return the public scope for a node or node-local GPU issue."""
+    scope: Dict[str, Any] = {
+        "level": "node",
+        "node": node.node_label,
+        "node_rank": node.node_rank,
+    }
+    if issue is not None and issue.ranks:
+        scope["level"] = "gpu"
+        scope["gpu_idx"] = int(issue.ranks[0])
+    return scope
+
+
+def _scope_text(text: str, scope: Dict[str, Any]) -> str:
+    """Add node context to issue text without making normal text noisy."""
+    if scope.get("level") == "gpu":
+        gpu_idx = scope.get("gpu_idx")
+        node = scope.get("node")
+        suffix = f" on {node} gpu{gpu_idx}"
+        existing = f" on gpu{gpu_idx}"
+        if existing in text:
+            return text.replace(existing, suffix)
+        return f"{text.rstrip('.')}{suffix}."
+    if scope.get("level") == "node" and scope.get("node"):
+        return f"{text.rstrip('.')} on {scope['node']}."
+    return text
+
+
+def _scoped_issue(
+    issue: DiagnosticIssue,
+    node: SystemNodeDiagnosisInput,
+) -> DiagnosticIssue:
+    """Attach node scope to a node-local System issue."""
+    scope = _node_scope(node, issue)
+    evidence = dict(issue.evidence or {})
+    evidence["scope"] = scope
+    evidence["samples_used"] = int(node.samples)
+    return replace(
+        issue,
+        summary=_scope_text(issue.summary, scope),
+        evidence=evidence,
+    )
+
+
+def _issue_sort_key(issue: DiagnosticIssue) -> tuple:
+    """Return the cluster-wide System issue priority key."""
+    scope = dict((issue.evidence or {}).get("scope") or {})
+    return (
+        SYSTEM_ISSUE_PRIORITY.get(issue.kind, 999),
+        -severity_rank(issue.severity),
+        -float(issue.score or 0.0),
+        str(scope.get("node") or ""),
+    )
+
+
+def _diagnose_node(
+    node: SystemNodeDiagnosisInput,
+) -> Tuple[DiagnosticIssue, ...]:
+    """Run regular System rules for one node input."""
+    signals = build_system_summary_signals(node)
+    issues = run_system_rules(signals) if signals.samples > 0 else ()
+    return tuple(_scoped_issue(issue, node) for issue in issues)
+
+
+def _primary_from_issue(
+    issue: DiagnosticIssue,
+) -> SystemDiagnosis:
+    """Promote the highest-priority scoped issue to section diagnosis."""
+    scope = dict((issue.evidence or {}).get("scope") or {})
+    return _mk_diag(
+        kind=issue.kind,
+        severity=issue.severity,
+        status=issue.status,
+        reason=issue.summary,
+        action=issue.action,
+        samples_used=int((issue.evidence or {}).get("samples_used") or 0),
+        scope=scope,
+    )
+
+
+def diagnose_system(
+    data: SystemDiagnosisInput,
 ) -> DiagnosticResult[SystemDiagnosis]:
     """
-    Build one rich system diagnosis result from summary-level system signals.
+    Diagnose cluster-level system pressure from prepared node inputs.
     """
-    signals = build_system_summary_signals(
-        duration_s=duration_s,
-        samples=system_samples,
-        cpu_avg_percent=cpu_avg_percent,
-        cpu_peak_percent=cpu_peak_percent,
-        ram_avg_bytes=ram_avg_bytes,
-        ram_peak_bytes=ram_peak_bytes,
-        ram_total_bytes=ram_total_bytes,
-        gpu_available=gpu_available,
-        gpu_count=gpu_count,
-        gpu_util_avg_percent=gpu_util_avg_percent,
-        gpu_util_peak_percent=gpu_util_peak_percent,
-        gpu_mem_avg_bytes=gpu_mem_avg_bytes,
-        gpu_mem_peak_bytes=gpu_mem_peak_bytes,
-        gpu_temp_avg_c=gpu_temp_avg_c,
-        gpu_temp_peak_c=gpu_temp_peak_c,
-        gpu_power_avg_w=gpu_power_avg_w,
-        gpu_power_peak_w=gpu_power_peak_w,
-        per_gpu=per_gpu,
-    )
+    node_issues = []
+    for node in data.per_node.values():
+        node_issues.extend(_diagnose_node(node))
 
-    issues = run_system_rules(signals) if signals.samples > 0 else ()
+    issues = tuple(sorted(node_issues, key=_issue_sort_key))
     if issues:
-        primary_issue = issues[0]
-        primary = _mk_diag(
-            kind=primary_issue.kind,
-            severity=primary_issue.severity,
-            status=primary_issue.status,
-            reason=primary_issue.summary,
-            action=primary_issue.action,
-            samples_used=signals.samples,
-        )
+        primary = _primary_from_issue(issues[0])
     else:
+        signals = build_system_summary_signals(data)
         primary = _default_primary(signals)
-
-    metric_attribution: Dict[str, Any] = {
-        "cpu": {
-            "avg_percent": signals.cpu_avg_percent,
-            "peak_percent": signals.cpu_peak_percent,
-        },
-        "ram": {
-            "avg_bytes": signals.ram_avg_bytes,
-            "peak_bytes": signals.ram_peak_bytes,
-            "total_bytes": signals.ram_total_bytes,
-            "pressure_frac": signals.ram_pressure_frac,
-            "peak_percent": signals.ram_peak_percent,
-        },
-        "gpu_rollup": {
-            "available": signals.gpu_available,
-            "count": signals.gpu_count,
-            "util_avg_percent": signals.gpu_util_avg_percent,
-            "util_peak_percent": signals.gpu_util_peak_percent,
-            "mem_avg_bytes": signals.gpu_mem_avg_bytes,
-            "mem_peak_bytes": signals.gpu_mem_peak_bytes,
-            "temp_avg_c": signals.gpu_temp_avg_c,
-            "temp_peak_c": signals.gpu_temp_peak_c,
-            "power_avg_w": signals.gpu_power_avg_w,
-            "power_peak_w": signals.gpu_power_peak_w,
-            "mem_peak_percent": signals.gpu_mem_peak_percent,
-            "power_avg_limit_percent": signals.gpu_power_avg_limit_percent,
-            "util_imbalance_pct": signals.gpu_util_imbalance_pct,
-            "mem_imbalance_pct": signals.gpu_mem_imbalance_pct,
-            "lowest_util_gpu_idx": signals.lowest_util_gpu_idx,
-            "highest_util_gpu_idx": signals.highest_util_gpu_idx,
-            "highest_mem_gpu_idx": signals.highest_mem_gpu_idx,
-        },
-    }
-
-    per_rank = {
-        str(gpu_idx): {
-            "gpu_idx": int(gpu_idx),
-            "metrics": item,
-        }
-        for gpu_idx, item in sorted(per_gpu.items())
-    }
 
     return DiagnosticResult(
         primary=primary,
         issues=issues,
-        metric_attribution=metric_attribution,
-        per_rank=per_rank,
     )
 
 
 __all__ = [
     "SystemDiagnosis",
-    "build_system_diagnosis_result",
+    "diagnose_system",
 ]

@@ -333,20 +333,12 @@ def run_process_rules(
     return sort_process_issues(out)
 
 
-HighCPUProcessPressureRule = HighProcessCPURule
-HighGPUMemoryPressureRule = HighProcessGPUMemoryRule
-HighRSSPressureRule = HighProcessRSSRule
-
-
 __all__ = [
     "DEFAULT_PROCESS_RULES",
     "GPUMemoryReservedOverhangRule",
-    "HighCPUProcessPressureRule",
-    "HighGPUMemoryPressureRule",
     "HighProcessCPURule",
     "HighProcessGPUMemoryRule",
     "HighProcessRSSRule",
-    "HighRSSPressureRule",
     "RankGPUMemoryImbalanceRule",
     "VeryHighProcessGPUMemoryRule",
     "run_process_rules",

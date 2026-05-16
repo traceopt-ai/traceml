@@ -88,6 +88,7 @@ class TraceMLAggregator:
                 max_queue=50_000,
                 flush_interval_sec=0.5,
                 max_flush_items=20_000,
+                summary_window_rows=int(settings.summary_window_rows),
                 synchronous="NORMAL",
             ),
         )
@@ -101,6 +102,7 @@ class TraceMLAggregator:
             session_root=session_root,
             db_path=str(db_path),
             flush_history=self._sqlite_writer.flush_now,
+            summary_window_rows=int(settings.summary_window_rows),
         )
 
         # Display driver owns renderer selection and layout mapping.
@@ -197,6 +199,9 @@ class TraceMLAggregator:
                         / str(self._settings.session_id or "default")
                     ),
                     print_to_stdout=True,
+                    summary_window_rows=int(
+                        self._settings.summary_window_rows
+                    ),
                 ),
             )
 

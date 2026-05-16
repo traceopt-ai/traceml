@@ -61,10 +61,12 @@ class StepMemoryComparer:
         )
 
     def _primary(self, section: Any) -> Dict[str, Any]:
-        primary = nested_get(section, "global", "primary_metric")
-        if isinstance(primary, dict):
-            return primary
-        primary = nested_get(section, "primary_metric")
+        primary = nested_get(
+            section,
+            "aggregate",
+            "metrics",
+            "primary_metric",
+        )
         return primary if isinstance(primary, dict) else {}
 
     def _primary_value(self, section: Any, key: str) -> Any:

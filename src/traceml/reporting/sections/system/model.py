@@ -8,45 +8,43 @@
 
 import sqlite3
 from dataclasses import dataclass, field
-from statistics import median
-from typing import Any, Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional
 
-from traceml.diagnostics.bands import Band
-from traceml.diagnostics.system.policy import DEFAULT_SYSTEM_POLICY
-from traceml.reporting.summaries.summary_formatting import bytes_to_gb
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
-MAX_SUMMARY_ROWS = 10_000
+MAX_SUMMARY_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
+
+SYSTEM_METRIC_NAMES = [
+    "cpu_percent",
+    "ram_bytes",
+    "ram_percent",
+    "gpu_util_percent",
+    "gpu_mem_bytes",
+    "gpu_mem_percent",
+    "gpu_temp_c",
+    "gpu_power_w",
+    "gpu_headroom_bytes",
+]
 
 
-def _table_has_column(
+def table_has_column(
     conn: sqlite3.Connection,
     table_name: str,
     column_name: str,
 ) -> bool:
+    """Return whether a SQLite table exposes a column."""
     rows = conn.execute(f"PRAGMA table_info({table_name});").fetchall()
     return any(str(row[1]) == column_name for row in rows)
 
 
-def _percent(
+def percent(
     numerator: Optional[float],
     denominator: Optional[float],
 ) -> Optional[float]:
+    """Return `numerator / denominator` as a non-negative percentage."""
     if numerator is None or denominator is None or float(denominator) <= 0.0:
         return None
     return max(0.0, float(numerator) / float(denominator) * 100.0)
-
-
-def _band_name(band: Optional[Band]) -> Optional[str]:
-    return None if band is None else str(band)
-
-
-def _format_percent_stat(
-    label: str,
-    value: Optional[float],
-) -> Optional[str]:
-    if value is None:
-        return None
-    return f"{label} {float(value):.0f}%"
 
 
 @dataclass
@@ -61,6 +59,7 @@ class SystemSummaryAgg:
     - GPU fields are optional because CPU-only runs are fully supported.
     """
 
+    # Sample timestamps are Unix seconds from the telemetry source.
     first_ts: Optional[float] = None
     last_ts: Optional[float] = None
     system_samples: int = 0
@@ -129,7 +128,6 @@ class SystemNodeIdentity:
     local_rank: Optional[int]
     local_world_size: Optional[int]
     world_size: Optional[int]
-    pid: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -139,15 +137,6 @@ class SystemNodeSummary:
     identity: SystemNodeIdentity
     aggregate: SystemSummaryAgg
     per_gpu: Dict[int, PerGPUSummary] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class MetricRollup:
-    """Median/worst view for one node-level metric."""
-
-    median: Optional[float]
-    worst: Optional[float]
-    worst_node: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -174,39 +163,10 @@ class SystemClusterSummary:
         return sum(len(node.per_gpu) for node in self.nodes.values())
 
 
-def rollup_metric(
-    nodes: Dict[str, SystemNodeSummary],
-    *,
-    value_fn,
-    higher_is_worse: bool,
-) -> MetricRollup:
-    """Build median/worst values for one metric across nodes."""
-    values: list[tuple[str, float]] = []
-    for label, node in nodes.items():
-        value = value_fn(node)
-        if value is not None:
-            values.append((label, float(value)))
-    if not values:
-        return MetricRollup(median=None, worst=None, worst_node=None)
-    worst_label, worst_value = sorted(
-        values,
-        key=lambda item: (
-            item[1] if higher_is_worse else -item[1],
-            item[0],
-        ),
-        reverse=True,
-    )[0]
-    return MetricRollup(
-        median=float(median([item[1] for item in values])),
-        worst=float(worst_value),
-        worst_node=worst_label,
-    )
-
-
 def node_gpu_mem_peak_percent(node: SystemNodeSummary) -> Optional[float]:
     """Highest GPU memory pressure observed on one node."""
     values = [
-        _percent(gpu.mem_peak_bytes, gpu.mem_total_bytes)
+        percent(gpu.mem_peak_bytes, gpu.mem_total_bytes)
         for gpu in node.per_gpu.values()
     ]
     nums = [value for value in values if value is not None]
@@ -226,356 +186,44 @@ def node_gpu_headroom_min_gb(node: SystemNodeSummary) -> Optional[float]:
     return min(values) if values else None
 
 
-def _avg(values: Iterable[Optional[float]]) -> Optional[float]:
+def average_optional(values: Iterable[Optional[float]]) -> Optional[float]:
+    """Average non-null numeric values, returning None for empty input."""
     nums = [float(value) for value in values if value is not None]
     return sum(nums) / len(nums) if nums else None
 
 
-def _max(values: Iterable[Optional[float]]) -> Optional[float]:
+def max_optional(values: Iterable[Optional[float]]) -> Optional[float]:
+    """Return the maximum non-null numeric value, if any."""
     nums = [float(value) for value in values if value is not None]
     return max(nums) if nums else None
 
 
-def _max_int(values: Iterable[Optional[int]]) -> Optional[int]:
+def max_int_optional(values: Iterable[Optional[int]]) -> Optional[int]:
+    """Return the maximum non-null integer value, if any."""
     nums = [int(value) for value in values if value is not None]
     return max(nums) if nums else None
 
 
-def _min_ts(values: Iterable[Optional[float]]) -> Optional[float]:
+def min_timestamp(values: Iterable[Optional[float]]) -> Optional[float]:
+    """Return the earliest non-null timestamp, if any."""
     nums = [float(value) for value in values if value is not None]
     return min(nums) if nums else None
 
 
-def _load_system_summary_agg(
-    conn: sqlite3.Connection,
-    *,
-    node_rank: Optional[int] = None,
-    max_system_rows: int = 5_000,
-) -> SystemSummaryAgg:
-    """
-    Load aggregated system metrics directly from `system_samples`.
-
-    Parameters
-    ----------
-    conn:
-        Open SQLite connection.
-    node_rank:
-        Optional node-rank filter. If None, aggregates across all nodes.
-    max_system_rows:
-        Safety cap on rows included in aggregation.
-
-    Returns
-    -------
-    SystemSummaryAgg
-        Aggregated summary values ready for formatting.
-    """
-    where_clause = ""
-    params: list[Any] = []
-
-    if node_rank is not None:
-        where_clause = "WHERE node_rank = ?"
-        params.append(int(node_rank))
-
-    count_sql = f"""
-        SELECT
-            COUNT(*),
-            MIN(sample_ts_s),
-            MAX(sample_ts_s)
-        FROM (
-            SELECT sample_ts_s
-            FROM system_samples
-            {where_clause}
-            ORDER BY id ASC
-            LIMIT ?
-        );
-    """
-    count_row = conn.execute(
-        count_sql, (*params, int(max_system_rows))
-    ).fetchone()
-
-    n_rows = int(count_row[0] or 0)
-    first_ts = float(count_row[1]) if count_row[1] is not None else None
-    last_ts = float(count_row[2]) if count_row[2] is not None else None
-
-    agg_sql = f"""
-        SELECT
-            AVG(cpu_percent),
-            MAX(cpu_percent),
-
-            AVG(ram_used_bytes),
-            MAX(ram_used_bytes),
-            MAX(ram_total_bytes),
-
-            MAX(gpu_available),
-            MAX(gpu_count),
-
-            AVG(gpu_util_avg),
-            MAX(gpu_util_peak),
-
-            AVG(gpu_mem_used_avg_bytes),
-            MAX(gpu_mem_used_peak_bytes),
-
-            AVG(gpu_temp_avg_c),
-            MAX(gpu_temp_peak_c),
-
-            AVG(gpu_power_avg_w),
-            MAX(gpu_power_peak_w)
-        FROM (
-            SELECT *
-            FROM system_samples
-            {where_clause}
-            ORDER BY id ASC
-            LIMIT ?
-        );
-    """
-    row = conn.execute(agg_sql, (*params, int(max_system_rows))).fetchone()
-
-    return SystemSummaryAgg(
-        first_ts=first_ts,
-        last_ts=last_ts,
-        system_samples=n_rows,
-        cpu_avg_percent=float(row[0]) if row[0] is not None else None,
-        cpu_peak_percent=float(row[1]) if row[1] is not None else None,
-        ram_avg_bytes=float(row[2]) if row[2] is not None else None,
-        ram_peak_bytes=float(row[3]) if row[3] is not None else None,
-        ram_total_bytes=float(row[4]) if row[4] is not None else None,
-        gpu_available=bool(row[5]) if row[5] is not None else None,
-        gpu_count=int(row[6]) if row[6] is not None else None,
-        gpu_util_avg_percent=float(row[7]) if row[7] is not None else None,
-        gpu_util_peak_percent=float(row[8]) if row[8] is not None else None,
-        gpu_mem_avg_bytes=float(row[9]) if row[9] is not None else None,
-        gpu_mem_peak_bytes=float(row[10]) if row[10] is not None else None,
-        gpu_temp_avg_c=float(row[11]) if row[11] is not None else None,
-        gpu_temp_peak_c=float(row[12]) if row[12] is not None else None,
-        gpu_power_avg_w=float(row[13]) if row[13] is not None else None,
-        gpu_power_peak_w=float(row[14]) if row[14] is not None else None,
-    )
-
-
-def _load_per_gpu_summary(
-    conn: sqlite3.Connection,
-    *,
-    node_rank: Optional[int] = None,
-    max_system_rows: int = 5_000,
-) -> Dict[int, PerGPUSummary]:
-    """
-    Load per-GPU aggregated metrics from `system_gpu_samples`.
-
-    Parameters
-    ----------
-    conn:
-        Open SQLite connection.
-    node_rank:
-        Optional node-rank filter. If None, aggregates across all nodes.
-    max_system_rows:
-        Safety cap on the number of parent `system_samples` rows included in the
-        summary window. Per-GPU rows are restricted to those parent rows.
-
-    Returns
-    -------
-    Dict[int, PerGPUSummary]
-        Mapping from GPU index to aggregated summary metrics.
-
-    Notes
-    -----
-    This function intentionally uses the same bounded `system_samples` window as
-    the top-level system summary so that the rollup and per-GPU views describe
-    the same time range.
-    """
-    where_clause = ""
-    params: list[Any] = []
-
-    if node_rank is not None:
-        where_clause = "WHERE s.node_rank = ?"
-        params.append(int(node_rank))
-
-    power_limit_expr = (
-        "MAX(g.power_limit_w)"
-        if _table_has_column(conn, "system_gpu_samples", "power_limit_w")
-        else "NULL"
-    )
-
-    sql = f"""
-        SELECT
-            g.gpu_idx,
-
-            AVG(g.util),
-            MAX(g.util),
-
-            AVG(g.mem_used_bytes),
-            MAX(g.mem_used_bytes),
-            MAX(g.mem_total_bytes),
-
-            AVG(g.temperature_c),
-            MAX(g.temperature_c),
-
-            AVG(g.power_usage_w),
-            MAX(g.power_usage_w),
-            {power_limit_expr}
-
-        FROM system_gpu_samples AS g
-        INNER JOIN (
-            SELECT s.global_rank, s.seq
-            FROM system_samples AS s
-            {where_clause}
-            ORDER BY s.id ASC
-            LIMIT ?
-        ) AS recent
-            ON g.global_rank IS recent.global_rank
-           AND g.seq = recent.seq
-        GROUP BY g.gpu_idx
-        ORDER BY g.gpu_idx ASC;
-    """
-
-    rows = conn.execute(sql, (*params, int(max_system_rows))).fetchall()
-
-    out: Dict[int, PerGPUSummary] = {}
-    for row in rows:
-        gpu_idx = int(row[0])
-        out[gpu_idx] = PerGPUSummary(
-            gpu_idx=gpu_idx,
-            util_avg_percent=float(row[1]) if row[1] is not None else None,
-            util_peak_percent=float(row[2]) if row[2] is not None else None,
-            mem_avg_bytes=float(row[3]) if row[3] is not None else None,
-            mem_peak_bytes=float(row[4]) if row[4] is not None else None,
-            mem_total_bytes=float(row[5]) if row[5] is not None else None,
-            temp_avg_c=float(row[6]) if row[6] is not None else None,
-            temp_peak_c=float(row[7]) if row[7] is not None else None,
-            power_avg_w=float(row[8]) if row[8] is not None else None,
-            power_peak_w=float(row[9]) if row[9] is not None else None,
-            power_limit_w=float(row[10]) if row[10] is not None else None,
-        )
-    return out
-
-
-def _highest_gpu_memory_percent(
-    per_gpu: Dict[int, PerGPUSummary],
-) -> Optional[float]:
-    values = [
-        _percent(item.mem_peak_bytes, item.mem_total_bytes)
-        for item in per_gpu.values()
-    ]
-    values = [value for value in values if value is not None]
-    return max(values) if values else None
-
-
-def _build_stats_line(
-    agg: SystemSummaryAgg,
-    *,
-    per_gpu: Dict[int, PerGPUSummary],
-) -> str:
-    ram_peak_percent = _percent(agg.ram_peak_bytes, agg.ram_total_bytes)
-    gpu_mem_peak_percent = _highest_gpu_memory_percent(per_gpu)
-
-    parts = [
-        _format_percent_stat("CPU avg", agg.cpu_avg_percent),
-        _format_percent_stat("RAM peak", ram_peak_percent),
-        _format_percent_stat("GPU util avg", agg.gpu_util_avg_percent),
-        _format_percent_stat("GPU memory peak", gpu_mem_peak_percent),
-    ]
-    rendered = [part for part in parts if part is not None]
-    return " | ".join(rendered) if rendered else "unavailable"
-
-
-def _per_gpu_to_json(
-    per_gpu: Dict[int, PerGPUSummary],
-) -> Dict[str, Dict[str, Optional[float]]]:
-    """
-    Convert per-GPU aggregates into a JSON-friendly dictionary keyed by GPU idx.
-    """
-    out: Dict[str, Dict[str, Optional[float]]] = {}
-
-    for gpu_idx, item in sorted(per_gpu.items()):
-        mem_peak_percent = _percent(item.mem_peak_bytes, item.mem_total_bytes)
-        power_avg_limit_percent = _percent(
-            item.power_avg_w,
-            item.power_limit_w,
-        )
-        out[str(gpu_idx)] = {
-            "util_avg_percent": item.util_avg_percent,
-            "util_peak_percent": item.util_peak_percent,
-            "util_avg_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_util_avg_percent.classify(
-                    item.util_avg_percent
-                )
-            ),
-            "mem_avg_gb": bytes_to_gb(item.mem_avg_bytes),
-            "mem_peak_gb": bytes_to_gb(item.mem_peak_bytes),
-            "mem_total_gb": bytes_to_gb(item.mem_total_bytes),
-            "mem_peak_percent": mem_peak_percent,
-            "mem_peak_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_memory_peak_percent.classify(
-                    mem_peak_percent
-                )
-            ),
-            "temp_avg_c": item.temp_avg_c,
-            "temp_peak_c": item.temp_peak_c,
-            "temp_peak_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_temp_peak_c.classify(
-                    item.temp_peak_c
-                )
-            ),
-            "power_avg_w": item.power_avg_w,
-            "power_peak_w": item.power_peak_w,
-            "power_limit_w": item.power_limit_w,
-            "power_avg_limit_percent": power_avg_limit_percent,
-            "power_avg_band": _band_name(
-                DEFAULT_SYSTEM_POLICY.gpu_power_avg_limit_percent.classify(
-                    power_avg_limit_percent
-                )
-            ),
-        }
-
-    return out
-
-
-def _per_gpu_to_diagnosis_input(
-    per_gpu: Dict[int, PerGPUSummary],
-) -> Dict[int, Dict[str, Optional[float]]]:
-    """
-    Convert per-GPU summary objects into the bytes-based shape used by system
-    diagnosis rules.
-
-    Notes
-    -----
-    Summary JSON intentionally exposes memory in GB for readability, while the
-    diagnosis layer keeps raw bytes so pressure calculations remain precise.
-    """
-    out: Dict[int, Dict[str, Optional[float]]] = {}
-
-    for gpu_idx, item in sorted(per_gpu.items()):
-        out[int(gpu_idx)] = {
-            "util_avg_percent": item.util_avg_percent,
-            "util_peak_percent": item.util_peak_percent,
-            "mem_avg_bytes": item.mem_avg_bytes,
-            "mem_peak_bytes": item.mem_peak_bytes,
-            "mem_total_bytes": item.mem_total_bytes,
-            "temp_avg_c": item.temp_avg_c,
-            "temp_peak_c": item.temp_peak_c,
-            "power_avg_w": item.power_avg_w,
-            "power_peak_w": item.power_peak_w,
-            "power_limit_w": item.power_limit_w,
-        }
-
-    return out
-
-
-def _best_gpu_idx(
-    per_gpu: Dict[int, PerGPUSummary],
-    attr_name: str,
-) -> Optional[int]:
-    """
-    Return the GPU index with the largest value for `attr_name`.
-    """
-    best_idx: Optional[int] = None
-    best_value: Optional[float] = None
-
-    for gpu_idx, item in per_gpu.items():
-        value = getattr(item, attr_name, None)
-        if value is None:
-            continue
-        if best_value is None or float(value) > float(best_value):
-            best_idx = int(gpu_idx)
-            best_value = float(value)
-
-    return best_idx
+__all__ = [
+    "MAX_SUMMARY_ROWS",
+    "SYSTEM_METRIC_NAMES",
+    "PerGPUSummary",
+    "SystemClusterSummary",
+    "SystemNodeIdentity",
+    "SystemNodeSummary",
+    "SystemSummaryAgg",
+    "average_optional",
+    "max_int_optional",
+    "max_optional",
+    "min_timestamp",
+    "node_gpu_headroom_min_gb",
+    "node_gpu_mem_peak_percent",
+    "percent",
+    "table_has_column",
+]

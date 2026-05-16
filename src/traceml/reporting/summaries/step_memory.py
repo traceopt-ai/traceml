@@ -14,7 +14,7 @@ from traceml.reporting.sections.step_memory.model import (
 def generate_step_memory_summary_card(
     db_path: str,
     *,
-    window_size: int = 400,
+    window_size: int = MAX_SUMMARY_WINDOW_ROWS,
     print_to_stdout: bool = True,
 ) -> Dict[str, Any]:
     """Generate and persist the end-of-run step-memory summary."""

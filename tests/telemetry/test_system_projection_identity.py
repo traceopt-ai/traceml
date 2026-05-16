@@ -19,7 +19,6 @@ def _system_payload() -> dict:
         "local_world_size": 4,
         "node_rank": 1,
         "hostname": "worker-1",
-        "pid": 12345,
         "sampler": "SystemSampler",
         "timestamp": 123.0,
         "tables": {
@@ -49,17 +48,17 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
     sample = conn.execute(
         """
         SELECT global_rank, local_rank, world_size, local_world_size,
-               node_rank, hostname, pid, seq
+               node_rank, hostname, seq
         FROM system_samples;
         """
     ).fetchone()
     gpu_sample = conn.execute(
         """
         SELECT global_rank, local_rank, world_size, local_world_size,
-               node_rank, hostname, pid, gpu_idx
+               node_rank, hostname, gpu_idx
         FROM system_gpu_samples;
         """
     ).fetchone()
 
-    assert sample == (5, 1, 8, 4, 1, "worker-1", 12345, 7)
-    assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 12345, 0)
+    assert sample == (5, 1, 8, 4, 1, "worker-1", 7)
+    assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)

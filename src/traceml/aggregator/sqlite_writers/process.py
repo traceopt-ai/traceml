@@ -43,7 +43,6 @@ Envelope:
     "local_world_size": int,
     "node_rank": int,
     "hostname": str,
-    "pid": int,
     "sampler": "ProcessSampler",
     "timestamp": float,
     "tables": {
@@ -51,7 +50,6 @@ Envelope:
             {
                 "seq": int,
                 "timestamp": float,
-                "pid": int,
                 "cpu_percent": float,
                 "cpu_logical_core_count": int,
                 "ram_used": float,   # bytes
@@ -78,6 +76,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 SAMPLER_NAME = "ProcessSampler"
+RETENTION_TABLES = ("process_samples",)
 
 
 def _optional_int(value: Any) -> Optional[int]:
@@ -109,7 +108,6 @@ class ProcessPayloadIdentity:
     local_world_size: Optional[int]
     node_rank: Optional[int]
     hostname: Optional[str]
-    runtime_pid: Optional[int]
 
 
 def _payload_identity(payload_dict: Dict[str, Any]) -> ProcessPayloadIdentity:
@@ -132,7 +130,6 @@ def _payload_identity(payload_dict: Dict[str, Any]) -> ProcessPayloadIdentity:
         local_world_size=_optional_int(payload_dict.get("local_world_size")),
         node_rank=_optional_int(payload_dict.get("node_rank")),
         hostname=_optional_str(payload_dict.get("hostname")),
-        runtime_pid=_optional_int(payload_dict.get("pid")),
     )
 
 
@@ -179,10 +176,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size         INTEGER,
             node_rank                INTEGER,
             hostname                 TEXT,
-            runtime_pid              INTEGER,
             sample_ts_s              REAL,
             seq                      INTEGER,
-            pid                      INTEGER,
             cpu_percent              REAL,
             cpu_logical_core_count   INTEGER,
             ram_used_bytes           REAL,
@@ -232,12 +227,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
         column="hostname",
         definition="TEXT",
     )
-    _ensure_column(
-        conn,
-        table="process_samples",
-        column="runtime_pid",
-        definition="INTEGER",
-    )
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_process_samples_rank_ts
@@ -248,12 +237,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_process_samples_global_rank_ts
         ON process_samples(global_rank, sample_ts_s, id);
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_process_samples_pid_ts
-        ON process_samples(pid, sample_ts_s, id);
         """
     )
 
@@ -309,7 +292,6 @@ def build_rows(
 
             seq_raw = row.get("seq")
             ts_raw = row.get("ts")
-            pid_raw = row.get("pid")
             cpu_percent_raw = row.get("cpu")
             cpu_logical_core_count_raw = row.get("cpu_cores")
             ram_used_raw = row.get("ram_used")
@@ -322,7 +304,6 @@ def build_rows(
             sample_ts_s = (
                 float(ts_raw) if isinstance(ts_raw, (int, float)) else None
             )
-            pid = int(pid_raw) if isinstance(pid_raw, int) else None
             cpu_percent = (
                 float(cpu_percent_raw)
                 if isinstance(cpu_percent_raw, (int, float))
@@ -394,10 +375,8 @@ def build_rows(
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    identity.runtime_pid,
                     sample_ts_s,
                     seq,
-                    pid,
                     cpu_percent,
                     cpu_logical_core_count,
                     ram_used_bytes,
@@ -440,10 +419,8 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                runtime_pid,
                 sample_ts_s,
                 seq,
-                pid,
                 cpu_percent,
                 cpu_logical_core_count,
                 ram_used_bytes,
@@ -455,7 +432,7 @@ def insert_rows(
                 gpu_mem_reserved_bytes,
                 gpu_mem_total_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )

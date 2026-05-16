@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Prepared analysis context for summary-oriented step-memory diagnostics.
 
@@ -11,12 +17,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional, Sequence
 
-from traceml.diagnostics.step_memory.policy import (
+from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
+
+from .policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
 )
-from traceml.diagnostics.trends import compute_trend_evidence
-from traceml.renderers.step_memory.schema import StepMemoryCombinedMetric
+from .trend import (
+    StepMemoryWindowCreepEvidence,
+    evaluate_step_memory_window_creep,
+)
 
 
 @dataclass(frozen=True)
@@ -69,17 +79,6 @@ def _safe_non_negative(value: Optional[float]) -> float:
     return max(0.0, out)
 
 
-def _clean_series(values: Sequence[float]) -> list[float]:
-    out = []
-    for value in values:
-        try:
-            number = float(value)
-        except Exception:
-            number = 0.0
-        out.append(max(0.0, number))
-    return out
-
-
 def _pressure_fraction(
     worst_peak_bytes: float,
     gpu_total_bytes: Optional[float],
@@ -98,81 +97,30 @@ def _build_trend_signals(
     metric: StepMemoryCombinedMetric,
     thresholds: StepMemoryDiagnosisThresholds,
 ) -> StepMemorySummaryTrendSignals:
-    steps_used = int(metric.summary.steps_used or 0)
-    if steps_used < int(thresholds.min_steps_for_diag):
-        return StepMemorySummaryTrendSignals(
-            eligible=False,
-            baseline_avg_bytes=None,
-            mid_avg_bytes=None,
-            recent_avg_bytes=None,
-            overall_abs_delta_bytes=None,
-            overall_worst_growth_pct=None,
-            overall_median_growth_pct=None,
-            early=False,
-            confirmed=False,
-            score=0.0,
-        )
-
-    worst = _clean_series(metric.series.worst)
-    median = _clean_series(metric.series.median)
-
-    worst_ev = compute_trend_evidence(worst, config=thresholds.trend)
-    median_ev = compute_trend_evidence(median, config=thresholds.trend)
-    if worst_ev is None or median_ev is None:
-        return StepMemorySummaryTrendSignals(
-            eligible=False,
-            baseline_avg_bytes=None,
-            mid_avg_bytes=None,
-            recent_avg_bytes=None,
-            overall_abs_delta_bytes=None,
-            overall_worst_growth_pct=None,
-            overall_median_growth_pct=None,
-            early=False,
-            confirmed=False,
-            score=0.0,
-        )
-
-    abs_delta = float(worst_ev.delta_vs_baseline)
-    worst_growth = worst_ev.delta_pct_vs_baseline
-    median_growth = median_ev.delta_pct_vs_baseline
-
-    direction_recent_mid = (
-        worst_ev.delta_vs_mid > 0.0 and median_ev.delta_vs_mid > 0.0
+    evidence = evaluate_step_memory_window_creep(
+        worst_series_bytes=metric.series.worst,
+        median_series_bytes=metric.series.median,
+        steps_used=int(metric.summary.steps_used or 0),
+        thresholds=thresholds,
     )
-    direction_mid_base = (worst_ev.mid_avg > worst_ev.baseline_avg) and (
-        median_ev.mid_avg > median_ev.baseline_avg
-    )
+    return _trend_evidence_to_summary_signals(evidence)
 
-    direction_ok = True
-    if thresholds.require_recent_gt_mid:
-        direction_ok = direction_ok and direction_recent_mid
-    if thresholds.require_mid_ge_baseline:
-        direction_ok = direction_ok and direction_mid_base
 
-    early = bool(direction_ok and abs_delta > 0.0)
-    confirmed = bool(
-        direction_ok
-        and abs_delta >= float(thresholds.creep_confirmed_delta_bytes)
-    )
-
-    score = (
-        max(0.0, abs_delta)
-        / max(1.0, float(thresholds.creep_score_delta_scale_bytes))
-        + max(0.0, float(worst_growth or 0.0)) * 10.0
-        + max(0.0, float(median_growth or 0.0)) * 6.0
-    )
-
+def _trend_evidence_to_summary_signals(
+    evidence: StepMemoryWindowCreepEvidence,
+) -> StepMemorySummaryTrendSignals:
+    """Convert shared creep evidence into summary-rule signals."""
     return StepMemorySummaryTrendSignals(
-        eligible=True,
-        baseline_avg_bytes=worst_ev.baseline_avg,
-        mid_avg_bytes=worst_ev.mid_avg,
-        recent_avg_bytes=worst_ev.recent_avg,
-        overall_abs_delta_bytes=abs_delta,
-        overall_worst_growth_pct=worst_growth,
-        overall_median_growth_pct=median_growth,
-        early=early,
-        confirmed=confirmed,
-        score=score,
+        eligible=evidence.eligible,
+        baseline_avg_bytes=evidence.baseline_avg_bytes,
+        mid_avg_bytes=evidence.mid_avg_bytes,
+        recent_avg_bytes=evidence.recent_avg_bytes,
+        overall_abs_delta_bytes=evidence.overall_abs_delta_bytes,
+        overall_worst_growth_pct=evidence.overall_worst_growth_pct,
+        overall_median_growth_pct=evidence.overall_median_growth_pct,
+        early=evidence.early,
+        confirmed=evidence.confirmed,
+        score=evidence.score,
     )
 
 

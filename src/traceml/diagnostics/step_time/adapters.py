@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from traceml.diagnostics.common import DiagnosticResult, diagnosis_to_dict
+from traceml.diagnostics.common import DiagnosticResult
 from traceml.diagnostics.step_time.api import (
     StepDiagnosis,
     build_step_diagnosis_result,
@@ -28,6 +28,7 @@ from traceml.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
+from traceml.utils.step_windows import common_suffix_steps
 
 _LOGGER = get_error_logger("StepTimeDiagnostics")
 
@@ -56,6 +57,21 @@ DEFAULT_SUMMARY_DIAG_CONFIG = SUMMARY_STEP_TIME_POLICY
 RankStepMetricSeries = Dict[int, Dict[int, Dict[str, float]]]
 
 
+@dataclass(frozen=True)
+class StepTimeDiagnosisInput:
+    """
+    Aligned step-time data consumed by final-summary diagnosis.
+
+    `rank_signals` carries one aggregate row per global rank. The optional
+    per-step series keeps trend checks on the same aligned window.
+    """
+
+    rank_signals: Dict[int, RankStepSignals]
+    per_rank_step_metrics: RankStepMetricSeries
+    max_rows: int
+    policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG
+
+
 def _log_adapter_error(message: str, exc: Exception) -> None:
     """Log adapter failures without blocking final summary generation."""
     try:
@@ -71,38 +87,6 @@ def _finite_float(x: Any) -> float:
     except Exception:
         return 0.0
     return v if np.isfinite(v) else 0.0
-
-
-def _common_suffix_steps(
-    per_rank_step_metrics: RankStepMetricSeries,
-    max_rows: int,
-) -> List[int]:
-    """
-    Compute a robust common suffix of step ids across all ranks.
-
-    Returns steps sorted ascending. Returns empty list on any issue.
-    """
-    try:
-        if not per_rank_step_metrics:
-            return []
-
-        step_sets = []
-        for step_map in per_rank_step_metrics.values():
-            if not step_map:
-                return []
-            step_sets.append(set(step_map.keys()))
-
-        common = set.intersection(*step_sets) if step_sets else set()
-        if not common:
-            return []
-
-        steps = sorted(int(s) for s in common)
-        if max_rows > 0:
-            steps = steps[-int(max_rows) :]
-        return steps
-    except Exception as exc:
-        _log_adapter_error("Step-time summary step alignment failed.", exc)
-        return []
 
 
 def _build_metric_series(
@@ -251,7 +235,7 @@ def build_summary_step_diagnosis_result(
     max_rows: int,
     per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
     policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG,
-) -> Optional[DiagnosticResult]:
+) -> Optional[DiagnosticResult[StepDiagnosis]]:
     """
     Build rich summary-mode diagnosis from per-rank averaged timing signals.
 
@@ -278,9 +262,14 @@ def build_summary_step_diagnosis_result(
     common_steps: List[int] = []
     metric_series: Dict[str, Optional[StepCombinedTimeSeries]] = {}
     if per_rank_step_metrics:
-        common_steps = _common_suffix_steps(
-            per_rank_step_metrics, max_rows=max_rows
-        )
+        try:
+            common_steps = common_suffix_steps(
+                per_rank_step_metrics,
+                max_rows=max_rows,
+            )
+        except Exception as exc:
+            _log_adapter_error("Step-time summary step alignment failed.", exc)
+            common_steps = []
         for mk in (
             "dataloader_fetch",
             "forward",
@@ -366,38 +355,23 @@ def build_summary_step_diagnosis_result(
     )
 
 
-def build_summary_step_diagnosis(
-    rank_signals: Dict[int, RankStepSignals],
-    *,
-    max_rows: int,
-    per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
-    policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG,
-) -> Optional[StepDiagnosis]:
-    """
-    Backward-compatible summary-mode primary diagnosis builder.
-    """
-    result = build_summary_step_diagnosis_result(
-        rank_signals,
-        max_rows=max_rows,
-        per_rank_step_metrics=per_rank_step_metrics,
-        policy=policy,
+def diagnose_step_time_summary(
+    data: StepTimeDiagnosisInput,
+) -> Optional[DiagnosticResult[StepDiagnosis]]:
+    """Run final-summary Step Time diagnosis from the typed input contract."""
+    return build_summary_step_diagnosis_result(
+        data.rank_signals,
+        max_rows=data.max_rows,
+        per_rank_step_metrics=data.per_rank_step_metrics,
+        policy=data.policy,
     )
-    return result.primary if result is not None else None
 
 
-def diagnosis_to_json(
-    diagnosis: Optional[StepDiagnosis],
-) -> Optional[Dict[str, Any]]:
-    """
-    Serialize StepDiagnosis into a JSON-friendly dict.
-    """
-    return diagnosis_to_dict(diagnosis, drop_none=True)
-
-
-def diagnosis_result_to_json(
-    result: Optional[DiagnosticResult],
-) -> Optional[Dict[str, Any]]:
-    """
-    Serialize a rich step-time diagnosis result into a JSON-friendly dict.
-    """
-    return diagnosis_to_dict(result, drop_none=True)
+__all__ = [
+    "DEFAULT_SUMMARY_DIAG_CONFIG",
+    "RankStepMetricSeries",
+    "RankStepSignals",
+    "StepTimeDiagnosisInput",
+    "build_summary_step_diagnosis_result",
+    "diagnose_step_time_summary",
+]

@@ -11,8 +11,9 @@ from __future__ import annotations
 import math
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
+from traceml.reporting.config import normalize_summary_window_rows
 from traceml.reporting.sections.system.model import (
     MAX_SUMMARY_ROWS,
     PerGPUSummary,
@@ -20,13 +21,11 @@ from traceml.reporting.sections.system.model import (
     SystemNodeIdentity,
     SystemNodeSummary,
     SystemSummaryAgg,
-    _avg,
-    _load_per_gpu_summary,
-    _load_system_summary_agg,
-    _max,
-    _max_int,
-    _min_ts,
-    _table_has_column,
+    average_optional,
+    max_int_optional,
+    max_optional,
+    min_timestamp,
+    table_has_column,
 )
 
 
@@ -34,8 +33,6 @@ from traceml.reporting.sections.system.model import (
 class SystemSectionData:
     """Loaded inputs for the system final-report section."""
 
-    aggregate: SystemSummaryAgg
-    per_gpu: Dict[int, PerGPUSummary]
     cluster: SystemClusterSummary
 
 
@@ -47,7 +44,6 @@ class _SampleRow:
     local_world_size: Optional[int]
     node_rank: Optional[int]
     hostname: Optional[str]
-    pid: Optional[int]
     sample_ts_s: Optional[float]
     seq: Optional[int]
     cpu_percent: Optional[float]
@@ -68,6 +64,7 @@ class _SampleRow:
 @dataclass(frozen=True)
 class _GpuRow:
     global_rank: Optional[int]
+    node_rank: Optional[int]
     seq: Optional[int]
     gpu_idx: int
     util: Optional[float]
@@ -80,8 +77,8 @@ class _GpuRow:
 
 def _node_label(row: _SampleRow) -> str:
     if row.node_rank is not None:
-        return f"n{int(row.node_rank)}"
-    return f"g{int(row.global_rank or 0)}"
+        return str(int(row.node_rank))
+    return str(int(row.global_rank or 0))
 
 
 def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
@@ -94,32 +91,37 @@ def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
         local_rank=row.local_rank,
         local_world_size=row.local_world_size,
         world_size=row.world_size,
-        pid=row.pid,
     )
 
 
 def _aggregate_samples(rows: list[_SampleRow]) -> SystemSummaryAgg:
     return SystemSummaryAgg(
-        first_ts=_min_ts(row.sample_ts_s for row in rows),
-        last_ts=_max(row.sample_ts_s for row in rows),
+        first_ts=min_timestamp(row.sample_ts_s for row in rows),
+        last_ts=max_optional(row.sample_ts_s for row in rows),
         system_samples=len(rows),
-        cpu_avg_percent=_avg(row.cpu_percent for row in rows),
-        cpu_peak_percent=_max(row.cpu_percent for row in rows),
-        ram_avg_bytes=_avg(row.ram_used_bytes for row in rows),
-        ram_peak_bytes=_max(row.ram_used_bytes for row in rows),
-        ram_total_bytes=_max(row.ram_total_bytes for row in rows),
+        cpu_avg_percent=average_optional(row.cpu_percent for row in rows),
+        cpu_peak_percent=max_optional(row.cpu_percent for row in rows),
+        ram_avg_bytes=average_optional(row.ram_used_bytes for row in rows),
+        ram_peak_bytes=max_optional(row.ram_used_bytes for row in rows),
+        ram_total_bytes=max_optional(row.ram_total_bytes for row in rows),
         gpu_available=(
             any(bool(row.gpu_available) for row in rows) if rows else None
         ),
-        gpu_count=_max_int(row.gpu_count for row in rows),
-        gpu_util_avg_percent=_avg(row.gpu_util_avg for row in rows),
-        gpu_util_peak_percent=_max(row.gpu_util_peak for row in rows),
-        gpu_mem_avg_bytes=_avg(row.gpu_mem_used_avg_bytes for row in rows),
-        gpu_mem_peak_bytes=_max(row.gpu_mem_used_peak_bytes for row in rows),
-        gpu_temp_avg_c=_avg(row.gpu_temp_avg_c for row in rows),
-        gpu_temp_peak_c=_max(row.gpu_temp_peak_c for row in rows),
-        gpu_power_avg_w=_avg(row.gpu_power_avg_w for row in rows),
-        gpu_power_peak_w=_max(row.gpu_power_peak_w for row in rows),
+        gpu_count=max_int_optional(row.gpu_count for row in rows),
+        gpu_util_avg_percent=average_optional(
+            row.gpu_util_avg for row in rows
+        ),
+        gpu_util_peak_percent=max_optional(row.gpu_util_peak for row in rows),
+        gpu_mem_avg_bytes=average_optional(
+            row.gpu_mem_used_avg_bytes for row in rows
+        ),
+        gpu_mem_peak_bytes=max_optional(
+            row.gpu_mem_used_peak_bytes for row in rows
+        ),
+        gpu_temp_avg_c=average_optional(row.gpu_temp_avg_c for row in rows),
+        gpu_temp_peak_c=max_optional(row.gpu_temp_peak_c for row in rows),
+        gpu_power_avg_w=average_optional(row.gpu_power_avg_w for row in rows),
+        gpu_power_peak_w=max_optional(row.gpu_power_peak_w for row in rows),
     )
 
 
@@ -132,16 +134,24 @@ def _aggregate_gpu(rows: list[_GpuRow]) -> Dict[int, PerGPUSummary]:
     for gpu_idx, gpu_rows in sorted(grouped.items()):
         out[gpu_idx] = PerGPUSummary(
             gpu_idx=gpu_idx,
-            util_avg_percent=_avg(row.util for row in gpu_rows),
-            util_peak_percent=_max(row.util for row in gpu_rows),
-            mem_avg_bytes=_avg(row.mem_used_bytes for row in gpu_rows),
-            mem_peak_bytes=_max(row.mem_used_bytes for row in gpu_rows),
-            mem_total_bytes=_max(row.mem_total_bytes for row in gpu_rows),
-            temp_avg_c=_avg(row.temperature_c for row in gpu_rows),
-            temp_peak_c=_max(row.temperature_c for row in gpu_rows),
-            power_avg_w=_avg(row.power_usage_w for row in gpu_rows),
-            power_peak_w=_max(row.power_usage_w for row in gpu_rows),
-            power_limit_w=_max(row.power_limit_w for row in gpu_rows),
+            util_avg_percent=average_optional(row.util for row in gpu_rows),
+            util_peak_percent=max_optional(row.util for row in gpu_rows),
+            mem_avg_bytes=average_optional(
+                row.mem_used_bytes for row in gpu_rows
+            ),
+            mem_peak_bytes=max_optional(
+                row.mem_used_bytes for row in gpu_rows
+            ),
+            mem_total_bytes=max_optional(
+                row.mem_total_bytes for row in gpu_rows
+            ),
+            temp_avg_c=average_optional(row.temperature_c for row in gpu_rows),
+            temp_peak_c=max_optional(row.temperature_c for row in gpu_rows),
+            power_avg_w=average_optional(
+                row.power_usage_w for row in gpu_rows
+            ),
+            power_peak_w=max_optional(row.power_usage_w for row in gpu_rows),
+            power_limit_w=max_optional(row.power_limit_w for row in gpu_rows),
         )
     return out
 
@@ -157,30 +167,58 @@ def _expected_nodes(rows: list[_SampleRow]) -> int:
     return max(1, len({_node_label(row) for row in rows}))
 
 
+def _recent_system_samples_cte(*, node_rank: Optional[int]) -> str:
+    """
+    Return the CTE used for the system summary window.
+
+    Cluster summaries keep the latest N samples per node. Scoped node
+    summaries keep the latest N samples for the requested node only.
+    """
+    where_clause = "WHERE node_rank = ?" if node_rank is not None else ""
+    return f"""
+        WITH recent_system_samples AS (
+            SELECT *
+            FROM (
+                SELECT
+                    s.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY COALESCE(s.node_rank, s.global_rank, 0)
+                        ORDER BY s.id DESC
+                    ) AS row_num
+                FROM system_samples AS s
+                {where_clause}
+            )
+            WHERE row_num <= ?
+        )
+    """
+
+
 def _sample_rows(
     conn: sqlite3.Connection,
     *,
     node_rank: Optional[int],
     max_system_rows: int,
 ) -> list[_SampleRow]:
-    where_clause = "WHERE node_rank = ?" if node_rank is not None else ""
-    params: tuple[Any, ...] = (
-        (int(node_rank),) if node_rank is not None else ()
+
+    sample_cte = _recent_system_samples_cte(node_rank=node_rank)
+    params = (
+        (int(node_rank), int(max_system_rows))
+        if node_rank is not None
+        else (int(max_system_rows),)
     )
     rows = conn.execute(
-        f"""
+        sample_cte
+        + """
         SELECT global_rank, local_rank, world_size, local_world_size,
-               node_rank, hostname, pid, sample_ts_s, seq, cpu_percent,
+               node_rank, hostname, sample_ts_s, seq, cpu_percent,
                ram_used_bytes, ram_total_bytes, gpu_available, gpu_count,
                gpu_util_avg, gpu_util_peak, gpu_mem_used_avg_bytes,
                gpu_mem_used_peak_bytes, gpu_temp_avg_c, gpu_temp_peak_c,
                gpu_power_avg_w, gpu_power_peak_w
-        FROM system_samples
-        {where_clause}
-        ORDER BY id ASC
-        LIMIT ?;
+        FROM recent_system_samples
+        ORDER BY COALESCE(node_rank, global_rank, 0) ASC, id ASC;
         """,
-        (*params, int(max_system_rows)),
+        params,
     ).fetchall()
     return [
         _SampleRow(
@@ -190,22 +228,21 @@ def _sample_rows(
             local_world_size=row[3],
             node_rank=row[4],
             hostname=row[5],
-            pid=row[6],
-            sample_ts_s=row[7],
-            seq=row[8],
-            cpu_percent=row[9],
-            ram_used_bytes=row[10],
-            ram_total_bytes=row[11],
-            gpu_available=bool(row[12]) if row[12] is not None else None,
-            gpu_count=row[13],
-            gpu_util_avg=row[14],
-            gpu_util_peak=row[15],
-            gpu_mem_used_avg_bytes=row[16],
-            gpu_mem_used_peak_bytes=row[17],
-            gpu_temp_avg_c=row[18],
-            gpu_temp_peak_c=row[19],
-            gpu_power_avg_w=row[20],
-            gpu_power_peak_w=row[21],
+            sample_ts_s=row[6],
+            seq=row[7],
+            cpu_percent=row[8],
+            ram_used_bytes=row[9],
+            ram_total_bytes=row[10],
+            gpu_available=bool(row[11]) if row[11] is not None else None,
+            gpu_count=row[12],
+            gpu_util_avg=row[13],
+            gpu_util_peak=row[14],
+            gpu_mem_used_avg_bytes=row[15],
+            gpu_mem_used_peak_bytes=row[16],
+            gpu_temp_avg_c=row[17],
+            gpu_temp_peak_c=row[18],
+            gpu_power_avg_w=row[19],
+            gpu_power_peak_w=row[20],
         )
         for row in rows
     ]
@@ -217,45 +254,44 @@ def _gpu_rows(
     node_rank: Optional[int],
     max_system_rows: int,
 ) -> list[_GpuRow]:
-    where_clause = "WHERE s.node_rank = ?" if node_rank is not None else ""
-    params: tuple[Any, ...] = (
-        (int(node_rank),) if node_rank is not None else ()
-    )
     power_limit_expr = (
         "g.power_limit_w"
-        if _table_has_column(conn, "system_gpu_samples", "power_limit_w")
+        if table_has_column(conn, "system_gpu_samples", "power_limit_w")
         else "NULL"
     )
+    sample_cte = _recent_system_samples_cte(node_rank=node_rank)
+    params = (
+        (int(node_rank), int(max_system_rows))
+        if node_rank is not None
+        else (int(max_system_rows),)
+    )
     rows = conn.execute(
-        f"""
-        SELECT g.global_rank, g.seq, g.gpu_idx, g.util, g.mem_used_bytes,
-               g.mem_total_bytes, g.temperature_c, g.power_usage_w,
-               {power_limit_expr}
+        sample_cte
+        + f"""
+        SELECT g.global_rank, g.node_rank, g.seq, g.gpu_idx, g.util,
+               g.mem_used_bytes, g.mem_total_bytes, g.temperature_c,
+               g.power_usage_w, {power_limit_expr}
         FROM system_gpu_samples AS g
-        INNER JOIN (
-            SELECT s.global_rank, s.seq
-            FROM system_samples AS s
-            {where_clause}
-            ORDER BY s.id ASC
-            LIMIT ?
-        ) AS recent
+        INNER JOIN recent_system_samples AS recent
             ON g.global_rank IS recent.global_rank
-           AND g.seq = recent.seq
+           AND g.node_rank IS recent.node_rank
+           AND g.seq IS recent.seq
         ORDER BY g.global_rank ASC, g.seq ASC, g.gpu_idx ASC;
         """,
-        (*params, int(max_system_rows)),
+        params,
     ).fetchall()
     return [
         _GpuRow(
             global_rank=row[0],
-            seq=row[1],
-            gpu_idx=int(row[2]),
-            util=row[3],
-            mem_used_bytes=row[4],
-            mem_total_bytes=row[5],
-            temperature_c=row[6],
-            power_usage_w=row[7],
-            power_limit_w=row[8],
+            node_rank=row[1],
+            seq=row[2],
+            gpu_idx=int(row[3]),
+            util=row[4],
+            mem_used_bytes=row[5],
+            mem_total_bytes=row[6],
+            temperature_c=row[7],
+            power_usage_w=row[8],
+            power_limit_w=row[9],
         )
         for row in rows
     ]
@@ -267,37 +303,55 @@ def _load_cluster_summary(
     node_rank: Optional[int],
     max_system_rows: int,
 ) -> SystemClusterSummary:
+
+    # Load the bounded system rows, keeping the latest window per node.
     samples = _sample_rows(
         conn,
         node_rank=node_rank,
         max_system_rows=max_system_rows,
     )
+    # Load GPU rows that belong to the same retained system samples.
     gpus = _gpu_rows(
         conn,
         node_rank=node_rank,
         max_system_rows=max_system_rows,
     )
-    gpu_by_key: Dict[tuple[Optional[int], Optional[int]], list[_GpuRow]] = {}
-    for row in gpus:
-        gpu_by_key.setdefault((row.global_rank, row.seq), []).append(row)
 
+    # Index GPU rows by the sample identity they were emitted with.
+    gpu_by_key: Dict[
+        tuple[Optional[int], Optional[int], Optional[int]],
+        list[_GpuRow],
+    ] = {}
+
+    for row in gpus:
+        key = (row.global_rank, row.node_rank, row.seq)
+        gpu_by_key.setdefault(key, []).append(row)
+
+    # Group system samples by node so each node gets its own rollup.
     sample_groups: Dict[str, list[_SampleRow]] = {}
     for row in samples:
         sample_groups.setdefault(_node_label(row), []).append(row)
 
+    # Build one node summary at a time from its system samples and GPU rows.
     nodes: Dict[str, SystemNodeSummary] = {}
     for label, node_rows in sorted(sample_groups.items()):
+        # Collect GPU rows that match this node's retained system samples.
         node_gpu_rows: list[_GpuRow] = []
         for row in node_rows:
             node_gpu_rows.extend(
-                gpu_by_key.get((row.global_rank, row.seq), [])
+                gpu_by_key.get(
+                    (row.global_rank, row.node_rank, row.seq),
+                    [],
+                )
             )
+        # Store the final per-node identity, system rollup, and GPU rollup.
         nodes[label] = SystemNodeSummary(
             identity=_node_identity(node_rows),
             aggregate=_aggregate_samples(node_rows),
             per_gpu=_aggregate_gpu(node_gpu_rows),
         )
 
+    # Return the cluster-level rollup plus the per-node summaries.
     return SystemClusterSummary(
         aggregate=_aggregate_samples(samples),
         nodes=nodes,
@@ -314,7 +368,7 @@ def load_system_section_data(
     """
     Load bounded system-section data from the SQLite history database.
     """
-    row_limit = min(max(1, int(max_system_rows)), MAX_SUMMARY_ROWS)
+    row_limit = normalize_summary_window_rows(max_system_rows)
     conn = sqlite3.connect(db_path)
     try:
         cluster = _load_cluster_summary(
@@ -322,24 +376,10 @@ def load_system_section_data(
             node_rank=node_rank,
             max_system_rows=row_limit,
         )
-        aggregate = _load_system_summary_agg(
-            conn,
-            node_rank=node_rank,
-            max_system_rows=row_limit,
-        )
-        per_gpu = _load_per_gpu_summary(
-            conn,
-            node_rank=node_rank,
-            max_system_rows=row_limit,
-        )
     finally:
         conn.close()
 
-    return SystemSectionData(
-        aggregate=aggregate,
-        per_gpu=per_gpu,
-        cluster=cluster,
-    )
+    return SystemSectionData(cluster=cluster)
 
 
 __all__ = [
