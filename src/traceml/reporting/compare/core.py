@@ -1,14 +1,20 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Structured comparison logic for TraceML final-summary JSON."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
 from traceml.reporting.compare.io import derive_compare_labels
 from traceml.reporting.compare.sections import SECTION_COMPARERS
 from traceml.reporting.compare.verdict import build_compare_verdict
-from traceml.sdk.protocol import utc_now_iso
 
 
 def _as_float(value: Any) -> float | None:
@@ -18,6 +24,11 @@ def _as_float(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _utc_now_iso() -> str:
+    """Return a UTC timestamp without importing the training SDK."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 def build_compare_payload(
@@ -40,7 +51,7 @@ def build_compare_payload(
 
     payload: Dict[str, Any] = {
         "schema_version": 2,
-        "generated_at": utc_now_iso(),
+        "generated_at": _utc_now_iso(),
         "lhs": {
             "path": str(lhs_path),
             "label": lhs_label,

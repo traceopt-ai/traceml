@@ -9,50 +9,19 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from traceml.utils.ast_analysis import analyze_script, build_code_manifest
+from traceml.utils.atomic_io import write_json_atomic
 
 
 def utc_now_iso() -> str:
     """Return the current UTC timestamp as an ISO-8601 string."""
     return datetime.now(timezone.utc).isoformat()
-
-
-def write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
-    """Write JSON atomically to avoid partially written manifest files."""
-    path = Path(path).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    tmp_path: Optional[Path] = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=str(path.parent),
-            delete=False,
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-        ) as tmp:
-            json.dump(payload, tmp, indent=2)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-            tmp_path = Path(tmp.name)
-
-        os.replace(tmp_path, path)
-    except Exception:
-        if tmp_path is not None:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-        raise
 
 
 def load_json_or_warn(path: Path) -> Dict[str, Any]:

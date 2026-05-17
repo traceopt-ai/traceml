@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Rule-based verdict selection for TraceML compare."""
 
 from __future__ import annotations
@@ -12,6 +18,23 @@ from traceml.reporting.compare.policy import (
     step_memory_status_rank,
     step_time_status_rank,
 )
+
+
+class VerdictPriority:
+    """Sequential order for choosing the primary compare finding."""
+
+    MISSING_PRIMARY_SIGNALS = 1
+    PARTIAL_PRIMARY_SIGNALS = 2
+    PARTIAL_DIAGNOSIS_CHANGE = 3
+    MIXED_PRIMARY_SIGNALS = 4
+    STEP_TIME_REGRESSION = 5
+    STEP_TIME_IMPROVEMENT = 6
+    STEP_MEMORY_REGRESSION = 7
+    STEP_MEMORY_IMPROVEMENT = 8
+    STEP_TIME_DIAGNOSIS_REGRESSION = 9
+    STEP_MEMORY_DIAGNOSIS_REGRESSION = 10
+    EQUIVALENT_PRIMARY_SIGNALS = 11
+    FALLBACK_INCONCLUSIVE = 99
 
 
 @dataclass(frozen=True)
@@ -115,7 +138,7 @@ class MissingPrimarySignalsRule:
         return CompareFinding(
             status="INCONCLUSIVE",
             severity="info",
-            priority=10,
+            priority=VerdictPriority.MISSING_PRIMARY_SIGNALS,
             domain="compare",
             metric=None,
             why=why,
@@ -132,7 +155,7 @@ class PartialPrimarySignalsRule:
         return CompareFinding(
             status="INCONCLUSIVE",
             severity="info",
-            priority=15,
+            priority=VerdictPriority.PARTIAL_PRIMARY_SIGNALS,
             domain="compare",
             metric=None,
             why="Primary compare sections are only partially comparable.",
@@ -152,7 +175,7 @@ class PartialDiagnosisChangeRule:
             return CompareFinding(
                 status="INCONCLUSIVE",
                 severity="info",
-                priority=16,
+                priority=VerdictPriority.PARTIAL_DIAGNOSIS_CHANGE,
                 domain="step_time",
                 metric="diagnosis",
                 why="Step time diagnosis changed, but supporting metrics are partial.",
@@ -187,7 +210,7 @@ class MixedPrimarySignalsRule:
         return CompareFinding(
             status="MIXED",
             severity="warning",
-            priority=20,
+            priority=VerdictPriority.MIXED_PRIMARY_SIGNALS,
             domain="compare",
             metric=None,
             why=why,
@@ -206,7 +229,7 @@ class StepTimeRegressionRule:
         return CompareFinding(
             status="REGRESSION",
             severity="warning",
-            priority=30,
+            priority=VerdictPriority.STEP_TIME_REGRESSION,
             domain="step_time",
             metric="step_avg_ms",
             why=f"Step time increased by {pct:.1f}%.",
@@ -225,7 +248,7 @@ class StepTimeImprovementRule:
         return CompareFinding(
             status="IMPROVEMENT",
             severity="info",
-            priority=40,
+            priority=VerdictPriority.STEP_TIME_IMPROVEMENT,
             domain="step_time",
             metric="step_avg_ms",
             why=f"Step time decreased by {abs(pct):.1f}%.",
@@ -244,7 +267,7 @@ class StepMemoryRegressionRule:
         return CompareFinding(
             status="REGRESSION",
             severity="warning",
-            priority=50,
+            priority=VerdictPriority.STEP_MEMORY_REGRESSION,
             domain="step_memory",
             metric="peak_reserved_bytes",
             why=f"Step memory increased by {pct:.1f}%.",
@@ -263,7 +286,7 @@ class StepMemoryImprovementRule:
         return CompareFinding(
             status="IMPROVEMENT",
             severity="info",
-            priority=60,
+            priority=VerdictPriority.STEP_MEMORY_IMPROVEMENT,
             domain="step_memory",
             metric="peak_reserved_bytes",
             why=f"Step memory decreased by {abs(pct):.1f}%.",
@@ -287,7 +310,7 @@ class DiagnosisRegressionRule:
             return CompareFinding(
                 status="REGRESSION",
                 severity="warning",
-                priority=70,
+                priority=VerdictPriority.STEP_TIME_DIAGNOSIS_REGRESSION,
                 domain="step_time",
                 metric="diagnosis",
                 why=(
@@ -308,7 +331,7 @@ class DiagnosisRegressionRule:
             return CompareFinding(
                 status="REGRESSION",
                 severity="warning",
-                priority=80,
+                priority=VerdictPriority.STEP_MEMORY_DIAGNOSIS_REGRESSION,
                 domain="step_memory",
                 metric="diagnosis",
                 why=(
@@ -329,7 +352,7 @@ class EquivalentPrimarySignalsRule:
         return CompareFinding(
             status="EQUIVALENT",
             severity="info",
-            priority=100,
+            priority=VerdictPriority.EQUIVALENT_PRIMARY_SIGNALS,
             domain="compare",
             metric=None,
             why="Primary training signals stayed stable.",
@@ -374,7 +397,7 @@ def build_compare_verdict(
         else CompareFinding(
             status="INCONCLUSIVE",
             severity="info",
-            priority=999,
+            priority=VerdictPriority.FALLBACK_INCONCLUSIVE,
             domain="compare",
             metric=None,
             why="No compare verdict could be derived.",
@@ -469,5 +492,6 @@ __all__ = [
     "CompareVerdictContext",
     "CompareVerdictRule",
     "VERDICT_RULES",
+    "VerdictPriority",
     "build_compare_verdict",
 ]
