@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Base helpers for section-level summary comparison."""
 
 from __future__ import annotations
@@ -53,6 +59,19 @@ def first_present(*values: Any) -> Any:
         if value is not None:
             return value
     return None
+
+
+def global_average(section: Any, metric_name: str) -> Any:
+    """Read one metric from the new final-summary `global.average` block."""
+    return nested_get(section, "global", "average", metric_name)
+
+
+def global_point_value(section: Any, kind: str, metric_name: str) -> Any:
+    """Read the numeric value from `global.median/worst.<metric>`."""
+    point = nested_get(section, "global", kind, metric_name)
+    if not isinstance(point, dict):
+        return None
+    return point.get("value")
 
 
 def diagnosis_status(section: Any) -> Optional[str]:
@@ -128,6 +147,8 @@ __all__ = [
     "as_str",
     "diagnosis_status",
     "first_present",
+    "global_average",
+    "global_point_value",
     "nested_get",
     "numeric_metric",
     "section_available",

@@ -5,25 +5,29 @@ from traceml.reporting.compare import build_compare_payload
 from traceml.reporting.compare import build_compare_text
 from traceml.reporting.compare.formatters import CompareTextFormatter
 
+BYTES_PER_GB = 1024.0**3
+
 
 def _base_payload() -> dict:
     return {
+        "schema_version": 1,
         "duration_s": 120.0,
         "system": {
-            "aggregate": {
-                "metrics": {
-                    "cpu": {"avg_percent": 25.0},
-                    "ram": {"peak_gb": 4.0},
-                    "gpu": {"available": True, "count": 1},
-                },
+            "global": {
+                "average": {
+                    "cpu_percent": 25.0,
+                    "ram_bytes": 4.0 * BYTES_PER_GB,
+                    "gpu_util_percent": 50.0,
+                    "gpu_mem_percent": 20.0,
+                }
             },
         },
         "process": {
-            "aggregate": {
-                "metrics": {
-                    "cpu": {"avg_percent": 80.0},
-                    "ram": {"peak_gb": 2.0},
-                },
+            "global": {
+                "average": {
+                    "cpu_percent": 80.0,
+                    "ram_bytes": 2.0 * BYTES_PER_GB,
+                }
             },
         },
     }
@@ -41,33 +45,33 @@ def _step_time_section(
     split_pct: Optional[dict] = None,
     split_ms: Optional[dict] = None,
 ) -> dict:
+    splits = split_ms or {
+        "dataloader": 24.0,
+        "forward": 60.0,
+        "backward": 180.0,
+        "optimizer": 36.0,
+    }
+    wait_ms = step_avg_ms * wait_share_pct / 100.0
     return {
         "diagnosis": {
             "status": status,
             "reason": reason,
             "action": action,
         },
-        "aggregate": {
-            "median": {
-                "step_avg_ms": step_avg_ms,
-                "wait_share_pct": wait_share_pct,
-                "compute_share_pct": compute_share_pct,
-                "dominant_phase": dominant_phase,
-                "split_pct": split_pct
-                or {
-                    "dataloader": 8.0,
-                    "forward": 20.0,
-                    "backward": 60.0,
-                    "optimizer": 12.0,
-                },
-                "split_ms": split_ms
-                or {
-                    "dataloader": 24.0,
-                    "forward": 60.0,
-                    "backward": 180.0,
-                    "optimizer": 36.0,
-                },
-            },
+        "global": {
+            "average": {
+                "step_time_ms": step_avg_ms,
+                "dataloader_ms": splits["dataloader"],
+                "forward_ms": splits["forward"],
+                "backward_ms": splits["backward"],
+                "optimizer_ms": splits["optimizer"],
+                "compute_ms": (
+                    splits["forward"]
+                    + splits["backward"]
+                    + splits["optimizer"]
+                ),
+                "wait_ms": wait_ms,
+            }
         },
     }
 
@@ -83,28 +87,28 @@ def _step_memory_section(
     skew_pct: float = 0.0,
     trend_delta_bytes: float = 0.0,
 ) -> dict:
+    median_peak = (
+        median_peak_bytes
+        if skew_pct <= 0.0
+        else worst_peak_bytes / (1.0 + skew_pct / 100.0)
+    )
     return {
         "diagnosis": {
             "status": status,
             "reason": reason,
             "action": action,
         },
-        "aggregate": {
-            "metrics": {
-                "primary_metric": {
-                    "metric": metric,
-                    "worst_peak_bytes": worst_peak_bytes,
-                    "median_peak_bytes": median_peak_bytes,
-                    "worst_global_rank": 0,
-                    "skew_pct": skew_pct,
-                    "trend": {
-                        "worst": {
-                            "delta_bytes": trend_delta_bytes,
-                        },
-                        "median": {
-                            "delta_bytes": trend_delta_bytes * 0.5,
-                        },
-                    },
+        "global": {
+            "median": {
+                "peak_reserved_bytes": {
+                    "value": median_peak,
+                    "idx": "0",
+                }
+            },
+            "worst": {
+                "peak_reserved_bytes": {
+                    "value": worst_peak_bytes,
+                    "idx": "0",
                 }
             },
         },
@@ -244,22 +248,14 @@ def test_compare_partial_step_time_stays_unclear() -> None:
                 "reason": "No clear timing issue.",
                 "action": "Keep monitoring.",
             },
-            "aggregate": {
-                "median": {
-                    "step_avg_ms": 300.0,
-                    "dominant_phase": "backward",
-                    "split_pct": {
-                        "dataloader": 8.0,
-                        "forward": 20.0,
-                        "backward": 60.0,
-                        "optimizer": 12.0,
-                    },
-                    "split_ms": {
-                        "dataloader": 24.0,
-                        "forward": 60.0,
-                        "backward": 180.0,
-                        "optimizer": 36.0,
-                    },
+            "global": {
+                "average": {
+                    "step_time_ms": 300.0,
+                    "dataloader_ms": 24.0,
+                    "forward_ms": 60.0,
+                    "backward_ms": 180.0,
+                    "optimizer_ms": 36.0,
+                    "compute_ms": 276.0,
                 },
             },
         },

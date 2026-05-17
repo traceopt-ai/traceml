@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Process compare section."""
 
 from __future__ import annotations
@@ -6,11 +12,13 @@ from typing import Any, Dict
 
 from traceml.reporting.compare.model import CompareSection
 from traceml.reporting.compare.sections.base import (
-    nested_get,
+    global_average,
     numeric_metric,
     section_available,
     section_diagnosis,
 )
+
+BYTES_PER_GB = 1024.0**3
 
 
 class ProcessComparer:
@@ -37,12 +45,12 @@ class ProcessComparer:
                     delta_unit="percentage_point",
                     direction="context",
                 ),
-                "rss_peak_gb": numeric_metric(
-                    key="rss_peak_gb",
-                    label="Process RSS peak",
+                "rss_avg_gb": numeric_metric(
+                    key="rss_avg_gb",
+                    label="Process RSS avg",
                     unit="gb",
-                    lhs=self._value(lhs, "rss_peak_gb"),
-                    rhs=self._value(rhs, "rss_peak_gb"),
+                    lhs=self._bytes_to_gb(self._value(lhs, "ram_bytes")),
+                    rhs=self._bytes_to_gb(self._value(rhs, "ram_bytes")),
                     direction="context",
                 ),
             },
@@ -50,14 +58,13 @@ class ProcessComparer:
 
     def _value(self, section: Any, key: str) -> Any:
         if key == "cpu_avg_percent":
-            return nested_get(
-                section, "aggregate", "metrics", "cpu", "avg_percent"
-            )
-        if key == "rss_peak_gb":
-            return nested_get(
-                section, "aggregate", "metrics", "ram", "peak_gb"
-            )
-        return None
+            key = "cpu_percent"
+        return global_average(section, key)
+
+    def _bytes_to_gb(self, value: Any) -> Any:
+        if value is None:
+            return None
+        return float(value) / BYTES_PER_GB
 
 
 __all__ = ["ProcessComparer"]

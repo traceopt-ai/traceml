@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Text formatter for TraceML compare payloads."""
 
 from __future__ import annotations
@@ -112,13 +118,13 @@ def _rows_for_section(
         ),
         "process": (
             "cpu_avg_percent",
-            "rss_peak_gb",
+            "rss_avg_gb",
         ),
         "system": (
             "cpu_avg_percent",
-            "ram_peak_gb",
+            "ram_avg_gb",
             "gpu_util_avg_percent",
-            "gpu_memory_peak_percent",
+            "gpu_memory_avg_percent",
         ),
     }
     diagnosis_labels = {

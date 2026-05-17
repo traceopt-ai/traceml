@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Step-time compare section."""
 
 from __future__ import annotations
@@ -6,8 +12,8 @@ from typing import Any, Dict
 
 from traceml.reporting.compare.model import CompareSection
 from traceml.reporting.compare.sections.base import (
-    first_present,
-    nested_get,
+    as_float,
+    global_average,
     numeric_metric,
     section_available,
     section_diagnosis,
@@ -34,16 +40,16 @@ class StepTimeComparer:
                     key="step_avg_ms",
                     label="Step avg",
                     unit="ms",
-                    lhs=self._value(lhs, "step_avg_ms"),
-                    rhs=self._value(rhs, "step_avg_ms"),
+                    lhs=self._value(lhs, "step_time_ms"),
+                    rhs=self._value(rhs, "step_time_ms"),
                     direction="higher_is_worse",
                 ),
                 "compute_ms": numeric_metric(
                     key="compute_ms",
                     label="Compute",
                     unit="ms",
-                    lhs=self._compute_ms(lhs),
-                    rhs=self._compute_ms(rhs),
+                    lhs=self._value(lhs, "compute_ms"),
+                    rhs=self._value(rhs, "compute_ms"),
                     direction="higher_is_worse",
                 ),
                 "wait_ms": numeric_metric(
@@ -58,71 +64,53 @@ class StepTimeComparer:
                     key="input_ms",
                     label="Input",
                     unit="ms",
-                    lhs=self._split_value(lhs, "split_ms", "dataloader"),
-                    rhs=self._split_value(rhs, "split_ms", "dataloader"),
+                    lhs=self._value(lhs, "dataloader_ms"),
+                    rhs=self._value(rhs, "dataloader_ms"),
                     direction="higher_is_worse",
                 ),
                 "wait_share_pct": numeric_metric(
                     key="wait_share_pct",
                     label="Wait share",
                     unit="percent",
-                    lhs=self._value(lhs, "wait_share_pct"),
-                    rhs=self._value(rhs, "wait_share_pct"),
+                    lhs=self._wait_share_pct(lhs),
+                    rhs=self._wait_share_pct(rhs),
                     delta_unit="percentage_point",
                     direction="higher_is_worse",
                 ),
                 "dominant_phase": text_metric(
                     key="dominant_phase",
                     label="Dominant phase",
-                    lhs=self._value(lhs, "dominant_phase"),
-                    rhs=self._value(rhs, "dominant_phase"),
+                    lhs=self._dominant_phase(lhs),
+                    rhs=self._dominant_phase(rhs),
                 ),
             },
         )
 
-    def _primary(self, section: Any) -> Dict[str, Any]:
-        primary = nested_get(section, "aggregate", "median")
-        return primary if isinstance(primary, dict) else {}
-
     def _value(self, section: Any, key: str) -> Any:
-        primary = self._primary(section)
-        if key == "wait_ms":
-            explicit = first_present(
-                primary.get("wait_ms"),
-                nested_get(primary, "split_ms", "wait"),
-            )
-            if explicit is not None:
-                return explicit
-            step_avg = primary.get("step_avg_ms")
-            wait_share = primary.get("wait_share_pct")
-            if step_avg is None or wait_share is None:
-                return None
-            return float(step_avg) * float(wait_share) / 100.0
-        return primary.get(key)
+        return global_average(section, key)
 
-    def _split_value(self, section: Any, split_key: str, phase: str) -> Any:
-        primary = self._primary(section)
-        split = primary.get(split_key)
-        if not isinstance(split, dict):
+    def _wait_share_pct(self, section: Any) -> Any:
+        step_ms = as_float(self._value(section, "step_time_ms"))
+        wait_ms = as_float(self._value(section, "wait_ms"))
+        if step_ms is None or wait_ms is None or abs(step_ms) <= 1e-12:
             return None
-        return split.get(phase)
+        return 100.0 * wait_ms / step_ms
 
-    def _compute_ms(self, section: Any) -> Any:
-        primary = self._primary(section)
-        value = primary.get("compute_ms")
-        if value is not None:
-            return value
-        split = primary.get("split_ms")
-        if not isinstance(split, dict):
+    def _dominant_phase(self, section: Any) -> Any:
+        phases = {
+            "dataloader": as_float(self._value(section, "dataloader_ms")),
+            "forward": as_float(self._value(section, "forward_ms")),
+            "backward": as_float(self._value(section, "backward_ms")),
+            "optimizer": as_float(self._value(section, "optimizer_ms")),
+        }
+        present = {
+            phase: value
+            for phase, value in phases.items()
+            if value is not None
+        }
+        if not present:
             return None
-        values = [
-            split.get("forward"),
-            split.get("backward"),
-            split.get("optimizer"),
-        ]
-        if any(value is None for value in values):
-            return None
-        return sum(float(value) for value in values)
+        return max(present, key=lambda phase: present[phase])
 
 
 __all__ = ["StepTimeComparer"]

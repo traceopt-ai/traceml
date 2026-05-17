@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Step-memory compare section."""
 
 from __future__ import annotations
@@ -6,7 +12,8 @@ from typing import Any, Dict
 
 from traceml.reporting.compare.model import CompareSection
 from traceml.reporting.compare.sections.base import (
-    nested_get,
+    as_float,
+    global_point_value,
     numeric_metric,
     section_available,
     section_diagnosis,
@@ -40,8 +47,8 @@ class StepMemoryComparer:
                     key="memory_skew_pct",
                     label="Memory skew",
                     unit="percent",
-                    lhs=self._primary_value(lhs, "skew_pct"),
-                    rhs=self._primary_value(rhs, "skew_pct"),
+                    lhs=self._skew_pct(lhs),
+                    rhs=self._skew_pct(rhs),
                     delta_unit="percentage_point",
                     direction="higher_is_worse",
                 ),
@@ -49,32 +56,26 @@ class StepMemoryComparer:
                     key="trend_worst_delta_bytes",
                     label="Memory trend",
                     unit="bytes",
-                    lhs=nested_get(
-                        self._primary(lhs), "trend", "worst", "delta_bytes"
-                    ),
-                    rhs=nested_get(
-                        self._primary(rhs), "trend", "worst", "delta_bytes"
-                    ),
+                    lhs=None,
+                    rhs=None,
                     direction="higher_is_worse",
                 ),
             },
         )
 
-    def _primary(self, section: Any) -> Dict[str, Any]:
-        primary = nested_get(
-            section,
-            "aggregate",
-            "metrics",
-            "primary_metric",
-        )
-        return primary if isinstance(primary, dict) else {}
-
-    def _primary_value(self, section: Any, key: str) -> Any:
-        return self._primary(section).get(key)
-
     def _peak_reserved(self, section: Any) -> Any:
-        primary = self._primary(section)
-        return primary.get("worst_peak_bytes")
+        return global_point_value(section, "worst", "peak_reserved_bytes")
+
+    def _skew_pct(self, section: Any) -> Any:
+        median = as_float(
+            global_point_value(section, "median", "peak_reserved_bytes")
+        )
+        worst = as_float(
+            global_point_value(section, "worst", "peak_reserved_bytes")
+        )
+        if median is None or worst is None or abs(median) <= 1e-12:
+            return None
+        return 100.0 * (worst - median) / median
 
 
 __all__ = ["StepMemoryComparer"]
