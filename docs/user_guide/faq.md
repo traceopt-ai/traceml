@@ -39,14 +39,14 @@ See:
 
 ## How is TraceML different from `torch.profiler`?
 
-`torch.profiler` is a deeper profiling tool.
+`torch.profiler` is an operator-level profiling tool.
 
 TraceML is a lighter-weight bottleneck finder for real training runs.
 
 A simple rule:
 
 - use TraceML to find where the problem is
-- use `torch.profiler` when you need deeper low-level analysis
+- use `torch.profiler` when you need low-level operator analysis
 
 ---
 
@@ -191,7 +191,7 @@ Not yet.
 
 ---
 
-## What is the difference between `watch`, `run`, and `deep`?
+## What is the difference between `watch` and `run`?
 
 `watch`
 - zero-code system and process visibility
@@ -201,11 +201,11 @@ Not yet.
 - step-aware bottleneck diagnosis
 - the best place to start for most users
 
-`deep`
-- optional deeper layer-level inspection
-- best for short follow-up diagnostic runs
-
 Start with `run`.
+
+Deep/layer profiling has been removed from the public CLI for now. If TraceML
+shows you need lower-level detail, use PyTorch Profiler, Nsight, or another
+operator-level profiler for that follow-up.
 
 ---
 

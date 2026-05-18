@@ -127,44 +127,6 @@ These settings usually give the cleanest experience with TraceML:
 
 ---
 
-## Optional: deeper layer-level signals
-
-Use this only for short diagnostic runs when step-level diagnosis already told you where to dig.
-
-Since `TraceMLCallback` handles step-level tracing, deeper layer-level hooks are
-added separately with `traceml.trace_model_instance(...)`.
-
-```python
-import traceml
-import lightning as L
-import torch.nn as nn
-
-
-class MyLightningModule(L.LightningModule):
-    def __init__(self):
-        super().__init__()
-        self.model = MyCoreModel()
-        self.loss_fn = nn.CrossEntropyLoss()
-
-        traceml.trace_model_instance(
-            self,
-            trace_layer_forward_memory=True,
-            trace_layer_backward_memory=True,
-            trace_layer_forward_time=True,
-            trace_layer_backward_time=True,
-        )
-```
-
-Use this when you want:
-
-- per-layer timing
-- per-layer memory detail
-- a short follow-up diagnostic run
-
-Hooks add overhead, so keep them off for normal runs unless you need them.
-
----
-
 ## Full example
 
 Save as `train_lightning.py`:

@@ -9,11 +9,6 @@ The stable surface that user code imports and calls. Everything in this page is 
       show_root_heading: true
       show_source: true
 
-::: traceml.decorators.trace_model_instance
-    options:
-      show_root_heading: true
-      show_source: true
-
 ## Hugging Face integration
 
 ::: traceml.integrations.huggingface.TraceMLTrainer
@@ -37,10 +32,11 @@ traceml run <script>                 # default: final summary JSON/text
 traceml run <script> --mode=cli      # live terminal view
 traceml run <script> --mode=dashboard # live browser view
 traceml watch <script>               # zero-code system/process view
-traceml deep <script>                # deeper layer-level diagnostics
 ```
 
 Live `cli` and `dashboard` modes are intended for single-node runs. For
 multi-node runs, use the default summary mode.
+
+Deep/layer profiling has been removed from the public CLI for now.
 
 See `traceml --help` for the full set of options.

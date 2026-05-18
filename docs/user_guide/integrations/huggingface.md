@@ -157,37 +157,6 @@ TraceML can help surface:
 
 ---
 
-## Optional: deeper layer-level signals
-
-Use this only for short diagnostic runs when step-level diagnosis already told you where to dig.
-
-Pass `traceml_kwargs` to enable deeper layer-level hooks:
-
-```python
-trainer = TraceMLTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    traceml_enabled=True,
-    traceml_kwargs={
-        "sample_layer_memory": True,
-        "trace_layer_forward_memory": True,
-        "trace_layer_forward_time": True,
-        "trace_layer_backward_time": True,
-    },
-)
-```
-
-Use this when you want:
-
-- per-layer timing
-- per-layer memory detail
-- short diagnostic follow-up runs
-
-Hooks add overhead, so keep them off for normal runs unless you need them.
-
----
-
 ## Full NLP example
 
 Save as `fine_tune_nlp.py`:
@@ -421,9 +390,6 @@ This launches your script natively through `torchrun` without TraceML telemetry.
 
 - everything that normal `transformers.Trainer` accepts
 - `traceml_enabled=True|False`
-- optional `traceml_kwargs={...}` for deeper hook-based signals
-
-Each key in `traceml_kwargs` maps to an option on `trace_model_instance(...)`.
 
 ---
 

@@ -24,7 +24,7 @@ TraceML output has two layers:
 
 2. **Evidence**
    - the numbers and trends that support the diagnosis
-   - example: step breakdown, skew, wait share, memory peaks
+   - example: step breakdown, skew, wait time, memory peaks
 
 The diagnosis is the best place to start.
 
@@ -48,11 +48,6 @@ When launched with `--mode=cli`, the terminal shows live:
 - step-time diagnosis and summary
 - step-memory diagnosis and summary
 
-In `deep` mode, it can also show:
-
-- layer timing
-- layer memory
-
 Live CLI mode is intended for single-node runs, including single-node
 multi-GPU.
 
@@ -64,7 +59,7 @@ The local UI shows the same ideas in a more compact review format:
 - process card
 - step-time analysis
 - step-memory analysis
-- model diagnostics rail
+- diagnostics rail
 
 The local UI is also intended for single-node runs. Multi-node runs should use
 the default final summary path.
@@ -171,7 +166,7 @@ What to do next:
 
 - optimize model compute
 - check batch size / precision / kernels
-- use deeper profiling only after TraceML shows the hot path
+- use an operator-level profiler only after TraceML shows the hot path
 
 ---
 
@@ -303,8 +298,7 @@ Common causes:
 
 What to look at:
 
-- `WAIT Share (%)`
-- `Wait*`
+- `Wait`
 - whether the run is also showing straggler behavior
 
 What to do next:
@@ -337,12 +331,12 @@ What to do next:
 
 In the CLI step summary, the important columns are:
 
-- `Dataloader Fetch`
+- `Input`
 - `Forward`
 - `Backward`
-- `Optimizer Step`
-- `Step Time`
-- `Wait*`
+- `Optimizer`
+- `Total Step`
+- `Wait`
 
 Important rows:
 
@@ -362,9 +356,10 @@ Important rows:
 
 - how much larger the worst value is than the median
 
-### `WAIT Share (%)`
+### `Wait`
 
-- how much of the typical step is unattributed to dataloader or traced model phases
+- how much of the typical step is unattributed to dataloader, forward,
+  backward, or optimizer work
 
 A good reading pattern is:
 
@@ -373,7 +368,7 @@ A good reading pattern is:
 3. compare worst vs median
 4. inspect `Worst Rank`
 5. inspect `Skew (%)`
-6. inspect `WAIT Share (%)`
+6. inspect `Wait`
 
 ---
 
@@ -601,7 +596,7 @@ Use this panel when:
 
 The local UI shows the same ideas in a more compact form.
 
-### Model Diagnostics rail
+### Diagnostics rail
 
 This is the best place to start in the local UI.
 
@@ -619,7 +614,7 @@ This card shows:
 - median vs worst step breakdown
 - gap
 - worst rank
-- wait share
+- wait time
 - dominant split
 
 Use it to validate the step-time diagnosis.
@@ -663,15 +658,15 @@ Use these as context cards:
 
 ## Common pitfalls
 
-### High `WAIT*` skew alone does not automatically mean a real wait bottleneck
+### High wait skew alone does not automatically mean a real wait bottleneck
 
 Look at:
 
-- `WAIT Share (%)`
+- `Wait`
 - the diagnosis
 - the rest of the step breakdown
 
-A tiny wait share with large percentage skew can still be minor in practice.
+A tiny wait value with large percentage skew can still be minor in practice.
 
 ### A high compute share does not mean every compute phase is equally important
 
@@ -708,7 +703,7 @@ If you are in a hurry:
 1. read the diagnosis
 2. identify the worst rank if shown
 3. compare worst vs median
-4. look at wait share or memory trend
+4. look at wait time or memory trend
 5. take the suggested next action
 
 That is usually enough to decide where to investigate next.

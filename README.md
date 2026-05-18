@@ -13,7 +13,7 @@
 
 </div>
 
-TraceML records lightweight signals during a PyTorch training run and produces a structured end-of-run summary. It answers the questions that usually come before deep profiling:
+TraceML records lightweight signals during a PyTorch training run and produces a structured end-of-run summary. It answers the questions that usually come before operator-level profiling:
 
 - Is the run input-bound, compute-bound, wait-heavy, or memory-constrained?
 - Where is time going across dataloader, forward, backward, and optimizer?
@@ -162,6 +162,8 @@ All modes write `final_summary.json` and `final_summary.txt` at the end of the r
 | `--mode=dashboard` | Live browser display | single-node, including multi-GPU |
 
 Summary mode is the default and works across all topologies. Use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node job.
+
+Deep/layer profiling has been removed from the public CLI for now.
 
 Multi-node live views are on the roadmap.
 

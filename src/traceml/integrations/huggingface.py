@@ -43,7 +43,7 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         super().__init__(*args, **kwargs)
         self.traceml_enabled = traceml_enabled
 
-        # If model-level tracing (Deep-Dive) is requested, apply it now
+        # Preserve optional hook kwargs for backward compatibility.
         self.traceml_kwargs = traceml_kwargs
         self._traceml_hooks_attached = False
 
@@ -70,7 +70,7 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
                     self._attached_model_id = id(model)
                     self._traceml_hooks_attached = True
                     logger.info(
-                        "[TraceML] Deep-Dive model tracing initialized (lazy)."
+                        "[TraceML] Optional model tracing initialized (lazy)."
                     )
                 except Exception as e:
                     logger.error(

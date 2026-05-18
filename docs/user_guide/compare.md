@@ -6,7 +6,7 @@ This is the cleanest way to answer questions like:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did wait share increase?
+- did wait time increase?
 - did memory pressure or skew get worse?
 
 `traceml compare` is designed for comparing finalized run summaries, not raw logs or raw SQLite databases.
@@ -98,7 +98,7 @@ It typically focuses on:
 - overall duration
 - step-time diagnosis changes
 - average step time changes
-- wait-share changes
+- wait-time changes
 - step split shifts across dataloader, forward, backward, and optimizer
 - memory changes when they are meaningful
 - process or system changes when they add useful context

@@ -40,7 +40,7 @@ TraceML works best with PyTorch training scripts that already run successfully o
 
 ## Pick your stack
 
-Three minimal paths to a first TraceML run, depending on how your training code is structured. Pick the tab that matches your setup — each shows install + the single change + the run command. Deeper details for each stack live in their integration pages.
+Three minimal paths to a first TraceML run, depending on how your training code is structured. Pick the tab that matches your setup — each shows install + the single change + the run command. Full details for each stack live in their integration pages.
 
 === "Plain PyTorch"
 
@@ -99,7 +99,7 @@ Three minimal paths to a first TraceML run, depending on how your training code 
     ```
 
     !!! note
-        For full HF details, multi-GPU DDP, and deeper layer signals, see the [Hugging Face integration](integrations/huggingface.md).
+        For full HF details and multi-GPU DDP, see the [Hugging Face integration](integrations/huggingface.md).
 
 === "Lightning"
 
@@ -149,7 +149,6 @@ You should see commands such as:
 
 - `watch`
 - `run`
-- `deep`
 - `compare`
 
 ### Optional extras
@@ -295,7 +294,7 @@ Typical next steps:
 - reduce compute cost
 - tune batch size, precision, or kernels
 - inspect forward, backward, or optimizer cost
-- use a deeper profiler only after identifying the hot path
+- use an operator-level profiler only after identifying the hot path
 
 ### `INPUT STRAGGLER`
 
@@ -328,7 +327,7 @@ Typical next steps:
 - inspect validation, checkpointing, logging, or framework work around the step
 - check CPU stalls
 - check uneven rank progress
-- compare wait share against input and compute shares
+- compare wait time against input and compute time
 
 ### `MEMORY CREEP`
 
@@ -397,7 +396,7 @@ Use compare when you want to answer questions like:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did wait share increase?
+- did wait time increase?
 - did memory behavior get worse?
 
 See [Compare Runs](compare.md).
@@ -454,18 +453,6 @@ Use this when you want:
 
 `watch` is lighter-weight than `run`, but it does not provide the same step-aware diagnosis.
 
-### `traceml deep`
-
-```bash
-traceml deep train.py
-```
-
-Use this only for short diagnostic runs when you need deeper per-layer signals.
-
-`deep` is more expensive than `run` and is best used after TraceML already showed you where to dig.
-
----
-
 ## 9) Distributed DDP
 
 TraceML supports single-node multi-GPU DDP and multi-node DDP summary reports.
@@ -473,9 +460,6 @@ For multi-node jobs, use summary mode for the final distributed report. Live
 CLI and dashboard views are currently intended for single-node runs.
 
 Keep `traceml.trace_step(...)` inside the training loop.
-
-If you also enable model hooks, call `traceml.trace_model_instance(model)`
-before wrapping the model in `DistributedDataParallel`.
 
 ### Minimal DDP example
 
@@ -589,29 +573,17 @@ or port for TraceML telemetry, add `--aggregator-host=<host>` or
 
 ---
 
-## 10) Optional model hooks
+## 10) Deep/layer profiling status
 
-If you want per-layer timing and memory signals, you can attach model hooks.
-
-```python
-import traceml
-
-traceml.trace_model_instance(model)
-```
-
-Use this together with `traceml.trace_step(model)`.
-
-Launch `deep` mode when you want a short diagnostic run with deeper layer-level signals:
+Deep/layer profiling has been removed from the public CLI for now. Start with
+the default summary path:
 
 ```bash
-traceml deep train.py
+traceml run train.py
 ```
 
-Use model hooks only when:
-
-- you already know the step is slow
-- you want more detail about where inside the model the time or memory is going
-- you are okay with some extra overhead for diagnosis
+If TraceML shows you need lower-level detail, use PyTorch Profiler, Nsight, or
+another operator-level profiler for that follow-up.
 
 ---
 
@@ -737,6 +709,6 @@ If TraceML helped you find a slowdown, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
 - single GPU or multi-GPU
-- whether you used `run`, `watch`, or `deep`
+- whether you used `run` or `watch`
 - the end-of-run summary
 - a minimal repro if possible
