@@ -109,6 +109,7 @@ def write_run_manifest(
     master_port: int,
     nproc_per_node: int,
     history_enabled: bool,
+    summary_window_rows: int,
     status: str,
     launch_cwd: str,
     aggregator_dir: Optional[Path] = None,
@@ -140,6 +141,7 @@ def write_run_manifest(
             "master_addr": str(master_addr),
             "master_port": int(master_port),
             "history_enabled": bool(history_enabled),
+            "summary_window_rows": int(summary_window_rows),
             "launch_cwd": str(Path(launch_cwd).resolve()),
         },
         "paths": {

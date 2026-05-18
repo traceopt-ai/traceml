@@ -34,11 +34,10 @@ from traceml.launcher.process import (
     terminate_process_group,
     wait_for_tcp_listen,
 )
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.runtime.launch_context import LaunchContext
 from traceml.runtime.session import get_session_id
 from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
-
-DEFAULT_LAUNCH_SUMMARY_WINDOW_ROWS = 10_000
 
 
 def _log_launcher_exception(message: str, exc: Exception) -> None:
@@ -69,6 +68,10 @@ def validate_launch_args(args: argparse.Namespace) -> None:
         raise SystemExit(
             "[TraceML] ERROR: --mode=summary requires history. "
             "Remove --no-history to enable final summary generation."
+        )
+    if int(getattr(args, "summary_window_rows", 1)) <= 0:
+        raise SystemExit(
+            "[TraceML] ERROR: --summary-window-rows must be greater than 0."
         )
     try:
         DistributedLaunchConfig.from_args(args)
@@ -102,9 +105,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_TCP_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_TCP_PORT"] = str(aggregator_cfg.port)
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
-    env["TRACEML_SUMMARY_WINDOW_ROWS"] = os.environ.get(
-        "TRACEML_SUMMARY_WINDOW_ROWS",
-        str(DEFAULT_LAUNCH_SUMMARY_WINDOW_ROWS),
+    env["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
+        int(getattr(args, "summary_window_rows", DEFAULT_SUMMARY_WINDOW_ROWS))
     )
     env["TRACEML_NNODES"] = str(torchrun_cfg.nnodes)
     env["TRACEML_NPROC_PER_NODE"] = str(torchrun_cfg.nproc_per_node)
@@ -144,6 +146,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         master_port=torchrun_cfg.master_port,
         nproc_per_node=torchrun_cfg.nproc_per_node,
         history_enabled=not args.no_history,
+        summary_window_rows=int(env["TRACEML_SUMMARY_WINDOW_ROWS"]),
         status="starting",
         launch_cwd=execution_cwd,
         aggregator_dir=aggregator_dir,

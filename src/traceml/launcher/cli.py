@@ -16,6 +16,7 @@ from traceml.launcher.commands import (
     run_with_tracing,
     validate_launch_args,
 )
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
@@ -73,6 +74,16 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=200,
         help="Maximum number of rows returned by remote telemetry queries.",
+    )
+    parser.add_argument(
+        "--summary-window-rows",
+        type=int,
+        default=DEFAULT_SUMMARY_WINDOW_ROWS,
+        help=(
+            "Rows used per node/rank for final summaries. SQLite retains "
+            "1.5x this value for alignment. Default: "
+            f"{DEFAULT_SUMMARY_WINDOW_ROWS}."
+        ),
     )
     parser.add_argument(
         "--nproc-per-node",

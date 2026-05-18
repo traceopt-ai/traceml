@@ -370,6 +370,9 @@ TraceML also writes canonical end-of-run summary artifacts, including:
 `final_summary.json` is the canonical machine-readable TraceML summary artifact
 and the intended input for downstream logging and run comparison.
 
+For long runs, use `--summary-window-rows N` to control how much recent
+per-node/per-rank history is used for the final summary.
+
 ---
 
 ## 6) Optional: compare two runs

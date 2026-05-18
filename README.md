@@ -66,26 +66,27 @@ logs/<session_id>/final_summary.txt
 +----------------------------------------------------------------------------+
 |                                                                            |
 |  System                                                                    |
-|  - Diagnosis: OK                                                           |
+|  - Diagnosis: NORMAL                                                       |
 |  - Scope: nodes 1/1 | samples 847                                          |
-|  - Stats: CPU 31% | RAM 28% | GPU util 96% | GPU memory 71% | GPU temp     |
-|    68.4C                                                                   |
-|  - Why: No material system issues detected.                                |
+|  - Stats: CPU 31% | RAM 28% | GPU util 96% | GPU mem 71% | GPU temp 68.4C  |
+|  - Why: CPU and RAM showed no system pressure.                             |
 |                                                                            |
 |  Process                                                                   |
-|  - Diagnosis: OK                                                           |
-|  - Stats: CPU 29% | RAM 8.2/31.3 GB | GPU mem 11.4/16.0 GB (71%)           |
-|  - Why: Process resource usage within normal bounds.                       |
+|  - Diagnosis: NORMAL                                                       |
+|  - Stats: global ranks 1 | CPU avg 29% | RSS peak 8.2 / 31.3 GB | GPU mem  |
+|  11.4 / 16.0 GB (71%)                                                      |
+|  - Why: Process CPU, RSS, and GPU memory showed no pressure.               |
 |                                                                            |
 |  Step Time                                                                 |
-|  - Diagnosis: INPUT BOUND                                                  |
-|  - Scope: last 50 aligned steps on global rank r0                          |
-|  - Stats: step 471.2ms | compute 94.8ms | wait 6.3ms | input 370.1ms       |
+|  - Diagnosis: INPUT-BOUND                                                  |
+|  - Scope: last 128 aligned steps on global rank r0                         |
+|  - Stats: total 471.2ms | model 101.1ms | compute 94.8ms | wait 6.3ms |    |
+|  input 370.1ms                                                             |
 |  - Why: Input loading took a large share (370.1ms/471.2ms).                |
 |                                                                            |
 |  Step Memory                                                               |
 |  - Diagnosis: BALANCED                                                     |
-|  - Scope: last 50 aligned steps                                            |
+|  - Scope: last 128 aligned steps                                           |
 |  - Stats: peak reserved peak 11.4 GB                                       |
 |  - Why: Memory usage is stable.                                            |
 +----------------------------------------------------------------------------+
@@ -97,33 +98,58 @@ The `final_summary.json` is machine-readable and designed for logging to W&B or 
 
 ## Compare Runs
 
-TraceML is most useful when you compare a healthy run against a slow or suspicious one.
+TraceML is most useful when you compare a slow or suspicious run against a
+baseline or fixed run.
 
 ```bash
-traceml compare run_a/final_summary.json run_b/final_summary.json
+traceml compare input_slow/final_summary.json input_fixed/final_summary.json
 ```
 
-Changed your model, dataloader, or batch size and something got slower? The compare output shows exactly which phase regressed and by how much.
+Changed your model, dataloader, or batch size? The compare output shows which
+phase moved and by how much.
 
 ```
-+----------------------------------------------------------------------------------------+
-|  TraceML Compare                                                                       |
-+----------------------------------------------------------------------------------------+
-|  A: run_before.json                                                                    |
-|  B: run_after.json                                                                     |
-+----------------------------------------------------------------------------------------+
-|  Step Time                                                                             |
-|  Metric                   A              B              Delta                          |
-|  Diagnosis                INPUT BOUND    COMPUTE BOUND  changed                        |
-|  Step time (median)       471.2 ms       623.8 ms       +152.6 ms (+32.4%)             |
-|  Compute (median)         94.8 ms        421.3 ms       +326.5 ms (+344.4%)            |
-|  Input (median)           370.1 ms       189.4 ms       -180.7 ms (-48.8%)             |
-|                                                                                        |
-|  Step Memory                                                                           |
-|  Metric                   A              B              Delta                          |
-|  Diagnosis                BALANCED       HIGH PRESSURE  changed                        |
-|  Peak reserved (worst)    11.4 GB        18.9 GB        +7.5 GB (+65.8%)               |
-+----------------------------------------------------------------------------------------+
++--------------------------------------------------------------------------------------+
+|  TraceML Compare                                                                     |
++--------------------------------------------------------------------------------------+
+|                                                                                      |
+|  A: input_slow                                                                       |
+|  B: input_fixed                                                                      |
+|  Delta: B - A                                                                        |
+|                                                                                      |
+|  Verdict: IMPROVEMENT                                                                |
+|  Why: Step time decreased by 71.9%.                                                  |
+|                                                                                      |
+|  Step Time                                                                           |
+|  Metric                         A                B                Delta              |
+|  Step time diagnosis            INPUT-BOUND      BALANCED         changed            |
+|  Total step                     471.2 ms         132.4 ms         -338.8 ms (-71.9%) |
+|  Model step                     101.1 ms         101.1 ms         +0.0 ms (+0.0%)    |
+|  Compute                        94.8 ms          94.8 ms          +0.0 ms (+0.0%)    |
+|  Wait                           6.3 ms           6.3 ms           +0.0 ms (+0.0%)    |
+|  Wait share                     6.2%             6.2%             +0.0 pp            |
+|  Input                          370.1 ms         31.3 ms          -338.8 ms (-91.5%) |
+|                                                                                      |
+|  Step Memory                                                                         |
+|  Metric                         A                B                Delta              |
+|  Step memory diagnosis          BALANCED         BALANCED         same               |
+|  Peak reserved                  11.4 GB          11.6 GB          +205 MB (+1.8%)    |
+|  Memory skew                    11.1%            11.1%            -0.0 pp            |
+|                                                                                      |
+|  Process                                                                             |
+|  Metric                         A                B                Delta              |
+|  Process diagnosis              NORMAL           NORMAL           same               |
+|  Process CPU avg                29.0%            31.0%            +2.0 pp            |
+|  Process RSS avg                0.8 GB           0.8 GB           +0.0 GB (+0.0%)    |
+|                                                                                      |
+|  System                                                                              |
+|  Metric                         A                B                Delta              |
+|  System diagnosis               NORMAL           NORMAL           same               |
+|  System CPU avg                 31.0%            30.0%            -1.0 pp            |
+|  System RAM avg                 8.0 GB           8.1 GB           +0.1 GB (+1.2%)    |
+|  GPU util avg                   96.0%            97.0%            +1.0 pp            |
+|  GPU memory avg                 71.0%            72.0%            +1.0 pp            |
++--------------------------------------------------------------------------------------+
 ```
 
 TraceML writes both a structured compare JSON and a compact text report.
@@ -145,6 +171,10 @@ All modes write `final_summary.json` and `final_summary.txt` at the end of the r
 Summary mode is the default and works across all topologies. Use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node job.
 
 Multi-node live views are on the roadmap.
+
+For very long jobs, tune the final-summary window with
+`--summary-window-rows N`. TraceML analyzes the latest `N` rows per node or
+rank and retains a small alignment buffer internally.
 
 ---
 
