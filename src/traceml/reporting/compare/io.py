@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 I/O helpers for TraceML run comparison.
 
@@ -17,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from traceml.sdk.protocol import write_json_atomic, write_text_atomic
+from traceml.utils.atomic_io import write_json_atomic, write_text_atomic
 
 _REQUIRED_TOP_LEVEL_SECTIONS = (
     "system",

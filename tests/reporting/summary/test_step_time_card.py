@@ -41,6 +41,7 @@ def _rank(
         avg_backward_ms=backward,
         avg_optimizer_ms=optimizer,
         avg_step_cpu_ms=effective_step,
+        avg_traced_step_ms=effective_step,
         avg_gpu_compute_ms=compute,
         avg_total_step_ms=dataloader + effective_step,
     )
@@ -139,7 +140,10 @@ def test_step_time_compute_bound_card_uses_short_reason() -> None:
     )
 
     assert payload["diagnosis"]["status"] == "COMPUTE-BOUND"
-    assert "- Stats: step 97.0ms | compute 90.0ms" in payload["card"]
+    assert (
+        "- Stats: total 97.0ms | input 2.0ms | compute 90.0ms"
+        in payload["card"]
+    )
     assert (
         "- Why: Compute dominated (90.0ms/97.0ms); backward was largest."
         in payload["card"]
@@ -182,7 +186,10 @@ def test_step_time_wait_heavy_card_uses_short_reason() -> None:
     )
 
     assert payload["diagnosis"]["status"] == "WAIT-HEAVY"
-    assert "- Why: Wait time was high (30.0ms/102.0ms)." in payload["card"]
+    assert (
+        "- Why: Wait was high inside the total step (30.0ms/102.0ms)."
+        in payload["card"]
+    )
     _assert_compact_card(payload["card"])
 
 

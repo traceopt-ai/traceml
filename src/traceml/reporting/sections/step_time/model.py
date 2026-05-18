@@ -18,13 +18,13 @@ from traceml.reporting.summaries.summary_formatting import safe_float
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
-    "step_time_ms",
+    "total_step_ms",
     "dataloader_ms",
+    "compute_ms",
+    "wait_ms",
     "forward_ms",
     "backward_ms",
     "optimizer_ms",
-    "compute_ms",
-    "wait_ms",
 ]
 
 
@@ -115,6 +115,7 @@ class RankStepSummary:
     avg_backward_ms: float
     avg_optimizer_ms: float
     avg_step_cpu_ms: float
+    avg_traced_step_ms: float
     avg_gpu_compute_ms: float
     avg_total_step_ms: float
 
@@ -219,6 +220,7 @@ def build_rank_summary(
     sum_bwd = 0.0
     sum_opt = 0.0
     sum_step_cpu = 0.0
+    sum_traced_step = 0.0
     sum_total = 0.0
     n = 0
 
@@ -236,17 +238,20 @@ def build_rank_summary(
         opt = finite_float(metrics["optimizer"])
         step_cpu = finite_float(metrics["step_time"])
 
-        gpu_compute = fwd + bwd + opt
-        step_effective = max(step_cpu, gpu_compute)
-        wait_proxy = max(0.0, step_effective - gpu_compute)
-        total_step = dl + step_effective
+        compute_ms = fwd + bwd + opt
+        # raw step = the direct trace_step wall timer.
+        # traced step = max(raw step, compute) to avoid impossible negative wait
+        # when CPU wall timing and CUDA event timing differ slightly.
+        traced_step = max(step_cpu, compute_ms)
+        wait_proxy = max(0.0, traced_step - compute_ms)
+        total_step = dl + traced_step
 
         per_step_metrics[int(step_id)] = {
             "dataloader_fetch": dl,
             "forward": fwd,
             "backward": bwd,
             "optimizer_step": opt,
-            "step_time": step_effective,
+            "step_time": traced_step,
             "wait_proxy": wait_proxy,
         }
 
@@ -255,6 +260,7 @@ def build_rank_summary(
         sum_bwd += bwd
         sum_opt += opt
         sum_step_cpu += step_cpu
+        sum_traced_step += traced_step
         sum_total += total_step
         n += 1
 
@@ -268,6 +274,7 @@ def build_rank_summary(
         avg_backward_ms=sum_bwd / n,
         avg_optimizer_ms=sum_opt / n,
         avg_step_cpu_ms=sum_step_cpu / n,
+        avg_traced_step_ms=sum_traced_step / n,
         avg_gpu_compute_ms=(sum_fwd + sum_bwd + sum_opt) / n,
         avg_total_step_ms=sum_total / n,
     )
@@ -278,15 +285,22 @@ def compute_wait_avg_ms(s: RankStepSummary) -> float:
     """
     Return average wait proxy for one rank summary.
 
-    Wait is derived from:
-        total_step - (dataloader + forward + backward + optimizer)
+    Public Step Time uses:
+        total_step_ms = dataloader_ms + compute_ms + wait_ms
+        compute_ms = forward_ms + backward_ms + optimizer_ms
+
+    Internally, wait is derived from:
+        traced_step_ms - compute_ms
+
+    where traced_step_ms is max(raw trace_step wall timer, compute_ms).
+    The traced-step value is intentionally internal so the public JSON remains
+    the simpler total/input/compute/wait model.
     """
     return max(
         0.0,
-        finite_float(s.avg_total_step_ms)
+        finite_float(s.avg_traced_step_ms)
         - (
-            finite_float(s.avg_dataloader_ms)
-            + finite_float(s.avg_forward_ms)
+            finite_float(s.avg_forward_ms)
             + finite_float(s.avg_backward_ms)
             + finite_float(s.avg_optimizer_ms)
         ),
@@ -298,12 +312,20 @@ def _rank_metric_values(
 ) -> Dict[str, Dict[int, float]]:
     """Return global-rank values for each Step Time metric."""
     return {
-        "step_time_ms": {
+        "total_step_ms": {
             int(rank): finite_float(summary.avg_total_step_ms)
             for rank, summary in per_global_rank_summary.items()
         },
         "dataloader_ms": {
             int(rank): finite_float(summary.avg_dataloader_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "compute_ms": {
+            int(rank): finite_float(summary.avg_gpu_compute_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "wait_ms": {
+            int(rank): compute_wait_avg_ms(summary)
             for rank, summary in per_global_rank_summary.items()
         },
         "forward_ms": {
@@ -318,27 +340,19 @@ def _rank_metric_values(
             int(rank): finite_float(summary.avg_optimizer_ms)
             for rank, summary in per_global_rank_summary.items()
         },
-        "compute_ms": {
-            int(rank): finite_float(summary.avg_gpu_compute_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "wait_ms": {
-            int(rank): compute_wait_avg_ms(summary)
-            for rank, summary in per_global_rank_summary.items()
-        },
     }
 
 
 def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
     """Return public row metrics for one global-rank step-time summary."""
     return {
-        "step_time_ms": finite_float(summary.avg_total_step_ms),
+        "total_step_ms": finite_float(summary.avg_total_step_ms),
         "dataloader_ms": finite_float(summary.avg_dataloader_ms),
+        "compute_ms": finite_float(summary.avg_gpu_compute_ms),
+        "wait_ms": compute_wait_avg_ms(summary),
         "forward_ms": finite_float(summary.avg_forward_ms),
         "backward_ms": finite_float(summary.avg_backward_ms),
         "optimizer_ms": finite_float(summary.avg_optimizer_ms),
-        "compute_ms": finite_float(summary.avg_gpu_compute_ms),
-        "wait_ms": compute_wait_avg_ms(summary),
     }
 
 

@@ -229,7 +229,10 @@ class WaitHeavyRule(_BaseStepTimeRule):
                 context.thresholds.wait_share_crit,
             ),
             summary=f"WAIT* is {_pct(context.wait_share)} of the typical step.",
-            action="Inspect sync points, CPU stalls, or H2D copies.",
+            action=(
+                "Inspect work outside traced phases, CPU stalls, logging, "
+                "checkpointing, validation, or transfers."
+            ),
             metric="wait_proxy",
             phase="wait",
             share_pct=context.wait_share,

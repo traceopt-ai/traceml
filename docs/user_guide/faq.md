@@ -151,7 +151,7 @@ See:
 
 ## Does TraceML support DDP?
 
-Yes, for single-node DDP.
+Yes.
 
 TraceML can surface:
 
@@ -160,19 +160,26 @@ TraceML can surface:
 - rank imbalance
 - worst-rank vs median-rank skew
 
+Single-node DDP supports live CLI/dashboard views and final summaries.
+Multi-node DDP is supported for end-of-run summary reports.
+
 ---
 
 ## Does TraceML support multi-node?
 
-Not yet.
+Yes, for summary-mode DDP runs.
 
-Today the main distributed target is single-node DDP.
+Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and
+`--master-addr` on every node. Node 0 starts the TraceML aggregator; other
+nodes connect to it for telemetry. Multi-node live CLI/dashboard views are not
+yet supported.
 
 ---
 
 ## Does TraceML support FSDP?
 
-Yes, for single-node FSDP.
+Yes, for single-node FSDP. Multi-node FSDP summary reports use the same
+distributed launch path as DDP, but should be validated on your environment.
 
 If you hit an issue on your setup, please open an issue with a minimal repro and environment details.
 
@@ -190,7 +197,7 @@ Not yet.
 - zero-code system and process visibility
 
 `run`
-- the default mode
+- the default command
 - step-aware bottleneck diagnosis
 - the best place to start for most users
 
@@ -212,6 +219,9 @@ Run:
 traceml run train.py --mode=dashboard
 ```
 
+The local UI is intended for single-node runs, including single-node
+multi-GPU. For multi-node runs, use summary mode.
+
 The local UI runs at:
 
 ```text
@@ -220,19 +230,19 @@ http://localhost:8765
 
 ---
 
-## Is there a summary-only mode?
+## What is the default run mode?
 
-Yes.
+`traceml run train.py` uses summary mode by default.
 
-Run:
+You can also make that explicit:
 
 ```bash
 traceml run train.py --mode=summary
 ```
 
-This skips the live UI and focuses on the final end-of-run summary. It is a
-good fit when you want lower terminal noise or want to forward TraceML summary
-fields into W&B or MLflow.
+Summary mode skips live UI and focuses on the final end-of-run summary. It is
+a good fit when you want lower terminal noise or want to forward TraceML
+summary fields into W&B or MLflow.
 
 ---
 
@@ -274,7 +284,7 @@ Yes.
 TraceML is designed to work alongside your existing tracking stack. The
 recommended low-noise path is:
 
-1. launch with `traceml run train.py --mode=summary`
+1. launch with `traceml run train.py`
 2. call `traceml.final_summary()` near the end of your script
 3. log selected fields from the returned dict into W&B or MLflow
 

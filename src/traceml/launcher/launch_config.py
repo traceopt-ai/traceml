@@ -131,7 +131,10 @@ class AggregatorLaunchConfig:
         return cls(
             connect_host=connect_host,
             bind_host=bind_host,
-            port=_positive_int(getattr(args, "tcp_port", 29765), "--tcp-port"),
+            port=_positive_int(
+                getattr(args, "aggregator_port", 29765),
+                "--aggregator-port",
+            ),
         )
 
     def is_owner(self, *, node_rank: int) -> bool:

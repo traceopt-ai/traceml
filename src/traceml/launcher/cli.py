@@ -16,6 +16,7 @@ from traceml.launcher.commands import (
     run_with_tracing,
     validate_launch_args,
 )
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
@@ -29,8 +30,11 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         default="summary",
         choices=["cli", "dashboard", "summary"],
         help=(
-            "TraceML display mode to launch. "
-            "Use 'cli' or 'dashboard' for live output. Default: summary."
+            "TraceML mode. "
+            "'summary': end-of-run report, supports single-node and "
+            "multi-node multi-GPU. "
+            "'cli' and 'dashboard': live views, intended for single-node "
+            "runs, including single-node multi-GPU. Default: summary."
         ),
     )
     parser.add_argument(
@@ -63,13 +67,26 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="Optional explicit session id. Required when --nnodes > 1.",
     )
     parser.add_argument(
-        "--tcp-port", type=int, default=29765, help="Aggregator bind port."
+        "--aggregator-port",
+        type=int,
+        default=29765,
+        help="TraceML aggregator port.",
     )
     parser.add_argument(
         "--remote-max-rows",
         type=int,
         default=200,
         help="Maximum number of rows returned by remote telemetry queries.",
+    )
+    parser.add_argument(
+        "--summary-window-rows",
+        type=int,
+        default=DEFAULT_SUMMARY_WINDOW_ROWS,
+        help=(
+            "Rows used per node/rank for final summaries. SQLite retains "
+            "1.5x this value for alignment. Default: "
+            f"{DEFAULT_SUMMARY_WINDOW_ROWS}."
+        ),
     )
     parser.add_argument(
         "--nproc-per-node",

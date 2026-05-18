@@ -6,7 +6,8 @@ TraceML is built to answer one question quickly:
 
 This guide explains how to read the output shown in:
 
-- the CLI
+- the default end-of-run summary
+- the live CLI view
 - the local UI
 
 The concepts are the same in both.
@@ -31,11 +32,16 @@ The tables and charts are there to explain **why** that diagnosis was chosen.
 
 ---
 
-## What the CLI and local UI show
+## What the summary, CLI, and local UI show
 
-### CLI
+### End-of-run summary
 
-During a run, the CLI shows:
+By default, `traceml run train.py` prints a compact final summary and writes
+`final_summary.json` plus `final_summary.txt`.
+
+### Live CLI
+
+When launched with `--mode=cli`, the terminal shows live:
 
 - system metrics
 - process metrics
@@ -47,6 +53,9 @@ In `deep` mode, it can also show:
 - layer timing
 - layer memory
 
+Live CLI mode is intended for single-node runs, including single-node
+multi-GPU.
+
 ### Local UI
 
 The local UI shows the same ideas in a more compact review format:
@@ -56,6 +65,9 @@ The local UI shows the same ideas in a more compact review format:
 - step-time analysis
 - step-memory analysis
 - model diagnostics rail
+
+The local UI is also intended for single-node runs. Multi-node runs should use
+the default final summary path.
 
 The CLI is best for live diagnosis while the job is running.
 
@@ -270,20 +282,23 @@ What to do next:
 
 Meaning:
 
-- a meaningful part of the typical step is going into wait / overhead instead of useful model work
+- a meaningful part of the typical step is not attributed to dataloader,
+  forward, backward, or optimizer work
 
 In TraceML:
 
-- `WAIT* = step_time - (forward + backward + optimizer_step)`
+- `compute = forward + backward + optimizer`
+- `wait = total_step - dataloader - compute`
 
-This is a proxy, not a direct collective-wait measurement.
+This is residual unattributed time in the reported total step, not direct
+collective, NCCL, or all-reduce timing.
 
 Common causes:
 
-- synchronization delays
-- uneven progress across ranks
+- validation or evaluation inside the measured loop
+- checkpointing or logging work
+- framework orchestration outside the traced phases
 - CPU stalls
-- host-side delays
 - transfer / orchestration overhead
 
 What to look at:
@@ -294,9 +309,9 @@ What to look at:
 
 What to do next:
 
-- inspect sync points
+- inspect work happening around the traced training step
 - inspect rank imbalance
-- inspect CPU-side delays and transfer paths
+- inspect CPU-side delays, logging, checkpointing, validation, and transfer paths
 
 ---
 
@@ -349,7 +364,7 @@ Important rows:
 
 ### `WAIT Share (%)`
 
-- how much of the typical step is going into wait / overhead
+- how much of the typical step is unattributed to dataloader or traced model phases
 
 A good reading pattern is:
 
@@ -638,7 +653,7 @@ Use these as context cards:
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `STRAGGLER` | inspect both input and compute unevenness |
-| `WAIT-HEAVY` | inspect sync points and uneven progress |
+| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and transfer paths |
 | `MEMORY CREEP (EARLY)` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |

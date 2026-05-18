@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 System manifest helpers for TraceML.
 
@@ -24,7 +30,7 @@ from pynvml import (
 )
 
 from traceml.samplers.runtime_context import resolve_runtime_context
-from traceml.samplers.utils import write_json_atomic
+from traceml.utils.atomic_io import write_json_atomic
 
 
 def _safe_call(fn, default=None):

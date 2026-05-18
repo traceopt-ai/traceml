@@ -59,7 +59,7 @@ class CompareDecisionPolicy:
     Notes
     -----
     - `step_avg_pct_*` gates primary performance regression or improvement.
-    - `wait_share_pp_*` and `phase_shift_pp_*` are supporting timing signals.
+    - `phase_shift_pp_*` thresholds are supporting timing signals.
     - Memory thresholds are supporting signals unless reinforced by a stronger
       memory diagnosis change.
     - The policy is intentionally biased toward abstaining rather than
@@ -68,9 +68,6 @@ class CompareDecisionPolicy:
 
     step_avg_pct_moderate: float = 3.0
     step_avg_pct_material: float = 8.0
-
-    wait_share_pp_moderate: float = 0.75
-    wait_share_pp_material: float = 2.5
 
     phase_shift_pp_moderate: float = 0.75
     phase_shift_pp_material: float = 2.0
@@ -105,23 +102,6 @@ def classify_step_avg_pct(
     if abs_pct >= float(policy.step_avg_pct_material):
         return "material"
     if abs_pct >= float(policy.step_avg_pct_moderate):
-        return "moderate"
-    return "negligible"
-
-
-def classify_wait_share_pp(
-    abs_pp: Optional[float],
-    *,
-    policy: CompareDecisionPolicy = DEFAULT_COMPARE_POLICY,
-) -> str:
-    """
-    Classify a wait-share delta in percentage points.
-    """
-    if abs_pp is None:
-        return "negligible"
-    if abs_pp >= float(policy.wait_share_pp_material):
-        return "material"
-    if abs_pp >= float(policy.wait_share_pp_moderate):
         return "moderate"
     return "negligible"
 

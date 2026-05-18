@@ -51,6 +51,9 @@ Or open the local UI:
 traceml run train.py --mode=dashboard
 ```
 
+Dashboard mode is intended for single-node runs, including single-node
+multi-GPU.
+
 ---
 
 ## What TraceML will show
@@ -101,6 +104,8 @@ If you want a richer browser-based view, run:
 ```bash
 traceml run train.py --mode=dashboard
 ```
+
+Dashboard mode is intended for single-node runs.
 
 The local UI is useful when you want:
 
@@ -286,6 +291,9 @@ If terminal output gets noisy, use:
 ```bash
 traceml run train.py --mode=dashboard
 ```
+
+Dashboard mode is intended for single-node runs. For multi-node runs, use the
+default final summary path.
 
 ### I want a baseline without TraceML
 

@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Shared protocol helpers for on-demand final summary generation.
 
@@ -19,7 +25,6 @@ contract:
 
 import json
 import os
-import tempfile
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -175,54 +180,6 @@ def load_json_or_none(path: Path) -> Optional[Dict[str, Any]]:
             return json.load(f)
     except Exception:
         return None
-
-
-def write_json_atomic(path: Path, payload: Dict[str, Any]) -> None:
-    """
-    Write JSON atomically to avoid partial files being observed by another
-    process.
-    """
-    path = Path(path).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(path.parent),
-        delete=False,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    ) as tmp:
-        json.dump(payload, tmp, indent=2)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_path = Path(tmp.name)
-
-    os.replace(tmp_path, path)
-
-
-def write_text_atomic(path: Path, text: str) -> None:
-    """
-    Write text atomically to avoid partial files being observed by another
-    process.
-    """
-    path = Path(path).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(path.parent),
-        delete=False,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    ) as tmp:
-        tmp.write(text)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_path = Path(tmp.name)
-
-    os.replace(tmp_path, path)
 
 
 def build_final_summary_request() -> FinalSummaryRequest:

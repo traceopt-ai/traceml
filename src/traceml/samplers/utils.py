@@ -13,9 +13,6 @@ contain sampler-specific aggregation logic.
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from collections import deque
 from pathlib import Path
 from queue import Empty
@@ -63,34 +60,6 @@ def append_queue_nowait_to_deque(
     """
     for item in drain_queue_nowait(queue_obj, skip_none=skip_none):
         target.append(item)
-
-
-def write_json_atomic(
-    path: Path | str,
-    payload: dict[str, Any],
-    *,
-    sort_keys: bool = False,
-) -> None:
-    """
-    Atomically write JSON to disk to avoid partial files being observed.
-    """
-    path = Path(path).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(path.parent),
-        delete=False,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    ) as tmp:
-        json.dump(payload, tmp, indent=2, sort_keys=sort_keys)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_path = Path(tmp.name)
-
-    os.replace(tmp_path, path)
 
 
 def ensure_session_dir(

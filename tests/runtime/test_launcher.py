@@ -23,6 +23,7 @@ from traceml.launcher.manifest import (
     write_run_manifest,
 )
 from traceml.launcher.launch_config import DistributedLaunchConfig
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 
 def test_build_parser_preserves_launch_commands() -> None:
@@ -48,6 +49,7 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.nnodes == 1
     assert args.node_rank == 0
     assert args.master_addr == "127.0.0.1"
+    assert args.summary_window_rows == DEFAULT_SUMMARY_WINDOW_ROWS
     assert args.args == ["--epochs", "1"]
 
     default_args = parser.parse_args(["watch", "train.py"])
@@ -75,6 +77,10 @@ def test_build_parser_accepts_multinode_launch_args() -> None:
             "10.0.0.10",
             "--aggregator-bind-host",
             "0.0.0.0",
+            "--aggregator-port",
+            "29888",
+            "--summary-window-rows",
+            "2048",
         ]
     )
 
@@ -85,6 +91,8 @@ def test_build_parser_accepts_multinode_launch_args() -> None:
     assert args.master_port == 29511
     assert args.aggregator_host == "10.0.0.10"
     assert args.aggregator_bind_host == "0.0.0.0"
+    assert args.aggregator_port == 29888
+    assert args.summary_window_rows == 2048
 
 
 def test_summary_mode_requires_history() -> None:
@@ -98,8 +106,29 @@ def test_summary_mode_requires_history() -> None:
         master_port=29500,
         aggregator_host=None,
         aggregator_bind_host=None,
-        tcp_port=29765,
+        aggregator_port=29765,
         session_id="test-session",
+        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+    )
+
+    with pytest.raises(SystemExit):
+        validate_launch_args(args)
+
+
+def test_summary_window_rows_must_be_positive() -> None:
+    args = argparse.Namespace(
+        mode="cli",
+        no_history=False,
+        nnodes=1,
+        nproc_per_node=1,
+        node_rank=0,
+        master_addr="127.0.0.1",
+        master_port=29500,
+        aggregator_host=None,
+        aggregator_bind_host=None,
+        aggregator_port=29765,
+        session_id="",
+        summary_window_rows=0,
     )
 
     with pytest.raises(SystemExit):
@@ -125,13 +154,14 @@ def test_run_manifest_write_and_update_are_atomic(tmp_path) -> None:
         logs_dir=str(tmp_path / "logs"),
         aggregator_host="127.0.0.1",
         aggregator_bind_host="127.0.0.1",
-        tcp_port=29765,
+        aggregator_port=29765,
         nnodes=1,
         node_rank=0,
         master_addr="127.0.0.1",
         master_port=29500,
         nproc_per_node=1,
         history_enabled=True,
+        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
         status="starting",
         launch_cwd=str(tmp_path),
     )
@@ -145,7 +175,11 @@ def test_run_manifest_write_and_update_are_atomic(tmp_path) -> None:
     assert payload["status"] == "completed"
     assert payload["launch"]["profile"] == "run"
     assert payload["launch"]["aggregator_host"] == "127.0.0.1"
+    assert payload["launch"]["aggregator_port"] == 29765
     assert payload["launch"]["nnodes"] == 1
+    assert (
+        payload["launch"]["summary_window_rows"] == DEFAULT_SUMMARY_WINDOW_ROWS
+    )
     assert payload["artifacts"]["summary_card_json"] == "summary.json"
 
 
@@ -182,7 +216,7 @@ def test_distributed_launch_config_builds_torchrun_command() -> None:
         master_port=29511,
         aggregator_host=None,
         aggregator_bind_host=None,
-        tcp_port=29765,
+        aggregator_port=29765,
         session_id="test-session",
     )
 
@@ -213,7 +247,7 @@ def test_single_node_launch_config_keeps_local_defaults() -> None:
         master_port=29500,
         aggregator_host=None,
         aggregator_bind_host=None,
-        tcp_port=29765,
+        aggregator_port=29765,
     )
 
     cfg = DistributedLaunchConfig.from_args(args)
