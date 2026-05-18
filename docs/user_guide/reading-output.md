@@ -287,10 +287,10 @@ Meaning:
 
 In TraceML:
 
-- `model_step = max(cpu_step_timer, forward + backward + optimizer)`
-- `WAIT* = model_step - forward - backward - optimizer`
+- `compute = forward + backward + optimizer`
+- `wait = total_step - dataloader - compute`
 
-This is residual unattributed time inside the traced step, not direct
+This is residual unattributed time in the reported total step, not direct
 collective, NCCL, or all-reduce timing.
 
 Common causes:

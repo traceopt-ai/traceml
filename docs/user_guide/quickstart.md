@@ -292,7 +292,7 @@ Model compute dominates the step.
 
 Typical next steps:
 
-- reduce model step cost
+- reduce compute cost
 - tune batch size, precision, or kernels
 - inspect forward, backward, or optimizer cost
 - use a deeper profiler only after identifying the hot path

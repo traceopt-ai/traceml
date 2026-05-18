@@ -90,10 +90,10 @@ Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
 |  Step Time                                                                 |
 |  - Diagnosis: INPUT STRAGGLER                                              |
 |  - Scope: compared over last 460 aligned steps across 4 global ranks       |
-|  - Stats: median/worst | total 303.7/303.7ms | model 299.9/300.0ms |       |
-|  compute 259.5/259.5ms | wait 40.5/40.5ms | input 3.8/254.5ms              |
-|  - Ranks: median/worst | total r3/r2 | model r2/r1 | compute r3/r1 | wait  |
-|  r2/r1 | input r2/r0                                                       |
+|  - Stats: median/worst | total 303.7/303.7ms | input 3.8/254.5ms |         |
+|  compute 259.5/259.5ms | wait 40.5/40.5ms                                  |
+|  - Ranks: median/worst | total r3/r2 | input r2/r0 | compute r3/r1 | wait  |
+|  r2/r1                                                                      |
 |  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
 |                                                                            |
 |  Step Memory                                                               |
@@ -134,11 +134,12 @@ The compact text report shows the verdict first, then the changed metrics:
 |  Metric                         A                B                Delta              |
 |  Step time diagnosis            INPUT STRAGGLER  BALANCED         changed            |
 |  Total step                     294.0 ms         13.0 ms          -280.9 ms (-95.6%) |
-|  Model step                     227.5 ms         10.3 ms          -217.2 ms (-95.5%) |
+|  Input                          66.4 ms          2.7 ms           -63.7 ms (-95.9%)  |
 |  Compute                        197.2 ms         8.6 ms           -188.6 ms (-95.6%) |
 |  Wait                           30.4 ms          1.7 ms           -28.6 ms (-94.3%)  |
-|  Wait share                     10.2%            16.1%            +5.9 pp            |
-|  Input                          66.4 ms          2.7 ms           -63.7 ms (-95.9%)  |
+|  Forward                        45.0 ms          2.1 ms           -42.9 ms (-95.3%)  |
+|  Backward                       130.0 ms         5.4 ms           -124.6 ms (-95.8%) |
+|  Optimizer                      22.2 ms          1.1 ms           -21.1 ms (-95.0%)  |
 +--------------------------------------------------------------------------------------+
 ```
 
