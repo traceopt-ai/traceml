@@ -21,9 +21,9 @@ from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 
 @dataclass(frozen=True)
-class TraceMLTCPSettings:
+class AggregatorTransportSettings:
     """
-    TCP configuration for TraceML telemetry transport.
+    Aggregator endpoint used by workers and the aggregator process.
 
     ``connect_host`` is used by training workers. ``bind_host`` is used by the
     aggregator process. They are the same on simple local runs, but different
@@ -47,7 +47,8 @@ class TraceMLSettings:
     - `mode` selects display backend and capture behavior ("cli" | "summary" | "dashboard").
     - `summary` mode disables live rendering and prints only the final
       end-of-run summary.
-    - TCP is used for telemetry transport (including rank0 -> rank0 loopback).
+    - Aggregator transport is used for telemetry, including rank0 -> rank0
+      loopback on local runs.
     """
 
     profile: str = "run"  # "deep"
@@ -58,7 +59,7 @@ class TraceMLSettings:
     logs_dir: str = "./logs"
     enable_logging: bool = False
     remote_max_rows: int = 200
-    tcp: TraceMLTCPSettings = TraceMLTCPSettings()
+    aggregator: AggregatorTransportSettings = AggregatorTransportSettings()
     session_id: str = ""
     history_enabled: bool = True
     db_path: str = ""

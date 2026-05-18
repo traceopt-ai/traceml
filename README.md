@@ -53,12 +53,19 @@ Run your script with TraceML:
 traceml run train.py
 ```
 
-At the end of the run, TraceML prints a compact summary and writes two artifacts:
+TraceML writes two end-of-run artifacts:
 
 ```text
 logs/<session_id>/final_summary.json
 logs/<session_id>/final_summary.txt
 ```
+
+## Example Output
+
+### End-of-run summary
+
+At the end of training, TraceML prints the same compact text report written to
+`final_summary.txt`:
 
 ```
 +----------------------------------------------------------------------------+
@@ -96,17 +103,15 @@ The `final_summary.json` is machine-readable and designed for logging to W&B or 
 
 ---
 
-## Compare Runs
+### Compare two runs
 
-TraceML is most useful when you compare a slow or suspicious run against a
-baseline or fixed run.
+Compare a slow or suspicious run against a baseline or fixed run:
 
 ```bash
 traceml compare input_slow/final_summary.json input_fixed/final_summary.json
 ```
 
-Changed your model, dataloader, or batch size? The compare output shows which
-phase moved and by how much.
+The compact text report shows the verdict first, then the changed metrics:
 
 ```
 +--------------------------------------------------------------------------------------+
@@ -129,30 +134,12 @@ phase moved and by how much.
 |  Wait                           6.3 ms           6.3 ms           +0.0 ms (+0.0%)    |
 |  Wait share                     6.2%             6.2%             +0.0 pp            |
 |  Input                          370.1 ms         31.3 ms          -338.8 ms (-91.5%) |
-|                                                                                      |
-|  Step Memory                                                                         |
-|  Metric                         A                B                Delta              |
-|  Step memory diagnosis          BALANCED         BALANCED         same               |
-|  Peak reserved                  11.4 GB          11.6 GB          +205 MB (+1.8%)    |
-|  Memory skew                    11.1%            11.1%            -0.0 pp            |
-|                                                                                      |
-|  Process                                                                             |
-|  Metric                         A                B                Delta              |
-|  Process diagnosis              NORMAL           NORMAL           same               |
-|  Process CPU avg                29.0%            31.0%            +2.0 pp            |
-|  Process RSS avg                0.8 GB           0.8 GB           +0.0 GB (+0.0%)    |
-|                                                                                      |
-|  System                                                                              |
-|  Metric                         A                B                Delta              |
-|  System diagnosis               NORMAL           NORMAL           same               |
-|  System CPU avg                 31.0%            30.0%            -1.0 pp            |
-|  System RAM avg                 8.0 GB           8.1 GB           +0.1 GB (+1.2%)    |
-|  GPU util avg                   96.0%            97.0%            +1.0 pp            |
-|  GPU memory avg                 71.0%            72.0%            +1.0 pp            |
 +--------------------------------------------------------------------------------------+
 ```
 
-TraceML writes both a structured compare JSON and a compact text report.
+The full compare report also includes Step Memory, Process, and System sections
+when those signals are available. TraceML writes both a structured compare JSON
+and a compact text report.
 
 See [Compare Runs](docs/user_guide/compare.md).
 
@@ -210,7 +197,13 @@ traceml run train.py \
   --session-id=my-run
 ```
 
-Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and `--master-addr` on every node. Node 0 starts the TraceML aggregator; the other nodes connect to it. If the TraceML aggregator should use a different reachable address than `--master-addr`, pass `--aggregator-host=<host>`.
+Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and
+`--master-addr` on every node. Node 0 starts the TraceML aggregator. Other
+nodes connect to `<node0-ip>:29765` by default. If workers need a different
+reachable address or port for TraceML telemetry, add
+`--aggregator-host=<host>` or `--aggregator-port=<port>` on every node. For
+multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default; override
+that only when needed with `--aggregator-bind-host=<bind-host>`.
 
 ### Zero-code first look
 

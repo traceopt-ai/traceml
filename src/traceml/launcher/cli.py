@@ -67,7 +67,10 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="Optional explicit session id. Required when --nnodes > 1.",
     )
     parser.add_argument(
-        "--tcp-port", type=int, default=29765, help="Aggregator bind port."
+        "--aggregator-port",
+        type=int,
+        default=29765,
+        help="TraceML aggregator port.",
     )
     parser.add_argument(
         "--remote-max-rows",

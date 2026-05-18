@@ -72,8 +72,8 @@ class TraceMLAggregator:
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
             TCPConfig(
-                host=str(settings.tcp.bind_host),
-                port=int(settings.tcp.port),
+                host=str(settings.aggregator.bind_host),
+                port=int(settings.aggregator.port),
             )
         )
 

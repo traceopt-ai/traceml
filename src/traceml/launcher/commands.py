@@ -101,9 +101,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(args.num_display_layers)
     session_id_arg = str(getattr(args, "session_id", "") or "").strip()
     env["TRACEML_SESSION_ID"] = session_id_arg or get_session_id()
-    env["TRACEML_TCP_CONNECT_HOST"] = aggregator_cfg.connect_host
-    env["TRACEML_TCP_BIND_HOST"] = aggregator_cfg.bind_host
-    env["TRACEML_TCP_PORT"] = str(aggregator_cfg.port)
+    env["TRACEML_AGGREGATOR_HOST"] = aggregator_cfg.connect_host
+    env["TRACEML_AGGREGATOR_BIND_HOST"] = aggregator_cfg.bind_host
+    env["TRACEML_AGGREGATOR_PORT"] = str(aggregator_cfg.port)
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
         int(getattr(args, "summary_window_rows", DEFAULT_SUMMARY_WINDOW_ROWS))
@@ -139,7 +139,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         logs_dir=args.logs_dir,
         aggregator_host=aggregator_cfg.connect_host,
         aggregator_bind_host=aggregator_cfg.bind_host,
-        tcp_port=aggregator_cfg.port,
+        aggregator_port=aggregator_cfg.port,
         nnodes=torchrun_cfg.nnodes,
         node_rank=torchrun_cfg.node_rank,
         master_addr=torchrun_cfg.master_addr,

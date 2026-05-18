@@ -20,14 +20,17 @@ from traceml.runtime.launch_context import (
     script_execution_context,
 )
 from traceml.runtime.runtime import TraceMLRuntime
-from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
+from traceml.runtime.settings import (
+    AggregatorTransportSettings,
+    TraceMLSettings,
+)
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 INTERRUPTED_EXIT_CODE = 130
 DEFAULT_LOGS_DIR = "./logs"
-DEFAULT_TCP_CONNECT_HOST = "127.0.0.1"
-DEFAULT_TCP_BIND_HOST = "127.0.0.1"
-DEFAULT_TCP_PORT = 29765
+DEFAULT_AGGREGATOR_HOST = "127.0.0.1"
+DEFAULT_AGGREGATOR_BIND_HOST = "127.0.0.1"
+DEFAULT_AGGREGATOR_PORT = 29765
 DEFAULT_PROFILE = "run"
 DEFAULT_UI_MODE = "cli"
 DEFAULT_INTERVAL_SEC = 1.0
@@ -209,16 +212,19 @@ def read_traceml_env() -> Dict[str, Any]:
                 str(DEFAULT_NUM_DISPLAY_LAYERS),
             )
         ),
-        "tcp_connect_host": os.environ.get(
-            "TRACEML_TCP_CONNECT_HOST",
-            DEFAULT_TCP_CONNECT_HOST,
+        "aggregator_host": os.environ.get(
+            "TRACEML_AGGREGATOR_HOST",
+            DEFAULT_AGGREGATOR_HOST,
         ),
-        "tcp_bind_host": os.environ.get(
-            "TRACEML_TCP_BIND_HOST",
-            DEFAULT_TCP_BIND_HOST,
+        "aggregator_bind_host": os.environ.get(
+            "TRACEML_AGGREGATOR_BIND_HOST",
+            DEFAULT_AGGREGATOR_BIND_HOST,
         ),
-        "tcp_port": int(
-            os.environ.get("TRACEML_TCP_PORT", str(DEFAULT_TCP_PORT))
+        "aggregator_port": int(
+            os.environ.get(
+                "TRACEML_AGGREGATOR_PORT",
+                str(DEFAULT_AGGREGATOR_PORT),
+            )
         ),
         "remote_max_rows": int(
             os.environ.get(
@@ -269,10 +275,10 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
         summary_window_rows=int(cfg["summary_window_rows"]),
-        tcp=TraceMLTCPSettings(
-            connect_host=str(cfg["tcp_connect_host"]),
-            bind_host=str(cfg["tcp_bind_host"]),
-            port=int(cfg["tcp_port"]),
+        aggregator=AggregatorTransportSettings(
+            connect_host=str(cfg["aggregator_host"]),
+            bind_host=str(cfg["aggregator_bind_host"]),
+            port=int(cfg["aggregator_port"]),
         ),
     )
 
