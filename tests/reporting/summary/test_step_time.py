@@ -191,7 +191,7 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
             avg_backward_ms=3.0,
             avg_optimizer_ms=1.0,
             avg_step_cpu_ms=8.0,
-            avg_model_step_ms=8.0,
+            avg_traced_step_ms=8.0,
             avg_gpu_compute_ms=6.0,
             avg_total_step_ms=9.0,
         )

@@ -33,9 +33,14 @@ The stable surface that user code imports and calls. Everything in this page is 
 TraceML ships with a CLI entry point installed as `traceml`.
 
 ```bash
-traceml watch <script>    # run script with live terminal dashboard
-traceml run <script>      # run script with minimal instrumentation
-traceml deep <script>     # run with full instrumentation (step + memory + layer)
+traceml run <script>                 # default: final summary JSON/text
+traceml run <script> --mode=cli      # live terminal view
+traceml run <script> --mode=dashboard # live browser view
+traceml watch <script>               # zero-code system/process view
+traceml deep <script>                # deeper layer-level diagnostics
 ```
+
+Live `cli` and `dashboard` modes are intended for single-node runs. For
+multi-node runs, use the default summary mode.
 
 See `traceml --help` for the full set of options.

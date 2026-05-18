@@ -109,14 +109,14 @@ traceml run train.py
 This gives you:
 
 - W&B for run tracking
-- TraceML for live bottleneck diagnosis
+- TraceML for the final bottleneck summary
 
 ---
 
 ## Log the final TraceML summary to W&B
 
-If you want a quieter run and a structured TraceML summary you can log at the
-end, launch in summary mode:
+TraceML runs in summary mode by default. If you want to make that explicit,
+launch with:
 
 ```bash
 traceml run train.py --mode=summary
@@ -235,7 +235,7 @@ This is useful when:
 
 A practical workflow is:
 
-1. run training with TraceML summary mode
+1. run training with TraceML
 2. keep the TraceML final summary JSON as a W&B or MLflow artifact
 3. compare two saved summaries locally with `traceml compare`
 
@@ -251,14 +251,17 @@ Good ways to reduce that:
 
 - disable `tqdm` progress bars
 - reduce extra console logging
-- use `--mode=summary` if you only want the final TraceML summary
-- use the local UI if the terminal feels crowded
+- use the default summary mode if you only want the final TraceML summary
+- use the local UI on a single-node run if the terminal feels crowded
 
 Launch the local UI with:
 
 ```bash
 traceml run train.py --mode=dashboard
 ```
+
+Dashboard mode is intended for single-node runs. For multi-node runs, keep the
+default summary mode and log the final summary artifact.
 
 This is often the cleanest option when you want:
 
@@ -292,7 +295,7 @@ It is not a TraceML requirement.
 A clean adoption path is:
 
 1. start with `traceml run train.py`
-2. use `--mode=summary` when you want a quieter run and a structured final summary
+2. use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node run
 3. log selected TraceML summary fields into W&B or MLflow if useful
 4. keep the TraceML final summary JSON for important runs
 5. compare two saved runs later with `traceml compare`

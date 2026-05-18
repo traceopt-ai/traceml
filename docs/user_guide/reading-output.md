@@ -6,7 +6,8 @@ TraceML is built to answer one question quickly:
 
 This guide explains how to read the output shown in:
 
-- the CLI
+- the default end-of-run summary
+- the live CLI view
 - the local UI
 
 The concepts are the same in both.
@@ -31,11 +32,16 @@ The tables and charts are there to explain **why** that diagnosis was chosen.
 
 ---
 
-## What the CLI and local UI show
+## What the summary, CLI, and local UI show
 
-### CLI
+### End-of-run summary
 
-During a run, the CLI shows:
+By default, `traceml run train.py` prints a compact final summary and writes
+`final_summary.json` plus `final_summary.txt`.
+
+### Live CLI
+
+When launched with `--mode=cli`, the terminal shows live:
 
 - system metrics
 - process metrics
@@ -47,6 +53,9 @@ In `deep` mode, it can also show:
 - layer timing
 - layer memory
 
+Live CLI mode is intended for single-node runs, including single-node
+multi-GPU.
+
 ### Local UI
 
 The local UI shows the same ideas in a more compact review format:
@@ -56,6 +65,9 @@ The local UI shows the same ideas in a more compact review format:
 - step-time analysis
 - step-memory analysis
 - model diagnostics rail
+
+The local UI is also intended for single-node runs. Multi-node runs should use
+the default final summary path.
 
 The CLI is best for live diagnosis while the job is running.
 

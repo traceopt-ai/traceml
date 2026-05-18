@@ -108,11 +108,12 @@ def _rows_for_section(
     metric_order = {
         "step_time": (
             "total_step_ms",
-            "model_step_ms",
+            "input_ms",
             "compute_ms",
             "wait_ms",
-            "wait_share_pct",
-            "input_ms",
+            "forward_ms",
+            "backward_ms",
+            "optimizer_ms",
         ),
         "step_memory": (
             "peak_reserved_bytes",

@@ -30,7 +30,6 @@ from traceml.reporting.sections.step_time.model import (
     build_overview,
     closest_rank_to_median,
     compute_wait_avg_ms,
-    compute_wait_share_pct,
     finite_float,
     summary_metric_values,
 )
@@ -59,11 +58,9 @@ class StepTimeCardStats:
 
     global_rank_count: int
     total_step: StepTimeMetricPair
-    model_step: StepTimeMetricPair
     compute: StepTimeMetricPair
     wait: StepTimeMetricPair
     input: StepTimeMetricPair
-    wait_share_pct: StepTimeMetricPair
 
     @property
     def is_multi_rank(self) -> bool:
@@ -137,12 +134,6 @@ def _build_card_stats(
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
-        model_step=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_model_step_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
         compute=_metric_pair_from_rank_values(
             {
                 int(rank): finite_float(summary.avg_gpu_compute_ms)
@@ -161,12 +152,6 @@ def _build_card_stats(
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
-        wait_share_pct=_metric_pair_from_rank_values(
-            {
-                int(rank): compute_wait_share_pct(summary)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
     )
 
 
@@ -176,10 +161,6 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         total = _format_ms_pair(
             stats.total_step.median_ms,
             stats.total_step.worst_ms,
-        )
-        model = _format_ms_pair(
-            stats.model_step.median_ms,
-            stats.model_step.worst_ms,
         )
         compute = _format_ms_pair(
             stats.compute.median_ms,
@@ -192,17 +173,16 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         )
         return (
             "- Stats: median/worst | "
-            f"total {total} | model {model} | compute {compute} | "
-            f"wait {wait} | input {input_ms}"
+            f"total {total} | input {input_ms} | compute {compute} | "
+            f"wait {wait}"
         )
 
     return (
         "- Stats: "
         f"total {format_ms(stats.total_step.worst_ms)} | "
-        f"model {format_ms(stats.model_step.worst_ms)} | "
+        f"input {format_ms(stats.input.worst_ms)} | "
         f"compute {format_ms(stats.compute.worst_ms)} | "
-        f"wait {format_ms(stats.wait.worst_ms)} | "
-        f"input {format_ms(stats.input.worst_ms)}"
+        f"wait {format_ms(stats.wait.worst_ms)}"
     )
 
 
@@ -213,10 +193,6 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
     total = _format_rank_pair(
         stats.total_step.median_global_rank,
         stats.total_step.worst_global_rank,
-    )
-    model = _format_rank_pair(
-        stats.model_step.median_global_rank,
-        stats.model_step.worst_global_rank,
     )
     compute = _format_rank_pair(
         stats.compute.median_global_rank,
@@ -232,8 +208,8 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
     )
     return (
         "- Ranks: median/worst | "
-        f"total {total} | model {model} | compute {compute} | "
-        f"wait {wait} | input {input_rank}"
+        f"total {total} | input {input_rank} | compute {compute} | "
+        f"wait {wait}"
     )
 
 
@@ -294,16 +270,16 @@ def _step_time_card_reason(
     if kind == "WAIT_HEAVY":
         evidence = (
             f"{format_ms(stats.wait.worst_ms)}/"
-            f"{format_ms(stats.model_step.worst_ms)}"
+            f"{format_ms(stats.total_step.worst_ms)}"
         )
-        return f"WAIT* was high inside the traced step ({evidence})."
+        return f"Wait was high inside the total step ({evidence})."
     if kind == "COMPUTE_BOUND":
         summary = per_global_rank_summary.get(stats.compute.worst_global_rank)
         phase = _largest_compute_phase(summary)
         suffix = f"; {phase} was largest" if phase else ""
         evidence = (
             f"{format_ms(stats.compute.worst_ms)}/"
-            f"{format_ms(stats.model_step.worst_ms)}"
+            f"{format_ms(stats.total_step.worst_ms)}"
         )
         return f"Compute dominated ({evidence}){suffix}."
 

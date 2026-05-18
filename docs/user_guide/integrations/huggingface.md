@@ -69,6 +69,9 @@ Or open the local UI:
 traceml run fine_tune.py --mode=dashboard
 ```
 
+Dashboard mode is intended for single-node runs, including single-node
+multi-GPU.
+
 ---
 
 ## What TraceML will show
@@ -121,20 +124,36 @@ This is optional. TraceML does not require you to replace your existing logger s
 
 `TraceMLTrainer` inherits DDP support from Hugging Face `Trainer`.
 
-Launch with:
+For a single-node run, launch with:
 
 ```bash
 traceml run fine_tune.py --nproc-per-node=4
 ```
 
-In single-node DDP, TraceML can help surface:
+For a multi-node summary run, use the same `--session-id`, `--nnodes`,
+`--nproc-per-node`, and `--master-addr` on every node, changing only
+`--node-rank`:
+
+```bash
+traceml run fine_tune.py \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+Run the same command on each node, changing only `--node-rank`.
+
+TraceML can help surface:
 
 - rank imbalance
 - input stragglers
 - compute stragglers
 - memory skew
 
-> Single-node only for now. Multi-node is not yet supported.
+> Multi-node runs currently produce end-of-run summary reports. Live CLI and
+> dashboard views are intended for single-node runs.
 
 ---
 
@@ -372,6 +391,9 @@ If terminal output gets noisy, use:
 ```bash
 traceml run fine_tune.py --mode=dashboard
 ```
+
+Dashboard mode is intended for single-node runs. For multi-node runs, use the
+default final summary path.
 
 ### Multi-GPU run only shows one rank
 

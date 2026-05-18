@@ -258,11 +258,12 @@ are comfortable with the default `auto` path.
 traceml run train.py
 ```
 
-This is the default TraceML workflow and the best place to start.
+This is the default TraceML workflow and the best place to start. By default,
+TraceML runs in summary mode.
 
-During training, TraceML opens a live terminal view alongside your logs.
-
-At the end of the run, it prints a compact summary you can review or share.
+During training, TraceML stays quiet. At the end of the run, it prints a
+compact summary you can review or share and writes `final_summary.json` plus
+`final_summary.txt` under the session log directory.
 
 ---
 
@@ -344,8 +345,9 @@ Typical next steps:
 
 ## 5) Optional: structured final summary
 
-If you want a low-noise run and a structured end-of-run payload for W&B or
-MLflow, launch in summary mode:
+`traceml run` uses summary mode by default. If you want to make that explicit
+for a low-noise run and a structured end-of-run payload for W&B or MLflow,
+launch with:
 
 ```bash
 traceml run train.py --mode=summary
@@ -410,6 +412,9 @@ If you want a richer view, run:
 traceml run train.py --mode=dashboard
 ```
 
+Live dashboard mode is intended for single-node runs, including single-node
+multi-GPU.
+
 The local UI runs at:
 
 ```text
@@ -422,7 +427,15 @@ Use the local UI when you want:
 - an easier browser-based layout
 - local comparison of runs
 
-If you just want the fastest path, stay with the default CLI mode.
+For live terminal feedback instead, use:
+
+```bash
+traceml run train.py --mode=cli
+```
+
+Live terminal mode is also intended for single-node runs.
+
+If you just want the fastest path, stay with the default summary mode.
 
 ---
 
@@ -453,9 +466,11 @@ Use this only for short diagnostic runs when you need deeper per-layer signals.
 
 ---
 
-## 9) Single-node DDP
+## 9) Distributed DDP
 
-TraceML supports single-node multi-GPU DDP.
+TraceML supports single-node multi-GPU DDP and multi-node DDP summary reports.
+For multi-node jobs, use summary mode for the final distributed report. Live
+CLI and dashboard views are currently intended for single-node runs.
 
 Keep `traceml.trace_step(...)` inside the training loop.
 
@@ -540,7 +555,37 @@ Launch with:
 traceml run train.py --nproc-per-node=4
 ```
 
-> Scope: multi-node distributed training is not yet supported.
+For a multi-node run, launch the same script on every node with a shared
+session id and the same torchrun rendezvous address.
+
+On node 0:
+
+```bash
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+On node 1:
+
+```bash
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=1 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+Node 0 starts the TraceML aggregator. Other nodes connect to
+`<node0-ip>:29765` by default. If workers need a different reachable address
+or port for TraceML telemetry, add `--aggregator-host=<host>` or
+`--aggregator-port=<port>` on every node. Node 0 binds the aggregator to
+`0.0.0.0` by default for multi-node runs; override that only when needed with
+`--aggregator-bind-host=<bind-host>`.
 
 ---
 
@@ -572,10 +617,16 @@ Use model hooks only when:
 
 ## 11) Common launch patterns
 
-Standard CLI:
+Default summary run:
 
 ```bash
 traceml run train.py
+```
+
+Live terminal view:
+
+```bash
+traceml run train.py --mode=cli
 ```
 
 Local UI:
@@ -584,7 +635,21 @@ Local UI:
 traceml run train.py --mode=dashboard
 ```
 
-Summary-only run:
+Summary-only distributed run:
+
+```bash
+traceml run train.py \
+  --mode=summary \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+Run the same command on each node, changing only `--node-rank`.
+
+Explicit summary mode:
 
 ```bash
 traceml run train.py --mode=summary
@@ -646,8 +711,8 @@ If your own logger, progress bar, or framework output is fighting with the Trace
 
 - disable `tqdm`
 - reduce extra terminal logging
-- try `--mode=dashboard` for browser-based viewing
-- try `--mode=summary` if you only want the final summary artifact and output
+- use the default summary mode if you only want final artifacts
+- try `--mode=dashboard` for browser-based viewing on a single-node run
 
 ### I want the fastest path
 

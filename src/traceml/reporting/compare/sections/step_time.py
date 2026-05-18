@@ -44,12 +44,12 @@ class StepTimeComparer:
                     rhs=self._value(rhs, "total_step_ms"),
                     direction="higher_is_worse",
                 ),
-                "model_step_ms": numeric_metric(
-                    key="model_step_ms",
-                    label="Model step",
+                "input_ms": numeric_metric(
+                    key="input_ms",
+                    label="Input",
                     unit="ms",
-                    lhs=self._value(lhs, "model_step_ms"),
-                    rhs=self._value(rhs, "model_step_ms"),
+                    lhs=self._value(lhs, "dataloader_ms"),
+                    rhs=self._value(rhs, "dataloader_ms"),
                     direction="higher_is_worse",
                 ),
                 "compute_ms": numeric_metric(
@@ -68,21 +68,28 @@ class StepTimeComparer:
                     rhs=self._value(rhs, "wait_ms"),
                     direction="higher_is_worse",
                 ),
-                "input_ms": numeric_metric(
-                    key="input_ms",
-                    label="Input",
+                "forward_ms": numeric_metric(
+                    key="forward_ms",
+                    label="Forward",
                     unit="ms",
-                    lhs=self._value(lhs, "dataloader_ms"),
-                    rhs=self._value(rhs, "dataloader_ms"),
+                    lhs=self._value(lhs, "forward_ms"),
+                    rhs=self._value(rhs, "forward_ms"),
                     direction="higher_is_worse",
                 ),
-                "wait_share_pct": numeric_metric(
-                    key="wait_share_pct",
-                    label="Wait share",
-                    unit="percent",
-                    lhs=self._wait_share_pct(lhs),
-                    rhs=self._wait_share_pct(rhs),
-                    delta_unit="percentage_point",
+                "backward_ms": numeric_metric(
+                    key="backward_ms",
+                    label="Backward",
+                    unit="ms",
+                    lhs=self._value(lhs, "backward_ms"),
+                    rhs=self._value(rhs, "backward_ms"),
+                    direction="higher_is_worse",
+                ),
+                "optimizer_ms": numeric_metric(
+                    key="optimizer_ms",
+                    label="Optimizer",
+                    unit="ms",
+                    lhs=self._value(lhs, "optimizer_ms"),
+                    rhs=self._value(rhs, "optimizer_ms"),
                     direction="higher_is_worse",
                 ),
                 "dominant_phase": text_metric(
@@ -96,21 +103,6 @@ class StepTimeComparer:
 
     def _value(self, section: Any, key: str) -> Any:
         return global_average(section, key)
-
-    def _wait_share_pct(self, section: Any) -> Any:
-        explicit = as_float(self._value(section, "wait_share_pct"))
-        if explicit is not None:
-            return explicit
-
-        model_step_ms = as_float(self._value(section, "model_step_ms"))
-        wait_ms = as_float(self._value(section, "wait_ms"))
-        if (
-            model_step_ms is None
-            or wait_ms is None
-            or abs(model_step_ms) <= 1e-12
-        ):
-            return None
-        return 100.0 * wait_ms / model_step_ms
 
     def _dominant_phase(self, section: Any) -> Any:
         phases = {

@@ -65,37 +65,42 @@ logs/<session_id>/final_summary.txt
 ### End-of-run summary
 
 At the end of training, TraceML prints the same compact text report written to
-`final_summary.txt`:
+`final_summary.txt`.
+
+Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
 
 ```
 +----------------------------------------------------------------------------+
-|  TraceML Run Summary | duration 94.2s                                      |
+|  TraceML Run Summary | duration 122.5s                                     |
 +----------------------------------------------------------------------------+
 |                                                                            |
 |  System                                                                    |
 |  - Diagnosis: NORMAL                                                       |
-|  - Scope: nodes 1/1 | samples 847                                          |
-|  - Stats: CPU 31% | RAM 28% | GPU util 96% | GPU mem 71% | GPU temp 68.4C  |
-|  - Why: CPU and RAM showed no system pressure.                             |
+|  - Scope: nodes 2/2 | samples 124                                          |
+|  - Stats: CPU med/worst 3%/3% n0 | RAM med/worst 4%/4% n1 | GPU util       |
+|  med/worst 74%/74% n0 | GPU temp med/worst 47.9C/47.9C n1                  |
+|  - Why: CPU, RAM, and GPU showed no system pressure.                       |
 |                                                                            |
 |  Process                                                                   |
-|  - Diagnosis: NORMAL                                                       |
-|  - Stats: global ranks 1 | CPU avg 29% | RSS peak 8.2 / 31.3 GB | GPU mem  |
-|  11.4 / 16.0 GB (71%)                                                      |
-|  - Why: Process CPU, RSS, and GPU memory showed no pressure.               |
+|  - Diagnosis: GPU MEMORY RESERVED OVERHANG                                 |
+|  - Stats: global ranks 4 | CPU avg 75% | RSS peak 1.3 / 540.7 GB | GPU     |
+|  reserved peak 1%                                                          |
+|  - Why: Reserved GPU memory was 1.70x active use.                          |
 |                                                                            |
 |  Step Time                                                                 |
-|  - Diagnosis: INPUT-BOUND                                                  |
-|  - Scope: last 128 aligned steps on global rank r0                         |
-|  - Stats: total 471.2ms | model 101.1ms | compute 94.8ms | wait 6.3ms |    |
-|  input 370.1ms                                                             |
-|  - Why: Input loading took a large share (370.1ms/471.2ms).                |
+|  - Diagnosis: INPUT STRAGGLER                                              |
+|  - Scope: compared over last 460 aligned steps across 4 global ranks       |
+|  - Stats: median/worst | total 303.7/303.7ms | model 299.9/300.0ms |       |
+|  compute 259.5/259.5ms | wait 40.5/40.5ms | input 3.8/254.5ms              |
+|  - Ranks: median/worst | total r3/r2 | model r2/r1 | compute r3/r1 | wait  |
+|  r2/r1 | input r2/r0                                                       |
+|  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
 |                                                                            |
 |  Step Memory                                                               |
 |  - Diagnosis: BALANCED                                                     |
-|  - Scope: last 128 aligned steps                                           |
-|  - Stats: peak reserved peak 11.4 GB                                       |
-|  - Why: Memory usage is stable.                                            |
+|  - Scope: last 460 aligned steps                                           |
+|  - Stats: peak reserved worst 192 MB on r0 | skew 0.0%                     |
+|  - Why: No clear pressure, imbalance, or creep signal.                     |
 +----------------------------------------------------------------------------+
 ```
 
@@ -123,17 +128,17 @@ The compact text report shows the verdict first, then the changed metrics:
 |  Delta: B - A                                                                        |
 |                                                                                      |
 |  Verdict: IMPROVEMENT                                                                |
-|  Why: Step time decreased by 71.9%.                                                  |
+|  Why: Step time decreased by 95.6%.                                                  |
 |                                                                                      |
 |  Step Time                                                                           |
 |  Metric                         A                B                Delta              |
-|  Step time diagnosis            INPUT-BOUND      BALANCED         changed            |
-|  Total step                     471.2 ms         132.4 ms         -338.8 ms (-71.9%) |
-|  Model step                     101.1 ms         101.1 ms         +0.0 ms (+0.0%)    |
-|  Compute                        94.8 ms          94.8 ms          +0.0 ms (+0.0%)    |
-|  Wait                           6.3 ms           6.3 ms           +0.0 ms (+0.0%)    |
-|  Wait share                     6.2%             6.2%             +0.0 pp            |
-|  Input                          370.1 ms         31.3 ms          -338.8 ms (-91.5%) |
+|  Step time diagnosis            INPUT STRAGGLER  BALANCED         changed            |
+|  Total step                     294.0 ms         13.0 ms          -280.9 ms (-95.6%) |
+|  Model step                     227.5 ms         10.3 ms          -217.2 ms (-95.5%) |
+|  Compute                        197.2 ms         8.6 ms           -188.6 ms (-95.6%) |
+|  Wait                           30.4 ms          1.7 ms           -28.6 ms (-94.3%)  |
+|  Wait share                     10.2%            16.1%            +5.9 pp            |
+|  Input                          66.4 ms          2.7 ms           -63.7 ms (-95.9%)  |
 +--------------------------------------------------------------------------------------+
 ```
 
@@ -276,8 +281,9 @@ See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md
 
 **Works today:**
 
-- Single GPU and single-node multi-GPU training
-- Multi-node DDP / FSDP summary reports
+- Single GPU training
+- Single-node multi-GPU DDP / FSDP training
+- Multi-node DDP summary reports
 - Step Time, Step Memory, System, and Process diagnostics
 - Run-to-run comparison from `final_summary.json`
 - Custom PyTorch loops, Hugging Face, and PyTorch Lightning
@@ -286,6 +292,7 @@ See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md
 
 - Ray Train integration
 - Slurm launch examples
+- Broader multi-node FSDP validation
 - Multi-node live CLI / dashboard
 - Explicit collective / NCCL timing
 
@@ -322,9 +329,9 @@ If TraceML helped you catch a slowdown, please open an issue and include:
 - the end-of-run summary
 - a minimal repro if possible
 
-GitHub issues: https://github.com/traceopt-ai/traceml/issues
+GitHub issues: [open an issue](https://github.com/traceopt-ai/traceml/issues)
 
-Email: support@traceopt.ai
+Email: [support@traceopt.ai](mailto:support@traceopt.ai)
 
 ---
 
