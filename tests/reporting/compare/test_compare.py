@@ -38,7 +38,7 @@ def _step_time_section(
     status: str = "BALANCED",
     reason: str = "No clear timing issue.",
     action: str = "Keep monitoring.",
-    step_avg_ms: float = 300.0,
+    total_step_ms: float = 300.0,
     wait_share_pct: float = 10.0,
     compute_share_pct: float = 90.0,
     dominant_phase: str = "backward",
@@ -51,7 +51,8 @@ def _step_time_section(
         "backward": 180.0,
         "optimizer": 36.0,
     }
-    wait_ms = step_avg_ms * wait_share_pct / 100.0
+    model_step_ms = max(0.0, total_step_ms - splits["dataloader"])
+    wait_ms = model_step_ms * wait_share_pct / 100.0
     return {
         "diagnosis": {
             "status": status,
@@ -60,7 +61,8 @@ def _step_time_section(
         },
         "global": {
             "average": {
-                "step_time_ms": step_avg_ms,
+                "total_step_ms": total_step_ms,
+                "model_step_ms": model_step_ms,
                 "dataloader_ms": splits["dataloader"],
                 "forward_ms": splits["forward"],
                 "backward_ms": splits["backward"],
@@ -71,6 +73,7 @@ def _step_time_section(
                     + splits["optimizer"]
                 ),
                 "wait_ms": wait_ms,
+                "wait_share_pct": wait_share_pct,
             }
         },
     }
@@ -149,7 +152,7 @@ def test_compare_missing_both_primary_sections_on_lhs_is_unclear() -> None:
             status="INPUT STRAGGLER",
             reason="r0 has excess dataloader burden.",
             action="Inspect dataloader imbalance.",
-            step_avg_ms=296.5,
+            total_step_ms=296.5,
             wait_share_pct=13.5,
         ),
         step_memory=_step_memory_section(
@@ -189,7 +192,7 @@ def test_compare_render_shows_unavailable_in_a_for_missing_numeric_fields() -> (
         step_time=_step_time_section(
             status="INPUT STRAGGLER",
             reason="r0 has excess dataloader burden (~86.6% of a typical local step).",
-            step_avg_ms=296.5,
+            total_step_ms=296.5,
             wait_share_pct=13.5,
         ),
         step_memory=_step_memory_section(
@@ -203,7 +206,7 @@ def test_compare_render_shows_unavailable_in_a_for_missing_numeric_fields() -> (
     text = build_compare_text(compare_payload)
 
     assert "Verdict: INCONCLUSIVE" in text
-    assert "Step avg" in text
+    assert "Total step" in text
     assert "n/a" in text
     assert "296.5 ms" in text
     assert "Peak reserved" in text
@@ -213,7 +216,7 @@ def test_compare_render_shows_unavailable_in_a_for_missing_numeric_fields() -> (
 def test_compare_text_formatter_matches_public_wrapper() -> None:
     lhs = _payload_with_sections()
     rhs = _payload_with_sections(
-        step_time=_step_time_section(step_avg_ms=330.0),
+        step_time=_step_time_section(total_step_ms=330.0),
     )
     compare_payload = _build_compare(lhs, rhs)
 
@@ -250,7 +253,8 @@ def test_compare_partial_step_time_stays_unclear() -> None:
             },
             "global": {
                 "average": {
-                    "step_time_ms": 300.0,
+                    "total_step_ms": 300.0,
+                    "model_step_ms": 276.0,
                     "dataloader_ms": 24.0,
                     "forward_ms": 60.0,
                     "backward_ms": 180.0,
@@ -266,7 +270,7 @@ def test_compare_partial_step_time_stays_unclear() -> None:
             status="WAIT-HEAVY",
             reason="WAIT dominates the traced step.",
             action="Inspect synchronization and host stalls.",
-            step_avg_ms=301.0,
+            total_step_ms=301.0,
             wait_share_pct=22.0,
         ),
         step_memory=_step_memory_section(),
@@ -296,7 +300,7 @@ def test_compare_fully_comparable_stable_runs_can_still_be_equivalent() -> (
     lhs = _payload_with_sections(
         step_time=_step_time_section(
             status="BALANCED",
-            step_avg_ms=300.0,
+            total_step_ms=300.0,
             wait_share_pct=10.0,
         ),
         step_memory=_step_memory_section(
@@ -309,7 +313,7 @@ def test_compare_fully_comparable_stable_runs_can_still_be_equivalent() -> (
     rhs = _payload_with_sections(
         step_time=_step_time_section(
             status="BALANCED",
-            step_avg_ms=301.0,
+            total_step_ms=301.0,
             wait_share_pct=10.1,
         ),
         step_memory=_step_memory_section(
@@ -340,7 +344,7 @@ def test_compare_one_comparable_domain_and_one_missing_domain_is_not_equivalent(
         include_step_memory=False,
         step_time=_step_time_section(
             status="BALANCED",
-            step_avg_ms=300.0,
+            total_step_ms=300.0,
             wait_share_pct=10.0,
         ),
     )
@@ -349,7 +353,7 @@ def test_compare_one_comparable_domain_and_one_missing_domain_is_not_equivalent(
         include_step_memory=True,
         step_time=_step_time_section(
             status="BALANCED",
-            step_avg_ms=300.5,
+            total_step_ms=300.5,
             wait_share_pct=10.2,
         ),
         step_memory=_step_memory_section(
@@ -374,7 +378,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     lhs = _payload_with_sections(
         step_time=_step_time_section(
             status="COMPUTE-BOUND",
-            step_avg_ms=621.1,
+            total_step_ms=621.1,
             wait_share_pct=1.4,
             split_ms={
                 "dataloader": 1.3,
@@ -392,7 +396,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     rhs = _payload_with_sections(
         step_time=_step_time_section(
             status="COMPUTE-BOUND",
-            step_avg_ms=735.2,
+            total_step_ms=735.2,
             wait_share_pct=1.6,
             split_ms={
                 "dataloader": 1.9,
@@ -419,18 +423,18 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
         "system",
     }
     assert (
-        compare_payload["sections"]["step_time"]["metrics"]["step_avg_ms"][
+        compare_payload["sections"]["step_time"]["metrics"]["total_step_ms"][
             "pct_change"
         ]
-        == compare_payload["sections"]["step_time"]["metrics"]["step_avg_ms"][
-            "pct_change"
-        ]
+        == compare_payload["sections"]["step_time"]["metrics"][
+            "total_step_ms"
+        ]["pct_change"]
     )
     assert compare_payload["verdict"]["status"] == "REGRESSION"
     assert compare_payload["verdict"]["primary_domain"] == "step_time"
     assert "Metric" in text
     assert "Step time diagnosis" in text
-    assert "Step avg" in text
+    assert "Total step" in text
     assert "621.1 ms" in text
     assert "735.2 ms" in text
     assert "+114.1 ms (+18.4%)" in text
@@ -440,13 +444,13 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
 
 def test_compare_verdict_uses_priority_for_mixed_primary_signals() -> None:
     lhs = _payload_with_sections(
-        step_time=_step_time_section(step_avg_ms=700.0),
+        step_time=_step_time_section(total_step_ms=700.0),
         step_memory=_step_memory_section(
             worst_peak_bytes=4.0 * 1024.0 * 1024.0 * 1024.0,
         ),
     )
     rhs = _payload_with_sections(
-        step_time=_step_time_section(step_avg_ms=600.0),
+        step_time=_step_time_section(total_step_ms=600.0),
         step_memory=_step_memory_section(
             worst_peak_bytes=6.0 * 1024.0 * 1024.0 * 1024.0,
         ),

@@ -53,6 +53,7 @@ def _summary_from_step_metrics(
     sum_bwd = 0.0
     sum_opt = 0.0
     sum_step_cpu = 0.0
+    sum_model_step = 0.0
     sum_total = 0.0
     n = 0
 
@@ -69,7 +70,9 @@ def _summary_from_step_metrics(
         sum_bwd += backward
         sum_opt += optimizer
         sum_step_cpu += max(0.0, step_time)
-        sum_total += dataloader + max(step_time, compute)
+        model_step = max(step_time, compute)
+        sum_model_step += model_step
+        sum_total += dataloader + model_step
         n += 1
 
     if n == 0:
@@ -82,6 +85,7 @@ def _summary_from_step_metrics(
         avg_backward_ms=sum_bwd / n,
         avg_optimizer_ms=sum_opt / n,
         avg_step_cpu_ms=sum_step_cpu / n,
+        avg_model_step_ms=sum_model_step / n,
         avg_gpu_compute_ms=(sum_fwd + sum_bwd + sum_opt) / n,
         avg_total_step_ms=sum_total / n,
     )

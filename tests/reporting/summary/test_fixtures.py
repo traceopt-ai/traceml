@@ -643,7 +643,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     assert process["metadata"]["global_ranks_seen"] == 1
     assert step_time["metadata"]["mode"] == "single_node"
     assert step_time["metadata"]["global_ranks_seen"] == 1
-    assert step_time["global"]["median"]["step_time_ms"]["value"] == 11.0
+    assert step_time["global"]["median"]["total_step_ms"]["value"] == 11.0
     assert step_time["units"] == {"time": "ms"}
     assert step_memory["metadata"]["global_ranks_seen"] == 1
     assert step_memory["metadata"]["global_ranks_used"] == 1

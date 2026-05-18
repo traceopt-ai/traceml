@@ -107,9 +107,11 @@ def _rows_for_section(
 ) -> list[tuple[str, str, str, str]]:
     metric_order = {
         "step_time": (
-            "step_avg_ms",
+            "total_step_ms",
+            "model_step_ms",
             "compute_ms",
             "wait_ms",
+            "wait_share_pct",
             "input_ms",
         ),
         "step_memory": (

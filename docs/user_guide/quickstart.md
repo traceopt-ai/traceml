@@ -319,11 +319,12 @@ Typical next steps:
 
 ### `WAIT-HEAVY`
 
-A meaningful part of the step is going into waiting rather than useful work.
+A meaningful part of the step is not attributed to dataloader, forward,
+backward, or optimizer work.
 
 Typical next steps:
 
-- inspect synchronization points
+- inspect validation, checkpointing, logging, or framework work around the step
 - check CPU stalls
 - check uneven rank progress
 - compare wait share against input and compute shares

@@ -204,7 +204,7 @@ traceml compare before/final_summary.json after/final_summary.json
 |--------|--------------|
 | Input-bound | Dataloader is the bottleneck — GPU is waiting on data |
 | Compute-bound | GPU is saturated — expected in a healthy run |
-| Wait-heavy | Unattributed time between phases — possible sync or stall |
+| Wait-heavy | Unattributed step time outside the traced phases |
 | Rank imbalance | One rank consistently slower — straggler or uneven data |
 | Memory creep | Peak allocation growing step-over-step |
 | High pressure | Memory near capacity — risk of OOM |

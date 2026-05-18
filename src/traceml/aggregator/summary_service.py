@@ -20,8 +20,8 @@ from traceml.sdk.protocol import (
     load_json_or_none,
     response_to_json,
     utc_now_iso,
-    write_json_atomic,
 )
+from traceml.utils.atomic_io import write_json_atomic
 
 
 class FinalSummaryService:

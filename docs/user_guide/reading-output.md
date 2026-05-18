@@ -270,20 +270,23 @@ What to do next:
 
 Meaning:
 
-- a meaningful part of the typical step is going into wait / overhead instead of useful model work
+- a meaningful part of the typical step is not attributed to dataloader,
+  forward, backward, or optimizer work
 
 In TraceML:
 
-- `WAIT* = step_time - (forward + backward + optimizer_step)`
+- `model_step = max(cpu_step_timer, forward + backward + optimizer)`
+- `WAIT* = model_step - forward - backward - optimizer`
 
-This is a proxy, not a direct collective-wait measurement.
+This is residual unattributed time inside the traced step, not direct
+collective, NCCL, or all-reduce timing.
 
 Common causes:
 
-- synchronization delays
-- uneven progress across ranks
+- validation or evaluation inside the measured loop
+- checkpointing or logging work
+- framework orchestration outside the traced phases
 - CPU stalls
-- host-side delays
 - transfer / orchestration overhead
 
 What to look at:
@@ -294,9 +297,9 @@ What to look at:
 
 What to do next:
 
-- inspect sync points
+- inspect work happening around the traced training step
 - inspect rank imbalance
-- inspect CPU-side delays and transfer paths
+- inspect CPU-side delays, logging, checkpointing, validation, and transfer paths
 
 ---
 
@@ -349,7 +352,7 @@ Important rows:
 
 ### `WAIT Share (%)`
 
-- how much of the typical step is going into wait / overhead
+- how much of the typical step is unattributed to dataloader or traced model phases
 
 A good reading pattern is:
 
@@ -638,7 +641,7 @@ Use these as context cards:
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `STRAGGLER` | inspect both input and compute unevenness |
-| `WAIT-HEAVY` | inspect sync points and uneven progress |
+| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and transfer paths |
 | `MEMORY CREEP (EARLY)` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |

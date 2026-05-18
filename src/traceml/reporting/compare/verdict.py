@@ -80,7 +80,7 @@ def _metric_has_both(metric: Dict[str, Any]) -> bool:
 
 
 def _primary_availability(context: CompareVerdictContext) -> str:
-    step = _metric_has_both(context.metric("step_time", "step_avg_ms"))
+    step = _metric_has_both(context.metric("step_time", "total_step_ms"))
     memory = _metric_has_both(
         context.metric("step_memory", "peak_reserved_bytes")
     )
@@ -121,7 +121,9 @@ class MissingPrimarySignalsRule:
         state = _primary_availability(context)
         if state != "insufficient":
             return None
-        step_state = _metric_state(context.metric("step_time", "step_avg_ms"))
+        step_state = _metric_state(
+            context.metric("step_time", "total_step_ms")
+        )
         memory_state = _metric_state(
             context.metric("step_memory", "peak_reserved_bytes")
         )
@@ -188,7 +190,7 @@ class MixedPrimarySignalsRule:
         self,
         context: CompareVerdictContext,
     ) -> Optional[CompareFinding]:
-        step = _signed_pct(context.metric("step_time", "step_avg_ms"))
+        step = _signed_pct(context.metric("step_time", "total_step_ms"))
         memory = _signed_pct(
             context.metric("step_memory", "peak_reserved_bytes")
         )
@@ -222,7 +224,7 @@ class StepTimeRegressionRule:
         self,
         context: CompareVerdictContext,
     ) -> Optional[CompareFinding]:
-        metric = context.metric("step_time", "step_avg_ms")
+        metric = context.metric("step_time", "total_step_ms")
         pct = _signed_pct(metric)
         if pct is None or pct < context.policy.step_avg_pct_moderate:
             return None
@@ -231,7 +233,7 @@ class StepTimeRegressionRule:
             severity="warning",
             priority=VerdictPriority.STEP_TIME_REGRESSION,
             domain="step_time",
-            metric="step_avg_ms",
+            metric="total_step_ms",
             why=f"Step time increased by {pct:.1f}%.",
         )
 
@@ -241,7 +243,7 @@ class StepTimeImprovementRule:
         self,
         context: CompareVerdictContext,
     ) -> Optional[CompareFinding]:
-        metric = context.metric("step_time", "step_avg_ms")
+        metric = context.metric("step_time", "total_step_ms")
         pct = _signed_pct(metric)
         if pct is None or pct > -context.policy.step_avg_pct_moderate:
             return None
@@ -250,7 +252,7 @@ class StepTimeImprovementRule:
             severity="info",
             priority=VerdictPriority.STEP_TIME_IMPROVEMENT,
             domain="step_time",
-            metric="step_avg_ms",
+            metric="total_step_ms",
             why=f"Step time decreased by {abs(pct):.1f}%.",
         )
 
@@ -429,7 +431,9 @@ def build_compare_verdict(
             "reason": primary.why if state != "comparable" else None,
         },
         "step_time": {
-            "state": _metric_state(context.metric("step_time", "step_avg_ms"))
+            "state": _metric_state(
+                context.metric("step_time", "total_step_ms")
+            )
         },
         "step_memory": {
             "state": _metric_state(

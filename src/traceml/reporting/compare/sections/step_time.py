@@ -36,12 +36,20 @@ class StepTimeComparer:
             available=section_available(lhs, rhs),
             diagnosis=section_diagnosis(lhs, rhs),
             metrics={
-                "step_avg_ms": numeric_metric(
-                    key="step_avg_ms",
-                    label="Step avg",
+                "total_step_ms": numeric_metric(
+                    key="total_step_ms",
+                    label="Total step",
                     unit="ms",
-                    lhs=self._value(lhs, "step_time_ms"),
-                    rhs=self._value(rhs, "step_time_ms"),
+                    lhs=self._value(lhs, "total_step_ms"),
+                    rhs=self._value(rhs, "total_step_ms"),
+                    direction="higher_is_worse",
+                ),
+                "model_step_ms": numeric_metric(
+                    key="model_step_ms",
+                    label="Model step",
+                    unit="ms",
+                    lhs=self._value(lhs, "model_step_ms"),
+                    rhs=self._value(rhs, "model_step_ms"),
                     direction="higher_is_worse",
                 ),
                 "compute_ms": numeric_metric(
@@ -90,11 +98,19 @@ class StepTimeComparer:
         return global_average(section, key)
 
     def _wait_share_pct(self, section: Any) -> Any:
-        step_ms = as_float(self._value(section, "step_time_ms"))
+        explicit = as_float(self._value(section, "wait_share_pct"))
+        if explicit is not None:
+            return explicit
+
+        model_step_ms = as_float(self._value(section, "model_step_ms"))
         wait_ms = as_float(self._value(section, "wait_ms"))
-        if step_ms is None or wait_ms is None or abs(step_ms) <= 1e-12:
+        if (
+            model_step_ms is None
+            or wait_ms is None
+            or abs(model_step_ms) <= 1e-12
+        ):
             return None
-        return 100.0 * wait_ms / step_ms
+        return 100.0 * wait_ms / model_step_ms
 
     def _dominant_phase(self, section: Any) -> Any:
         phases = {

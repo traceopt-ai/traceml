@@ -34,9 +34,8 @@ from traceml.sdk.protocol import (
     get_final_summary_json_path,
     get_final_summary_txt_path,
     utc_now_iso,
-    write_json_atomic,
-    write_text_atomic,
 )
+from traceml.utils.atomic_io import write_json_atomic, write_text_atomic
 
 SUMMARY_WIDTH = 78
 SUMMARY_INNER_TEXT_WIDTH = SUMMARY_WIDTH - 4

@@ -504,7 +504,10 @@ def build_step_diagnosis_result(
             worst_rank=(
                 None if context.single_rank else context.overall_worst_rank
             ),
-            note="WAIT* = step_time - (forward + backward + optimizer_step).",
+            note=(
+                "WAIT* = model_step - "
+                "(forward + backward + optimizer_step)."
+            ),
         )
     elif primary_issue is not None and primary_issue.kind == "COMPUTE_BOUND":
         primary = _mk_diag(

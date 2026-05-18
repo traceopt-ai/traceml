@@ -18,13 +18,15 @@ from traceml.reporting.summaries.summary_formatting import safe_float
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
-    "step_time_ms",
+    "total_step_ms",
+    "model_step_ms",
     "dataloader_ms",
     "forward_ms",
     "backward_ms",
     "optimizer_ms",
     "compute_ms",
     "wait_ms",
+    "wait_share_pct",
 ]
 
 
@@ -115,6 +117,7 @@ class RankStepSummary:
     avg_backward_ms: float
     avg_optimizer_ms: float
     avg_step_cpu_ms: float
+    avg_model_step_ms: float
     avg_gpu_compute_ms: float
     avg_total_step_ms: float
 
@@ -219,6 +222,7 @@ def build_rank_summary(
     sum_bwd = 0.0
     sum_opt = 0.0
     sum_step_cpu = 0.0
+    sum_model_step = 0.0
     sum_total = 0.0
     n = 0
 
@@ -255,6 +259,7 @@ def build_rank_summary(
         sum_bwd += bwd
         sum_opt += opt
         sum_step_cpu += step_cpu
+        sum_model_step += step_effective
         sum_total += total_step
         n += 1
 
@@ -268,6 +273,7 @@ def build_rank_summary(
         avg_backward_ms=sum_bwd / n,
         avg_optimizer_ms=sum_opt / n,
         avg_step_cpu_ms=sum_step_cpu / n,
+        avg_model_step_ms=sum_model_step / n,
         avg_gpu_compute_ms=(sum_fwd + sum_bwd + sum_opt) / n,
         avg_total_step_ms=sum_total / n,
     )
@@ -279,18 +285,29 @@ def compute_wait_avg_ms(s: RankStepSummary) -> float:
     Return average wait proxy for one rank summary.
 
     Wait is derived from:
-        total_step - (dataloader + forward + backward + optimizer)
+        model_step - (forward + backward + optimizer)
+
+    `model_step` is the effective traced step duration:
+    max(cpu step timer, forward + backward + optimizer). Dataloader time is
+    reported separately and is not part of WAIT*.
     """
     return max(
         0.0,
-        finite_float(s.avg_total_step_ms)
+        finite_float(s.avg_model_step_ms)
         - (
-            finite_float(s.avg_dataloader_ms)
-            + finite_float(s.avg_forward_ms)
+            finite_float(s.avg_forward_ms)
             + finite_float(s.avg_backward_ms)
             + finite_float(s.avg_optimizer_ms)
         ),
     )
+
+
+def compute_wait_share_pct(s: RankStepSummary) -> float:
+    """Return WAIT* as a percentage of the effective traced step."""
+    model_step_ms = finite_float(s.avg_model_step_ms)
+    if model_step_ms <= 0.0:
+        return 0.0
+    return 100.0 * compute_wait_avg_ms(s) / model_step_ms
 
 
 def _rank_metric_values(
@@ -298,8 +315,12 @@ def _rank_metric_values(
 ) -> Dict[str, Dict[int, float]]:
     """Return global-rank values for each Step Time metric."""
     return {
-        "step_time_ms": {
+        "total_step_ms": {
             int(rank): finite_float(summary.avg_total_step_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "model_step_ms": {
+            int(rank): finite_float(summary.avg_model_step_ms)
             for rank, summary in per_global_rank_summary.items()
         },
         "dataloader_ms": {
@@ -326,19 +347,25 @@ def _rank_metric_values(
             int(rank): compute_wait_avg_ms(summary)
             for rank, summary in per_global_rank_summary.items()
         },
+        "wait_share_pct": {
+            int(rank): compute_wait_share_pct(summary)
+            for rank, summary in per_global_rank_summary.items()
+        },
     }
 
 
 def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
     """Return public row metrics for one global-rank step-time summary."""
     return {
-        "step_time_ms": finite_float(summary.avg_total_step_ms),
+        "total_step_ms": finite_float(summary.avg_total_step_ms),
+        "model_step_ms": finite_float(summary.avg_model_step_ms),
         "dataloader_ms": finite_float(summary.avg_dataloader_ms),
         "forward_ms": finite_float(summary.avg_forward_ms),
         "backward_ms": finite_float(summary.avg_backward_ms),
         "optimizer_ms": finite_float(summary.avg_optimizer_ms),
         "compute_ms": finite_float(summary.avg_gpu_compute_ms),
         "wait_ms": compute_wait_avg_ms(summary),
+        "wait_share_pct": compute_wait_share_pct(summary),
     }
 
 
@@ -495,6 +522,7 @@ __all__ = [
     "build_rank_summary",
     "closest_rank_to_median",
     "compute_wait_avg_ms",
+    "compute_wait_share_pct",
     "finite_float",
     "summary_metric_values",
     "to_rank_signals",
