@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 import os
@@ -8,8 +14,8 @@ import psutil
 import torch
 import torch.distributed as dist
 
+from traceml.runtime.identity import RuntimeIdentity, resolve_runtime_identity
 from traceml.samplers.base_sampler import BaseSampler
-from traceml.samplers.runtime_context import resolve_runtime_context
 from traceml.samplers.schema.process import ProcessGPUMetrics, ProcessSample
 
 
@@ -46,7 +52,7 @@ class ProcessSampler(BaseSampler):
         self._init_process()
         self._init_ram()
         self._warmup_cpu()
-        self._init_ddp_context()
+        self._init_runtime_identity()
         self._init_gpu_state()
 
     def _init_process(self) -> None:
@@ -89,23 +95,23 @@ class ProcessSampler(BaseSampler):
             )
             self.cpu_count = 0
 
-    def _init_ddp_context(self) -> None:
+    def _init_runtime_identity(self) -> None:
         """
-        Detect whether the current process was launched as part of a
-        multi-process run.
+        Resolve distributed identity without touching CUDA.
 
-        We do not rely on `dist.is_initialized()` here because distributed
-        initialization may not have completed yet.
+        Process telemetry is process-level, so ``global_rank`` is the stable
+        process identity. CUDA devices are node-local, so GPU sampling still
+        uses ``local_rank`` when selecting the device.
         """
-        ctx = resolve_runtime_context()
+        identity: RuntimeIdentity = resolve_runtime_identity()
 
-        self.local_rank = ctx.local_rank
-        self.world_size = ctx.world_size
-        self.rank = ctx.rank
-        self.is_ddp_intended = ctx.is_ddp_intended
-
-        if self.is_ddp_intended and self.local_rank == -1:
-            self.local_rank = 0
+        self.identity = identity
+        self.global_rank = identity.global_rank
+        self.local_rank = identity.local_rank
+        self.node_rank = identity.node_rank
+        self.world_size = identity.world_size
+        self.local_world_size = identity.local_world_size
+        self.is_distributed = identity.is_distributed
 
     def _init_gpu_state(self) -> None:
         """
@@ -145,7 +151,7 @@ class ProcessSampler(BaseSampler):
         """
         Return True if safe to call torch.cuda.* in this process.
         """
-        if not self.is_ddp_intended:
+        if not self.is_distributed:
             return True
         if not dist.is_available():
             return False
@@ -158,11 +164,7 @@ class ProcessSampler(BaseSampler):
         if self.device_index is not None:
             return
 
-        device_index = (
-            self.local_rank
-            if self.is_ddp_intended and self.local_rank != -1
-            else 0
-        )
+        device_index = self.local_rank if self.is_distributed else 0
 
         torch.cuda.set_device(device_index)
         self.device_index = device_index

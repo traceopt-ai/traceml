@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Shared utility helpers for TraceML samplers.
 
@@ -7,13 +13,12 @@ contain sampler-specific aggregation logic.
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from collections import deque
 from pathlib import Path
 from queue import Empty
 from typing import Any
+
+from traceml.runtime.session import rank_dir_name
 
 
 def drain_queue_nowait(queue_obj: Any, *, skip_none: bool = True) -> list[Any]:
@@ -57,34 +62,6 @@ def append_queue_nowait_to_deque(
         target.append(item)
 
 
-def write_json_atomic(
-    path: Path | str,
-    payload: dict[str, Any],
-    *,
-    sort_keys: bool = False,
-) -> None:
-    """
-    Atomically write JSON to disk to avoid partial files being observed.
-    """
-    path = Path(path).resolve()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=str(path.parent),
-        delete=False,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-    ) as tmp:
-        json.dump(payload, tmp, indent=2, sort_keys=sort_keys)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp_path = Path(tmp.name)
-
-    os.replace(tmp_path, path)
-
-
 def ensure_session_dir(
     *,
     logs_dir: Path | str,
@@ -93,9 +70,12 @@ def ensure_session_dir(
 ) -> Path:
     """
     Return a session directory path and ensure it exists.
+
+    ``rank`` is the global distributed rank. It is used only for process-owned
+    files, where local rank would collide across nodes.
     """
     root = Path(logs_dir).resolve() / session_id
     if rank is not None:
-        root = root / str(rank)
+        root = root / rank_dir_name(rank)
     root.mkdir(parents=True, exist_ok=True)
     return root

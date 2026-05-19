@@ -1,16 +1,16 @@
 """
 Public TraceML package surface.
 
-This module intentionally keeps import-time work minimal so lightweight entry
-points such as `traceml.cli` do not pull in optional training dependencies
-like PyTorch unless the user actually accesses the instrumentation API.
+This module intentionally keeps import-time work minimal so launcher entry
+points do not pull in optional training dependencies like PyTorch unless the
+user actually accesses the instrumentation API.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.2.14"
+__version__ = "0.2.15"
 
 __all__ = [
     "__version__",

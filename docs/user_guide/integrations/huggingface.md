@@ -69,6 +69,9 @@ Or open the local UI:
 traceml run fine_tune.py --mode=dashboard
 ```
 
+Dashboard mode is intended for single-node runs, including single-node
+multi-GPU.
+
 ---
 
 ## What TraceML will show
@@ -121,51 +124,36 @@ This is optional. TraceML does not require you to replace your existing logger s
 
 `TraceMLTrainer` inherits DDP support from Hugging Face `Trainer`.
 
-Launch with:
+For a single-node run, launch with:
 
 ```bash
 traceml run fine_tune.py --nproc-per-node=4
 ```
 
-In single-node DDP, TraceML can help surface:
+For a multi-node summary run, use the same `--session-id`, `--nnodes`,
+`--nproc-per-node`, and `--master-addr` on every node, changing only
+`--node-rank`:
+
+```bash
+traceml run fine_tune.py \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+Run the same command on each node, changing only `--node-rank`.
+
+TraceML can help surface:
 
 - rank imbalance
 - input stragglers
 - compute stragglers
 - memory skew
 
-> Single-node only for now. Multi-node is not yet supported.
-
----
-
-## Optional: deeper layer-level signals
-
-Use this only for short diagnostic runs when step-level diagnosis already told you where to dig.
-
-Pass `traceml_kwargs` to enable deeper layer-level hooks:
-
-```python
-trainer = TraceMLTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    traceml_enabled=True,
-    traceml_kwargs={
-        "sample_layer_memory": True,
-        "trace_layer_forward_memory": True,
-        "trace_layer_forward_time": True,
-        "trace_layer_backward_time": True,
-    },
-)
-```
-
-Use this when you want:
-
-- per-layer timing
-- per-layer memory detail
-- short diagnostic follow-up runs
-
-Hooks add overhead, so keep them off for normal runs unless you need them.
+> Multi-node runs currently produce end-of-run summary reports. Live CLI and
+> dashboard views are intended for single-node runs.
 
 ---
 
@@ -373,6 +361,9 @@ If terminal output gets noisy, use:
 traceml run fine_tune.py --mode=dashboard
 ```
 
+Dashboard mode is intended for single-node runs. For multi-node runs, use the
+default final summary path.
+
 ### Multi-GPU run only shows one rank
 
 Make sure you launch through TraceML, not plain `python`:
@@ -399,9 +390,6 @@ This launches your script natively through `torchrun` without TraceML telemetry.
 
 - everything that normal `transformers.Trainer` accepts
 - `traceml_enabled=True|False`
-- optional `traceml_kwargs={...}` for deeper hook-based signals
-
-Each key in `traceml_kwargs` maps to an option on `trace_model_instance(...)`.
 
 ---
 

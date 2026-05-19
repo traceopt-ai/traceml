@@ -13,9 +13,11 @@ implementation is split into:
 
 from .api import (
     StepMemoryDiagnosis,
+    StepMemoryDiagnosisInput,
     StepMemoryDiagnosisKind,
     build_step_memory_diagnosis,
     build_step_memory_summary_diagnosis_result,
+    diagnose_step_memory_summary,
 )
 from .policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
@@ -33,6 +35,8 @@ __all__ = [
     "SUMMARY_STEP_MEMORY_POLICY",
     "DEFAULT_STEP_MEMORY_THRESHOLDS",
     "StepMemoryDiagnosis",
+    "StepMemoryDiagnosisInput",
     "build_step_memory_diagnosis",
     "build_step_memory_summary_diagnosis_result",
+    "diagnose_step_memory_summary",
 ]

@@ -9,6 +9,7 @@ and publishes a small response file for the requesting process to read.
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.reporting.final import generate_summary
 from traceml.sdk.protocol import (
     FinalSummaryResponse,
@@ -19,8 +20,8 @@ from traceml.sdk.protocol import (
     load_json_or_none,
     response_to_json,
     utc_now_iso,
-    write_json_atomic,
 )
+from traceml.utils.atomic_io import write_json_atomic
 
 
 class FinalSummaryService:
@@ -34,11 +35,13 @@ class FinalSummaryService:
         session_root: Path,
         db_path: str,
         flush_history: Callable[[float], bool],
+        summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
     ) -> None:
         self._logger = logger
         self._session_root = Path(session_root).resolve()
         self._db_path = str(db_path)
         self._flush_history = flush_history
+        self._summary_window_rows = int(summary_window_rows)
         self._last_request_id: Optional[str] = None
 
     def poll(self) -> None:
@@ -73,6 +76,7 @@ class FinalSummaryService:
                 self._db_path,
                 session_root=str(self._session_root),
                 print_to_stdout=False,
+                summary_window_rows=self._summary_window_rows,
             )
 
             response = FinalSummaryResponse(

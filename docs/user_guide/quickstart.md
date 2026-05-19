@@ -40,7 +40,7 @@ TraceML works best with PyTorch training scripts that already run successfully o
 
 ## Pick your stack
 
-Three minimal paths to a first TraceML run, depending on how your training code is structured. Pick the tab that matches your setup — each shows install + the single change + the run command. Deeper details for each stack live in their integration pages.
+Three minimal paths to a first TraceML run, depending on how your training code is structured. Pick the tab that matches your setup — each shows install + the single change + the run command. Full details for each stack live in their integration pages.
 
 === "Plain PyTorch"
 
@@ -99,7 +99,7 @@ Three minimal paths to a first TraceML run, depending on how your training code 
     ```
 
     !!! note
-        For full HF details, multi-GPU DDP, and deeper layer signals, see the [Hugging Face integration](integrations/huggingface.md).
+        For full HF details and multi-GPU DDP, see the [Hugging Face integration](integrations/huggingface.md).
 
 === "Lightning"
 
@@ -149,7 +149,6 @@ You should see commands such as:
 
 - `watch`
 - `run`
-- `deep`
 - `compare`
 
 ### Optional extras
@@ -258,11 +257,12 @@ are comfortable with the default `auto` path.
 traceml run train.py
 ```
 
-This is the default TraceML workflow and the best place to start.
+This is the default TraceML workflow and the best place to start. By default,
+TraceML runs in summary mode.
 
-During training, TraceML opens a live terminal view alongside your logs.
-
-At the end of the run, it prints a compact summary you can review or share.
+During training, TraceML stays quiet. At the end of the run, it prints a
+compact summary you can review or share and writes `final_summary.json` plus
+`final_summary.txt` under the session log directory.
 
 ---
 
@@ -291,10 +291,10 @@ Model compute dominates the step.
 
 Typical next steps:
 
-- reduce model step cost
+- reduce compute cost
 - tune batch size, precision, or kernels
 - inspect forward, backward, or optimizer cost
-- use a deeper profiler only after identifying the hot path
+- use an operator-level profiler only after identifying the hot path
 
 ### `INPUT STRAGGLER`
 
@@ -319,14 +319,15 @@ Typical next steps:
 
 ### `WAIT-HEAVY`
 
-A meaningful part of the step is going into waiting rather than useful work.
+A meaningful part of the step is not attributed to dataloader, forward,
+backward, or optimizer work.
 
 Typical next steps:
 
-- inspect synchronization points
+- inspect validation, checkpointing, logging, or framework work around the step
 - check CPU stalls
 - check uneven rank progress
-- compare wait share against input and compute shares
+- compare wait time against input and compute time
 
 ### `MEMORY CREEP`
 
@@ -343,8 +344,9 @@ Typical next steps:
 
 ## 5) Optional: structured final summary
 
-If you want a low-noise run and a structured end-of-run payload for W&B or
-MLflow, launch in summary mode:
+`traceml run` uses summary mode by default. If you want to make that explicit
+for a low-noise run and a structured end-of-run payload for W&B or MLflow,
+launch with:
 
 ```bash
 traceml run train.py --mode=summary
@@ -369,6 +371,9 @@ TraceML also writes canonical end-of-run summary artifacts, including:
 `final_summary.json` is the canonical machine-readable TraceML summary artifact
 and the intended input for downstream logging and run comparison.
 
+For long runs, use `--summary-window-rows N` to control how much recent
+per-node/per-rank history is used for the final summary.
+
 ---
 
 ## 6) Optional: compare two runs
@@ -391,7 +396,7 @@ Use compare when you want to answer questions like:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did wait share increase?
+- did wait time increase?
 - did memory behavior get worse?
 
 See [Compare Runs](compare.md).
@@ -406,6 +411,9 @@ If you want a richer view, run:
 traceml run train.py --mode=dashboard
 ```
 
+Live dashboard mode is intended for single-node runs, including single-node
+multi-GPU.
+
 The local UI runs at:
 
 ```text
@@ -418,7 +426,15 @@ Use the local UI when you want:
 - an easier browser-based layout
 - local comparison of runs
 
-If you just want the fastest path, stay with the default CLI mode.
+For live terminal feedback instead, use:
+
+```bash
+traceml run train.py --mode=cli
+```
+
+Live terminal mode is also intended for single-node runs.
+
+If you just want the fastest path, stay with the default summary mode.
 
 ---
 
@@ -437,26 +453,13 @@ Use this when you want:
 
 `watch` is lighter-weight than `run`, but it does not provide the same step-aware diagnosis.
 
-### `traceml deep`
+## 9) Distributed DDP
 
-```bash
-traceml deep train.py
-```
-
-Use this only for short diagnostic runs when you need deeper per-layer signals.
-
-`deep` is more expensive than `run` and is best used after TraceML already showed you where to dig.
-
----
-
-## 9) Single-node DDP
-
-TraceML supports single-node multi-GPU DDP.
+TraceML supports single-node multi-GPU DDP and multi-node DDP summary reports.
+For multi-node jobs, use summary mode for the final distributed report. Live
+CLI and dashboard views are currently intended for single-node runs.
 
 Keep `traceml.trace_step(...)` inside the training loop.
-
-If you also enable model hooks, call `traceml.trace_model_instance(model)`
-before wrapping the model in `DistributedDataParallel`.
 
 ### Minimal DDP example
 
@@ -536,42 +539,66 @@ Launch with:
 traceml run train.py --nproc-per-node=4
 ```
 
-> Scope: multi-node distributed training is not yet supported.
+For a multi-node run, launch the same script on every node with a shared
+session id and the same torchrun rendezvous address.
+
+On node 0:
+
+```bash
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+On node 1:
+
+```bash
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=1 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+Node 0 starts the TraceML aggregator. Other nodes connect to
+`<node0-ip>:29765` by default. If workers need a different reachable address
+or port for TraceML telemetry, add `--aggregator-host=<host>` or
+`--aggregator-port=<port>` on every node. Node 0 binds the aggregator to
+`0.0.0.0` by default for multi-node runs; override that only when needed with
+`--aggregator-bind-host=<bind-host>`.
 
 ---
 
-## 10) Optional model hooks
+## 10) Deep/layer profiling status
 
-If you want per-layer timing and memory signals, you can attach model hooks.
-
-```python
-import traceml
-
-traceml.trace_model_instance(model)
-```
-
-Use this together with `traceml.trace_step(model)`.
-
-Launch `deep` mode when you want a short diagnostic run with deeper layer-level signals:
+Deep/layer profiling has been removed from the public CLI for now. Start with
+the default summary path:
 
 ```bash
-traceml deep train.py
+traceml run train.py
 ```
 
-Use model hooks only when:
-
-- you already know the step is slow
-- you want more detail about where inside the model the time or memory is going
-- you are okay with some extra overhead for diagnosis
+If TraceML shows you need lower-level detail, use PyTorch Profiler, Nsight, or
+another operator-level profiler for that follow-up.
 
 ---
 
 ## 11) Common launch patterns
 
-Standard CLI:
+Default summary run:
 
 ```bash
 traceml run train.py
+```
+
+Live terminal view:
+
+```bash
+traceml run train.py --mode=cli
 ```
 
 Local UI:
@@ -580,7 +607,21 @@ Local UI:
 traceml run train.py --mode=dashboard
 ```
 
-Summary-only run:
+Summary-only distributed run:
+
+```bash
+traceml run train.py \
+  --mode=summary \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+Run the same command on each node, changing only `--node-rank`.
+
+Explicit summary mode:
 
 ```bash
 traceml run train.py --mode=summary
@@ -642,8 +683,8 @@ If your own logger, progress bar, or framework output is fighting with the Trace
 
 - disable `tqdm`
 - reduce extra terminal logging
-- try `--mode=dashboard` for browser-based viewing
-- try `--mode=summary` if you only want the final summary artifact and output
+- use the default summary mode if you only want final artifacts
+- try `--mode=dashboard` for browser-based viewing on a single-node run
 
 ### I want the fastest path
 
@@ -668,6 +709,6 @@ If TraceML helped you find a slowdown, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
 - single GPU or multi-GPU
-- whether you used `run`, `watch`, or `deep`
+- whether you used `run` or `watch`
 - the end-of-run summary
 - a minimal repro if possible

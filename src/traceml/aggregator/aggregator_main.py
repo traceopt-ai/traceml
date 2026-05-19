@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 TraceML aggregator process entrypoint.
 
@@ -30,7 +36,11 @@ from typing import Any, Optional
 
 from traceml.aggregator.trace_aggregator import TraceMLAggregator
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
-from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml.runtime.settings import (
+    AggregatorTransportSettings,
+    TraceMLSettings,
+)
 
 AGGREGATOR_ERROR_LOG_NAME = "aggregator_error.log"
 
@@ -104,14 +114,29 @@ def read_traceml_env() -> dict[str, Any]:
         "num_display_layers": int(
             os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
         ),
-        "tcp_host": os.environ.get("TRACEML_TCP_HOST", "127.0.0.1"),
-        "tcp_port": int(os.environ.get("TRACEML_TCP_PORT", "29765")),
+        "aggregator_host": os.environ.get(
+            "TRACEML_AGGREGATOR_HOST",
+            "127.0.0.1",
+        ),
+        "aggregator_bind_host": os.environ.get(
+            "TRACEML_AGGREGATOR_BIND_HOST",
+            "127.0.0.1",
+        ),
+        "aggregator_port": int(
+            os.environ.get("TRACEML_AGGREGATOR_PORT", "29765")
+        ),
         "remote_max_rows": int(
             os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
         "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
         == "1",
+        "summary_window_rows": int(
+            os.environ.get(
+                "TRACEML_SUMMARY_WINDOW_ROWS",
+                str(DEFAULT_SUMMARY_WINDOW_ROWS),
+            )
+        ),
     }
 
 
@@ -170,9 +195,11 @@ def main() -> None:
             remote_max_rows=int(cfg["remote_max_rows"]),
             session_id=session_id,
             history_enabled=bool(cfg["history_enabled"]),
-            tcp=TraceMLTCPSettings(
-                host=str(cfg["tcp_host"]),
-                port=int(cfg["tcp_port"]),
+            summary_window_rows=int(cfg["summary_window_rows"]),
+            aggregator=AggregatorTransportSettings(
+                connect_host=str(cfg["aggregator_host"]),
+                bind_host=str(cfg["aggregator_bind_host"]),
+                port=int(cfg["aggregator_port"]),
             ),
             db_path=str(db_path),
         )

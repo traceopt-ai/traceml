@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Execute a user script inside the TraceML runtime."""
 
 import os
@@ -8,18 +14,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml.runtime.launch_context import (
     LaunchContext,
     script_execution_context,
 )
 from traceml.runtime.runtime import TraceMLRuntime
-from traceml.runtime.settings import TraceMLSettings, TraceMLTCPSettings
+from traceml.runtime.settings import (
+    AggregatorTransportSettings,
+    TraceMLSettings,
+)
 from traceml.utils.shared_utils import EXECUTION_LAYER
 
 INTERRUPTED_EXIT_CODE = 130
 DEFAULT_LOGS_DIR = "./logs"
-DEFAULT_TCP_HOST = "127.0.0.1"
-DEFAULT_TCP_PORT = 29765
+DEFAULT_AGGREGATOR_HOST = "127.0.0.1"
+DEFAULT_AGGREGATOR_BIND_HOST = "127.0.0.1"
+DEFAULT_AGGREGATOR_PORT = 29765
 DEFAULT_PROFILE = "run"
 DEFAULT_UI_MODE = "cli"
 DEFAULT_INTERVAL_SEC = 1.0
@@ -201,9 +212,19 @@ def read_traceml_env() -> Dict[str, Any]:
                 str(DEFAULT_NUM_DISPLAY_LAYERS),
             )
         ),
-        "tcp_host": os.environ.get("TRACEML_TCP_HOST", DEFAULT_TCP_HOST),
-        "tcp_port": int(
-            os.environ.get("TRACEML_TCP_PORT", str(DEFAULT_TCP_PORT))
+        "aggregator_host": os.environ.get(
+            "TRACEML_AGGREGATOR_HOST",
+            DEFAULT_AGGREGATOR_HOST,
+        ),
+        "aggregator_bind_host": os.environ.get(
+            "TRACEML_AGGREGATOR_BIND_HOST",
+            DEFAULT_AGGREGATOR_BIND_HOST,
+        ),
+        "aggregator_port": int(
+            os.environ.get(
+                "TRACEML_AGGREGATOR_PORT",
+                str(DEFAULT_AGGREGATOR_PORT),
+            )
         ),
         "remote_max_rows": int(
             os.environ.get(
@@ -212,6 +233,12 @@ def read_traceml_env() -> Dict[str, Any]:
             )
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
+        "summary_window_rows": int(
+            os.environ.get(
+                "TRACEML_SUMMARY_WINDOW_ROWS",
+                str(DEFAULT_SUMMARY_WINDOW_ROWS),
+            )
+        ),
         "disable_traceml": os.environ.get("TRACEML_DISABLED", "0") == "1",
     }
 
@@ -247,9 +274,11 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
-        tcp=TraceMLTCPSettings(
-            host=str(cfg["tcp_host"]),
-            port=int(cfg["tcp_port"]),
+        summary_window_rows=int(cfg["summary_window_rows"]),
+        aggregator=AggregatorTransportSettings(
+            connect_host=str(cfg["aggregator_host"]),
+            bind_host=str(cfg["aggregator_bind_host"]),
+            port=int(cfg["aggregator_port"]),
         ),
     )
 

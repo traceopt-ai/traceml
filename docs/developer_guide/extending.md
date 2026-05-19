@@ -88,8 +88,9 @@ To add a sampler:
 4. Add SQLite projection, renderer, or summary code only if the data is
    user-facing.
 
-Layer-level samplers are currently `deep` profile only. Keep advanced profiling
-out of normal `run` and `watch` paths unless there is a strong reason.
+Deep/layer profiling has been removed from the public CLI for now. Keep normal
+sampler changes scoped to `run` and `watch`, and do not document layer-level
+profiling as a public path unless that surface is reintroduced deliberately.
 
 Tests should live in `tests/runtime/` for selection behavior and in a more
 specific folder if the sampler has domain logic.

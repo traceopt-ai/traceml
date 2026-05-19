@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Asynchronous SQLite telemetry writer."""
 
 import queue
@@ -18,6 +24,10 @@ from traceml.aggregator.sqlite_writers import (
 from traceml.aggregator.sqlite_writers import step_time as step_time_sql_writer
 from traceml.aggregator.sqlite_writers import system as system_sql_writer
 from traceml.loggers.error_log import get_error_logger
+from traceml.reporting.config import (
+    DEFAULT_SUMMARY_WINDOW_ROWS,
+    summary_retention_rows_for_window,
+)
 from traceml.utils.msgpack_codec import Encoder as MsgpackEncoder
 
 _PROJECTION_WRITERS = [
@@ -27,6 +37,17 @@ _PROJECTION_WRITERS = [
     step_memory_sql_writer,
     stdout_stderr_sql_writer,
 ]
+_RETENTION_TABLES = frozenset(
+    str(table)
+    for writer in _PROJECTION_WRITERS
+    for table in getattr(writer, "RETENTION_TABLES", ())
+)
+_RETENTION_PARTITION_SQL = {
+    "system_samples": "COALESCE(node_rank, global_rank, 0)",
+    "process_samples": "COALESCE(global_rank, rank, 0)",
+    "step_time_samples": "COALESCE(global_rank, rank, 0)",
+    "step_memory_samples": "COALESCE(global_rank, rank, 0)",
+}
 
 
 @dataclass(frozen=True)
@@ -45,6 +66,7 @@ class SQLiteWriterConfig:
     max_queue: int = 50_000
     flush_interval_sec: float = 0.5
     max_flush_items: int = 20_000
+    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
     synchronous: str = "NORMAL"
 
 
@@ -220,7 +242,7 @@ class SQLiteWriterSimple:
         self, msg: Dict[str, Any]
     ) -> tuple[Optional[int], Optional[str]]:
         """Extract best-effort ``rank`` and ``sampler`` metadata from a message."""
-        rank_val = msg.get("rank", None)
+        rank_val = msg.get("global_rank", msg.get("rank", None))
         sampler_val = msg.get("sampler", None)
 
         rank: Optional[int]
@@ -325,8 +347,127 @@ class SQLiteWriterSimple:
         for writer in _PROJECTION_WRITERS:
             writer.insert_rows(conn, projection_rows[writer])
 
+        self._prune_retained_rows(conn, projection_rows)
+
         conn.execute("COMMIT;")
         self._written += len(raw_rows)
+
+    def _prune_retained_rows(
+        self,
+        conn: sqlite3.Connection,
+        projection_rows: dict[Any, dict[str, list[tuple]]],
+    ) -> None:
+        """
+        Keep bounded history for the high-frequency summary tables.
+
+        The final report reads a fixed summary window. We retain a larger
+        buffer in SQLite so long jobs stay bounded while still having enough
+        recent rows for aligned multi-rank summaries.
+        """
+        retention_rows = summary_retention_rows_for_window(
+            self._cfg.summary_window_rows
+        )
+
+        for writer, rows_by_table in projection_rows.items():
+            if not any(rows_by_table.values()):
+                continue
+
+            for table in getattr(writer, "RETENTION_TABLES", ()):
+                self._prune_table_by_identity(
+                    conn,
+                    table=str(table),
+                    retention_rows=retention_rows,
+                )
+
+            if writer is system_sql_writer:
+                self._prune_system_gpu_samples_to_retained_system_samples(conn)
+
+            sampler = getattr(writer, "SAMPLER_NAME", None)
+            if sampler is not None:
+                self._prune_raw_messages_for_sampler(
+                    conn,
+                    sampler=str(sampler),
+                    retention_rows=retention_rows,
+                )
+
+    @staticmethod
+    def _prune_table_by_identity(
+        conn: sqlite3.Connection,
+        *,
+        table: str,
+        retention_rows: int,
+    ) -> None:
+        """Delete rows outside the retained window for each table identity."""
+        if table not in _RETENTION_TABLES:
+            raise ValueError(f"Unknown retained SQLite table: {table}")
+        partition_sql = _RETENTION_PARTITION_SQL.get(table)
+        if partition_sql is None:
+            raise ValueError(f"Missing retention identity for table: {table}")
+
+        conn.execute(
+            f"""
+            DELETE FROM {table}
+            WHERE id IN (
+                SELECT id FROM (
+                    SELECT
+                        id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY {partition_sql}
+                            ORDER BY id DESC
+                        ) AS row_num
+                    FROM {table}
+                )
+                WHERE row_num > ?
+            );
+            """,
+            (int(retention_rows),),
+        )
+
+    @staticmethod
+    def _prune_system_gpu_samples_to_retained_system_samples(
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Keep GPU rows only for retained system snapshots."""
+        conn.execute(
+            """
+            DELETE FROM system_gpu_samples AS gpu
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM system_samples AS sample
+                WHERE sample.global_rank IS gpu.global_rank
+                  AND sample.node_rank IS gpu.node_rank
+                  AND sample.seq IS gpu.seq
+            );
+            """
+        )
+
+    @staticmethod
+    def _prune_raw_messages_for_sampler(
+        conn: sqlite3.Connection,
+        *,
+        sampler: str,
+        retention_rows: int,
+    ) -> None:
+        """Delete raw sampler blobs outside the retained per-rank window."""
+        conn.execute(
+            """
+            DELETE FROM raw_messages
+            WHERE id IN (
+                SELECT id FROM (
+                    SELECT
+                        id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY sampler, COALESCE(rank, 0)
+                            ORDER BY id DESC
+                        ) AS row_num
+                    FROM raw_messages
+                    WHERE sampler = ?
+                )
+                WHERE row_num > ?
+            );
+            """,
+            (sampler, int(retention_rows)),
+        )
 
     def _flush_once(self, conn: sqlite3.Connection) -> None:
         """

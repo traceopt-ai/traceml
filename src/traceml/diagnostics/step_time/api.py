@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Step-time diagnosis shared by live renderers and summaries."""
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
 DiagnosisKind = Literal[
     "NO_DATA",
+    "WARMUP",
     "BALANCED",
     "STRAGGLER",
     "INPUT_STRAGGLER",
@@ -45,6 +52,7 @@ DiagnosisKind = Literal[
 
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "NO_DATA": "NO DATA",
+    "WARMUP": "WARMUP",
     "BALANCED": "BALANCED",
     "STRAGGLER": "STRAGGLER",
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
@@ -100,6 +108,37 @@ def _mk_diag(
         worst_rank=worst_rank,
         note=note,
     )
+
+
+def build_step_warmup_diagnosis(
+    *,
+    steps_used: int,
+    required_steps: int,
+    max_steps_used: Optional[int] = None,
+) -> DiagnosticResult[StepDiagnosis]:
+    """
+    Build the explicit partial-data diagnosis for a non-empty timing window.
+
+    ``NO_DATA`` is reserved for missing or unusable timing data. ``WARMUP``
+    means TraceML has timing samples, but fewer than the configured minimum for
+    a stable summary diagnosis.
+    """
+    low = max(0, int(steps_used))
+    high = max(low, int(max_steps_used if max_steps_used is not None else low))
+    required = max(1, int(required_steps))
+    available = f"{low}" if low == high else f"{low}-{high}"
+    suffix = "step" if high == 1 else "steps"
+    primary = _mk_diag(
+        kind="WARMUP",
+        severity="info",
+        reason=(
+            f"Only {available} {suffix} per rank available; summary "
+            f"diagnosis requires {required}."
+        ),
+        action="Use a longer run for a stable timing diagnosis.",
+        steps_used=low,
+    )
+    return DiagnosticResult(primary=primary)
 
 
 def _merge_note(base: Optional[str], extra: Optional[str]) -> Optional[str]:
@@ -217,154 +256,6 @@ def _metric_attribution_entry(
     }
 
 
-def _per_rank_diagnostics(
-    *,
-    per_rank_timing: Dict[int, Dict[str, float]],
-    thresholds: DiagnosisThresholds,
-    input_issue: Optional[DiagnosticIssue],
-    compute_issue: Optional[DiagnosticIssue],
-) -> Dict[str, Any]:
-    """
-    Build per-rank timing evidence and local issue lists.
-
-    The final-summary JSON is the main consumer. Runtime paths can safely carry
-    an empty mapping when only aggregate metrics are available.
-    """
-    if not per_rank_timing:
-        return {}
-
-    input_ranks = set(input_issue.ranks if input_issue is not None else ())
-    compute_ranks = set(
-        compute_issue.ranks if compute_issue is not None else ()
-    )
-
-    out: Dict[str, Any] = {}
-    for rank in sorted(per_rank_timing.keys()):
-        timing = {
-            key: non_negative_finite(value)
-            for key, value in per_rank_timing[rank].items()
-        }
-        step_ms = non_negative_finite(timing.get("step_time", 0.0))
-        dataloader_ms = non_negative_finite(
-            timing.get("dataloader_fetch", 0.0)
-        )
-        forward_ms = non_negative_finite(timing.get("forward", 0.0))
-        backward_ms = non_negative_finite(timing.get("backward", 0.0))
-        optimizer_ms = non_negative_finite(timing.get("optimizer_step", 0.0))
-        wait_ms = non_negative_finite(timing.get("wait_proxy", 0.0))
-        compute_ms = forward_ms + backward_ms + optimizer_ms
-
-        issues: list[Dict[str, Any]] = []
-
-        if rank in input_ranks:
-            issues.append(
-                {
-                    "kind": "INPUT_STRAGGLER",
-                    "status": "INPUT STRAGGLER",
-                    "severity": (
-                        input_issue.severity
-                        if input_issue is not None
-                        else "warn"
-                    ),
-                    "summary": "This rank carries the heaviest dataloader burden.",
-                    "action": f"Inspect input loading on {_rank_str(rank)}.",
-                }
-            )
-
-        if rank in compute_ranks:
-            issues.append(
-                {
-                    "kind": "COMPUTE_STRAGGLER",
-                    "status": "COMPUTE STRAGGLER",
-                    "severity": (
-                        compute_issue.severity
-                        if compute_issue is not None
-                        else "warn"
-                    ),
-                    "summary": "This rank carries the heaviest compute burden.",
-                    "action": f"Inspect compute on {_rank_str(rank)}.",
-                }
-            )
-
-        dl_share = share(dataloader_ms, step_ms)
-        wait_share = share(wait_ms, step_ms)
-        compute_share = share(compute_ms, step_ms)
-
-        if (
-            dl_share >= thresholds.input_share_warn
-            and wait_share < thresholds.wait_share_warn
-        ):
-            issues.append(
-                {
-                    "kind": "INPUT_BOUND",
-                    "status": "INPUT-BOUND",
-                    "severity": _severity(
-                        dl_share, thresholds.input_share_crit
-                    ),
-                    "summary": f"Dataloader is {_pct(dl_share)} of the local step.",
-                    "action": f"Review input throughput on {_rank_str(rank)}.",
-                }
-            )
-
-        if wait_share >= thresholds.wait_share_warn:
-            issues.append(
-                {
-                    "kind": "WAIT_HEAVY",
-                    "status": "WAIT-HEAVY",
-                    "severity": _severity(
-                        wait_share, thresholds.wait_share_crit
-                    ),
-                    "summary": f"WAIT* is {_pct(wait_share)} of the local step.",
-                    "action": (
-                        "Inspect synchronization or stalls on "
-                        f"{_rank_str(rank)}."
-                    ),
-                }
-            )
-
-        if (
-            compute_share >= thresholds.compute_bound_share_warn
-            and dl_share < thresholds.input_share_warn
-            and wait_share < thresholds.wait_share_warn
-        ):
-            issues.append(
-                {
-                    "kind": "COMPUTE_BOUND",
-                    "status": "COMPUTE-BOUND",
-                    "severity": _severity(
-                        compute_share,
-                        thresholds.compute_bound_share_crit,
-                    ),
-                    "summary": f"Compute is {_pct(compute_share)} of the local step.",
-                    "action": f"Optimize compute on {_rank_str(rank)}.",
-                }
-            )
-
-        out[str(rank)] = {
-            "rank": int(rank),
-            "timing": {
-                "dataloader_ms": dataloader_ms,
-                "forward_ms": forward_ms,
-                "backward_ms": backward_ms,
-                "optimizer_ms": optimizer_ms,
-                "compute_ms": compute_ms,
-                "step_time_ms": step_ms,
-                "wait_ms": wait_ms,
-            },
-            "split_pct": {
-                "dataloader": dl_share,
-                "forward": share(forward_ms, step_ms),
-                "backward": share(backward_ms, step_ms),
-                "optimizer": share(optimizer_ms, step_ms),
-                "wait": wait_share,
-                "compute": compute_share,
-            },
-            "issues": issues,
-        }
-
-    return out
-
-
 def _select_primary_issue(
     issues: Sequence[DiagnosticIssue],
 ) -> Optional[DiagnosticIssue]:
@@ -432,7 +323,6 @@ def build_step_diagnosis_result(
     dashboard consumers can additionally use:
     - `result.issues`
     - `result.metric_attribution`
-    - `result.per_rank`
     """
     metric_names = [metric.metric for metric in metrics]
     if len(metric_names) != len(set(metric_names)):
@@ -475,15 +365,13 @@ def build_step_diagnosis_result(
         return DiagnosticResult(primary=primary)
 
     if steps_used < thresholds.min_steps_for_confident_diag:
-        primary = _mk_diag(
-            kind="NO_DATA",
-            severity="info",
-            reason=f"Only {steps_used} steps available.",
-            action="Wait for a fuller window.",
+        result = build_step_warmup_diagnosis(
             steps_used=steps_used,
-            worst_rank=overall_worst_rank,
+            required_steps=thresholds.min_steps_for_confident_diag,
         )
-        return DiagnosticResult(primary=primary)
+        return DiagnosticResult(
+            primary=replace(result.primary, worst_rank=overall_worst_rank)
+        )
 
     context = build_step_time_context(
         metrics=metrics,
@@ -616,7 +504,7 @@ def build_step_diagnosis_result(
             worst_rank=(
                 None if context.single_rank else context.overall_worst_rank
             ),
-            note="WAIT* = step_time - (forward + backward + optimizer_step).",
+            note="wait_ms = total_step_ms - dataloader_ms - compute_ms.",
         )
     elif primary_issue is not None and primary_issue.kind == "COMPUTE_BOUND":
         primary = _mk_diag(
@@ -754,18 +642,10 @@ def build_step_diagnosis_result(
         },
     }
 
-    per_rank = _per_rank_diagnostics(
-        per_rank_timing=context.per_rank_timing,
-        thresholds=thresholds,
-        input_issue=input_issue,
-        compute_issue=compute_issue,
-    )
-
     return DiagnosticResult(
         primary=primary,
         issues=tuple(issues),
         metric_attribution=metric_attribution,
-        per_rank=per_rank,
     )
 
 
@@ -797,6 +677,7 @@ __all__ = [
     "DEFAULT_THRESHOLDS",
     "StepDiagnosis",
     "ComputeSignal",
+    "build_step_warmup_diagnosis",
     "build_step_diagnosis",
     "build_step_diagnosis_result",
 ]

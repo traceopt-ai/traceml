@@ -1,9 +1,19 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
 import pytest
 
-from traceml.diagnostics.process.api import build_process_diagnosis_result
-from traceml.diagnostics.process.context import build_process_summary_signals
+from traceml.diagnostics.process.api import diagnose_process
+from traceml.diagnostics.process.context import (
+    ProcessDiagnosisInput,
+    ProcessRankDiagnosisInput,
+    build_process_summary_signals,
+)
 from traceml.diagnostics.process.rules import (
     GPUMemoryReservedOverhangRule,
     HighProcessCPURule,
@@ -20,14 +30,14 @@ def _per_rank(
     used_peak: float = 200.0,
     reserved_peak: float = 240.0,
     total: float = 1000.0,
-) -> dict[int, dict[str, float]]:
+) -> dict[int, ProcessRankDiagnosisInput]:
     return {
-        0: {
-            "ram_peak_bytes": rss_peak,
-            "gpu_mem_used_peak_bytes": used_peak,
-            "gpu_mem_reserved_peak_bytes": reserved_peak,
-            "gpu_mem_total_bytes": total,
-        }
+        0: _rank(
+            rss_peak=rss_peak,
+            used_peak=used_peak,
+            reserved_peak=reserved_peak,
+            total=total,
+        )
     }
 
 
@@ -38,24 +48,21 @@ def _rank(
     reserved_peak: float = 240.0,
     total: float = 1000.0,
     overhang: float | None = None,
-) -> dict[str, float]:
-    out = {
-        "ram_peak_bytes": rss_peak,
-        "gpu_mem_used_peak_bytes": used_peak,
-        "gpu_mem_reserved_peak_bytes": reserved_peak,
-        "gpu_mem_total_bytes": total,
-    }
-    if overhang is not None:
-        out["gpu_mem_reserved_overhang_ratio"] = overhang
-    return out
+) -> ProcessRankDiagnosisInput:
+    return ProcessRankDiagnosisInput(
+        ram_peak_bytes=rss_peak,
+        gpu_mem_used_peak_bytes=used_peak,
+        gpu_mem_reserved_peak_bytes=reserved_peak,
+        gpu_mem_total_bytes=total,
+        gpu_mem_reserved_overhang_ratio=overhang,
+    )
 
 
-def _signals(**overrides):
+def _input(**overrides) -> ProcessDiagnosisInput:
     values = dict(
         duration_s=10.0,
         samples=10,
         distinct_ranks=1,
-        distinct_pids=1,
         cpu_avg_percent=120.0,
         cpu_peak_percent=200.0,
         cpu_logical_core_count=8,
@@ -64,7 +71,6 @@ def _signals(**overrides):
         ram_total_bytes=1000.0,
         gpu_available=True,
         gpu_count=1,
-        gpu_device_index=0,
         gpu_mem_used_avg_bytes=100.0,
         gpu_mem_used_peak_bytes=200.0,
         gpu_mem_reserved_avg_bytes=120.0,
@@ -73,7 +79,11 @@ def _signals(**overrides):
         per_rank=_per_rank(),
     )
     values.update(overrides)
-    return build_process_summary_signals(**values)
+    return ProcessDiagnosisInput(**values)
+
+
+def _signals(**overrides):
+    return build_process_summary_signals(_input(**overrides))
 
 
 @pytest.mark.parametrize(
@@ -102,16 +112,8 @@ def _signals(**overrides):
             RankGPUMemoryImbalanceRule(),
             {
                 "per_rank": {
-                    0: {
-                        "gpu_mem_used_peak_bytes": 900.0,
-                        "gpu_mem_reserved_peak_bytes": 900.0,
-                        "gpu_mem_total_bytes": 1000.0,
-                    },
-                    1: {
-                        "gpu_mem_used_peak_bytes": 400.0,
-                        "gpu_mem_reserved_peak_bytes": 400.0,
-                        "gpu_mem_total_bytes": 1000.0,
-                    },
+                    0: _rank(used_peak=900.0, reserved_peak=900.0),
+                    1: _rank(used_peak=400.0, reserved_peak=400.0),
                 }
             },
             "RANK_GPU_MEMORY_IMBALANCE",
@@ -191,16 +193,8 @@ def test_process_rules_do_not_trigger_normal_condition(
         (
             {
                 "per_rank": {
-                    0: {
-                        "gpu_mem_used_peak_bytes": 900.0,
-                        "gpu_mem_reserved_peak_bytes": 900.0,
-                        "gpu_mem_total_bytes": 1000.0,
-                    },
-                    1: {
-                        "gpu_mem_used_peak_bytes": 400.0,
-                        "gpu_mem_reserved_peak_bytes": 400.0,
-                        "gpu_mem_total_bytes": 1000.0,
-                    },
+                    0: _rank(used_peak=900.0, reserved_peak=900.0),
+                    1: _rank(used_peak=400.0, reserved_peak=400.0),
                 }
             },
             "RANK_GPU_MEMORY_IMBALANCE",
@@ -225,18 +219,16 @@ def test_process_primary_priority_when_everything_triggers() -> None:
         gpu_mem_used_peak_bytes=400.0,
         gpu_mem_reserved_peak_bytes=1000.0,
         per_rank={
-            0: {
-                "gpu_mem_used_peak_bytes": 900.0,
-                "gpu_mem_reserved_peak_bytes": 1000.0,
-                "gpu_mem_total_bytes": 1000.0,
-                "gpu_mem_reserved_overhang_ratio": 1000.0 / 900.0,
-            },
-            1: {
-                "gpu_mem_used_peak_bytes": 400.0,
-                "gpu_mem_reserved_peak_bytes": 700.0,
-                "gpu_mem_total_bytes": 1000.0,
-                "gpu_mem_reserved_overhang_ratio": 700.0 / 400.0,
-            },
+            0: _rank(
+                used_peak=900.0,
+                reserved_peak=1000.0,
+                overhang=1000.0 / 900.0,
+            ),
+            1: _rank(
+                used_peak=400.0,
+                reserved_peak=700.0,
+                overhang=700.0 / 400.0,
+            ),
         },
     )
 
@@ -271,13 +263,12 @@ def test_process_cpu_only_normal_does_not_emit_gpu_context_status() -> None:
     result = _diagnose(
         gpu_available=False,
         gpu_count=0,
-        gpu_device_index=None,
         gpu_mem_used_avg_bytes=None,
         gpu_mem_used_peak_bytes=None,
         gpu_mem_reserved_avg_bytes=None,
         gpu_mem_reserved_peak_bytes=None,
         gpu_mem_total_bytes=None,
-        per_rank={0: {"ram_peak_bytes": 200.0}},
+        per_rank={0: _rank(rss_peak=200.0)},
     )
 
     assert result.primary.kind == "NORMAL"
@@ -294,26 +285,6 @@ def test_process_no_data_is_primary_without_running_rules() -> None:
 
 
 def _diagnose(**overrides):
-    values = dict(
-        duration_s=10.0,
-        process_samples=10,
-        distinct_ranks=1,
-        distinct_pids=1,
-        cpu_avg_percent=120.0,
-        cpu_peak_percent=200.0,
-        cpu_logical_core_count=8,
-        ram_avg_bytes=100.0,
-        ram_peak_bytes=200.0,
-        ram_total_bytes=1000.0,
-        gpu_available=True,
-        gpu_count=1,
-        gpu_device_index=0,
-        gpu_mem_used_avg_bytes=100.0,
-        gpu_mem_used_peak_bytes=200.0,
-        gpu_mem_reserved_avg_bytes=120.0,
-        gpu_mem_reserved_peak_bytes=240.0,
-        gpu_mem_total_bytes=1000.0,
-        per_rank=_per_rank(),
-    )
-    values.update(overrides)
-    return build_process_diagnosis_result(**values)
+    if "process_samples" in overrides:
+        overrides["samples"] = overrides.pop("process_samples")
+    return diagnose_process(_input(**overrides))

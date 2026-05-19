@@ -1,16 +1,28 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """SQLite loader for the final-report step-time section."""
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
+from traceml.reporting.config import normalize_summary_window_rows
+from traceml.reporting.sections.step_time.alignment import (
+    AlignedStepWindow,
+    build_aligned_step_summary,
+)
 from traceml.reporting.sections.step_time.model import (
     MAX_SUMMARY_WINDOW_ROWS,
+    GlobalRankIdentity,
     RankStepSummary,
-    _build_rank_summary,
-    _load_rank_step_rows,
+    build_rank_summary,
 )
 
 
@@ -20,9 +32,78 @@ class StepTimeSectionData:
 
     training_steps: int
     latest_step_observed: Optional[int]
-    per_rank_summary: Dict[int, RankStepSummary]
-    per_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]]
+    aligned_summary: Dict[int, RankStepSummary]
+    aligned_step_metrics: Dict[int, Dict[int, Dict[str, float]]]
+    aligned_window: AlignedStepWindow
+    per_global_rank_summary: Dict[int, RankStepSummary]
+    per_global_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]]
+    identities: Dict[int, GlobalRankIdentity]
     max_rows: int
+
+
+def load_global_rank_step_rows(
+    conn: sqlite3.Connection,
+    *,
+    global_rank: int,
+    max_rows: int,
+) -> list[Dict[str, Any]]:
+    """Load the latest bounded step-time rows for one global rank."""
+    cur = conn.execute(
+        """
+        SELECT step, events_json
+        FROM step_time_samples
+        WHERE global_rank = ?
+        ORDER BY step DESC, id DESC
+        LIMIT ?;
+        """,
+        (int(global_rank), int(max_rows)),
+    )
+
+    rows: list[Dict[str, Any]] = []
+    for step, events_json in cur:
+        if step is None or not events_json:
+            continue
+        try:
+            events = json.loads(events_json)
+        except Exception:
+            continue
+        if isinstance(events, dict):
+            rows.append({"step": int(step), "events": events})
+    return rows
+
+
+def load_global_rank_identities(
+    conn: sqlite3.Connection,
+    global_ranks: Iterable[int],
+) -> Dict[int, GlobalRankIdentity]:
+    """Load the latest runtime identity metadata for each global rank."""
+    identities: Dict[int, GlobalRankIdentity] = {}
+    for global_rank in global_ranks:
+        row = conn.execute(
+            """
+            SELECT local_rank, node_rank, hostname, local_world_size,
+                   world_size
+            FROM step_time_samples
+            WHERE global_rank = ?
+            ORDER BY sample_ts_s DESC, id DESC
+            LIMIT 1;
+            """,
+            (int(global_rank),),
+        ).fetchone()
+        local_rank = int(row[0]) if row and row[0] is not None else None
+        node_rank = int(row[1]) if row and row[1] is not None else None
+        hostname = str(row[2]) if row and row[2] is not None else None
+        local_world_size = int(row[3]) if row and row[3] is not None else None
+        world_size = int(row[4]) if row and row[4] is not None else None
+        identities[int(global_rank)] = GlobalRankIdentity(
+            global_rank=int(global_rank),
+            local_rank=local_rank,
+            node_rank=node_rank,
+            hostname=hostname,
+            local_world_size=local_world_size,
+            world_size=world_size,
+        )
+    return identities
 
 
 def load_step_time_section_data(
@@ -33,7 +114,7 @@ def load_step_time_section_data(
     """
     Load bounded step-time section data from the SQLite history database.
     """
-    row_limit = min(max(1, int(max_rows)), MAX_SUMMARY_WINDOW_ROWS)
+    row_limit = normalize_summary_window_rows(max_rows)
     conn = sqlite3.connect(db_path)
 
     try:
@@ -49,37 +130,63 @@ def load_step_time_section_data(
             latest_step_observed + 1 if latest_step_observed is not None else 0
         )
 
-        rank_rows = conn.execute(
-            "SELECT DISTINCT rank FROM step_time_samples ORDER BY rank ASC;"
+        global_rank_rows = conn.execute(
+            """
+            SELECT DISTINCT global_rank
+            FROM step_time_samples
+            WHERE global_rank IS NOT NULL
+            ORDER BY global_rank ASC;
+            """
         ).fetchall()
-        ranks_present = [int(r[0]) for r in rank_rows if r[0] is not None]
+        global_ranks_present = [
+            int(row[0]) for row in global_rank_rows if row[0] is not None
+        ]
+        identities = load_global_rank_identities(conn, global_ranks_present)
 
-        per_rank_summary: Dict[int, RankStepSummary] = {}
-        per_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]] = {}
+        per_global_rank_summary: Dict[int, RankStepSummary] = {}
+        per_global_rank_step_metrics: Dict[
+            int,
+            Dict[int, Dict[str, float]],
+        ] = {}
 
-        for rank in ranks_present:
-            step_rows = _load_rank_step_rows(
+        for global_rank in global_ranks_present:
+            step_rows = load_global_rank_step_rows(
                 conn,
-                rank=rank,
+                global_rank=global_rank,
                 max_rows=row_limit,
             )
-            analysis = _build_rank_summary(step_rows)
+            analysis = build_rank_summary(step_rows)
             if analysis is not None:
-                per_rank_summary[rank] = analysis.summary
-                per_rank_step_metrics[rank] = analysis.per_step_metrics
+                per_global_rank_summary[global_rank] = analysis.summary
+                per_global_rank_step_metrics[global_rank] = (
+                    analysis.per_step_metrics
+                )
+
+        aligned_summary, aligned_step_metrics, aligned_window = (
+            build_aligned_step_summary(
+                per_global_rank_step_metrics=per_global_rank_step_metrics,
+                max_rows=row_limit,
+            )
+        )
     finally:
         conn.close()
 
     return StepTimeSectionData(
         training_steps=training_steps,
         latest_step_observed=latest_step_observed,
-        per_rank_summary=per_rank_summary,
-        per_rank_step_metrics=per_rank_step_metrics,
+        aligned_summary=aligned_summary,
+        aligned_step_metrics=aligned_step_metrics,
+        aligned_window=aligned_window,
+        per_global_rank_summary=per_global_rank_summary,
+        per_global_rank_step_metrics=per_global_rank_step_metrics,
+        identities=identities,
         max_rows=row_limit,
     )
 
 
 __all__ = [
     "StepTimeSectionData",
+    "load_global_rank_identities",
+    "load_global_rank_step_rows",
     "load_step_time_section_data",
 ]

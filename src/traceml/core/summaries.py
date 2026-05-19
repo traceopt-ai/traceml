@@ -31,10 +31,14 @@ class SummaryResult:
 class SummarySection(Protocol):
     """Build one final-report section from persisted telemetry."""
 
-    name: str
+    @property
+    def name(self) -> str:
+        """Stable section key, for example ``"system"`` or ``"step_time"``."""
+        ...
 
     def build(self, db_path: str) -> SummaryResult:
         """Build the section for a telemetry database."""
+        ...
 
 
 class ReportGenerator(Protocol):
@@ -44,6 +48,7 @@ class ReportGenerator(Protocol):
 
     def generate(self, db_path: str) -> Dict[str, Any]:
         """Generate a JSON-safe final report payload."""
+        ...
 
 
 __all__ = [

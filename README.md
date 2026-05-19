@@ -2,32 +2,28 @@
 
 # TraceML
 
-**Catch PyTorch training slowdowns early, while the job is still running.**
+**Runtime bottleneck detection for PyTorch training jobs.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](docs/user_guide/quickstart.md) • [**Compare Runs**](docs/user_guide/compare.md) • [**How to Read Output**](docs/user_guide/reading-output.md) • [**FAQ**](docs/user_guide/faq.md) • [**Use with W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Quickstart**](docs/user_guide/quickstart.md) • [**Compare Runs**](docs/user_guide/compare.md) • [**How to Read Output**](docs/user_guide/reading-output.md) • [**W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) • [**FAQ**](docs/user_guide/faq.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
 
 </div>
 
-TraceML is an open-source tool for catching PyTorch training slowdowns early, so bad runs do not quietly waste costly compute.
+TraceML records lightweight signals during a PyTorch training run and produces a structured end-of-run summary. It answers the questions that usually come before operator-level profiling:
 
-It gives you lightweight step-level signals while the job is still running, so you can quickly tell whether the slowdown looks input-bound, compute-bound, wait-heavy, imbalanced across ranks, or memory-related.
-
-Use TraceML when you want a fast answer before reaching for a heavyweight profiler.
-
-**⭐ If TraceML helps you, please consider starring the repo.**
-
-> **Upcoming rename:** TraceML will transition to **TraceOpt** in a future release.
-> For now, the active package remains `traceml-ai` and Python imports remain `traceml`.
-> The future PyPI package name [`traceopt-ai`](https://pypi.org/project/traceopt-ai/) is now in place as we prepare the migration.
+- Is the run input-bound, compute-bound, wait-heavy, or memory-constrained?
+- Where is time going across dataloader, forward, backward, and optimizer?
+- Are some distributed ranks consistently slower than others?
+- Did memory usage drift upward during the run?
+- Did a recent change cause a regression?
 
 ---
 
-## The fastest way to try it
+## Quickstart
 
 Install:
 
@@ -51,100 +47,234 @@ for batch in dataloader:
         optimizer.step()
 ```
 
-Run:
+Run your script with TraceML:
 
 ```bash
 traceml run train.py
 ```
 
-During training, TraceML opens a live terminal view alongside your logs.
+TraceML writes two end-of-run artifacts:
 
-![TraceML terminal dashboard](docs/assets/cli_demo_v1.png)
+```text
+logs/<session_id>/final_summary.json
+logs/<session_id>/final_summary.txt
+```
 
-At the end of the run, it prints a compact summary you can review or share.
+## Example Output
 
-![TraceML summary](docs/assets/end-of-run-summary.png)
+### End-of-run summary
 
-Start with `traceml run train.py`. Most users do not need `watch` or `deep` first.
+At the end of training, TraceML prints the same compact text report written to
+`final_summary.txt`.
 
-For custom training loops, manual and selective instrumentation are available in the [Quickstart](docs/user_guide/quickstart.md).
+Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
+
+```
++----------------------------------------------------------------------------+
+|  TraceML Run Summary | duration 122.5s                                     |
++----------------------------------------------------------------------------+
+|                                                                            |
+|  System                                                                    |
+|  - Diagnosis: NORMAL                                                       |
+|  - Scope: nodes 2/2 | samples 124                                          |
+|  - Stats: CPU med/worst 3%/3% n0 | RAM med/worst 4%/4% n1 | GPU util       |
+|  med/worst 74%/74% n0 | GPU temp med/worst 47.9C/47.9C n1                  |
+|  - Why: CPU, RAM, and GPU showed no system pressure.                       |
+|                                                                            |
+|  Process                                                                   |
+|  - Diagnosis: GPU MEMORY RESERVED OVERHANG                                 |
+|  - Stats: global ranks 4 | CPU avg 75% | RSS peak 1.3 / 540.7 GB | GPU     |
+|  reserved peak 1%                                                          |
+|  - Why: Reserved GPU memory was 1.70x active use.                          |
+|                                                                            |
+|  Step Time                                                                 |
+|  - Diagnosis: INPUT STRAGGLER                                              |
+|  - Scope: compared over last 460 aligned steps across 4 global ranks       |
+|  - Stats: median/worst | total 303.7/303.7ms | input 3.8/254.5ms |         |
+|  compute 259.5/259.5ms | wait 40.5/40.5ms                                  |
+|  - Ranks: median/worst | total r3/r2 | input r2/r0 | compute r3/r1 | wait  |
+|  r2/r1                                                                      |
+|  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
+|                                                                            |
+|  Step Memory                                                               |
+|  - Diagnosis: BALANCED                                                     |
+|  - Scope: last 460 aligned steps                                           |
+|  - Stats: peak reserved worst 192 MB on r0 | skew 0.0%                     |
+|  - Why: No clear pressure, imbalance, or creep signal.                     |
++----------------------------------------------------------------------------+
+```
+
+The `final_summary.json` is machine-readable and designed for logging to W&B or MLflow, storing as a run artifact, or comparing against another run.
 
 ---
 
-## Core workflows
+### Compare two runs
 
-### 1. Live diagnosis
+Compare a slow or suspicious run against a baseline or fixed run:
 
-Use the default workflow when you want live step-aware diagnosis during training plus the end-of-run summary.
+```bash
+traceml compare input_slow/final_summary.json input_fixed/final_summary.json
+```
+
+The compact text report shows the verdict first, then the changed metrics:
+
+```
++--------------------------------------------------------------------------------------+
+|  TraceML Compare                                                                     |
++--------------------------------------------------------------------------------------+
+|                                                                                      |
+|  A: input_slow                                                                       |
+|  B: input_fixed                                                                      |
+|  Delta: B - A                                                                        |
+|                                                                                      |
+|  Verdict: IMPROVEMENT                                                                |
+|  Why: Step time decreased by 95.6%.                                                  |
+|                                                                                      |
+|  Step Time                                                                           |
+|  Metric                         A                B                Delta              |
+|  Step time diagnosis            INPUT STRAGGLER  BALANCED         changed            |
+|  Total step                     294.0 ms         13.0 ms          -280.9 ms (-95.6%) |
+|  Input                          66.4 ms          2.7 ms           -63.7 ms (-95.9%)  |
+|  Compute                        197.2 ms         8.6 ms           -188.6 ms (-95.6%) |
+|  Wait                           30.4 ms          1.7 ms           -28.6 ms (-94.3%)  |
+|  Forward                        45.0 ms          2.1 ms           -42.9 ms (-95.3%)  |
+|  Backward                       130.0 ms         5.4 ms           -124.6 ms (-95.8%) |
+|  Optimizer                      22.2 ms          1.1 ms           -21.1 ms (-95.0%)  |
++--------------------------------------------------------------------------------------+
+```
+
+The full compare report also includes Step Memory, Process, and System sections
+when those signals are available. TraceML writes both a structured compare JSON
+and a compact text report.
+
+See [Compare Runs](docs/user_guide/compare.md).
+
+---
+
+## Modes
+
+All modes write `final_summary.json` and `final_summary.txt` at the end of the run. The mode controls only what you see during training.
+
+| Mode | During training | Topology |
+|------|----------------|----------|
+| `--mode=summary` | Silent | single-node and multi-node multi-GPU |
+| `--mode=cli` | Live terminal display | single-node, including multi-GPU |
+| `--mode=dashboard` | Live browser display | single-node, including multi-GPU |
+
+Summary mode is the default and works across all topologies. Use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node job.
+
+Deep/layer profiling has been removed from the public CLI for now.
+
+Multi-node live views are on the roadmap.
+
+For very long jobs, tune the final-summary window with
+`--summary-window-rows N`. TraceML analyzes the latest `N` rows per node or
+rank and retains a small alignment buffer internally.
+
+---
+
+## Common Workflows
+
+### Diagnose one run
 
 ```bash
 traceml run train.py
 ```
 
-### 2. Low-noise summary runs
+### Multi-node distributed run
 
-Use summary mode when you mainly want the structured final summary for logging into W&B or MLflow.
-
-```bash
-traceml run train.py --mode=summary
-```
-
-Then call `traceml.final_summary()` near the end of your script.
-
-TraceML also writes canonical summary artifacts for the run, including `final_summary.json`, which is the intended machine-readable output for downstream logging and later run comparison.
-
-### 3. Compare two runs
-
-If you have `final_summary.json` from two runs, compare them directly:
+On node 0:
 
 ```bash
-traceml compare run_a.json run_b.json
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
 ```
 
-TraceML writes both a structured compare JSON and a compact text report.
+On node 1:
 
-See [docs/user_guide/compare.md](docs/user_guide/compare.md).
+```bash
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=1 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --session-id=my-run
+```
+
+Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and
+`--master-addr` on every node. Node 0 starts the TraceML aggregator. Other
+nodes connect to `<node0-ip>:29765` by default. If workers need a different
+reachable address or port for TraceML telemetry, add
+`--aggregator-host=<host>` or `--aggregator-port=<port>` on every node. For
+multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default; override
+that only when needed with `--aggregator-bind-host=<bind-host>`.
+
+### Zero-code first look
+
+```bash
+traceml watch train.py
+```
+
+System and process telemetry only. No step instrumentation needed.
+
+### Compare two runs
+
+```bash
+traceml compare before/final_summary.json after/final_summary.json
+```
 
 ---
 
-## What TraceML helps you see
+## What TraceML measures
 
-TraceML helps answer questions like:
+| Signal | What it means |
+|--------|--------------|
+| Input-bound | Dataloader is the bottleneck — GPU is waiting on data |
+| Compute-bound | GPU is saturated — expected in a healthy run |
+| Wait-heavy | Unattributed step time outside the traced phases |
+| Rank imbalance | One rank consistently slower — straggler or uneven data |
+| Memory creep | Peak allocation growing step-over-step |
+| High pressure | Memory near capacity — risk of OOM |
 
-- Is the run input-bound, compute-bound, wait-heavy, or memory-constrained?
-- Are some distributed ranks slower than others?
-- Is memory usage drifting upward over time?
-- Where is time showing up across dataloader, forward, backward, and optimizer phases?
-
-It is designed to help you decide quickly whether a run looks healthy or whether it is worth digging deeper.
-
----
-
-## Overhead
-
-TraceML adds fixed per-step instrumentation overhead, so the relative cost is highest when training steps are very short. In larger or distributed workloads, that fixed cost is amortized over a longer end-to-end step. In our early DDP benchmarks, TraceML did not produce a measurable slowdown beyond normal run-to-run variation.
+`wait` is residual step time, not direct NCCL or all-reduce timing. In DDP, communication may overlap with backward. Use PyTorch Profiler or Nsight when you need explicit collective or kernel-level timing.
 
 ---
 
 ## When to use TraceML
 
-Use TraceML when training feels:
+Use TraceML when you want a lightweight performance fingerprint for a PyTorch training run:
 
-- slower than expected
-- unstable from step to step
-- imbalanced across distributed ranks
-- fine in dashboards but still underperforming
+- keep a small `final_summary.json` you can share, store, diff, or log
+- see where step time went across dataloader, forward, backward, optimizer, and wait time
+- compare a new run against a previous baseline
+- check whether ranks, nodes, process memory, or system resources look imbalanced
+- collect enough evidence before opening PyTorch Profiler or Nsight
 
-Start with TraceML when you need a fast answer in the terminal.
-Reach for `torch.profiler` once you know where to dig deeper.
+**When not to use TraceML:** If you already need operator, kernel, or collective-level timing, go straight to `torch.profiler` or Nsight. TraceML is the cheap first pass that tells you where to look.
 
 ---
 
 ## How it fits with your stack
 
-TraceML is designed to work alongside tools like W&B, MLflow, and TensorBoard, not replace them.
+TraceML sits between experiment tracking and heavyweight profiling.
 
-Use experiment trackers for dashboards, artifacts, and team reporting. Use TraceML for live bottleneck diagnosis, structured final summaries, and simple run-to-run comparison from saved TraceML summary JSON files.
+```text
+Run PyTorch training with TraceML
+        ↓
+Save final_summary.json as a lightweight performance fingerprint
+        ↓
+Review final_summary.txt for the likely bottleneck
+        ↓
+Compare against a previous summary when behavior changes
+        ↓
+Open torch.profiler or Nsight only if you need operator/kernel detail
+```
+
+Use W&B, MLflow, or TensorBoard for experiment tracking, metrics, and dashboards. Use TraceML for bottleneck diagnosis, distributed run summaries, and run-to-run performance comparison.
 
 See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md).
 
@@ -154,12 +284,28 @@ See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md
 
 **Works today:**
 
-- single GPU
-- single-node DDP/FSDP
+- Single GPU training
+- Single-node multi-GPU DDP / FSDP training
+- Multi-node DDP summary reports
+- Step Time, Step Memory, System, and Process diagnostics
+- Run-to-run comparison from `final_summary.json`
+- Custom PyTorch loops, Hugging Face, and PyTorch Lightning
 
 **Next:**
 
-- multi-node training support
+- Ray Train integration
+- Slurm launch examples
+- Broader multi-node FSDP validation
+- Multi-node live CLI / dashboard
+- Explicit collective / NCCL timing
+
+---
+
+## Overhead
+
+TraceML adds fixed per-step instrumentation overhead. Relative overhead is highest when training steps are very short. In larger jobs the fixed cost is amortized over longer step time.
+
+In our early DDP benchmarks, TraceML did not produce a measurable slowdown beyond normal run-to-run variation.
 
 ---
 
@@ -167,14 +313,12 @@ See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md
 
 - [Quickstart](docs/user_guide/quickstart.md)
 - [Compare Runs](docs/user_guide/compare.md)
-- [Examples](examples/README.md)
 - [How to Read TraceML Output](docs/user_guide/reading-output.md)
+- [Examples](examples/README.md)
 - [FAQ](docs/user_guide/faq.md)
 - [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md)
 - [Hugging Face integration](docs/user_guide/integrations/huggingface.md)
 - [PyTorch Lightning integration](docs/user_guide/integrations/lightning.md)
-
-Need a lighter zero-code first look or a deeper follow-up run? See the [Quickstart](docs/user_guide/quickstart.md) and [FAQ](docs/user_guide/faq.md) for `watch` and `deep`.
 
 ---
 
@@ -183,26 +327,27 @@ Need a lighter zero-code first look or a deeper follow-up run? See the [Quicksta
 If TraceML helped you catch a slowdown, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
-- single GPU or multi-GPU
-- whether you used `run`, `watch`, or `deep`
+- single GPU or multi-GPU setup
+- training framework
 - the end-of-run summary
 - a minimal repro if possible
 
-GitHub issues: https://github.com/traceopt-ai/traceml/issues
+GitHub issues: [open an issue](https://github.com/traceopt-ai/traceml/issues)
 
-Email: support@traceopt.ai
+Email: [support@traceopt.ai](mailto:support@traceopt.ai)
 
 ---
 
 ## Contributing
 
+If TraceML helped you catch a slowdown, a GitHub star helps others find it.
+
 Contributions are welcome, especially:
 
-- reproducible slowdown cases
-- bug reports
+- real slowdown examples and repros
+- distributed training edge cases
 - docs improvements
-- integrations
-- examples
+- framework integrations
 
 ---
 
@@ -211,3 +356,6 @@ Contributions are welcome, especially:
 Apache 2.0. See [LICENSE](LICENSE).
 
 TraceOpt is a trademark of OptAI UG (haftungsbeschränkt).
+
+> **Upcoming rename:** `traceml-ai` will be renamed to `traceopt-ai` in a future release.
+> Python imports will change from `traceml` to `traceopt`. The active package today remains `traceml-ai`.

@@ -6,7 +6,8 @@ TraceML is built to answer one question quickly:
 
 This guide explains how to read the output shown in:
 
-- the CLI
+- the default end-of-run summary
+- the live CLI view
 - the local UI
 
 The concepts are the same in both.
@@ -23,7 +24,7 @@ TraceML output has two layers:
 
 2. **Evidence**
    - the numbers and trends that support the diagnosis
-   - example: step breakdown, skew, wait share, memory peaks
+   - example: step breakdown, skew, wait time, memory peaks
 
 The diagnosis is the best place to start.
 
@@ -31,21 +32,24 @@ The tables and charts are there to explain **why** that diagnosis was chosen.
 
 ---
 
-## What the CLI and local UI show
+## What the summary, CLI, and local UI show
 
-### CLI
+### End-of-run summary
 
-During a run, the CLI shows:
+By default, `traceml run train.py` prints a compact final summary and writes
+`final_summary.json` plus `final_summary.txt`.
+
+### Live CLI
+
+When launched with `--mode=cli`, the terminal shows live:
 
 - system metrics
 - process metrics
 - step-time diagnosis and summary
 - step-memory diagnosis and summary
 
-In `deep` mode, it can also show:
-
-- layer timing
-- layer memory
+Live CLI mode is intended for single-node runs, including single-node
+multi-GPU.
 
 ### Local UI
 
@@ -55,7 +59,10 @@ The local UI shows the same ideas in a more compact review format:
 - process card
 - step-time analysis
 - step-memory analysis
-- model diagnostics rail
+- diagnostics rail
+
+The local UI is also intended for single-node runs. Multi-node runs should use
+the default final summary path.
 
 The CLI is best for live diagnosis while the job is running.
 
@@ -159,7 +166,7 @@ What to do next:
 
 - optimize model compute
 - check batch size / precision / kernels
-- use deeper profiling only after TraceML shows the hot path
+- use an operator-level profiler only after TraceML shows the hot path
 
 ---
 
@@ -270,33 +277,35 @@ What to do next:
 
 Meaning:
 
-- a meaningful part of the typical step is going into wait / overhead instead of useful model work
+- a meaningful part of the typical step is not attributed to dataloader,
+  forward, backward, or optimizer work
 
 In TraceML:
 
-- `WAIT* = step_time - (forward + backward + optimizer_step)`
+- `compute = forward + backward + optimizer`
+- `wait = total_step - dataloader - compute`
 
-This is a proxy, not a direct collective-wait measurement.
+This is residual unattributed time in the reported total step, not direct
+collective, NCCL, or all-reduce timing.
 
 Common causes:
 
-- synchronization delays
-- uneven progress across ranks
+- validation or evaluation inside the measured loop
+- checkpointing or logging work
+- framework orchestration outside the traced phases
 - CPU stalls
-- host-side delays
 - transfer / orchestration overhead
 
 What to look at:
 
-- `WAIT Share (%)`
-- `Wait*`
+- `Wait`
 - whether the run is also showing straggler behavior
 
 What to do next:
 
-- inspect sync points
+- inspect work happening around the traced training step
 - inspect rank imbalance
-- inspect CPU-side delays and transfer paths
+- inspect CPU-side delays, logging, checkpointing, validation, and transfer paths
 
 ---
 
@@ -322,12 +331,12 @@ What to do next:
 
 In the CLI step summary, the important columns are:
 
-- `Dataloader Fetch`
+- `Input`
 - `Forward`
 - `Backward`
-- `Optimizer Step`
-- `Step Time`
-- `Wait*`
+- `Optimizer`
+- `Total Step`
+- `Wait`
 
 Important rows:
 
@@ -347,9 +356,10 @@ Important rows:
 
 - how much larger the worst value is than the median
 
-### `WAIT Share (%)`
+### `Wait`
 
-- how much of the typical step is going into wait / overhead
+- how much of the typical step is unattributed to dataloader, forward,
+  backward, or optimizer work
 
 A good reading pattern is:
 
@@ -358,7 +368,7 @@ A good reading pattern is:
 3. compare worst vs median
 4. inspect `Worst Rank`
 5. inspect `Skew (%)`
-6. inspect `WAIT Share (%)`
+6. inspect `Wait`
 
 ---
 
@@ -586,7 +596,7 @@ Use this panel when:
 
 The local UI shows the same ideas in a more compact form.
 
-### Model Diagnostics rail
+### Diagnostics rail
 
 This is the best place to start in the local UI.
 
@@ -604,7 +614,7 @@ This card shows:
 - median vs worst step breakdown
 - gap
 - worst rank
-- wait share
+- wait time
 - dominant split
 
 Use it to validate the step-time diagnosis.
@@ -638,7 +648,7 @@ Use these as context cards:
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `STRAGGLER` | inspect both input and compute unevenness |
-| `WAIT-HEAVY` | inspect sync points and uneven progress |
+| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and transfer paths |
 | `MEMORY CREEP (EARLY)` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |
@@ -648,15 +658,15 @@ Use these as context cards:
 
 ## Common pitfalls
 
-### High `WAIT*` skew alone does not automatically mean a real wait bottleneck
+### High wait skew alone does not automatically mean a real wait bottleneck
 
 Look at:
 
-- `WAIT Share (%)`
+- `Wait`
 - the diagnosis
 - the rest of the step breakdown
 
-A tiny wait share with large percentage skew can still be minor in practice.
+A tiny wait value with large percentage skew can still be minor in practice.
 
 ### A high compute share does not mean every compute phase is equally important
 
@@ -693,7 +703,7 @@ If you are in a hurry:
 1. read the diagnosis
 2. identify the worst rank if shown
 3. compare worst vs median
-4. look at wait share or memory trend
+4. look at wait time or memory trend
 5. take the suggested next action
 
 That is usually enough to decide where to investigate next.

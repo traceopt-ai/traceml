@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 TraceML settings (shared configuration schema).
 
@@ -11,12 +17,22 @@ This module defines the shared configuration dataclasses used by:
 
 from dataclasses import dataclass
 
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+
 
 @dataclass(frozen=True)
-class TraceMLTCPSettings:
-    """TCP configuration for TraceML telemetry transport."""
+class AggregatorTransportSettings:
+    """
+    Aggregator endpoint used by workers and the aggregator process.
 
-    host: str = "127.0.0.1"
+    ``connect_host`` is used by training workers. ``bind_host`` is used by the
+    aggregator process. They are the same on simple local runs, but different
+    on multi-node runs where the aggregator binds ``0.0.0.0`` and workers
+    connect to node 0's reachable address.
+    """
+
+    connect_host: str = "127.0.0.1"
+    bind_host: str = "127.0.0.1"
     port: int = 29765
 
 
@@ -31,7 +47,8 @@ class TraceMLSettings:
     - `mode` selects display backend and capture behavior ("cli" | "summary" | "dashboard").
     - `summary` mode disables live rendering and prints only the final
       end-of-run summary.
-    - TCP is used for telemetry transport (including rank0 -> rank0 loopback).
+    - Aggregator transport is used for telemetry, including rank0 -> rank0
+      loopback on local runs.
     """
 
     profile: str = "run"  # "deep"
@@ -42,7 +59,8 @@ class TraceMLSettings:
     logs_dir: str = "./logs"
     enable_logging: bool = False
     remote_max_rows: int = 200
-    tcp: TraceMLTCPSettings = TraceMLTCPSettings()
+    aggregator: AggregatorTransportSettings = AggregatorTransportSettings()
     session_id: str = ""
     history_enabled: bool = True
     db_path: str = ""
+    summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS

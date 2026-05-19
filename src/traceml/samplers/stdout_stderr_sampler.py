@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Stdout/stderr sampler for TraceML.
 
@@ -40,7 +46,7 @@ class StdoutStderrSampler(BaseSampler):
         logs_dir = ensure_session_dir(
             logs_dir=self._ctx.logs_dir,
             session_id=self._ctx.session_id,
-            rank=self._ctx.local_rank,
+            rank=self._ctx.global_rank,
         )
         self.log_path = Path(logs_dir) / log_filename
         self.log_path.write_text(

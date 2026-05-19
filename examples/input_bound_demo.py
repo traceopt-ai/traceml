@@ -8,17 +8,17 @@ from torch.utils.data import DataLoader, Dataset
 import traceml
 
 SEED = 42
-INPUT_DIM = 1024
-HIDDEN_DIM = 2048
+INPUT_DIM = 256
+HIDDEN_DIM = 512
 NUM_CLASSES = 10
 
-BATCH_SIZE = 128
-NUM_SAMPLES = 12000
-NUM_EPOCHS = 4
+BATCH_SIZE = 16
+NUM_SAMPLES = 960
+NUM_EPOCHS = 1
 
 # This is the key knob for the example.
 # It makes input loading deliberately slow so TraceML can surface it clearly.
-SLEEP_PER_SAMPLE = 0.02
+SLEEP_PER_SAMPLE = 0.008
 
 
 class SlowDataset(Dataset):
@@ -96,7 +96,7 @@ def main():
                 loss.backward()
                 optimizer.step()
 
-            if total_steps % 25 == 0:
+            if total_steps % 10 == 0:
                 print(
                     f"Epoch {epoch} | Step {total_steps} | "
                     f"loss: {loss.item():.4f}"

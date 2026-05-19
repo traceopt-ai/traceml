@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 SQLite projection writer for ProcessSampler.
 
@@ -10,7 +16,9 @@ Design
 - Accepts already-decoded payload dicts from the main writer
 - Produces one query-friendly table:
     1) process_samples
-       One row per sampled process snapshot, keyed by rank and sample time
+       One row per sampled process snapshot, keyed by global rank and sample
+       time. The legacy `rank` column is still written as global rank while
+       downstream code migrates.
 
 Storage units
 -------------
@@ -28,7 +36,13 @@ Expected payload shape
 ----------------------
 Envelope:
 {
-    "rank": int,
+    "rank": int,          # legacy alias for global_rank
+    "global_rank": int,
+    "local_rank": int,
+    "world_size": int,
+    "local_world_size": int,
+    "node_rank": int,
+    "hostname": str,
     "sampler": "ProcessSampler",
     "timestamp": float,
     "tables": {
@@ -36,7 +50,6 @@ Envelope:
             {
                 "seq": int,
                 "timestamp": float,
-                "pid": int,
                 "cpu_percent": float,
                 "cpu_logical_core_count": int,
                 "ram_used": float,   # bytes
@@ -56,10 +69,84 @@ Envelope:
 }
 """
 
+from __future__ import annotations
+
 import sqlite3
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 SAMPLER_NAME = "ProcessSampler"
+RETENTION_TABLES = ("process_samples",)
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    """Best-effort integer coercion for telemetry identity fields."""
+    try:
+        return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def _optional_str(value: Any) -> Optional[str]:
+    """Best-effort string coercion for telemetry identity fields."""
+    if value is None:
+        return None
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+@dataclass(frozen=True)
+class ProcessPayloadIdentity:
+    """Distributed identity stored with projected process telemetry."""
+
+    rank: Optional[int]
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+
+
+def _payload_identity(payload_dict: Dict[str, Any]) -> ProcessPayloadIdentity:
+    """
+    Return storage identity for one ProcessSampler payload.
+
+    New code should read ``global_rank``. The legacy ``rank`` column is still
+    written as the same value to keep existing process summaries working while
+    the reporting layer is migrated separately.
+    """
+    global_rank = _optional_int(payload_dict.get("global_rank"))
+    legacy_rank = _optional_int(payload_dict.get("rank"))
+    rank = global_rank if global_rank is not None else legacy_rank
+
+    return ProcessPayloadIdentity(
+        rank=rank,
+        global_rank=global_rank,
+        local_rank=_optional_int(payload_dict.get("local_rank")),
+        world_size=_optional_int(payload_dict.get("world_size")),
+        local_world_size=_optional_int(payload_dict.get("local_world_size")),
+        node_rank=_optional_int(payload_dict.get("node_rank")),
+        hostname=_optional_str(payload_dict.get("hostname")),
+    )
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    """Add one nullable projection column when upgrading an existing DB."""
+    existing = {
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info({table});").fetchall()
+    }
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition};")
 
 
 def accepts_sampler(sampler: Optional[str]) -> bool:
@@ -75,8 +162,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     -----
     process_samples
         One row per sampled process snapshot. Includes process CPU/RAM fields,
-        rank metadata, and flattened single-device GPU memory metrics when
-        available.
+        distributed identity, and flattened single-device GPU memory metrics.
     """
     conn.execute(
         """
@@ -84,9 +170,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
             id                       INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns               INTEGER NOT NULL,
             rank                     INTEGER,
+            global_rank              INTEGER,
+            local_rank               INTEGER,
+            world_size               INTEGER,
+            local_world_size         INTEGER,
+            node_rank                INTEGER,
+            hostname                 TEXT,
             sample_ts_s              REAL,
             seq                      INTEGER,
-            pid                      INTEGER,
             cpu_percent              REAL,
             cpu_logical_core_count   INTEGER,
             ram_used_bytes           REAL,
@@ -100,6 +191,42 @@ def init_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    _ensure_column(
+        conn,
+        table="process_samples",
+        column="global_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="process_samples",
+        column="local_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="process_samples",
+        column="world_size",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="process_samples",
+        column="local_world_size",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="process_samples",
+        column="node_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="process_samples",
+        column="hostname",
+        definition="TEXT",
+    )
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_process_samples_rank_ts
@@ -108,8 +235,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_process_samples_pid_ts
-        ON process_samples(pid, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_process_samples_global_rank_ts
+        ON process_samples(global_rank, sample_ts_s, id);
         """
     )
 
@@ -149,11 +276,7 @@ def build_rows(
     if not accepts_sampler(str(sampler) if sampler is not None else None):
         return out
 
-    rank_raw = payload_dict.get("rank")
-    try:
-        rank = int(rank_raw) if rank_raw is not None else None
-    except Exception:
-        rank = None
+    identity = _payload_identity(payload_dict)
 
     tables = payload_dict.get("tables")
     if not isinstance(tables, dict):
@@ -169,7 +292,6 @@ def build_rows(
 
             seq_raw = row.get("seq")
             ts_raw = row.get("ts")
-            pid_raw = row.get("pid")
             cpu_percent_raw = row.get("cpu")
             cpu_logical_core_count_raw = row.get("cpu_cores")
             ram_used_raw = row.get("ram_used")
@@ -182,7 +304,6 @@ def build_rows(
             sample_ts_s = (
                 float(ts_raw) if isinstance(ts_raw, (int, float)) else None
             )
-            pid = int(pid_raw) if isinstance(pid_raw, int) else None
             cpu_percent = (
                 float(cpu_percent_raw)
                 if isinstance(cpu_percent_raw, (int, float))
@@ -247,10 +368,15 @@ def build_rows(
             out["process_samples"].append(
                 (
                     recv_ts_ns,
-                    rank,
+                    identity.rank,
+                    identity.global_rank,
+                    identity.local_rank,
+                    identity.world_size,
+                    identity.local_world_size,
+                    identity.node_rank,
+                    identity.hostname,
                     sample_ts_s,
                     seq,
-                    pid,
                     cpu_percent,
                     cpu_logical_core_count,
                     ram_used_bytes,
@@ -287,9 +413,14 @@ def insert_rows(
             INSERT INTO process_samples(
                 recv_ts_ns,
                 rank,
+                global_rank,
+                local_rank,
+                world_size,
+                local_world_size,
+                node_rank,
+                hostname,
                 sample_ts_s,
                 seq,
-                pid,
                 cpu_percent,
                 cpu_logical_core_count,
                 ram_used_bytes,
@@ -301,7 +432,7 @@ def insert_rows(
                 gpu_mem_reserved_bytes,
                 gpu_mem_total_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )

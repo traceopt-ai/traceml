@@ -6,7 +6,7 @@ actual work to the split CLI and dashboard compute classes.
 
 Example
 -------
-    computer = SystemMetricsComputer(db_path="metrics.db", rank=None)
+    computer = SystemMetricsComputer(db_path="metrics.db", node_rank=None)
     cli_payload = computer.compute_cli()
     dash_payload = computer.compute_dashboard(window_n=100)
 """
@@ -27,8 +27,8 @@ class SystemMetricsComputer:
     ----------
     db_path:
         Path to the SQLite database file.
-    rank:
-        Optional rank filter.
+    node_rank:
+        Optional node-rank filter.
     stale_ttl_s:
         Maximum age in seconds for stale cached payload reuse.
     """
@@ -36,17 +36,17 @@ class SystemMetricsComputer:
     def __init__(
         self,
         db_path: str,
-        rank: Optional[int] = None,
+        node_rank: Optional[int] = None,
         stale_ttl_s: Optional[float] = 30.0,
     ) -> None:
         self._cli = SystemCLIComputer(
             db_path=db_path,
-            rank=rank,
+            node_rank=node_rank,
             stale_ttl_s=stale_ttl_s,
         )
         self._dash = SystemDashboardComputer(
             db_path=db_path,
-            rank=rank,
+            node_rank=node_rank,
             stale_ttl_s=stale_ttl_s,
         )
 

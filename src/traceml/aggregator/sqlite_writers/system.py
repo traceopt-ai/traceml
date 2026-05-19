@@ -1,19 +1,15 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 SQLite projection writer for SystemSampler.
 
 This module projects TraceML SystemSampler payloads into query-friendly
 SQLite tables while preserving the original sampler payload in the main
 `raw_messages` table.
-
-Design
-------
-- Keeps sampler-specific SQL logic out of the core SQLite writer
-- Accepts already-decoded payload dicts from the main writer
-- Produces two query-friendly tables:
-    1) system_samples
-       One row per system sample with host-level fields and aggregated GPU stats
-    2) system_gpu_samples
-       One row per GPU within each system sample
 
 Storage units
 -------------
@@ -33,7 +29,12 @@ Expected payload shape
 ----------------------
 Envelope:
 {
-    "rank": int,
+    "global_rank": int,  # process that emitted this node-level sample
+    "local_rank": int,
+    "world_size": int,
+    "local_world_size": int,
+    "node_rank": int,    # canonical System grouping identity
+    "hostname": str,
     "sampler": "SystemSampler",
     "timestamp": float,
     "tables": {
@@ -60,9 +61,78 @@ Envelope:
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 SAMPLER_NAME = "SystemSampler"
+RETENTION_TABLES = ("system_samples",)
+
+
+def _optional_int(value: Any) -> Optional[int]:
+    """Best-effort integer coercion for telemetry identity fields."""
+    try:
+        return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def _optional_str(value: Any) -> Optional[str]:
+    """Best-effort string coercion for telemetry identity fields."""
+    if value is None:
+        return None
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+@dataclass(frozen=True)
+class SystemPayloadIdentity:
+    """Distributed identity stored with projected system telemetry."""
+
+    global_rank: Optional[int]
+    local_rank: Optional[int]
+    world_size: Optional[int]
+    local_world_size: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+
+
+def _payload_identity(
+    payload_dict: Dict[str, Any],
+) -> SystemPayloadIdentity:
+    """
+    Return storage identity for one payload.
+
+    System projection tables store explicit distributed identity fields only.
+    The legacy generic ``rank`` field is intentionally ignored.
+    """
+    global_rank = _optional_int(payload_dict.get("global_rank"))
+
+    return SystemPayloadIdentity(
+        global_rank=global_rank,
+        local_rank=_optional_int(payload_dict.get("local_rank")),
+        world_size=_optional_int(payload_dict.get("world_size")),
+        local_world_size=_optional_int(payload_dict.get("local_world_size")),
+        node_rank=_optional_int(payload_dict.get("node_rank")),
+        hostname=_optional_str(payload_dict.get("hostname")),
+    )
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    """Add one nullable projection column when upgrading an existing DB."""
+    existing = {
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info({table});").fetchall()
+    }
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition};")
 
 
 def accepts_sampler(sampler: Optional[str]) -> bool:
@@ -89,7 +159,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS system_samples (
             id                     INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns             INTEGER NOT NULL,
-            rank                   INTEGER,
+            global_rank            INTEGER,
+            local_rank             INTEGER,
+            world_size             INTEGER,
+            local_world_size       INTEGER,
+            node_rank              INTEGER,
+            hostname               TEXT,
             sample_ts_s            REAL,
             seq                    INTEGER,
             cpu_percent            REAL,
@@ -110,17 +185,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_system_samples_rank_ts
-        ON system_samples(rank, sample_ts_s, id);
-        """
-    )
-
-    conn.execute(
-        """
         CREATE TABLE IF NOT EXISTS system_gpu_samples (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             recv_ts_ns       INTEGER NOT NULL,
-            rank             INTEGER,
+            global_rank      INTEGER,
+            local_rank       INTEGER,
+            world_size       INTEGER,
+            local_world_size INTEGER,
+            node_rank        INTEGER,
+            hostname         TEXT,
             sample_ts_s      REAL,
             seq              INTEGER,
             gpu_idx          INTEGER NOT NULL,
@@ -133,10 +206,88 @@ def init_schema(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    _ensure_column(
+        conn,
+        table="system_samples",
+        column="global_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_samples",
+        column="local_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_samples",
+        column="world_size",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_samples",
+        column="local_world_size",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_samples",
+        column="node_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_samples",
+        column="hostname",
+        definition="TEXT",
+    )
+    _ensure_column(
+        conn,
+        table="system_gpu_samples",
+        column="global_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_gpu_samples",
+        column="local_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_gpu_samples",
+        column="world_size",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_gpu_samples",
+        column="local_world_size",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_gpu_samples",
+        column="node_rank",
+        definition="INTEGER",
+    )
+    _ensure_column(
+        conn,
+        table="system_gpu_samples",
+        column="hostname",
+        definition="TEXT",
+    )
     conn.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_system_gpu_samples_rank_gpu_ts
-        ON system_gpu_samples(rank, gpu_idx, sample_ts_s, id);
+        CREATE INDEX IF NOT EXISTS idx_system_samples_node_ts
+        ON system_samples(node_rank, sample_ts_s, id);
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_system_gpu_samples_global_gpu_ts
+        ON system_gpu_samples(global_rank, gpu_idx, sample_ts_s, id);
         """
     )
 
@@ -178,11 +329,7 @@ def build_rows(
     if not accepts_sampler(str(sampler) if sampler is not None else None):
         return out
 
-    rank_raw = payload_dict.get("rank")
-    try:
-        rank = int(rank_raw) if rank_raw is not None else None
-    except Exception:
-        rank = None
+    identity = _payload_identity(payload_dict)
 
     tables = payload_dict.get("tables")
     if not isinstance(tables, dict):
@@ -291,7 +438,12 @@ def build_rows(
                     out["system_gpu_samples"].append(
                         (
                             recv_ts_ns,
-                            rank,
+                            identity.global_rank,
+                            identity.local_rank,
+                            identity.world_size,
+                            identity.local_world_size,
+                            identity.node_rank,
+                            identity.hostname,
                             sample_ts_s,
                             seq,
                             gpu_idx,
@@ -324,7 +476,12 @@ def build_rows(
             out["system_samples"].append(
                 (
                     recv_ts_ns,
-                    rank,
+                    identity.global_rank,
+                    identity.local_rank,
+                    identity.world_size,
+                    identity.local_world_size,
+                    identity.node_rank,
+                    identity.hostname,
                     sample_ts_s,
                     seq,
                     cpu_percent,
@@ -365,7 +522,12 @@ def insert_rows(
             """
             INSERT INTO system_samples(
                 recv_ts_ns,
-                rank,
+                global_rank,
+                local_rank,
+                world_size,
+                local_world_size,
+                node_rank,
+                hostname,
                 sample_ts_s,
                 seq,
                 cpu_percent,
@@ -382,7 +544,7 @@ def insert_rows(
                 gpu_power_avg_w,
                 gpu_power_peak_w
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             system_rows,
         )
@@ -393,7 +555,12 @@ def insert_rows(
             """
             INSERT INTO system_gpu_samples(
                 recv_ts_ns,
-                rank,
+                global_rank,
+                local_rank,
+                world_size,
+                local_world_size,
+                node_rank,
+                hostname,
                 sample_ts_s,
                 seq,
                 gpu_idx,
@@ -404,7 +571,7 @@ def insert_rows(
                 power_usage_w,
                 power_limit_w
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             gpu_rows,
         )

@@ -1,13 +1,20 @@
 import json
 import sqlite3
 
+from traceml.diagnostics.step_time.adapters import (
+    StepTimeDiagnosisInput,
+    diagnose_step_time_summary,
+)
+from traceml.reporting.sections.step_time.alignment import AlignedStepWindow
 from traceml.reporting.summaries.step_time import (
     generate_step_time_summary_card,
 )
 from traceml.reporting.sections.step_time import StepTimeSummarySection
 from traceml.reporting.sections.step_time.loader import (
+    StepTimeSectionData,
     load_step_time_section_data,
 )
+from traceml.reporting.sections.step_time.model import to_rank_signals
 
 
 def _create_step_time_db(path: str) -> None:
@@ -16,13 +23,20 @@ def _create_step_time_db(path: str) -> None:
         conn.execute(
             """
             CREATE TABLE step_time_samples (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns    INTEGER NOT NULL,
-                rank          INTEGER,
-                sample_ts_s   REAL,
-                seq           INTEGER,
-                step          INTEGER,
-                events_json   TEXT NOT NULL
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                recv_ts_ns         INTEGER NOT NULL,
+                rank               INTEGER,
+                global_rank        INTEGER,
+                local_rank         INTEGER,
+                world_size         INTEGER,
+                local_world_size   INTEGER,
+                node_rank          INTEGER,
+                hostname           TEXT,
+                runtime_pid        INTEGER,
+                sample_ts_s        REAL,
+                seq                INTEGER,
+                step               INTEGER,
+                events_json        TEXT NOT NULL
             );
             """
         )
@@ -64,20 +78,55 @@ def _create_step_time_db(path: str) -> None:
             },
         }
         rows = [
-            (1, 0, 1.0, 1, 1, json.dumps(events)),
-            (2, 0, 2.0, 2, 2, json.dumps(events)),
+            (
+                1,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                "worker-0",
+                10_000,
+                1.0,
+                1,
+                1,
+                json.dumps(events),
+            ),
+            (
+                2,
+                0,
+                0,
+                0,
+                1,
+                1,
+                0,
+                "worker-0",
+                10_000,
+                2.0,
+                2,
+                2,
+                json.dumps(events),
+            ),
         ]
         conn.executemany(
             """
             INSERT INTO step_time_samples(
                 recv_ts_ns,
                 rank,
+                global_rank,
+                local_rank,
+                world_size,
+                local_world_size,
+                node_rank,
+                hostname,
+                runtime_pid,
                 sample_ts_s,
                 seq,
                 step,
                 events_json
             )
-            VALUES (?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )
@@ -95,9 +144,9 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
         print_to_stdout=False,
     )
 
-    assert summary["overview"]["ranks_seen"] == 1
-    assert summary["global"]["typical"]["steps_analyzed"] == 2
-    assert summary["global"]["typical"]["step_avg_ms"] == 31.0
+    assert summary["metadata"]["global_ranks_seen"] == 1
+    assert summary["global"]["window"]["steps_analyzed"] == 2
+    assert summary["global"]["median"]["total_step_ms"]["value"] == 31.0
     assert "Global: n/a" not in summary["card"]
 
 
@@ -112,20 +161,29 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
 
     assert data.training_steps == 3
     assert data.latest_step_observed == 2
-    assert data.per_rank_summary[0].steps_analyzed == 2
+    assert data.per_global_rank_summary[0].steps_analyzed == 2
+    assert data.aligned_window.steps_analyzed == 2
     assert result.section == "step_time"
-    assert result.payload["overview"]["ranks_seen"] == 1
-    assert result.payload["global"]["typical"]["step_avg_ms"] == 31.0
+    assert result.payload["metadata"]["global_ranks_seen"] == 1
+    assert result.payload["global"]["median"]["total_step_ms"]["value"] == 31.0
+    assert result.payload["groups"]["rows"]["0"]["identity"] == {
+        "global_rank": 0,
+        "local_rank": 0,
+        "node_rank": 0,
+        "hostname": "worker-0",
+        "local_world_size": 1,
+        "world_size": 1,
+    }
     assert "TraceML Step Timing Summary" in result.text
 
 
 def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
     from traceml.reporting.sections.step_time.builder import (
-        build_step_time_card,
+        build_step_time_payload,
     )
     from traceml.reporting.summaries.step_time import RankStepSummary
 
-    per_rank = {
+    per_global_rank = {
         rank: RankStepSummary(
             steps_analyzed=128,
             avg_dataloader_ms=1.0,
@@ -133,21 +191,46 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
             avg_backward_ms=3.0,
             avg_optimizer_ms=1.0,
             avg_step_cpu_ms=8.0,
+            avg_traced_step_ms=8.0,
             avg_gpu_compute_ms=6.0,
             avg_total_step_ms=9.0,
         )
         for rank in range(4)
     }
 
-    card, summary = build_step_time_card(
+    data = StepTimeSectionData(
         training_steps=129,
         latest_step_observed=128,
-        per_rank_summary=per_rank,
-        per_rank_step_metrics={},
+        aligned_summary=per_global_rank,
+        aligned_step_metrics={},
+        aligned_window=AlignedStepWindow(
+            alignment="common_steps",
+            steps_analyzed=128,
+            start_step=None,
+            end_step=None,
+            window_size=10000,
+            global_ranks_used=4,
+            global_ranks_observed=4,
+        ),
+        per_global_rank_summary=per_global_rank,
+        per_global_rank_step_metrics={},
+        identities={},
         max_rows=10000,
     )
+    diagnosis = diagnose_step_time_summary(
+        StepTimeDiagnosisInput(
+            rank_signals=to_rank_signals(per_global_rank),
+            per_rank_step_metrics={},
+            max_rows=10000,
+        )
+    )
+    summary = build_step_time_payload(data, diagnosis)
+    card = summary["card"]
 
-    assert "compared over last 128 steps per rank" in card
+    assert "compared over last 128 aligned steps across 4 global ranks" in card
     assert "10000 steps" not in card
-    assert summary["overview"]["steps_analyzed_min"] == 128
-    assert summary["overview"]["steps_analyzed_max"] == 128
+    assert summary["global"]["window"]["steps_analyzed"] == 128
+    assert summary["global"]["window"]["window_size"] == 10000
+    assert "aligned_steps_analyzed" not in summary["metadata"]
+    assert "steps_analyzed_min_per_global_rank" not in summary["metadata"]
+    assert "steps_analyzed_max_per_global_rank" not in summary["metadata"]

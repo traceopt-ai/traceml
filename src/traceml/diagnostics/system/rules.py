@@ -270,7 +270,7 @@ DEFAULT_SYSTEM_RULES = (
 )
 
 
-_ISSUE_PRIORITY = {
+SYSTEM_ISSUE_PRIORITY = {
     "VERY_HIGH_GPU_MEMORY": 0,
     "HIGH_GPU_TEMPERATURE": 1,
     "HIGH_GPU_MEMORY": 2,
@@ -288,7 +288,7 @@ def sort_system_issues(
         sorted(
             issues,
             key=lambda issue: (
-                _ISSUE_PRIORITY.get(issue.kind, 999),
+                SYSTEM_ISSUE_PRIORITY.get(issue.kind, 999),
                 -(float(issue.score or 0.0)),
             ),
         )
@@ -318,6 +318,7 @@ __all__ = [
     "HighGPUTemperatureRule",
     "HighHostMemoryRule",
     "LowGPUUtilizationRule",
+    "SYSTEM_ISSUE_PRIORITY",
     "VeryHighGPUMemoryRule",
     "run_system_rules",
     "sort_system_issues",

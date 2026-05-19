@@ -1,22 +1,34 @@
-"""Step-time aggregation helpers for the final-report section."""
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
 
-import json
-import sqlite3
+"""Step-time domain objects and pure helpers for the final-report section."""
+
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 
 from traceml.diagnostics.step_time.adapters import RankStepSignals
-from traceml.reporting.summaries.summary_formatting import (
-    safe_float,
-    share_percent,
-)
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml.reporting.schema import BaseGlobal, GlobalWindow
+from traceml.reporting.summaries.summary_formatting import safe_float
 
-MAX_SUMMARY_WINDOW_ROWS = 10_000
+MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
+STEP_TIME_METRIC_NAMES = [
+    "total_step_ms",
+    "dataloader_ms",
+    "compute_ms",
+    "wait_ms",
+    "forward_ms",
+    "backward_ms",
+    "optimizer_ms",
+]
 
 
-def _finite_float(x: Any) -> float:
+def finite_float(x: Any) -> float:
     """Convert to float; coerce non-finite values to 0.0."""
     v = safe_float(x)
     return v if np.isfinite(v) else 0.0
@@ -31,7 +43,7 @@ def _event_total_ms(by_dev: Any) -> float:
     for stats in by_dev.values():
         if not isinstance(stats, dict):
             continue
-        total += _finite_float(stats.get("duration_ms"))
+        total += finite_float(stats.get("duration_ms"))
     return total
 
 
@@ -62,7 +74,7 @@ def _event_bucket(name: str) -> Optional[str]:
     return None
 
 
-def _closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
+def closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
     """
     Return the rank whose value is closest to the median of all values.
 
@@ -75,7 +87,7 @@ def _closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
         return None
 
     vals = np.asarray(
-        [_finite_float(v) for v in rank_to_value.values()],
+        [finite_float(v) for v in rank_to_value.values()],
         dtype=np.float64,
     )
     if vals.size == 0:
@@ -86,8 +98,8 @@ def _closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
     return min(
         rank_to_value.keys(),
         key=lambda r: (
-            abs(_finite_float(rank_to_value[r]) - median_val),
-            _finite_float(rank_to_value[r]),
+            abs(finite_float(rank_to_value[r]) - median_val),
+            finite_float(rank_to_value[r]),
             r,
         ),
     )
@@ -103,6 +115,7 @@ class RankStepSummary:
     avg_backward_ms: float
     avg_optimizer_ms: float
     avg_step_cpu_ms: float
+    avg_traced_step_ms: float
     avg_gpu_compute_ms: float
     avg_total_step_ms: float
 
@@ -115,59 +128,35 @@ class RankStepAnalysis:
     per_step_metrics: Dict[int, Dict[str, float]]
 
 
-def _to_rank_signals(
-    per_rank_summary: Dict[int, RankStepSummary],
+@dataclass(frozen=True)
+class GlobalRankIdentity:
+    """Runtime identity observed for one global rank."""
+
+    global_rank: int
+    local_rank: Optional[int]
+    node_rank: Optional[int]
+    hostname: Optional[str]
+    local_world_size: Optional[int]
+    world_size: Optional[int]
+
+
+def to_rank_signals(
+    per_global_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[int, RankStepSignals]:
     """
-    Convert local rank summaries to diagnosis adapter input objects.
+    Convert global-rank summaries to diagnosis adapter input objects.
     """
     return {
         int(rank): RankStepSignals(
             steps_analyzed=int(s.steps_analyzed),
-            dataloader_ms=_finite_float(s.avg_dataloader_ms),
-            forward_ms=_finite_float(s.avg_forward_ms),
-            backward_ms=_finite_float(s.avg_backward_ms),
-            optimizer_ms=_finite_float(s.avg_optimizer_ms),
-            step_cpu_ms=_finite_float(s.avg_step_cpu_ms),
+            dataloader_ms=finite_float(s.avg_dataloader_ms),
+            forward_ms=finite_float(s.avg_forward_ms),
+            backward_ms=finite_float(s.avg_backward_ms),
+            optimizer_ms=finite_float(s.avg_optimizer_ms),
+            step_cpu_ms=finite_float(s.avg_step_cpu_ms),
         )
-        for rank, s in per_rank_summary.items()
+        for rank, s in per_global_rank_summary.items()
     }
-
-
-def _load_rank_step_rows(
-    conn: sqlite3.Connection,
-    *,
-    rank: int,
-    max_rows: int,
-) -> list[Dict[str, Any]]:
-    """
-    Load the latest up to `max_rows` step-time rows for one rank.
-
-    Assumes one projected row per step in `step_time_samples`.
-    """
-    cur = conn.execute(
-        """
-        SELECT step, events_json
-        FROM step_time_samples
-        WHERE rank = ?
-        ORDER BY step DESC, id DESC
-        LIMIT ?;
-        """,
-        (int(rank), int(max_rows)),
-    )
-
-    rows: list[Dict[str, Any]] = []
-    for step, events_json in cur:
-        if step is None or not events_json:
-            continue
-        try:
-            events = json.loads(events_json)
-        except Exception:
-            continue
-        if not isinstance(events, dict):
-            continue
-        rows.append({"step": int(step), "events": events})
-    return rows
 
 
 def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
@@ -211,7 +200,7 @@ def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
     return metrics
 
 
-def _build_rank_summary(
+def build_rank_summary(
     step_rows: list[Dict[str, Any]],
 ) -> Optional[RankStepAnalysis]:
     """
@@ -231,6 +220,7 @@ def _build_rank_summary(
     sum_bwd = 0.0
     sum_opt = 0.0
     sum_step_cpu = 0.0
+    sum_traced_step = 0.0
     sum_total = 0.0
     n = 0
 
@@ -242,23 +232,26 @@ def _build_rank_summary(
         if metrics is None or step_id is None:
             continue
 
-        dl = _finite_float(metrics["dataloader"])
-        fwd = _finite_float(metrics["forward"])
-        bwd = _finite_float(metrics["backward"])
-        opt = _finite_float(metrics["optimizer"])
-        step_cpu = _finite_float(metrics["step_time"])
+        dl = finite_float(metrics["dataloader"])
+        fwd = finite_float(metrics["forward"])
+        bwd = finite_float(metrics["backward"])
+        opt = finite_float(metrics["optimizer"])
+        step_cpu = finite_float(metrics["step_time"])
 
-        gpu_compute = fwd + bwd + opt
-        step_effective = max(step_cpu, gpu_compute)
-        wait_proxy = max(0.0, step_effective - gpu_compute)
-        total_step = dl + step_effective
+        compute_ms = fwd + bwd + opt
+        # raw step = the direct trace_step wall timer.
+        # traced step = max(raw step, compute) to avoid impossible negative wait
+        # when CPU wall timing and CUDA event timing differ slightly.
+        traced_step = max(step_cpu, compute_ms)
+        wait_proxy = max(0.0, traced_step - compute_ms)
+        total_step = dl + traced_step
 
         per_step_metrics[int(step_id)] = {
             "dataloader_fetch": dl,
             "forward": fwd,
             "backward": bwd,
             "optimizer_step": opt,
-            "step_time": step_effective,
+            "step_time": traced_step,
             "wait_proxy": wait_proxy,
         }
 
@@ -267,6 +260,7 @@ def _build_rank_summary(
         sum_bwd += bwd
         sum_opt += opt
         sum_step_cpu += step_cpu
+        sum_traced_step += traced_step
         sum_total += total_step
         n += 1
 
@@ -280,255 +274,242 @@ def _build_rank_summary(
         avg_backward_ms=sum_bwd / n,
         avg_optimizer_ms=sum_opt / n,
         avg_step_cpu_ms=sum_step_cpu / n,
+        avg_traced_step_ms=sum_traced_step / n,
         avg_gpu_compute_ms=(sum_fwd + sum_bwd + sum_opt) / n,
         avg_total_step_ms=sum_total / n,
     )
     return RankStepAnalysis(summary=summary, per_step_metrics=per_step_metrics)
 
 
-def _split_ms(s: RankStepSummary) -> Dict[str, float]:
-    """Return the main timing split in milliseconds for one rank summary."""
-    return {
-        "dataloader": s.avg_dataloader_ms,
-        "forward": s.avg_forward_ms,
-        "backward": s.avg_backward_ms,
-        "optimizer": s.avg_optimizer_ms,
-    }
-
-
-def _split_pct(s: RankStepSummary) -> Dict[str, Optional[float]]:
-    """Return the main timing split as percentage share of average total step."""
-    return {
-        "dataloader": share_percent(s.avg_dataloader_ms, s.avg_total_step_ms),
-        "forward": share_percent(s.avg_forward_ms, s.avg_total_step_ms),
-        "backward": share_percent(s.avg_backward_ms, s.avg_total_step_ms),
-        "optimizer": share_percent(s.avg_optimizer_ms, s.avg_total_step_ms),
-    }
-
-
-def _compute_wait_avg_ms(s: RankStepSummary) -> float:
+def compute_wait_avg_ms(s: RankStepSummary) -> float:
     """
     Return average wait proxy for one rank summary.
 
-    Wait is derived from:
-        total_step - (dataloader + forward + backward + optimizer)
+    Public Step Time uses:
+        total_step_ms = dataloader_ms + compute_ms + wait_ms
+        compute_ms = forward_ms + backward_ms + optimizer_ms
+
+    Internally, wait is derived from:
+        traced_step_ms - compute_ms
+
+    where traced_step_ms is max(raw trace_step wall timer, compute_ms).
+    The traced-step value is intentionally internal so the public JSON remains
+    the simpler total/input/compute/wait model.
     """
     return max(
         0.0,
-        _finite_float(s.avg_total_step_ms)
+        finite_float(s.avg_traced_step_ms)
         - (
-            _finite_float(s.avg_dataloader_ms)
-            + _finite_float(s.avg_forward_ms)
-            + _finite_float(s.avg_backward_ms)
-            + _finite_float(s.avg_optimizer_ms)
+            finite_float(s.avg_forward_ms)
+            + finite_float(s.avg_backward_ms)
+            + finite_float(s.avg_optimizer_ms)
         ),
     )
 
 
-def _dominant_bucket(split_ms: Dict[str, float]) -> Optional[str]:
-    """Return the timing bucket with the largest ms contribution."""
-    if not split_ms:
-        return None
-    return max(split_ms, key=split_ms.get)
-
-
-def _dominant_line(
-    median_split_ms: Optional[Dict[str, float]],
-    worst_split_ms: Optional[Dict[str, float]],
-) -> str:
-    """
-    Build one concise dominant-phase takeaway line.
-    """
-    if median_split_ms is None and worst_split_ms is None:
-        return "n/a"
-
-    if median_split_ms is not None and worst_split_ms is None:
-        dom = _dominant_bucket(median_split_ms)
-        return f"{dom} is the largest phase"
-
-    if median_split_ms is None and worst_split_ms is not None:
-        dom = _dominant_bucket(worst_split_ms)
-        return f"{dom} is the largest phase"
-
-    dom_median = _dominant_bucket(median_split_ms or {})
-    dom_worst = _dominant_bucket(worst_split_ms or {})
-
-    if dom_median == dom_worst:
-        return (
-            f"{dom_median} is the largest phase on both median and worst rank"
-        )
-
-    return (
-        f"median rank is dominated by {dom_median}; "
-        f"worst rank is dominated by {dom_worst}"
-    )
-
-
-def _empty_timing_rollup() -> Dict[str, Any]:
-    """
-    Return an empty timing rollup block with stable keys.
-
-    Using a stable empty structure makes downstream consumers simpler and keeps
-    missing-data handling explicit rather than forcing callers to guard every
-    field access.
-    """
+def _rank_metric_values(
+    per_global_rank_summary: Dict[int, RankStepSummary],
+) -> Dict[str, Dict[int, float]]:
+    """Return global-rank values for each Step Time metric."""
     return {
-        "steps_analyzed": 0,
-        "step_avg_ms": None,
-        "compute_avg_ms": None,
-        "compute_share_pct": None,
-        "wait_avg_ms": None,
-        "wait_share_pct": None,
-        "split_ms": None,
-        "split_pct": None,
-        "dominant_phase": None,
-    }
-
-
-def _timing_rollup_from_summary(
-    summary: Optional[RankStepSummary],
-) -> Dict[str, Any]:
-    """Build one timing rollup from a per-rank summary."""
-    if summary is None:
-        return _empty_timing_rollup()
-
-    split_ms = _split_ms(summary)
-    split_pct = _split_pct(summary)
-    step_avg_ms = _finite_float(summary.avg_total_step_ms)
-    compute_avg_ms = _finite_float(summary.avg_gpu_compute_ms)
-    wait_avg_ms = _compute_wait_avg_ms(summary)
-
-    return {
-        "steps_analyzed": int(summary.steps_analyzed),
-        "step_avg_ms": step_avg_ms,
-        "compute_avg_ms": compute_avg_ms,
-        "compute_share_pct": share_percent(compute_avg_ms, step_avg_ms),
-        "wait_avg_ms": wait_avg_ms,
-        "wait_share_pct": share_percent(wait_avg_ms, step_avg_ms),
-        "split_ms": split_ms,
-        "split_pct": split_pct,
-        "dominant_phase": _dominant_bucket(split_ms),
-    }
-
-
-def _rank_entry_to_json(
-    rank: int,
-    summary: RankStepSummary,
-) -> Dict[str, Any]:
-    """Serialize one rank summary."""
-    return {
-        "identity": {
-            "rank": int(rank),
-            "local_rank": None,
-            "gpu_idx": None,
+        "total_step_ms": {
+            int(rank): finite_float(summary.avg_total_step_ms)
+            for rank, summary in per_global_rank_summary.items()
         },
-        "timing": _timing_rollup_from_summary(summary),
+        "dataloader_ms": {
+            int(rank): finite_float(summary.avg_dataloader_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "compute_ms": {
+            int(rank): finite_float(summary.avg_gpu_compute_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "wait_ms": {
+            int(rank): compute_wait_avg_ms(summary)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "forward_ms": {
+            int(rank): finite_float(summary.avg_forward_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "backward_ms": {
+            int(rank): finite_float(summary.avg_backward_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "optimizer_ms": {
+            int(rank): finite_float(summary.avg_optimizer_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
     }
 
 
-def _timing_rollup_with_rank(
-    rank: Optional[int],
-    summary: Optional[RankStepSummary],
-) -> Dict[str, Any]:
-    """
-    Attach rank identity to a timing rollup block.
-    """
-    rollup = _timing_rollup_from_summary(summary)
-    rollup["rank"] = int(rank) if rank is not None else None
-    return rollup
+def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
+    """Return public row metrics for one global-rank step-time summary."""
+    return {
+        "total_step_ms": finite_float(summary.avg_total_step_ms),
+        "dataloader_ms": finite_float(summary.avg_dataloader_ms),
+        "compute_ms": finite_float(summary.avg_gpu_compute_ms),
+        "wait_ms": compute_wait_avg_ms(summary),
+        "forward_ms": finite_float(summary.avg_forward_ms),
+        "backward_ms": finite_float(summary.avg_backward_ms),
+        "optimizer_ms": finite_float(summary.avg_optimizer_ms),
+    }
 
 
-def _build_global_rollup(
+def _average_points(values_by_metric: Dict[str, Dict[int, float]]) -> Dict:
+    """Average each Step Time metric across observed global ranks."""
+    out: Dict[str, Optional[float]] = {}
+    for metric, values in values_by_metric.items():
+        vals = list(values.values())
+        out[metric] = sum(vals) / len(vals) if vals else None
+    return out
+
+
+def _empty_average(metric_names: Iterable[str]) -> Dict[str, None]:
+    """Return a null-valued average block for missing-data sections."""
+    return {str(metric): None for metric in metric_names}
+
+
+def _empty_rank_points(
+    metric_names: Iterable[str],
+) -> Dict[str, Dict[str, None]]:
+    """Return stable null-valued median/worst rank points."""
+    return {
+        str(metric): {"value": None, "idx": None} for metric in metric_names
+    }
+
+
+def _rank_points(
+    values_by_metric: Dict[str, Dict[int, float]],
     *,
-    per_rank_summary: Dict[int, RankStepSummary],
-    representative_rank: Optional[int],
-    bottleneck_rank: Optional[int],
-    imbalance_gap_pct: Optional[float],
+    kind: str,
+) -> Dict[str, Dict[str, Any]]:
+    """Return `{value, global_rank}` points for median or worst values."""
+    out: Dict[str, Dict[str, Any]] = {}
+    for metric, values in values_by_metric.items():
+        if not values:
+            out[metric] = {"value": None, "idx": None}
+            continue
+        if kind == "median":
+            rank = closest_rank_to_median(values)
+        elif kind == "worst":
+            rank = max(values, key=lambda item: (values[item], -int(item)))
+        else:
+            raise ValueError(f"Unsupported Step Time point kind: {kind}")
+        out[metric] = {
+            "value": values.get(rank) if rank is not None else None,
+            "idx": str(rank) if rank is not None else None,
+        }
+    return out
+
+
+def build_global_rollup(
+    *,
+    per_global_rank_summary: Dict[int, RankStepSummary],
+    median_global_rank: Optional[int],
+    worst_global_rank: Optional[int],
+    analysis_window: Any,
 ) -> Dict[str, Any]:
     """Build the top-level step-time rollup for the run window."""
-    if not per_rank_summary:
-        return {
-            "mode": "no_data",
-            "ranks_seen": 0,
-            "representative_rank": None,
-            "bottleneck_rank": None,
-            "imbalance_gap_pct": None,
-            "typical": _empty_timing_rollup(),
-            "bottleneck": _empty_timing_rollup(),
-        }
+    window_json = dict(analysis_window.to_json())
+    steps_analyzed = window_json.get("aligned_steps_analyzed", 0)
+    end_step = window_json.get("end_step")
+    window = GlobalWindow(
+        kind="step_window",
+        alignment=str(window_json.get("alignment") or "common_steps"),
+        steps_analyzed=int(steps_analyzed or 0),
+        start_step=window_json.get("start_step"),
+        end_step=end_step,
+        completed_step=end_step,
+        window_size=window_json.get("window_size"),
+    ).to_json()
+    if not per_global_rank_summary:
+        return BaseGlobal(
+            index_by="global_rank",
+            window=window,
+            average=_empty_average(STEP_TIME_METRIC_NAMES),
+            median=_empty_rank_points(STEP_TIME_METRIC_NAMES),
+            worst=_empty_rank_points(STEP_TIME_METRIC_NAMES),
+        ).to_json()
 
-    representative_summary = (
-        per_rank_summary.get(representative_rank)
-        if representative_rank is not None
-        else None
-    )
-    bottleneck_summary = (
-        per_rank_summary.get(bottleneck_rank)
-        if bottleneck_rank is not None
-        else None
-    )
-
-    return {
-        "mode": (
-            "single_rank" if len(per_rank_summary) <= 1 else "distributed"
-        ),
-        "ranks_seen": len(per_rank_summary),
-        "representative_rank": representative_rank,
-        "bottleneck_rank": bottleneck_rank,
-        "imbalance_gap_pct": imbalance_gap_pct,
-        "typical": _timing_rollup_from_summary(representative_summary),
-        "bottleneck": _timing_rollup_from_summary(bottleneck_summary),
-    }
+    values_by_metric = _rank_metric_values(per_global_rank_summary)
+    return BaseGlobal(
+        index_by="global_rank",
+        window=window,
+        average=_average_points(values_by_metric),
+        median=_rank_points(values_by_metric, kind="median"),
+        worst=_rank_points(values_by_metric, kind="worst"),
+    ).to_json()
 
 
-def _build_overview(
+def build_overview(
     *,
-    per_rank_summary: Dict[int, RankStepSummary],
+    per_global_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[str, Any]:
-    """Build high-level overview fields from per-rank timing summaries."""
-    if not per_rank_summary:
+    """Build high-level overview fields from global-rank timing summaries."""
+    if not per_global_rank_summary:
         return {
-            "mode": "no_data",
-            "representative_rank": None,
-            "worst_rank": None,
-            "representative_avg_step_ms": None,
+            "rank_comparison": "no_data",
+            "median_global_rank": None,
+            "worst_global_rank": None,
+            "median_avg_step_ms": None,
             "worst_avg_step_ms": None,
-            "worst_vs_representative_pct": None,
+            "step_time_skew_percent": None,
         }
 
     avg_total_by_rank = {
-        rank: s.avg_total_step_ms for rank, s in per_rank_summary.items()
+        rank: s.avg_total_step_ms
+        for rank, s in per_global_rank_summary.items()
     }
-    worst_rank = max(avg_total_by_rank, key=avg_total_by_rank.get)
-    representative_rank = _closest_rank_to_median(avg_total_by_rank)
+    worst_global_rank = max(avg_total_by_rank, key=avg_total_by_rank.get)
+    median_global_rank = closest_rank_to_median(avg_total_by_rank)
 
-    worst_avg_step_ms = avg_total_by_rank.get(worst_rank)
-    representative_avg_step_ms = (
-        avg_total_by_rank.get(representative_rank)
-        if representative_rank is not None
+    worst_avg_step_ms = avg_total_by_rank.get(worst_global_rank)
+    median_avg_step_ms = (
+        avg_total_by_rank.get(median_global_rank)
+        if median_global_rank is not None
         else None
     )
 
-    worst_vs_representative_pct = None
+    step_time_skew_percent = None
     if (
         worst_avg_step_ms is not None
-        and representative_avg_step_ms is not None
-        and representative_avg_step_ms > 0.0
-        and worst_rank != representative_rank
+        and median_avg_step_ms is not None
+        and median_avg_step_ms > 0.0
+        and worst_global_rank != median_global_rank
     ):
-        worst_vs_representative_pct = (
+        step_time_skew_percent = (
             100.0
-            * (worst_avg_step_ms - representative_avg_step_ms)
-            / representative_avg_step_ms
+            * (worst_avg_step_ms - median_avg_step_ms)
+            / median_avg_step_ms
         )
 
     return {
-        "mode": (
-            "single_rank" if len(per_rank_summary) <= 1 else "distributed"
+        "rank_comparison": (
+            "single_rank"
+            if len(per_global_rank_summary) <= 1
+            else "distributed"
         ),
-        "representative_rank": representative_rank,
-        "worst_rank": worst_rank,
-        "representative_avg_step_ms": representative_avg_step_ms,
+        "median_global_rank": median_global_rank,
+        "worst_global_rank": worst_global_rank,
+        "median_avg_step_ms": median_avg_step_ms,
         "worst_avg_step_ms": worst_avg_step_ms,
-        "worst_vs_representative_pct": worst_vs_representative_pct,
+        "step_time_skew_percent": step_time_skew_percent,
     }
+
+
+__all__ = [
+    "MAX_SUMMARY_WINDOW_ROWS",
+    "STEP_TIME_METRIC_NAMES",
+    "GlobalRankIdentity",
+    "RankStepAnalysis",
+    "RankStepSummary",
+    "build_global_rollup",
+    "build_overview",
+    "build_rank_summary",
+    "closest_rank_to_median",
+    "compute_wait_avg_ms",
+    "finite_float",
+    "summary_metric_values",
+    "to_rank_signals",
+]

@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Tests for the seq-counter optimisation in Database, DBIncrementalSender,
 and DatabaseWriter.
@@ -14,6 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from traceml.database.database import Database
+from traceml.runtime.sender import SenderIdentity
 from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 # Database.get_append_count() tests
@@ -177,6 +184,24 @@ class TestDBIncrementalSender:
         assert "t1" not in payload["tables"]
         assert "t2" in payload["tables"]
         assert len(payload["tables"]["t2"]) == 1
+
+    def test_payload_rank_uses_attached_runtime_rank(self):
+        db = Database(sampler_name="test")
+        sender, transport = self._make_sender(db)
+        sender.identity = SenderIdentity(global_rank=5, local_rank=1)
+
+        db.add_record("t1", {"v": 1})
+        sender.flush()
+
+        payload = transport.send.call_args[0][0]
+        assert payload["rank"] == 5
+        assert payload["global_rank"] == 5
+        assert payload["local_rank"] == 1
+        assert payload["world_size"] == 1
+        assert payload["local_world_size"] == 1
+        assert payload["node_rank"] == 0
+        assert payload["hostname"] == ""
+        assert payload["pid"] == 0
 
 
 # DatabaseWriter tests

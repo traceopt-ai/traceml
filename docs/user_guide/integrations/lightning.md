@@ -51,6 +51,9 @@ Or open the local UI:
 traceml run train.py --mode=dashboard
 ```
 
+Dashboard mode is intended for single-node runs, including single-node
+multi-GPU.
+
 ---
 
 ## What TraceML will show
@@ -102,6 +105,8 @@ If you want a richer browser-based view, run:
 traceml run train.py --mode=dashboard
 ```
 
+Dashboard mode is intended for single-node runs.
+
 The local UI is useful when you want:
 
 - a richer run review experience
@@ -119,44 +124,6 @@ These settings usually give the cleanest experience with TraceML:
 | `enable_progress_bar=False` | Yes | Prevents Lightning progress output from fighting with the TraceML CLI |
 | `enable_model_summary=False` | Optional | Keeps terminal output cleaner |
 | `logger=False` | Optional | Useful for local diagnosis runs if you want minimal output |
-
----
-
-## Optional: deeper layer-level signals
-
-Use this only for short diagnostic runs when step-level diagnosis already told you where to dig.
-
-Since `TraceMLCallback` handles step-level tracing, deeper layer-level hooks are
-added separately with `traceml.trace_model_instance(...)`.
-
-```python
-import traceml
-import lightning as L
-import torch.nn as nn
-
-
-class MyLightningModule(L.LightningModule):
-    def __init__(self):
-        super().__init__()
-        self.model = MyCoreModel()
-        self.loss_fn = nn.CrossEntropyLoss()
-
-        traceml.trace_model_instance(
-            self,
-            trace_layer_forward_memory=True,
-            trace_layer_backward_memory=True,
-            trace_layer_forward_time=True,
-            trace_layer_backward_time=True,
-        )
-```
-
-Use this when you want:
-
-- per-layer timing
-- per-layer memory detail
-- a short follow-up diagnostic run
-
-Hooks add overhead, so keep them off for normal runs unless you need them.
 
 ---
 
@@ -286,6 +253,9 @@ If terminal output gets noisy, use:
 ```bash
 traceml run train.py --mode=dashboard
 ```
+
+Dashboard mode is intended for single-node runs. For multi-node runs, use the
+default final summary path.
 
 ### I want a baseline without TraceML
 

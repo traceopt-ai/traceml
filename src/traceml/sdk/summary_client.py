@@ -18,8 +18,8 @@ from traceml.sdk.protocol import (
     load_json_or_none,
     request_to_json,
     resolve_session_context_from_env,
-    write_json_atomic,
 )
+from traceml.utils.atomic_io import write_json_atomic
 
 
 def _read_text_or_empty(path: Path) -> str:

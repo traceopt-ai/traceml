@@ -38,6 +38,10 @@ htmlcov/
 .tox/
 .mypy_cache/
 
+# Local training outputs / generated telemetry
+
+logs/
+
 
 # IDE / Editor
 

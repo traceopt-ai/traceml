@@ -6,7 +6,7 @@ This is the cleanest way to answer questions like:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did wait share increase?
+- did wait time increase?
 - did memory pressure or skew get worse?
 
 `traceml compare` is designed for comparing finalized run summaries, not raw logs or raw SQLite databases.
@@ -20,10 +20,11 @@ You need two TraceML final summary JSON files.
 A common way to produce them is:
 
 ```bash
-traceml run train.py --mode=summary
+traceml run train.py
 ```
 
-Then call `traceml.final_summary()` near the end of your script.
+`traceml run` uses summary mode by default and writes `final_summary.json` at
+the end of the run.
 
 If you are logging TraceML output into W&B or MLflow, you can also keep those summary JSON files as run artifacts and compare them later.
 
@@ -97,7 +98,7 @@ It typically focuses on:
 - overall duration
 - step-time diagnosis changes
 - average step time changes
-- wait-share changes
+- wait-time changes
 - step split shifts across dataloader, forward, backward, and optimizer
 - memory changes when they are meaningful
 - process or system changes when they add useful context
@@ -121,7 +122,7 @@ That means:
 
 A good workflow is:
 
-1. run TraceML in summary mode for each run you care about
+1. run TraceML for each run you care about
 2. save the TraceML final summary JSON file for each run
 3. compare two runs with `traceml compare`
 4. use the compare output to decide whether a regression looks real and where to dig next
@@ -129,8 +130,8 @@ A good workflow is:
 Example:
 
 ```bash
-traceml run train_a.py --mode=summary
-traceml run train_b.py --mode=summary
+traceml run train_a.py
+traceml run train_b.py
 traceml compare run_a.json run_b.json
 ```
 

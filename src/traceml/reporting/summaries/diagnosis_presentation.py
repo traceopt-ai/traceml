@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 End-of-run diagnosis presentation helpers.
 
@@ -79,6 +85,8 @@ def present_step_time_summary_diagnosis(
     note = getattr(diagnosis, "note", None)
 
     if status == "NO DATA":
+        action = "Run longer for a stable timing diagnosis."
+    elif status == "WARMUP":
         action = "Run longer for a stable timing diagnosis."
     elif action in {
         "Wait for a fuller window.",

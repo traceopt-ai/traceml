@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """Argparse wiring for the TraceML launcher."""
 
 from __future__ import annotations
@@ -10,6 +16,7 @@ from traceml.launcher.commands import (
     run_with_tracing,
     validate_launch_args,
 )
+from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
@@ -20,11 +27,14 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--mode",
         type=str,
-        default="cli",
+        default="summary",
         choices=["cli", "dashboard", "summary"],
         help=(
-            "TraceML display mode to launch. "
-            "Use 'summary' for final-summary-only runs. Default: cli."
+            "TraceML mode. "
+            "'summary': end-of-run report, supports single-node and "
+            "multi-node multi-GPU. "
+            "'cli' and 'dashboard': live views, intended for single-node "
+            "runs, including single-node multi-GPU. Default: summary."
         ),
     )
     parser.add_argument(
@@ -54,16 +64,13 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         "--session-id",
         type=str,
         default="",
-        help="Optional explicit session id.",
+        help="Optional explicit session id. Required when --nnodes > 1.",
     )
     parser.add_argument(
-        "--tcp-host",
-        type=str,
-        default="127.0.0.1",
-        help="Aggregator bind host.",
-    )
-    parser.add_argument(
-        "--tcp-port", type=int, default=29765, help="Aggregator bind port."
+        "--aggregator-port",
+        type=int,
+        default=29765,
+        help="TraceML aggregator port.",
     )
     parser.add_argument(
         "--remote-max-rows",
@@ -72,17 +79,69 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="Maximum number of rows returned by remote telemetry queries.",
     )
     parser.add_argument(
+        "--summary-window-rows",
+        type=int,
+        default=DEFAULT_SUMMARY_WINDOW_ROWS,
+        help=(
+            "Rows used per node/rank for final summaries. SQLite retains "
+            "1.5x this value for alignment. Default: "
+            f"{DEFAULT_SUMMARY_WINDOW_ROWS}."
+        ),
+    )
+    parser.add_argument(
         "--nproc-per-node",
         type=int,
         default=1,
         help="torchrun nproc_per_node value.",
     )
     parser.add_argument(
+        "--nnodes",
+        type=int,
+        default=1,
+        help="torchrun nnodes value.",
+    )
+    parser.add_argument(
+        "--node-rank",
+        type=int,
+        default=0,
+        help="torchrun node_rank value for this machine.",
+    )
+    parser.add_argument(
+        "--master-addr",
+        type=str,
+        default="127.0.0.1",
+        help="torchrun master_addr value, usually node 0's address.",
+    )
+    parser.add_argument(
+        "--master-port",
+        type=int,
+        default=29500,
+        help="torchrun master_port value.",
+    )
+    parser.add_argument(
+        "--aggregator-host",
+        type=str,
+        default=None,
+        help=(
+            "Address workers use to send TraceML telemetry. Defaults to "
+            "--master-addr."
+        ),
+    )
+    parser.add_argument(
+        "--aggregator-bind-host",
+        type=str,
+        default=None,
+        help=(
+            "Address the owner node binds the TraceML aggregator to. Use "
+            "0.0.0.0 when other nodes must connect."
+        ),
+    )
+    parser.add_argument(
         "--args",
         nargs=argparse.REMAINDER,
         help=(
             "Arguments forwarded to the target training script. "
-            "Usage: traceml <watch|run|deep> <script> --args <script args>"
+            "Usage: traceml <watch|run> <script> --args <script args>"
         ),
     )
     parser.add_argument(
@@ -106,7 +165,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  traceml watch train.py\n"
             "  traceml run train.py --args --epochs 10 --lr 1e-3\n"
-            "  traceml deep train.py --args --config config.yaml\n"
             "  traceml compare run_a.json run_b.json"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
@@ -124,12 +182,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a script with TraceML bottleneck instrumentation.",
     )
     _add_launch_args(run_parser)
-
-    deep_parser = sub.add_parser(
-        "deep",
-        help="Run a script with TraceML deep layerwise instrumentation.",
-    )
-    _add_launch_args(deep_parser)
 
     compare_parser = sub.add_parser(
         "compare",
@@ -167,15 +219,13 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    if args.command in {"watch", "run", "deep"}:
+    if args.command in {"watch", "run"}:
         validate_launch_args(args)
 
     if args.command == "watch":
         run_with_tracing(args, profile="watch")
     elif args.command == "run":
         run_with_tracing(args, profile="run")
-    elif args.command == "deep":
-        run_with_tracing(args, profile="deep")
     elif args.command == "compare":
         run_compare(args)
     elif args.command == "inspect":

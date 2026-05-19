@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 System renderer.
 
@@ -18,7 +24,7 @@ from rich.table import Table
 from traceml.aggregator.display_drivers.layout import SYSTEM_LAYOUT
 from traceml.loggers.error_log import get_error_logger
 from traceml.renderers.base_renderer import BaseRenderer
-from traceml.utils.formatting import fmt_mem_new, fmt_mem_ratio, fmt_percent
+from traceml.utils.formatting import fmt_mem_new, fmt_percent
 
 from .computer import SystemMetricsComputer
 
@@ -54,19 +60,24 @@ class SystemRenderer(BaseRenderer):
         grid.add_column(justify="left", style="bright_white", no_wrap=True)
         grid.add_column(justify="left", style="bright_white", no_wrap=True)
 
-        # CPU + RAM row
+        if data.get("view") == "cluster":
+            return self._cluster_panel(data, grid)
+        return self._single_node_panel(data, grid)
+
+    def _single_node_panel(self, data: Dict[str, Any], grid: Table) -> Panel:
+        """Render the single-node terminal system view."""
         ram_pct_str = ""
         if data["ram_total"]:
             ram_pct = data["ram_used"] * 100.0 / data["ram_total"]
-            ram_pct_str = f" ({ram_pct:.1f}%)"
+            ram_pct_str = fmt_percent(ram_pct)
+        else:
+            ram_pct_str = "N/A"
 
         grid.add_row(
             f"[bold green]CPU[/bold green] {fmt_percent(data['cpu'])}",
-            f"[bold green]RAM[/bold green] "
-            f"{fmt_mem_ratio(data['ram_used'], data['ram_total'])}{ram_pct_str}",
+            f"[bold green]RAM[/bold green] {ram_pct_str}",
         )
 
-        # GPU rows
         if not data["gpu_available"]:
             grid.add_row(
                 "[bold green]GPU[/bold green]", "[red]Not available[/red]"
@@ -80,14 +91,10 @@ class SystemRenderer(BaseRenderer):
             )
             util_str = fmt_percent(avg) if avg is not None else "N/A"
 
-            skew = data.get("gpu_util_skew")
-            if skew is not None:
-                util_str = f"{util_str} (Δ {skew:.1f}%)"
-
             grid.add_row(
                 f"[bold green]GPU UTIL[/bold green] {util_str}",
                 f"[bold green]GPU MEM[/bold green] "
-                f"{fmt_mem_ratio(data['gpu_mem_used'], data['gpu_mem_total'])}",
+                f"{self._format_percent_ratio(data['gpu_mem_used'], data['gpu_mem_total'])}",
             )
 
             temp = data.get("gpu_temp_max")
@@ -98,21 +105,97 @@ class SystemRenderer(BaseRenderer):
             )
 
             headroom = data.get("gpu_mem_headroom_min")
-            headroom_idx = data.get("gpu_mem_headroom_min_idx")
             headroom_str = (
-                f"[bold green]GPU HDRM[/bold green] "
-                f"gpu{headroom_idx}: {fmt_mem_new(headroom)}"
-                if headroom is not None and headroom_idx is not None
+                f"[bold green]GPU HDRM[/bold green] {fmt_mem_new(headroom)}"
+                if headroom is not None
                 else "[bold green]GPU HDRM[/bold green] N/A"
             )
             grid.add_row(temp_str, headroom_str)
+
+        return self._panel(grid, "[bold cyan]System Metrics[/bold cyan]")
+
+    def _cluster_panel(self, data: Dict[str, Any], grid: Table) -> Panel:
+        """Render the multi-node terminal system view."""
+        metrics = data.get("metrics", {})
+        grid.add_row(
+            self._cluster_metric("CPU", metrics.get("cpu"), "%"),
+            self._cluster_metric("RAM", metrics.get("ram"), "%"),
+        )
+
+        if not data.get("gpu_available"):
+            grid.add_row(
+                "[bold green]GPU[/bold green]", "[red]Not available[/red]"
+            )
+        else:
+            grid.add_row(
+                self._cluster_metric("GPU UTIL", metrics.get("gpu_util"), "%"),
+                self._cluster_metric("GPU MEM", metrics.get("gpu_mem"), "%"),
+            )
+            grid.add_row(
+                self._cluster_metric("GPU TMP", metrics.get("gpu_temp"), "C"),
+                self._cluster_metric(
+                    "GPU HDRM",
+                    metrics.get("gpu_headroom"),
+                    "bytes",
+                ),
+            )
+
+        suffix = str(data.get("title_suffix") or "").strip()
+        title = "[bold cyan]System Metrics[/bold cyan]"
+        if suffix:
+            title = f"[bold cyan]System Metrics {suffix}[/bold cyan]"
+        return self._panel(grid, title)
+
+    def _cluster_metric(
+        self,
+        label: str,
+        metric: Any,
+        unit: str,
+    ) -> str:
+        """Format one median/worst-node metric pair."""
+        if not isinstance(metric, dict):
+            return f"[bold green]{label}[/bold green] N/A"
+
+        left = self._format_metric_value(metric.get("median"), unit)
+        right = self._format_metric_value(metric.get("worst"), unit)
+        node = str(metric.get("worst_node") or "n/a")
+        return f"[bold green]{label}[/bold green] {left} / {right} {node}"
+
+    def _format_metric_value(self, value: Any, unit: str) -> str:
+        """Format one terminal metric value."""
+        if value is None:
+            return "N/A"
+        try:
+            numeric = float(value)
+        except Exception:
+            return "N/A"
+        if unit == "%":
+            return fmt_percent(numeric)
+        if unit == "C":
+            return f"{numeric:.1f}°C"
+        if unit == "bytes":
+            return fmt_mem_new(numeric)
+        return f"{numeric:.1f}"
+
+    def _format_percent_ratio(self, numerator: Any, denominator: Any) -> str:
+        """Format a ratio as a percentage for compact terminal display."""
+        try:
+            den = float(denominator)
+            if den <= 0.0:
+                return "N/A"
+            return fmt_percent(float(numerator) * 100.0 / den)
+        except Exception:
+            return "N/A"
+
+    def _panel(self, grid: Table, title: str) -> Panel:
+        """Build the common Rich panel wrapper."""
 
         cols, _ = shutil.get_terminal_size()
         panel_width = min(max(100, int(cols * 0.75)), 100)
 
         return Panel(
             grid,
-            title="[bold cyan]System Metrics[/bold cyan]",
+            title=title,
             title_align="center",
             border_style="cyan",
             width=panel_width,
