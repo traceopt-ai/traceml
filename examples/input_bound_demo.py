@@ -13,8 +13,8 @@ HIDDEN_DIM = 2048
 NUM_CLASSES = 10
 
 BATCH_SIZE = 128
-NUM_SAMPLES = 12000
-NUM_EPOCHS = 4
+NUM_SAMPLES = 1200
+NUM_EPOCHS = 2
 
 # This is the key knob for the example.
 # It makes input loading deliberately slow so TraceML can surface it clearly.
