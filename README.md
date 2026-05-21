@@ -13,13 +13,27 @@
 
 </div>
 
-TraceML records lightweight signals during a PyTorch training run and produces a structured end-of-run summary. It answers the questions that usually come before operator-level profiling:
+TraceML gives every PyTorch training run a structured performance fingerprint: where time went, whether ranks skewed, and whether memory drifted. It answers the questions that usually come before operator-level profiling:
 
 - Is the run input-bound, compute-bound, wait-heavy, or memory-constrained?
 - Where is time going across dataloader, forward, backward, and optimizer?
 - Are some distributed ranks consistently slower than others?
 - Did memory usage drift upward during the run?
 - Did a recent change cause a regression?
+
+## How TraceML Fits
+
+TraceML fits between experiment tracking and heavyweight profiling. It gives you a first-pass diagnosis of where a training run is likely wasting time.
+
+| Tool | Setup cost | Output | Best for | When to use |
+|---|---|---|---|---|
+| TraceML | Small training-step wrapper | Live step breakdown + `final_summary.json` | Classifying input, compute, wait, memory, and rank-skew issues | First pass on normal training jobs |
+| `torch.profiler` | Profiler schedule/context | Operator and CUDA activity traces | Finding expensive PyTorch ops/kernels | When compute/model path needs deep inspection |
+| Nsight Systems / Compute | External profiler run | CUDA timeline / kernel-level detail | Kernel scheduling, CUDA stalls, low-level GPU analysis | Deep dive on a specific GPU performance issue |
+| W&B / MLflow / TensorBoard | Metric logging/integration | Loss, accuracy, throughput, experiment history | Tracking outcomes across runs | Experiment management and dashboards |
+| `nvidia-smi` / cluster dashboards | No code changes | GPU/CPU utilization and memory | Machine-level health and capacity signals | Sanity checks and cluster monitoring |
+
+TraceML does not replace these tools. It is the cheap first pass that tells you where to look.
 
 ---
 
@@ -93,7 +107,7 @@ Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
 |  - Stats: median/worst | total 303.7/303.7ms | input 3.8/254.5ms |         |
 |  compute 259.5/259.5ms | wait 40.5/40.5ms                                  |
 |  - Ranks: median/worst | total r3/r2 | input r2/r0 | compute r3/r1 | wait  |
-|  r2/r1                                                                      |
+|  r2/r1                                                                     |
 |  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
 |                                                                            |
 |  Step Memory                                                               |
@@ -149,6 +163,12 @@ and a compact text report.
 
 See [Compare Runs](docs/user_guide/compare.md).
 
+### Live CLI view
+
+![TraceML live CLI view](docs/assets/cli_demo_v1.png)
+
+Live CLI view while TraceML collects the same signals used for `final_summary.json`.
+
 ---
 
 ## Modes
@@ -162,8 +182,6 @@ All modes write `final_summary.json` and `final_summary.txt` at the end of the r
 | `--mode=dashboard` | Live browser display | single-node, including multi-GPU |
 
 Summary mode is the default and works across all topologies. Use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node job.
-
-Deep/layer profiling has been removed from the public CLI for now.
 
 Multi-node live views are on the roadmap.
 
@@ -244,42 +262,6 @@ traceml compare before/final_summary.json after/final_summary.json
 
 ---
 
-## When to use TraceML
-
-Use TraceML when you want a lightweight performance fingerprint for a PyTorch training run:
-
-- keep a small `final_summary.json` you can share, store, diff, or log
-- see where step time went across dataloader, forward, backward, optimizer, and wait time
-- compare a new run against a previous baseline
-- check whether ranks, nodes, process memory, or system resources look imbalanced
-- collect enough evidence before opening PyTorch Profiler or Nsight
-
-**When not to use TraceML:** If you already need operator, kernel, or collective-level timing, go straight to `torch.profiler` or Nsight. TraceML is the cheap first pass that tells you where to look.
-
----
-
-## How it fits with your stack
-
-TraceML sits between experiment tracking and heavyweight profiling.
-
-```text
-Run PyTorch training with TraceML
-        ↓
-Save final_summary.json as a lightweight performance fingerprint
-        ↓
-Review final_summary.txt for the likely bottleneck
-        ↓
-Compare against a previous summary when behavior changes
-        ↓
-Open torch.profiler or Nsight only if you need operator/kernel detail
-```
-
-Use W&B, MLflow, or TensorBoard for experiment tracking, metrics, and dashboards. Use TraceML for bottleneck diagnosis, distributed run summaries, and run-to-run performance comparison.
-
-See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md).
-
----
-
 ## Current support
 
 **Works today:**
@@ -303,9 +285,7 @@ See [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md
 
 ## Overhead
 
-TraceML adds fixed per-step instrumentation overhead. Relative overhead is highest when training steps are very short. In larger jobs the fixed cost is amortized over longer step time.
-
-In our early DDP benchmarks, TraceML did not produce a measurable slowdown beyond normal run-to-run variation.
+**Overhead:** In our benchmark runs, TraceML adds <2% overhead on single GPU and <1% on single-node multi-GPU at default settings.
 
 ---
 
@@ -324,7 +304,9 @@ In our early DDP benchmarks, TraceML did not produce a measurable slowdown beyon
 
 ## Feedback
 
-If TraceML helped you catch a slowdown, please open an issue and include:
+If TraceML helped, a GitHub star helps others find it.
+
+If you hit a problem or unexpected result, open an issue and include:
 
 - hardware / CUDA / PyTorch versions
 - single GPU or multi-GPU setup
@@ -340,8 +322,6 @@ Email: [support@traceopt.ai](mailto:support@traceopt.ai)
 
 ## Contributing
 
-If TraceML helped you catch a slowdown, a GitHub star helps others find it.
-
 Contributions are welcome, especially:
 
 - real slowdown examples and repros
@@ -356,6 +336,3 @@ Contributions are welcome, especially:
 Apache 2.0. See [LICENSE](LICENSE).
 
 TraceOpt is a trademark of OptAI UG (haftungsbeschränkt).
-
-> **Upcoming rename:** `traceml-ai` will be renamed to `traceopt-ai` in a future release.
-> Python imports will change from `traceml` to `traceopt`. The active package today remains `traceml-ai`.
