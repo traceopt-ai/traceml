@@ -13,6 +13,15 @@ def _enabled() -> bool:
     return bool(getattr(_TLS, "_traceml_forward_enabled", False))
 
 
+def _target_ids() -> set[int]:
+    return getattr(_TLS, "_traceml_forward_target_ids", set())
+
+
+def _is_target(module: nn.Module) -> bool:
+    ids = _target_ids()
+    return not ids or id(module) in ids
+
+
 def _depth() -> int:
     return int(getattr(_TLS, "_traceml_forward_depth", 0))
 
@@ -21,8 +30,25 @@ def _set_depth(v: int) -> None:
     setattr(_TLS, "_traceml_forward_depth", v)
 
 
+def _collect_forward_target_ids(model: nn.Module | None) -> set[int]:
+    if model is None:
+        return set()
+
+    targets = {id(model)}
+
+    ddp_module = getattr(model, "module", None)
+    if isinstance(ddp_module, nn.Module):
+        targets.add(id(ddp_module))
+
+    fsdp_module = getattr(model, "_fsdp_wrapped_module", None)
+    if isinstance(fsdp_module, nn.Module):
+        targets.add(id(fsdp_module))
+
+    return targets
+
+
 def _traceml_module_call(self: nn.Module, *args, **kwargs):
-    if not _enabled():
+    if not _enabled() or not _is_target(self):
         return _ORIG_MODULE_CALL(self, *args, **kwargs)
 
     # Only time the OUTERMOST forward to avoid submodule spam
@@ -53,11 +79,26 @@ class forward_auto_timer:
     Assumes patch_forward() has been called once at startup/runtime init.
     """
 
+    def __init__(self, model: nn.Module | None = None):
+        self.model = model
+        self._prev_enabled = False
+        self._prev_depth = 0
+        self._prev_target_ids = set()
+
     def __enter__(self):
+        self._prev_enabled = _enabled()
+        self._prev_depth = _depth()
+        self._prev_target_ids = _target_ids()
+
         _TLS._traceml_forward_enabled = True
+        _TLS._traceml_forward_depth = 0
+        _TLS._traceml_forward_target_ids = _collect_forward_target_ids(
+            self.model
+        )
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        _TLS._traceml_forward_enabled = False
-        _TLS._traceml_forward_depth = 0
+        _TLS._traceml_forward_enabled = self._prev_enabled
+        _TLS._traceml_forward_depth = self._prev_depth
+        _TLS._traceml_forward_target_ids = self._prev_target_ids
         return False

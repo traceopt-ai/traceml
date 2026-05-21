@@ -176,7 +176,11 @@ def trace_step(model: nn.Module):
         with timed_region(
             "_traceml_internal:step_time", scope="step", use_gpu=False
         ):
-            with forward_auto_timer(), backward_auto_timer(), h2d_auto_timer():
+            with (
+                forward_auto_timer(model),
+                backward_auto_timer(),
+                h2d_auto_timer(),
+            ):
                 if _should_auto_install_optimizer_timing():
                     ensure_optimizer_timing_installed()
                 yield
