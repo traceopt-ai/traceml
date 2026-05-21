@@ -23,6 +23,7 @@ WAIT_STEP_KEY = "step_time"
 
 EVENT_ALIASES = {
     "dataloader_fetch": "_traceml_internal:dataloader_next",
+    "h2d": "_traceml_internal:h2d_time",
     "forward": "_traceml_internal:forward_time",
     "backward": "_traceml_internal:backward_time",
     "optimizer_step": "_traceml_internal:optimizer_step",
@@ -31,6 +32,7 @@ EVENT_ALIASES = {
 
 DEFAULT_METRIC_KEYS: Tuple[str, ...] = (
     "dataloader_fetch",
+    "h2d",
     "forward",
     "backward",
     "optimizer_step",
@@ -39,6 +41,7 @@ DEFAULT_METRIC_KEYS: Tuple[str, ...] = (
 
 DEFAULT_HEATMAP_KEYS: Tuple[str, ...] = (
     "dataloader_fetch",
+    "h2d",
     "forward",
     "backward",
     "optimizer_step",
@@ -180,6 +183,7 @@ class StepCombinedComputer:
         )
 
         step_sums = per_metric_rank_sums.get("step_time", {})
+        h2d_sums = per_metric_rank_sums.get("h2d", {})
         fwd_sums = per_metric_rank_sums.get("forward", {})
         bwd_sums = per_metric_rank_sums.get("backward", {})
         opt_sums = per_metric_rank_sums.get("optimizer_step", {})
@@ -188,6 +192,7 @@ class StepCombinedComputer:
             r: max(
                 0.0,
                 step_sums.get(r, 0.0)
+                - h2d_sums.get(r, 0.0)
                 - fwd_sums.get(r, 0.0)
                 - bwd_sums.get(r, 0.0)
                 - opt_sums.get(r, 0.0),
@@ -615,11 +620,12 @@ class StepCombinedComputer:
         """
         Compute overall rank "badness" score used for dashboard identity.
 
-        Same definition as before:
-            dataloader_fetch + max(step_time, forward + backward + optimizer_step)
+        Overall score:
+            dataloader_fetch + max(step_time, h2d + forward + backward + optimizer_step)
         """
         step_sums = per_metric_rank_sums.get("step_time", {})
         dl_sums = per_metric_rank_sums.get("dataloader_fetch", {})
+        h2d_sums = per_metric_rank_sums.get("h2d", {})
         fwd_sums = per_metric_rank_sums.get("forward", {})
         bwd_sums = per_metric_rank_sums.get("backward", {})
         opt_sums = per_metric_rank_sums.get("optimizer_step", {})
@@ -629,7 +635,8 @@ class StepCombinedComputer:
                 self._safe_float(dl_sums.get(r, 0.0))
                 + max(
                     self._safe_float(step_sums.get(r, 0.0)),
-                    self._safe_float(fwd_sums.get(r, 0.0))
+                    self._safe_float(h2d_sums.get(r, 0.0))
+                    + self._safe_float(fwd_sums.get(r, 0.0))
                     + self._safe_float(bwd_sums.get(r, 0.0))
                     + self._safe_float(opt_sums.get(r, 0.0)),
                 )

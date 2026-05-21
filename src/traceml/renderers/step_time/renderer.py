@@ -32,6 +32,16 @@ from traceml.renderers.utils import fmt_time_run
 from .compute import StepCombinedComputer
 from .schema import StepCombinedTimeResult
 
+METRIC_LABELS = {
+    "dataloader_fetch": "DL",
+    "h2d": "H2D",
+    "forward": "FWD",
+    "backward": "BWD",
+    "optimizer_step": "OPT",
+    "step_time": "STEP",
+    "wait_proxy": "WAIT",
+}
+
 
 class StepCombinedRenderer(BaseRenderer):
     """
@@ -94,10 +104,9 @@ class StepCombinedRenderer(BaseRenderer):
         table.add_column("Metric", style="magenta")
 
         for m in metrics:
-            title = (
-                "Wait*"
-                if m.metric == "wait_proxy"
-                else m.metric.replace("_", " ").title()
+            title = METRIC_LABELS.get(
+                m.metric,
+                m.metric.replace("_", " ").title(),
             )
             table.add_column(title, justify="right")
 
@@ -173,7 +182,13 @@ class StepCombinedRenderer(BaseRenderer):
         cols, _ = shutil.get_terminal_size()
         width = min(max(100, int(cols * 0.75)), 120)
 
-        footer = "\n\n[dim]* WAIT = step time − model execution (mixed CPU/GPU proxy)[/dim]"
+        footer = (
+            "\n\n[dim]"
+            "DL=dataloader fetch | H2D=host-to-device | FWD=forward | "
+            "BWD=backward | OPT=optimizer | STEP=traced step | "
+            "WAIT=STEP−H2D−FWD−BWD−OPT"
+            "[/dim]"
+        )
         return Panel(
             Group(diag_text, "", table, footer),
             title=f"Model Step Summary ({subtitle})",
