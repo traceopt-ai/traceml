@@ -23,15 +23,17 @@ from traceml.renderers.step_time.schema import (
 from .ui_shell import CARD_STYLE, compact_metric_html, safe_ms, safe_pct
 
 _STACK_KEYS = [
-    ("Dataloader", "dataloader_fetch", "#d32f2f"),
-    ("Forward", "forward", "#1976d2"),
-    ("Backward", "backward", "#512da8"),
-    ("Optimizer", "optimizer_step", "#2e7d32"),
-    ("WAIT*", "wait_proxy", "#f9a825"),
+    ("DL", "dataloader_fetch", "#d32f2f"),
+    ("H2D", "h2d", "#00897b"),
+    ("FWD", "forward", "#1976d2"),
+    ("BWD", "backward", "#512da8"),
+    ("OPT", "optimizer_step", "#2e7d32"),
+    ("WAIT", "wait_proxy", "#f9a825"),
 ]
 
 _REQUIRED_KEYS = {
     "dataloader_fetch",
+    "h2d",
     "forward",
     "backward",
     "optimizer_step",
@@ -200,7 +202,7 @@ def _render_kpis(
         ),
         compact_metric_html("WAIT Share", safe_pct(wait_share)),
         compact_metric_html(
-            "Dominant Split",
+            "Dominant Phase",
             _dominant_metric(metrics, mode="worst_total"),
         ),
     ]
