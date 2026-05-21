@@ -41,10 +41,11 @@ Event name
 from __future__ import annotations
 
 import threading
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
+from traceml.instrumentation.h2d import should_time_h2d
 from traceml.utils.timing import timed_region
 
 _H2D_TLS = threading.local()
@@ -58,57 +59,16 @@ def _enabled() -> bool:
     return bool(getattr(_H2D_TLS, "_traceml_h2d_enabled", False))
 
 
-# Device-target detection
-
-
-def _device_type(value: Any) -> Optional[str]:
-    """Return the device type string for a value, or None if not recognisable."""
-    if isinstance(value, torch.device):
-        return value.type
-    if isinstance(value, torch.Tensor):
-        return value.device.type
-    if isinstance(value, str):
-        try:
-            return torch.device(value).type
-        except (RuntimeError, TypeError):
-            return None
-    return None
-
-
-def _is_cuda_target(args: tuple, kwargs: dict) -> bool:
-    """
-    Return True when the ``.to()`` call is moving data to a CUDA device.
-
-    Handles the common calling conventions:
-      tensor.to("cuda:0")
-      tensor.to(torch.device("cuda"))
-      tensor.to(device="cuda:0")
-      tensor.to(other_cuda_tensor)   # copies device from other_tensor
-    """
-    first = args[0] if args else None
-    if _device_type(first) == "cuda":
-        return True
-    if _device_type(kwargs.get("device")) == "cuda":
-        return True
-    return False
-
-
 # Patched method
 
 
 def _traceml_tensor_to(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
     if not _enabled():
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
-    # D2D — source is already on CUDA; skip before parsing the destination.
-    if self.is_cuda:
+
+    if not should_time_h2d(self, args, kwargs):
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
-    #  _apply traversal — model.to(device) calls tensor.to() once per
-    # Parameter, inflating n_calls by the parameter count.
-    if isinstance(self, torch.nn.Parameter):
-        return _ORIG_TENSOR_TO(self, *args, **kwargs)
-    # Destination check last — involves torch.device() parsing.
-    if not _is_cuda_target(args, kwargs):
-        return _ORIG_TENSOR_TO(self, *args, **kwargs)
+
     with timed_region(
         "_traceml_internal:h2d_time",
         scope="step",

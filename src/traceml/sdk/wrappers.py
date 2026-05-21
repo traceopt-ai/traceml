@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from traceml.instrumentation.h2d import should_time_h2d
 from traceml.utils.timing import TimeScope, timed_region
 
 
@@ -289,8 +290,11 @@ class _WrappedH2D:
     def to(self, *args: Any, **kwargs: Any) -> Any:
         # If the auto-patch was installed after this wrapper was created
         # (wrap-then-init race), defer to avoid double-counting: the patch
-        # will time this call.
+        # will time this call if it qualifies as H2D.
         if getattr(torch.Tensor, "_traceml_h2d_patched", False):
+            return self._obj.to(*args, **kwargs)
+
+        if not should_time_h2d(self._obj, args, kwargs):
             return self._obj.to(*args, **kwargs)
 
         with timed_region(
@@ -321,7 +325,7 @@ class _WrappedH2D:
 
 def wrap_h2d(obj: Any) -> "_WrappedH2D":
     """
-    Wrap a tensor or batch object so the next ``.to(...)`` call is timed.
+    Wrap a tensor or batch object so qualifying CPU-to-CUDA .to(...) calls are timed.
 
     Intended for ``manual`` or ``selective`` initialization modes where the
     automatic ``torch.Tensor.to()`` patch is not installed.
