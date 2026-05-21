@@ -16,7 +16,7 @@
 TraceML gives every PyTorch training run a structured performance fingerprint: where time went, whether ranks skewed, and whether memory drifted. It answers the questions that usually come before operator-level profiling:
 
 - Is the run input-bound, compute-bound, wait-heavy, or memory-constrained?
-- Where is time going across dataloader, forward, backward, and optimizer?
+- How much time is spent in dataloader, forward, backward, and optimizer?
 - Are some distributed ranks consistently slower than others?
 - Did memory usage drift upward during the run?
 - Did a recent change cause a regression?
@@ -231,7 +231,7 @@ reachable address or port for TraceML telemetry, add
 multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default; override
 that only when needed with `--aggregator-bind-host=<bind-host>`.
 
-### Zero-code first look
+### Watch mode (no code changes)
 
 ```bash
 traceml watch train.py
