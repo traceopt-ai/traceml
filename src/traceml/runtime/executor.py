@@ -19,6 +19,8 @@ from traceml.runtime.launch_context import (
     LaunchContext,
     script_execution_context,
 )
+from traceml.runtime.lifecycle import NoOpRuntime
+from traceml.runtime.lifecycle import start_runtime as start_runtime_handle
 from traceml.runtime.runtime import TraceMLRuntime
 from traceml.runtime.settings import (
     AggregatorTransportSettings,
@@ -153,23 +155,6 @@ def write_runtime_error_log(
         error=error,
         include_execution_layer=False,
     )
-
-
-class NoOpRuntime:
-    """
-    Fallback runtime used when TraceML is disabled or runtime startup fails.
-
-    This preserves the executor control flow and avoids additional branching
-    in the main execution path.
-    """
-
-    def start(self) -> None:
-        """No-op start hook."""
-        return None
-
-    def stop(self) -> None:
-        """No-op stop hook."""
-        return None
 
 
 def read_traceml_env() -> Dict[str, Any]:
@@ -307,10 +292,8 @@ def start_runtime(cfg: Dict[str, Any]) -> Union[TraceMLRuntime, NoOpRuntime]:
 
     try:
         settings = build_runtime_settings(cfg)
-        runtime = TraceMLRuntime(settings=settings)
-        runtime.start()
-        return runtime
-
+        handle = start_runtime_handle(settings, fail_open=False)
+        return handle.runtime
     except Exception as error:
         write_runtime_error_log(
             cfg,

@@ -20,6 +20,23 @@ Live UI and final summaries are separate paths. They can share diagnostics, but
 they should pass explicit policies such as `LIVE_STEP_TIME_POLICY` or
 `SUMMARY_STEP_TIME_POLICY` when thresholds differ.
 
+## TraceML Lifecycle
+
+TraceML has two runtime pieces:
+
+- one aggregator, which receives TCP telemetry, writes SQLite history, and
+  creates the final summary
+- one runtime per training process, which samples local telemetry and sends
+  batches to the aggregator
+
+CLI launchers may run these pieces as subprocesses. Framework integrations may
+run them inside Ray actors or worker processes. Both paths should use
+`traceml.runtime.lifecycle` so startup and shutdown stay consistent.
+
+The owner that starts a component must stop it. Use `try/finally` around
+training work, and make stop paths safe to call more than once.
+
+
 ## Add a Diagnostic Rule
 
 Diagnostics live under `src/traceml/diagnostics/<domain>/`.

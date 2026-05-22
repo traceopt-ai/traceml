@@ -21,6 +21,15 @@ from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 
 @dataclass(frozen=True)
+class AggregatorEndpoint:
+    """Reachable TraceML aggregator endpoint for worker runtimes."""
+
+    host: str
+    port: int
+    session_id: str
+
+
+@dataclass(frozen=True)
 class AggregatorTransportSettings:
     """
     Aggregator endpoint used by workers and the aggregator process.
