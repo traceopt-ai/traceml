@@ -129,7 +129,33 @@ Three minimal paths to a first TraceML run, depending on how your training code 
     !!! note
         For full Lightning details, see the [PyTorch Lightning integration](integrations/lightning.md).
 
-Everything below this point applies to all three stacks — reading output, compare runs, DDP, troubleshooting.
+=== "Ray Train"
+
+    ```bash
+    pip install "traceml-ai[ray]"
+    ```
+
+    Wrap Ray's `TorchTrainer` with `TraceMLTorchTrainer`:
+
+    ```python
+    from ray.train import ScalingConfig
+    from traceml.integrations.ray import TraceMLTorchTrainer
+
+    trainer = TraceMLTorchTrainer(
+        train_loop_per_worker,
+        train_loop_config={"steps": 100},
+        scaling_config=ScalingConfig(num_workers=4, use_gpu=True),
+    )
+    trainer.fit()
+    ```
+
+    Ray still launches workers and owns distributed communication. TraceML
+    starts one aggregator actor and one runtime inside each Ray worker.
+
+    !!! note
+        For full Ray details, see the [Ray Train integration](integrations/ray.md).
+
+Everything below this point applies to all four stacks — reading output, compare runs, DDP, troubleshooting.
 
 ---
 

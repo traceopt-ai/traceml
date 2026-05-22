@@ -12,6 +12,7 @@
 [**Quickstart**](docs/user_guide/quickstart.md) •
 [**Compare Runs**](docs/user_guide/compare.md) •
 [**How to Read Output**](docs/user_guide/reading-output.md) •
+[**Ray Train**](docs/user_guide/integrations/ray.md) •
 [**W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) •
 [**FAQ**](docs/user_guide/faq.md) •
 [**Issues**](https://github.com/traceopt-ai/traceml/issues) •
@@ -275,13 +276,13 @@ traceml compare before/final_summary.json after/final_summary.json
 - Single GPU training
 - Single-node multi-GPU DDP / FSDP training
 - Multi-node DDP summary reports
+- Ray Train through a thin `TorchTrainer` wrapper
 - Step Time, Step Memory, System, and Process diagnostics
 - Run-to-run comparison from `final_summary.json`
 - Custom PyTorch loops, Hugging Face, and PyTorch Lightning
 
 **Next:**
 
-- Ray Train integration
 - Slurm launch examples
 - Broader multi-node FSDP validation
 - Multi-node live CLI / dashboard
@@ -305,6 +306,7 @@ traceml compare before/final_summary.json after/final_summary.json
 - [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md)
 - [Hugging Face integration](docs/user_guide/integrations/huggingface.md)
 - [PyTorch Lightning integration](docs/user_guide/integrations/lightning.md)
+- [Ray Train integration](docs/user_guide/integrations/ray.md)
 
 ---
 

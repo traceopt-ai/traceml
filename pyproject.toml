@@ -53,6 +53,10 @@ lightning = [
     "lightning>=2.6.0",
 ]
 
+ray = [
+    "ray[train]>=2.0.0",
+]
+
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
