@@ -20,6 +20,7 @@ MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
     "total_step_ms",
     "dataloader_ms",
+    "h2d_ms",
     "compute_ms",
     "wait_ms",
     "forward_ms",
@@ -55,6 +56,8 @@ def _event_bucket(name: str) -> Optional[str]:
         return "step_time"
     if "dataloader_next" in n:
         return "dataloader"
+    if "h2d_time" in n or "host_to_device" in n:
+        return "h2d"
     if "forward_time" in n:
         return "forward"
     if "backward_time" in n:
@@ -111,6 +114,7 @@ class RankStepSummary:
 
     steps_analyzed: int
     avg_dataloader_ms: float
+    avg_h2d_ms: float
     avg_forward_ms: float
     avg_backward_ms: float
     avg_optimizer_ms: float
@@ -150,6 +154,7 @@ def to_rank_signals(
         int(rank): RankStepSignals(
             steps_analyzed=int(s.steps_analyzed),
             dataloader_ms=finite_float(s.avg_dataloader_ms),
+            h2d_ms=finite_float(s.avg_h2d_ms),
             forward_ms=finite_float(s.avg_forward_ms),
             backward_ms=finite_float(s.avg_backward_ms),
             optimizer_ms=finite_float(s.avg_optimizer_ms),
@@ -176,6 +181,7 @@ def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
     """
     metrics = {
         "dataloader": 0.0,
+        "h2d": 0.0,
         "forward": 0.0,
         "backward": 0.0,
         "optimizer": 0.0,
@@ -207,15 +213,15 @@ def build_rank_summary(
     Build a per-rank summary and per-step canonical metrics over provided rows.
 
     For each step:
-        gpu_compute = forward + backward + optimizer
-        step_effective = max(step_time, gpu_compute)
-        total_step = dataloader + step_effective
-        wait_proxy = max(0, step_effective - gpu_compute)
+        known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
+        wait_ms = traced_step_ms - known_step_ms
+        total_step_ms = dataloader_ms + traced_step_ms
     """
     if not step_rows:
         return None
 
     sum_dl = 0.0
+    sum_h2d = 0.0
     sum_fwd = 0.0
     sum_bwd = 0.0
     sum_opt = 0.0
@@ -233,21 +239,24 @@ def build_rank_summary(
             continue
 
         dl = finite_float(metrics["dataloader"])
+        h2d = finite_float(metrics["h2d"])
         fwd = finite_float(metrics["forward"])
         bwd = finite_float(metrics["backward"])
         opt = finite_float(metrics["optimizer"])
         step_cpu = finite_float(metrics["step_time"])
 
         compute_ms = fwd + bwd + opt
+        known_step_ms = h2d + compute_ms
         # raw step = the direct trace_step wall timer.
-        # traced step = max(raw step, compute) to avoid impossible negative wait
+        # traced step = max(raw step, known_step_ms) to avoid impossible negative wait
         # when CPU wall timing and CUDA event timing differ slightly.
-        traced_step = max(step_cpu, compute_ms)
-        wait_proxy = max(0.0, traced_step - compute_ms)
+        traced_step = max(step_cpu, known_step_ms)
+        wait_proxy = max(0.0, traced_step - known_step_ms)
         total_step = dl + traced_step
 
         per_step_metrics[int(step_id)] = {
             "dataloader_fetch": dl,
+            "h2d": h2d,
             "forward": fwd,
             "backward": bwd,
             "optimizer_step": opt,
@@ -256,6 +265,7 @@ def build_rank_summary(
         }
 
         sum_dl += dl
+        sum_h2d += h2d
         sum_fwd += fwd
         sum_bwd += bwd
         sum_opt += opt
@@ -270,6 +280,7 @@ def build_rank_summary(
     summary = RankStepSummary(
         steps_analyzed=n,
         avg_dataloader_ms=sum_dl / n,
+        avg_h2d_ms=sum_h2d / n,
         avg_forward_ms=sum_fwd / n,
         avg_backward_ms=sum_bwd / n,
         avg_optimizer_ms=sum_opt / n,
@@ -285,22 +296,16 @@ def compute_wait_avg_ms(s: RankStepSummary) -> float:
     """
     Return average wait proxy for one rank summary.
 
-    Public Step Time uses:
-        total_step_ms = dataloader_ms + compute_ms + wait_ms
-        compute_ms = forward_ms + backward_ms + optimizer_ms
-
-    Internally, wait is derived from:
-        traced_step_ms - compute_ms
-
-    where traced_step_ms is max(raw trace_step wall timer, compute_ms).
-    The traced-step value is intentionally internal so the public JSON remains
-    the simpler total/input/compute/wait model.
+    known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
+    wait_ms = traced_step_ms - known_step_ms
+    total_step_ms = dataloader_ms + traced_step_ms
     """
     return max(
         0.0,
         finite_float(s.avg_traced_step_ms)
         - (
-            finite_float(s.avg_forward_ms)
+            finite_float(s.avg_h2d_ms)
+            + finite_float(s.avg_forward_ms)
             + finite_float(s.avg_backward_ms)
             + finite_float(s.avg_optimizer_ms)
         ),
@@ -318,6 +323,10 @@ def _rank_metric_values(
         },
         "dataloader_ms": {
             int(rank): finite_float(summary.avg_dataloader_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "h2d_ms": {
+            int(rank): finite_float(summary.avg_h2d_ms)
             for rank, summary in per_global_rank_summary.items()
         },
         "compute_ms": {
@@ -348,6 +357,7 @@ def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
     return {
         "total_step_ms": finite_float(summary.avg_total_step_ms),
         "dataloader_ms": finite_float(summary.avg_dataloader_ms),
+        "h2d_ms": finite_float(summary.avg_h2d_ms),
         "compute_ms": finite_float(summary.avg_gpu_compute_ms),
         "wait_ms": compute_wait_avg_ms(summary),
         "forward_ms": finite_float(summary.avg_forward_ms),

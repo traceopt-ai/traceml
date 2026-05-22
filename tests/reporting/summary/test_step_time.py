@@ -187,6 +187,7 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         rank: RankStepSummary(
             steps_analyzed=128,
             avg_dataloader_ms=1.0,
+            avg_h2d_ms=0.0,
             avg_forward_ms=2.0,
             avg_backward_ms=3.0,
             avg_optimizer_ms=1.0,

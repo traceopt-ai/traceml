@@ -58,6 +58,7 @@ class StepTimeCardStats:
 
     global_rank_count: int
     total_step: StepTimeMetricPair
+    h2d: StepTimeMetricPair
     compute: StepTimeMetricPair
     wait: StepTimeMetricPair
     input: StepTimeMetricPair
@@ -152,6 +153,12 @@ def _build_card_stats(
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
+        h2d=_metric_pair_from_rank_values(
+            {
+                int(rank): finite_float(summary.avg_h2d_ms)
+                for rank, summary in per_global_rank_summary.items()
+            }
+        ),
     )
 
 
@@ -171,9 +178,13 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
             stats.input.median_ms,
             stats.input.worst_ms,
         )
+        h2d_ms = _format_ms_pair(
+            stats.h2d.median_ms,
+            stats.h2d.worst_ms,
+        )
         return (
             "- Stats: median/worst | "
-            f"total {total} | input {input_ms} | compute {compute} | "
+            f"total {total} | input {input_ms} | H2D {h2d_ms} | compute {compute} | "
             f"wait {wait}"
         )
 
@@ -181,6 +192,7 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         "- Stats: "
         f"total {format_ms(stats.total_step.worst_ms)} | "
         f"input {format_ms(stats.input.worst_ms)} | "
+        f"H2D {format_ms(stats.h2d.worst_ms)} | "
         f"compute {format_ms(stats.compute.worst_ms)} | "
         f"wait {format_ms(stats.wait.worst_ms)}"
     )
@@ -206,9 +218,13 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
         stats.input.median_global_rank,
         stats.input.worst_global_rank,
     )
+    h2d_rank = _format_rank_pair(
+        stats.h2d.median_global_rank,
+        stats.h2d.worst_global_rank,
+    )
     return (
         "- Ranks: median/worst | "
-        f"total {total} | input {input_rank} | compute {compute} | "
+        f"total {total} | input {input_rank} | H2D {h2d_rank} | compute {compute} | "
         f"wait {wait}"
     )
 

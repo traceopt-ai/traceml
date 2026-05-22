@@ -252,7 +252,7 @@ class FinalReportGenerator:
         )
 
         return {
-            "schema_version": 1.2,
+            "schema_version": 1.3,
             "generated_at": utc_now_iso(),
             "duration_s": _summary_duration_s(
                 step_time_summary,

@@ -109,6 +109,7 @@ def _rows_for_section(
         "step_time": (
             "total_step_ms",
             "input_ms",
+            "h2d_ms",
             "compute_ms",
             "wait_ms",
             "forward_ms",

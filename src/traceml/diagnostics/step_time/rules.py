@@ -231,7 +231,7 @@ class WaitHeavyRule(_BaseStepTimeRule):
             summary=f"WAIT* is {_pct(context.wait_share)} of the typical step.",
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "
-                "checkpointing, validation, or transfers."
+                "checkpointing, validation, or unobserved transfers."
             ),
             metric="wait_proxy",
             phase="wait",

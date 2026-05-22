@@ -115,6 +115,7 @@ in `global_ranks_used`.
   "step_time": [
     "total_step_ms",
     "dataloader_ms",
+    "h2d_ms",
     "compute_ms",
     "wait_ms",
     "forward_ms",
@@ -142,19 +143,21 @@ Metric suffixes are units:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
-traced_step_ms = max(raw_trace_step_wall_ms, compute_ms)
-wait_ms = traced_step_ms - compute_ms
+known_step_ms = h2d_ms + compute_ms
+traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
+wait_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
 
 The public contract is:
 
 ```text
-total_step_ms = dataloader_ms + compute_ms + wait_ms
+total_step_ms = dataloader_ms + h2d_ms + compute_ms + wait_ms
 ```
 
 `traced_step_ms` and the raw `trace_step` wall timer are internal measurement
 details and are not emitted in final-summary JSON. `wait_ms` can include
 validation, checkpointing, logging, framework orchestration, CPU stalls,
-transfer stalls, or other work outside the traced compute phases. Do not treat
-it as NCCL, all-reduce, or synchronization overhead without profiler evidence.
+unobserved transfer stalls, or other work outside the traced H2D and compute
+phases. Do not treat it as NCCL, all-reduce, or synchronization overhead
+without profiler evidence.

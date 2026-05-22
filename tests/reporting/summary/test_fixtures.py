@@ -831,7 +831,7 @@ def test_final_summary_fixture_schema_contains_all_sections(
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.2
+    assert payload["schema_version"] == 1.3
     assert set(payload) == {
         "schema_version",
         "generated_at",
