@@ -52,6 +52,14 @@ class StepTimeComparer:
                     rhs=self._value(rhs, "dataloader_ms"),
                     direction="higher_is_worse",
                 ),
+                "h2d_ms": numeric_metric(
+                    key="h2d_ms",
+                    label="H2D",
+                    unit="ms",
+                    lhs=self._value(lhs, "h2d_ms"),
+                    rhs=self._value(rhs, "h2d_ms"),
+                    direction="higher_is_worse",
+                ),
                 "compute_ms": numeric_metric(
                     key="compute_ms",
                     label="Compute",
@@ -107,6 +115,7 @@ class StepTimeComparer:
     def _dominant_phase(self, section: Any) -> Any:
         phases = {
             "dataloader": as_float(self._value(section, "dataloader_ms")),
+            "h2d": as_float(self._value(section, "h2d_ms")),
             "forward": as_float(self._value(section, "forward_ms")),
             "backward": as_float(self._value(section, "backward_ms")),
             "optimizer": as_float(self._value(section, "optimizer_ms")),

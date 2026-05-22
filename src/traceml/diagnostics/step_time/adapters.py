@@ -44,6 +44,7 @@ class RankStepSignals:
 
     steps_analyzed: int
     dataloader_ms: float
+    h2d_ms: float
     forward_ms: float
     backward_ms: float
     optimizer_ms: float
@@ -210,16 +211,20 @@ def _build_summary_per_rank_timing(
     out: Dict[int, Dict[str, float]] = {}
     for rank, item in rank_signals.items():
         dataloader = _finite_float(item.dataloader_ms)
+        h2d = _finite_float(item.h2d_ms)
         forward = _finite_float(item.forward_ms)
         backward = _finite_float(item.backward_ms)
         optimizer = _finite_float(item.optimizer_ms)
         step_cpu = _finite_float(item.step_cpu_ms)
+
         compute = forward + backward + optimizer
-        step_effective = max(step_cpu, compute)
-        wait = max(0.0, step_effective - compute)
+        known_step = h2d + compute
+        step_effective = max(step_cpu, known_step)
+        wait = max(0.0, step_effective - known_step)
 
         out[int(rank)] = {
             "dataloader_fetch": dataloader,
+            "h2d": h2d,
             "forward": forward,
             "backward": backward,
             "optimizer_step": optimizer,
@@ -272,6 +277,7 @@ def build_summary_step_diagnosis_result(
             common_steps = []
         for mk in (
             "dataloader_fetch",
+            "h2d",
             "forward",
             "backward",
             "optimizer_step",
@@ -298,6 +304,7 @@ def build_summary_step_diagnosis_result(
     )
 
     dl = {r: _finite_float(s.dataloader_ms) for r, s in rank_signals.items()}
+    h2d = {r: _finite_float(s.h2d_ms) for r, s in rank_signals.items()}
     fwd = {r: _finite_float(s.forward_ms) for r, s in rank_signals.items()}
     bwd = {r: _finite_float(s.backward_ms) for r, s in rank_signals.items()}
     opt = {r: _finite_float(s.optimizer_ms) for r, s in rank_signals.items()}
@@ -306,8 +313,9 @@ def build_summary_step_diagnosis_result(
     }
 
     compute = {r: fwd[r] + bwd[r] + opt[r] for r in ranks}
-    step_effective = {r: max(step_raw[r], compute[r]) for r in ranks}
-    wait = {r: max(0.0, step_effective[r] - compute[r]) for r in ranks}
+    known_step = {r: h2d[r] + compute[r] for r in ranks}
+    step_effective = {r: max(step_raw[r], known_step[r]) for r in ranks}
+    wait = {r: max(0.0, step_effective[r] - known_step[r]) for r in ranks}
 
     # Keep overall rank identity aligned with summary-card semantics.
     overall_rank_scores = {r: dl[r] + step_effective[r] for r in ranks}
@@ -317,6 +325,7 @@ def build_summary_step_diagnosis_result(
 
     metric_values = {
         "dataloader_fetch": dl,
+        "h2d": h2d,
         "forward": fwd,
         "backward": bwd,
         "optimizer_step": opt,
@@ -327,6 +336,7 @@ def build_summary_step_diagnosis_result(
     metrics: List[StepCombinedTimeMetric] = []
     for key in (
         "dataloader_fetch",
+        "h2d",
         "forward",
         "backward",
         "optimizer_step",

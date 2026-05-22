@@ -54,14 +54,16 @@ unattributed step time:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
-traced_step_ms = max(raw_trace_step_wall_ms, compute_ms)
-wait_ms = traced_step_ms - compute_ms
+known_step_ms = h2d_ms + compute_ms
+traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
+wait_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
 
 It can include validation, checkpointing, logging, framework orchestration, CPU
-stalls, transfer stalls, or other work inside the timed step but outside the
-compute phases. It is not direct NCCL, all-reduce, or synchronization timing.
+stalls, unobserved transfer stalls, or other work inside the timed step but
+outside the traced H2D and compute phases. It is not direct NCCL, all-reduce,
+or synchronization timing.
 
 ## Step Memory
 

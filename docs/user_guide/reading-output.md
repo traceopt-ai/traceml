@@ -278,12 +278,12 @@ What to do next:
 Meaning:
 
 - a meaningful part of the typical step is not attributed to dataloader,
-  forward, backward, or optimizer work
+  H2D, forward, backward, or optimizer work
 
 In TraceML:
 
 - `compute = forward + backward + optimizer`
-- `wait = total_step - dataloader - compute`
+- `wait = total_step - dataloader - h2d - compute`
 
 This is residual unattributed time in the reported total step, not direct
 collective, NCCL, or all-reduce timing.
@@ -294,7 +294,7 @@ Common causes:
 - checkpointing or logging work
 - framework orchestration outside the traced phases
 - CPU stalls
-- transfer / orchestration overhead
+- unobserved transfer or orchestration overhead
 
 What to look at:
 
@@ -305,7 +305,7 @@ What to do next:
 
 - inspect work happening around the traced training step
 - inspect rank imbalance
-- inspect CPU-side delays, logging, checkpointing, validation, and transfer paths
+- inspect CPU-side delays, logging, checkpointing, validation, and unobserved transfer paths
 
 ---
 
@@ -648,7 +648,7 @@ Use these as context cards:
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `STRAGGLER` | inspect both input and compute unevenness |
-| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and transfer paths |
+| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY CREEP (EARLY)` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |

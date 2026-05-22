@@ -54,7 +54,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.2
+    assert payload["schema_version"] == 1.3
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",

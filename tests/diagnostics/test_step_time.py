@@ -265,6 +265,7 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
         0: RankStepSignals(
             steps_analyzed=40,
             dataloader_ms=1.0,
+            h2d_ms=0.0,
             forward_ms=20.0,
             backward_ms=60.0,
             optimizer_ms=10.0,
@@ -283,6 +284,7 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
     rank_signals[0] = RankStepSignals(
         steps_analyzed=60,
         dataloader_ms=1.0,
+        h2d_ms=0.0,
         forward_ms=20.0,
         backward_ms=60.0,
         optimizer_ms=10.0,

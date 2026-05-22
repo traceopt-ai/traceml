@@ -50,6 +50,7 @@ def _summary_from_step_metrics(
 
     sum_dl = 0.0
     sum_fwd = 0.0
+    sum_h2d = 0.0
     sum_bwd = 0.0
     sum_opt = 0.0
     sum_step_cpu = 0.0
@@ -59,18 +60,21 @@ def _summary_from_step_metrics(
 
     for metrics in step_metrics.values():
         dataloader = finite_float(metrics.get("dataloader_fetch"))
+        h2d = finite_float(metrics.get("h2d"))
         forward = finite_float(metrics.get("forward"))
         backward = finite_float(metrics.get("backward"))
         optimizer = finite_float(metrics.get("optimizer_step"))
         step_time = finite_float(metrics.get("step_time"))
         compute = forward + backward + optimizer
+        known_step = h2d + compute
 
         sum_dl += dataloader
+        sum_h2d += h2d
         sum_fwd += forward
         sum_bwd += backward
         sum_opt += optimizer
         sum_step_cpu += max(0.0, step_time)
-        traced_step = max(step_time, compute)
+        traced_step = max(step_time, known_step)
         sum_traced_step += traced_step
         sum_total += dataloader + traced_step
         n += 1
@@ -81,6 +85,7 @@ def _summary_from_step_metrics(
     return RankStepSummary(
         steps_analyzed=n,
         avg_dataloader_ms=sum_dl / n,
+        avg_h2d_ms=sum_h2d / n,
         avg_forward_ms=sum_fwd / n,
         avg_backward_ms=sum_bwd / n,
         avg_optimizer_ms=sum_opt / n,

@@ -37,6 +37,7 @@ def _rank(
     return RankStepSummary(
         steps_analyzed=steps,
         avg_dataloader_ms=dataloader,
+        avg_h2d_ms=0.0,
         avg_forward_ms=forward,
         avg_backward_ms=backward,
         avg_optimizer_ms=optimizer,
@@ -141,7 +142,7 @@ def test_step_time_compute_bound_card_uses_short_reason() -> None:
 
     assert payload["diagnosis"]["status"] == "COMPUTE-BOUND"
     assert (
-        "- Stats: total 97.0ms | input 2.0ms | compute 90.0ms"
+        "- Stats: total 97.0ms | input 2.0ms | H2D 0.0ms | compute 90.0ms"
         in payload["card"]
     )
     assert (

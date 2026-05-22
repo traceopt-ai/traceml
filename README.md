@@ -9,7 +9,13 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
 
-[**Quickstart**](docs/user_guide/quickstart.md) • [**Compare Runs**](docs/user_guide/compare.md) • [**How to Read Output**](docs/user_guide/reading-output.md) • [**W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) • [**FAQ**](docs/user_guide/faq.md) • [**Issues**](https://github.com/traceopt-ai/traceml/issues)
+[**Quickstart**](docs/user_guide/quickstart.md) •
+[**Compare Runs**](docs/user_guide/compare.md) •
+[**How to Read Output**](docs/user_guide/reading-output.md) •
+[**W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) •
+[**FAQ**](docs/user_guide/faq.md) •
+[**Issues**](https://github.com/traceopt-ai/traceml/issues) •
+[**Discussions**](https://github.com/traceopt-ai/traceml/discussions)
 
 </div>
 
