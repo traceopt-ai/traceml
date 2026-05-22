@@ -319,7 +319,7 @@ Typical next steps:
 
 ### `WAIT-HEAVY`
 
-A meaningful part of the step is not attributed to dataloader, forward,
+A meaningful part of the step is not attributed to dataloader, H2D, forward,
 backward, or optimizer work.
 
 Typical next steps:
