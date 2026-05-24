@@ -130,7 +130,7 @@ For a single-node run, launch with:
 traceml run fine_tune.py --nproc-per-node=4
 ```
 
-For a multi-node summary run, use the same `--session-id`, `--nnodes`,
+For a multi-node summary run, use the same `--run-name`, `--nnodes`,
 `--nproc-per-node`, and `--master-addr` on every node, changing only
 `--node-rank`:
 
@@ -140,10 +140,12 @@ traceml run fine_tune.py \
   --node-rank=0 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
 Run the same command on each node, changing only `--node-rank`.
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 TraceML can help surface:
 

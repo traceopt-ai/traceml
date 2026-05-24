@@ -77,8 +77,8 @@ traceml run train.py
 TraceML writes two end-of-run artifacts:
 
 ```text
-logs/<session_id>/final_summary.json
-logs/<session_id>/final_summary.txt
+logs/<run_name>/final_summary.json
+logs/<run_name>/final_summary.txt
 ```
 
 ## Example Output
@@ -216,7 +216,7 @@ traceml run train.py \
   --node-rank=0 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
 On node 1:
@@ -227,16 +227,19 @@ traceml run train.py \
   --node-rank=1 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
-Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and
+Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
 `--master-addr` on every node. Node 0 starts the TraceML aggregator. Other
 nodes connect to `<node0-ip>:29765` by default. If workers need a different
 reachable address or port for TraceML telemetry, add
 `--aggregator-host=<host>` or `--aggregator-port=<port>` on every node. For
 multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default; override
 that only when needed with `--aggregator-bind-host=<bind-host>`.
+
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 ### Watch mode (no code changes)
 

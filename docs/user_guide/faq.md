@@ -169,10 +169,13 @@ Multi-node DDP is supported for end-of-run summary reports.
 
 Yes, for summary-mode DDP runs.
 
-Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and
+Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
 `--master-addr` on every node. Node 0 starts the TraceML aggregator; other
 nodes connect to it for telemetry. Multi-node live CLI/dashboard views are not
 yet supported.
+
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 ---
 

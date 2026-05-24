@@ -61,10 +61,23 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="Maximum number of model layers to display in the live UI.",
     )
     parser.add_argument(
+        "--run-name",
+        type=str,
+        default="",
+        help=(
+            "Human-readable TraceML run name. Determines the output folder "
+            "under --logs-dir. Required for multi-node runs unless "
+            "--session-id is used."
+        ),
+    )
+    parser.add_argument(
         "--session-id",
         type=str,
         default="",
-        help="Optional explicit session id. Required when --nnodes > 1.",
+        help=(
+            "Backward-compatible alias for --run-name. Existing scripts may "
+            "continue to use this flag."
+        ),
     )
     parser.add_argument(
         "--aggregator-port",

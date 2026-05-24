@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from traceml.launcher.launch_config import DistributedLaunchConfig
+from traceml.launcher.launch_config import DistributedLaunchConfig, RunIdentity
 from traceml.launcher.manifest import (
     collect_existing_artifacts,
     update_run_manifest,
@@ -74,7 +74,12 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "[TraceML] ERROR: --summary-window-rows must be greater than 0."
         )
     try:
-        DistributedLaunchConfig.from_args(args)
+        launch_cfg = DistributedLaunchConfig.from_args(args)
+        RunIdentity.from_args(
+            args,
+            generated_session_id="validation_placeholder",
+            require_explicit=launch_cfg.torchrun.nnodes > 1,
+        )
     except ValueError as exc:
         raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
 
@@ -99,8 +104,12 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_ENABLE_LOGGING"] = "1" if args.enable_logging else "0"
     env["TRACEML_LOGS_DIR"] = args.logs_dir
     env["TRACEML_NUM_DISPLAY_LAYERS"] = str(args.num_display_layers)
-    session_id_arg = str(getattr(args, "session_id", "") or "").strip()
-    env["TRACEML_SESSION_ID"] = session_id_arg or get_session_id()
+    run_identity = RunIdentity.from_args(
+        args,
+        generated_session_id=get_session_id(),
+        require_explicit=torchrun_cfg.nnodes > 1,
+    )
+    env["TRACEML_SESSION_ID"] = run_identity.session_id
     env["TRACEML_AGGREGATOR_HOST"] = aggregator_cfg.connect_host
     env["TRACEML_AGGREGATOR_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_AGGREGATOR_PORT"] = str(aggregator_cfg.port)
@@ -133,6 +142,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     manifest_path = write_run_manifest(
         session_root=session_root,
         session_id=session_id,
+        run=run_identity.to_manifest(),
         script_path=script_path,
         profile=env["TRACEML_PROFILE"],
         ui_mode=args.mode,

@@ -576,7 +576,7 @@ traceml run train.py \
   --node-rank=0 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
 On node 1:
@@ -587,7 +587,7 @@ traceml run train.py \
   --node-rank=1 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
 Node 0 starts the TraceML aggregator. Other nodes connect to
@@ -596,6 +596,9 @@ or port for TraceML telemetry, add `--aggregator-host=<host>` or
 `--aggregator-port=<port>` on every node. Node 0 binds the aggregator to
 `0.0.0.0` by default for multi-node runs; override that only when needed with
 `--aggregator-bind-host=<bind-host>`.
+
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 ---
 
@@ -642,7 +645,7 @@ traceml run train.py \
   --node-rank=0 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
 Run the same command on each node, changing only `--node-rank`.

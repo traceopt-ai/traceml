@@ -112,6 +112,7 @@ def write_run_manifest(
     summary_window_rows: int,
     status: str,
     launch_cwd: str,
+    run: Optional[Dict[str, Any]] = None,
     aggregator_dir: Optional[Path] = None,
     db_path: Optional[Path] = None,
     extra: Optional[Dict[str, Any]] = None,
@@ -121,9 +122,17 @@ def write_run_manifest(
     session_root.mkdir(parents=True, exist_ok=True)
 
     manifest_path = session_root / "manifest.json"
+    run_block: Dict[str, Any] = {
+        "run_name": str(session_id),
+        "session_id": str(session_id),
+    }
+    if run:
+        run_block.update(run)
+
     manifest: Dict[str, Any] = {
         "schema_version": 1,
         "session_id": str(session_id),
+        "run": run_block,
         "status": str(status),
         "created_at": utc_now_iso(),
         "host": {"hostname": socket.gethostname()},
@@ -146,6 +155,7 @@ def write_run_manifest(
         },
         "paths": {
             "session_root": str(session_root),
+            "run_root": str(session_root),
             "aggregator_dir": (
                 str(aggregator_dir.resolve()) if aggregator_dir else None
             ),

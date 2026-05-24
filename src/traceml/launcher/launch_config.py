@@ -16,9 +16,12 @@ focused on orchestration and makes multi-node behavior easier to test.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
+
+_RUN_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def _positive_int(value: Any, name: str) -> int:
@@ -143,6 +146,83 @@ class AggregatorLaunchConfig:
 
 
 @dataclass(frozen=True)
+class RunIdentity:
+    """Resolved public run identity for one TraceML launch.
+
+    Users should think in terms of ``run_name``. Internally, TraceML still uses
+    ``session_id`` as the stable runtime/session key for environment variables,
+    log paths, and aggregator coordination.
+    """
+
+    run_name: str
+    session_id: str
+    source: str
+
+    @classmethod
+    def from_args(
+        cls,
+        args: Any,
+        *,
+        generated_session_id: Optional[str] = None,
+        require_explicit: bool = False,
+    ) -> "RunIdentity":
+        """Resolve and validate run identity from CLI arguments."""
+        run_name = str(getattr(args, "run_name", "") or "").strip()
+        session_id = str(getattr(args, "session_id", "") or "").strip()
+
+        if run_name and session_id and run_name != session_id:
+            raise ValueError(
+                "--run-name and --session-id identify the same TraceML run "
+                "and must match when both are provided."
+            )
+
+        resolved = run_name or session_id
+        source = (
+            "run_name"
+            if run_name
+            else "session_id" if session_id else "generated"
+        )
+
+        if require_explicit and not resolved:
+            raise ValueError(
+                "--run-name is required when --nnodes > 1 so every node "
+                "writes into the same TraceML run. --session-id is still "
+                "accepted for backward compatibility."
+            )
+
+        if not resolved:
+            resolved = str(generated_session_id or "").strip()
+
+        if not resolved:
+            raise ValueError("TraceML run identity could not be resolved.")
+
+        if "/" in resolved or "\\" in resolved:
+            raise ValueError(
+                "--run-name must be a single path segment, not a path."
+            )
+
+        if not _RUN_NAME_RE.match(resolved):
+            raise ValueError(
+                "--run-name may contain only letters, numbers, '.', '_', "
+                "and '-'."
+            )
+
+        return cls(
+            run_name=resolved,
+            session_id=resolved,
+            source=source,
+        )
+
+    def to_manifest(self) -> dict[str, str]:
+        """Return stable manifest fields for the public run identity."""
+        return {
+            "run_name": self.run_name,
+            "session_id": self.session_id,
+            "identity_source": self.source,
+        }
+
+
+@dataclass(frozen=True)
 class DistributedLaunchConfig:
     """Complete distributed launch configuration used by the CLI handler."""
 
@@ -153,12 +233,6 @@ class DistributedLaunchConfig:
     def from_args(cls, args: Any) -> "DistributedLaunchConfig":
         """Build a complete launch config from argparse args."""
         torchrun = TorchrunLaunchConfig.from_args(args)
-        session_id = str(getattr(args, "session_id", "") or "").strip()
-        if torchrun.nnodes > 1 and not session_id:
-            raise ValueError(
-                "--session-id is required when --nnodes > 1 so all nodes "
-                "write into the same TraceML session."
-            )
         aggregator = AggregatorLaunchConfig.from_args(
             args,
             torchrun=torchrun,
@@ -169,5 +243,6 @@ class DistributedLaunchConfig:
 __all__ = [
     "AggregatorLaunchConfig",
     "DistributedLaunchConfig",
+    "RunIdentity",
     "TorchrunLaunchConfig",
 ]
