@@ -13,6 +13,7 @@ These are the main user-facing examples.
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
 | `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.final_summary()` | CPU / CUDA | Best first example |
+| `summary_logging_minimal.py` | Minimal tracker-friendly `traceml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
@@ -90,6 +91,7 @@ Starter examples now prefer the top-level public API:
 - `traceml.init(mode="auto")`
 - `traceml.trace_step(...)`
 - `traceml.trace_model_instance(...)`
+- `traceml.summary()`
 - `traceml.final_summary()`
 
 For explicit manual instrumentation, see:

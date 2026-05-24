@@ -1,9 +1,9 @@
 """
 Client-side helper for requesting and reading a finalized TraceML summary.
 
-This module is used by the public `traceml.final_summary()` API. It does not
-generate summaries locally. Instead, it requests a fresh summary from the
-aggregator process and reads the published summary artifact.
+This module backs the public `traceml.summary()` and `traceml.final_summary()`
+APIs. It does not generate summaries locally. Instead, it requests a fresh
+summary from the aggregator process and reads the published summary artifact.
 """
 
 import time
@@ -19,6 +19,7 @@ from traceml.sdk.protocol import (
     request_to_json,
     resolve_session_context_from_env,
 )
+from traceml.sdk.summary_projection import compact_summary
 from traceml.utils.atomic_io import write_json_atomic
 
 
@@ -40,7 +41,10 @@ def final_summary(
     rank0_only: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
-    Request and return a finalized TraceML summary for the current session.
+    Request and return the full final_summary.json payload for this session.
+
+    Most users should call ``traceml.summary()`` for compact W&B/MLflow-friendly
+    scalar output. Use this function when you need the full structured report.
 
     Parameters
     ----------
@@ -117,3 +121,26 @@ def final_summary(
     raise RuntimeError(
         "Timed out waiting for TraceML final summary from the aggregator."
     )
+
+
+def summary(
+    *,
+    timeout_sec: float = 30.0,
+    poll_interval_sec: float = 0.1,
+    print_text: bool = False,
+    rank0_only: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return a compact tracker-friendly TraceML summary for the current session.
+
+    The returned dict is flat and intended for experiment trackers such as W&B,
+    MLflow, and internal dashboards. Use ``final_summary()`` when you need the
+    complete structured JSON artifact.
+    """
+    payload = final_summary(
+        timeout_sec=timeout_sec,
+        poll_interval_sec=poll_interval_sec,
+        print_text=print_text,
+        rank0_only=rank0_only,
+    )
+    return compact_summary(payload)

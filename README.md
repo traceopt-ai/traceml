@@ -125,7 +125,10 @@ Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
 +----------------------------------------------------------------------------+
 ```
 
-The `final_summary.json` is machine-readable and designed for logging to W&B or MLflow, storing as a run artifact, or comparing against another run.
+For experiment trackers, call `traceml.summary()` near the end of your script
+to get a flat dict of diagnosis statuses and average metrics. Keep
+`final_summary.json` when you want the full run artifact or an input for
+`traceml compare`.
 
 ---
 

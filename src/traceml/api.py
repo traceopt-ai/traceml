@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 from traceml.sdk.initial import TraceMLInitConfig
 from traceml.sdk.summary_client import final_summary as _final_summary
+from traceml.sdk.summary_client import summary as _summary
 
 
 def trace_step(*args: Any, **kwargs: Any) -> Any:
@@ -32,9 +33,27 @@ def final_summary(
     rank0_only: bool = True,
 ) -> Optional[Dict[str, Any]]:
     """
-    Return a finalized TraceML summary for the active session.
+    Return the full final_summary.json payload for the active session.
     """
     return _final_summary(
+        timeout_sec=timeout_sec,
+        poll_interval_sec=poll_interval_sec,
+        print_text=print_text,
+        rank0_only=rank0_only,
+    )
+
+
+def summary(
+    *,
+    timeout_sec: float = 30.0,
+    poll_interval_sec: float = 0.1,
+    print_text: bool = False,
+    rank0_only: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return a compact tracker-friendly TraceML summary for the active session.
+    """
+    return _summary(
         timeout_sec=timeout_sec,
         poll_interval_sec=poll_interval_sec,
         print_text=print_text,
@@ -124,6 +143,7 @@ def start(
 __all__ = [
     "trace_step",
     "trace_model_instance",
+    "summary",
     "final_summary",
     "start",
     "init",

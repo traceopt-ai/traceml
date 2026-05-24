@@ -52,3 +52,21 @@ multi-node runs, use the default summary mode.
 Deep/layer profiling has been removed from the public CLI for now.
 
 See `traceml --help` for the full set of options.
+
+## Summary APIs
+
+### `traceml.summary()`
+
+Returns a compact flat dict for experiment trackers such as W&B, MLflow, or
+internal dashboards.
+
+```python
+summary = traceml.summary(print_text=True)
+if summary is not None:
+    wandb.log(summary)
+```
+
+### `traceml.final_summary()`
+
+Returns the full `final_summary.json` payload. Use this when you need the
+complete structured report or want to store the artifact for `traceml compare`.

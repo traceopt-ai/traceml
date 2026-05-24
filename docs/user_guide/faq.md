@@ -288,8 +288,10 @@ TraceML is designed to work alongside your existing tracking stack. The
 recommended low-noise path is:
 
 1. launch with `traceml run train.py`
-2. call `traceml.final_summary()` near the end of your script
-3. log selected fields from the returned dict into W&B or MLflow
+2. call `traceml.summary()` near the end of your script
+3. log the returned flat dict into W&B or MLflow
+
+Use `traceml.final_summary()` if you need the full structured JSON payload.
 
 See:
 

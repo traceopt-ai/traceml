@@ -14,7 +14,7 @@ from traceml.sdk.instrumentation import (
     trace_step,
     trace_time,
 )
-from traceml.sdk.summary_client import final_summary
+from traceml.sdk.summary_client import final_summary, summary
 from traceml.sdk.wrappers import (
     wrap_backward,
     wrap_dataloader_fetch,
@@ -35,6 +35,7 @@ __all__ = [
     "trace_step",
     "trace_model_instance",
     "trace_time",
+    "summary",
     "final_summary",
     "wrap_dataloader_fetch",
     "wrap_forward",
