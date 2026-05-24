@@ -1,0 +1,100 @@
+name: I found a bottleneck
+description: Share what TraceML found and how it helped your training run.
+title: "[Bottleneck]: "
+labels:
+  - bottleneck
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Found something useful with TraceML? Share the before, the finding, and what changed. These reports help the project improve and help other training teams spot similar issues.
+
+  - type: textarea
+    id: training-context
+    attributes:
+      label: What were you training?
+      description: Include model, TraceML integration path, hardware, topology, and scale if you can share them.
+      placeholder: "Example: Training a ViT on 4x L40S with a plain PyTorch DDP loop"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: traceml-surface
+    attributes:
+      label: Where did TraceML show the bottleneck?
+      options:
+        - final_summary.txt or final_summary.json
+        - Live CLI
+        - Dashboard
+        - traceml compare
+        - traceml.summary()
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: diagnosis-area
+    attributes:
+      label: Which TraceML area was most useful?
+      options:
+        - Step Time
+        - Step Memory
+        - Process
+        - System
+        - Compare
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-traceml-found
+    attributes:
+      label: What did TraceML find?
+      description: Paste the relevant diagnosis/status, `issues` entry, or summary text. Common examples include input-bound, compute-bound, wait-heavy, input straggler, compute straggler, memory pressure, memory imbalance, and memory creep.
+      placeholder: "TraceML showed that..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: final-summary
+    attributes:
+      label: final_summary output
+      description: Paste the useful part of `final_summary.txt` or `final_summary.json`, with secrets removed.
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: action-taken
+    attributes:
+      label: What did you change?
+      description: Tell us what you tried after seeing the TraceML result.
+      placeholder: "I changed..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: What improved?
+      description: Share concrete impact if you have it, such as throughput, GPU utilization, time per step, cost, or debugging time saved.
+      placeholder: "Example: Step time dropped from 820ms to 610ms, and GPU utilization rose from 58% to 83%."
+    validations:
+      required: true
+
+  - type: textarea
+    id: quote
+    attributes:
+      label: Can we quote you?
+      description: Optional short testimonial we can use in docs, README, or release notes.
+      placeholder: "TraceML helped us..."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: permission
+    attributes:
+      label: Sharing permission
+      options:
+        - label: You may reference this issue publicly, but please do not include private details beyond what I wrote here.
+          required: true

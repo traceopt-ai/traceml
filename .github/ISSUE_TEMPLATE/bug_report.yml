@@ -1,0 +1,110 @@
+name: Bug report
+description: Report a TraceML bug with enough context for us to reproduce it.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. The details below help us reproduce training-environment issues quickly.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Tell us what went wrong and what you expected TraceML to do.
+      placeholder: TraceML reported..., but I expected...
+    validations:
+      required: true
+
+  - type: input
+    id: traceml-version
+    attributes:
+      label: TraceML version
+      description: Run `python -c "import traceml; print(traceml.__version__)"` if you are not sure.
+      placeholder: "Example: 0.2.15"
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware and CUDA
+      description: Include GPU/CPU, memory, CUDA version, accelerator type, and number of devices if relevant.
+      placeholder: "Example: 8x NVIDIA A100 80GB, CUDA 12.1, 512GB RAM"
+    validations:
+      required: true
+
+  - type: input
+    id: pytorch-version
+    attributes:
+      label: PyTorch version
+      placeholder: "Example: 2.5.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: traceml-integration
+    attributes:
+      label: Training framework / TraceML integration
+      description: Pick the public TraceML path that best matches your setup.
+      options:
+        - Plain PyTorch loop with traceml.trace_step(...)
+        - Hugging Face Trainer with TraceMLTrainer
+        - PyTorch Lightning with TraceMLCallback
+        - Ray Train with TraceMLTorchTrainer
+        - traceml watch
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: launch-command
+    attributes:
+      label: Launch command and topology
+      description: Include the `traceml run`, `traceml watch`, or framework launch command, plus single-GPU/multi-GPU/multi-node details.
+      placeholder: |
+        traceml run train.py --mode=summary --nproc-per-node=4
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: final-summary
+    attributes:
+      label: final_summary output
+      description: Paste `final_summary.txt`, `final_summary.json`, or the `traceml.final_summary()` payload. If no final summary was produced, paste the error output and say that no summary was written.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro-script
+    attributes:
+      label: Reproduction script
+      description: Share the smallest script or command sequence that reproduces the issue.
+      placeholder: |
+        python train.py --model ...
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Extra environment details
+      description: Include OS, Python version, cuDNN/NCCL versions, containers, cluster scheduler, W&B/MLflow/TensorBoard logging, or anything else that may matter.
+      placeholder: "Example: Ubuntu 22.04, Python 3.11, NCCL 2.19, Slurm"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed secrets, tokens, and private data from the pasted output.
+          required: true
+        - label: I included a minimal repro script or command.
+          required: true
