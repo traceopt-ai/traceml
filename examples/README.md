@@ -102,10 +102,9 @@ For explicit manual instrumentation, see:
 - `tml.wrap_backward(...)`
 - `tml.wrap_optimizer(...)`
 
-Legacy imports from `traceml.decorators` still work for backward
-compatibility, but new examples use the top-level `tml.*` API from
-`import traceml_ai as tml`. Legacy
-decorator imports are planned for deprecation starting in `v0.3.0`.
+The old decorator import path still works for backward compatibility, but it
+is deprecated and will be removed in a future version. New examples use the
+top-level `tml.*` API from `import traceml_ai as tml`.
 
 ---
 

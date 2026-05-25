@@ -68,9 +68,9 @@ For supported integrations:
 - Hugging Face: use `TraceMLTrainer`
 - Lightning: add `TraceMLCallback()`
 
-`from traceml.decorators import trace_step` still works for backward
-compatibility, but the preferred public API is now the top-level
-`tml.*` from `import traceml_ai as tml`.
+The old decorator import path still works for backward compatibility, but it
+is deprecated and will be removed in a future version. The preferred public API
+is now the top-level `tml.*` from `import traceml_ai as tml`.
 
 ---
 
@@ -87,15 +87,10 @@ with tml.trace_step(model):
     ...
 ```
 
-TraceML AI still supports:
-
-```python
-from traceml_ai.sdk.decorators_compat import trace_step
-```
-
-for backward compatibility, but new examples and docs use the top-level
-`tml.*` API from `import traceml_ai as tml`. Legacy decorator imports are planned for deprecation
-starting in `v0.3.0`.
+TraceML AI still supports the old decorator import path for backward
+compatibility, but new examples and docs use the top-level `tml.*` API from
+`import traceml_ai as tml`. The decorator import path will be removed in a
+future version.
 
 ---
 

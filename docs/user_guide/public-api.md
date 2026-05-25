@@ -2,12 +2,19 @@
 
 The stable surface that user code imports and calls. Everything in this page is covered by TraceML AI's compatibility contract across v0.x minor releases.
 
-## Decorators
+## Core API
 
-::: traceml_ai.decorators.trace_step
-    options:
-      show_root_heading: true
-      show_source: true
+```python
+import traceml_ai as tml
+
+tml.init(mode="auto")
+
+with tml.trace_step(model):
+    ...
+```
+
+The old decorator import path is deprecated and will be removed in a future
+version. New code should use the top-level `tml.*` API.
 
 ## Hugging Face integration
 

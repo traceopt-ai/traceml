@@ -267,9 +267,9 @@ with tml.trace_step(model):
 Call `tml.init(mode="auto")` once near the start of the script, then wrap
 the full training step body from `zero_grad(...)` through `optimizer.step()`.
 
-Legacy imports from `traceml.decorators` still work for backward compatibility.
-The preferred API is the top-level `tml.*` API from `import traceml_ai as tml`. Legacy decorator
-imports are planned for deprecation starting in `v0.3.0`.
+The old decorator import path still works for backward compatibility, but it
+is deprecated and will be removed in a future version. The preferred API is the
+top-level `tml.*` API from `import traceml_ai as tml`.
 
 If you need explicit wrappers or partial auto-instrumentation, use
 `mode="manual"` or `mode="selective"`. Keep that as a second step after you
