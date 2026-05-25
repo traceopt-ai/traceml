@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from traceml.diagnostics.process.api import diagnose_process
-from traceml.diagnostics.process.context import (
+from traceml_ai.diagnostics.process.api import diagnose_process
+from traceml_ai.diagnostics.process.context import (
     ProcessDiagnosisInput,
     ProcessRankDiagnosisInput,
     build_process_summary_signals,
 )
-from traceml.diagnostics.process.rules import (
+from traceml_ai.diagnostics.process.rules import (
     GPUMemoryReservedOverhangRule,
     HighProcessCPURule,
     HighProcessGPUMemoryRule,

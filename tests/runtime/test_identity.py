@@ -6,7 +6,7 @@
 
 import os
 
-from traceml.runtime.identity import resolve_runtime_identity
+from traceml_ai.runtime.identity import resolve_runtime_identity
 
 
 class _FakeDistributed:

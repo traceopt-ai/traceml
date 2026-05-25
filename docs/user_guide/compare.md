@@ -1,6 +1,6 @@
 # Compare Runs
 
-Use `traceml compare` to compare two TraceML final summary JSON files from two different runs.
+Use `traceml compare` to compare two TraceML AI final summary JSON files from two different runs.
 
 This is the cleanest way to answer questions like:
 
@@ -15,7 +15,7 @@ This is the cleanest way to answer questions like:
 
 ## What you need
 
-You need two TraceML final summary JSON files.
+You need two TraceML AI final summary JSON files.
 
 A common way to produce them is:
 
@@ -26,7 +26,7 @@ traceml run train.py
 `traceml run` uses summary mode by default and writes `final_summary.json` at
 the end of the run.
 
-If you are logging TraceML output into W&B or MLflow, you can also keep those summary JSON files as run artifacts and compare them later.
+If you are logging TraceML AI output into W&B or MLflow, you can also keep those summary JSON files as run artifacts and compare them later.
 
 ---
 
@@ -41,7 +41,7 @@ This compares:
 - `A`: the first file you pass
 - `B`: the second file you pass
 
-TraceML writes:
+TraceML AI writes:
 
 - a structured compare JSON
 - a compact text report
@@ -55,7 +55,7 @@ compare/run_a_vs_run_b.json
 compare/run_a_vs_run_b.txt
 ```
 
-If the file names are generic, such as `final_summary.json`, TraceML falls back to parent directory names when naming the compare artifacts.
+If the file names are generic, such as `final_summary.json`, TraceML AI falls back to parent directory names when naming the compare artifacts.
 
 ---
 
@@ -122,8 +122,8 @@ That means:
 
 A good workflow is:
 
-1. run TraceML for each run you care about
-2. save the TraceML final summary JSON file for each run
+1. run TraceML AI for each run you care about
+2. save the TraceML AI final summary JSON file for each run
 3. compare two runs with `traceml compare`
 4. use the compare output to decide whether a regression looks real and where to dig next
 
@@ -147,7 +147,7 @@ This is often enough to tell whether the slowdown is coming from:
 
 ## What compare is best at today
 
-TraceML compare is currently strongest for comparing:
+TraceML AI compare is currently strongest for comparing:
 
 - step time
 - step memory
@@ -166,7 +166,7 @@ Use W&B, MLflow, or TensorBoard for:
 - dashboards
 - experiment management
 
-Use TraceML compare for:
+Use TraceML AI compare for:
 
 - bottleneck changes
 - diagnosis changes
@@ -181,10 +181,10 @@ Use TraceML compare for:
 That means:
 
 - if one summary has a field and the other does not, comparison still runs
-- if a section is missing, TraceML skips noisy output instead of failing when possible
-- if newer TraceML versions add more fields later, older comparisons should still remain usable for the shared fields
+- if a section is missing, TraceML AI skips noisy output instead of failing when possible
+- if newer TraceML AI versions add more fields later, older comparisons should still remain usable for the shared fields
 
-This helps keep compare useful across incremental TraceML releases.
+This helps keep compare useful across incremental TraceML AI releases.
 
 ---
 
@@ -192,7 +192,7 @@ This helps keep compare useful across incremental TraceML releases.
 
 Compare:
 
-- TraceML final summary JSON files from completed runs
+- TraceML AI final summary JSON files from completed runs
 
 Do not compare:
 
@@ -220,6 +220,6 @@ Use compare when:
 ## Related docs
 
 - [Quickstart](quickstart.md)
-- [How to Read TraceML Output](reading-output.md)
-- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
+- [How to Read TraceML AI Output](reading-output.md)
+- [Use TraceML AI with W&B / MLflow](integrations/wandb-mlflow.md)
 - [FAQ](faq.md)

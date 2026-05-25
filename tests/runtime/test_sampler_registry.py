@@ -1,10 +1,10 @@
-from traceml.core import Registry
-from traceml.runtime.sampler_registry import (
+from traceml_ai.core import Registry
+from traceml_ai.runtime.sampler_registry import (
     SamplerSpec,
     build_samplers,
     select_sampler_specs,
 )
-from traceml.samplers.base_sampler import BaseSampler
+from traceml_ai.samplers.base_sampler import BaseSampler
 
 
 class _FakeSampler(BaseSampler):

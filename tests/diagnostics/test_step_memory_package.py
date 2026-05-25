@@ -1,4 +1,4 @@
-from traceml.diagnostics.step_memory import (
+from traceml_ai.diagnostics.step_memory import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     LIVE_STEP_MEMORY_POLICY,
     SUMMARY_STEP_MEMORY_POLICY,
@@ -6,15 +6,15 @@ from traceml.diagnostics.step_memory import (
     build_step_memory_diagnosis,
     build_step_memory_summary_diagnosis_result,
 )
-from traceml.diagnostics.step_memory.adapters import (
+from traceml_ai.diagnostics.step_memory.adapters import (
     build_step_memory_summary_signals,
 )
-from traceml.diagnostics.step_memory.rules import (
+from traceml_ai.diagnostics.step_memory.rules import (
     DEFAULT_STEP_MEMORY_SUMMARY_RULES,
     run_step_memory_summary_rules,
 )
-from traceml.diagnostics.step_memory.trend import evaluate_step_memory_creep
-from traceml.renderers.step_memory.schema import (
+from traceml_ai.diagnostics.step_memory.trend import evaluate_step_memory_creep
+from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedSeries,
@@ -170,7 +170,7 @@ def test_step_memory_policies_are_explicit():
 
 
 def test_step_memory_summary_enrichment_fails_open(monkeypatch):
-    import traceml.diagnostics.step_memory.adapters as adapters
+    import traceml_ai.diagnostics.step_memory.adapters as adapters
 
     def broken_adapter(*args, **kwargs):
         raise RuntimeError("boom")
@@ -191,7 +191,7 @@ def test_step_memory_summary_enrichment_fails_open(monkeypatch):
 def test_step_memory_summary_fails_open_preserves_pressure_capacity(
     monkeypatch,
 ):
-    import traceml.diagnostics.step_memory.adapters as adapters
+    import traceml_ai.diagnostics.step_memory.adapters as adapters
 
     def broken_adapter(*args, **kwargs):
         raise RuntimeError("boom")

@@ -1,16 +1,16 @@
 # Hugging Face Trainer
 
-Use TraceML with Hugging Face `Trainer` to find training bottlenecks without rewriting your training loop.
+Use TraceML AI with Hugging Face `Trainer` to find training bottlenecks without rewriting your training loop.
 
 `TraceMLTrainer` is a drop-in replacement for `transformers.Trainer`. It adds step-aware diagnosis so you can quickly tell whether a run is input-bound, compute-bound, straggler-heavy, or showing memory drift.
 
-> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
+> Start with the [Quickstart](../quickstart.md) if you have not used TraceML AI yet.
 
 ---
 
 ## Install
 
-Install TraceML with Hugging Face support:
+Install TraceML AI with Hugging Face support:
 
 ```bash
 pip install "traceml-ai[hf]"
@@ -35,7 +35,7 @@ pip install torchvision
 Replace `Trainer` with `TraceMLTrainer`. Everything else stays the same.
 
 ```python
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations.huggingface import TraceMLTrainer
 from transformers import TrainingArguments
 
 training_args = TrainingArguments(
@@ -74,9 +74,9 @@ multi-GPU.
 
 ---
 
-## What TraceML will show
+## What TraceML AI will show
 
-In Hugging Face runs, TraceML helps you spot:
+In Hugging Face runs, TraceML AI helps you spot:
 
 - input-bound training
 - compute-bound steps
@@ -84,7 +84,7 @@ In Hugging Face runs, TraceML helps you spot:
 - wait-heavy behavior
 - memory creep over time
 
-You keep the normal Hugging Face workflow. TraceML adds diagnosis around the training step.
+You keep the normal Hugging Face workflow. TraceML AI adds diagnosis around the training step.
 
 ---
 
@@ -92,7 +92,7 @@ You keep the normal Hugging Face workflow. TraceML adds diagnosis around the tra
 
 `TraceMLTrainer` subclasses `transformers.Trainer` and wraps the training step automatically.
 
-That means you do not need to add `traceml.trace_step(...)` manually in your
+That means you do not need to add `tml.trace_step(...)` manually in your
 Hugging Face training loop.
 
 If `traceml_enabled=False`, it behaves like a normal `Trainer`.
@@ -101,13 +101,13 @@ If `traceml_enabled=False`, it behaves like a normal `Trainer`.
 
 ## Use with your existing tracking stack
 
-TraceML is designed to work alongside tools like W&B, MLflow, and TensorBoard.
+TraceML AI is designed to work alongside tools like W&B, MLflow, and TensorBoard.
 
 A common setup is:
 
 - Hugging Face Trainer for training
 - W&B / TensorBoard for experiment tracking
-- TraceML for bottleneck diagnosis
+- TraceML AI for bottleneck diagnosis
 
 For the cleanest terminal experience, you can set:
 
@@ -116,7 +116,7 @@ report_to="none"
 disable_tqdm=True
 ```
 
-This is optional. TraceML does not require you to replace your existing logger stack.
+This is optional. TraceML AI does not require you to replace your existing logger stack.
 
 ---
 
@@ -147,7 +147,7 @@ Run the same command on each node, changing only `--node-rank`.
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 
-TraceML can help surface:
+TraceML AI can help surface:
 
 - rank imbalance
 - input stragglers
@@ -174,7 +174,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations.huggingface import TraceMLTrainer
 
 
 def main():
@@ -254,7 +254,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations.huggingface import TraceMLTrainer
 
 
 def main():
@@ -331,11 +331,11 @@ traceml run fine_tune_vision.py
 
 ## Recommended `TrainingArguments` settings
 
-These settings make the terminal output cleaner when using TraceML:
+These settings make the terminal output cleaner when using TraceML AI:
 
 | Setting | Recommended value | Why |
 |---|---|---|
-| `disable_tqdm=True` | Yes | Prevents tqdm from fighting with the TraceML CLI |
+| `disable_tqdm=True` | Yes | Prevents tqdm from fighting with the TraceML AI CLI |
 | `report_to="none"` | Optional | Keeps W&B / TensorBoard output out of the terminal for local diagnosis |
 | `save_strategy="no"` | Optional | Useful for short local diagnostic runs |
 
@@ -343,7 +343,7 @@ These settings make the terminal output cleaner when using TraceML:
 
 ## Troubleshooting
 
-### Terminal output overlaps with TraceML
+### Terminal output overlaps with TraceML AI
 
 Set:
 
@@ -351,11 +351,11 @@ Set:
 disable_tqdm=True
 ```
 
-This gives the TraceML CLI cleaner terminal control.
+This gives the TraceML AI CLI cleaner terminal control.
 
 ### I still want W&B or TensorBoard
 
-That is fine. TraceML is designed to work alongside them.
+That is fine. TraceML AI is designed to work alongside them.
 
 If terminal output gets noisy, use:
 
@@ -368,13 +368,13 @@ default final summary path.
 
 ### Multi-GPU run only shows one rank
 
-Make sure you launch through TraceML, not plain `python`:
+Make sure you launch through TraceML AI, not plain `python`:
 
 ```bash
 traceml run fine_tune.py --nproc-per-node=4
 ```
 
-### I want a baseline without TraceML
+### I want a baseline without TraceML AI
 
 Run:
 
@@ -382,7 +382,7 @@ Run:
 traceml run fine_tune.py --disable-traceml
 ```
 
-This launches your script natively through `torchrun` without TraceML telemetry.
+This launches your script natively through `torchrun` without TraceML AI telemetry.
 
 ---
 

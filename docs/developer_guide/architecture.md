@@ -1,8 +1,8 @@
 # Architecture
 
-![TraceML architecture overview](../assets/Architecture_excali_b.png)
+![TraceML AI architecture overview](../assets/Architecture_excali_b.png)
 
-TraceML runs as three cooperating processes during a training job. The CLI spawns an **aggregator** server and one or more **training** ranks via `torchrun`. Training ranks run user code in-process with TraceML hooks attached; telemetry is shipped over TCP to the aggregator, which renders the unified view.
+TraceML AI runs as three cooperating processes during a training job. The CLI spawns an **aggregator** server and one or more **training** ranks via `torchrun`. Training ranks run user code in-process with TraceML AI hooks attached; telemetry is shipped over TCP to the aggregator, which renders the unified view.
 
 ## Telemetry data flow
 

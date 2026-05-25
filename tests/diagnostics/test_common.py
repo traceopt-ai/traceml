@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from traceml.diagnostics.common import (
+from traceml_ai.diagnostics.common import (
     BaseDiagnosis,
     DiagnosticIssue,
     DiagnosticResult,

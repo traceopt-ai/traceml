@@ -1,20 +1,20 @@
 # Ray Train
 
-TraceML's Ray integration is intentionally thin: Ray launches and manages the
-training workers, while TraceML observes those workers over its normal TCP
+TraceML AI's Ray integration is intentionally thin: Ray launches and manages the
+training workers, while TraceML AI observes those workers over its normal TCP
 telemetry path.
 
 ```text
 driver process
-  -> starts one TraceML aggregator actor
+  -> starts one TraceML AI aggregator actor
   -> runs Ray TorchTrainer
        -> Ray starts training workers
-            -> each worker starts one TraceML runtime
+            -> each worker starts one TraceML AI runtime
             -> each worker sends telemetry to the aggregator actor
 ```
 
 Ray still owns scheduling, worker placement, ranks, process groups, and
-DDP/NCCL/Gloo communication. TraceML does not replace Ray's launcher or reach
+DDP/NCCL/Gloo communication. TraceML AI does not replace Ray's launcher or reach
 into Ray Train internals.
 
 ## Install
@@ -29,7 +29,7 @@ pip install "traceml-ai[ray]"
 import ray
 from ray.train import ScalingConfig
 
-from traceml.integrations.ray import TraceMLRayConfig, TraceMLTorchTrainer
+from traceml_ai.integrations.ray import TraceMLRayConfig, TraceMLTorchTrainer
 
 
 def train_loop_per_worker(config):
@@ -37,16 +37,16 @@ def train_loop_per_worker(config):
     import torch.nn as nn
     import torch.optim as optim
 
-    import traceml
+    import traceml_ai as tml
 
     model = nn.Sequential(nn.Linear(32, 64), nn.ReLU(), nn.Linear(64, 4))
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 
-    traceml.trace_model_instance(model)
+    tml.trace_model_instance(model)
 
     for _ in range(config["steps"]):
-        with traceml.trace_step(model):
+        with tml.trace_step(model):
             x = torch.randn(64, 32)
             y = torch.randint(0, 4, (64,))
 
@@ -69,7 +69,7 @@ trainer.fit()
 ```
 
 Use the same ``train_loop_per_worker`` shape you would pass to Ray's
-``TorchTrainer``. The wrapper starts TraceML before your loop runs and stops it
+``TorchTrainer``. The wrapper starts TraceML AI before your loop runs and stops it
 after the loop exits.
 
 ## Network Model
@@ -111,7 +111,7 @@ The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal
 rendering from the aggregator actor.
 
-``init_mode`` is passed to ``traceml.init()`` inside each Ray worker. Use
+``init_mode`` is passed to ``tml.init()`` inside each Ray worker. Use
 ``init_mode="manual"`` if your training loop wraps dataloader, forward,
 backward, and optimizer timing explicitly. Use ``init_mode="selective"`` with
 the ``patch_*`` options when you only want some automatic patches.
@@ -120,6 +120,6 @@ the ``patch_*`` options when you only want some automatic patches.
 
 ``TraceMLTorchTrainer.fit()`` starts the aggregator actor, runs Ray Train, and
 then stops the actor in a ``finally`` block. Each worker also stops its local
-TraceML runtime in a ``finally`` block. Normal exceptions and keyboard
-interrupts should therefore release TraceML resources. A hard ``SIGKILL`` cannot
+TraceML AI runtime in a ``finally`` block. Normal exceptions and keyboard
+interrupts should therefore release TraceML AI resources. A hard ``SIGKILL`` cannot
 run Python cleanup code in any framework.

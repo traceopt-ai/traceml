@@ -10,7 +10,7 @@ pre-commit install --install-hooks
 pre-commit install --hook-type pre-push
 ```
 
-All extras are installed because the docs build imports every TraceML module.
+All extras are installed because the docs build imports every TraceML AI module.
 
 ## Branch naming
 
@@ -84,7 +84,7 @@ If a code change affects user-facing behavior, update the relevant doc in the sa
 Use `autorefs` to link to API symbols in prose:
 
 ```markdown
-See [`trace_step`][traceml.decorators.trace_step] for the context manager.
+See [`trace_step`][traceml_ai.decorators.trace_step] for the context manager.
 ```
 
 ## PR checklist

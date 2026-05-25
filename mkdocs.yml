@@ -1,4 +1,4 @@
-site_name: TraceML
+site_name: TraceML AI
 site_description: Real-time bottleneck finder for PyTorch training runs
 site_url: https://traceopt-ai.github.io/traceml/
 repo_url: https://github.com/traceopt-ai/traceml
@@ -85,5 +85,5 @@ nav:
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
-      - Extending TraceML: developer_guide/extending.md
+      - Extending TraceML AI: developer_guide/extending.md
       - Contributing: developer_guide/contributing.md

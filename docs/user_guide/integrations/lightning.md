@@ -1,16 +1,16 @@
 # PyTorch Lightning
 
-Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
+Use TraceML AI with PyTorch Lightning to find training bottlenecks without changing your training loop.
 
 `TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing memory drift.
 
-> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
+> Start with the [Quickstart](../quickstart.md) if you have not used TraceML AI yet.
 
 ---
 
 ## Install
 
-Install TraceML with Lightning support:
+Install TraceML AI with Lightning support:
 
 ```bash
 pip install "traceml-ai[lightning]"
@@ -24,7 +24,7 @@ Add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the sam
 
 ```python
 import lightning as L
-from traceml.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations.lightning import TraceMLCallback
 
 model = MyLightningModule()
 
@@ -56,9 +56,9 @@ multi-GPU.
 
 ---
 
-## What TraceML will show
+## What TraceML AI will show
 
-In Lightning runs, TraceML helps you spot:
+In Lightning runs, TraceML AI helps you spot:
 
 - input-bound training
 - compute-bound steps
@@ -66,7 +66,7 @@ In Lightning runs, TraceML helps you spot:
 - rank imbalance and stragglers
 - memory creep over time
 
-You keep the normal Lightning workflow. TraceML adds diagnosis around the training step.
+You keep the normal Lightning workflow. TraceML AI adds diagnosis around the training step.
 
 ---
 
@@ -74,14 +74,14 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 `TraceMLCallback` hooks into Lightning’s training lifecycle automatically.
 
-That means you do not need to wrap your code with `traceml.trace_step(...)`
+That means you do not need to wrap your code with `tml.trace_step(...)`
 manually in Lightning.
 
 ---
 
 ## Use with Lightning loggers
 
-TraceML works alongside Lightning loggers such as:
+TraceML AI works alongside Lightning loggers such as:
 
 - W&B
 - TensorBoard
@@ -93,7 +93,7 @@ For the cleanest terminal experience during diagnosis runs, it helps to use:
 enable_progress_bar=False
 ```
 
-You do not need to replace your existing logger stack to use TraceML.
+You do not need to replace your existing logger stack to use TraceML AI.
 
 ---
 
@@ -117,11 +117,11 @@ The local UI is useful when you want:
 
 ## Trainer tips
 
-These settings usually give the cleanest experience with TraceML:
+These settings usually give the cleanest experience with TraceML AI:
 
 | Setting | Recommended value | Why |
 |---|---|---|
-| `enable_progress_bar=False` | Yes | Prevents Lightning progress output from fighting with the TraceML CLI |
+| `enable_progress_bar=False` | Yes | Prevents Lightning progress output from fighting with the TraceML AI CLI |
 | `enable_model_summary=False` | Optional | Keeps terminal output cleaner |
 | `logger=False` | Optional | Useful for local diagnosis runs if you want minimal output |
 
@@ -137,7 +137,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from traceml.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations.lightning import TraceMLCallback
 
 SEED = 42
 INPUT_DIM = 128
@@ -228,13 +228,13 @@ traceml run train_lightning.py
 
 `TraceMLCallback` supports gradient accumulation.
 
-When Lightning uses `accumulate_grad_batches=N`, TraceML still preserves step alignment so the dashboard and summaries stay consistent.
+When Lightning uses `accumulate_grad_batches=N`, TraceML AI still preserves step alignment so the dashboard and summaries stay consistent.
 
 ---
 
 ## Troubleshooting
 
-### Terminal output overlaps with TraceML
+### Terminal output overlaps with TraceML AI
 
 Set:
 
@@ -242,11 +242,11 @@ Set:
 enable_progress_bar=False
 ```
 
-This gives the TraceML CLI cleaner terminal control.
+This gives the TraceML AI CLI cleaner terminal control.
 
 ### I still want W&B or TensorBoard
 
-That is fine. TraceML is designed to work alongside them.
+That is fine. TraceML AI is designed to work alongside them.
 
 If terminal output gets noisy, use:
 
@@ -257,7 +257,7 @@ traceml run train.py --mode=dashboard
 Dashboard mode is intended for single-node runs. For multi-node runs, use the
 default final summary path.
 
-### I want a baseline without TraceML
+### I want a baseline without TraceML AI
 
 Run:
 
@@ -265,7 +265,7 @@ Run:
 traceml run train_lightning.py --disable-traceml
 ```
 
-This launches your script natively through `torchrun` without TraceML telemetry.
+This launches your script natively through `torchrun` without TraceML AI telemetry.
 
 ---
 

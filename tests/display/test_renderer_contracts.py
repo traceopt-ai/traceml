@@ -1,4 +1,4 @@
-from traceml.renderers.base_renderer import (
+from traceml_ai.renderers.base_renderer import (
     BaseRenderer,
     CLIRenderer,
     DashboardRenderer,

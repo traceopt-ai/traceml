@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 
-import traceml
+import traceml_ai as tml
 
 SEED = 42
 INPUT_DIM = 256
@@ -58,7 +58,7 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on: {device}")
-    traceml.init(mode="auto")
+    tml.init(mode="auto")
 
     dataset = SlowDataset(
         num_samples=NUM_SAMPLES,
@@ -87,7 +87,7 @@ def main():
         for batch_x, batch_y in loader:
             total_steps += 1
 
-            with traceml.trace_step(model):
+            with tml.trace_step(model):
                 batch_x = batch_x.to(device, non_blocking=True)
                 batch_y = batch_y.to(device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)

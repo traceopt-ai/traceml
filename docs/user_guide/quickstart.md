@@ -1,24 +1,24 @@
-# TraceML Quickstart
+# TraceML AI Quickstart
 
-Get from install to your first useful TraceML run in a few minutes.
+Get from install to your first useful TraceML AI run in a few minutes.
 
 This guide is for practitioners who want the fastest path to an answer.
 
-TraceML is most useful when you want to know:
+TraceML AI is most useful when you want to know:
 
 - why training is slow
 - whether the bottleneck is input, compute, wait, or rank imbalance
 - whether memory is drifting over time
 
-If you are new to TraceML, start here.
+If you are new to TraceML AI, start here.
 
 ---
 
 ## What you will do
 
-1. Install TraceML
-2. Initialize TraceML with `traceml.init(mode="auto")`
-3. Wrap your training step with `traceml.trace_step(model)`
+1. Install TraceML AI
+2. Initialize TraceML AI with `tml.init(mode="auto")`
+3. Wrap your training step with `tml.trace_step(model)`
 4. Run `traceml run train.py`
 5. Read the diagnosis in the CLI
 6. Optionally collect a structured final summary
@@ -34,13 +34,13 @@ If you are new to TraceML, start here.
 | Python | 3.10+ |
 | PyTorch | 2.5+ |
 
-TraceML works best with PyTorch training scripts that already run successfully on their own.
+TraceML AI works best with PyTorch training scripts that already run successfully on their own.
 
 ---
 
 ## Pick your stack
 
-Three minimal paths to a first TraceML run, depending on how your training code is structured. Pick the tab that matches your setup — each shows install + the single change + the run command. Full details for each stack live in their integration pages.
+Three minimal paths to a first TraceML AI run, depending on how your training code is structured. Pick the tab that matches your setup — each shows install + the single change + the run command. Full details for each stack live in their integration pages.
 
 === "Plain PyTorch"
 
@@ -51,12 +51,12 @@ Three minimal paths to a first TraceML run, depending on how your training code 
     Initialize once, then wrap the training step body:
 
     ```python
-    import traceml
+    import traceml_ai as tml
 
-    traceml.init(mode="auto")
+    tml.init(mode="auto")
 
     for step in range(num_steps):
-        with traceml.trace_step(model):
+        with tml.trace_step(model):
             optimizer.zero_grad(set_to_none=True)
             loss = criterion(model(x), y)
             loss.backward()
@@ -81,7 +81,7 @@ Three minimal paths to a first TraceML run, depending on how your training code 
     Replace `Trainer` with `TraceMLTrainer`:
 
     ```python
-    from traceml.integrations.huggingface import TraceMLTrainer
+    from traceml_ai.integrations.huggingface import TraceMLTrainer
 
     trainer = TraceMLTrainer(
         model=model,
@@ -111,7 +111,7 @@ Three minimal paths to a first TraceML run, depending on how your training code 
 
     ```python
     import lightning as L
-    from traceml.integrations.lightning import TraceMLCallback
+    from traceml_ai.integrations.lightning import TraceMLCallback
 
     trainer = L.Trainer(
         max_steps=500,
@@ -139,7 +139,7 @@ Three minimal paths to a first TraceML run, depending on how your training code 
 
     ```python
     from ray.train import ScalingConfig
-    from traceml.integrations.ray import TraceMLTorchTrainer
+    from traceml_ai.integrations.ray import TraceMLTorchTrainer
 
     trainer = TraceMLTorchTrainer(
         train_loop_per_worker,
@@ -149,7 +149,7 @@ Three minimal paths to a first TraceML run, depending on how your training code 
     trainer.fit()
     ```
 
-    Ray still launches workers and owns distributed communication. TraceML
+    Ray still launches workers and owns distributed communication. TraceML AI
     starts one aggregator actor and one runtime inside each Ray worker.
 
     !!! note
@@ -191,7 +191,7 @@ For PyTorch Lightning support:
 pip install "traceml-ai[lightning]"
 ```
 
-If you want the PyTorch versions TraceML is tested against:
+If you want the PyTorch versions TraceML AI is tested against:
 
 ```bash
 pip install "traceml-ai[torch]"
@@ -204,7 +204,7 @@ pip install "traceml-ai[torch]"
 Save this as `train.py`.
 
 ```python
-import traceml
+import traceml_ai as tml
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -227,7 +227,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on: {device}")
 
-    traceml.init(mode="auto")
+    tml.init(mode="auto")
 
     model = MyModel().to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
@@ -235,7 +235,7 @@ def main():
 
     model.train()
     for step in range(200):
-        with traceml.trace_step(model):
+        with tml.trace_step(model):
             inputs = torch.randn(64, 128, device=device)
             labels = torch.randint(0, 10, (64,), device=device)
 
@@ -258,17 +258,17 @@ if __name__ == "__main__":
 In a normal PyTorch loop, the preferred minimal setup is:
 
 ```python
-traceml.init(mode="auto")
+tml.init(mode="auto")
 
-with traceml.trace_step(model):
+with tml.trace_step(model):
     ...
 ```
 
-Call `traceml.init(mode="auto")` once near the start of the script, then wrap
+Call `tml.init(mode="auto")` once near the start of the script, then wrap
 the full training step body from `zero_grad(...)` through `optimizer.step()`.
 
 Legacy imports from `traceml.decorators` still work for backward compatibility.
-The preferred API is the top-level `traceml.*`. Legacy decorator
+The preferred API is the top-level `tml.*` API from `import traceml_ai as tml`. Legacy decorator
 imports are planned for deprecation starting in `v0.3.0`.
 
 If you need explicit wrappers or partial auto-instrumentation, use
@@ -277,16 +277,16 @@ are comfortable with the default `auto` path.
 
 ---
 
-## 3) Run TraceML
+## 3) Run TraceML AI
 
 ```bash
 traceml run train.py
 ```
 
-This is the default TraceML workflow and the best place to start. By default,
-TraceML runs in summary mode.
+This is the default TraceML AI workflow and the best place to start. By default,
+TraceML AI runs in summary mode.
 
-During training, TraceML stays quiet. At the end of the run, it prints a
+During training, TraceML AI stays quiet. At the end of the run, it prints a
 compact summary you can review or share and writes `final_summary.json` plus
 `final_summary.txt` under the session log directory.
 
@@ -294,7 +294,7 @@ compact summary you can review or share and writes `final_summary.json` plus
 
 ## 4) How to read the output
 
-TraceML is built to answer one question quickly:
+TraceML AI is built to answer one question quickly:
 
 **Why is this training job slow?**
 
@@ -378,27 +378,27 @@ launch with:
 traceml run train.py --mode=summary
 ```
 
-Then call `traceml.summary()` near the end of your script:
+Then call `tml.summary()` near the end of your script:
 
 ```python
-summary = traceml.summary(print_text=True)
+summary = tml.summary(print_text=True)
 if summary is not None:
     print(summary["traceml/step_time/status"])
 ```
 
 This returns a flat Python dict generated by the aggregator process. It is
-intended for logging TraceML diagnosis fields and global average metrics into
+intended for logging TraceML AI diagnosis fields and global average metrics into
 your existing tracking stack.
 
-TraceML also writes canonical end-of-run summary artifacts, including:
+TraceML AI also writes canonical end-of-run summary artifacts, including:
 
 - `final_summary.json`
 - `final_summary.txt`
 
-`final_summary.json` is the canonical machine-readable TraceML summary artifact
+`final_summary.json` is the canonical machine-readable TraceML AI summary artifact
 and the intended input for downstream logging and run comparison.
 
-Use `traceml.final_summary()` if you need the full structured JSON payload
+Use `tml.final_summary()` if you need the full structured JSON payload
 instead of the compact tracker dict.
 
 For long runs, use `--summary-window-rows N` to control how much recent
@@ -418,7 +418,7 @@ This writes:
 - a structured compare JSON
 - a compact text report
 
-`traceml compare` is designed to consume TraceML `final_summary.json`
+`traceml compare` is designed to consume TraceML AI `final_summary.json`
 artifacts.
 
 Use compare when you want to answer questions like:
@@ -485,18 +485,18 @@ Use this when you want:
 
 ## 9) Distributed DDP
 
-TraceML supports single-node multi-GPU DDP and multi-node DDP summary reports.
+TraceML AI supports single-node multi-GPU DDP and multi-node DDP summary reports.
 For multi-node jobs, use summary mode for the final distributed report. Live
 CLI and dashboard views are currently intended for single-node runs.
 
-Keep `traceml.trace_step(...)` inside the training loop.
+Keep `tml.trace_step(...)` inside the training loop.
 
 ### Minimal DDP example
 
 ```python
 import os
 
-import traceml
+import traceml_ai as tml
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -546,7 +546,7 @@ def main():
 
     model.train()
     for step in range(200):
-        with traceml.trace_step(model.module):
+        with tml.trace_step(model.module):
             inputs = torch.randn(64, 128, device=device)
             labels = torch.randint(0, 10, (64,), device=device)
 
@@ -594,9 +594,9 @@ traceml run train.py \
   --run-name=my-run
 ```
 
-Node 0 starts the TraceML aggregator. Other nodes connect to
+Node 0 starts the TraceML AI aggregator. Other nodes connect to
 `<node0-ip>:29765` by default. If workers need a different reachable address
-or port for TraceML telemetry, add `--aggregator-host=<host>` or
+or port for TraceML AI telemetry, add `--aggregator-host=<host>` or
 `--aggregator-port=<port>` on every node. Node 0 binds the aggregator to
 `0.0.0.0` by default for multi-node runs; override that only when needed with
 `--aggregator-bind-host=<bind-host>`.
@@ -615,7 +615,7 @@ the default summary path:
 traceml run train.py
 ```
 
-If TraceML shows you need lower-level detail, use PyTorch Profiler, Nsight, or
+If TraceML AI shows you need lower-level detail, use PyTorch Profiler, Nsight, or
 another operator-level profiler for that follow-up.
 
 ---
@@ -660,7 +660,7 @@ Explicit summary mode:
 traceml run train.py --mode=summary
 ```
 
-Compare two TraceML summary artifacts:
+Compare two TraceML AI summary artifacts:
 
 ```bash
 traceml compare run_a.json run_b.json
@@ -696,7 +696,7 @@ traceml run train.py --args -- --epochs 10 --lr 1e-3
 
 ### `torchrun: command not found`
 
-TraceML launches your script through:
+TraceML AI launches your script through:
 
 ```bash
 python -m torch.distributed.run
@@ -712,7 +712,7 @@ If that works but your environment still fails to launch, check your Python envi
 
 ### Output is messy in the terminal
 
-If your own logger, progress bar, or framework output is fighting with the TraceML CLI:
+If your own logger, progress bar, or framework output is fighting with the TraceML AI CLI:
 
 - disable `tqdm`
 - reduce extra terminal logging
@@ -738,7 +738,7 @@ Add the local UI or compare workflow only after you get value from the default r
 - PyTorch Lightning integration: `docs/lightning.md`
 - GitHub issues: `https://github.com/traceopt-ai/traceml/issues`
 
-If TraceML helped you find a slowdown, please open an issue and include:
+If TraceML AI helped you find a slowdown, please open an issue and include:
 
 - hardware / CUDA / PyTorch versions
 - single GPU or multi-GPU

@@ -7,7 +7,7 @@ import torch.optim as optim
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 
-import traceml
+import traceml_ai as tml
 
 SEED = 42
 INPUT_DIM = 1024
@@ -86,7 +86,7 @@ def main():
     torch.cuda.set_device(local_rank)
     device = torch.device("cuda", local_rank)
 
-    traceml.init(mode="auto")
+    tml.init(mode="auto")
 
     set_seed(SEED + rank)
 
@@ -96,7 +96,7 @@ def main():
     base_model = TinyMLP().to(device)
 
     # Attach TraceML hooks to the real model before FSDP wrapping
-    traceml.trace_model_instance(base_model)
+    tml.trace_model_instance(base_model)
 
     # Wrap with FSDP
     model = FSDP(
@@ -115,7 +115,7 @@ def main():
         train_sampler.set_epoch(epoch)
 
         for batch in train_loader:
-            with traceml.trace_step(base_model):
+            with tml.trace_step(base_model):
                 batch_x, batch_y = load_batch_to_device(batch, device)
 
                 optimizer.zero_grad(set_to_none=True)

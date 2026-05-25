@@ -1,20 +1,20 @@
 import json
 import sqlite3
 
-from traceml.diagnostics.step_time.adapters import (
+from traceml_ai.diagnostics.step_time.adapters import (
     StepTimeDiagnosisInput,
     diagnose_step_time_summary,
 )
-from traceml.reporting.sections.step_time.alignment import AlignedStepWindow
-from traceml.reporting.summaries.step_time import (
+from traceml_ai.reporting.sections.step_time.alignment import AlignedStepWindow
+from traceml_ai.reporting.summaries.step_time import (
     generate_step_time_summary_card,
 )
-from traceml.reporting.sections.step_time import StepTimeSummarySection
-from traceml.reporting.sections.step_time.loader import (
+from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
+from traceml_ai.reporting.sections.step_time.loader import (
     StepTimeSectionData,
     load_step_time_section_data,
 )
-from traceml.reporting.sections.step_time.model import to_rank_signals
+from traceml_ai.reporting.sections.step_time.model import to_rank_signals
 
 
 def _create_step_time_db(path: str) -> None:
@@ -178,10 +178,10 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
 
 
 def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
-    from traceml.reporting.sections.step_time.builder import (
+    from traceml_ai.reporting.sections.step_time.builder import (
         build_step_time_payload,
     )
-    from traceml.reporting.summaries.step_time import RankStepSummary
+    from traceml_ai.reporting.summaries.step_time import RankStepSummary
 
     per_global_rank = {
         rank: RankStepSummary(

@@ -6,12 +6,18 @@
 
 import sqlite3
 
-from traceml.reporting.sections.process import ProcessSummarySection
-from traceml.reporting.sections.process.loader import load_process_section_data
-from traceml.reporting.sections.system import SystemSummarySection
-from traceml.reporting.sections.system.loader import load_system_section_data
-from traceml.reporting.summaries.process import generate_process_summary_card
-from traceml.reporting.summaries.system import generate_system_summary_card
+from traceml_ai.reporting.sections.process import ProcessSummarySection
+from traceml_ai.reporting.sections.process.loader import (
+    load_process_section_data,
+)
+from traceml_ai.reporting.sections.system import SystemSummarySection
+from traceml_ai.reporting.sections.system.loader import (
+    load_system_section_data,
+)
+from traceml_ai.reporting.summaries.process import (
+    generate_process_summary_card,
+)
+from traceml_ai.reporting.summaries.system import generate_system_summary_card
 
 
 def _create_system_tables(conn: sqlite3.Connection) -> None:

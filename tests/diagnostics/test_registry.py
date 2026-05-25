@@ -1,17 +1,17 @@
 from types import SimpleNamespace
 
-from traceml.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
-from traceml.diagnostics.model_diagnostics import (
+from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
+from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
     ModelDiagnosisItem,
     build_model_diagnostics_payload,
 )
-from traceml.diagnostics.registry import (
+from traceml_ai.diagnostics.registry import (
     DiagnosticDomainRegistry,
     DiagnosticDomainSpec,
     ModelDiagnosticContext,
 )
-from traceml.renderers.step_memory.schema import (
+from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedSeries,
@@ -141,7 +141,7 @@ def test_default_model_diagnostics_payload_keeps_existing_sources():
 
 
 def test_model_step_memory_diagnostics_use_live_policy(monkeypatch):
-    import traceml.diagnostics.model_diagnostics as model_diagnostics
+    import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
 
     captured = {}
 

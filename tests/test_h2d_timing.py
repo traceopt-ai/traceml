@@ -36,17 +36,17 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import traceml.instrumentation.patches.forward_auto_timer_patch as fwd_patch
-import traceml.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
-import traceml.utils.timing as timing_module
-from traceml.instrumentation.patches.h2d_auto_timer_patch import (
+import traceml_ai.instrumentation.patches.forward_auto_timer_patch as fwd_patch
+import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
+import traceml_ai.utils.timing as timing_module
+from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     _H2D_TLS,
     _ORIG_TENSOR_TO,
     _is_cuda_target,
     _traceml_tensor_to,
     h2d_auto_timer,
 )
-from traceml.sdk.wrappers import wrap_h2d
+from traceml_ai.sdk.wrappers import wrap_h2d
 
 
 # _reload_initialization and _reload_h2d_patch use local imports intentionally.
@@ -56,13 +56,13 @@ from traceml.sdk.wrappers import wrap_h2d
 
 
 def _reload_initialization():
-    import traceml.sdk.initial as m
+    import traceml_ai.sdk.initial as m
 
     return importlib.reload(m)
 
 
 def _reload_h2d_patch():
-    import traceml.instrumentation.patches.h2d_auto_timer_patch as m
+    import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as m
 
     return importlib.reload(m)
 
@@ -172,7 +172,7 @@ class TestH2DAutoTimerPatch:
             return _ctx()
 
         with patch(
-            "traceml.instrumentation.patches.h2d_auto_timer_patch.timed_region",
+            "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
             side_effect=fake_timed_region,
         ):
             self._mod._traceml_tensor_to(tensor, "cpu")
@@ -195,7 +195,7 @@ class TestH2DAutoTimerPatch:
             return _ctx()
 
         with patch(
-            "traceml.instrumentation.patches.h2d_auto_timer_patch.timed_region",
+            "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
             side_effect=fake_timed_region,
         ):
             # CPU target → _is_cuda_target returns False → no timing
@@ -221,7 +221,7 @@ class TestH2DAutoTimerPatch:
         # Patch the original .to() so it doesn't try to move to a real GPU.
         with patch.object(torch.Tensor, "to", return_value=tensor):
             with patch(
-                "traceml.instrumentation.patches.h2d_auto_timer_patch.timed_region",
+                "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
                 side_effect=fake_timed_region,
             ):
                 self._mod._traceml_tensor_to(tensor, "cuda:0")
@@ -250,7 +250,7 @@ class TestH2DAutoTimerPatch:
             new_callable=lambda: property(lambda self: True),
         ):
             with patch(
-                "traceml.instrumentation.patches.h2d_auto_timer_patch.timed_region",
+                "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
                 side_effect=fake_timed_region,
             ):
                 # Even though destination is CUDA, source is already CUDA → D2D.
@@ -277,7 +277,7 @@ class TestH2DAutoTimerPatch:
             yield
 
         with patch(
-            "traceml.instrumentation.patches.h2d_auto_timer_patch.timed_region",
+            "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
             side_effect=fake_timed_region,
         ):
             self._mod._traceml_tensor_to(param, "cuda:0")
@@ -392,7 +392,7 @@ class TestWrapH2D:
         torch.Tensor._traceml_h2d_patched = True  # type: ignore[attr-defined]
         try:
             with patch(
-                "traceml.sdk.wrappers.timed_region",
+                "traceml_ai.sdk.wrappers.timed_region",
                 side_effect=fake_timed_region,
             ):
                 with patch.object(torch.Tensor, "to", return_value=tensor):

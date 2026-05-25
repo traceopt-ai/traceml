@@ -1,8 +1,8 @@
-# Use TraceML with W&B, MLflow, or TensorBoard
+# Use TraceML AI with W&B, MLflow, or TensorBoard
 
-You do **not** need to replace your existing tracking stack to use TraceML.
+You do **not** need to replace your existing tracking stack to use TraceML AI.
 
-TraceML is designed to work **alongside** tools like:
+TraceML AI is designed to work **alongside** tools like:
 
 - Weights & Biases (W&B)
 - MLflow
@@ -13,7 +13,7 @@ TraceML is designed to work **alongside** tools like:
 A good mental model is:
 
 - your existing stack tracks runs, configs, metrics, and artifacts
-- TraceML explains **why training is slow**
+- TraceML AI explains **why training is slow**
 
 ---
 
@@ -27,7 +27,7 @@ Use your existing tools for:
 - long-term dashboards
 - team reporting
 
-Use TraceML for:
+Use TraceML AI for:
 
 - input bottlenecks
 - compute-bound steps
@@ -35,9 +35,9 @@ Use TraceML for:
 - wait-heavy behavior
 - memory creep
 - step-aware bottleneck diagnosis
-- compact run-to-run comparison from saved TraceML summary JSON files
+- compact run-to-run comparison from saved TraceML AI summary JSON files
 
-TraceML is the training bottleneck finder in the stack.
+TraceML AI is the training bottleneck finder in the stack.
 
 ---
 
@@ -47,12 +47,12 @@ A common setup looks like this:
 
 - Hugging Face, Lightning, or a normal PyTorch loop for training
 - W&B or MLflow for experiment tracking
-- TraceML for bottleneck diagnosis during runs and end-of-run summaries
+- TraceML AI for bottleneck diagnosis during runs and end-of-run summaries
 
 That means:
 
 - keep your current tracking workflow
-- add TraceML when you need to understand throughput problems
+- add TraceML AI when you need to understand throughput problems
 
 ---
 
@@ -65,7 +65,7 @@ Tracking tools answer questions like:
 - which checkpoint belongs to this run?
 - how did this run compare to the last one?
 
-TraceML answers questions like:
+TraceML AI answers questions like:
 
 - is the job input-bound or compute-bound?
 - is one rank slower than the others?
@@ -77,20 +77,20 @@ These are different jobs.
 
 ---
 
-## Example: W&B + TraceML
+## Example: W&B + TraceML AI
 
-You can keep using W&B logging in your training script and launch the run through TraceML.
+You can keep using W&B logging in your training script and launch the run through TraceML AI.
 
 Example:
 
 ```python
-import traceml
+import traceml_ai as tml
 import wandb
 
 wandb.init(project="my-project")
 
 for batch in dataloader:
-    with traceml.trace_step(model):
+    with tml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -109,56 +109,56 @@ traceml run train.py
 This gives you:
 
 - W&B for run tracking
-- TraceML for the final bottleneck summary
+- TraceML AI for the final bottleneck summary
 
 ---
 
-## Log the final TraceML summary to W&B
+## Log the final TraceML AI summary to W&B
 
-TraceML runs in summary mode by default. If you want to make that explicit,
+TraceML AI runs in summary mode by default. If you want to make that explicit,
 launch with:
 
 ```bash
 traceml run train.py --mode=summary
 ```
 
-Then request TraceML's compact tracker summary near the end of your script and
+Then request TraceML AI's compact tracker summary near the end of your script and
 log it into W&B:
 
 ```python
-import traceml
+import traceml_ai as tml
 import wandb
 
 wandb.init(project="my-project")
 
 # training loop ...
 
-summary = traceml.summary(print_text=True)
+summary = tml.summary(print_text=True)
 if summary is not None:
     wandb.log(summary)
 ```
 
-This lets W&B stay your experiment system of record while TraceML contributes a
+This lets W&B stay your experiment system of record while TraceML AI contributes a
 clean bottleneck diagnosis at the end of the run.
 
-`traceml.summary()` returns a flat dict of diagnosis statuses and global
+`tml.summary()` returns a flat dict of diagnosis statuses and global
 average metrics. If you also store `final_summary.json` as a run artifact, you
 can reuse it later with `traceml compare`.
 
 ---
 
-## Example: MLflow + TraceML
+## Example: MLflow + TraceML AI
 
 You can do the same with MLflow.
 
 ```python
-import traceml
+import traceml_ai as tml
 import mlflow
 
 mlflow.start_run()
 
 for batch in dataloader:
-    with traceml.trace_step(model):
+    with tml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -177,23 +177,23 @@ traceml run train.py
 This gives you:
 
 - MLflow for experiment tracking
-- TraceML for bottleneck diagnosis
+- TraceML AI for bottleneck diagnosis
 
 ---
 
-## Log the final TraceML summary to MLflow
+## Log the final TraceML AI summary to MLflow
 
-TraceML can also return a compact tracker summary for MLflow logging:
+TraceML AI can also return a compact tracker summary for MLflow logging:
 
 ```python
-import traceml
+import traceml_ai as tml
 import mlflow
 
 mlflow.start_run()
 
 # training loop ...
 
-summary = traceml.summary(print_text=True)
+summary = tml.summary(print_text=True)
 if summary is not None:
     numeric = {
         k: v for k, v in summary.items()
@@ -210,11 +210,11 @@ if summary is not None:
 
 This is a good fit when you want a compact diagnosis in your run metadata.
 
-If you also want the full TraceML artifact, call `traceml.final_summary()` and
+If you also want the full TraceML AI artifact, call `tml.final_summary()` and
 attach that JSON to the run:
 
 ```python
-full = traceml.final_summary()
+full = tml.final_summary()
 if full is not None:
     mlflow.log_dict(full, "traceml/final_summary.json")
 ```
@@ -225,7 +225,7 @@ That attached JSON is a good input for `traceml compare` later.
 
 ## Compare runs later
 
-Once you have TraceML final summary JSON files for two runs, compare them with:
+Once you have TraceML AI final summary JSON files for two runs, compare them with:
 
 ```bash
 traceml compare run_a.json run_b.json
@@ -240,8 +240,8 @@ This is useful when:
 
 A practical workflow is:
 
-1. run training with TraceML
-2. keep the TraceML final summary JSON as a W&B or MLflow artifact
+1. run training with TraceML AI
+2. keep the TraceML AI final summary JSON as a W&B or MLflow artifact
 3. compare two saved summaries locally with `traceml compare`
 
 See [Compare Runs](../compare.md).
@@ -250,13 +250,13 @@ See [Compare Runs](../compare.md).
 
 ## Keeping terminal output clean
 
-If you use TraceML in CLI mode together with other loggers, the terminal can get noisy.
+If you use TraceML AI in CLI mode together with other loggers, the terminal can get noisy.
 
 Good ways to reduce that:
 
 - disable `tqdm` progress bars
 - reduce extra console logging
-- use the default summary mode if you only want the final TraceML summary
+- use the default summary mode if you only want the final TraceML AI summary
 - use the local UI on a single-node run if the terminal feels crowded
 
 Launch the local UI with:
@@ -271,7 +271,7 @@ default summary mode and log the final summary artifact.
 This is often the cleanest option when you want:
 
 - existing loggers to keep running
-- TraceML visible at the same time
+- TraceML AI visible at the same time
 - less terminal clutter
 
 ---
@@ -291,18 +291,18 @@ disable_tqdm=True
 
 That is just to keep the terminal cleaner during local diagnosis runs.
 
-It is not a TraceML requirement.
+It is not a TraceML AI requirement.
 
 ---
 
-## Best way to adopt TraceML
+## Best way to adopt TraceML AI
 
 A clean adoption path is:
 
 1. start with `traceml run train.py`
 2. use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node run
-3. log selected TraceML summary fields into W&B or MLflow if useful
-4. keep the TraceML final summary JSON for important runs
+3. log selected TraceML AI summary fields into W&B or MLflow if useful
+4. keep the TraceML AI final summary JSON for important runs
 5. compare two saved runs later with `traceml compare`
 
 This usually gives the best balance between:
@@ -318,5 +318,5 @@ This usually gives the best balance between:
 
 - [Quickstart](../quickstart.md)
 - [Compare Runs](../compare.md)
-- [How to Read TraceML Output](../reading-output.md)
+- [How to Read TraceML AI Output](../reading-output.md)
 - [FAQ](../faq.md)

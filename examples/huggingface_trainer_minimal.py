@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 from transformers import TrainingArguments
 
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations.huggingface import TraceMLTrainer
 
 SEED = 42
 INPUT_DIM = 128

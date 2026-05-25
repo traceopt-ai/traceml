@@ -1,43 +1,43 @@
 # Public API
 
-The stable surface that user code imports and calls. Everything in this page is covered by TraceML's compatibility contract across v0.x minor releases.
+The stable surface that user code imports and calls. Everything in this page is covered by TraceML AI's compatibility contract across v0.x minor releases.
 
 ## Decorators
 
-::: traceml.decorators.trace_step
+::: traceml_ai.decorators.trace_step
     options:
       show_root_heading: true
       show_source: true
 
 ## Hugging Face integration
 
-::: traceml.integrations.huggingface.TraceMLTrainer
+::: traceml_ai.integrations.huggingface.TraceMLTrainer
     options:
       show_root_heading: true
       show_source: true
 
 ## PyTorch Lightning integration
 
-::: traceml.integrations.lightning.TraceMLCallback
+::: traceml_ai.integrations.lightning.TraceMLCallback
     options:
       show_root_heading: true
       show_source: true
 
 ## Ray Train integration
 
-::: traceml.integrations.ray.TraceMLTorchTrainer
+::: traceml_ai.integrations.ray.TraceMLTorchTrainer
     options:
       show_root_heading: true
       show_source: true
 
-::: traceml.integrations.ray.TraceMLRayConfig
+::: traceml_ai.integrations.ray.TraceMLRayConfig
     options:
       show_root_heading: true
       show_source: true
 
 ## CLI
 
-TraceML ships with a CLI entry point installed as `traceml`.
+TraceML AI ships with a CLI entry point installed as `traceml`.
 
 ```bash
 traceml run <script>                 # default: final summary JSON/text
@@ -55,18 +55,18 @@ See `traceml --help` for the full set of options.
 
 ## Summary APIs
 
-### `traceml.summary()`
+### `tml.summary()`
 
 Returns a compact flat dict for experiment trackers such as W&B, MLflow, or
 internal dashboards.
 
 ```python
-summary = traceml.summary(print_text=True)
+summary = tml.summary(print_text=True)
 if summary is not None:
     wandb.log(summary)
 ```
 
-### `traceml.final_summary()`
+### `tml.final_summary()`
 
 Returns the full `final_summary.json` payload. Use this when you need the
 complete structured report or want to store the artifact for `traceml compare`.

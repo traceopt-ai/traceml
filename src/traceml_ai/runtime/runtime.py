@@ -1,0 +1,203 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Per-rank TraceML runtime agent."""
+
+import threading
+from typing import Any, Callable, List, Optional
+
+from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
+from traceml_ai.runtime.config import config
+from traceml_ai.runtime.identity import resolve_runtime_identity
+from traceml_ai.runtime.sampler_registry import build_samplers
+from traceml_ai.runtime.sender import SenderIdentity, TelemetryPublisher
+from traceml_ai.runtime.stdout_stderr_capture import StreamCapture
+from traceml_ai.samplers.base_sampler import BaseSampler
+from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig
+
+from .settings import TraceMLSettings
+
+
+def _safe(logger, label: str, fn: Callable[[], Any]) -> Any:
+    """Execute `fn()` and log exceptions; never raise."""
+    try:
+        return fn()
+    except Exception as e:
+        logger.error(f"[TraceML] {label}: {e}")
+        return None
+
+
+class TraceMLRuntime:
+    """Runs samplers and publishes telemetry from one training rank."""
+
+    def __init__(
+        self,
+        settings: Optional[TraceMLSettings] = None,
+    ) -> None:
+        self._settings = settings or TraceMLSettings()
+
+        # Global config
+        config.enable_logging = bool(self._settings.enable_logging)
+        config.logs_dir = str(self._settings.logs_dir)
+        config.session_id = self._settings.session_id
+
+        self.mode = self._settings.mode
+        self.profile = getattr(self._settings, "profile", "run")
+
+        setup_error_logger()
+        self._logger = get_error_logger("TraceMLRuntime")
+
+        # Runtime identity separates local device rank from globally unique
+        # telemetry rank. Sampler selection still needs local rank, while
+        # outbound payloads must identify the worker by global rank.
+        self.identity = resolve_runtime_identity()
+        self.is_ddp = self.identity.is_distributed
+        self.local_rank = self.identity.local_rank
+        self.global_rank = self.identity.global_rank
+        self.world_size = self.identity.world_size
+
+        # Stop event shared by all internal threads in this process
+        self._stop_event = threading.Event()
+
+        # Samplers (all ranks)
+        self._samplers = self._build_samplers()
+
+        # Transport: every rank has a TCP client
+        self._tcp_client = TCPClient(
+            TCPConfig(
+                host=self._settings.aggregator.connect_host,
+                port=int(self._settings.aggregator.port),
+            )
+        )
+        self._publisher = TelemetryPublisher(
+            tcp_client=self._tcp_client,
+            identity=SenderIdentity(
+                global_rank=self.identity.global_rank,
+                local_rank=self.identity.local_rank,
+                world_size=self.identity.world_size,
+                local_world_size=self.identity.local_world_size,
+                node_rank=self.identity.node_rank,
+                hostname=self.identity.hostname,
+                pid=self.identity.pid,
+            ),
+            logger=self._logger,
+        )
+        self._publisher.attach_senders(self._samplers)
+
+        # Sampler thread (per-rank)
+        self._sampler_thread = threading.Thread(
+            target=self._sampler_loop,
+            name=f"TraceMLSampler(rank={self.local_rank})",
+            daemon=True,
+        )
+
+    def _build_samplers(self) -> List[BaseSampler]:
+        """
+        Build samplers for this rank based on profile and UI mode using the
+        runtime sampler registry.
+        """
+        return build_samplers(
+            profile=self.profile,
+            mode=self.mode,
+            is_ddp=self.is_ddp,
+            local_rank=self.local_rank,
+            logger=self._logger,
+        )
+
+    def _tick(self) -> None:
+        """
+        Run all samplers once and delegate publishing.
+
+        Phase 1 — Sample + local DB write
+        ----------------------------------
+        Each sampler collects its metrics and writes to the local DB.
+        Sampling failures are logged and skipped so user training continues.
+
+        Phase 2 — Publish
+        -----------------
+        TelemetryPublisher flushes sampler writers, collects incremental
+        payloads, and sends a single TCP batch.
+        """
+        for sampler in self._samplers:
+            _safe(
+                self._logger,
+                f"{sampler.sampler_name}.sample failed",
+                sampler.sample,
+            )
+
+        self._publisher.publish(self._samplers)
+
+    def _sampler_loop(self) -> None:
+        """Sampler loop (all ranks)."""
+        while not self._stop_event.is_set():
+            self._tick()
+            self._stop_event.wait(float(self._settings.sampler_interval_sec))
+
+        # final tick
+        self._tick()
+
+    def start(self) -> None:
+        """
+        Start TraceML runtime.
+
+        Start order:
+        1) enable stdout/stderr capture (CLI mode only, dashboard no need)
+        2) start sampler thread
+        """
+        if self.mode == "cli":
+            _safe(
+                self._logger,
+                "Stdout/stderr capture enable failed",
+                StreamCapture.redirect_to_capture,
+            )
+
+        try:
+            self._sampler_thread.start()
+        except Exception as e:
+            self._logger.exception("[TraceML] Sampler thread start failed")
+            raise RuntimeError("Failed to start TraceML sampler thread") from e
+
+    def stop(self) -> None:
+        """
+        Stop TraceML runtime and release resources (best effort).
+
+        - Signals the sampler thread to stop
+        - Joins the sampler thread
+        - Closes TCP client
+        - Restores stdout/stderr (CLI mode only)
+        """
+        self._stop_event.set()
+
+        # stop sampler
+        self._sampler_thread.join(
+            timeout=float(self._settings.sampler_interval_sec) * 5.0
+        )
+
+        if self._sampler_thread.is_alive():
+            self._logger.error(
+                "[TraceML] WARNING: sampler thread did not terminate"
+            )
+
+        # close client last
+        self._publisher.close()
+
+        # restore stdout/stderr
+        if self.mode == "cli":
+            _safe(
+                self._logger,
+                "Stdout/stderr restore failed",
+                StreamCapture.redirect_to_original,
+            )
+
+    def log_summaries(self, path: Optional[str] = None) -> None:
+        """
+        Log summaries (rank0 only).
+
+        With the 'store-only' design, summaries should be implemented in renderers
+        or in the aggregator; the runtime itself doesn't compute summaries.
+        """
+        # Intentionally no-op here. Keep the method to avoid breaking callers.
+        pass

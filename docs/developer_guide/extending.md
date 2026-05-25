@@ -1,4 +1,4 @@
-# Extending TraceML
+# Extending TraceML AI
 
 This guide is for contributors adding a new metric, diagnosis, summary section,
 or compare field. It follows the current code layout and avoids older internal
@@ -20,9 +20,9 @@ Live UI and final summaries are separate paths. They can share diagnostics, but
 they should pass explicit policies such as `LIVE_STEP_TIME_POLICY` or
 `SUMMARY_STEP_TIME_POLICY` when thresholds differ.
 
-## TraceML Lifecycle
+## TraceML AI Lifecycle
 
-TraceML has two runtime pieces:
+TraceML AI has two runtime pieces:
 
 - one aggregator, which receives TCP telemetry, writes SQLite history, and
   creates the final summary
@@ -31,15 +31,15 @@ TraceML has two runtime pieces:
 
 CLI launchers may run these pieces as subprocesses. Framework integrations may
 run them inside Ray actors or worker processes. Both paths should use
-`traceml.runtime.lifecycle` so startup and shutdown stay consistent.
+`traceml_ai.runtime.lifecycle` so startup and shutdown stay consistent.
 
 The owner that starts a component must stop it. Use `try/finally` around
 training work, and make stop paths safe to call more than once.
 
 ## Ray Integration
 
-Ray support lives in `traceml.integrations.ray` and should stay separate from
-the core runtime. Do not import Ray from `traceml.runtime`, `traceml.aggregator`,
+Ray support lives in `traceml_ai.integrations.ray` and should stay separate from
+the core runtime. Do not import Ray from `traceml_ai.runtime`, `traceml_ai.aggregator`,
 or the top-level `traceml` package.
 
 The integration has two owners:
@@ -48,7 +48,7 @@ The integration has two owners:
 - the Ray worker wrapper owns `start_runtime(...)` and `handle.stop(...)`
 
 Ray owns scheduling, process groups, ranks, and DDP/NCCL/Gloo communication.
-TraceML only starts telemetry components inside the processes Ray already
+TraceML AI only starts telemetry components inside the processes Ray already
 created. Keep future Ray changes in that shape: no second launcher, no Ray Train
 internals, and no duplicated aggregator/runtime lifecycle code.
 
@@ -163,9 +163,9 @@ object or formatter when the logic is reusable or non-trivial.
 
 ## Fail Open
 
-TraceML should not break user training because optional telemetry, rendering,
+TraceML AI should not break user training because optional telemetry, rendering,
 or reporting failed. Existing code logs advisory failures through
-`traceml.loggers.error_log.get_error_logger`.
+`traceml_ai.loggers.error_log.get_error_logger`.
 
 Use that pattern for non-critical paths:
 
@@ -174,7 +174,7 @@ logger = get_error_logger("MyComponent")
 try:
     ...
 except Exception as exc:
-    logger.exception("[TraceML] MyComponent failed: %s", exc)
+    logger.exception("[TraceML AI] MyComponent failed: %s", exc)
 ```
 
 Prefer returning an empty payload, `NO DATA` diagnosis, or fallback text over

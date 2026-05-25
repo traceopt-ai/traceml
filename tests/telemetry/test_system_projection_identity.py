@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from traceml.aggregator.sqlite_writers import system as system_projection
+from traceml_ai.aggregator.sqlite_writers import system as system_projection
 
 
 def _system_payload() -> dict:

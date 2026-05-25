@@ -11,19 +11,22 @@ from pathlib import Path
 
 import pytest
 
-from traceml.launcher.cli import build_parser
-from traceml.launcher.commands import (
+from traceml_ai.launcher.cli import build_parser
+from traceml_ai.launcher.commands import (
     resolve_existing_script_path,
     validate_launch_args,
 )
-from traceml.launcher.manifest import (
+from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
     load_json_or_warn,
     update_run_manifest,
     write_run_manifest,
 )
-from traceml.launcher.launch_config import DistributedLaunchConfig, RunIdentity
-from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml_ai.launcher.launch_config import (
+    DistributedLaunchConfig,
+    RunIdentity,
+)
+from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 
 def test_build_parser_preserves_launch_commands() -> None:

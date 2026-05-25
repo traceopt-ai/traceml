@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 
-import traceml
+import traceml_ai as tml
 
 SEED = 42
 INPUT_DIM = 128
@@ -79,7 +79,7 @@ def main() -> None:
     else:
         device = torch.device("cpu")
 
-    traceml.init(mode="auto")
+    tml.init(mode="auto")
 
     set_seed(SEED + rank)
 
@@ -110,7 +110,7 @@ def main() -> None:
         for batch_x, batch_y in train_loader:
             global_step += 1
 
-            with traceml.trace_step(model.module):
+            with tml.trace_step(model.module):
                 batch_x = batch_x.to(device, non_blocking=True)
                 batch_y = batch_y.to(device, non_blocking=True)
 
