@@ -205,10 +205,9 @@ def main():
 
     db_path = find_db()
     if db_path:
-        print(f"\n[BatchSize demo] DB path: {db_path}", file=sys.stderr)
+        print(f"[BatchSize demo] DB path: {db_path}", file=sys.stderr)
         print(
-            "[BatchSize demo] Query batch size rows with:\n"
-            f"  sqlite3 {db_path} "
+            f"[BatchSize demo] sqlite3 {db_path} "
             '"SELECT global_rank, step, bytes_total, n_transfers '
             'FROM batch_size_samples ORDER BY global_rank, step;"',
             file=sys.stderr,
