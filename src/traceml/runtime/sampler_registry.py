@@ -8,6 +8,7 @@ from typing import Callable, Iterable, Optional
 from traceml.core import Registry
 from traceml.loggers.error_log import get_error_logger
 from traceml.samplers.base_sampler import BaseSampler
+from traceml.samplers.batch_size_sampler import BatchSizeSampler
 from traceml.samplers.layer_backward_memory_sampler import (
     LayerBackwardMemorySampler,
 )
@@ -82,6 +83,7 @@ DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
         _spec("stdout_stderr", StdoutStderrSampler, modes=("cli",)),
         _spec("step_time", StepTimeSampler, profiles=("run", "deep")),
         _spec("step_memory", StepMemorySampler, profiles=("run", "deep")),
+        _spec("batch_size", BatchSizeSampler, profiles=("run", "deep")),
         _spec("layer_memory", LayerMemorySampler, profiles=("deep",)),
         _spec(
             "layer_forward_memory",

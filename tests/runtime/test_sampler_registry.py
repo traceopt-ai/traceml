@@ -66,6 +66,7 @@ def test_run_cli_selects_step_samplers() -> None:
         "stdout_stderr",
         "step_time",
         "step_memory",
+        "batch_size",
     )
 
 
@@ -75,6 +76,7 @@ def test_deep_profile_selects_layer_samplers_after_step_samplers() -> None:
         "process",
         "step_time",
         "step_memory",
+        "batch_size",
         "layer_memory",
         "layer_forward_memory",
         "layer_backward_memory",
@@ -94,6 +96,7 @@ def test_ddp_nonzero_rank_skips_rank_zero_only_system_sampler() -> None:
         "stdout_stderr",
         "step_time",
         "step_memory",
+        "batch_size",
     )
 
 
@@ -109,6 +112,7 @@ def test_ddp_rank_zero_keeps_rank_zero_only_system_sampler() -> None:
         "stdout_stderr",
         "step_time",
         "step_memory",
+        "batch_size",
     )
 
 

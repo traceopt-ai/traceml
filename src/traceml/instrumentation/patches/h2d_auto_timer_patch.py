@@ -46,6 +46,7 @@ from typing import Any
 import torch
 
 from traceml.instrumentation.h2d import should_time_h2d
+from traceml.utils.batch_size import record_batch_size_bytes
 from traceml.utils.timing import timed_region
 
 _H2D_TLS = threading.local()
@@ -69,12 +70,26 @@ def _traceml_tensor_to(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
     if not should_time_h2d(self, args, kwargs):
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
 
+    # Bytes are computed from the source tensor BEFORE .to(), because the
+    # returned tensor lives on the destination device — element_size and
+    # numel are identical pre/post copy, but we keep the source as the
+    # source of truth.
+    try:
+        n_bytes = int(self.element_size()) * int(self.numel())
+    except Exception:
+        n_bytes = 0
+
     with timed_region(
         "_traceml_internal:h2d_time",
         scope="step",
         use_gpu=True,
     ):
-        return _ORIG_TENSOR_TO(self, *args, **kwargs)
+        result = _ORIG_TENSOR_TO(self, *args, **kwargs)
+
+    if n_bytes > 0:
+        record_batch_size_bytes(n_bytes)
+
+    return result
 
 
 # Public API
