@@ -3,8 +3,7 @@ Core training instrumentation helpers used by TraceML.
 
 This module contains the actual tracing context managers and hook attachment
 logic. It intentionally has no import-time side effects. Patch installation is
-owned by `traceml.init(...)` and the legacy `traceml.decorators` compatibility
-layer.
+owned by `tml.init(...)` and the legacy decorator compatibility layer.
 
 New path
 --------
@@ -14,8 +13,9 @@ New path
 
 Legacy compatibility path
 -------------------------
-- `from traceml.decorators import trace_step`
-- import side effects remain enabled there for backward compatibility
+- Old decorator imports still work for backward compatibility.
+- The decorator import path is deprecated and will be removed in a future
+  version.
 """
 
 from __future__ import annotations

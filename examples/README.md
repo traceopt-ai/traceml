@@ -1,8 +1,8 @@
 # Examples
 
-This folder contains the easiest ways to try TraceML AI without reading the full codebase.
+This folder contains the easiest ways to try TraceML without reading the full codebase.
 
-If you are new to TraceML AI, start here.
+If you are new to TraceML, start here.
 
 ---
 
@@ -14,7 +14,7 @@ These are the main user-facing examples.
 |---|---|---|---|
 | `pytorch_minimal.py` | Minimal plain PyTorch loop with `tml.init(mode="auto")`, `tml.trace_step(...)`, and `tml.final_summary()` | CPU / CUDA | Best first example |
 | `summary_logging_minimal.py` | Minimal tracker-friendly `tml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
-| `manual_custom_minimal.py` | Manual TraceML AI instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
+| `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
 | `lightning_minimal.py` | Minimal Lightning `TraceMLCallback` example | CPU / CUDA | No dataset download required |
@@ -31,20 +31,20 @@ If you want a quieter artifact-oriented flow, run an example with:
 traceml run examples/pytorch_minimal.py --mode=summary
 ```
 
-Then keep the TraceML AI final summary JSON if you want to compare runs later with `traceml compare`.
+Then keep the TraceML final summary JSON if you want to compare runs later with `traceml compare`.
 
 ---
 
 ## Diagnosis demos
 
-These examples are still user-facing, but they are more about showing specific TraceML AI diagnoses than showing the smallest integration.
+These examples are still user-facing, but they are more about showing specific TraceML diagnoses than showing the smallest integration.
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
 | `input_bound_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
 | `input_straggler_ddp_demo.py` | Input straggler in single-node DDP | CPU / CUDA | One rank is deliberately slower in the input path |
 
-These are useful when you want to see how TraceML AI behaves on a known bottleneck.
+These are useful when you want to see how TraceML behaves on a known bottleneck.
 
 ---
 
@@ -74,13 +74,13 @@ Single-node DDP:
 traceml run examples/ddp_minimal.py --nproc-per-node=4
 ```
 
-Run without TraceML AI telemetry for a baseline:
+Run without TraceML telemetry for a baseline:
 
 ```bash
 traceml run examples/pytorch_minimal.py --disable-traceml
 ```
 
-Compare two saved TraceML AI final summary JSON files:
+Compare two saved TraceML final summary JSON files:
 
 ```bash
 traceml compare run_a.json run_b.json
@@ -142,8 +142,8 @@ That includes things like:
 
 - [Quickstart](../docs/quickstart.md)
 - [Compare Runs](../docs/compare.md)
-- [How to Read TraceML AI Output](../docs/how-to-read-output.md)
+- [How to Read TraceML Output](../docs/how-to-read-output.md)
 - [FAQ](../docs/faq.md)
-- [Use TraceML AI with W&B / MLflow](../docs/use-with-wandb-mlflow.md)
+- [Use TraceML with W&B / MLflow](../docs/use-with-wandb-mlflow.md)
 - [Hugging Face Trainer](../docs/huggingface.md)
 - [PyTorch Lightning](../docs/lightning.md)

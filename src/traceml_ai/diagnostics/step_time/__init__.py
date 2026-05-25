@@ -3,7 +3,7 @@ Public step-time diagnostics package.
 
 This package keeps the external import path stable as:
 
-    traceml.diagnostics.step_time
+    traceml_ai.diagnostics.step_time
 
 while organizing the implementation into smaller modules:
 - `api` for the public entry points and primary diagnosis dataclasses

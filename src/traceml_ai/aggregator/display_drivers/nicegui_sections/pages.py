@@ -38,7 +38,7 @@ from .ui_shell import PAGE_GAP_CLASS, VIEWPORT_STYLE
 def build_top_tabs(active: str, show_layers: bool):
     """Shared top navigation tabs."""
     with ui.row().classes("w-full px-4 pt-1 pb-1 items-center"):
-        ui.label("TraceML AI").classes("text-3xl font-extrabold mr-6").style(
+        ui.label("TraceML").classes("text-3xl font-extrabold mr-6").style(
             "color:#d47a00;"
         )
         with ui.tabs().classes("text-base") as tabs:

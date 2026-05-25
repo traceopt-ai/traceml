@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Minimal example for logging TraceML AI's compact summary.
+"""Minimal example for logging TraceML's compact summary.
 
 Run with:
 

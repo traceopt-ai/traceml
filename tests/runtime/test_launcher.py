@@ -145,6 +145,32 @@ def test_summary_window_rows_must_be_positive() -> None:
         validate_launch_args(args)
 
 
+def test_dashboard_mode_requires_dashboard_extra(monkeypatch) -> None:
+    args = argparse.Namespace(
+        mode="dashboard",
+        no_history=False,
+        nnodes=1,
+        nproc_per_node=1,
+        node_rank=0,
+        master_addr="127.0.0.1",
+        master_port=29500,
+        aggregator_host=None,
+        aggregator_bind_host=None,
+        aggregator_port=29765,
+        run_name="",
+        session_id="",
+        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+    )
+
+    monkeypatch.setattr(
+        "traceml_ai.launcher.commands.importlib.util.find_spec",
+        lambda package: None if package == "nicegui" else object(),
+    )
+
+    with pytest.raises(SystemExit, match=r"traceml-ai\[dashboard\]"):
+        validate_launch_args(args)
+
+
 def test_multinode_launch_requires_run_name_or_session_id() -> None:
     args = argparse.Namespace(
         mode="summary",

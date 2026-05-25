@@ -2,10 +2,10 @@
 
 Short answers to common questions before or during adoption.
 
-If you are new to TraceML AI, start with:
+If you are new to TraceML, start with:
 
 - [Quickstart](quickstart.md)
-- [How to Read TraceML AI Output](reading-output.md)
+- [How to Read TraceML Output](reading-output.md)
 - [Compare Runs](compare.md)
 
 ---
@@ -14,7 +14,7 @@ If you are new to TraceML AI, start with:
 
 No.
 
-TraceML AI is designed to work alongside your existing stack.
+TraceML is designed to work alongside your existing stack.
 
 Use your current tools for:
 
@@ -23,29 +23,29 @@ Use your current tools for:
 - dashboards
 - reporting
 
-Use TraceML AI for:
+Use TraceML for:
 
 - bottleneck diagnosis
 - stragglers
 - wait-heavy behavior
 - memory creep
-- run-to-run bottleneck comparison from saved TraceML AI summary JSON files
+- run-to-run bottleneck comparison from saved TraceML summary JSON files
 
 See:
 
-- [Use TraceML AI with W&B / MLflow](integrations/wandb-mlflow.md)
+- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
 
 ---
 
-## How is TraceML AI different from `torch.profiler`?
+## How is TraceML different from `torch.profiler`?
 
 `torch.profiler` is an operator-level profiling tool.
 
-TraceML AI is a lighter-weight bottleneck finder for real training runs.
+TraceML is a lighter-weight bottleneck finder for real training runs.
 
 A simple rule:
 
-- use TraceML AI to find where the problem is
+- use TraceML to find where the problem is
 - use `torch.profiler` when you need low-level operator analysis
 
 ---
@@ -68,9 +68,7 @@ For supported integrations:
 - Hugging Face: use `TraceMLTrainer`
 - Lightning: add `TraceMLCallback()`
 
-The old decorator import path still works for backward compatibility, but it
-is deprecated and will be removed in a future version. The preferred public API
-is now the top-level `tml.*` from `import traceml_ai as tml`.
+The preferred public API is the top-level `tml.*` from `import traceml_ai as tml`.
 
 ---
 
@@ -87,10 +85,7 @@ with tml.trace_step(model):
     ...
 ```
 
-TraceML AI still supports the old decorator import path for backward
-compatibility, but new examples and docs use the top-level `tml.*` API from
-`import traceml_ai as tml`. The decorator import path will be removed in a
-future version.
+Use the top-level `tml.*` API from `import traceml_ai as tml`.
 
 ---
 
@@ -98,7 +93,7 @@ future version.
 
 Use:
 
-- `tml.init(mode="auto")` for the default TraceML AI workflow
+- `tml.init(mode="auto")` for the default TraceML workflow
 - `tml.init(mode="manual")` when you want fully explicit wrappers
 - `tml.init(mode="selective", ...)` when you want some automatic patching
   and some explicit wrapping
@@ -124,7 +119,7 @@ with `mode="auto"` and only move to wrappers if they need explicit control.
 
 ---
 
-## Does TraceML AI work with Hugging Face Trainer?
+## Does TraceML work with Hugging Face Trainer?
 
 Yes.
 
@@ -134,7 +129,7 @@ See:
 
 ---
 
-## Does TraceML AI work with PyTorch Lightning?
+## Does TraceML work with PyTorch Lightning?
 
 Yes.
 
@@ -144,11 +139,11 @@ See:
 
 ---
 
-## Does TraceML AI support DDP?
+## Does TraceML support DDP?
 
 Yes.
 
-TraceML AI can surface:
+TraceML can surface:
 
 - input stragglers
 - compute stragglers
@@ -160,12 +155,12 @@ Multi-node DDP is supported for end-of-run summary reports.
 
 ---
 
-## Does TraceML AI support multi-node?
+## Does TraceML support multi-node?
 
 Yes, for summary-mode DDP runs.
 
 Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
-`--master-addr` on every node. Node 0 starts the TraceML AI aggregator; other
+`--master-addr` on every node. Node 0 starts the TraceML aggregator; other
 nodes connect to it for telemetry. Multi-node live CLI/dashboard views are not
 yet supported.
 
@@ -174,7 +169,7 @@ yet supported.
 
 ---
 
-## Does TraceML AI support FSDP?
+## Does TraceML support FSDP?
 
 Yes, for single-node FSDP. Multi-node FSDP summary reports use the same
 distributed launch path as DDP, but should be validated on your environment.
@@ -183,7 +178,7 @@ If you hit an issue on your setup, please open an issue with a minimal repro and
 
 ---
 
-## Does TraceML AI support tensor parallel or pipeline parallel?
+## Does TraceML support tensor parallel or pipeline parallel?
 
 Not yet.
 
@@ -201,7 +196,7 @@ Not yet.
 
 Start with `run`.
 
-Deep/layer profiling has been removed from the public CLI for now. If TraceML AI
+Deep/layer profiling has been removed from the public CLI for now. If TraceML
 shows you need lower-level detail, use PyTorch Profiler, Nsight, or another
 operator-level profiler for that follow-up.
 
@@ -214,6 +209,7 @@ Yes.
 Run:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
@@ -239,12 +235,12 @@ traceml run train.py --mode=summary
 ```
 
 Summary mode skips live UI and focuses on the final end-of-run summary. It is
-a good fit when you want lower terminal noise or want to forward TraceML AI
+a good fit when you want lower terminal noise or want to forward TraceML
 summary fields into W&B or MLflow.
 
 ---
 
-## Can TraceML AI compare two runs?
+## Can TraceML compare two runs?
 
 Yes.
 
@@ -254,7 +250,7 @@ Use:
 traceml compare run_a.json run_b.json
 ```
 
-`traceml compare` is designed to consume TraceML AI `final_summary.json`
+`traceml compare` is designed to consume TraceML `final_summary.json`
 artifacts.
 
 
@@ -265,7 +261,7 @@ It writes:
 
 A good workflow is:
 
-1. run each job with TraceML AI
+1. run each job with TraceML
 2. retain `final_summary.json` for each run
 3. compare the two runs with `traceml compare`
 
@@ -275,11 +271,11 @@ See:
 
 ---
 
-## Can I log TraceML AI output into W&B or MLflow?
+## Can I log TraceML output into W&B or MLflow?
 
 Yes.
 
-TraceML AI is designed to work alongside your existing tracking stack. The
+TraceML is designed to work alongside your existing tracking stack. The
 recommended low-noise path is:
 
 1. launch with `traceml run train.py`
@@ -290,11 +286,11 @@ Use `tml.final_summary()` if you need the full structured JSON payload.
 
 See:
 
-- [Use TraceML AI with W&B / MLflow](integrations/wandb-mlflow.md)
+- [Use TraceML with W&B / MLflow](integrations/wandb-mlflow.md)
 
 ---
 
-## Can I run without TraceML AI telemetry for a baseline?
+## Can I run without TraceML telemetry for a baseline?
 
 Yes.
 
@@ -314,7 +310,7 @@ A common cause is retaining tensors across steps, for example by storing graph-b
 
 See:
 
-- [How to Read TraceML AI Output](reading-output.md)
+- [How to Read TraceML Output](reading-output.md)
 
 ---
 
@@ -330,7 +326,7 @@ Common causes:
 
 See:
 
-- [How to Read TraceML AI Output](reading-output.md)
+- [How to Read TraceML Output](reading-output.md)
 
 ---
 
@@ -346,7 +342,7 @@ Common causes:
 
 See:
 
-- [How to Read TraceML AI Output](reading-output.md)
+- [How to Read TraceML Output](reading-output.md)
 
 ---
 

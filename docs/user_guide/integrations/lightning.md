@@ -1,16 +1,16 @@
 # PyTorch Lightning
 
-Use TraceML AI with PyTorch Lightning to find training bottlenecks without changing your training loop.
+Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
 
 `TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing memory drift.
 
-> Start with the [Quickstart](../quickstart.md) if you have not used TraceML AI yet.
+> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
 
 ---
 
 ## Install
 
-Install TraceML AI with Lightning support:
+Install TraceML with Lightning support:
 
 ```bash
 pip install "traceml-ai[lightning]"
@@ -56,9 +56,9 @@ multi-GPU.
 
 ---
 
-## What TraceML AI will show
+## What TraceML will show
 
-In Lightning runs, TraceML AI helps you spot:
+In Lightning runs, TraceML helps you spot:
 
 - input-bound training
 - compute-bound steps
@@ -66,7 +66,7 @@ In Lightning runs, TraceML AI helps you spot:
 - rank imbalance and stragglers
 - memory creep over time
 
-You keep the normal Lightning workflow. TraceML AI adds diagnosis around the training step.
+You keep the normal Lightning workflow. TraceML adds diagnosis around the training step.
 
 ---
 
@@ -81,7 +81,7 @@ manually in Lightning.
 
 ## Use with Lightning loggers
 
-TraceML AI works alongside Lightning loggers such as:
+TraceML works alongside Lightning loggers such as:
 
 - W&B
 - TensorBoard
@@ -93,7 +93,7 @@ For the cleanest terminal experience during diagnosis runs, it helps to use:
 enable_progress_bar=False
 ```
 
-You do not need to replace your existing logger stack to use TraceML AI.
+You do not need to replace your existing logger stack to use TraceML.
 
 ---
 
@@ -102,6 +102,7 @@ You do not need to replace your existing logger stack to use TraceML AI.
 If you want a richer browser-based view, run:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
@@ -117,11 +118,11 @@ The local UI is useful when you want:
 
 ## Trainer tips
 
-These settings usually give the cleanest experience with TraceML AI:
+These settings usually give the cleanest experience with TraceML:
 
 | Setting | Recommended value | Why |
 |---|---|---|
-| `enable_progress_bar=False` | Yes | Prevents Lightning progress output from fighting with the TraceML AI CLI |
+| `enable_progress_bar=False` | Yes | Prevents Lightning progress output from fighting with the TraceML CLI |
 | `enable_model_summary=False` | Optional | Keeps terminal output cleaner |
 | `logger=False` | Optional | Useful for local diagnosis runs if you want minimal output |
 
@@ -228,13 +229,13 @@ traceml run train_lightning.py
 
 `TraceMLCallback` supports gradient accumulation.
 
-When Lightning uses `accumulate_grad_batches=N`, TraceML AI still preserves step alignment so the dashboard and summaries stay consistent.
+When Lightning uses `accumulate_grad_batches=N`, TraceML still preserves step alignment so the dashboard and summaries stay consistent.
 
 ---
 
 ## Troubleshooting
 
-### Terminal output overlaps with TraceML AI
+### Terminal output overlaps with TraceML
 
 Set:
 
@@ -242,22 +243,23 @@ Set:
 enable_progress_bar=False
 ```
 
-This gives the TraceML AI CLI cleaner terminal control.
+This gives the TraceML CLI cleaner terminal control.
 
 ### I still want W&B or TensorBoard
 
-That is fine. TraceML AI is designed to work alongside them.
+That is fine. TraceML is designed to work alongside them.
 
 If terminal output gets noisy, use:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
 Dashboard mode is intended for single-node runs. For multi-node runs, use the
 default final summary path.
 
-### I want a baseline without TraceML AI
+### I want a baseline without TraceML
 
 Run:
 
@@ -265,7 +267,7 @@ Run:
 traceml run train_lightning.py --disable-traceml
 ```
 
-This launches your script natively through `torchrun` without TraceML AI telemetry.
+This launches your script natively through `torchrun` without TraceML telemetry.
 
 ---
 

@@ -1,6 +1,6 @@
 # Public API
 
-The stable surface that user code imports and calls. Everything in this page is covered by TraceML AI's compatibility contract across v0.x minor releases.
+The stable surface that user code imports and calls. Everything in this page is covered by TraceML's compatibility contract across v0.x minor releases.
 
 ## Core API
 
@@ -13,8 +13,9 @@ with tml.trace_step(model):
     ...
 ```
 
-The old decorator import path is deprecated and will be removed in a future
-version. New code should use the top-level `tml.*` API.
+The old `import traceml` path still works for now, but emits a `FutureWarning`
+and will be removed in a future release. New code should use
+`import traceml_ai as tml`.
 
 ## Hugging Face integration
 
@@ -44,7 +45,7 @@ version. New code should use the top-level `tml.*` API.
 
 ## CLI
 
-TraceML AI ships with a CLI entry point installed as `traceml`.
+TraceML ships with a CLI entry point installed as `traceml`.
 
 ```bash
 traceml run <script>                 # default: final summary JSON/text
@@ -55,6 +56,8 @@ traceml watch <script>               # zero-code system/process view
 
 Live `cli` and `dashboard` modes are intended for single-node runs. For
 multi-node runs, use the default summary mode.
+Dashboard mode requires the optional dashboard extra:
+`pip install "traceml-ai[dashboard]"`.
 
 Deep/layer profiling has been removed from the public CLI for now.
 

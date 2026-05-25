@@ -1,20 +1,20 @@
 # Ray Train
 
-TraceML AI's Ray integration is intentionally thin: Ray launches and manages the
-training workers, while TraceML AI observes those workers over its normal TCP
+TraceML's Ray integration is intentionally thin: Ray launches and manages the
+training workers, while TraceML observes those workers over its normal TCP
 telemetry path.
 
 ```text
 driver process
-  -> starts one TraceML AI aggregator actor
+  -> starts one TraceML aggregator actor
   -> runs Ray TorchTrainer
        -> Ray starts training workers
-            -> each worker starts one TraceML AI runtime
+            -> each worker starts one TraceML runtime
             -> each worker sends telemetry to the aggregator actor
 ```
 
 Ray still owns scheduling, worker placement, ranks, process groups, and
-DDP/NCCL/Gloo communication. TraceML AI does not replace Ray's launcher or reach
+DDP/NCCL/Gloo communication. TraceML does not replace Ray's launcher or reach
 into Ray Train internals.
 
 ## Install
@@ -69,7 +69,7 @@ trainer.fit()
 ```
 
 Use the same ``train_loop_per_worker`` shape you would pass to Ray's
-``TorchTrainer``. The wrapper starts TraceML AI before your loop runs and stops it
+``TorchTrainer``. The wrapper starts TraceML before your loop runs and stops it
 after the loop exits.
 
 ## Network Model
@@ -120,6 +120,6 @@ the ``patch_*`` options when you only want some automatic patches.
 
 ``TraceMLTorchTrainer.fit()`` starts the aggregator actor, runs Ray Train, and
 then stops the actor in a ``finally`` block. Each worker also stops its local
-TraceML AI runtime in a ``finally`` block. Normal exceptions and keyboard
-interrupts should therefore release TraceML AI resources. A hard ``SIGKILL`` cannot
+TraceML runtime in a ``finally`` block. Normal exceptions and keyboard
+interrupts should therefore release TraceML resources. A hard ``SIGKILL`` cannot
 run Python cleanup code in any framework.

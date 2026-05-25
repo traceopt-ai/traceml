@@ -1,6 +1,6 @@
-# How to Read TraceML AI Output
+# How to Read TraceML Output
 
-TraceML AI is built to answer one question quickly:
+TraceML is built to answer one question quickly:
 
 **Why is this training job slow or unstable?**
 
@@ -16,7 +16,7 @@ The concepts are the same in both.
 
 ## Start with the diagnosis
 
-TraceML AI output has two layers:
+TraceML output has two layers:
 
 1. **Diagnosis**
    - the short answer
@@ -166,7 +166,7 @@ What to do next:
 
 - optimize model compute
 - check batch size / precision / kernels
-- use an operator-level profiler only after TraceML AI shows the hot path
+- use an operator-level profiler only after TraceML shows the hot path
 
 ---
 
@@ -176,7 +176,7 @@ Meaning:
 
 - one rank has meaningfully more input burden than a typical rank
 
-TraceML AI uses this idea:
+TraceML uses this idea:
 
 - compare the worst rank to the median rank
 - measure how much extra dataloader work the worst rank is carrying
@@ -214,7 +214,7 @@ Meaning:
 
 - one rank has meaningfully more compute burden than a typical rank
 
-TraceML AI uses this idea:
+TraceML uses this idea:
 
 - compare worst compute vs median compute
 - normalize the excess by a typical local step burden
@@ -280,7 +280,7 @@ Meaning:
 - a meaningful part of the typical step is not attributed to dataloader,
   H2D, forward, backward, or optimizer work
 
-In TraceML AI:
+In TraceML:
 
 - `compute = forward + backward + optimizer`
 - `wait = total_step - dataloader - h2d - compute`
@@ -313,7 +313,7 @@ What to do next:
 
 Meaning:
 
-- TraceML AI does not yet have enough complete step data to make a diagnosis
+- TraceML does not yet have enough complete step data to make a diagnosis
 
 This is common:
 
@@ -506,7 +506,7 @@ What to do next:
 
 Meaning:
 
-- TraceML AI does not yet have enough aligned memory data to diagnose the run
+- TraceML does not yet have enough aligned memory data to diagnose the run
 
 What to do next:
 

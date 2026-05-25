@@ -1,6 +1,6 @@
 <div align="center">
 
-# TraceML AI
+# TraceML
 
 **Runtime bottleneck detection for PyTorch training jobs.**
 
@@ -21,7 +21,7 @@
 
 </div>
 
-TraceML AI gives every PyTorch training run a structured performance fingerprint: where time went, whether ranks skewed, and whether memory drifted. It answers the questions that usually come before operator-level profiling:
+TraceML gives every PyTorch training run a structured performance fingerprint: where time went, whether ranks skewed, and whether memory drifted. It answers the questions that usually come before operator-level profiling:
 
 - Is the run input-bound, compute-bound, wait-heavy, or memory-constrained?
 - How much time is spent in dataloader, forward, backward, and optimizer?
@@ -29,19 +29,19 @@ TraceML AI gives every PyTorch training run a structured performance fingerprint
 - Did memory usage drift upward during the run?
 - Did a recent change cause a regression?
 
-## How TraceML AI Fits
+## How TraceML Fits
 
-TraceML AI fits between experiment tracking and heavyweight profiling. It gives you a first-pass diagnosis of where a training run is likely wasting time.
+TraceML fits between experiment tracking and heavyweight profiling. It gives you a first-pass diagnosis of where a training run is likely wasting time.
 
 | Tool | Setup cost | Output | Best for | When to use |
 |---|---|---|---|---|
-| TraceML AI | Small training-step wrapper | Live step breakdown + `final_summary.json` | Classifying input, compute, wait, memory, and rank-skew issues | First pass on normal training jobs |
+| TraceML | Small training-step wrapper | Live step breakdown + `final_summary.json` | Classifying input, compute, wait, memory, and rank-skew issues | First pass on normal training jobs |
 | `torch.profiler` | Profiler schedule/context | Operator and CUDA activity traces | Finding expensive PyTorch ops/kernels | When compute/model path needs deep inspection |
 | Nsight Systems / Compute | External profiler run | CUDA timeline / kernel-level detail | Kernel scheduling, CUDA stalls, low-level GPU analysis | Deep dive on a specific GPU performance issue |
 | W&B / MLflow / TensorBoard | Metric logging/integration | Loss, accuracy, throughput, experiment history | Tracking outcomes across runs | Experiment management and dashboards |
 | `nvidia-smi` / cluster dashboards | No code changes | GPU/CPU utilization and memory | Machine-level health and capacity signals | Sanity checks and cluster monitoring |
 
-TraceML AI does not replace these tools. It is the cheap first pass that tells you where to look.
+TraceML does not replace these tools. It is the cheap first pass that tells you where to look.
 
 ---
 
@@ -53,7 +53,7 @@ Install:
 pip install traceml-ai
 ```
 
-Initialize TraceML AI and wrap your training step:
+Initialize TraceML and wrap your training step:
 
 ```python
 import traceml_ai as tml
@@ -75,7 +75,11 @@ Run your script with the `traceml` CLI:
 traceml run train.py
 ```
 
-TraceML AI writes two end-of-run artifacts:
+> The CLI command is `traceml`. New Python code should use
+> `import traceml_ai as tml`. The old `import traceml` path still works for
+> now, but emits a `FutureWarning` and will be removed in a future release.
+
+TraceML writes two end-of-run artifacts:
 
 ```text
 logs/<run_name>/final_summary.json
@@ -86,7 +90,7 @@ logs/<run_name>/final_summary.txt
 
 ### End-of-run summary
 
-At the end of training, TraceML AI prints the same compact text report written to
+At the end of training, TraceML prints the same compact text report written to
 `final_summary.txt`.
 
 Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
@@ -131,10 +135,6 @@ to get a flat dict of diagnosis statuses and average metrics. Keep
 `final_summary.json` when you want the full run artifact or an input for
 `traceml compare`.
 
-The old `import traceml` path still works for now and emits a
-`FutureWarning`. New code should use `import traceml_ai as tml`; the CLI
-remains `traceml`.
-
 ---
 
 ### Compare two runs
@@ -173,16 +173,16 @@ The compact text report shows the verdict first, then the changed metrics:
 ```
 
 The full compare report also includes Step Memory, Process, and System sections
-when those signals are available. TraceML AI writes both a structured compare JSON
+when those signals are available. TraceML writes both a structured compare JSON
 and a compact text report.
 
 See [Compare Runs](docs/user_guide/compare.md).
 
 ### Live CLI view
 
-![TraceML AI live CLI view](docs/assets/cli_demo_v1.png)
+![TraceML live CLI view](docs/assets/cli_demo_v1.png)
 
-Live CLI view while TraceML AI collects the same signals used for `final_summary.json`.
+Live CLI view while TraceML collects the same signals used for `final_summary.json`.
 
 ---
 
@@ -197,11 +197,16 @@ All modes write `final_summary.json` and `final_summary.txt` at the end of the r
 | `--mode=dashboard` | Live browser display | single-node, including multi-GPU |
 
 Summary mode is the default and works across all topologies. Use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node job.
+Dashboard mode requires the optional dashboard extra:
+
+```bash
+pip install "traceml-ai[dashboard]"
+```
 
 Multi-node live views are on the roadmap.
 
 For very long jobs, tune the final-summary window with
-`--summary-window-rows N`. TraceML AI analyzes the latest `N` rows per node or
+`--summary-window-rows N`. TraceML analyzes the latest `N` rows per node or
 rank and retains a small alignment buffer internally.
 
 ---
@@ -239,9 +244,9 @@ traceml run train.py \
 ```
 
 Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
-`--master-addr` on every node. Node 0 starts the TraceML AI aggregator. Other
+`--master-addr` on every node. Node 0 starts the TraceML aggregator. Other
 nodes connect to `<node0-ip>:29765` by default. If workers need a different
-reachable address or port for TraceML AI telemetry, add
+reachable address or port for TraceML telemetry, add
 `--aggregator-host=<host>` or `--aggregator-port=<port>` on every node. For
 multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default; override
 that only when needed with `--aggregator-bind-host=<bind-host>`.
@@ -265,7 +270,7 @@ traceml compare before/final_summary.json after/final_summary.json
 
 ---
 
-## What TraceML AI measures
+## What TraceML measures
 
 | Signal | What it means |
 |--------|--------------|
@@ -303,7 +308,7 @@ traceml compare before/final_summary.json after/final_summary.json
 
 ## Overhead
 
-**Overhead:** In our benchmark runs, TraceML AI adds <2% overhead on single GPU and <1% on single-node multi-GPU at default settings.
+**Overhead:** In our benchmark runs, TraceML adds <2% overhead on single GPU and <1% on single-node multi-GPU at default settings.
 
 ---
 
@@ -311,10 +316,10 @@ traceml compare before/final_summary.json after/final_summary.json
 
 - [Quickstart](docs/user_guide/quickstart.md)
 - [Compare Runs](docs/user_guide/compare.md)
-- [How to Read TraceML AI Output](docs/user_guide/reading-output.md)
+- [How to Read TraceML Output](docs/user_guide/reading-output.md)
 - [Examples](examples/README.md)
 - [FAQ](docs/user_guide/faq.md)
-- [Use TraceML AI with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md)
+- [Use TraceML with W&B / MLflow](docs/user_guide/integrations/wandb-mlflow.md)
 - [Hugging Face integration](docs/user_guide/integrations/huggingface.md)
 - [PyTorch Lightning integration](docs/user_guide/integrations/lightning.md)
 - [Ray Train integration](docs/user_guide/integrations/ray.md)
@@ -323,7 +328,7 @@ traceml compare before/final_summary.json after/final_summary.json
 
 ## Feedback
 
-If TraceML AI helped, a GitHub star helps others find it.
+If TraceML helped, a GitHub star helps others find it.
 
 If you hit a problem or unexpected result, open an issue and include:
 

@@ -39,10 +39,10 @@ if str(SRC) not in sys.path:
 import traceml_ai.instrumentation.patches.forward_auto_timer_patch as fwd_patch
 import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
 import traceml_ai.utils.timing as timing_module
+from traceml_ai.instrumentation.h2d import is_cuda_target
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     _H2D_TLS,
     _ORIG_TENSOR_TO,
-    _is_cuda_target,
     _traceml_tensor_to,
     h2d_auto_timer,
 )
@@ -85,14 +85,18 @@ def _recorded_h2d_events(buf: deque) -> list:
     return [e for e in buf if e.name == "_traceml_internal:h2d_time"]
 
 
-# Auto-patch: _is_cuda_target detection
+def _fake_tensor_to(tensor, *args, **kwargs):
+    return tensor
+
+
+# Auto-patch: CUDA target detection
 
 
 class TestIsCudaTarget:
-    """Unit-test _is_cuda_target without needing a real GPU."""
+    """Unit-test is_cuda_target without needing a real GPU."""
 
     def _fn(self, args, kwargs):
-        return _is_cuda_target(args, kwargs)
+        return is_cuda_target(args, kwargs)
 
     def test_string_cuda_device(self):
         assert self._fn(("cuda:0",), {}) is True
@@ -138,6 +142,8 @@ class TestIsCudaTarget:
 
 class TestH2DAutoTimerPatch:
     def setup_method(self):
+        torch.Tensor.to = h2d_patch._ORIG_TENSOR_TO  # type: ignore[assignment]
+        torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
         # Reload so each test starts with a clean TLS state.
         self._mod = _reload_h2d_patch()
         # Reset the TLS flag directly.
@@ -198,7 +204,7 @@ class TestH2DAutoTimerPatch:
             "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
             side_effect=fake_timed_region,
         ):
-            # CPU target → _is_cuda_target returns False → no timing
+            # CPU target -> is_cuda_target returns False -> no timing
             self._mod._traceml_tensor_to(tensor, "cpu")
 
         assert recorded == [], "CPU target must NOT be timed"
@@ -218,8 +224,8 @@ class TestH2DAutoTimerPatch:
             recorded.append(name)
             yield
 
-        # Patch the original .to() so it doesn't try to move to a real GPU.
-        with patch.object(torch.Tensor, "to", return_value=tensor):
+        # Patch the captured original .to() so it doesn't try to move to a real GPU.
+        with patch.object(self._mod, "_ORIG_TENSOR_TO", _fake_tensor_to):
             with patch(
                 "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
                 side_effect=fake_timed_region,
@@ -249,12 +255,13 @@ class TestH2DAutoTimerPatch:
             "is_cuda",
             new_callable=lambda: property(lambda self: True),
         ):
-            with patch(
-                "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
-                side_effect=fake_timed_region,
-            ):
-                # Even though destination is CUDA, source is already CUDA → D2D.
-                self._mod._traceml_tensor_to(cuda_tensor, "cuda:0")
+            with patch.object(self._mod, "_ORIG_TENSOR_TO", _fake_tensor_to):
+                with patch(
+                    "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
+                    side_effect=fake_timed_region,
+                ):
+                    # Even though destination is CUDA, source is already CUDA -> D2D.
+                    self._mod._traceml_tensor_to(cuda_tensor, "cuda:0")
 
         assert recorded == [], "D2D transfers must NOT be timed as h2d_time"
 
@@ -276,11 +283,12 @@ class TestH2DAutoTimerPatch:
             recorded.append(name)
             yield
 
-        with patch(
-            "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
-            side_effect=fake_timed_region,
-        ):
-            self._mod._traceml_tensor_to(param, "cuda:0")
+        with patch.object(self._mod, "_ORIG_TENSOR_TO", _fake_tensor_to):
+            with patch(
+                "traceml_ai.instrumentation.patches.h2d_auto_timer_patch.timed_region",
+                side_effect=fake_timed_region,
+            ):
+                self._mod._traceml_tensor_to(param, "cuda:0")
 
         assert recorded == [], "Parameter.to() must NOT be timed (C2 gate)"
 
@@ -309,13 +317,18 @@ class TestH2DStepScoping:
     """
 
     def test_event_buffered_inside_h2d_auto_timer(self):
+        torch.Tensor.to = h2d_patch._ORIG_TENSOR_TO  # type: ignore[assignment]
+        torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
         tensor = torch.ones(4)
 
         with _fresh_step_buffer() as buf:
             with h2d_auto_timer():
-                # Patch .to() at the original pointer level so it returns
+                # Patch the captured original .to() so it returns
                 # the same tensor without needing a GPU.
-                with patch.object(torch.Tensor, "to", return_value=tensor):
+                with patch(
+                    "traceml_ai.instrumentation.patches.h2d_auto_timer_patch._ORIG_TENSOR_TO",
+                    _fake_tensor_to,
+                ):
                     _traceml_tensor_to(tensor, "cuda:0")
 
             events = _recorded_h2d_events(buf)
@@ -324,11 +337,16 @@ class TestH2DStepScoping:
         assert events[0].name == "_traceml_internal:h2d_time"
 
     def test_no_event_buffered_outside_h2d_auto_timer(self):
+        torch.Tensor.to = h2d_patch._ORIG_TENSOR_TO  # type: ignore[assignment]
+        torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
         _H2D_TLS._traceml_h2d_enabled = False
         tensor = torch.ones(4)
 
         with _fresh_step_buffer() as buf:
-            with patch.object(torch.Tensor, "to", return_value=tensor):
+            with patch(
+                "traceml_ai.instrumentation.patches.h2d_auto_timer_patch._ORIG_TENSOR_TO",
+                _fake_tensor_to,
+            ):
                 _traceml_tensor_to(tensor, "cuda:0")
 
             events = _recorded_h2d_events(buf)
@@ -342,9 +360,11 @@ class TestH2DStepScoping:
 class TestWrapH2D:
     def setup_method(self):
         # Ensure no auto H2D patch is installed for manual-wrapper tests.
+        torch.Tensor.to = h2d_patch._ORIG_TENSOR_TO  # type: ignore[assignment]
         torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
 
     def teardown_method(self):
+        torch.Tensor.to = h2d_patch._ORIG_TENSOR_TO  # type: ignore[assignment]
         torch.Tensor._traceml_h2d_patched = False  # type: ignore[attr-defined]
 
     def test_wrap_h2d_returns_proxy(self):
@@ -358,7 +378,7 @@ class TestWrapH2D:
 
         with _fresh_step_buffer() as buf:
             with patch.object(torch.Tensor, "to", return_value=tensor):
-                wrapped.to("cpu")  # device doesn't matter for wrap_h2d timing
+                wrapped.to("cuda:0")
 
             events = _recorded_h2d_events(buf)
 
@@ -415,7 +435,7 @@ class TestWrapH2D:
         wrapped = wrap_h2d(batch)
 
         with _fresh_step_buffer() as buf:
-            wrapped.to("cpu")
+            wrapped.to("cuda:0")
             events = _recorded_h2d_events(buf)
 
         assert len(events) == 1

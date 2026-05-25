@@ -13,7 +13,6 @@ from typing import Any, Callable, Dict, Optional, Type
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
-from traceml_ai.aggregator.display_drivers.nicegui import NiceGUIDisplayDriver
 from traceml_ai.aggregator.display_drivers.summary import SummaryDisplayDriver
 from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterConfig,
@@ -24,6 +23,11 @@ from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.reporting.final import generate_summary
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
+
+DASHBOARD_EXTRA_INSTALL_HINT = (
+    "Dashboard mode requires optional dependencies. Install them with "
+    "`pip install 'traceml-ai[dashboard]'`."
+)
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -37,9 +41,32 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
 
 _DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
     "cli": CLIDisplayDriver,
-    "dashboard": NiceGUIDisplayDriver,
     "summary": SummaryDisplayDriver,
 }
+
+
+def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
+    if mode == "dashboard":
+        try:
+            from traceml_ai.aggregator.display_drivers.nicegui import (
+                NiceGUIDisplayDriver,
+            )
+        except ModuleNotFoundError as exc:
+            if exc.name in {"nicegui", "plotly"}:
+                raise RuntimeError(
+                    f"[TraceML] {DASHBOARD_EXTRA_INSTALL_HINT}"
+                ) from exc
+            raise
+
+        return NiceGUIDisplayDriver
+
+    driver_cls = _DISPLAY_DRIVERS.get(mode)
+    if driver_cls is None:
+        supported = sorted([*_DISPLAY_DRIVERS.keys(), "dashboard"])
+        raise ValueError(
+            f"[TraceML] Unknown display mode: {mode!r}. Supported: {supported}"
+        )
+    return driver_cls
 
 
 class TraceMLAggregator:
@@ -106,12 +133,7 @@ class TraceMLAggregator:
         )
 
         # Display driver owns renderer selection and layout mapping.
-        driver_cls = _DISPLAY_DRIVERS.get(settings.mode)
-        if driver_cls is None:
-            raise ValueError(
-                f"[TraceML] Unknown display mode: {settings.mode!r}. "
-                f"Supported: {sorted(_DISPLAY_DRIVERS.keys())}"
-            )
+        driver_cls = _resolve_display_driver(settings.mode)
 
         self._display_driver = driver_cls(
             logger=self._logger,

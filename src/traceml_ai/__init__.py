@@ -1,5 +1,5 @@
 """
-Public TraceML AI package surface.
+Public TraceML package surface.
 
 This module intentionally keeps import-time work minimal so launcher entry
 points do not pull in optional training dependencies like PyTorch unless the

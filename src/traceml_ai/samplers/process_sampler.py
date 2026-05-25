@@ -164,19 +164,24 @@ class ProcessSampler(BaseSampler):
         """
         Ensure a CUDA device is selected for this rank.
         """
-        if self.device_index is not None:
-            return
-
-        device_index = self.local_rank if self.is_distributed else 0
-
-        torch.cuda.set_device(device_index)
-        self.device_index = device_index
-
         if self.gpu_available is None:
             self.gpu_available = bool(torch.cuda.is_available())
             self.gpu_count = (
                 int(torch.cuda.device_count()) if self.gpu_available else 0
             )
+
+        if not self.gpu_available or self.gpu_count <= 0:
+            return
+
+        if self.device_index is not None:
+            return
+
+        device_index = self.local_rank if self.is_distributed else 0
+        if device_index < 0 or device_index >= self.gpu_count:
+            return
+
+        torch.cuda.set_device(device_index)
+        self.device_index = device_index
 
     def _sample_gpu(self) -> Optional[ProcessGPUMetrics]:
         """
@@ -187,7 +192,7 @@ class ProcessSampler(BaseSampler):
 
         try:
             self._ensure_cuda_device()
-            if not self.gpu_available:
+            if not self.gpu_available or self.device_index is None:
                 return None
 
             i = int(self.device_index or 0)

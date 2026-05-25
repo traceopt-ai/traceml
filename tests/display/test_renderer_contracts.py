@@ -1,3 +1,8 @@
+import builtins
+
+import pytest
+
+from traceml_ai.aggregator.trace_aggregator import _resolve_display_driver
 from traceml_ai.renderers.base_renderer import (
     BaseRenderer,
     CLIRenderer,
@@ -70,3 +75,20 @@ def test_renderer_can_support_both_cli_and_dashboard_contracts() -> None:
     assert isinstance(renderer, DashboardRenderer)
     assert renderer.get_panel_renderable() == "panel"
     assert renderer.get_dashboard_renderable() == {"payload": "dual"}
+
+
+def test_dashboard_driver_missing_extra_has_install_hint(monkeypatch) -> None:
+    original_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "traceml_ai.aggregator.display_drivers.nicegui":
+            raise ModuleNotFoundError(
+                "No module named 'nicegui'",
+                name="nicegui",
+            )
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    with pytest.raises(RuntimeError, match=r"traceml-ai\[dashboard\]"):
+        _resolve_display_driver("dashboard")

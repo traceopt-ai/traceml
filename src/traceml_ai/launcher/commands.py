@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import struct
@@ -42,6 +43,11 @@ from traceml_ai.runtime.launch_context import LaunchContext
 from traceml_ai.runtime.session import get_session_id
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
+DASHBOARD_EXTRA_INSTALL_HINT = (
+    "Dashboard mode requires optional dependencies. Install them with "
+    "`pip install 'traceml-ai[dashboard]'`."
+)
+
 
 def _log_launcher_exception(message: str, exc: Exception) -> None:
     """Log launcher failures when the shared error logger is available."""
@@ -65,6 +71,18 @@ def resolve_existing_script_path(script_path: str) -> str:
 
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
+    if getattr(args, "mode", None) == "dashboard":
+        missing = [
+            package
+            for package in ("nicegui", "plotly")
+            if importlib.util.find_spec(package) is None
+        ]
+        if missing:
+            raise SystemExit(
+                "[TraceML] ERROR: "
+                f"{DASHBOARD_EXTRA_INSTALL_HINT} Missing: {', '.join(missing)}."
+            )
+
     if getattr(args, "mode", None) == "summary" and getattr(
         args, "no_history", False
     ):

@@ -1,16 +1,16 @@
 # Hugging Face Trainer
 
-Use TraceML AI with Hugging Face `Trainer` to find training bottlenecks without rewriting your training loop.
+Use TraceML with Hugging Face `Trainer` to find training bottlenecks without rewriting your training loop.
 
 `TraceMLTrainer` is a drop-in replacement for `transformers.Trainer`. It adds step-aware diagnosis so you can quickly tell whether a run is input-bound, compute-bound, straggler-heavy, or showing memory drift.
 
-> Start with the [Quickstart](../quickstart.md) if you have not used TraceML AI yet.
+> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
 
 ---
 
 ## Install
 
-Install TraceML AI with Hugging Face support:
+Install TraceML with Hugging Face support:
 
 ```bash
 pip install "traceml-ai[hf]"
@@ -66,6 +66,7 @@ traceml run fine_tune.py
 Or open the local UI:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run fine_tune.py --mode=dashboard
 ```
 
@@ -74,9 +75,9 @@ multi-GPU.
 
 ---
 
-## What TraceML AI will show
+## What TraceML will show
 
-In Hugging Face runs, TraceML AI helps you spot:
+In Hugging Face runs, TraceML helps you spot:
 
 - input-bound training
 - compute-bound steps
@@ -84,7 +85,7 @@ In Hugging Face runs, TraceML AI helps you spot:
 - wait-heavy behavior
 - memory creep over time
 
-You keep the normal Hugging Face workflow. TraceML AI adds diagnosis around the training step.
+You keep the normal Hugging Face workflow. TraceML adds diagnosis around the training step.
 
 ---
 
@@ -101,13 +102,13 @@ If `traceml_enabled=False`, it behaves like a normal `Trainer`.
 
 ## Use with your existing tracking stack
 
-TraceML AI is designed to work alongside tools like W&B, MLflow, and TensorBoard.
+TraceML is designed to work alongside tools like W&B, MLflow, and TensorBoard.
 
 A common setup is:
 
 - Hugging Face Trainer for training
 - W&B / TensorBoard for experiment tracking
-- TraceML AI for bottleneck diagnosis
+- TraceML for bottleneck diagnosis
 
 For the cleanest terminal experience, you can set:
 
@@ -116,7 +117,7 @@ report_to="none"
 disable_tqdm=True
 ```
 
-This is optional. TraceML AI does not require you to replace your existing logger stack.
+This is optional. TraceML does not require you to replace your existing logger stack.
 
 ---
 
@@ -147,7 +148,7 @@ Run the same command on each node, changing only `--node-rank`.
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 
-TraceML AI can help surface:
+TraceML can help surface:
 
 - rank imbalance
 - input stragglers
@@ -331,11 +332,11 @@ traceml run fine_tune_vision.py
 
 ## Recommended `TrainingArguments` settings
 
-These settings make the terminal output cleaner when using TraceML AI:
+These settings make the terminal output cleaner when using TraceML:
 
 | Setting | Recommended value | Why |
 |---|---|---|
-| `disable_tqdm=True` | Yes | Prevents tqdm from fighting with the TraceML AI CLI |
+| `disable_tqdm=True` | Yes | Prevents tqdm from fighting with the TraceML CLI |
 | `report_to="none"` | Optional | Keeps W&B / TensorBoard output out of the terminal for local diagnosis |
 | `save_strategy="no"` | Optional | Useful for short local diagnostic runs |
 
@@ -343,7 +344,7 @@ These settings make the terminal output cleaner when using TraceML AI:
 
 ## Troubleshooting
 
-### Terminal output overlaps with TraceML AI
+### Terminal output overlaps with TraceML
 
 Set:
 
@@ -351,15 +352,16 @@ Set:
 disable_tqdm=True
 ```
 
-This gives the TraceML AI CLI cleaner terminal control.
+This gives the TraceML CLI cleaner terminal control.
 
 ### I still want W&B or TensorBoard
 
-That is fine. TraceML AI is designed to work alongside them.
+That is fine. TraceML is designed to work alongside them.
 
 If terminal output gets noisy, use:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run fine_tune.py --mode=dashboard
 ```
 
@@ -368,13 +370,13 @@ default final summary path.
 
 ### Multi-GPU run only shows one rank
 
-Make sure you launch through TraceML AI, not plain `python`:
+Make sure you launch through TraceML, not plain `python`:
 
 ```bash
 traceml run fine_tune.py --nproc-per-node=4
 ```
 
-### I want a baseline without TraceML AI
+### I want a baseline without TraceML
 
 Run:
 
@@ -382,7 +384,7 @@ Run:
 traceml run fine_tune.py --disable-traceml
 ```
 
-This launches your script natively through `torchrun` without TraceML AI telemetry.
+This launches your script natively through `torchrun` without TraceML telemetry.
 
 ---
 

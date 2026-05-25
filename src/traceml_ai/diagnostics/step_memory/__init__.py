@@ -2,7 +2,7 @@
 Public step-memory diagnostics package.
 
 This package contains both live and summary-oriented step-memory diagnosis.
-The public import path remains ``traceml.diagnostics.step_memory`` while the
+The public import path is ``traceml_ai.diagnostics.step_memory`` while the
 implementation is split into:
 
 - ``api`` for primary builders and diagnosis payloads

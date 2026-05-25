@@ -10,7 +10,7 @@ pre-commit install --install-hooks
 pre-commit install --hook-type pre-push
 ```
 
-All extras are installed because the docs build imports every TraceML AI module.
+All extras are installed because the docs build imports every TraceML module.
 
 ## Branch naming
 
