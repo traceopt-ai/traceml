@@ -30,6 +30,7 @@ class TCPServer:
 
     def __init__(self, cfg: TCPConfig):
         self.cfg = cfg
+        self._port = int(cfg.port)
         self._sock: Optional[socket.socket] = None
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -39,11 +40,17 @@ class TCPServer:
         )  # set by _handle_client on every new message
         self.logger = get_error_logger("TraceML-TCPServer")
 
+    @property
+    def port(self) -> int:
+        """Actual bound TCP port. Differs from config when cfg.port == 0."""
+        return int(self._port)
+
     def start(self) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self._sock.bind((self.cfg.host, self.cfg.port))
+        self._port = int(self._sock.getsockname()[1])
         self._sock.listen(self.cfg.backlog)
 
         self._thread = threading.Thread(

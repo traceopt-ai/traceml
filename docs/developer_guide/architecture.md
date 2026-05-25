@@ -35,7 +35,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Renderers | `src/traceml/renderers/` | Transform stored data into Rich/Plotly output |
 | Display drivers | `src/traceml/aggregator/display_drivers/` | CLI vs NiceGUI output medium |
 | Decorators | `src/traceml/decorators.py` | User-facing instrumentation entry points |
-| Integrations | `src/traceml/integrations/` | Hugging Face + Lightning adapters |
+| Integrations | `src/traceml/integrations/` | Hugging Face, Lightning, and Ray adapters |
 | Utils | `src/traceml/utils/` | Hooks, patches, memory/timing helpers |
 
 For the user-facing API surface (`trace_step`, `TraceMLTrainer`, `TraceMLCallback`, CLI usage), see the [Public API](../user_guide/public-api.md). The source tree above is the canonical reference for internals — start from the entry points and follow the imports.

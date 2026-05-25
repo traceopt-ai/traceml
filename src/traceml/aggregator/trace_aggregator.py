@@ -22,7 +22,7 @@ from traceml.aggregator.sqlite_writer import (
 from traceml.aggregator.summary_service import FinalSummaryService
 from traceml.database.remote_database_store import RemoteDBStore
 from traceml.reporting.final import generate_summary
-from traceml.runtime.settings import TraceMLSettings
+from traceml.runtime.settings import AggregatorEndpoint, TraceMLSettings
 from traceml.transport.tcp_transport import TCPConfig, TCPServer
 
 
@@ -152,6 +152,15 @@ class TraceMLAggregator:
         except Exception:
             self._logger.exception("[TraceML] Aggregator thread start failed")
             raise
+
+    @property
+    def endpoint(self) -> AggregatorEndpoint:
+        """Return the reachable endpoint after the TCP server has started."""
+        return AggregatorEndpoint(
+            host=str(self._settings.aggregator.connect_host),
+            port=int(self._tcp_server.port),
+            session_id=str(self._settings.session_id or "default"),
+        )
 
     def stop(self, timeout_sec: float) -> None:
         """

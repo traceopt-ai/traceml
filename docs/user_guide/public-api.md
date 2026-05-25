@@ -23,6 +23,18 @@ The stable surface that user code imports and calls. Everything in this page is 
       show_root_heading: true
       show_source: true
 
+## Ray Train integration
+
+::: traceml.integrations.ray.TraceMLTorchTrainer
+    options:
+      show_root_heading: true
+      show_source: true
+
+::: traceml.integrations.ray.TraceMLRayConfig
+    options:
+      show_root_heading: true
+      show_source: true
+
 ## CLI
 
 TraceML ships with a CLI entry point installed as `traceml`.

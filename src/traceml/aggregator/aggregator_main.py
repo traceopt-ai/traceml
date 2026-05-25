@@ -34,9 +34,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from traceml.aggregator.trace_aggregator import TraceMLAggregator
 from traceml.loggers.error_log import get_error_logger, setup_error_logger
 from traceml.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml.runtime.lifecycle import start_aggregator
 from traceml.runtime.settings import (
     AggregatorTransportSettings,
     TraceMLSettings,
@@ -181,7 +181,7 @@ def main() -> None:
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
 
-    agg: Optional[TraceMLAggregator] = None
+    handle = None
     err: Optional[BaseException] = None
 
     try:
@@ -204,24 +204,22 @@ def main() -> None:
             db_path=str(db_path),
         )
 
-        agg = TraceMLAggregator(
+        logger.info("[TraceML] Starting aggregator")
+        handle = start_aggregator(
+            settings,
             logger=logger,
             stop_event=stop_event,
-            settings=settings,
         )
-        logger.info("[TraceML] Starting aggregator")
-        agg.start()
-
         stop_event.wait()
 
     except BaseException as exc:
         err = exc
 
     finally:
-        if agg is not None:
+        if handle is not None:
             try:
                 logger.info("[TraceML] Stopping aggregator")
-                agg.stop(timeout_sec=5.0)
+                handle.stop(timeout_sec=5.0)
             except Exception:
                 pass
 
