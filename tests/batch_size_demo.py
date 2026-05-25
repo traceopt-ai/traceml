@@ -207,17 +207,26 @@ def main():
     if db_path:
         print(f"\n[BatchSize demo] DB path: {db_path}", file=sys.stderr)
         print(
-            "[BatchSize demo] Query rows with:\n"
-            f"  sqlite3 {db_path} "
-            '"SELECT global_rank, step, bytes_total, n_transfers '
-            'FROM batch_size_samples ORDER BY global_rank, step;"',
+            "[BatchSize demo] Install sqlite3 (Ubuntu/Debian RunPod):\n"
+            "  apt-get update && apt-get install -y sqlite3\n\n"
+            "[BatchSize demo] Inspect rows per (rank, step):\n"
+            f"  sqlite3 -header -column {db_path} \\\n"
+            '    "SELECT global_rank, step, bytes_total, n_transfers '
+            'FROM batch_size_samples ORDER BY global_rank, step;"\n\n'
+            "[BatchSize demo] Per-rank totals (sanity check):\n"
+            f"  sqlite3 -header -column {db_path} \\\n"
+            '    "SELECT global_rank, COUNT(*) AS steps, '
+            "SUM(bytes_total) AS total_bytes "
+            'FROM batch_size_samples GROUP BY global_rank;"\n\n'
+            "[BatchSize demo] Show table schema:\n"
+            f'  sqlite3 {db_path} ".schema batch_size_samples"',
             file=sys.stderr,
         )
         print_batch_size_results(db_path)
     else:
         print(
             "DB not found. Make sure you ran with: "
-            "traceml run examples/batch_size_demo.py",
+            "traceml run tests/batch_size_demo.py",
             file=sys.stderr,
         )
 
