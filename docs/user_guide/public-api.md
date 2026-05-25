@@ -43,18 +43,6 @@ and will be removed in a future release. New code should use
       show_root_heading: true
       show_source: true
 
-## Ray Train integration
-
-::: traceml.integrations.ray.TraceMLTorchTrainer
-    options:
-      show_root_heading: true
-      show_source: true
-
-::: traceml.integrations.ray.TraceMLRayConfig
-    options:
-      show_root_heading: true
-      show_source: true
-
 ## CLI
 
 TraceML ships with a CLI entry point installed as `traceml`.
