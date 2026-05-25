@@ -29,8 +29,8 @@ Traced process pressure.
 - `NORMAL`: no process CPU, RSS, or available GPU memory pressure.
 - `VERY_HIGH_PROCESS_GPU_MEMORY`: critical process GPU memory pressure.
 - `HIGH_PROCESS_GPU_MEMORY`: elevated process GPU memory pressure.
-- `GPU_MEMORY_RESERVED_OVERHANG`: reserved GPU memory is much higher than used
-  GPU memory.
+- `HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO`: PyTorch CUDA allocator
+  reserved memory is much higher than allocated tensor memory.
 - `RANK_GPU_MEMORY_IMBALANCE`: GPU memory differs materially across ranks.
 - `HIGH_PROCESS_RSS`: elevated process RSS.
 - `HIGH_PROCESS_CPU`: elevated process CPU relative to CPU capacity.

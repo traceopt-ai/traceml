@@ -152,10 +152,16 @@ class GPUMemoryReservedOverhangRule(_BaseProcessRule):
         rank = context.highest_overhang_rank
         return self._issue(
             kind="GPU_MEMORY_RESERVED_OVERHANG",
-            status="GPU MEMORY RESERVED OVERHANG",
+            status="HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO",
             severity="warn",
-            summary=f"Reserved GPU memory was {float(ratio):.2f}x active use.",
-            action="Inspect allocator behavior or retained tensors.",
+            summary=(
+                "PyTorch CUDA allocator reserved memory was "
+                f"{float(ratio):.2f}x allocated tensor memory."
+            ),
+            action=(
+                "Inspect CUDA allocator caching, fragmentation, variable "
+                "tensor shapes, or retained tensors."
+            ),
             metric="gpu_mem_reserved_peak_bytes",
             phase="gpu_memory",
             score=ratio,

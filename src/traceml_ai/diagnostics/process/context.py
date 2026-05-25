@@ -219,7 +219,7 @@ def _least_headroom(
 def _peak_reserved_overhang(
     per_rank: Dict[int, ProcessRankDiagnosisInput],
 ) -> tuple[Optional[float], Optional[int]]:
-    """Return the largest rank-local reserved/used peak ratio."""
+    """Return the largest rank-local CUDA reserved/allocated peak ratio."""
     best_ratio: Optional[float] = None
     best_rank: Optional[int] = None
 

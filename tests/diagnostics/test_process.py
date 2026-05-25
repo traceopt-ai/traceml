@@ -255,6 +255,11 @@ def test_reserved_overhang_uses_rank_local_peak_ratio() -> None:
 
     issue = result.issues[0]
     assert issue.kind == "GPU_MEMORY_RESERVED_OVERHANG"
+    assert issue.status == "HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO"
+    assert (
+        issue.summary
+        == "PyTorch CUDA allocator reserved memory was 1.80x allocated tensor memory."
+    )
     assert issue.ranks == (1,)
     assert issue.evidence["gpu_mem_reserved_overhang_ratio"] == 1.8
 

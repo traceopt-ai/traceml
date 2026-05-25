@@ -101,7 +101,7 @@ class ProcessSummaryAgg:
     gpu_mem_reserved_avg_bytes: Optional[float] = None
     gpu_mem_reserved_peak_bytes: Optional[float] = None
     gpu_mem_total_bytes: Optional[float] = None
-    # Max reserved/used CUDA memory ratio observed in the selected window.
+    # Max CUDA allocator reserved/allocated ratio in the selected window.
     gpu_mem_reserved_overhang_ratio: Optional[float] = None
 
 
@@ -141,7 +141,7 @@ class PerRankProcessSummary:
     gpu_mem_reserved_avg_bytes: Optional[float] = None
     gpu_mem_reserved_peak_bytes: Optional[float] = None
     gpu_mem_total_bytes: Optional[float] = None
-    # Max reserved/used CUDA memory ratio observed for this global rank.
+    # Max CUDA allocator reserved/allocated ratio for this global rank.
     gpu_mem_reserved_overhang_ratio: Optional[float] = None
 
 
