@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-import traceml_ai as tml
+import traceml_ai as traceml
 
 # -------------------------
 # Medium CNN for MNIST
@@ -52,7 +52,7 @@ def optimizer_step(opt):
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    tml.init(mode="auto")
+    traceml.init(mode="auto")
 
     transform = transforms.Compose(
         [
@@ -73,7 +73,7 @@ def main():
     # Enables per-layer memory + timing hooks.
     # Can add overhead in long training runs.
     # Recommended for short runs, diagnosis, or one-off investigations.
-    tml.trace_model_instance(
+    traceml.trace_model_instance(
         model,
         trace_layer_forward_memory=True,
         trace_layer_backward_memory=True,
@@ -87,7 +87,7 @@ def main():
     print("Starting training...")
     for step, (xb, yb) in enumerate(loader):
 
-        with tml.trace_step(model):
+        with traceml.trace_step(model):
             xb, yb = xb.to(device), yb.to(device)
 
             opt.zero_grad(set_to_none=True)

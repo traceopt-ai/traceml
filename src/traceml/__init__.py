@@ -1,7 +1,7 @@
 """
 Deprecated compatibility package for the former ``traceml`` import path.
 
-Use ``import traceml_ai as tml`` in new code. The ``traceml`` CLI command is
+Use ``import traceml_ai as traceml`` in new code. The ``traceml`` CLI command is
 unchanged.
 """
 
@@ -58,7 +58,7 @@ def _install_alias_finder() -> None:
 
 warnings.warn(
     "The 'traceml' Python import path is deprecated and will be removed in a "
-    "future release. Use 'import traceml_ai as tml' instead.",
+    "future release. Use 'import traceml_ai as traceml' instead.",
     FutureWarning,
     stacklevel=2,
 )

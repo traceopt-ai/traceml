@@ -37,16 +37,16 @@ def train_loop_per_worker(config):
     import torch.nn as nn
     import torch.optim as optim
 
-    import traceml_ai as tml
+    import traceml_ai as traceml
 
     model = nn.Sequential(nn.Linear(32, 64), nn.ReLU(), nn.Linear(64, 4))
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 
-    tml.trace_model_instance(model)
+    traceml.trace_model_instance(model)
 
     for _ in range(config["steps"]):
-        with tml.trace_step(model):
+        with traceml.trace_step(model):
             x = torch.randn(64, 32)
             y = torch.randint(0, 4, (64,))
 
@@ -111,7 +111,7 @@ The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal
 rendering from the aggregator actor.
 
-``init_mode`` is passed to ``tml.init()`` inside each Ray worker. Use
+``init_mode`` is passed to ``traceml.init()`` inside each Ray worker. Use
 ``init_mode="manual"`` if your training loop wraps dataloader, forward,
 backward, and optimizer timing explicitly. Use ``init_mode="selective"`` with
 the ``patch_*`` options when you only want some automatic patches.

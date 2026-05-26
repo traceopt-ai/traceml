@@ -74,7 +74,7 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 `TraceMLCallback` hooks into Lightning’s training lifecycle automatically.
 
-That means you do not need to wrap your code with `tml.trace_step(...)`
+That means you do not need to wrap your code with `traceml.trace_step(...)`
 manually in Lightning.
 
 ---

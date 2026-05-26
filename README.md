@@ -32,15 +32,16 @@ TraceML gives every PyTorch training run a structured performance fingerprint: w
 
 ## How TraceML Fits
 
-TraceML fits between experiment tracking and heavyweight profiling. It gives you a first-pass diagnosis of where a training run is likely wasting time.
+TraceML is the first pass before heavyweight profiling. It tells you which
+class of bottleneck to investigate next.
 
-| Tool | Setup cost | Output | Best for | When to use |
-|---|---|---|---|---|
-| TraceML | Small training-step wrapper | Live step breakdown + `final_summary.json` | Classifying input, compute, wait, memory, and rank-skew issues | First pass on normal training jobs |
-| `torch.profiler` | Profiler schedule/context | Operator and CUDA activity traces | Finding expensive PyTorch ops/kernels | When compute/model path needs deep inspection |
-| Nsight Systems / Compute | External profiler run | CUDA timeline / kernel-level detail | Kernel scheduling, CUDA stalls, low-level GPU analysis | Deep dive on a specific GPU performance issue |
-| W&B / MLflow / TensorBoard | Metric logging/integration | Loss, accuracy, throughput, experiment history | Tracking outcomes across runs | Experiment management and dashboards |
-| `nvidia-smi` / cluster dashboards | No code changes | GPU/CPU utilization and memory | Machine-level health and capacity signals | Sanity checks and cluster monitoring |
+| Tool                              | Use it for | Output | Cost |
+|-----------------------------------|---|---|---|
+| **TraceML**                       | Classify training bottlenecks: input, compute, wait, memory, rank skew | `final_summary.json`, text summary, live views | Small code wrapper |
+| `torch.profiler`                  | Inspect expensive ops, kernels, and CUDA activity | Profiler trace | Profiler schedule/context |
+| Nsight Systems / Compute          | Debug low-level CUDA and kernel behavior | GPU timeline and kernel detail | Separate profiler run |
+| W&B / MLflow / TensorBoard        | Track experiments and metrics over time | Dashboards and metric history | Logging integration |
+| `nvidia-smi` / cluster dashboards | Check machine health and utilization | System-level metrics | No code changes |
 
 TraceML does not replace these tools. It is the cheap first pass that tells you where to look.
 
@@ -57,12 +58,12 @@ pip install traceml-ai
 Initialize TraceML and wrap your training step:
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 
-tml.init()
+traceml.init()
 
 for batch in dataloader:
-    with tml.trace_step(model):
+    with traceml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -77,7 +78,7 @@ traceml run train.py
 ```
 
 > The CLI command is `traceml`. New Python code should use
-> `import traceml_ai as tml`. The old `import traceml` path still works for
+> `import traceml_ai as traceml`. The old `import traceml` path still works for
 > now, but emits a `FutureWarning` and will be removed in a future release.
 
 TraceML writes two end-of-run artifacts:
@@ -131,7 +132,7 @@ Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
 +----------------------------------------------------------------------------+
 ```
 
-For experiment trackers, call `tml.summary()` near the end of your script
+For experiment trackers, call `traceml.summary()` near the end of your script
 to get a flat dict of diagnosis statuses and average metrics. Keep
 `final_summary.json` when you want the full run artifact or an input for
 `traceml compare`.

@@ -5,17 +5,17 @@ The stable surface that user code imports and calls. Everything in this page is 
 ## Core API
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 
-tml.init(mode="auto")
+traceml.init(mode="auto")
 
-with tml.trace_step(model):
+with traceml.trace_step(model):
     ...
 ```
 
 The old `import traceml` path still works for now, but emits a `FutureWarning`
 and will be removed in a future release. New code should use
-`import traceml_ai as tml`.
+`import traceml_ai as traceml`.
 
 ## Hugging Face integration
 
@@ -65,18 +65,18 @@ See `traceml --help` for the full set of options.
 
 ## Summary APIs
 
-### `tml.summary()`
+### `traceml.summary()`
 
 Returns a compact flat dict for experiment trackers such as W&B, MLflow, or
 internal dashboards.
 
 ```python
-summary = tml.summary(print_text=True)
+summary = traceml.summary(print_text=True)
 if summary is not None:
     wandb.log(summary)
 ```
 
-### `tml.final_summary()`
+### `traceml.final_summary()`
 
 Returns the full `final_summary.json` payload. Use this when you need the
 complete structured report or want to store the artifact for `traceml compare`.

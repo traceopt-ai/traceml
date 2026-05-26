@@ -8,7 +8,7 @@ Each training step moves a batch from CPU RAM to GPU via:
     batch_x = batch_x.to(device, non_blocking=True)
     batch_y = batch_y.to(device, non_blocking=True)
 
-Because tml.init(mode="auto") patches torch.Tensor.to(), those calls are
+Because traceml.init(mode="auto") patches torch.Tensor.to(), those calls are
 timed and stored in the SQLite DB under the event name:
     _traceml_internal:h2d_time
 
@@ -33,7 +33,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 
-import traceml_ai as tml
+import traceml_ai as traceml
 
 SEED = 42
 INPUT_DIM = 512
@@ -149,7 +149,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
-    tml.init(mode="auto")
+    traceml.init(mode="auto")
 
     # Keep data on CPU so each step does a real H2D transfer
     x = torch.randn(NUM_SAMPLES, INPUT_DIM)
@@ -176,7 +176,7 @@ def main():
         if step >= NUM_STEPS:
             break
 
-        with tml.trace_step(model):
+        with traceml.trace_step(model):
             # These .to() calls happen inside trace_step so they are timed
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
@@ -192,7 +192,7 @@ def main():
             print(f"Step {step}/{NUM_STEPS} | loss: {loss.item():.4f}")
 
     print("\nTraining done. Waiting for final summary...")
-    tml.final_summary()
+    traceml.final_summary()
 
     # Print the DB path to stderr so it appears in the terminal AFTER the TUI
     # exits (TUI captures stdout; stderr goes to the panel but the path line

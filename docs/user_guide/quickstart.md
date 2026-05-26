@@ -17,8 +17,8 @@ If you are new to TraceML, start here.
 ## What you will do
 
 1. Install TraceML
-2. Initialize TraceML with `tml.init(mode="auto")`
-3. Wrap your training step with `tml.trace_step(model)`
+2. Initialize TraceML with `traceml.init(mode="auto")`
+3. Wrap your training step with `traceml.trace_step(model)`
 4. Run `traceml run train.py`
 5. Read the diagnosis in the CLI
 6. Optionally collect a structured final summary
@@ -51,12 +51,12 @@ Three minimal paths to a first TraceML run, depending on how your training code 
     Initialize once, then wrap the training step body:
 
     ```python
-    import traceml_ai as tml
+    import traceml_ai as traceml
 
-    tml.init(mode="auto")
+    traceml.init(mode="auto")
 
     for step in range(num_steps):
-        with tml.trace_step(model):
+        with traceml.trace_step(model):
             optimizer.zero_grad(set_to_none=True)
             loss = criterion(model(x), y)
             loss.backward()
@@ -204,7 +204,7 @@ pip install "traceml-ai[torch]"
 Save this as `train.py`.
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -227,7 +227,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running on: {device}")
 
-    tml.init(mode="auto")
+    traceml.init(mode="auto")
 
     model = MyModel().to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
@@ -235,7 +235,7 @@ def main():
 
     model.train()
     for step in range(200):
-        with tml.trace_step(model):
+        with traceml.trace_step(model):
             inputs = torch.randn(64, 128, device=device)
             labels = torch.randint(0, 10, (64,), device=device)
 
@@ -258,18 +258,18 @@ if __name__ == "__main__":
 In a normal PyTorch loop, the preferred minimal setup is:
 
 ```python
-tml.init(mode="auto")
+traceml.init(mode="auto")
 
-with tml.trace_step(model):
+with traceml.trace_step(model):
     ...
 ```
 
-Call `tml.init(mode="auto")` once near the start of the script, then wrap
+Call `traceml.init(mode="auto")` once near the start of the script, then wrap
 the full training step body from `zero_grad(...)` through `optimizer.step()`.
 
 The old `import traceml` path still works for now, but emits a `FutureWarning`
 and will be removed in a future release. New code should use
-`import traceml_ai as tml`.
+`import traceml_ai as traceml`.
 
 If you need explicit wrappers or partial auto-instrumentation, use
 `mode="manual"` or `mode="selective"`. Keep that as a second step after you
@@ -378,10 +378,10 @@ launch with:
 traceml run train.py --mode=summary
 ```
 
-Then call `tml.summary()` near the end of your script:
+Then call `traceml.summary()` near the end of your script:
 
 ```python
-summary = tml.summary(print_text=True)
+summary = traceml.summary(print_text=True)
 if summary is not None:
     print(summary["traceml/step_time/status"])
 ```
@@ -398,7 +398,7 @@ TraceML also writes canonical end-of-run summary artifacts, including:
 `final_summary.json` is the canonical machine-readable TraceML summary artifact
 and the intended input for downstream logging and run comparison.
 
-Use `tml.final_summary()` if you need the full structured JSON payload
+Use `traceml.final_summary()` if you need the full structured JSON payload
 instead of the compact tracker dict.
 
 For long runs, use `--summary-window-rows N` to control how much recent
@@ -493,14 +493,14 @@ TraceML supports single-node multi-GPU DDP and multi-node DDP summary reports.
 For multi-node jobs, use summary mode for the final distributed report. Live
 CLI and dashboard views are currently intended for single-node runs.
 
-Keep `tml.trace_step(...)` inside the training loop.
+Keep `traceml.trace_step(...)` inside the training loop.
 
 ### Minimal DDP example
 
 ```python
 import os
 
-import traceml_ai as tml
+import traceml_ai as traceml
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -550,7 +550,7 @@ def main():
 
     model.train()
     for step in range(200):
-        with tml.trace_step(model.module):
+        with traceml.trace_step(model.module):
             inputs = torch.randn(64, 128, device=device)
             labels = torch.randint(0, 10, (64,), device=device)
 

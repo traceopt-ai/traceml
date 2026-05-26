@@ -3,13 +3,13 @@ Core training instrumentation helpers used by TraceML.
 
 This module contains the actual tracing context managers and hook attachment
 logic. It intentionally has no import-time side effects. Patch installation is
-owned by `tml.init(...)` and the legacy decorator compatibility layer.
+owned by `traceml.init(...)` and the legacy decorator compatibility layer.
 
 New path
 --------
-- `import traceml_ai as tml`
-- `tml.init(...)`
-- `tml.trace_step(...)`
+- `import traceml_ai as traceml`
+- `traceml.init(...)`
+- `traceml.trace_step(...)`
 
 Legacy compatibility path
 -------------------------
