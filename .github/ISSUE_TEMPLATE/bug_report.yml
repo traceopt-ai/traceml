@@ -22,7 +22,7 @@ body:
     id: traceml-version
     attributes:
       label: TraceML version
-      description: Run `python -c "import traceml; print(traceml.__version__)"` if you are not sure.
+      description: Run `python -c "import traceml_ai; print(traceml_ai.__version__)"` if you are not sure.
       placeholder: "Example: 0.2.15"
     validations:
       required: true
