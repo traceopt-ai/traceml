@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from traceml.runtime import lifecycle
-from traceml.runtime.settings import AggregatorEndpoint, TraceMLSettings
+from traceml_ai.runtime import lifecycle
+from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 
 
 @dataclass

@@ -6,28 +6,28 @@
 
 from __future__ import annotations
 
-from traceml.diagnostics.step_time.api import (
+from traceml_ai.diagnostics.step_time.api import (
     DEFAULT_THRESHOLDS,
     build_step_diagnosis_result,
 )
-from traceml.diagnostics.step_time.adapters import (
+from traceml_ai.diagnostics.step_time.adapters import (
     DEFAULT_SUMMARY_DIAG_CONFIG,
     RankStepSignals,
     build_summary_step_diagnosis_result,
 )
-from traceml.diagnostics.step_time.context import build_step_time_context
-from traceml.diagnostics.step_time.policy import (
+from traceml_ai.diagnostics.step_time.context import build_step_time_context
+from traceml_ai.diagnostics.step_time.policy import (
     LIVE_STEP_TIME_POLICY,
     SUMMARY_STEP_TIME_POLICY,
 )
-from traceml.diagnostics.step_time.rules import (
+from traceml_ai.diagnostics.step_time.rules import (
     ComputeBoundRule,
     ComputeStragglerRule,
     InputBoundRule,
     InputStragglerRule,
     WaitHeavyRule,
 )
-from traceml.renderers.step_time.schema import (
+from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
     StepCombinedTimeMetric,
     StepCombinedTimeSeries,

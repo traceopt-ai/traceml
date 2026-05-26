@@ -5,6 +5,7 @@
 **Runtime bottleneck detection for PyTorch training jobs.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
+[![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
@@ -55,12 +56,12 @@ pip install traceml-ai
 Initialize TraceML and wrap your training step:
 
 ```python
-import traceml
+import traceml_ai as tml
 
-traceml.init()
+tml.init()
 
 for batch in dataloader:
-    with traceml.trace_step(model):
+    with tml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -68,17 +69,21 @@ for batch in dataloader:
         optimizer.step()
 ```
 
-Run your script with TraceML:
+Run your script with the `traceml` CLI:
 
 ```bash
 traceml run train.py
 ```
 
+> The CLI command is `traceml`. New Python code should use
+> `import traceml_ai as tml`. The old `import traceml` path still works for
+> now, but emits a `FutureWarning` and will be removed in a future release.
+
 TraceML writes two end-of-run artifacts:
 
 ```text
-logs/<session_id>/final_summary.json
-logs/<session_id>/final_summary.txt
+logs/<run_name>/final_summary.json
+logs/<run_name>/final_summary.txt
 ```
 
 ## Example Output
@@ -125,7 +130,10 @@ Example from a 4-rank DDP run configured as 2 nodes x 2 GPUs:
 +----------------------------------------------------------------------------+
 ```
 
-The `final_summary.json` is machine-readable and designed for logging to W&B or MLflow, storing as a run artifact, or comparing against another run.
+For experiment trackers, call `tml.summary()` near the end of your script
+to get a flat dict of diagnosis statuses and average metrics. Keep
+`final_summary.json` when you want the full run artifact or an input for
+`traceml compare`.
 
 ---
 
@@ -189,6 +197,11 @@ All modes write `final_summary.json` and `final_summary.txt` at the end of the r
 | `--mode=dashboard` | Live browser display | single-node, including multi-GPU |
 
 Summary mode is the default and works across all topologies. Use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node job.
+Dashboard mode requires the optional dashboard extra:
+
+```bash
+pip install "traceml-ai[dashboard]"
+```
 
 Multi-node live views are on the roadmap.
 
@@ -216,7 +229,7 @@ traceml run train.py \
   --node-rank=0 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
 On node 1:
@@ -227,16 +240,19 @@ traceml run train.py \
   --node-rank=1 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
-Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and
+Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
 `--master-addr` on every node. Node 0 starts the TraceML aggregator. Other
 nodes connect to `<node0-ip>:29765` by default. If workers need a different
 reachable address or port for TraceML telemetry, add
 `--aggregator-host=<host>` or `--aggregator-port=<port>` on every node. For
 multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default; override
 that only when needed with `--aggregator-bind-host=<bind-host>`.
+
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 ### Watch mode (no code changes)
 

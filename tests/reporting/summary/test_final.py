@@ -6,8 +6,8 @@
 
 from dataclasses import dataclass
 
-from traceml.core.summaries import SummaryResult
-from traceml.reporting.final import (
+from traceml_ai.core.summaries import SummaryResult
+from traceml_ai.reporting.final import (
     FinalReportGenerator,
     build_summary_payload,
 )
@@ -94,7 +94,7 @@ def test_final_report_generator_fails_open_for_one_section():
 
 
 def test_reporting_final_is_the_summary_orchestration_owner():
-    import traceml.reporting.final as reporting_final
+    import traceml_ai.reporting.final as reporting_final
 
     assert reporting_final.generate_summary is not None
     assert reporting_final.build_summary_payload is build_summary_payload

@@ -31,15 +31,15 @@ TraceML has two runtime pieces:
 
 CLI launchers may run these pieces as subprocesses. Framework integrations may
 run them inside Ray actors or worker processes. Both paths should use
-`traceml.runtime.lifecycle` so startup and shutdown stay consistent.
+`traceml_ai.runtime.lifecycle` so startup and shutdown stay consistent.
 
 The owner that starts a component must stop it. Use `try/finally` around
 training work, and make stop paths safe to call more than once.
 
 ## Ray Integration
 
-Ray support lives in `traceml.integrations.ray` and should stay separate from
-the core runtime. Do not import Ray from `traceml.runtime`, `traceml.aggregator`,
+Ray support lives in `traceml_ai.integrations.ray` and should stay separate from
+the core runtime. Do not import Ray from `traceml_ai.runtime`, `traceml_ai.aggregator`,
 or the top-level `traceml` package.
 
 The integration has two owners:
@@ -165,7 +165,7 @@ object or formatter when the logic is reusable or non-trivial.
 
 TraceML should not break user training because optional telemetry, rendering,
 or reporting failed. Existing code logs advisory failures through
-`traceml.loggers.error_log.get_error_logger`.
+`traceml_ai.loggers.error_log.get_error_logger`.
 
 Use that pattern for non-critical paths:
 

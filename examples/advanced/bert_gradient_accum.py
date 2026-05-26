@@ -13,7 +13,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-import traceml
+import traceml_ai as tml
 
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
@@ -87,7 +87,7 @@ def main():
     use_amp = torch.cuda.is_available()
     dtype = torch.float16 if use_amp else torch.float32
 
-    traceml.init(mode="auto")
+    tml.init(mode="auto")
 
     tokenizer, train_loader, _ = prepare_data()
 
@@ -136,7 +136,7 @@ def main():
             optimizer.zero_grad(set_to_none=True)
 
             # ONE TraceML step == GRAD_ACC_STEPS micro-steps + optimizer step
-            with traceml.trace_step(model):
+            with tml.trace_step(model):
                 last_logits = None
                 last_labels = None
                 total_step_loss = 0.0
@@ -144,7 +144,11 @@ def main():
                 for mb in micro_batches:
                     mb = load_batch_to_device(mb, device)
 
-                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=dtype):
+                    with torch.amp.autocast(
+                        device_type="cuda" if use_amp else "cpu",
+                        enabled=use_amp,
+                        dtype=dtype,
+                    ):
                         out = model(**mb)
                         # scale loss down so accumulated grad matches non-accum
                         loss = out.loss / GRAD_ACC_STEPS

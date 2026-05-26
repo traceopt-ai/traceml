@@ -1,11 +1,11 @@
 import pytest
 
-from traceml.runtime.state import (
+from traceml_ai.runtime.state import (
     TraceSessionState,
     get_trace_session_state,
     reset_trace_session_state,
 )
-from traceml.sdk.instrumentation import TraceState
+from traceml_ai.sdk.instrumentation import TraceState
 
 
 def test_trace_session_state_tracks_step_with_explicit_methods():
@@ -50,7 +50,7 @@ def test_trace_state_facade_uses_runtime_session_state():
 
 
 def test_decorators_import_path_shares_trace_state():
-    import traceml.decorators as decorators
+    import traceml_ai.decorators as decorators
 
     TraceState.reset()
     decorators.TraceState.step += 2

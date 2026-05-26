@@ -1,4 +1,4 @@
-from traceml.analytics.trends import (
+from traceml_ai.analytics.trends import (
     TrendComputationConfig,
     compute_trend_evidence,
     compute_trend_pct,

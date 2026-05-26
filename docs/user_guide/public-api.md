@@ -2,35 +2,43 @@
 
 The stable surface that user code imports and calls. Everything in this page is covered by TraceML's compatibility contract across v0.x minor releases.
 
-## Decorators
+## Core API
 
-::: traceml.decorators.trace_step
-    options:
-      show_root_heading: true
-      show_source: true
+```python
+import traceml_ai as tml
+
+tml.init(mode="auto")
+
+with tml.trace_step(model):
+    ...
+```
+
+The old `import traceml` path still works for now, but emits a `FutureWarning`
+and will be removed in a future release. New code should use
+`import traceml_ai as tml`.
 
 ## Hugging Face integration
 
-::: traceml.integrations.huggingface.TraceMLTrainer
+::: traceml_ai.integrations.huggingface.TraceMLTrainer
     options:
       show_root_heading: true
       show_source: true
 
 ## PyTorch Lightning integration
 
-::: traceml.integrations.lightning.TraceMLCallback
+::: traceml_ai.integrations.lightning.TraceMLCallback
     options:
       show_root_heading: true
       show_source: true
 
 ## Ray Train integration
 
-::: traceml.integrations.ray.TraceMLTorchTrainer
+::: traceml_ai.integrations.ray.TraceMLTorchTrainer
     options:
       show_root_heading: true
       show_source: true
 
-::: traceml.integrations.ray.TraceMLRayConfig
+::: traceml_ai.integrations.ray.TraceMLRayConfig
     options:
       show_root_heading: true
       show_source: true
@@ -48,7 +56,27 @@ traceml watch <script>               # zero-code system/process view
 
 Live `cli` and `dashboard` modes are intended for single-node runs. For
 multi-node runs, use the default summary mode.
+Dashboard mode requires the optional dashboard extra:
+`pip install "traceml-ai[dashboard]"`.
 
 Deep/layer profiling has been removed from the public CLI for now.
 
 See `traceml --help` for the full set of options.
+
+## Summary APIs
+
+### `tml.summary()`
+
+Returns a compact flat dict for experiment trackers such as W&B, MLflow, or
+internal dashboards.
+
+```python
+summary = tml.summary(print_text=True)
+if summary is not None:
+    wandb.log(summary)
+```
+
+### `tml.final_summary()`
+
+Returns the full `final_summary.json` payload. Use this when you need the
+complete structured report or want to store the artifact for `traceml compare`.

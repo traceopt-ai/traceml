@@ -35,7 +35,7 @@ pip install torchvision
 Replace `Trainer` with `TraceMLTrainer`. Everything else stays the same.
 
 ```python
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations.huggingface import TraceMLTrainer
 from transformers import TrainingArguments
 
 training_args = TrainingArguments(
@@ -66,6 +66,7 @@ traceml run fine_tune.py
 Or open the local UI:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run fine_tune.py --mode=dashboard
 ```
 
@@ -92,7 +93,7 @@ You keep the normal Hugging Face workflow. TraceML adds diagnosis around the tra
 
 `TraceMLTrainer` subclasses `transformers.Trainer` and wraps the training step automatically.
 
-That means you do not need to add `traceml.trace_step(...)` manually in your
+That means you do not need to add `tml.trace_step(...)` manually in your
 Hugging Face training loop.
 
 If `traceml_enabled=False`, it behaves like a normal `Trainer`.
@@ -130,7 +131,7 @@ For a single-node run, launch with:
 traceml run fine_tune.py --nproc-per-node=4
 ```
 
-For a multi-node summary run, use the same `--session-id`, `--nnodes`,
+For a multi-node summary run, use the same `--run-name`, `--nnodes`,
 `--nproc-per-node`, and `--master-addr` on every node, changing only
 `--node-rank`:
 
@@ -140,10 +141,12 @@ traceml run fine_tune.py \
   --node-rank=0 \
   --nproc-per-node=4 \
   --master-addr=<node0-ip> \
-  --session-id=my-run
+  --run-name=my-run
 ```
 
 Run the same command on each node, changing only `--node-rank`.
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 TraceML can help surface:
 
@@ -172,7 +175,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations.huggingface import TraceMLTrainer
 
 
 def main():
@@ -252,7 +255,7 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations.huggingface import TraceMLTrainer
 
 
 def main():
@@ -358,6 +361,7 @@ That is fine. TraceML is designed to work alongside them.
 If terminal output gets noisy, use:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run fine_tune.py --mode=dashboard
 ```
 

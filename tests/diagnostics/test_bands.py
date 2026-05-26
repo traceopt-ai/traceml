@@ -1,4 +1,4 @@
-from traceml.diagnostics.bands import BandThresholds, format_band_value
+from traceml_ai.diagnostics.bands import BandThresholds, format_band_value
 
 
 def test_band_thresholds_classify_low_normal_high_and_very_high() -> None:

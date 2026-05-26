@@ -1,9 +1,9 @@
 from rich.console import Console
 from rich.panel import Panel
 
-from traceml.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
-from traceml.renderers.step_memory.formatter import StepMemoryRichFormatter
-from traceml.renderers.step_memory.schema import (
+from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
+from traceml_ai.renderers.step_memory.formatter import StepMemoryRichFormatter
+from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedResult,
@@ -77,7 +77,7 @@ def test_step_memory_formatter_renders_empty_state() -> None:
 
 
 def test_step_memory_formatter_uses_live_policy(monkeypatch) -> None:
-    import traceml.renderers.step_memory.formatter as formatter_module
+    import traceml_ai.renderers.step_memory.formatter as formatter_module
 
     captured = {}
 

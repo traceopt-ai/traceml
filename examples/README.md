@@ -12,7 +12,8 @@ These are the main user-facing examples.
 
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
-| `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.final_summary()` | CPU / CUDA | Best first example |
+| `pytorch_minimal.py` | Minimal plain PyTorch loop with `tml.init(mode="auto")`, `tml.trace_step(...)`, and `tml.final_summary()` | CPU / CUDA | Best first example |
+| `summary_logging_minimal.py` | Minimal tracker-friendly `tml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
@@ -87,22 +88,23 @@ traceml compare run_a.json run_b.json
 
 Starter examples now prefer the top-level public API:
 
-- `traceml.init(mode="auto")`
-- `traceml.trace_step(...)`
-- `traceml.trace_model_instance(...)`
-- `traceml.final_summary()`
+- `tml.init(mode="auto")`
+- `tml.trace_step(...)`
+- `tml.trace_model_instance(...)`
+- `tml.summary()`
+- `tml.final_summary()`
 
 For explicit manual instrumentation, see:
 
-- `traceml.init(mode="manual")`
-- `traceml.wrap_dataloader_fetch(...)`
-- `traceml.wrap_forward(...)`
-- `traceml.wrap_backward(...)`
-- `traceml.wrap_optimizer(...)`
+- `tml.init(mode="manual")`
+- `tml.wrap_dataloader_fetch(...)`
+- `tml.wrap_forward(...)`
+- `tml.wrap_backward(...)`
+- `tml.wrap_optimizer(...)`
 
-Legacy imports from `traceml.decorators` still work for backward
-compatibility, but new examples use the top-level `traceml.*` API. Legacy
-decorator imports are planned for deprecation starting in `v0.3.0`.
+The old decorator import path still works for backward compatibility, but it
+is deprecated and will be removed in a future version. New examples use the
+top-level `tml.*` API from `import traceml_ai as tml`.
 
 ---
 

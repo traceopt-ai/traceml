@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from traceml.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations.lightning import TraceMLCallback
 
 SEED = 42
 INPUT_DIM = 128

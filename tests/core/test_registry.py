@@ -1,6 +1,6 @@
 import pytest
 
-from traceml.core import Registry
+from traceml_ai.core import Registry
 
 
 def test_registry_registers_and_fetches_items() -> None:

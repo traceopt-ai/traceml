@@ -6,12 +6,12 @@
 
 import sqlite3
 
-from traceml.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
-from traceml.reporting.sections.step_memory import StepMemorySummarySection
-from traceml.reporting.sections.step_memory.loader import (
+from traceml_ai.diagnostics.step_memory import SUMMARY_STEP_MEMORY_POLICY
+from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
+from traceml_ai.reporting.sections.step_memory.loader import (
     load_step_memory_section_data,
 )
-from traceml.reporting.summaries.step_memory import (
+from traceml_ai.reporting.summaries.step_memory import (
     generate_step_memory_summary_card,
 )
 

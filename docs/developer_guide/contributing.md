@@ -84,7 +84,8 @@ If a code change affects user-facing behavior, update the relevant doc in the sa
 Use `autorefs` to link to API symbols in prose:
 
 ```markdown
-See [`trace_step`][traceml.decorators.trace_step] for the context manager.
+Use `import traceml_ai as tml` and link to the public API guide for user-facing
+instrumentation examples.
 ```
 
 ## PR checklist

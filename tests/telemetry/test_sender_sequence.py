@@ -19,9 +19,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from traceml.database.database import Database
-from traceml.runtime.sender import SenderIdentity
-from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
+from traceml_ai.database.database import Database
+from traceml_ai.runtime.sender import SenderIdentity
+from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 # Database.get_append_count() tests
 
@@ -75,7 +75,7 @@ class TestDBIncrementalSender:
     """Verify the sender's seq-counter flush logic."""
 
     def _make_sender(self, db, max_rows_per_flush=-1):
-        from traceml.database.database_sender import DBIncrementalSender
+        from traceml_ai.database.database_sender import DBIncrementalSender
 
         mock_transport = MagicMock()
         sender = DBIncrementalSender(
@@ -229,7 +229,7 @@ class TestDatabaseWriter:
         """Writer only writes new rows on subsequent flushes."""
         db = Database(sampler_name="test")
 
-        with patch("traceml.database.database_writer.config") as mock_cfg:
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
             mock_cfg.enable_logging = True
             mock_cfg.logs_dir = str(tmp_path)
 
@@ -259,7 +259,7 @@ class TestDatabaseWriter:
         """No disk I/O when nothing is new."""
         db = Database(sampler_name="test")
 
-        with patch("traceml.database.database_writer.config") as mock_cfg:
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
             mock_cfg.enable_logging = True
 
             writer = db.writer
@@ -281,7 +281,7 @@ class TestDatabaseWriter:
         """Writer handles eviction gracefully, writing available rows."""
         db = Database(sampler_name="test", max_rows=3)
 
-        with patch("traceml.database.database_writer.config") as mock_cfg:
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
             mock_cfg.enable_logging = True
 
             writer = db.writer

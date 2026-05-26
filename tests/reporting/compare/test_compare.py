@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import Optional
 
-from traceml.reporting.compare import build_compare_payload
-from traceml.reporting.compare import build_compare_text
-from traceml.reporting.compare.formatters import CompareTextFormatter
+from traceml_ai.reporting.compare import build_compare_payload
+from traceml_ai.reporting.compare import build_compare_text
+from traceml_ai.reporting.compare.formatters import CompareTextFormatter
 
 BYTES_PER_GB = 1024.0**3
 

@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-import traceml
+import traceml_ai as tml
 
 SEED = 42
 INPUT_DIM = 128
@@ -71,7 +71,7 @@ def main() -> None:
     print(f"Running on: {device}")
 
     # Manual mode disables the default automatic patching path.
-    traceml.init(mode="manual")
+    tml.init(mode="manual")
 
     batch_source = CustomBatchSource(
         steps=STEPS,
@@ -82,20 +82,20 @@ def main() -> None:
     )
 
     # Manual wrappers are the explicit instrumentation path.
-    batch_source = traceml.wrap_dataloader_fetch(batch_source)
+    batch_source = tml.wrap_dataloader_fetch(batch_source)
 
     model = TinyMLP().to(device)
-    model = traceml.wrap_forward(model)
+    model = tml.wrap_forward(model)
 
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
-    optimizer = traceml.wrap_optimizer(optimizer)
+    optimizer = tml.wrap_optimizer(optimizer)
 
     criterion = nn.CrossEntropyLoss()
     model.train()
 
     for step, (batch_x, batch_y) in enumerate(batch_source, start=1):
 
-        with traceml.trace_step(model):
+        with tml.trace_step(model):
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
@@ -104,7 +104,7 @@ def main() -> None:
             loss = criterion(logits, batch_y)
 
             # Backward timing is wrapped explicitly in manual mode.
-            traceml.wrap_backward(loss).backward()
+            tml.wrap_backward(loss).backward()
             optimizer.step()
 
         if step % 50 == 0:
@@ -114,7 +114,7 @@ def main() -> None:
 
     print("Done.")
 
-    summary = traceml.final_summary(print_text=True)
+    summary = tml.final_summary(print_text=True)
     print(summary is not None)
 
 

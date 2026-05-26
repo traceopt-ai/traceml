@@ -1,14 +1,14 @@
 import importlib
 import sys
 
-from traceml.integrations.ray import (
+from traceml_ai.integrations.ray import (
     TraceMLRayConfig,
     _build_aggregator_settings,
     _build_worker_settings,
     _endpoint_from_mapping,
     _normalize_config,
 )
-from traceml.runtime.settings import AggregatorEndpoint
+from traceml_ai.runtime.settings import AggregatorEndpoint
 
 
 def test_ray_integration_module_import_is_lazy():
@@ -18,10 +18,10 @@ def test_ray_integration_module_import_is_lazy():
     Ray is an optional dependency, so users without Ray installed must still be
     able to import the rest of TraceML and inspect integration modules.
     """
-    sys.modules.pop("traceml.integrations.ray", None)
+    sys.modules.pop("traceml_ai.integrations.ray", None)
     sys.modules.pop("ray", None)
 
-    importlib.import_module("traceml.integrations.ray")
+    importlib.import_module("traceml_ai.integrations.ray")
 
     assert "ray" not in sys.modules
 

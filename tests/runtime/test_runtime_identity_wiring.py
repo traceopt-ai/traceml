@@ -4,9 +4,9 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-from traceml.runtime.runtime import TraceMLRuntime
-from traceml.runtime.sender import SenderIdentity
-from traceml.runtime.settings import TraceMLSettings
+from traceml_ai.runtime.runtime import TraceMLRuntime
+from traceml_ai.runtime.sender import SenderIdentity
+from traceml_ai.runtime.settings import TraceMLSettings
 
 
 class _FakeLogger:
@@ -67,20 +67,20 @@ def test_runtime_uses_local_rank_for_samplers_and_global_rank_for_publisher(
     monkeypatch.setenv("LOCAL_WORLD_SIZE", "4")
     monkeypatch.setenv("GROUP_RANK", "1")
     monkeypatch.setattr(
-        "traceml.runtime.runtime.setup_error_logger",
+        "traceml_ai.runtime.runtime.setup_error_logger",
         lambda: None,
     )
     monkeypatch.setattr(
-        "traceml.runtime.runtime.get_error_logger",
+        "traceml_ai.runtime.runtime.get_error_logger",
         lambda _name: _FakeLogger(),
     )
     monkeypatch.setattr(
-        "traceml.runtime.runtime.build_samplers",
+        "traceml_ai.runtime.runtime.build_samplers",
         _fake_build_samplers,
     )
-    monkeypatch.setattr("traceml.runtime.runtime.TCPClient", _FakeTCPClient)
+    monkeypatch.setattr("traceml_ai.runtime.runtime.TCPClient", _FakeTCPClient)
     monkeypatch.setattr(
-        "traceml.runtime.runtime.TelemetryPublisher",
+        "traceml_ai.runtime.runtime.TelemetryPublisher",
         _FakePublisher,
     )
 

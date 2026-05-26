@@ -24,7 +24,7 @@ Add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the sam
 
 ```python
 import lightning as L
-from traceml.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations.lightning import TraceMLCallback
 
 model = MyLightningModule()
 
@@ -74,7 +74,7 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 `TraceMLCallback` hooks into Lightning’s training lifecycle automatically.
 
-That means you do not need to wrap your code with `traceml.trace_step(...)`
+That means you do not need to wrap your code with `tml.trace_step(...)`
 manually in Lightning.
 
 ---
@@ -102,6 +102,7 @@ You do not need to replace your existing logger stack to use TraceML.
 If you want a richer browser-based view, run:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
@@ -137,7 +138,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from traceml.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations.lightning import TraceMLCallback
 
 SEED = 42
 INPUT_DIM = 128
@@ -251,6 +252,7 @@ That is fine. TraceML is designed to work alongside them.
 If terminal output gets noisy, use:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 

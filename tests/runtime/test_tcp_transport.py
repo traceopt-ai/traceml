@@ -1,4 +1,4 @@
-from traceml.transport.tcp_transport import TCPConfig, TCPServer
+from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 
 
 class _FakeSocket:
@@ -29,7 +29,7 @@ class _FakeSocket:
 def test_tcp_server_exposes_actual_port_for_dynamic_bind(monkeypatch) -> None:
     fake = _FakeSocket()
     monkeypatch.setattr(
-        "traceml.transport.tcp_transport.socket.socket",
+        "traceml_ai.transport.tcp_transport.socket.socket",
         lambda *_args, **_kwargs: fake,
     )
 

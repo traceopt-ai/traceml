@@ -30,7 +30,7 @@ sys.modules.setdefault(
     ),
 )
 
-from traceml.runtime.executor import run_user_script
+from traceml_ai.runtime.executor import run_user_script
 
 
 def test_run_user_script_adds_script_dir_to_sys_path(tmp_path, monkeypatch):
