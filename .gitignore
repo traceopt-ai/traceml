@@ -41,6 +41,22 @@ htmlcov/
 # Local training outputs / generated telemetry
 
 logs/
+compare/
+
+
+# Local ML datasets, checkpoints, model weights, and export archives
+
+data/
+mnist/
+checkpoints/
+*_agnews_ddp/
+*_agnews_full/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.zip
 
 
 # IDE / Editor
