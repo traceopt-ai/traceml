@@ -1,38 +1,27 @@
-# Hugging Face Trainer
+# Hugging Face Trainer Integration
 
-Use TraceML with Hugging Face `Trainer` to find training bottlenecks without rewriting your training loop.
+Use TraceML with Hugging Face `Trainer` without rewriting your training loop.
 
-`TraceMLTrainer` is a drop-in replacement for `transformers.Trainer`. It adds step-aware diagnosis so you can quickly tell whether a run is input-bound, compute-bound, straggler-heavy, or showing memory drift.
+`TraceMLTrainer` is a drop-in replacement for `transformers.Trainer`. It wraps
+the training step automatically and writes the same TraceML
+`final_summary.json` and `final_summary.txt` artifacts.
 
-> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
-
----
-
-## Install
-
-Install TraceML with Hugging Face support:
+## 1. Install
 
 ```bash
 pip install "traceml-ai[hf]"
 ```
 
-If your example uses datasets:
+If you are running the full examples below, install their optional dependencies:
 
 ```bash
-pip install datasets
+pip install datasets torchvision
 ```
 
-For vision examples:
+## 2. Replace `Trainer` With `TraceMLTrainer`
 
-```bash
-pip install torchvision
-```
-
----
-
-## Basic usage
-
-Replace `Trainer` with `TraceMLTrainer`. Everything else stays the same.
+Change the import and instantiate `TraceMLTrainer` instead of
+`transformers.Trainer`:
 
 ```python
 from traceml_ai.integrations.huggingface import TraceMLTrainer
@@ -40,8 +29,6 @@ from transformers import TrainingArguments
 
 training_args = TrainingArguments(
     output_dir="./output",
-    per_device_train_batch_size=32,
-    num_train_epochs=3,
     report_to="none",
     disable_tqdm=True,
 )
@@ -57,110 +44,81 @@ trainer = TraceMLTrainer(
 trainer.train()
 ```
 
-Run with:
+You do not need to add `traceml.trace_step(...)` manually. If
+`traceml_enabled=False`, `TraceMLTrainer` behaves like a normal
+`transformers.Trainer`.
+
+## 3. Launch The Run
+
+Single GPU:
 
 ```bash
 traceml run fine_tune.py
 ```
 
-Or open the local UI:
+Single-node multi-GPU DDP:
+
+```bash
+traceml run fine_tune.py --nproc-per-node=4
+```
+
+For multi-node DDP launch commands, see
+[Distributed Training](../distributed-training.md).
+
+## Recommended `TrainingArguments`
+
+These settings are optional, but they make local TraceML diagnostic runs easier
+to read:
+
+| Setting | Why it helps |
+|---|---|
+| `disable_tqdm=True` | Prevents the Hugging Face progress bar from fighting with the TraceML live CLI. |
+| `report_to="none"` | Keeps tracker output out of the terminal during local diagnosis. |
+| `save_strategy="no"` | Avoids checkpoint files during short diagnostic runs. |
+
+TraceML can still run alongside W&B, MLflow, and TensorBoard. For tracker
+logging patterns, see [W&B / MLflow](wandb-mlflow.md).
+
+## Troubleshooting
+
+### Terminal output overlaps with TraceML
+
+Set `disable_tqdm=True` in `TrainingArguments`.
+
+If output is still noisy, use browser dashboard mode on single-node runs:
 
 ```bash
 pip install "traceml-ai[dashboard]"
 traceml run fine_tune.py --mode=dashboard
 ```
 
-Dashboard mode is intended for single-node runs, including single-node
-multi-GPU.
+### Multi-GPU run only shows one rank
 
----
-
-## What TraceML will show
-
-In Hugging Face runs, TraceML helps you spot:
-
-- input-bound training
-- compute-bound steps
-- DDP rank stragglers
-- wait-heavy behavior
-- memory creep over time
-
-You keep the normal Hugging Face workflow. TraceML adds diagnosis around the training step.
-
----
-
-## How it works
-
-`TraceMLTrainer` subclasses `transformers.Trainer` and wraps the training step automatically.
-
-That means you do not need to add `traceml.trace_step(...)` manually in your
-Hugging Face training loop.
-
-If `traceml_enabled=False`, it behaves like a normal `Trainer`.
-
----
-
-## Use with your existing tracking stack
-
-TraceML is designed to work alongside tools like W&B, MLflow, and TensorBoard.
-
-A common setup is:
-
-- Hugging Face Trainer for training
-- W&B / TensorBoard for experiment tracking
-- TraceML for bottleneck diagnosis
-
-For the cleanest terminal experience, you can set:
-
-```python
-report_to="none"
-disable_tqdm=True
-```
-
-This is optional. TraceML does not require you to replace your existing logger stack.
-
----
-
-## Multi-GPU DDP
-
-`TraceMLTrainer` inherits DDP support from Hugging Face `Trainer`.
-
-For a single-node run, launch with:
+Make sure you launched through TraceML with `--nproc-per-node`, not plain
+`python`:
 
 ```bash
 traceml run fine_tune.py --nproc-per-node=4
 ```
 
-For a multi-node summary run, use the same `--run-name`, `--nnodes`,
-`--nproc-per-node`, and `--master-addr` on every node, changing only
-`--node-rank`:
+### I want a baseline without TraceML
+
+Run the same script with TraceML disabled:
 
 ```bash
-traceml run fine_tune.py \
-  --nnodes=2 \
-  --node-rank=0 \
-  --nproc-per-node=4 \
-  --master-addr=<node0-ip> \
-  --run-name=my-run
+traceml run fine_tune.py --disable-traceml
 ```
 
-Run the same command on each node, changing only `--node-rank`.
-`--session-id` remains accepted as a backward-compatible alias for
-`--run-name`.
+This launches your script natively through `torchrun` without TraceML telemetry.
 
-TraceML can help surface:
+## Full Examples
 
-- rank imbalance
-- input stragglers
-- compute stragglers
-- memory skew
+Use these examples when you want a complete runnable script. If you already
+have a Hugging Face training script, start with the smaller replacement pattern
+above.
 
-> Multi-node runs currently produce end-of-run summary reports. Live CLI and
-> dashboard views are intended for single-node runs.
-
----
-
-## Full NLP example
+<details>
+<summary>NLP classification example</summary>
 
 Save as `fine_tune_nlp.py`:
 
@@ -184,8 +142,6 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForSequenceClassification.from_pretrained(
         model_name,
@@ -223,7 +179,6 @@ def main():
     )
 
     trainer.train()
-    print("Done.")
 
 
 if __name__ == "__main__":
@@ -236,9 +191,10 @@ Run with:
 traceml run fine_tune_nlp.py
 ```
 
----
+</details>
 
-## Full vision example
+<details>
+<summary>Vision classification example</summary>
 
 Save as `fine_tune_vision.py`:
 
@@ -264,8 +220,6 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-
     image_processor = AutoImageProcessor.from_pretrained(model_name)
     model = AutoModelForImageClassification.from_pretrained(
         model_name,
@@ -273,7 +227,6 @@ def main():
     ).to(device)
 
     dataset = load_dataset("cifar10", split="train[:2000]")
-
     transform = Compose(
         [
             RandomResizedCrop(
@@ -315,7 +268,6 @@ def main():
     )
 
     trainer.train()
-    print("Done.")
 
 
 if __name__ == "__main__":
@@ -328,65 +280,7 @@ Run with:
 traceml run fine_tune_vision.py
 ```
 
----
-
-## Recommended `TrainingArguments` settings
-
-These settings make the terminal output cleaner when using TraceML:
-
-| Setting | Recommended value | Why |
-|---|---|---|
-| `disable_tqdm=True` | Yes | Prevents tqdm from fighting with the TraceML CLI |
-| `report_to="none"` | Optional | Keeps W&B / TensorBoard output out of the terminal for local diagnosis |
-| `save_strategy="no"` | Optional | Useful for short local diagnostic runs |
-
----
-
-## Troubleshooting
-
-### Terminal output overlaps with TraceML
-
-Set:
-
-```python
-disable_tqdm=True
-```
-
-This gives the TraceML CLI cleaner terminal control.
-
-### I still want W&B or TensorBoard
-
-That is fine. TraceML is designed to work alongside them.
-
-If terminal output gets noisy, use:
-
-```bash
-pip install "traceml-ai[dashboard]"
-traceml run fine_tune.py --mode=dashboard
-```
-
-Dashboard mode is intended for single-node runs. For multi-node runs, use the
-default final summary path.
-
-### Multi-GPU run only shows one rank
-
-Make sure you launch through TraceML, not plain `python`:
-
-```bash
-traceml run fine_tune.py --nproc-per-node=4
-```
-
-### I want a baseline without TraceML
-
-Run:
-
-```bash
-traceml run fine_tune.py --disable-traceml
-```
-
-This launches your script natively through `torchrun` without TraceML telemetry.
-
----
+</details>
 
 ## Reference
 
@@ -395,10 +289,9 @@ This launches your script natively through `torchrun` without TraceML telemetry.
 - everything that normal `transformers.Trainer` accepts
 - `traceml_enabled=True|False`
 
----
+## Next Steps
 
-## Next steps
-
-- Read the [Quickstart](../quickstart.md) for plain PyTorch training loops
-- Read [lightning.md](lightning.md) for the PyTorch Lightning integration
-- Open an issue if you hit a problem: https://github.com/traceopt-ai/traceml/issues
+- [How to Read Output](../reading-output.md)
+- [Distributed Training](../distributed-training.md)
+- [W&B / MLflow](wandb-mlflow.md)
+- [Open an issue](https://github.com/traceopt-ai/traceml/issues)

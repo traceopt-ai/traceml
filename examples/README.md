@@ -140,10 +140,9 @@ That includes things like:
 
 ## Related docs
 
-- [Quickstart](../docs/quickstart.md)
-- [Compare Runs](../docs/compare.md)
-- [How to Read TraceML Output](../docs/how-to-read-output.md)
-- [FAQ](../docs/faq.md)
-- [Use TraceML with W&B / MLflow](../docs/use-with-wandb-mlflow.md)
-- [Hugging Face Trainer](../docs/huggingface.md)
-- [PyTorch Lightning](../docs/lightning.md)
+- [Quickstart](../docs/user_guide/quickstart.md)
+- [Distributed Training](../docs/user_guide/distributed-training.md)
+- [Compare Runs](../docs/user_guide/compare.md)
+- [How to Read TraceML Output](../docs/user_guide/reading-output.md)
+- [Use With Your Stack](../docs/user_guide/integrations.md)
+- [FAQ](../docs/user_guide/faq.md)
