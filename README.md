@@ -16,6 +16,7 @@
 [**Ray Train**](docs/user_guide/integrations/ray.md) •
 [**W&B / MLflow**](docs/user_guide/integrations/wandb-mlflow.md) •
 [**FAQ**](docs/user_guide/faq.md) •
+[**Security**](SECURITY.md) •
 [**Issues**](https://github.com/traceopt-ai/traceml/issues) •
 [**Discussions**](https://github.com/traceopt-ai/traceml/discussions)
 
@@ -339,6 +340,8 @@ If you hit a problem or unexpected result, open an issue and include:
 - a minimal repro if possible
 
 GitHub issues: [open an issue](https://github.com/traceopt-ai/traceml/issues)
+
+Security reports: see [SECURITY.md](SECURITY.md)
 
 Email: [support@traceopt.ai](mailto:support@traceopt.ai)
 
