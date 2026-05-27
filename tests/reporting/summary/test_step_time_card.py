@@ -235,7 +235,7 @@ def test_step_time_compute_straggler_card_shows_rank_evidence() -> None:
 
     assert payload["diagnosis"]["status"] == "COMPUTE STRAGGLER"
     assert (
-        "- Why: r1 compute was slower than median global rank (260.0/220.0ms)."
+        "- Why: r1 forward was slower than peer median (90.0/65.0ms)."
         in payload["card"]
     )
     assert "issues" not in payload["groups"]["rows"]["1"]
@@ -287,9 +287,9 @@ def test_step_time_priority_prefers_straggler_over_wait_heavy() -> None:
                 step_cpu=350.0,
             ),
             1: _rank(
-                dataloader=80.0,
-                forward=90.0,
-                backward=160.0,
+                dataloader=100.0,
+                forward=100.0,
+                backward=170.0,
                 step_cpu=350.0,
             ),
         }

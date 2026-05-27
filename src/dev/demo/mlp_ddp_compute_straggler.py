@@ -1,10 +1,10 @@
 """
 Compute-straggler synthetic-MLP DDP scenario for TraceOpt demo data.
 
-This keeps the healthy baseline data, model output, optimizer, and DDP loop,
-but makes one global rank do extra GPU matrix work inside forward(). The extra
-work is multiplied by zero before it touches logits, so the training semantics
-stay the same while TraceML sees one rank with higher model-compute cost.
+This keeps the healthy baseline data, model, loss, and DDP loop, but makes one
+global rank do extra GPU matrix work inside optimizer.step(). Putting the
+synthetic work after gradient synchronization avoids DDP wait-time smearing, so
+the final summary shows a clean rank-local compute straggler.
 """
 
 from __future__ import annotations
@@ -31,17 +31,17 @@ EPOCHS = 2
 LR = 1e-3
 LOG_EVERY_STEPS = 50
 
-# One rank does extra forward-side GPU work. If your GPU is much faster/slower,
-# tune only EXTRA_FORWARD_MATMULS while keeping the model/data unchanged.
+# One rank does extra optimizer-side GPU work. If your GPU is much
+# faster/slower, tune only EXTRA_OPTIMIZER_MATMULS while keeping the model/data
+# unchanged.
 STRAGGLER_RANK = 2
-EXTRA_FORWARD_DIM = 4096
-EXTRA_FORWARD_MATMULS = 24
+EXTRA_OPTIMIZER_DIM = 4096
+EXTRA_OPTIMIZER_MATMULS = 24
 
 
 class BaselineMLP(nn.Module):
-    def __init__(self, rank: int) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.rank = int(rank)
         self.net = nn.Sequential(
             nn.Linear(INPUT_DIM, HIDDEN_DIM),
             nn.GELU(),
@@ -50,36 +50,46 @@ class BaselineMLP(nn.Module):
             nn.Linear(HIDDEN_DIM, NUM_CLASSES),
         )
 
-        generator = torch.Generator().manual_seed(SEED)
-        probe_a = torch.randn(
-            EXTRA_FORWARD_DIM,
-            EXTRA_FORWARD_DIM,
-            dtype=torch.float32,
-            generator=generator,
-        )
-        probe_b = torch.randn(
-            EXTRA_FORWARD_DIM,
-            EXTRA_FORWARD_DIM,
-            dtype=torch.float32,
-            generator=generator,
-        )
-        self.register_buffer("probe_a", probe_a.mul_(0.01))
-        self.register_buffer("probe_b", probe_b.mul_(0.01))
-
-    def _extra_forward_compute(self) -> torch.Tensor:
-        work = self.probe_a
-        other = self.probe_b
-        with torch.no_grad():
-            for _ in range(EXTRA_FORWARD_MATMULS):
-                work = torch.matmul(work, other)
-        return work.flatten()[0]
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        logits = self.net(x)
+        return self.net(x)
+
+
+class RankStragglerAdamW(AdamW):
+    def __init__(
+        self,
+        params,
+        *,
+        rank: int,
+        device: torch.device,
+        **kwargs,
+    ) -> None:
+        super().__init__(params, **kwargs)
+        self.rank = int(rank)
+        self.work_a = torch.randn(
+            EXTRA_OPTIMIZER_DIM,
+            EXTRA_OPTIMIZER_DIM,
+            device=device,
+            dtype=torch.float32,
+        ).mul_(0.01)
+        self.work_b = torch.randn(
+            EXTRA_OPTIMIZER_DIM,
+            EXTRA_OPTIMIZER_DIM,
+            device=device,
+            dtype=torch.float32,
+        ).mul_(0.01)
+
+    def step(self, closure=None):
+        result = super().step(closure=closure)
         if self.rank == STRAGGLER_RANK:
-            extra = self._extra_forward_compute().to(dtype=logits.dtype)
-            logits = logits + extra * 0.0
-        return logits
+            self._extra_optimizer_compute()
+        return result
+
+    def _extra_optimizer_compute(self) -> None:
+        work = self.work_a
+        other = self.work_b
+        with torch.no_grad():
+            for _ in range(EXTRA_OPTIMIZER_MATMULS):
+                work = torch.matmul(work, other)
 
 
 def set_seed(seed: int) -> None:
@@ -157,7 +167,7 @@ def main() -> None:
     set_seed(SEED + rank)
 
     train_loader, train_sampler = prepare_data(rank, world_size)
-    model = BaselineMLP(rank=rank).to(device)
+    model = BaselineMLP().to(device)
 
     traceml.trace_model_instance(model)
 
@@ -170,7 +180,12 @@ def main() -> None:
     else:
         model = torch.nn.parallel.DistributedDataParallel(model)
 
-    optimizer = AdamW(model.parameters(), lr=LR)
+    optimizer = RankStragglerAdamW(
+        model.parameters(),
+        rank=rank,
+        device=device,
+        lr=LR,
+    )
     criterion = nn.CrossEntropyLoss()
     scaler = torch.amp.GradScaler(
         enabled=use_cuda,
@@ -218,7 +233,7 @@ def main() -> None:
                     f"loss={running_loss / LOG_EVERY_STEPS:.4f} "
                     f"acc={running_acc / LOG_EVERY_STEPS:.4f} "
                     f"straggler_rank={STRAGGLER_RANK} "
-                    f"extra_matmuls={EXTRA_FORWARD_MATMULS}"
+                    f"extra_matmuls={EXTRA_OPTIMIZER_MATMULS}"
                 )
                 running_loss = 0.0
                 running_acc = 0.0

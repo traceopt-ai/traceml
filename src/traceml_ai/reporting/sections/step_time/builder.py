@@ -184,8 +184,8 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         )
         return (
             "- Stats: median/worst | "
-            f"total {total} | input {input_ms} | H2D {h2d_ms} | compute {compute} | "
-            f"wait {wait}"
+            f"total {total} | input {input_ms} | H2D {h2d_ms} | "
+            f"compute {compute} | wait {wait}"
         )
 
     return (
@@ -224,8 +224,8 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
     )
     return (
         "- Ranks: median/worst | "
-        f"total {total} | input {input_rank} | H2D {h2d_rank} | compute {compute} | "
-        f"wait {wait}"
+        f"total {total} | input {input_rank} | H2D {h2d_rank} | "
+        f"compute {compute} | wait {wait}"
     )
 
 
@@ -243,11 +243,43 @@ def _largest_compute_phase(
     return max(values, key=values.get) if values else None
 
 
+def _issue_by_kind(issues: tuple[Any, ...], kind: str) -> Optional[Any]:
+    """Return the first issue with the requested kind."""
+    for issue in issues:
+        if str(getattr(issue, "kind", "") or "") == kind:
+            return issue
+    return None
+
+
+def _compute_phase_pair_from_rank_values(
+    phase: str,
+    per_global_rank_summary: Dict[int, RankStepSummary],
+) -> StepTimeMetricPair:
+    """Return median/worst timing values for one compute phase."""
+    phase_key = str(phase or "").lower()
+    field_by_phase = {
+        "forward": "avg_forward_ms",
+        "backward": "avg_backward_ms",
+        "optimizer": "avg_optimizer_ms",
+    }
+    field_name = field_by_phase.get(phase_key)
+    if field_name is None:
+        return StepTimeMetricPair(None, None, None, None)
+
+    return _metric_pair_from_rank_values(
+        {
+            int(rank): finite_float(getattr(summary, field_name))
+            for rank, summary in per_global_rank_summary.items()
+        }
+    )
+
+
 def _step_time_card_reason(
     diagnosis: Optional[Any],
     *,
     stats: Optional[StepTimeCardStats],
     per_global_rank_summary: Dict[int, RankStepSummary],
+    issues: tuple[Any, ...] = (),
 ) -> str:
     """Build the short `Why` line used only by the human card."""
     kind = str(getattr(diagnosis, "kind", "") or "")
@@ -267,6 +299,24 @@ def _step_time_card_reason(
             f"slower than median global rank ({evidence})."
         )
     if kind == "COMPUTE_STRAGGLER":
+        issue = _issue_by_kind(issues, "COMPUTE_STRAGGLER")
+        phase = str(getattr(issue, "phase", "") or "").lower()
+        phase_stats = _compute_phase_pair_from_rank_values(
+            phase,
+            per_global_rank_summary,
+        )
+        if phase_stats.worst_ms is not None:
+            ranks = tuple(getattr(issue, "ranks", ()) or ())
+            rank = int(ranks[0]) if ranks else phase_stats.worst_global_rank
+            evidence = _format_ms_pair(
+                phase_stats.worst_ms,
+                phase_stats.median_ms,
+            )
+            return (
+                f"{_global_rank_label(rank)} {phase} was slower than "
+                f"peer median ({evidence})."
+            )
+
         evidence = _format_ms_pair(
             stats.compute.worst_ms,
             stats.compute.median_ms,
@@ -387,6 +437,7 @@ def build_step_time_payload(
         summary_diag,
         stats=card_stats,
         per_global_rank_summary=row_rank_summary,
+        issues=tuple(issues),
     )
 
     if not aligned_summary:
