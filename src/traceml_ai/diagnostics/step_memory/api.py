@@ -18,6 +18,7 @@ from ..common import BaseDiagnosis, Severity, validate_confidence
 from .policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
+    classify_imbalance_severity,
 )
 from .trend import (
     StepMemoryWindowCreepEvidence,
@@ -210,14 +211,25 @@ def build_step_memory_diagnosis(
             confidence=0.9 if sev == "crit" else 0.8,
         )
 
-    imbalance_hits = [
-        item
-        for item in ready
-        if item.skew_pct >= float(thresholds.imbalance_skew_warn)
-    ]
+    imbalance_hits = []
+    for item in ready:
+        sev = classify_imbalance_severity(
+            skew_pct=item.skew_pct,
+            pressure_frac=item.pressure_frac,
+            thresholds=thresholds,
+        )
+        if sev is not None:
+            imbalance_hits.append((item, sev))
+
     if imbalance_hits:
-        best = max(imbalance_hits, key=lambda item: item.skew_pct)
-        sev = _severity(best.skew_pct, thresholds.imbalance_skew_crit)
+        best, sev = max(
+            imbalance_hits,
+            key=lambda pair: (
+                1 if pair[1] == "crit" else 0,
+                pair[0].skew_pct,
+                float(pair[0].pressure_frac or 0.0),
+            ),
+        )
         return _mk_diag(
             kind="IMBALANCE",
             severity=sev,
@@ -226,7 +238,9 @@ def build_step_memory_diagnosis(
             worst_rank=best.worst_rank,
             reason=(
                 f"{_metric_label(best.metric.metric)} shows "
-                f"+{best.skew_pct * 100.0:.1f}% cross-rank skew."
+                f"+{best.skew_pct * 100.0:.1f}% cross-rank skew "
+                f"at ~{float(best.pressure_frac or 0.0) * 100.0:.0f}% "
+                "of device capacity."
             ),
             action="Inspect per-rank workload.",
             confidence=0.85 if sev == "crit" else 0.75,
