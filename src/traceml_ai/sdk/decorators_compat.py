@@ -7,9 +7,9 @@ instrumentation.
 
 New code should prefer the explicit path:
 
-    import traceml_ai as tml
-    tml.init(...)
-    with tml.trace_step(...):
+    import traceml_ai as traceml
+    traceml.init(...)
+    with traceml.trace_step(...):
         ...
 
 Backward compatibility

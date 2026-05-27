@@ -12,8 +12,8 @@ These are the main user-facing examples.
 
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
-| `pytorch_minimal.py` | Minimal plain PyTorch loop with `tml.init(mode="auto")`, `tml.trace_step(...)`, and `tml.final_summary()` | CPU / CUDA | Best first example |
-| `summary_logging_minimal.py` | Minimal tracker-friendly `tml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
+| `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.final_summary()` | CPU / CUDA | Best first example |
+| `summary_logging_minimal.py` | Minimal tracker-friendly `traceml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
@@ -88,23 +88,23 @@ traceml compare run_a.json run_b.json
 
 Starter examples now prefer the top-level public API:
 
-- `tml.init(mode="auto")`
-- `tml.trace_step(...)`
-- `tml.trace_model_instance(...)`
-- `tml.summary()`
-- `tml.final_summary()`
+- `traceml.init(mode="auto")`
+- `traceml.trace_step(...)`
+- `traceml.trace_model_instance(...)`
+- `traceml.summary()`
+- `traceml.final_summary()`
 
 For explicit manual instrumentation, see:
 
-- `tml.init(mode="manual")`
-- `tml.wrap_dataloader_fetch(...)`
-- `tml.wrap_forward(...)`
-- `tml.wrap_backward(...)`
-- `tml.wrap_optimizer(...)`
+- `traceml.init(mode="manual")`
+- `traceml.wrap_dataloader_fetch(...)`
+- `traceml.wrap_forward(...)`
+- `traceml.wrap_backward(...)`
+- `traceml.wrap_optimizer(...)`
 
 The old decorator import path still works for backward compatibility, but it
 is deprecated and will be removed in a future version. New examples use the
-top-level `tml.*` API from `import traceml_ai as tml`.
+top-level `traceml.*` API from `import traceml_ai as traceml`.
 
 ---
 
@@ -140,10 +140,9 @@ That includes things like:
 
 ## Related docs
 
-- [Quickstart](../docs/quickstart.md)
-- [Compare Runs](../docs/compare.md)
-- [How to Read TraceML Output](../docs/how-to-read-output.md)
-- [FAQ](../docs/faq.md)
-- [Use TraceML with W&B / MLflow](../docs/use-with-wandb-mlflow.md)
-- [Hugging Face Trainer](../docs/huggingface.md)
-- [PyTorch Lightning](../docs/lightning.md)
+- [Quickstart](../docs/user_guide/quickstart.md)
+- [Distributed Training](../docs/user_guide/distributed-training.md)
+- [Compare Runs](../docs/user_guide/compare.md)
+- [How to Read TraceML Output](../docs/user_guide/reading-output.md)
+- [Use With Your Stack](../docs/user_guide/integrations.md)
+- [FAQ](../docs/user_guide/faq.md)

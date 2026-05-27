@@ -55,11 +55,11 @@ A simple rule:
 Usually just this:
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 
-tml.init(mode="auto")
+traceml.init(mode="auto")
 
-with tml.trace_step(model):
+with traceml.trace_step(model):
     ...
 ```
 
@@ -68,24 +68,24 @@ For supported integrations:
 - Hugging Face: use `TraceMLTrainer`
 - Lightning: add `TraceMLCallback()`
 
-The preferred public API is the top-level `tml.*` from `import traceml_ai as tml`.
+The preferred public API is the top-level `traceml.*` from `import traceml_ai as traceml`.
 
 ---
 
-## Should I use `tml.trace_step()` or `trace_step()`?
+## Should I use `traceml.trace_step()` or `trace_step()`?
 
 Prefer:
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 
-tml.init(mode="auto")
+traceml.init(mode="auto")
 
-with tml.trace_step(model):
+with traceml.trace_step(model):
     ...
 ```
 
-Use the top-level `tml.*` API from `import traceml_ai as tml`.
+Use the top-level `traceml.*` API from `import traceml_ai as traceml`.
 
 ---
 
@@ -93,9 +93,9 @@ Use the top-level `tml.*` API from `import traceml_ai as tml`.
 
 Use:
 
-- `tml.init(mode="auto")` for the default TraceML workflow
-- `tml.init(mode="manual")` when you want fully explicit wrappers
-- `tml.init(mode="selective", ...)` when you want some automatic patching
+- `traceml.init(mode="auto")` for the default TraceML workflow
+- `traceml.init(mode="manual")` when you want fully explicit wrappers
+- `traceml.init(mode="selective", ...)` when you want some automatic patching
   and some explicit wrapping
 
 Start with `auto` unless you already know you need more control.
@@ -109,10 +109,10 @@ part of your training loop is custom.
 
 The main wrapper entrypoints are:
 
-- `tml.wrap_dataloader_fetch(...)`
-- `tml.wrap_forward(...)`
-- `tml.wrap_backward(...)`
-- `tml.wrap_optimizer(...)`
+- `traceml.wrap_dataloader_fetch(...)`
+- `traceml.wrap_forward(...)`
+- `traceml.wrap_backward(...)`
+- `traceml.wrap_optimizer(...)`
 
 This is most relevant in `manual` or `selective` mode. Most users should start
 with `mode="auto"` and only move to wrappers if they need explicit control.
@@ -279,10 +279,10 @@ TraceML is designed to work alongside your existing tracking stack. The
 recommended low-noise path is:
 
 1. launch with `traceml run train.py`
-2. call `tml.summary()` near the end of your script
+2. call `traceml.summary()` near the end of your script
 3. log the returned flat dict into W&B or MLflow
 
-Use `tml.final_summary()` if you need the full structured JSON payload.
+Use `traceml.final_summary()` if you need the full structured JSON payload.
 
 See:
 

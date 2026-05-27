@@ -40,7 +40,7 @@ training work, and make stop paths safe to call more than once.
 
 Ray support lives in `traceml_ai.integrations.ray` and should stay separate from
 the core runtime. Do not import Ray from `traceml_ai.runtime`, `traceml_ai.aggregator`,
-or the top-level `traceml` package.
+or the public package surfaces (`traceml_ai` or the deprecated `traceml` shim).
 
 The integration has two owners:
 
@@ -53,9 +53,13 @@ created. Keep future Ray changes in that shape: no second launcher, no Ray Train
 internals, and no duplicated aggregator/runtime lifecycle code.
 
 
+The live implementation tree is `src/traceml_ai/`. The `src/traceml/` package is
+a deprecated compatibility shim for older imports and should not receive new
+implementation code.
+
 ## Add a Diagnostic Rule
 
-Diagnostics live under `src/traceml/diagnostics/<domain>/`.
+Diagnostics live under `src/traceml_ai/diagnostics/<domain>/`.
 
 Current domains include:
 
@@ -84,7 +88,7 @@ Tests should live in `tests/diagnostics/` and cover:
 
 ## Add a Summary Section
 
-Final-report sections live under `src/traceml/reporting/sections/`.
+Final-report sections live under `src/traceml_ai/reporting/sections/`.
 
 Current sections:
 
@@ -102,7 +106,7 @@ formatter.py  render section text
 model.py      section-local data helpers
 ```
 
-Register sections through `src/traceml/reporting/final.py`. Keep the aggregator
+Register sections through `src/traceml_ai/reporting/final.py`. Keep the aggregator
 as a caller only; report assembly belongs in `reporting`.
 
 Tests should live in `tests/reporting/summary/`. Prefer small SQLite fixtures
@@ -111,11 +115,11 @@ lines.
 
 ## Add a Sampler
 
-Runtime sampler selection is in `src/traceml/runtime/sampler_registry.py`.
+Runtime sampler selection is in `src/traceml_ai/runtime/sampler_registry.py`.
 
 To add a sampler:
 
-1. Implement a `BaseSampler` subclass under `src/traceml/samplers/`.
+1. Implement a `BaseSampler` subclass under `src/traceml_ai/samplers/`.
 2. Add a `SamplerSpec` to `DEFAULT_SAMPLER_REGISTRY`.
 3. Restrict it by `profiles` and `modes` so it only runs where needed.
 4. Add SQLite projection, renderer, or summary code only if the data is
@@ -130,7 +134,7 @@ specific folder if the sampler has domain logic.
 
 ## Add a Compare Metric
 
-Compare code lives under `src/traceml/reporting/compare/`.
+Compare code lives under `src/traceml_ai/reporting/compare/`.
 
 Important files:
 
@@ -155,8 +159,8 @@ Live display code is renderer-driven. CLI and dashboard renderers may differ.
 
 Relevant paths:
 
-- `src/traceml/renderers/`
-- `src/traceml/aggregator/display_drivers/`
+- `src/traceml_ai/renderers/`
+- `src/traceml_ai/aggregator/display_drivers/`
 
 Keep renderer methods focused on presentation. Put data shaping in a compute
 object or formatter when the logic is reusable or non-trivial.

@@ -18,7 +18,7 @@ def train_loop_per_worker(config):
     import torch.optim as optim
     from ray import train
 
-    import traceml_ai as tml
+    import traceml_ai as traceml
 
     ctx = train.get_context()
     device = torch.device(
@@ -35,10 +35,10 @@ def train_loop_per_worker(config):
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 
-    tml.trace_model_instance(model)
+    traceml.trace_model_instance(model)
 
     for step in range(int(config["steps"])):
-        with tml.trace_step(model):
+        with traceml.trace_step(model):
             x = torch.randn(64, 32, device=device)
             y = torch.randint(0, 4, (64,), device=device)
 

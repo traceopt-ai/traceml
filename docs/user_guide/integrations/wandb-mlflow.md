@@ -84,13 +84,13 @@ You can keep using W&B logging in your training script and launch the run throug
 Example:
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 import wandb
 
 wandb.init(project="my-project")
 
 for batch in dataloader:
-    with tml.trace_step(model):
+    with traceml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -126,14 +126,14 @@ Then request TraceML's compact tracker summary near the end of your script and
 log it into W&B:
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 import wandb
 
 wandb.init(project="my-project")
 
 # training loop ...
 
-summary = tml.summary(print_text=True)
+summary = traceml.summary(print_text=True)
 if summary is not None:
     wandb.log(summary)
 ```
@@ -141,7 +141,7 @@ if summary is not None:
 This lets W&B stay your experiment system of record while TraceML contributes a
 clean bottleneck diagnosis at the end of the run.
 
-`tml.summary()` returns a flat dict of diagnosis statuses and global
+`traceml.summary()` returns a flat dict of diagnosis statuses and global
 average metrics. If you also store `final_summary.json` as a run artifact, you
 can reuse it later with `traceml compare`.
 
@@ -152,13 +152,13 @@ can reuse it later with `traceml compare`.
 You can do the same with MLflow.
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 import mlflow
 
 mlflow.start_run()
 
 for batch in dataloader:
-    with tml.trace_step(model):
+    with traceml.trace_step(model):
         optimizer.zero_grad(set_to_none=True)
         outputs = model(batch["x"])
         loss = criterion(outputs, batch["y"])
@@ -186,14 +186,14 @@ This gives you:
 TraceML can also return a compact tracker summary for MLflow logging:
 
 ```python
-import traceml_ai as tml
+import traceml_ai as traceml
 import mlflow
 
 mlflow.start_run()
 
 # training loop ...
 
-summary = tml.summary(print_text=True)
+summary = traceml.summary(print_text=True)
 if summary is not None:
     numeric = {
         k: v for k, v in summary.items()
@@ -210,11 +210,11 @@ if summary is not None:
 
 This is a good fit when you want a compact diagnosis in your run metadata.
 
-If you also want the full TraceML artifact, call `tml.final_summary()` and
+If you also want the full TraceML artifact, call `traceml.final_summary()` and
 attach that JSON to the run:
 
 ```python
-full = tml.final_summary()
+full = traceml.final_summary()
 if full is not None:
     mlflow.log_dict(full, "traceml/final_summary.json")
 ```

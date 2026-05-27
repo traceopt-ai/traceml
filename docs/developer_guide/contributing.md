@@ -84,7 +84,7 @@ If a code change affects user-facing behavior, update the relevant doc in the sa
 Use `autorefs` to link to API symbols in prose:
 
 ```markdown
-Use `import traceml_ai as tml` and link to the public API guide for user-facing
+Use `import traceml_ai as traceml` and link to the public API guide for user-facing
 instrumentation examples.
 ```
 

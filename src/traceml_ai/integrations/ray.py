@@ -244,7 +244,7 @@ class _TraceMLWorkerLoop:
     config: TraceMLRayConfig
 
     def __call__(self, train_loop_config: Dict[str, Any]) -> Any:
-        import traceml_ai as tml
+        import traceml_ai as traceml
 
         _apply_ray_train_identity_env()
 
@@ -255,7 +255,7 @@ class _TraceMLWorkerLoop:
         handle: Optional[RuntimeHandle] = None
         try:
             handle = start_runtime_handle(settings, fail_open=True)
-            tml.init(
+            traceml.init(
                 mode=str(self.config.init_mode),
                 patch_dataloader=self.config.patch_dataloader,
                 patch_forward=self.config.patch_forward,

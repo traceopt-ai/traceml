@@ -10,7 +10,7 @@ Run with:
 
     traceml run examples/summary_logging_minimal.py
 
-At the end of the run, ``tml.summary()`` returns a flat dict designed for
+At the end of the run, ``traceml.summary()`` returns a flat dict designed for
 W&B, MLflow, and other experiment trackers.
 """
 
@@ -21,12 +21,12 @@ import time
 import torch
 from torch import nn
 
-import traceml_ai as tml
+import traceml_ai as traceml
 
 
 def main() -> None:
     """Run a tiny traced loop and print the compact TraceML summary."""
-    tml.init()
+    traceml.init()
 
     torch.manual_seed(0)
     model = nn.Linear(8, 2)
@@ -37,7 +37,7 @@ def main() -> None:
     y = torch.randint(0, 2, (32,))
 
     for _ in range(128):
-        with tml.trace_step(model):
+        with traceml.trace_step(model):
             optimizer.zero_grad(set_to_none=True)
             logits = model(x)
             loss = criterion(logits, y)
@@ -45,7 +45,7 @@ def main() -> None:
             optimizer.step()
         time.sleep(0.04)
 
-    summary = tml.summary(print_text=True)
+    summary = traceml.summary(print_text=True)
     if summary is None:
         return
 
