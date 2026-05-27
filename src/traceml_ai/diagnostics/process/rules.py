@@ -149,6 +149,16 @@ class GPUMemoryReservedOverhangRule(_BaseProcessRule):
         if self.policy.gpu_reserved_overhang_ratio.classify(ratio) != "high":
             return None
 
+        reserved_pct = context.gpu_mem_reserved_peak_percent
+        min_reserved_pct = (
+            self.policy.gpu_reserved_overhang_min_reserved_percent
+        )
+        # PyTorch's CUDA allocator normally caches memory. Treat the
+        # reserved/allocated gap as actionable only when the process is also
+        # holding a meaningful share of device memory.
+        if reserved_pct is None or reserved_pct < min_reserved_pct:
+            return None
+
         rank = context.highest_overhang_rank
         return self._issue(
             kind="GPU_MEMORY_RESERVED_OVERHANG",
@@ -168,6 +178,7 @@ class GPUMemoryReservedOverhangRule(_BaseProcessRule):
             ranks=(() if rank is None else (rank,)),
             evidence={
                 "gpu_mem_reserved_overhang_ratio": float(ratio),
+                "gpu_mem_reserved_peak_percent": reserved_pct,
                 "highest_overhang_rank": rank,
             },
         )

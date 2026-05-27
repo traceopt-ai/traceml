@@ -15,6 +15,7 @@ class ProcessDiagnosisPolicy:
     rss_peak_percent: BandThresholds
     gpu_memory_peak_percent: BandThresholds
     gpu_reserved_overhang_ratio: BandThresholds
+    gpu_reserved_overhang_min_reserved_percent: float
     rank_gpu_memory_imbalance_percent: BandThresholds
 
 
@@ -26,7 +27,8 @@ DEFAULT_PROCESS_POLICY = ProcessDiagnosisPolicy(
         high_at=80.0,
         very_high_at=90.0,
     ),
-    gpu_reserved_overhang_ratio=BandThresholds(high_at=1.5),
+    gpu_reserved_overhang_ratio=BandThresholds(high_at=2.0),
+    gpu_reserved_overhang_min_reserved_percent=30.0,
     rank_gpu_memory_imbalance_percent=BandThresholds(high_at=30.0),
 )
 

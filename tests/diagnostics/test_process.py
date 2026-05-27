@@ -102,9 +102,9 @@ def _signals(**overrides):
         (
             GPUMemoryReservedOverhangRule(),
             {
-                "gpu_mem_used_peak_bytes": 400.0,
+                "gpu_mem_used_peak_bytes": 300.0,
                 "gpu_mem_reserved_peak_bytes": 700.0,
-                "per_rank": _per_rank(used_peak=400.0, reserved_peak=700.0),
+                "per_rank": _per_rank(used_peak=300.0, reserved_peak=700.0),
             },
             "GPU_MEMORY_RESERVED_OVERHANG",
         ),
@@ -159,6 +159,14 @@ def test_process_rules_trigger_one_condition(
                 "gpu_mem_reserved_peak_bytes": 450.0,
             },
         ),
+        (
+            GPUMemoryReservedOverhangRule(),
+            {
+                "gpu_mem_used_peak_bytes": 10.0,
+                "gpu_mem_reserved_peak_bytes": 50.0,
+                "per_rank": _per_rank(used_peak=10.0, reserved_peak=50.0),
+            },
+        ),
         (RankGPUMemoryImbalanceRule(), {}),
         (HighProcessRSSRule(), {"ram_peak_bytes": 500.0}),
         (HighProcessCPURule(), {"cpu_avg_percent": 120.0}),
@@ -184,9 +192,9 @@ def test_process_rules_do_not_trigger_normal_condition(
         ),
         (
             {
-                "gpu_mem_used_peak_bytes": 400.0,
+                "gpu_mem_used_peak_bytes": 300.0,
                 "gpu_mem_reserved_peak_bytes": 700.0,
-                "per_rank": _per_rank(used_peak=400.0, reserved_peak=700.0),
+                "per_rank": _per_rank(used_peak=300.0, reserved_peak=700.0),
             },
             "GPU_MEMORY_RESERVED_OVERHANG",
         ),
@@ -225,9 +233,9 @@ def test_process_primary_priority_when_everything_triggers() -> None:
                 overhang=1000.0 / 900.0,
             ),
             1: _rank(
-                used_peak=400.0,
+                used_peak=300.0,
                 reserved_peak=700.0,
-                overhang=700.0 / 400.0,
+                overhang=700.0 / 300.0,
             ),
         },
     )
@@ -249,7 +257,7 @@ def test_reserved_overhang_uses_rank_local_peak_ratio() -> None:
         gpu_mem_total_bytes=2000.0,
         per_rank={
             0: _rank(used_peak=1000.0, reserved_peak=1200.0, overhang=1.2),
-            1: _rank(used_peak=100.0, reserved_peak=180.0, overhang=1.8),
+            1: _rank(used_peak=100.0, reserved_peak=220.0, overhang=2.2),
         },
     )
 
@@ -258,10 +266,11 @@ def test_reserved_overhang_uses_rank_local_peak_ratio() -> None:
     assert issue.status == "HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO"
     assert (
         issue.summary
-        == "PyTorch CUDA allocator reserved memory was 1.80x allocated tensor memory."
+        == "PyTorch CUDA allocator reserved memory was 2.20x allocated tensor memory."
     )
     assert issue.ranks == (1,)
-    assert issue.evidence["gpu_mem_reserved_overhang_ratio"] == 1.8
+    assert issue.evidence["gpu_mem_reserved_overhang_ratio"] == 2.2
+    assert issue.evidence["gpu_mem_reserved_peak_percent"] == 60.0
 
 
 def test_process_cpu_only_normal_does_not_emit_gpu_context_status() -> None:
