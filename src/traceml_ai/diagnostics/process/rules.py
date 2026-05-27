@@ -7,7 +7,11 @@ from typing import Optional, Sequence, Tuple
 
 from ..common import DiagnosticIssue, DiagnosticRule
 from .context import ProcessSummarySignals
-from .policy import DEFAULT_PROCESS_POLICY, ProcessDiagnosisPolicy
+from .policy import (
+    DEFAULT_PROCESS_POLICY,
+    ProcessDiagnosisPolicy,
+    classify_rank_gpu_memory_imbalance_severity,
+)
 
 
 def _fmt_pct(value: Optional[float]) -> str:
@@ -16,6 +20,15 @@ def _fmt_pct(value: Optional[float]) -> str:
 
 def _fmt_rank(rank: Optional[int]) -> str:
     return "" if rank is None else f" on rank {int(rank)}"
+
+
+def _safe_float(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
 
 
 @dataclass(frozen=True)
@@ -65,6 +78,33 @@ def _gpu_memory_peak(
         "gpu_mem_used_peak_percent",
         context.highest_used_rank,
     )
+
+
+def _rank_gpu_memory_pressure(
+    context: ProcessSummarySignals,
+    *,
+    peak_attr: str,
+    fallback_percent: Optional[float],
+    fallback_rank: Optional[int],
+) -> Tuple[Optional[float], Optional[int]]:
+    """Return the worst rank-local GPU memory pressure for one peak metric."""
+    best_pct: Optional[float] = None
+    best_rank: Optional[int] = None
+
+    for rank_id, item in context.per_rank.items():
+        peak_bytes = _safe_float(getattr(item, peak_attr, None))
+        total_bytes = _safe_float(item.gpu_mem_total_bytes)
+        if peak_bytes is None or total_bytes is None or total_bytes <= 0.0:
+            continue
+
+        pct = max(0.0, peak_bytes / total_bytes * 100.0)
+        if best_pct is None or pct > best_pct:
+            best_pct = pct
+            best_rank = int(rank_id)
+
+    if best_pct is not None:
+        return best_pct, best_rank
+    return fallback_percent, fallback_rank
 
 
 @dataclass(frozen=True)
@@ -194,6 +234,13 @@ class RankGPUMemoryImbalanceRule(_BaseProcessRule):
     ) -> Optional[DiagnosticIssue]:
         pct = context.rank_gpu_reserved_imbalance_percent
         metric = "rank_gpu_reserved_imbalance_percent"
+        pressure_metric = "gpu_mem_reserved_peak_percent"
+        pressure_pct, pressure_rank = _rank_gpu_memory_pressure(
+            context,
+            peak_attr="gpu_mem_reserved_peak_bytes",
+            fallback_percent=context.gpu_mem_reserved_peak_percent,
+            fallback_rank=context.highest_reserved_rank,
+        )
         ranks: Tuple[int, ...] = tuple(
             rank
             for rank in (
@@ -206,6 +253,13 @@ class RankGPUMemoryImbalanceRule(_BaseProcessRule):
         if pct is None:
             pct = context.rank_gpu_used_imbalance_percent
             metric = "rank_gpu_used_imbalance_percent"
+            pressure_metric = "gpu_mem_used_peak_percent"
+            pressure_pct, pressure_rank = _rank_gpu_memory_pressure(
+                context,
+                peak_attr="gpu_mem_used_peak_bytes",
+                fallback_percent=context.gpu_mem_used_peak_percent,
+                fallback_rank=context.highest_used_rank,
+            )
             ranks = tuple(
                 rank
                 for rank in (
@@ -215,17 +269,25 @@ class RankGPUMemoryImbalanceRule(_BaseProcessRule):
                 if rank is not None
             )
 
-        if (
-            self.policy.rank_gpu_memory_imbalance_percent.classify(pct)
-            != "high"
-        ):
+        # Use rank-local pressure for the same memory family as the imbalance.
+        # Aggregate process pressure can be low while one rank is already high.
+        sev = classify_rank_gpu_memory_imbalance_severity(
+            imbalance_percent=pct,
+            pressure_percent=pressure_pct,
+            policy=self.policy,
+        )
+        if sev is None:
             return None
 
         return self._issue(
             kind="RANK_GPU_MEMORY_IMBALANCE",
             status="RANK GPU MEMORY IMBALANCE",
-            severity="warn",
-            summary=f"Process GPU memory differed by {_fmt_pct(pct)} across ranks.",
+            severity=sev,
+            summary=(
+                f"Process GPU memory differed by {_fmt_pct(pct)} across "
+                "ranks; worst rank reached "
+                f"{_fmt_pct(pressure_pct)} of device capacity."
+            ),
             action="Inspect per-rank workload and memory behavior.",
             metric=metric,
             phase="gpu_memory",
@@ -238,6 +300,15 @@ class RankGPUMemoryImbalanceRule(_BaseProcessRule):
                 "rank_gpu_reserved_imbalance_percent": (
                     context.rank_gpu_reserved_imbalance_percent
                 ),
+                "gpu_mem_reserved_peak_percent": (
+                    context.gpu_mem_reserved_peak_percent
+                ),
+                "gpu_mem_used_peak_percent": (
+                    context.gpu_mem_used_peak_percent
+                ),
+                "rank_gpu_memory_pressure_percent": pressure_pct,
+                "rank_gpu_memory_pressure_metric": pressure_metric,
+                "rank_gpu_memory_pressure_rank": pressure_rank,
                 "highest_used_rank": context.highest_used_rank,
                 "highest_reserved_rank": context.highest_reserved_rank,
                 "least_headroom_rank": context.least_headroom_rank,

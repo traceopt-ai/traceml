@@ -112,8 +112,8 @@ def _signals(**overrides):
             RankGPUMemoryImbalanceRule(),
             {
                 "per_rank": {
-                    0: _rank(used_peak=900.0, reserved_peak=900.0),
-                    1: _rank(used_peak=400.0, reserved_peak=400.0),
+                    0: _rank(used_peak=600.0, reserved_peak=600.0),
+                    1: _rank(used_peak=300.0, reserved_peak=300.0),
                 }
             },
             "RANK_GPU_MEMORY_IMBALANCE",
@@ -160,6 +160,15 @@ def test_process_rules_trigger_one_condition(
             },
         ),
         (
+            RankGPUMemoryImbalanceRule(),
+            {
+                "per_rank": {
+                    0: _rank(used_peak=40.0, reserved_peak=50.0),
+                    1: _rank(used_peak=20.0, reserved_peak=25.0),
+                }
+            },
+        ),
+        (
             GPUMemoryReservedOverhangRule(),
             {
                 "gpu_mem_used_peak_bytes": 10.0,
@@ -201,8 +210,8 @@ def test_process_rules_do_not_trigger_normal_condition(
         (
             {
                 "per_rank": {
-                    0: _rank(used_peak=900.0, reserved_peak=900.0),
-                    1: _rank(used_peak=400.0, reserved_peak=400.0),
+                    0: _rank(used_peak=600.0, reserved_peak=600.0),
+                    1: _rank(used_peak=300.0, reserved_peak=300.0),
                 }
             },
             "RANK_GPU_MEMORY_IMBALANCE",
@@ -266,11 +275,57 @@ def test_reserved_overhang_uses_rank_local_peak_ratio() -> None:
     assert issue.status == "HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO"
     assert (
         issue.summary
-        == "PyTorch CUDA allocator reserved memory was 2.20x allocated tensor memory."
+        == "PyTorch CUDA allocator reserved memory was 2.20x allocated "
+        "tensor memory."
     )
     assert issue.ranks == (1,)
     assert issue.evidence["gpu_mem_reserved_overhang_ratio"] == 2.2
     assert issue.evidence["gpu_mem_reserved_peak_percent"] == 60.0
+
+
+def test_rank_gpu_memory_imbalance_uses_pressure_gate() -> None:
+    low_pressure = RankGPUMemoryImbalanceRule().evaluate(
+        _signals(
+            per_rank={
+                0: _rank(used_peak=40.0, reserved_peak=50.0),
+                1: _rank(used_peak=20.0, reserved_peak=25.0),
+            }
+        )
+    )
+    assert low_pressure is None
+
+    warn_issue = RankGPUMemoryImbalanceRule().evaluate(
+        _signals(
+            per_rank={
+                0: _rank(used_peak=350.0, reserved_peak=350.0),
+                1: _rank(used_peak=260.0, reserved_peak=260.0),
+            }
+        )
+    )
+    assert warn_issue is not None
+    assert warn_issue.kind == "RANK_GPU_MEMORY_IMBALANCE"
+    assert warn_issue.severity == "warn"
+
+    crit_issue = RankGPUMemoryImbalanceRule().evaluate(
+        _signals(
+            per_rank={
+                0: _rank(used_peak=600.0, reserved_peak=600.0),
+                1: _rank(used_peak=300.0, reserved_peak=300.0),
+            }
+        )
+    )
+    assert crit_issue is not None
+    assert crit_issue.severity == "crit"
+    assert (
+        crit_issue.summary
+        == "Process GPU memory differed by 50.0% across ranks; "
+        "worst rank reached 60.0% of device capacity."
+    )
+    assert crit_issue.evidence["rank_gpu_memory_pressure_percent"] == 60.0
+    assert (
+        crit_issue.evidence["rank_gpu_memory_pressure_metric"]
+        == "gpu_mem_reserved_peak_percent"
+    )
 
 
 def test_process_cpu_only_normal_does_not_emit_gpu_context_status() -> None:
