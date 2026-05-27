@@ -58,7 +58,7 @@ pip install traceml-ai
 ```python
 import traceml_ai as traceml
 
-traceml.init()
+traceml.init(mode="auto")
 
 for batch in dataloader:
     with traceml.trace_step(model):

@@ -111,7 +111,7 @@ The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal
 rendering from the aggregator actor.
 
-``init_mode`` is passed to ``traceml.init()`` inside each Ray worker. Use
+``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray worker. Use
 ``init_mode="manual"`` if your training loop wraps dataloader, forward,
 backward, and optimizer timing explicitly. Use ``init_mode="selective"`` with
 the ``patch_*`` options when you only want some automatic patches.
