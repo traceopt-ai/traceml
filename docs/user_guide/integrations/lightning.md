@@ -74,7 +74,7 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 ## How it works
 
-`traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing before Lightning receives the batch. `TraceMLCallback` then hooks into Lightning’s training lifecycle for H2D transfer, forward, backward, optimizer, step, and memory timing.
+`traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing before Lightning receives the batch and installs the H2D Tensor.to patch. `TraceMLCallback` then scopes that H2D timing to Lightning’s batch-transfer hooks and records forward, backward, optimizer, step, and memory timing.
 
 That means you do not need to wrap your code with `traceml.trace_step(...)`
 manually in Lightning.

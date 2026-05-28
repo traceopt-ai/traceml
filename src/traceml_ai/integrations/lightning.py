@@ -1,6 +1,9 @@
 import os
 import sys
 
+from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
+    h2d_auto_timer,
+)
 from traceml_ai.runtime.state import get_trace_session_state
 from traceml_ai.utils.flush_buffers import flush_step_events
 from traceml_ai.utils.step_memory import StepMemoryTracker
@@ -27,12 +30,17 @@ def init():
     Initialize TraceML for PyTorch Lightning runs.
 
     Lightning owns forward/backward/optimizer timing through TraceMLCallback.
-    The integration init only enables DataLoader fetch timing, which happens
-    before Lightning callback hooks can observe the batch.
+    The integration init enables DataLoader fetch timing plus the H2D Tensor.to
+    patch. The callback turns H2D timing on only around Lightning's batch
+    transfer hooks, so forward/backward timing stays callback-owned.
     """
     import traceml_ai as traceml
 
-    return traceml.init(mode="selective", patch_dataloader=True)
+    return traceml.init(
+        mode="selective",
+        patch_dataloader=True,
+        patch_h2d=True,
+    )
 
 
 def _log_lightning_error(message: str, exc: Exception) -> None:
@@ -116,9 +124,7 @@ class TraceMLCallback(Callback):
             return
 
         self._close_context("_h2d_ctx")
-        self._h2d_ctx = timed_region(
-            "_traceml_internal:h2d_time", scope="step", use_gpu=True
-        )
+        self._h2d_ctx = h2d_auto_timer()
         self._h2d_ctx.__enter__()
 
     def on_after_batch_transfer(
