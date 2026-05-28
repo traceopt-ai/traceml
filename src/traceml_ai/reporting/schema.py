@@ -313,10 +313,18 @@ def empty_section_payload(
     title = section_name.replace("_", " ").title()
     card = f"TraceML {title} Summary\n- Status: unavailable"
     diagnosis = {
-        "severity": "info",
-        "status": "NO DATA",
-        "reason": reason,
         "kind": "NO_DATA",
+        "status": "NO DATA",
+        "severity": "info",
+        "summary": reason,
+        "action": "Check final-report logs for this section.",
+        "metric": None,
+        "phase": None,
+        "score": None,
+        "share_pct": None,
+        "skew_pct": None,
+        "ranks": [],
+        "evidence": {},
     }
 
     return BaseSectionPayload(
@@ -326,7 +334,7 @@ def empty_section_payload(
             section_metric_names=[],
         ).to_json(),
         diagnosis=diagnosis,
-        issues=[],
+        issues=[diagnosis],
         global_summary=BaseGlobal(
             index_by=index_by,
             window=GlobalWindow(

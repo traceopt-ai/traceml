@@ -184,7 +184,7 @@ def test_step_memory_summary_enrichment_fails_open(monkeypatch):
     result = build_step_memory_summary_diagnosis_result([_metric()])
 
     assert result.primary.kind == "BALANCED"
-    assert result.issues == ()
+    assert result.issues[0].kind == "BALANCED"
     assert result.metric_attribution == {}
 
 
@@ -208,5 +208,5 @@ def test_step_memory_summary_fails_open_preserves_pressure_capacity(
     )
 
     assert result.primary.kind == "HIGH_PRESSURE"
-    assert result.issues == ()
+    assert result.issues[0].kind == "HIGH_PRESSURE"
     assert result.metric_attribution == {}

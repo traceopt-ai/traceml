@@ -11,7 +11,7 @@ Final-report step-time section.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 from traceml_ai.core.summaries import SummaryResult
 from traceml_ai.diagnostics.common import DiagnosticResult
@@ -42,7 +42,7 @@ class StepTimeSummarySection(
     BaseSummarySection[
         StepTimeSectionData,
         StepTimeDiagnosisInput,
-        Optional[DiagnosticResult[StepDiagnosis]],
+        DiagnosticResult[StepDiagnosis],
     ],
 ):
     """Build TraceML's final-report step-time section."""
@@ -68,14 +68,14 @@ class StepTimeSummarySection(
     def diagnose(
         self,
         diagnosis_input: StepTimeDiagnosisInput,
-    ) -> Optional[DiagnosticResult[StepDiagnosis]]:
+    ) -> DiagnosticResult[StepDiagnosis]:
         """Run Step Time diagnosis for the aligned telemetry window."""
         return diagnose_step_time_summary(diagnosis_input)
 
     def build_payload(
         self,
         data: StepTimeSectionData,
-        diagnosis_result: Optional[DiagnosticResult[StepDiagnosis]],
+        diagnosis_result: DiagnosticResult[StepDiagnosis],
     ) -> SummaryResult:
         """Assemble the Step Time summary payload and display text."""
         payload = build_step_time_payload(data, diagnosis_result)

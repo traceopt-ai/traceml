@@ -13,6 +13,7 @@ from traceml_ai.utils.timing import (
 
 try:
     from lightning.pytorch.callbacks import Callback
+
     IS_LIGHTNING_AVAILABLE = True
 except ImportError:
     Callback = object
@@ -53,7 +54,9 @@ class TraceMLCallback(Callback):
 
     def __init__(self):
         if not IS_LIGHTNING_AVAILABLE:
-            raise ImportError("Install traceml[lightning] to use Lightning integration")
+            raise ImportError(
+                "Install traceml[lightning] to use Lightning integration"
+            )
         super().__init__()
         self._traceml_step_ctx = None
         self._forward_ctx = None
