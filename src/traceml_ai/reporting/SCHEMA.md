@@ -1,7 +1,8 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. Each section has the same outer shape
-so the output is easy to store, diff, and consume from tooling.
+TraceML writes one end-of-run JSON file. The current schema version is `1.4`.
+Each section has the same outer shape so the output is easy to store, diff, and
+consume from tooling.
 
 Sections:
 
@@ -30,8 +31,36 @@ Sections:
     "training_latest_step": null,
     "section_metric_names": []
   },
-  "diagnosis": {},
-  "issues": [],
+  "diagnosis": {
+    "kind": "...",
+    "status": "...",
+    "severity": "info | warn | crit",
+    "summary": "...",
+    "action": "...",
+    "metric": null,
+    "phase": null,
+    "score": null,
+    "share_pct": null,
+    "skew_pct": null,
+    "ranks": [],
+    "evidence": {}
+  },
+  "issues": [
+    {
+      "kind": "...",
+      "status": "...",
+      "severity": "info | warn | crit",
+      "summary": "...",
+      "action": "...",
+      "metric": null,
+      "phase": null,
+      "score": null,
+      "share_pct": null,
+      "skew_pct": null,
+      "ranks": [],
+      "evidence": {}
+    }
+  ],
   "global": {
     "index_by": "node_rank | global_rank",
     "window": {
@@ -71,8 +100,17 @@ Sections:
 
 ## Field Rules
 
-- `diagnosis` is the primary section-level result.
-- `issues` is the sorted list of material issues behind the diagnosis.
+- `issues` is the canonical sorted list of diagnostic findings or states.
+- `issues` is always non-empty.
+- `diagnosis` is always equal to `issues[0]`.
+- Neutral states such as `NORMAL`, `BALANCED`, `NO_DATA`, `WARMUP`, and
+  `NO_GPU` are represented with the same issue shape as actionable findings.
+- `kind` is the stable internal key for code, comparisons, and frontend logic.
+- `status` is the user-facing display label.
+- `summary` is the short explanation. Older `reason` fields should be treated
+  as pre-`1.4` input, not the current final-summary contract.
+- Section-specific details such as `scope`, `samples_used`, `steps_used`,
+  `note`, and `confidence` belong in `evidence`.
 - `groups.rows` contains row data only: `identity` and `metrics`.
 - Row-level diagnosis is intentionally omitted for now.
 - `global.average`, `global.median`, `global.worst`, and
