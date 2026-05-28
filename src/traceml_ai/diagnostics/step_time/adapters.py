@@ -240,7 +240,7 @@ def build_summary_step_diagnosis_result(
     max_rows: int,
     per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
     policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG,
-) -> Optional[DiagnosticResult[StepDiagnosis]]:
+) -> DiagnosticResult[StepDiagnosis]:
     """
     Build rich summary-mode diagnosis from per-rank averaged timing signals.
 
@@ -251,7 +251,7 @@ def build_summary_step_diagnosis_result(
     - If series preparation fails, diagnosis still succeeds without trend notes.
     """
     if not rank_signals:
-        return None
+        return build_step_diagnosis_result([], thresholds=policy.thresholds)
 
     ranks = sorted(rank_signals.keys())
     min_steps = min(s.steps_analyzed for s in rank_signals.values())
@@ -356,7 +356,7 @@ def build_summary_step_diagnosis_result(
             metrics.append(metric)
 
     if not metrics:
-        return None
+        return build_step_diagnosis_result([], thresholds=policy.thresholds)
 
     return build_step_diagnosis_result(
         metrics,
@@ -367,7 +367,7 @@ def build_summary_step_diagnosis_result(
 
 def diagnose_step_time_summary(
     data: StepTimeDiagnosisInput,
-) -> Optional[DiagnosticResult[StepDiagnosis]]:
+) -> DiagnosticResult[StepDiagnosis]:
     """Run final-summary Step Time diagnosis from the typed input contract."""
     return build_summary_step_diagnosis_result(
         data.rank_signals,

@@ -316,4 +316,4 @@ def test_step_memory_summary_ignores_low_pressure_skew() -> None:
     )
 
     assert result.primary.kind == "BALANCED"
-    assert result.issues == ()
+    assert result.issues[0].kind == "BALANCED"

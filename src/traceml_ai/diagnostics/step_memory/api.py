@@ -27,6 +27,7 @@ from .trend import (
 
 StepMemoryDiagnosisKind = Literal[
     "NO_DATA",
+    "NO_GPU",
     "BALANCED",
     "HIGH_PRESSURE",
     "IMBALANCE",
@@ -36,6 +37,7 @@ StepMemoryDiagnosisKind = Literal[
 
 _STATUS_BY_KIND = {
     "NO_DATA": "NO DATA",
+    "NO_GPU": "NO GPU",
     "BALANCED": "BALANCED",
     "HIGH_PRESSURE": "HIGH PRESSURE",
     "IMBALANCE": "IMBALANCE",
@@ -85,6 +87,7 @@ class StepMemoryDiagnosisInput:
 
     metrics: Sequence[StepMemoryCombinedMetric]
     gpu_total_bytes: Optional[float]
+    no_gpu_detected: bool = False
     thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS
 
 
@@ -299,6 +302,7 @@ def build_step_memory_summary_diagnosis_result(
     metrics: Sequence[StepMemoryCombinedMetric],
     *,
     gpu_total_bytes: Optional[float] = None,
+    no_gpu_detected: bool = False,
     thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS,
 ) -> DiagnosticResult[StepMemoryDiagnosis]:
     """
@@ -308,6 +312,21 @@ def build_step_memory_summary_diagnosis_result(
     modular rules, sorted by priority, and the top issue becomes primary. The
     live renderer path keeps using `build_step_memory_diagnosis()`.
     """
+    if no_gpu_detected:
+        primary = _mk_diag(
+            kind="NO_GPU",
+            severity="info",
+            metric="peak_reserved",
+            steps_used=0,
+            reason=(
+                "No GPU detected. Step memory uses torch-based GPU memory "
+                "telemetry."
+            ),
+            action="Step memory is not applicable for this run.",
+            confidence=1.0,
+        )
+        return DiagnosticResult(primary=primary)
+
     from .adapters import build_step_memory_summary_signals
     from .rules import (
         run_step_memory_summary_rules,
@@ -396,6 +415,7 @@ def diagnose_step_memory_summary(
     return build_step_memory_summary_diagnosis_result(
         data.metrics,
         gpu_total_bytes=data.gpu_total_bytes,
+        no_gpu_detected=data.no_gpu_detected,
         thresholds=data.thresholds,
     )
 

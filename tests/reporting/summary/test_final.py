@@ -54,7 +54,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.3
+    assert payload["schema_version"] == 1.4
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
@@ -84,6 +84,7 @@ def test_final_report_generator_fails_open_for_one_section():
 
     assert payload["process"]["metadata"]["mode"] == "no_data"
     assert payload["process"]["diagnosis"]["status"] == "NO DATA"
+    assert payload["process"]["diagnosis"] == payload["process"]["issues"][0]
     assert payload["process"]["global"]["index_by"] == "global_rank"
     assert payload["process"]["groups"] == {
         "by": "global_rank",

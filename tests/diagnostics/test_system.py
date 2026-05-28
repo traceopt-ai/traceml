@@ -255,14 +255,14 @@ def test_system_cpu_only_normal_does_not_emit_no_gpu() -> None:
     assert result.primary.kind == "NORMAL"
     assert result.primary.status == "NORMAL"
     assert "GPU" not in result.primary.reason
-    assert result.issues == ()
+    assert result.issues[0].kind == "NORMAL"
 
 
 def test_system_no_data_is_primary_without_running_rules() -> None:
     result = _diagnose(system_samples=0, per_gpu={})
 
     assert result.primary.kind == "NO_DATA"
-    assert result.issues == ()
+    assert result.issues[0].kind == "NO_DATA"
 
 
 def _diagnose(**overrides):

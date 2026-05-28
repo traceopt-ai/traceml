@@ -208,14 +208,15 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
 
     assert payload["metadata"]["nodes_coverage"] == "2/2"
     assert payload["diagnosis"]["kind"] == "HIGH_GPU_TEMPERATURE"
-    assert payload["diagnosis"]["scope"] == {
+    assert payload["diagnosis"] == payload["issues"][0]
+    assert payload["diagnosis"]["evidence"]["scope"] == {
         "level": "gpu",
         "node": "1",
         "node_rank": 1,
         "gpu_idx": 0,
     }
-    assert "1 gpu0" in payload["diagnosis"]["reason"]
-    assert payload["issues"][0]["scope"]["node"] == "1"
+    assert "1 gpu0" in payload["diagnosis"]["summary"]
+    assert payload["issues"][0]["evidence"]["scope"]["node"] == "1"
     assert "diagnosis" not in payload["groups"]["rows"]["1"]
     assert "issues" not in payload["groups"]["rows"]["1"]
     assert payload["global"]["worst"]["gpu_temp_c"]["idx"] == "1"

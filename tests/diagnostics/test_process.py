@@ -343,14 +343,14 @@ def test_process_cpu_only_normal_does_not_emit_gpu_context_status() -> None:
     assert result.primary.kind == "NORMAL"
     assert result.primary.status == "NORMAL"
     assert "GPU" not in result.primary.reason
-    assert result.issues == ()
+    assert result.issues[0].kind == "NORMAL"
 
 
 def test_process_no_data_is_primary_without_running_rules() -> None:
     result = _diagnose(process_samples=0, per_rank={})
 
     assert result.primary.kind == "NO_DATA"
-    assert result.issues == ()
+    assert result.issues[0].kind == "NO_DATA"
 
 
 def _diagnose(**overrides):

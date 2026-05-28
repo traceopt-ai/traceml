@@ -19,9 +19,6 @@ from traceml_ai.renderers.step_memory.schema import (
 )
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
-from traceml_ai.reporting.summaries.diagnosis_presentation import (
-    SummaryDiagnosisPresentation,
-)
 from traceml_ai.reporting.topology import topology_mode_from_identities
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
@@ -246,40 +243,6 @@ def build_global_rank_summaries_from_window(
     return out
 
 
-def no_gpu_diagnosis_json() -> Dict[str, Any]:
-    """
-    Stable summary diagnosis block for CPU-only / no-GPU runs.
-    """
-    return {
-        "kind": "NO_GPU",
-        "status": "NO GPU",
-        "severity": "info",
-        "metric": None,
-        "steps_used": 0,
-        "worst_global_rank": None,
-        "reason": (
-            "No GPU detected. Step memory uses torch-based GPU memory telemetry."
-        ),
-        "action": "Treat step memory as not applicable for this run.",
-        "note": None,
-        "confidence": 1.0,
-    }
-
-
-def no_gpu_diagnosis_presented() -> SummaryDiagnosisPresentation:
-    """
-    Stable end-of-run presentation block for CPU-only / no-GPU runs.
-    """
-    return SummaryDiagnosisPresentation(
-        status="NO GPU",
-        reason=(
-            "No GPU detected. Step memory uses torch-based GPU memory telemetry."
-        ),
-        action="Step memory is not applicable for this run.",
-        note=None,
-    )
-
-
 def primary_metric(
     metrics: list[StepMemoryCombinedMetric],
     diagnosis: Optional[StepMemoryDiagnosis],
@@ -494,8 +457,6 @@ __all__ = [
     "empty_global_rollup",
     "metric_label",
     "metric_sort_key",
-    "no_gpu_diagnosis_json",
-    "no_gpu_diagnosis_presented",
     "primary_metric",
     "topology_mode",
 ]

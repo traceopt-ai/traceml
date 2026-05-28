@@ -17,7 +17,8 @@
 [**FAQ**](docs/user_guide/faq.md) •
 [**Security**](SECURITY.md) •
 [**Issues**](https://github.com/traceopt-ai/traceml/issues) •
-[**Discussions**](https://github.com/traceopt-ai/traceml/discussions)
+[**Discussions**](https://github.com/traceopt-ai/traceml/discussions) •
+[**Discord**](https://discord.gg/rY3EQguZAN)
 
 </div>
 

@@ -65,6 +65,7 @@ class StepMemorySummarySection(
         return StepMemoryDiagnosisInput(
             metrics=tuple(data.metrics),
             gpu_total_bytes=data.gpu_total_bytes,
+            no_gpu_detected=data.no_gpu_detected,
             thresholds=SUMMARY_STEP_MEMORY_POLICY.thresholds,
         )
 

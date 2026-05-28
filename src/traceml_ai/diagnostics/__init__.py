@@ -8,7 +8,6 @@ from .common import (
     DiagnosticResult,
     DiagnosticRule,
     Severity,
-    diagnosis_to_dict,
 )
 from .model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
@@ -29,7 +28,6 @@ __all__ = [
     "DiagnosticIssue",
     "DiagnosticResult",
     "DiagnosticRule",
-    "diagnosis_to_dict",
     "DiagnosticDomainRegistry",
     "DiagnosticDomainSpec",
     "ModelDiagnosticBuilder",

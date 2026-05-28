@@ -33,11 +33,9 @@ from traceml_ai.reporting.sections.step_time.model import (
     finite_float,
     summary_metric_values,
 )
-from traceml_ai.reporting.summaries.diagnosis_presentation import (
-    diagnosis_presentation_to_json,
-    present_step_time_summary_diagnosis,
+from traceml_ai.reporting.summaries.issue_summary import (
+    diagnostic_result_to_json,
 )
-from traceml_ai.reporting.summaries.issue_summary import issues_to_json
 from traceml_ai.reporting.summaries.summary_formatting import format_ms
 from traceml_ai.reporting.topology import topology_mode_from_identities
 
@@ -275,7 +273,7 @@ def _compute_phase_pair_from_rank_values(
 
 
 def _step_time_card_reason(
-    diagnosis: Optional[Any],
+    diagnosis: Any,
     *,
     stats: Optional[StepTimeCardStats],
     per_global_rank_summary: Dict[int, RankStepSummary],
@@ -283,7 +281,7 @@ def _step_time_card_reason(
 ) -> str:
     """Build the short `Why` line used only by the human card."""
     kind = str(getattr(diagnosis, "kind", "") or "")
-    if diagnosis is None or kind == "NO_DATA":
+    if kind == "NO_DATA":
         return "Need more step-time samples."
     if kind == "WARMUP":
         return str(getattr(diagnosis, "reason", "") or "").strip()
@@ -376,7 +374,7 @@ def _global_rank_entry_to_json(
 
 def build_step_time_payload(
     data: StepTimeSectionData,
-    diagnosis_result: Optional[DiagnosticResult[StepDiagnosis]],
+    diagnosis_result: DiagnosticResult[StepDiagnosis],
 ) -> Dict[str, Any]:
     """
     Build the Step Time payload and compact card text.
@@ -409,11 +407,9 @@ def build_step_time_payload(
     )
     primary_summary = median_summary or worst_summary
 
-    summary_diag = (
-        diagnosis_result.primary if diagnosis_result is not None else None
-    )
-    summary_diag_presented = present_step_time_summary_diagnosis(summary_diag)
-    issues = diagnosis_result.issues if diagnosis_result else ()
+    summary_diag = diagnosis_result.primary
+    issues = diagnosis_result.issues
+    diagnosis_json, issues_json = diagnostic_result_to_json(diagnosis_result)
 
     global_rollup = build_global_rollup(
         per_global_rank_summary=aligned_summary,
@@ -428,11 +424,7 @@ def build_step_time_payload(
         f"global ranks {len(all_global_ranks)}"
     )
     lines = [title, "Step Time"]
-    diagnosis_status = (
-        summary_diag_presented.status
-        if summary_diag_presented is not None
-        else "NO DATA"
-    )
+    diagnosis_status = summary_diag.status
     diagnosis_why = _step_time_card_reason(
         summary_diag,
         stats=card_stats,
@@ -501,11 +493,8 @@ def build_step_time_payload(
     )
     summary = BaseSectionPayload(
         metadata=metadata.to_json(),
-        diagnosis=diagnosis_presentation_to_json(
-            summary_diag_presented,
-            include_action=False,
-        ),
-        issues=issues_to_json(issues),
+        diagnosis=diagnosis_json,
+        issues=issues_json,
         global_summary=global_rollup,
         groups=BaseGroups(
             by="global_rank",

@@ -32,16 +32,12 @@ from traceml_ai.reporting.sections.step_memory.model import (
     empty_global_rollup,
     metric_label,
     metric_sort_key,
-    no_gpu_diagnosis_json,
-    no_gpu_diagnosis_presented,
     primary_metric,
     topology_mode,
 )
-from traceml_ai.reporting.summaries.diagnosis_presentation import (
-    diagnosis_presentation_to_json,
-    present_step_memory_summary_diagnosis,
+from traceml_ai.reporting.summaries.issue_summary import (
+    diagnostic_result_to_json,
 )
-from traceml_ai.reporting.summaries.issue_summary import issues_to_json
 from traceml_ai.reporting.summaries.summary_formatting import (
     format_ratio_percent,
 )
@@ -81,7 +77,6 @@ def _build_step_memory_payload(
     latest_step_observed: Optional[int],
     metrics: list[StepMemoryCombinedMetric],
     diagnosis_result: DiagnosticResult[StepMemoryDiagnosis],
-    no_gpu_detected: bool,
     per_global_rank: Dict[str, StepMemoryGlobalRankSummary],
     global_ranks_seen_fallback: int = 0,
 ) -> Dict[str, Any]:
@@ -89,25 +84,10 @@ def _build_step_memory_payload(
     sorted_metrics = sorted(metrics, key=metric_sort_key)
     diagnosis = diagnosis_result.primary
     primary = primary_metric(sorted_metrics, diagnosis)
-    diagnosis_presented = present_step_memory_summary_diagnosis(diagnosis)
-    issues = tuple(getattr(diagnosis_result, "issues", ()) or ())
+    diagnosis_json, issues_json = diagnostic_result_to_json(diagnosis_result)
     group_rows = _group_rows_to_json(per_global_rank)
 
     if not sorted_metrics or primary is None:
-        no_gpu_diagnosis = no_gpu_diagnosis_json() if no_gpu_detected else None
-        no_gpu_presented = (
-            no_gpu_diagnosis_presented() if no_gpu_detected else None
-        )
-        diagnosis_status = (
-            no_gpu_diagnosis["status"]
-            if no_gpu_diagnosis is not None
-            else "NO DATA"
-        )
-        diagnosis_reason = (
-            no_gpu_diagnosis["reason"]
-            if no_gpu_diagnosis is not None
-            else "No step-memory data was collected."
-        )
         latest_step_text = (
             latest_step_observed if latest_step_observed is not None else "n/a"
         )
@@ -117,10 +97,10 @@ def _build_step_memory_payload(
                 f"steps {training_steps} | "
                 f"global ranks {global_ranks_seen_fallback}",
                 "Step Memory",
-                f"- Diagnosis: {diagnosis_status}",
+                f"- Diagnosis: {diagnosis.status}",
                 f"- Scope: latest step {latest_step_text}",
                 "- Stats: n/a",
-                f"- Why: {diagnosis_reason}",
+                f"- Why: {diagnosis.reason}",
             ]
         )
 
@@ -134,11 +114,8 @@ def _build_step_memory_payload(
         )
         summary = BaseSectionPayload(
             metadata=metadata.to_json(),
-            diagnosis=diagnosis_presentation_to_json(
-                no_gpu_presented,
-                include_action=False,
-            ),
-            issues=[],
+            diagnosis=diagnosis_json,
+            issues=issues_json,
             global_summary=empty_global_rollup(),
             groups=BaseGroups(
                 by="global_rank",
@@ -154,23 +131,13 @@ def _build_step_memory_payload(
     global_ranks_used = int(primary.coverage.ranks_present)
     single_rank = global_ranks_used <= 1
 
-    diagnosis_status = (
-        diagnosis_presented.status
-        if diagnosis_presented is not None
-        else "NO DATA"
-    )
-    diagnosis_reason = (
-        diagnosis_presented.reason
-        if diagnosis_presented is not None
-        else "Need more step-memory samples."
-    )
     lines = [
         (
             f"TraceML Step Memory Summary | steps {training_steps} | "
             f"global ranks {global_ranks_seen}"
         ),
         "Step Memory",
-        f"- Diagnosis: {diagnosis_status}",
+        f"- Diagnosis: {diagnosis.status}",
         f"- Scope: last {steps_used} aligned steps",
     ]
     if single_rank:
@@ -190,7 +157,7 @@ def _build_step_memory_payload(
             f"{worst_global_rank} | "
             f"skew {format_ratio_percent(primary.summary.skew_pct)}"
         )
-    lines.extend([f"- Stats: {stats_text}", f"- Why: {diagnosis_reason}"])
+    lines.extend([f"- Stats: {stats_text}", f"- Why: {diagnosis.reason}"])
     card = "\n".join(lines)
 
     aggregate = build_global_rollup(
@@ -210,11 +177,8 @@ def _build_step_memory_payload(
     )
     summary = BaseSectionPayload(
         metadata=metadata.to_json(),
-        diagnosis=diagnosis_presentation_to_json(
-            diagnosis_presented,
-            include_action=False,
-        ),
-        issues=issues_to_json(issues),
+        diagnosis=diagnosis_json,
+        issues=issues_json,
         global_summary=aggregate,
         groups=BaseGroups(
             by="global_rank",
@@ -238,7 +202,6 @@ def build_step_memory_section_payload(
         latest_step_observed=data.latest_step_observed,
         metrics=data.metrics,
         diagnosis_result=diagnosis_result,
-        no_gpu_detected=data.no_gpu_detected,
         per_global_rank=data.per_global_rank,
         global_ranks_seen_fallback=data.aligned_window.global_ranks_seen,
     )
