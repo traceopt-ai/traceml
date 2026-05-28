@@ -60,12 +60,20 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         "schema_version",
         "generated_at",
         "duration_s",
+        "meta",
         "system",
         "process",
         "step_time",
         "step_memory",
         "text",
     ]
+    assert payload["meta"] == {
+        "run_name": None,
+        "mode": "no_data",
+        "world_size": None,
+        "nodes_observed": None,
+        "gpus_observed": None,
+    }
     assert "TraceML Run Summary | duration 10.0s" in payload["text"]
     assert "System" in payload["text"]
     assert "Step Memory" in payload["text"]

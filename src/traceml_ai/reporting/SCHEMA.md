@@ -12,6 +12,31 @@ Sections:
 - `step_time`: aligned training-step timing across global ranks.
 - `step_memory`: aligned per-step peak allocated/reserved memory.
 
+## Top-Level Shape
+
+```json
+{
+  "schema_version": 1.4,
+  "generated_at": "...",
+  "duration_s": null,
+  "meta": {
+    "run_name": null,
+    "mode": "single_node | multi_node | no_data",
+    "world_size": null,
+    "nodes_observed": null,
+    "gpus_observed": null
+  },
+  "system": {},
+  "process": {},
+  "step_time": {},
+  "step_memory": {},
+  "text": ""
+}
+```
+
+`meta` contains run-level identity and observed topology. Section-level
+`metadata` remains section-specific coverage and metric-contract information.
+
 ## Section Shape
 
 ```json

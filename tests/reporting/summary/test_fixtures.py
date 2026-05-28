@@ -858,11 +858,26 @@ def test_final_summary_fixture_schema_contains_all_sections(
         "schema_version",
         "generated_at",
         "duration_s",
+        "meta",
         "system",
         "process",
         "step_time",
         "step_memory",
         "text",
+    }
+    assert set(payload["meta"]) == {
+        "run_name",
+        "mode",
+        "world_size",
+        "nodes_observed",
+        "gpus_observed",
+    }
+    assert payload["meta"] == {
+        "run_name": None,
+        "mode": "single_node",
+        "world_size": 1,
+        "nodes_observed": 1,
+        "gpus_observed": 0,
     }
     for key in ("system", "process", "step_time", "step_memory"):
         assert "metadata" in payload[key]
