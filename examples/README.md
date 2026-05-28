@@ -17,7 +17,7 @@ These are the main user-facing examples.
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
-| `lightning_minimal.py` | Minimal Lightning `TraceMLCallback` example | CPU / CUDA | No dataset download required |
+| `lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 
 If you only try one example first, use:
 
@@ -93,6 +93,10 @@ Starter examples now prefer the top-level public API:
 - `traceml.trace_model_instance(...)`
 - `traceml.summary()`
 - `traceml.final_summary()`
+
+Lightning examples use `traceml_ai.integrations.lightning.init()` with
+`TraceMLCallback()` so Lightning can keep owning the training loop while
+TraceML records DataLoader, transfer, step, phase, and memory timing.
 
 For explicit manual instrumentation, see:
 

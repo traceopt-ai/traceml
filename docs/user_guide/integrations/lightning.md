@@ -20,11 +20,13 @@ pip install "traceml-ai[lightning]"
 
 ## Basic usage
 
-Add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
+Initialize the Lightning integration once, then add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
 
 ```python
 import lightning as L
-from traceml_ai.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations import lightning as traceml_lightning
+
+traceml_lightning.init()
 
 model = MyLightningModule()
 
@@ -33,7 +35,7 @@ trainer = L.Trainer(
     accelerator="auto",
     devices=1,
     enable_progress_bar=False,
-    callbacks=[TraceMLCallback()],
+    callbacks=[traceml_lightning.TraceMLCallback()],
 )
 
 trainer.fit(model, train_dataloaders=loader)
@@ -72,7 +74,7 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 ## How it works
 
-`TraceMLCallback` hooks into Lightning’s training lifecycle automatically.
+`traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing before Lightning receives the batch. `TraceMLCallback` then hooks into Lightning’s training lifecycle for H2D transfer, forward, backward, optimizer, step, and memory timing.
 
 That means you do not need to wrap your code with `traceml.trace_step(...)`
 manually in Lightning.
@@ -138,7 +140,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from traceml_ai.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations import lightning as traceml_lightning
 
 SEED = 42
 INPUT_DIM = 128
@@ -190,6 +192,7 @@ class TinyLightningModel(L.LightningModule):
 
 def main() -> None:
     torch.manual_seed(SEED)
+    traceml_lightning.init()
 
     dataset = SyntheticClassificationDataset(NUM_SAMPLES)
     loader = DataLoader(
@@ -206,7 +209,7 @@ def main() -> None:
         accelerator="auto",
         devices=1,
         enable_progress_bar=False,
-        callbacks=[TraceMLCallback()],
+        callbacks=[traceml_lightning.TraceMLCallback()],
         logger=False,
     )
 

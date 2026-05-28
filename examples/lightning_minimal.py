@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from traceml_ai.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations import lightning as traceml_lightning
 
 SEED = 42
 INPUT_DIM = 128
@@ -55,6 +55,7 @@ class TinyLightningModel(L.LightningModule):
 
 def main() -> None:
     torch.manual_seed(SEED)
+    traceml_lightning.init()
 
     dataset = SyntheticClassificationDataset(NUM_SAMPLES)
     loader = DataLoader(
@@ -71,7 +72,7 @@ def main() -> None:
         accelerator="auto",
         devices=1,
         enable_progress_bar=False,
-        callbacks=[TraceMLCallback()],
+        callbacks=[traceml_lightning.TraceMLCallback()],
         logger=False,
     )
 

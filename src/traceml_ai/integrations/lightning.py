@@ -22,6 +22,19 @@ except ImportError:
 TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 
 
+def init():
+    """
+    Initialize TraceML for PyTorch Lightning runs.
+
+    Lightning owns forward/backward/optimizer timing through TraceMLCallback.
+    The integration init only enables DataLoader fetch timing, which happens
+    before Lightning callback hooks can observe the batch.
+    """
+    import traceml_ai as traceml
+
+    return traceml.init(mode="selective", patch_dataloader=True)
+
+
 def _log_lightning_error(message: str, exc: Exception) -> None:
     """
     Log TraceML callback failures without interrupting Lightning training.
@@ -40,6 +53,23 @@ def _log_lightning_error(message: str, exc: Exception) -> None:
         pass
 
     print(f"[TraceML] {message}: {exc}", file=sys.stderr)
+
+
+def _device_is_cuda(device) -> bool:
+    device_type = getattr(device, "type", None)
+    if device_type is not None:
+        return str(device_type).lower() == "cuda"
+    return str(device).lower().startswith("cuda")
+
+
+def _lightning_uses_cuda(trainer, pl_module) -> bool:
+    strategy = getattr(trainer, "strategy", None)
+    root_device = getattr(strategy, "root_device", None)
+    if root_device is not None:
+        return _device_is_cuda(root_device)
+
+    module_device = getattr(pl_module, "device", None)
+    return _device_is_cuda(module_device)
 
 
 class TraceMLCallback(Callback):
@@ -62,9 +92,41 @@ class TraceMLCallback(Callback):
         self._forward_ctx = None
         self._backward_ctx = None
         self._optimizer_ctx = None
+        self._h2d_ctx = None
 
         self._mem_tracker = None
         self._opt_step_occurred = False
+
+    def _close_context(self, ctx_attr: str) -> None:
+        ctx = getattr(self, ctx_attr, None)
+        if ctx is None:
+            return
+        try:
+            ctx.__exit__(None, None, None)
+        except Exception:
+            pass
+        setattr(self, ctx_attr, None)
+
+    def on_before_batch_transfer(
+        self, trainer, pl_module, batch, dataloader_idx=0
+    ):
+        if TRACEML_DISABLED or not getattr(trainer, "training", True):
+            return
+        if not _lightning_uses_cuda(trainer, pl_module):
+            return
+
+        self._close_context("_h2d_ctx")
+        self._h2d_ctx = timed_region(
+            "_traceml_internal:h2d_time", scope="step", use_gpu=True
+        )
+        self._h2d_ctx.__enter__()
+
+    def on_after_batch_transfer(
+        self, trainer, pl_module, batch, dataloader_idx=0
+    ):
+        if TRACEML_DISABLED:
+            return
+        self._close_context("_h2d_ctx")
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         # Start overall step timing
@@ -97,12 +159,7 @@ class TraceMLCallback(Callback):
         if TRACEML_DISABLED:
             return
         # End forward timing
-        if self._forward_ctx is not None:
-            try:
-                self._forward_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
-            self._forward_ctx = None
+        self._close_context("_forward_ctx")
 
         # Start backward timing
         self._backward_ctx = timed_region(
@@ -114,12 +171,7 @@ class TraceMLCallback(Callback):
         if TRACEML_DISABLED:
             return
         # End backward timing
-        if self._backward_ctx is not None:
-            try:
-                self._backward_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
-            self._backward_ctx = None
+        self._close_context("_backward_ctx")
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
         if TRACEML_DISABLED:
@@ -136,12 +188,7 @@ class TraceMLCallback(Callback):
         if TRACEML_DISABLED:
             return
         # End optimizer step timing (zero_grad happens after step)
-        if self._optimizer_ctx is not None:
-            try:
-                self._optimizer_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
-            self._optimizer_ctx = None
+        self._close_context("_optimizer_ctx")
 
     def on_train_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx
@@ -150,18 +197,13 @@ class TraceMLCallback(Callback):
             return
         # Safety: end any active context managers (edge cases)
         for ctx_attr in (
+            "_h2d_ctx",
             "_forward_ctx",
             "_backward_ctx",
             "_optimizer_ctx",
             "_traceml_step_ctx",
         ):
-            ctx = getattr(self, ctx_attr, None)
-            if ctx is not None:
-                try:
-                    ctx.__exit__(None, None, None)
-                except Exception:
-                    pass
-                setattr(self, ctx_attr, None)
+            self._close_context(ctx_attr)
 
         # Handle Gradient Accumulation (Micro-batches):
         # If the optimizer didn't run this batch (because of grad accumulation),
@@ -198,3 +240,6 @@ class TraceMLCallback(Callback):
             flush_step_events(pl_module, trace_state.step)
         except Exception as e:
             _log_lightning_error("flush failed", e)
+
+
+__all__ = ["TraceMLCallback", "init"]
