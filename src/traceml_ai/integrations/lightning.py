@@ -1,8 +1,6 @@
 import os
 import sys
 
-from lightning.pytorch.callbacks import Callback
-
 from traceml_ai.runtime.state import get_trace_session_state
 from traceml_ai.utils.flush_buffers import flush_step_events
 from traceml_ai.utils.step_memory import StepMemoryTracker
@@ -12,6 +10,13 @@ from traceml_ai.utils.timing import (
     record_event,
     timed_region,
 )
+
+try:
+    from lightning.pytorch.callbacks import Callback
+    IS_LIGHTNING_AVAILABLE = True
+except ImportError:
+    Callback = object
+    IS_LIGHTNING_AVAILABLE = False
 
 TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 
@@ -47,6 +52,8 @@ class TraceMLCallback(Callback):
     """
 
     def __init__(self):
+        if not IS_LIGHTNING_AVAILABLE:
+            raise ImportError("Install traceml[lightning] to use Lightning integration")
         super().__init__()
         self._traceml_step_ctx = None
         self._forward_ctx = None
