@@ -143,17 +143,20 @@ from torch.utils.data import DataLoader, Dataset
 from traceml_ai.integrations import lightning as traceml_lightning
 
 SEED = 42
-INPUT_DIM = 128
+MODEL_INPUT_DIM = 128
+TRANSFER_INPUT_DIM = 32768
 HIDDEN_DIM = 256
 NUM_CLASSES = 10
-NUM_SAMPLES = 4096
+NUM_SAMPLES = 1024
 BATCH_SIZE = 64
 MAX_STEPS = 200
 
 
 class SyntheticClassificationDataset(Dataset):
     def __init__(self, num_samples: int):
-        self.x = torch.randn(num_samples, INPUT_DIM)
+        # Transfer a wider CPU batch so Lightning H2D timing is visible, while
+        # the model below only consumes MODEL_INPUT_DIM features for compute.
+        self.x = torch.randn(num_samples, TRANSFER_INPUT_DIM)
         self.y = torch.randint(0, NUM_CLASSES, (num_samples,))
 
     def __len__(self) -> int:
@@ -167,13 +170,14 @@ class TinyLightningModel(L.LightningModule):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(INPUT_DIM, HIDDEN_DIM),
+            nn.Linear(MODEL_INPUT_DIM, HIDDEN_DIM),
             nn.ReLU(),
             nn.Linear(HIDDEN_DIM, NUM_CLASSES),
         )
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, x):
+        x = x[..., :MODEL_INPUT_DIM].contiguous()
         return self.net(x)
 
     def training_step(self, batch, batch_idx):
