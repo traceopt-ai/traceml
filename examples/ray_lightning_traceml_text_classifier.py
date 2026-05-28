@@ -67,7 +67,6 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
     from ray.train.lightning import (
         RayDDPStrategy,
         RayLightningEnvironment,
-        RayTrainReportCallback,
         prepare_trainer,
     )
 
@@ -129,7 +128,7 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
         max_steps=int(config["max_steps"]),
         strategy=RayDDPStrategy(),
         plugins=[RayLightningEnvironment()],
-        callbacks=[TraceMLCallback(), RayTrainReportCallback()],
+        callbacks=[TraceMLCallback()],
         enable_checkpointing=False,
         enable_progress_bar=False,
         log_every_n_steps=10,
