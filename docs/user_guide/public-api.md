@@ -19,6 +19,11 @@ and will be removed in a future release. New code should use
 
 ## Hugging Face integration
 
+::: traceml_ai.integrations.huggingface.TraceMLTrainerCallback
+    options:
+      show_root_heading: true
+      show_source: true
+
 ::: traceml_ai.integrations.huggingface.TraceMLTrainer
     options:
       show_root_heading: true
