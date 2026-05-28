@@ -1,0 +1,53 @@
+# Distributed Training
+
+TraceML uses launch flags similar to `torchrun` and writes the same
+`final_summary.json` artifact for single-node and multi-node summary runs.
+
+## Single-node DDP/FSDP
+
+Use `--nproc-per-node` for a single machine with multiple local workers:
+
+```bash
+traceml run train.py --nproc-per-node=4
+```
+
+Live CLI and dashboard modes are intended for single-node runs. Summary mode is
+the default and works for both single-node and multi-node summary reports.
+
+## Multi-node DDP
+
+Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
+`--master-addr` on every node. Set `--node-rank` to the current node's rank.
+
+On node 0:
+
+```bash
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=0 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --run-name=my-run
+```
+
+On node 1:
+
+```bash
+traceml run train.py \
+  --nnodes=2 \
+  --node-rank=1 \
+  --nproc-per-node=4 \
+  --master-addr=<node0-ip> \
+  --run-name=my-run
+```
+
+Node 0 starts the TraceML aggregator. Other nodes connect to
+`<node0-ip>:29765` by default. If workers need a different reachable address or
+port for TraceML telemetry, add `--aggregator-host=<host>` or
+`--aggregator-port=<port>` on every node.
+
+For multi-node runs, node 0 binds the aggregator to `0.0.0.0` by default.
+Override that only when needed with `--aggregator-bind-host=<bind-host>`.
+
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.

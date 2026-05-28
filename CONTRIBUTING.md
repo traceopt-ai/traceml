@@ -14,6 +14,8 @@ You can help in many ways:
 - 📖 Improving documentation or examples
 
 If you are unsure where to start, check the GitHub Issues page or open a discussion.
+Look for issues labeled `good first issue` or `help wanted` when you want a
+scoped task.
 
 ---
 
@@ -43,9 +45,64 @@ pip install -e ".[dev]"
 ```
 
 Requirements:
-- Python 3.9+
-- PyTorch 1.12+
-- CUDA enabled GPU (recommended; contributors may use local GPUs or cloud providers such as Google Cloud, AWS, Runpod, etc.)
+- Python 3.10+
+- PyTorch 2.5+ for Torch-backed examples and tests
+- CUDA enabled GPU for GPU/distributed changes. Many docs, reporting, CLI, and CPU smoke-test changes can be developed without a GPU.
+
+---
+
+## Open tasks for first contributors
+
+These are real starter-sized tasks we are willing to review. Please comment on
+the matching GitHub issue before starting, or open a short issue first if one
+does not exist yet.
+
+### Add an end-to-end final-summary smoke test
+
+Add a pytest test that runs a tiny TraceML training script through `traceml run`
+with `--mode=summary` and a fixed `--run-name`.
+
+Done means:
+
+- the test runs on CPU in CI
+- it asserts `logs/<run-name>/final_summary.json` is written
+- it also checks `final_summary.txt` is written
+- the JSON includes `schema_version`, `system`, `process`, `step_time`, and `step_memory`
+
+### Add an executable MLflow summary example
+
+Add a minimal example that logs `traceml.summary()` output to MLflow.
+
+Done means:
+
+- the example lives under `examples/`
+- it keeps `mlflow` optional and does not add it as a core dependency
+- it logs numeric summary values with `mlflow.log_metrics(...)`
+- it logs string diagnosis fields with `mlflow.set_tags(...)`
+- `examples/README.md` links to the new example
+
+### Improve runtime-failure safety tests
+
+TraceML should not stop user training when telemetry or reporting fails. Add or
+extend tests around that contract.
+
+Done means:
+
+- the test simulates a TraceML runtime, sampler, sender, or final-summary failure
+- the user training loop still finishes
+- the failure is logged or handled without escaping into user code
+
+### Add compare regression coverage for diagnosis changes
+
+`traceml compare` should clearly show when a diagnosis changes between two
+saved `final_summary.json` files.
+
+Done means:
+
+- the test uses small summary fixtures, not a full training run
+- it covers at least one improvement and one regression case
+- it asserts the compact text output includes the changed Step Time diagnosis
+- it asserts the structured compare JSON records the same change
 
 ---
 
@@ -67,7 +124,8 @@ When contributing, please ensure:
 
 If in doubt, open an issue before implementing.
 
-For code extension points, see [`docs/extending-traceml.md`](docs/extending-traceml.md).
+For code extension points, see
+[`docs/developer_guide/extending.md`](docs/developer_guide/extending.md).
 
 ---
 

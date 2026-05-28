@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import pytest
 
-from traceml.diagnostics.process.api import diagnose_process
-from traceml.diagnostics.process.context import (
+from traceml_ai.diagnostics.process.api import diagnose_process
+from traceml_ai.diagnostics.process.context import (
     ProcessDiagnosisInput,
     ProcessRankDiagnosisInput,
     build_process_summary_signals,
 )
-from traceml.diagnostics.process.rules import (
+from traceml_ai.diagnostics.process.rules import (
     GPUMemoryReservedOverhangRule,
     HighProcessCPURule,
     HighProcessGPUMemoryRule,
@@ -255,6 +255,11 @@ def test_reserved_overhang_uses_rank_local_peak_ratio() -> None:
 
     issue = result.issues[0]
     assert issue.kind == "GPU_MEMORY_RESERVED_OVERHANG"
+    assert issue.status == "HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO"
+    assert (
+        issue.summary
+        == "PyTorch CUDA allocator reserved memory was 1.80x allocated tensor memory."
+    )
     assert issue.ranks == (1,)
     assert issue.evidence["gpu_mem_reserved_overhang_ratio"] == 1.8
 

@@ -7,7 +7,7 @@ import torch.optim as optim
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 
-import traceml
+import traceml_ai as traceml
 
 SEED = 42
 INPUT_DIM = 1024

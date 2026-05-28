@@ -1,10 +1,12 @@
-from traceml.core import Registry
-from traceml.runtime.sampler_registry import (
+from traceml_ai.core import Registry
+from traceml_ai.runtime.sampler_registry import (
     SamplerSpec,
     build_samplers,
     select_sampler_specs,
 )
-from traceml.samplers.base_sampler import BaseSampler
+from traceml_ai.samplers import process_sampler
+from traceml_ai.samplers.base_sampler import BaseSampler
+from traceml_ai.samplers.process_sampler import ProcessSampler
 
 
 class _FakeSampler(BaseSampler):
@@ -199,6 +201,67 @@ def test_build_samplers_logs_and_skips_constructor_failures() -> None:
     assert isinstance(samplers[0], _FakeSampler)
     assert len(logger.exceptions) == 1
     assert "Failed to initialize sampler" in logger.exceptions[0][0]
+
+
+def test_process_sampler_does_not_set_cuda_device_when_unavailable(
+    monkeypatch,
+) -> None:
+    set_device_calls: list[int] = []
+
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "is_available",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "device_count",
+        lambda: 0,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "set_device",
+        lambda device_index: set_device_calls.append(device_index),
+    )
+
+    sampler = ProcessSampler()
+
+    assert sampler._sample_gpu() is None
+    assert sampler.gpu_available is False
+    assert sampler.gpu_count == 0
+    assert set_device_calls == []
+
+
+def test_process_sampler_does_not_touch_cuda_before_ddp_init(
+    monkeypatch,
+) -> None:
+    cuda_calls: list[str] = []
+
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setattr(process_sampler.dist, "is_available", lambda: True)
+    monkeypatch.setattr(process_sampler.dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "is_available",
+        lambda: cuda_calls.append("is_available") or True,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "device_count",
+        lambda: cuda_calls.append("device_count") or 1,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "set_device",
+        lambda device_index: cuda_calls.append(f"set_device:{device_index}"),
+    )
+
+    sampler = ProcessSampler()
+
+    assert sampler._sample_gpu() is None
+    assert cuda_calls == []
 
 
 def test_build_samplers_continues_after_constructor_failure() -> None:

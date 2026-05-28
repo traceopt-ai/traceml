@@ -17,18 +17,18 @@ import json
 import sqlite3
 from pathlib import Path
 
-from traceml.aggregator.sqlite_writers import (
+from traceml_ai.aggregator.sqlite_writers import (
     process as process_projection,
     step_memory as step_memory_projection,
     step_time as step_time_projection,
     system as system_projection,
 )
-from traceml.reporting.final import build_summary_payload
-from traceml.reporting.schema import BaseSectionPayload
-from traceml.reporting.sections.process import ProcessSummarySection
-from traceml.reporting.sections.step_memory import StepMemorySummarySection
-from traceml.reporting.sections.step_time import StepTimeSummarySection
-from traceml.reporting.sections.system import SystemSummarySection
+from traceml_ai.reporting.final import build_summary_payload
+from traceml_ai.reporting.schema import BaseSectionPayload
+from traceml_ai.reporting.sections.process import ProcessSummarySection
+from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
+from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
+from traceml_ai.reporting.sections.system import SystemSummarySection
 
 
 SECTION_KEYS = {

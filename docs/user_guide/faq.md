@@ -55,7 +55,7 @@ A simple rule:
 Usually just this:
 
 ```python
-import traceml
+import traceml_ai as traceml
 
 traceml.init(mode="auto")
 
@@ -68,9 +68,7 @@ For supported integrations:
 - Hugging Face: use `TraceMLTrainer`
 - Lightning: add `TraceMLCallback()`
 
-`from traceml.decorators import trace_step` still works for backward
-compatibility, but the preferred public API is now the top-level
-`traceml.*`.
+The preferred public API is the top-level `traceml.*` from `import traceml_ai as traceml`.
 
 ---
 
@@ -79,7 +77,7 @@ compatibility, but the preferred public API is now the top-level
 Prefer:
 
 ```python
-import traceml
+import traceml_ai as traceml
 
 traceml.init(mode="auto")
 
@@ -87,15 +85,7 @@ with traceml.trace_step(model):
     ...
 ```
 
-TraceML still supports:
-
-```python
-from traceml.sdk.decorators_compat import trace_step
-```
-
-for backward compatibility, but new examples and docs use the top-level
-`traceml.*` API. Legacy decorator imports are planned for deprecation
-starting in `v0.3.0`.
+Use the top-level `traceml.*` API from `import traceml_ai as traceml`.
 
 ---
 
@@ -169,10 +159,13 @@ Multi-node DDP is supported for end-of-run summary reports.
 
 Yes, for summary-mode DDP runs.
 
-Use the same `--session-id`, `--nnodes`, `--nproc-per-node`, and
+Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
 `--master-addr` on every node. Node 0 starts the TraceML aggregator; other
 nodes connect to it for telemetry. Multi-node live CLI/dashboard views are not
 yet supported.
+
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 ---
 
@@ -216,6 +209,7 @@ Yes.
 Run:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
@@ -285,8 +279,10 @@ TraceML is designed to work alongside your existing tracking stack. The
 recommended low-noise path is:
 
 1. launch with `traceml run train.py`
-2. call `traceml.final_summary()` near the end of your script
-3. log selected fields from the returned dict into W&B or MLflow
+2. call `traceml.summary()` near the end of your script
+3. log the returned flat dict into W&B or MLflow
+
+Use `traceml.final_summary()` if you need the full structured JSON payload.
 
 See:
 

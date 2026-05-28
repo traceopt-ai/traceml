@@ -13,11 +13,11 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import traceml.utils.batch_size as bs_module
-from traceml.aggregator.sqlite_writers import batch_size as bs_writer
-from traceml.samplers.batch_size_sampler import BatchSizeSampler
-from traceml.samplers.schema.batch_size_schema import BatchSizeSample
-from traceml.utils.batch_size import (
+import traceml_ai.utils.batch_size as bs_module
+from traceml_ai.aggregator.sqlite_writers import batch_size as bs_writer
+from traceml_ai.samplers.batch_size_sampler import BatchSizeSampler
+from traceml_ai.samplers.schema.batch_size_schema import BatchSizeSample
+from traceml_ai.utils.batch_size import (
     BatchSizeBatch,
     BatchSizeEvent,
     flush_batch_size_buffer,
@@ -314,7 +314,7 @@ class TestBatchSizeSqlWriter:
 
 class TestH2DAutoPatchRecordsBytes:
     def test_records_when_target_is_cuda(self, monkeypatch):
-        import traceml.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
+        import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
 
         def _fake_to(_self, *args, **kwargs):
             return _self
@@ -332,7 +332,7 @@ class TestH2DAutoPatchRecordsBytes:
         assert bs_module._BATCH_SIZE_BUFFER[0].bytes_count == 128
 
     def test_does_not_record_cpu_target(self):
-        import traceml.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
+        import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
 
         t = torch.zeros(4, 8, dtype=torch.float32)
         h2d_patch._H2D_TLS._traceml_h2d_enabled = True
@@ -344,7 +344,7 @@ class TestH2DAutoPatchRecordsBytes:
         assert len(bs_module._BATCH_SIZE_BUFFER) == 0
 
     def test_does_not_record_when_disabled(self, monkeypatch):
-        import traceml.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
+        import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
 
         def _fake_to(_self, *args, **kwargs):
             return _self
@@ -368,7 +368,7 @@ class TestWrapH2DRecordsContainerBytes:
             torch.Tensor, "_traceml_h2d_patched", False, raising=False
         )
 
-        from traceml.sdk.wrappers import wrap_h2d
+        from traceml_ai.sdk.wrappers import wrap_h2d
 
         # Subclass of dict: tensor_bytes() recognizes it as a dict container.
         class DictBatch(dict):
@@ -393,7 +393,7 @@ class TestWrapH2DRecordsContainerBytes:
             torch.Tensor, "_traceml_h2d_patched", False, raising=False
         )
 
-        from traceml.sdk.wrappers import wrap_h2d
+        from traceml_ai.sdk.wrappers import wrap_h2d
 
         class OpaqueBatch:
             def to(self, device):

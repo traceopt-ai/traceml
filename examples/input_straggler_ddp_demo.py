@@ -9,7 +9,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
-import traceml
+import traceml_ai as traceml
 
 SEED = 42
 INPUT_DIM = 1024

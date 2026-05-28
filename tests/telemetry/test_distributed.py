@@ -1,4 +1,4 @@
-from traceml.transport import distributed
+from traceml_ai.transport import distributed
 
 
 def test_ddp_info_does_not_require_torch(monkeypatch):

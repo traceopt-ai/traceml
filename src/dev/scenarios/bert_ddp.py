@@ -14,7 +14,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-import traceml
+import traceml_ai as traceml
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"
@@ -123,7 +123,11 @@ def forward_pass(model, batch, dtype):
     Measure forward pass time (with AMP).
     """
     use_cuda = torch.cuda.is_available()
-    with torch.cuda.amp.autocast(enabled=use_cuda, dtype=dtype):
+    with torch.amp.autocast(
+        device_type="cuda" if use_cuda else "cpu",
+        enabled=use_cuda,
+        dtype=dtype,
+    ):
         return model(**batch)
 
 

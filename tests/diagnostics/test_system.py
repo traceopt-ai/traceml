@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from traceml.diagnostics.system.api import diagnose_system
-from traceml.diagnostics.system.context import (
+from traceml_ai.diagnostics.system.api import diagnose_system
+from traceml_ai.diagnostics.system.context import (
     SystemDiagnosisInput,
     SystemGpuDiagnosisInput,
     SystemNodeDiagnosisInput,
     build_system_summary_signals,
 )
-from traceml.diagnostics.system.rules import (
+from traceml_ai.diagnostics.system.rules import (
     HighCPURule,
     HighGPUMemoryRule,
     HighGPUPowerRule,
