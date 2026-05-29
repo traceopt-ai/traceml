@@ -36,11 +36,11 @@ def train_loop_per_worker(config):
     import torch
     import torch.nn as nn
     import torch.optim as optim
-    from ray import train
+    import ray.train as ray_train
 
     import traceml_ai as traceml
 
-    ctx = train.get_context()
+    ctx = ray_train.get_context()
     device = torch.device(
         "cuda"
         if bool(config["use_gpu"]) and torch.cuda.is_available()
@@ -55,7 +55,7 @@ def train_loop_per_worker(config):
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 
-    train_ds = train.get_dataset_shard("train")
+    train_ds = ray_train.get_dataset_shard("train")
     train_loader = train_ds.iter_torch_batches(
         batch_size=int(config["batch_size"]),
         prefetch_batches=1,
@@ -111,7 +111,7 @@ def main() -> None:
     args = parser.parse_args()
 
     import ray
-    from ray.train import ScalingConfig
+    import ray.train as ray_train
 
     from traceml_ai.integrations.ray import (
         TraceMLRayConfig,
@@ -133,7 +133,7 @@ def main() -> None:
             "input_delay_ms": args.input_delay_ms,
             "use_gpu": args.use_gpu,
         },
-        scaling_config=ScalingConfig(
+        scaling_config=ray_train.ScalingConfig(
             num_workers=args.num_workers,
             use_gpu=args.use_gpu,
         ),
