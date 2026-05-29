@@ -204,7 +204,9 @@ def main() -> None:
         datasets={"train": train_dataset},
         traceml_config=TraceMLRayConfig(
             mode="summary",
-            init_mode="manual",
+            init_mode="selective",
+            patch_dataloader=True,
+            patch_h2d=True,
             session_id="ray-lightning-text",
         ),
     )
