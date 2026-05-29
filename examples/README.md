@@ -16,6 +16,8 @@ These are the main user-facing examples.
 | `summary_logging_minimal.py` | Minimal tracker-friendly `traceml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
+| `ray/torchtrainer_minimal.py` | Minimal Ray Train example with Ray Data input timing | CPU / CUDA | Uses `TraceMLTorchTrainer` |
+| `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data and `TraceMLCallback` |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
 | `lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 
@@ -90,13 +92,16 @@ Starter examples now prefer the top-level public API:
 
 - `traceml.init(mode="auto")`
 - `traceml.trace_step(...)`
-- `traceml.trace_model_instance(...)`
 - `traceml.summary()`
 - `traceml.final_summary()`
 
 Lightning examples use `traceml_ai.integrations.lightning.init()` with
 `TraceMLCallback()` so Lightning can keep owning the training loop while
 TraceML records DataLoader, transfer, step, phase, and memory timing.
+
+Ray Data examples wrap `iter_torch_batches(...)` with
+`traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch
+`DataLoader` objects.
 
 For explicit manual instrumentation, see:
 
@@ -121,6 +126,7 @@ Use:
 - `ddp_minimal.py` if you want single-node distributed training
 - `huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
 - `lightning_minimal.py` if you use PyTorch Lightning
+- `ray/torchtrainer_minimal.py` if you use Ray Train
 
 Use the diagnosis demos when you want to see:
 
