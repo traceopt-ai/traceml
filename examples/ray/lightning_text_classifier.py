@@ -225,7 +225,6 @@ def main() -> None:
             init_mode="selective",
             patch_dataloader=True,
             patch_h2d=True,
-            session_id="ray-lightning-text",
         ),
     )
     trainer.fit()
