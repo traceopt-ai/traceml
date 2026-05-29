@@ -7,7 +7,17 @@ from traceml_ai.sdk.decorators_compat import trace_model_instance, trace_step
 
 logger = logging.getLogger(__name__)
 
-TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
+
+def _traceml_disabled() -> bool:
+    """
+    Read the TRACEML_DISABLED kill switch dynamically.
+
+    Read per-call rather than captured at import so toggling the env var
+    after import (notebooks, tests) is honored, matching how trace_step and
+    trace_model_instance already check it.
+    """
+    return os.environ.get("TRACEML_DISABLED") == "1"
+
 
 try:
     from transformers import Trainer, TrainerCallback
@@ -98,12 +108,21 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
             _log_hf_error("Failed to initialize model tracing", exc)
 
     def on_train_begin(self, args, state, control, **kwargs):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
+
+        # Self-heal before training starts. If this callback instance is
+        # reused and a previous run crashed mid-step, the leaked trace_step is
+        # still suspended with its auto-timer flags armed. With
+        # eval_on_start=True, HF runs evaluation between here and the first
+        # on_step_begin, so those eval forward passes would otherwise be timed
+        # into the orphaned step. Closing here covers that window.
+        self._close_step_cm_safely()
+
         self._maybe_attach_model_hooks(kwargs.get("model"))
 
     def on_step_begin(self, args, state, control, **kwargs):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
 
         # If a previous step raised, HF never fired on_step_end and the
@@ -112,6 +131,12 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         self._close_step_cm_safely()
 
         model = kwargs.get("model")
+        if model is None:
+            # Defensive: standard Trainer always passes the model, but a None
+            # would raise inside StepMemoryTracker, costing a lost step and
+            # log noise. Skip bracketing this step instead.
+            return
+
         # Late attachment fallback when on_train_begin missed the model.
         self._maybe_attach_model_hooks(model)
 
@@ -123,7 +148,7 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
             _log_hf_error("trace_step enter failed", exc)
 
     def on_step_end(self, args, state, control, **kwargs):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         self._close_step_cm_safely()
 
@@ -159,7 +184,7 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         self.traceml_enabled = traceml_enabled
         self.traceml_kwargs = traceml_kwargs
 
-        if not traceml_enabled or TRACEML_DISABLED:
+        if not traceml_enabled or _traceml_disabled():
             return
 
         # Dedup guard: a user passing callbacks=[TraceMLTrainerCallback()] to

@@ -119,8 +119,11 @@ trade-offs vs. the legacy subclass that are worth knowing:
   applies consistently to every step, so dashboard step alignment still holds.
 - **Exception safety.** If `training_step` raises, Hugging Face does not call
   `on_step_end`. The callback defensively closes the trace_step context on
-  the next `on_step_begin` and on `on_train_end`, but the step where the
-  exception occurred may be reported with incomplete timing or memory. The
+  the next `on_step_begin`, on `on_train_begin` (so a reused callback instance
+  whose previous run crashed mid-step does not bleed a leaked auto-timer flag
+  into an `eval_on_start=True` evaluation), and on `on_train_end`. Even so, the
+  step where the exception occurred may be reported with incomplete timing or
+  memory. The
   legacy subclass's `with trace_step(model): super().training_step(...)`
   pattern ran the `finally` cleanup deterministically. If you need precise
   attribution on failing steps, the legacy `TraceMLTrainer` path is stricter.

@@ -258,14 +258,16 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches():
             f"got {len(batches)}."
         )
 
-        forward_counts = [
-            sum(
-                1
-                for evt in batch.events
-                if evt.name == "_traceml_internal:forward_time"
-            )
-            for batch in batches
-        ]
+        def _counts(event_name: str) -> list:
+            return [
+                sum(1 for evt in batch.events if evt.name == event_name)
+                for batch in batches
+            ]
+
+        forward_counts = _counts("_traceml_internal:forward_time")
+        backward_counts = _counts("_traceml_internal:backward_time")
+        optimizer_counts = _counts("_traceml_internal:optimizer_step")
+
         # Each optimizer step calls model.forward() grad_accum times. Each call
         # produces one outermost-forward event. Allow a small tolerance for
         # warmup / HF internals but the dominant count must match.
@@ -273,6 +275,20 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches():
             f"Expected {grad_accum} forward events per TraceML step "
             f"(one per micro-batch in the grad-accum group), got "
             f"{forward_counts}."
+        )
+        # Backward fires once per micro-batch too, so it folds the same way.
+        # Gates against backward auto-timer flags being lost across the
+        # accumulated micro-batches.
+        assert all(count == grad_accum for count in backward_counts), (
+            f"Expected {grad_accum} backward events per TraceML step "
+            f"(one per micro-batch in the grad-accum group), got "
+            f"{backward_counts}."
+        )
+        # The optimizer steps exactly once per grad-accum group. Gates against
+        # a missing/dummy optimizer event slipping past the forward check.
+        assert all(count == 1 for count in optimizer_counts), (
+            f"Expected exactly one optimizer event per TraceML step "
+            f"(one per optimizer step), got {optimizer_counts}."
         )
 
 
@@ -374,3 +390,47 @@ def test_hf_trainer_wrapper_dedups_user_supplied_callback():
             f"Expected one StepMemoryEvent per optimizer step "
             f"({max_steps}), got {len(drained)}; dedup guard failed."
         )
+
+
+@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
+def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
+    """
+    With TRACEML_DISABLED=1 set after import, the callback must be a complete
+    no-op: it advances no step counter and emits no step-memory events. This
+    gates the dynamic (per-call) env-var read against regressing to an
+    import-time constant that would ignore the kill switch.
+    """
+    monkeypatch.setenv("TRACEML_DISABLED", "1")
+    _reset_traceml_state()
+    max_steps = 3
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        output_dir = Path(tmp_dir) / "results"
+        model = _build_tiny_model()
+        train_dataset = _TinyTokenizedDataset()
+        training_args = _build_training_args(
+            str(output_dir), max_steps=max_steps
+        )
+
+        from traceml_ai.runtime.state import get_trace_session_state
+
+        step_before = get_trace_session_state().step
+
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            callbacks=[TraceMLTrainerCallback()],
+        )
+        trainer.train()
+
+        step_after = get_trace_session_state().step
+        assert step_after == step_before, (
+            "Step counter must not advance when TRACEML_DISABLED=1; "
+            f"advanced by {step_after - step_before}."
+        )
+
+        drained = _drain_step_memory_queue(id(model))
+        assert (
+            drained == []
+        ), f"Expected no StepMemoryEvents when disabled, got {len(drained)}."
