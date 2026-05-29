@@ -36,6 +36,7 @@ def train_loop_per_worker(config):
     import torch
     import torch.nn as nn
     import torch.optim as optim
+    from ray import train
 
     import traceml_ai as traceml
 
@@ -43,12 +44,20 @@ def train_loop_per_worker(config):
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 
-    traceml.trace_model_instance(model)
+    train_ds = train.get_dataset_shard("train")
+    train_loader = train_ds.iter_torch_batches(
+        batch_size=64,
+        prefetch_batches=1,
+    )
+    train_loader = traceml.wrap_dataloader_fetch(train_loader)
 
-    for _ in range(config["steps"]):
+    for step, batch in enumerate(train_loader):
+        if step >= config["steps"]:
+            break
+
         with traceml.trace_step(model):
-            x = torch.randn(64, 32)
-            y = torch.randint(0, 4, (64,))
+            x = batch["x"]
+            y = batch["y"].long()
 
             optimizer.zero_grad(set_to_none=True)
             loss = criterion(model(x), y)
@@ -57,11 +66,15 @@ def train_loop_per_worker(config):
 
 
 ray.init()
+train_dataset = ray.data.from_items(
+    [{"x": [0.0] * 32, "y": 0} for _ in range(4096)]
+)
 
 trainer = TraceMLTorchTrainer(
     train_loop_per_worker,
     train_loop_config={"steps": 10},
     scaling_config=ScalingConfig(num_workers=4, use_gpu=False),
+    datasets={"train": train_dataset},
     traceml_config=TraceMLRayConfig(mode="summary"),
 )
 
@@ -71,6 +84,32 @@ trainer.fit()
 Use the same ``train_loop_per_worker`` shape you would pass to Ray's
 ``TorchTrainer``. The wrapper starts TraceML before your loop runs and stops it
 after the loop exits.
+
+When using Ray Data, wrap the ``iter_torch_batches(...)`` iterator with
+``traceml.wrap_dataloader_fetch(...)``. Ray Data is not a PyTorch
+``DataLoader``, so the PyTorch DataLoader patch cannot see those fetches.
+
+## Ray + Lightning
+
+When combining Ray Train and PyTorch Lightning, add ``TraceMLCallback()`` to the
+Lightning ``Trainer`` and keep wrapping Ray Data iterators with
+``traceml.wrap_dataloader_fetch(...)``. To capture Lightning H2D timing inside
+Ray workers, initialize the worker patches selectively:
+
+```python
+TraceMLRayConfig(
+    mode="summary",
+    init_mode="selective",
+    patch_dataloader=True,
+    patch_h2d=True,
+)
+```
+
+The ``examples/ray/lightning_text_classifier.py`` demo also includes
+``--input-delay-ms=10`` to make Ray input timing visible and
+``--transfer-dim=131072`` to make Lightning H2D timing visible.
+``--transfer-dim`` creates a reusable per-batch CPU tensor; it does not add a
+full dataset-sized tensor.
 
 ## Network Model
 
@@ -111,10 +150,13 @@ The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal
 rendering from the aggregator actor.
 
-``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray worker. Use
-``init_mode="manual"`` if your training loop wraps dataloader, forward,
-backward, and optimizer timing explicitly. Use ``init_mode="selective"`` with
-the ``patch_*`` options when you only want some automatic patches.
+``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray
+worker. The Ray Data ``wrap_dataloader_fetch(...)`` pattern above works with
+the default auto mode because Ray Data iterators are separate from PyTorch
+``DataLoader``. Use ``init_mode="manual"`` only if your training loop wraps
+dataloader, forward, backward, and optimizer timing explicitly. Use
+``init_mode="selective"`` with the ``patch_*`` options when you only want some
+automatic patches.
 
 ## Lifecycle
 
