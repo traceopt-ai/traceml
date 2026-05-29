@@ -64,6 +64,7 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
     import torch.nn as nn
     import torch.nn.functional as F
     import ray.train
+    import traceml_ai as traceml
     from ray.train.lightning import (
         RayDDPStrategy,
         RayLightningEnvironment,
@@ -119,8 +120,9 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
     train_ds = ray.train.get_dataset_shard("train")
     train_loader = train_ds.iter_torch_batches(
         batch_size=int(config["batch_size"]),
-        prefetch_batches=2,
+        prefetch_batches=1,
     )
+    train_loader = traceml.wrap_dataloader_fetch(train_loader)
 
     trainer = pl.Trainer(
         accelerator="auto",
