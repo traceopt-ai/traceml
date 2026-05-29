@@ -100,7 +100,8 @@ class TraceMLCallback(Callback):
         self._forward_ctx = None
         self._backward_ctx = None
         self._optimizer_ctx = None
-        self._h2d_ctx = None
+        self._batch_to_device_strategy = None
+        self._original_batch_to_device = None
 
         self._mem_tracker = None
         self._opt_step_occurred = False
@@ -115,24 +116,48 @@ class TraceMLCallback(Callback):
             pass
         setattr(self, ctx_attr, None)
 
-    def on_before_batch_transfer(
-        self, trainer, pl_module, batch, dataloader_idx=0
-    ):
-        if TRACEML_DISABLED or not getattr(trainer, "training", True):
-            return
-        if not _lightning_uses_cuda(trainer, pl_module):
+    def setup(self, trainer, pl_module, stage=None):
+        if self._original_batch_to_device is not None:
             return
 
-        self._close_context("_h2d_ctx")
-        self._h2d_ctx = h2d_auto_timer()
-        self._h2d_ctx.__enter__()
-
-    def on_after_batch_transfer(
-        self, trainer, pl_module, batch, dataloader_idx=0
-    ):
-        if TRACEML_DISABLED:
+        strategy = getattr(trainer, "strategy", None)
+        if strategy is None:
             return
-        self._close_context("_h2d_ctx")
+
+        original = strategy.batch_to_device
+
+        def wrapped_batch_to_device(batch, *args, **kwargs):
+            if (
+                TRACEML_DISABLED
+                or not getattr(trainer, "training", True)
+                or not _lightning_uses_cuda(trainer, pl_module)
+            ):
+                return original(batch, *args, **kwargs)
+            with h2d_auto_timer():
+                return original(batch, *args, **kwargs)
+
+        try:
+            strategy.batch_to_device = wrapped_batch_to_device
+        except Exception as e:
+            _log_lightning_error("H2D batch transfer wrap failed", e)
+            return
+
+        self._batch_to_device_strategy = strategy
+        self._original_batch_to_device = original
+
+    def teardown(self, trainer, pl_module, stage=None):
+        strategy = self._batch_to_device_strategy
+        original = self._original_batch_to_device
+        if strategy is None or original is None:
+            return
+
+        try:
+            strategy.batch_to_device = original
+        except Exception as e:
+            _log_lightning_error("H2D batch transfer restore failed", e)
+        finally:
+            self._batch_to_device_strategy = None
+            self._original_batch_to_device = None
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         # Start overall step timing
@@ -203,7 +228,6 @@ class TraceMLCallback(Callback):
             return
         # Safety: end any active context managers (edge cases)
         for ctx_attr in (
-            "_h2d_ctx",
             "_forward_ctx",
             "_backward_ctx",
             "_optimizer_ctx",
