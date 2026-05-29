@@ -122,6 +122,11 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
         batch_size=int(config["batch_size"]),
         prefetch_batches=1,
     )
+
+    input_delay_s = float(config.get("input_delay_ms", 0.0)) / 1000.0
+    if input_delay_s > 0.0:
+        train_loader = _delay_batches(train_loader, input_delay_s)
+
     train_loader = traceml.wrap_dataloader_fetch(train_loader)
 
     trainer = pl.Trainer(
@@ -139,6 +144,12 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
     trainer.fit(TextClassifier(), train_dataloaders=train_loader)
 
 
+def _delay_batches(iterator, delay_s: float):
+    for batch in iterator:
+        time.sleep(delay_s)
+        yield batch
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ray-address", default=None)
@@ -153,6 +164,12 @@ def main() -> None:
     parser.add_argument("--hidden-dim", type=int, default=2048)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--input-delay-ms",
+        type=float,
+        default=0.0,
+        help="Optional per-batch delay to make Ray input timing visible.",
+    )
     parser.add_argument(
         "--delay-rank",
         type=int,
@@ -193,6 +210,7 @@ def main() -> None:
             "embed_dim": args.embed_dim,
             "hidden_dim": args.hidden_dim,
             "lr": args.lr,
+            "input_delay_ms": args.input_delay_ms,
             "delay_rank": args.delay_rank,
             "delay_ms": args.delay_ms,
         },
