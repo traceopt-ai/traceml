@@ -34,6 +34,7 @@ def build_synthetic_text_dataset(
     num_samples: int,
     seq_len: int,
     vocab_size: int,
+    transfer_dim: int,
     seed: int,
 ):
     """Create a Ray Dataset with fixed-size token ids and binary labels."""
@@ -51,10 +52,20 @@ def build_synthetic_text_dataset(
         ^ (input_ids[:, seq_len // 2 :].sum(axis=1) % 2)
     ).astype(np.int64)
 
-    rows = [
-        {"input_ids": input_ids[idx], "labels": labels[idx]}
-        for idx in range(num_samples)
-    ]
+    transfer_blob = None
+    if transfer_dim > 0:
+        transfer_blob = rng.standard_normal(
+            (num_samples, transfer_dim),
+            dtype=np.float32,
+        )
+
+    rows = []
+    for idx in range(num_samples):
+        row = {"input_ids": input_ids[idx], "labels": labels[idx]}
+        if transfer_blob is not None:
+            row["transfer_blob"] = transfer_blob[idx]
+        rows.append(row)
+
     return ray.data.from_items(rows)
 
 
@@ -158,6 +169,15 @@ def main() -> None:
     parser.add_argument("--num-samples", type=int, default=65536)
     parser.add_argument("--seq-len", type=int, default=128)
     parser.add_argument("--vocab-size", type=int, default=30522)
+    parser.add_argument(
+        "--transfer-dim",
+        type=int,
+        default=0,
+        help=(
+            "Optional float32 features per sample to make Lightning H2D "
+            "transfer timing visible."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--max-steps", type=int, default=150)
     parser.add_argument("--embed-dim", type=int, default=256)
@@ -198,6 +218,7 @@ def main() -> None:
         num_samples=args.num_samples,
         seq_len=args.seq_len,
         vocab_size=args.vocab_size,
+        transfer_dim=args.transfer_dim,
         seed=args.seed,
     )
 
