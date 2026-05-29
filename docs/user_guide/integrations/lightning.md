@@ -2,23 +2,17 @@
 
 Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
 
-`TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing memory drift.
+`TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a
+run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing
+memory drift.
 
-> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
-
----
-
-## Install
-
-Install TraceML with Lightning support:
+## 1. Install
 
 ```bash
 pip install "traceml-ai[lightning]"
 ```
 
----
-
-## Basic usage
+## 2. Add `TraceMLCallback`
 
 Initialize the Lightning integration once, then add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
 
@@ -41,22 +35,31 @@ trainer = L.Trainer(
 trainer.fit(model, train_dataloaders=loader)
 ```
 
-Run with:
+You do not need to add `traceml.trace_step(...)` manually. Lightning still owns
+the training loop.
+
+## 3. Launch The Run
+
+Single GPU:
 
 ```bash
 traceml run train.py
 ```
 
-Or open the local UI:
+Single-node multi-GPU DDP:
+
+```bash
+traceml run train.py --nproc-per-node=4
+```
+
+For multi-node DDP launch commands, see
+[Distributed Training](../distributed-training.md).
+
+For browser dashboard mode on single-node runs:
 
 ```bash
 traceml run train.py --mode=dashboard
 ```
-
-Dashboard mode is intended for single-node runs, including single-node
-multi-GPU.
-
----
 
 ## What TraceML will show
 
@@ -74,10 +77,20 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 ## How it works
 
-`traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing before Lightning receives the batch and installs the H2D Tensor.to patch. `TraceMLCallback` then scopes that H2D timing to Lightning’s batch-transfer hooks and records forward, backward, optimizer, step, and memory timing.
+`traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing and
+installs the H2D `.to(...)` patch. `TraceMLCallback` records step, forward,
+backward, optimizer, and memory timing. It also scopes H2D timing around
+Lightning's internal `strategy.batch_to_device(...)` path.
 
-That means you do not need to wrap your code with `traceml.trace_step(...)`
-manually in Lightning.
+Normal PyTorch `DataLoader` input timing is automatic after
+`traceml_lightning.init()`. If you pass Lightning a custom iterator or
+non-PyTorch loader, wrap it with `traceml.wrap_dataloader_fetch(...)` before
+passing it to `trainer.fit(...)`. For Ray Data with Lightning, see
+[Ray Train](ray.md).
+
+Small batches may show `H2D 0.0ms` because the transfer is below display
+precision. The full example below uses a wider CPU tensor so H2D timing is
+visible.
 
 ---
 

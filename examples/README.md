@@ -17,7 +17,7 @@ These are the main user-facing examples.
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `ray/torchtrainer_minimal.py` | Minimal Ray Train example with Ray Data input timing | CPU / CUDA | Uses `TraceMLTorchTrainer` |
-| `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data and `TraceMLCallback` |
+| `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data, `TraceMLCallback`, and optional input/H2D demo knobs |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
 | `lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 
@@ -102,6 +102,9 @@ TraceML records DataLoader, transfer, step, phase, and memory timing.
 Ray Data examples wrap `iter_torch_batches(...)` with
 `traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch
 `DataLoader` objects.
+
+Ray + Lightning can use `--input-delay-ms` to make input timing visible and
+`--transfer-dim` to make Lightning H2D timing visible.
 
 For explicit manual instrumentation, see:
 

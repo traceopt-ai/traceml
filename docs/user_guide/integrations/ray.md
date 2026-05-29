@@ -89,6 +89,28 @@ When using Ray Data, wrap the ``iter_torch_batches(...)`` iterator with
 ``traceml.wrap_dataloader_fetch(...)``. Ray Data is not a PyTorch
 ``DataLoader``, so the PyTorch DataLoader patch cannot see those fetches.
 
+## Ray + Lightning
+
+When combining Ray Train and PyTorch Lightning, add ``TraceMLCallback()`` to the
+Lightning ``Trainer`` and keep wrapping Ray Data iterators with
+``traceml.wrap_dataloader_fetch(...)``. To capture Lightning H2D timing inside
+Ray workers, initialize the worker patches selectively:
+
+```python
+TraceMLRayConfig(
+    mode="summary",
+    init_mode="selective",
+    patch_dataloader=True,
+    patch_h2d=True,
+)
+```
+
+The ``examples/ray/lightning_text_classifier.py`` demo also includes
+``--input-delay-ms=10`` to make Ray input timing visible and
+``--transfer-dim=131072`` to make Lightning H2D timing visible.
+``--transfer-dim`` creates a reusable per-batch CPU tensor; it does not add a
+full dataset-sized tensor.
+
 ## Network Model
 
 The aggregator runs as a normal Ray actor and binds a TCP server. By default it
