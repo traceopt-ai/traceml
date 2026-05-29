@@ -112,8 +112,8 @@ class TraceMLCallback(Callback):
             return
         try:
             ctx.__exit__(None, None, None)
-        except Exception:
-            pass
+        except Exception as e:
+            _log_lightning_error(f"{ctx_attr} cleanup failed", e)
         setattr(self, ctx_attr, None)
 
     def setup(self, trainer, pl_module, stage=None):
