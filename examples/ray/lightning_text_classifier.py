@@ -34,7 +34,6 @@ def build_synthetic_text_dataset(
     num_samples: int,
     seq_len: int,
     vocab_size: int,
-    transfer_dim: int,
     seed: int,
 ):
     """Create a Ray Dataset with fixed-size token ids and binary labels."""
@@ -52,18 +51,9 @@ def build_synthetic_text_dataset(
         ^ (input_ids[:, seq_len // 2 :].sum(axis=1) % 2)
     ).astype(np.int64)
 
-    transfer_blob = None
-    if transfer_dim > 0:
-        transfer_blob = rng.standard_normal(
-            (num_samples, transfer_dim),
-            dtype=np.float32,
-        )
-
     rows = []
     for idx in range(num_samples):
         row = {"input_ids": input_ids[idx], "labels": labels[idx]}
-        if transfer_blob is not None:
-            row["transfer_blob"] = transfer_blob[idx]
         rows.append(row)
 
     return ray.data.from_items(rows)
@@ -138,6 +128,10 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
     if input_delay_s > 0.0:
         train_loader = _delay_batches(train_loader, input_delay_s)
 
+    transfer_dim = int(config.get("transfer_dim", 0))
+    if transfer_dim > 0:
+        train_loader = _add_transfer_blob_batches(train_loader, transfer_dim)
+
     train_loader = traceml.wrap_dataloader_fetch(train_loader)
 
     trainer = pl.Trainer(
@@ -161,6 +155,24 @@ def _delay_batches(iterator, delay_s: float):
         yield batch
 
 
+def _add_transfer_blob_batches(iterator, transfer_dim: int):
+    import torch
+
+    transfer_blob = None
+    transfer_shape = None
+    for batch in iterator:
+        input_ids = batch["input_ids"]
+        batch_size = int(input_ids.shape[0])
+        shape = (batch_size, transfer_dim)
+        if transfer_blob is None or transfer_shape != shape:
+            transfer_blob = torch.empty(shape, dtype=torch.float32)
+            transfer_shape = shape
+
+        batch = dict(batch)
+        batch["transfer_blob"] = transfer_blob
+        yield batch
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ray-address", default=None)
@@ -174,8 +186,8 @@ def main() -> None:
         type=int,
         default=0,
         help=(
-            "Optional float32 features per sample to make Lightning H2D "
-            "transfer timing visible."
+            "Optional reusable float32 CPU features per batch to make "
+            "Lightning H2D transfer timing visible."
         ),
     )
     parser.add_argument("--batch-size", type=int, default=256)
@@ -218,7 +230,6 @@ def main() -> None:
         num_samples=args.num_samples,
         seq_len=args.seq_len,
         vocab_size=args.vocab_size,
-        transfer_dim=args.transfer_dim,
         seed=args.seed,
     )
 
@@ -231,6 +242,7 @@ def main() -> None:
             "embed_dim": args.embed_dim,
             "hidden_dim": args.hidden_dim,
             "lr": args.lr,
+            "transfer_dim": args.transfer_dim,
             "input_delay_ms": args.input_delay_ms,
             "delay_rank": args.delay_rank,
             "delay_ms": args.delay_ms,
