@@ -6,6 +6,7 @@ import pytest
 from traceml_ai.integrations.huggingface import (
     TraceMLTrainer,
     TraceMLTrainerCallback,
+    init,
 )
 
 try:
@@ -434,3 +435,24 @@ def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
         assert (
             drained == []
         ), f"Expected no StepMemoryEvents when disabled, got {len(drained)}."
+
+
+@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
+def test_hf_init_enables_dataloader_and_h2d_patches():
+    """
+    init() must enable the process-wide patches the callback cannot install on
+    its own. The DataLoader fetch patch in particular is what lets TraceML
+    attribute data-loading time on the HF path; the per-step bracket alone
+    never installs it. The H2D Tensor.to patch is gated the same way: the
+    auto-timer trace_step arms each step is a no-op unless the patch is on.
+    """
+    config = init()
+
+    assert config.patch_dataloader, (
+        "huggingface.init() must enable DataLoader fetch timing so the "
+        "callback path can attribute data-loading time."
+    )
+    assert config.patch_h2d, (
+        "huggingface.init() must enable the H2D Tensor.to patch the "
+        "per-step auto-timer relies on."
+    )

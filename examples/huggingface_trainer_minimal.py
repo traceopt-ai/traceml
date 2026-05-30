@@ -3,10 +3,10 @@ import torch.nn as nn
 from torch.utils.data import Dataset
 from transformers import Trainer, TrainingArguments
 
-from traceml_ai.integrations.huggingface import TraceMLTrainerCallback
+from traceml_ai.integrations import huggingface as traceml_hf
 
 # Legacy path still works:
-#   from traceml_ai.integrations.huggingface import TraceMLTrainer
+#   trainer = traceml_hf.TraceMLTrainer(...)
 # TraceMLTrainer is now a thin wrapper that auto-installs
 # TraceMLTrainerCallback under the hood.
 
@@ -60,6 +60,8 @@ class TinyMLPForTrainer(nn.Module):
 def main() -> None:
     torch.manual_seed(SEED)
 
+    traceml_hf.init()
+
     model = TinyMLPForTrainer()
     train_dataset = SyntheticClassificationDataset(NUM_SAMPLES)
 
@@ -78,7 +80,7 @@ def main() -> None:
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        callbacks=[TraceMLTrainerCallback()],
+        callbacks=[traceml_hf.TraceMLTrainerCallback()],
     )
 
     trainer.train()

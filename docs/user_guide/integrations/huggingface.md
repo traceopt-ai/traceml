@@ -2,10 +2,11 @@
 
 Use TraceML with Hugging Face `Trainer` without rewriting your training loop.
 
-The preferred integration is `TraceMLTrainerCallback`: a standard
-`transformers.TrainerCallback` you pass to your existing `Trainer`. The legacy
-`TraceMLTrainer` subclass is still supported. It is now a thin wrapper that
-installs the same callback under the hood.
+The preferred integration is two steps: call
+`traceml_ai.integrations.huggingface.init()` once, then pass
+`TraceMLTrainerCallback` (a standard `transformers.TrainerCallback`) to your
+existing `Trainer`. The legacy `TraceMLTrainer` subclass is still supported. It
+is now a thin wrapper that installs the same callback under the hood.
 
 ## 1. Install
 
@@ -19,13 +20,16 @@ If you are running the full examples below, install their optional dependencies:
 pip install datasets torchvision
 ```
 
-## 2. Add `TraceMLTrainerCallback` To Your `Trainer`
+## 2. Initialize TraceML And Add `TraceMLTrainerCallback`
 
-Register the callback alongside `transformers.Trainer`:
+Call `init()` once before constructing the `Trainer`, then register the
+callback alongside `transformers.Trainer`:
 
 ```python
-from traceml_ai.integrations.huggingface import TraceMLTrainerCallback
+from traceml_ai.integrations import huggingface as traceml_hf
 from transformers import Trainer, TrainingArguments
+
+traceml_hf.init()
 
 training_args = TrainingArguments(
     output_dir="./output",
@@ -38,15 +42,22 @@ trainer = Trainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
-    callbacks=[TraceMLTrainerCallback()],
+    callbacks=[traceml_hf.TraceMLTrainerCallback()],
 )
 
 trainer.train()
 ```
 
+`traceml_hf.init()` installs TraceML's process-wide instrumentation:
+`DataLoader` fetch timing, the H2D `Tensor.to` patch, and the
+forward/backward/optimizer auto-timers. The callback is a per-step bracket and
+cannot install these on its own, so calling `init()` first is what lets TraceML
+attribute `DataLoader` fetch time and host-to-device copies. It is idempotent
+and safe to call once at startup.
+
 You do not need to add `traceml.trace_step(...)` manually. The callback opens
-and closes `trace_step` around each optimizer step, and TraceML's existing
-auto-timers capture forward, backward, h2d, and optimizer phases inside that
+and closes `trace_step` around each optimizer step, and the auto-timers `init()`
+installed capture forward, backward, h2d, and optimizer phases inside that
 bracket.
 
 ### Legacy `TraceMLTrainer`
@@ -57,9 +68,11 @@ adopted it. It is now a thin wrapper that auto-installs
 and `traceml_kwargs` arguments as before:
 
 ```python
-from traceml_ai.integrations.huggingface import TraceMLTrainer
+from traceml_ai.integrations import huggingface as traceml_hf
 
-trainer = TraceMLTrainer(
+traceml_hf.init()
+
+trainer = traceml_hf.TraceMLTrainer(
     model=model,
     args=training_args,
     train_dataset=train_dataset,
@@ -193,10 +206,12 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml_ai.integrations.huggingface import TraceMLTrainerCallback
+from traceml_ai.integrations import huggingface as traceml_hf
 
 
 def main():
+    traceml_hf.init()
+
     model_name = "prajjwal1/bert-mini"
     output_dir = "./hf_nlp_output"
     os.makedirs(output_dir, exist_ok=True)
@@ -235,7 +250,7 @@ def main():
         model=model,
         args=training_args,
         train_dataset=dataset,
-        callbacks=[TraceMLTrainerCallback()],
+        callbacks=[traceml_hf.TraceMLTrainerCallback()],
     )
 
     trainer.train()
@@ -272,10 +287,12 @@ from transformers import (
     TrainingArguments,
 )
 
-from traceml_ai.integrations.huggingface import TraceMLTrainerCallback
+from traceml_ai.integrations import huggingface as traceml_hf
 
 
 def main():
+    traceml_hf.init()
+
     model_name = "google/vit-base-patch16-224-in21k"
     output_dir = "./hf_vision_output"
     os.makedirs(output_dir, exist_ok=True)
@@ -325,7 +342,7 @@ def main():
         args=training_args,
         train_dataset=dataset,
         data_collator=DefaultDataCollator(),
-        callbacks=[TraceMLTrainerCallback()],
+        callbacks=[traceml_hf.TraceMLTrainerCallback()],
     )
 
     trainer.train()
@@ -344,6 +361,11 @@ traceml run fine_tune_vision.py
 </details>
 
 ## Reference
+
+`init()` takes no arguments. Call it once before constructing the `Trainer` to
+install TraceML's process-wide patches (`DataLoader` fetch timing, H2D
+`Tensor.to`, and the forward/backward/optimizer auto-timers). It is idempotent
+and returns the effective `TraceMLInitConfig`.
 
 `TraceMLTrainerCallback(traceml_kwargs=None)` accepts:
 

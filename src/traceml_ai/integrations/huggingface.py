@@ -29,6 +29,30 @@ except ImportError:
     TrainerCallback = object  # Fallback for type hinting
 
 
+def init():
+    """
+    Initialize TraceML for Hugging Face ``Trainer`` runs.
+
+    Call once before constructing the ``Trainer``, then register
+    ``TraceMLTrainerCallback``. ``init()`` makes TraceML's process-wide
+    instrumentation explicit: PyTorch ``DataLoader`` fetch timing, the H2D
+    ``Tensor.to`` patch, and the forward/backward/optimizer auto-timers that
+    ``trace_step`` arms inside each bracketed step.
+
+    The callback is a per-step bracket and cannot install these process-wide
+    patches on its own; the auto-timers it arms are no-ops unless the matching
+    patch is installed. ``init()`` is the recommended entry point so the
+    DataLoader fetch patch in particular is installed deterministically rather
+    than relying on import order. This mirrors the PyTorch Lightning
+    integration's ``init()``; HF uses ``mode="auto"`` because ``trace_step``
+    drives forward/backward timing through the patch-gated auto-timers, whereas
+    Lightning's callback owns that timing directly.
+    """
+    import traceml_ai as traceml
+
+    return traceml.init(mode="auto")
+
+
 def _log_hf_error(message: str, exc: Exception) -> None:
     """
     Log TraceML HF callback failures without interrupting training.
@@ -196,3 +220,6 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         self.add_callback(
             TraceMLTrainerCallback(traceml_kwargs=traceml_kwargs)
         )
+
+
+__all__ = ["TraceMLTrainerCallback", "TraceMLTrainer", "init"]
