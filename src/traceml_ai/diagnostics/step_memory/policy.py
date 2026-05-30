@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from traceml_ai.analytics.trends import TrendBands
 from traceml_ai.diagnostics.trends import TrendConfig
@@ -17,8 +18,10 @@ class StepMemoryDiagnosisThresholds:
     pressure_warn_fraction: float = 0.92
     pressure_crit_fraction: float = 0.97
 
-    imbalance_skew_warn: float = 0.12
-    imbalance_skew_crit: float = 0.20
+    imbalance_skew_warn: float = 0.20
+    imbalance_skew_crit: float = 0.30
+    imbalance_pressure_warn_fraction: float = 0.30
+    imbalance_pressure_crit_fraction: float = 0.50
 
     creep_score_delta_scale_bytes: float = 100.0 * 1024.0 * 1024.0
     creep_confirmed_delta_bytes: float = 1024.0 * 1024.0 * 1024.0
@@ -50,10 +53,41 @@ SUMMARY_STEP_MEMORY_POLICY = StepMemoryDiagnosisPolicy(name="summary")
 DEFAULT_STEP_MEMORY_THRESHOLDS = LIVE_STEP_MEMORY_POLICY.thresholds
 
 
+def classify_imbalance_severity(
+    *,
+    skew_pct: float,
+    pressure_frac: Optional[float],
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> Optional[str]:
+    """
+    Classify actionable cross-rank memory imbalance.
+
+    Skew alone is noisy when absolute GPU memory pressure is tiny, because
+    harmless allocator/cache differences can look large as percentages. Require
+    both rank skew and worst-rank capacity pressure before emitting imbalance.
+    """
+    if pressure_frac is None:
+        return None
+
+    skew = max(0.0, float(skew_pct))
+    pressure = max(0.0, float(pressure_frac))
+
+    if skew >= float(thresholds.imbalance_skew_crit) and pressure >= float(
+        thresholds.imbalance_pressure_crit_fraction
+    ):
+        return "crit"
+    if skew >= float(thresholds.imbalance_skew_warn) and pressure >= float(
+        thresholds.imbalance_pressure_warn_fraction
+    ):
+        return "warn"
+    return None
+
+
 __all__ = [
     "StepMemoryDiagnosisPolicy",
     "StepMemoryDiagnosisThresholds",
     "LIVE_STEP_MEMORY_POLICY",
     "SUMMARY_STEP_MEMORY_POLICY",
     "DEFAULT_STEP_MEMORY_THRESHOLDS",
+    "classify_imbalance_severity",
 ]

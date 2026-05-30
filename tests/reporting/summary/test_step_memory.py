@@ -180,6 +180,7 @@ def test_step_memory_section_diagnosis_input_uses_summary_policy(tmp_path):
     diagnosis_input = section.to_diagnosis_input(data)
 
     assert diagnosis_input.thresholds is SUMMARY_STEP_MEMORY_POLICY.thresholds
+    assert diagnosis_input.no_gpu_detected is False
     assert len(diagnosis_input.metrics) == 2
 
 
@@ -199,6 +200,8 @@ def test_step_memory_section_reports_no_gpu_without_memory_rows(tmp_path):
     result = StepMemorySummarySection(window_size=3).build(str(db_path))
 
     assert result.payload["metadata"]["mode"] == "no_data"
+    assert result.payload["diagnosis"] == result.payload["issues"][0]
+    assert result.payload["diagnosis"]["kind"] == "NO_GPU"
     assert result.payload["diagnosis"]["status"] == "NO GPU"
     assert result.payload["card"].find("Diagnosis: NO GPU") > -1
 

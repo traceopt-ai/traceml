@@ -31,6 +31,11 @@ and will be removed in a future release. New code should use
 
 ## PyTorch Lightning integration
 
+::: traceml_ai.integrations.lightning.init
+    options:
+      show_root_heading: true
+      show_source: true
+
 ::: traceml_ai.integrations.lightning.TraceMLCallback
     options:
       show_root_heading: true

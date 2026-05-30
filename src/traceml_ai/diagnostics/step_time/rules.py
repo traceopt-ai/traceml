@@ -156,8 +156,8 @@ class ComputeStragglerRule(_BaseStepTimeRule):
                 context.thresholds.compute_straggler_score_crit,
             ),
             summary=(
-                f"{_rank_str(rank)} has excess compute burden "
-                f"(~{_pct(score)} of a typical local step)."
+                f"{_rank_str(rank)} {label.lower()} has excess compute "
+                f"burden (~{_pct(score)} of a typical observed step)."
             ),
             action=f"Inspect {label.lower()} on {_rank_str(rank)}.",
             metric="compute",
@@ -196,7 +196,10 @@ class InputBoundRule(_BaseStepTimeRule):
                 context.dataloader_share,
                 context.thresholds.input_share_crit,
             ),
-            summary=f"Dataloader is {_pct(context.dataloader_share)} of the typical step.",
+            summary=(
+                f"Dataloader is {_pct(context.dataloader_share)} of the "
+                "typical step."
+            ),
             action="Increase workers, prefetch, or storage throughput.",
             metric="dataloader_fetch",
             phase="dataloader",
@@ -228,7 +231,9 @@ class WaitHeavyRule(_BaseStepTimeRule):
                 context.wait_share,
                 context.thresholds.wait_share_crit,
             ),
-            summary=f"WAIT* is {_pct(context.wait_share)} of the typical step.",
+            summary=(
+                f"WAIT* is {_pct(context.wait_share)} of the typical step."
+            ),
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "
                 "checkpointing, validation, or unobserved transfers."

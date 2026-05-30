@@ -10,11 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
-from traceml_ai.diagnostics.common import (
-    DiagnosticIssue,
-    DiagnosticResult,
-    diagnosis_to_dict,
-)
+from traceml_ai.diagnostics.common import DiagnosticResult
 from traceml_ai.diagnostics.system import SystemDiagnosis
 from traceml_ai.reporting.schema import (
     BaseGlobal,
@@ -35,22 +31,13 @@ from traceml_ai.reporting.sections.system.model import (
     node_gpu_mem_peak_percent,
     percent,
 )
-from traceml_ai.reporting.summaries.issue_summary import issue_to_json
+from traceml_ai.reporting.summaries.issue_summary import (
+    diagnostic_result_to_json,
+)
 from traceml_ai.reporting.summaries.summary_formatting import (
     duration_from_bounds,
     format_optional,
 )
-
-
-def _issue_to_scoped_json(issue: DiagnosticIssue) -> Dict[str, Any]:
-    """Serialize a System issue with public node/GPU scope."""
-    payload = issue_to_json(issue)
-    scope = payload.get("evidence", {}).pop("scope", None)
-    payload.get("evidence", {}).pop("samples_used", None)
-    payload.pop("ranks", None)
-    if scope is not None:
-        payload["scope"] = scope
-    return payload
 
 
 def _node_headroom_min_bytes(node: SystemNodeSummary) -> Optional[float]:
@@ -302,9 +289,7 @@ def build_system_payload(
     node_payloads: Dict[str, Dict[str, Any]] = {}
     node_metrics: Dict[str, Dict[str, Any]] = {}
     primary_diagnosis = diagnosis_result.primary
-    issues = [
-        _issue_to_scoped_json(issue) for issue in diagnosis_result.issues
-    ]
+    diagnosis_json, issues_json = diagnostic_result_to_json(diagnosis_result)
 
     for label, node in cluster.nodes.items():
         metrics = _node_metric_values(node)
@@ -313,12 +298,6 @@ def build_system_payload(
             node,
             metrics=metrics,
         )
-    primary = diagnosis_to_dict(
-        primary_diagnosis,
-        drop_none=True,
-        include_action=False,
-    )
-
     duration_s = duration_from_bounds(
         cluster.aggregate.first_ts,
         cluster.aggregate.last_ts,
@@ -334,10 +313,10 @@ def build_system_payload(
                 f"nodes {coverage} | samples {cluster.aggregate.system_samples}"
             ),
             "System",
-            f"- Diagnosis: {primary.get('status', 'NO DATA')}",
+            f"- Diagnosis: {primary_diagnosis.status}",
             f"- Scope: nodes {coverage} | samples {cluster.aggregate.system_samples}",
             f"- Stats: {_card_stats(cluster, median=median, worst=worst)}",
-            f"- Why: {primary.get('reason', 'No system telemetry was recorded.')}",
+            f"- Why: {primary_diagnosis.reason}",
         ]
     )
 
@@ -365,8 +344,8 @@ def build_system_payload(
     )
     payload = BaseSectionPayload(
         metadata=metadata.to_json(),
-        diagnosis=primary,
-        issues=issues,
+        diagnosis=diagnosis_json,
+        issues=issues_json,
         global_summary=global_summary.to_json(),
         groups=BaseGroups(
             by="node_rank",

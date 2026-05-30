@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -81,6 +82,184 @@ def _summary_duration_s(*sections: Dict[str, Any]) -> Optional[float]:
         except Exception:
             continue
     return None
+
+
+def _safe_int(value: Any, *, allow_zero: bool = True) -> Optional[int]:
+    """Return an int when a JSON value is numeric enough for metadata."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    if parsed < 0 or (parsed == 0 and not allow_zero):
+        return None
+    return parsed
+
+
+def _section_metadata(section: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a section metadata mapping when present."""
+    metadata = section.get("metadata") if isinstance(section, dict) else None
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _section_group_rows(section: Dict[str, Any]) -> Dict[str, Any]:
+    """Return section group rows when present."""
+    groups = section.get("groups") if isinstance(section, dict) else None
+    if not isinstance(groups, dict):
+        return {}
+    rows = groups.get("rows")
+    return dict(rows) if isinstance(rows, dict) else {}
+
+
+def _run_name_from_manifest(session_root: Optional[str]) -> Optional[str]:
+    """Load the public run name from the launcher manifest when available."""
+    if not session_root:
+        return None
+
+    root = Path(session_root).resolve()
+    manifest_path = root / "manifest.json"
+    manifest: Dict[str, Any] = {}
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if isinstance(loaded, dict):
+            manifest = loaded
+    except Exception:
+        manifest = {}
+
+    run = manifest.get("run")
+    run_block = run if isinstance(run, dict) else {}
+    candidates = (
+        run_block.get("run_name"),
+        manifest.get("session_id"),
+        root.name,
+    )
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if text:
+            return text
+    return None
+
+
+def _final_meta_mode(sections: Sequence[Dict[str, Any]]) -> str:
+    """Infer run mode from already-built section metadata."""
+    saw_single_node = False
+    for section in sections:
+        mode = str(_section_metadata(section).get("mode") or "")
+        if mode == "multi_node":
+            return "multi_node"
+        if mode == "single_node":
+            saw_single_node = True
+    return "single_node" if saw_single_node else "no_data"
+
+
+def _final_meta_world_size(
+    sections: Sequence[Dict[str, Any]]
+) -> Optional[int]:
+    """Infer observed world size from section metadata and rank identities."""
+    candidates: List[int] = []
+    for section in sections:
+        metadata = _section_metadata(section)
+        for key in ("global_ranks_seen", "global_ranks_used"):
+            value = _safe_int(metadata.get(key), allow_zero=False)
+            if value is not None:
+                candidates.append(value)
+
+        groups = section.get("groups") if isinstance(section, dict) else None
+        group_by = groups.get("by") if isinstance(groups, dict) else None
+        rows = _section_group_rows(section)
+        if group_by == "global_rank" and rows:
+            candidates.append(len(rows))
+
+        for group_row in rows.values():
+            if not isinstance(group_row, dict):
+                continue
+            identity = group_row.get("identity")
+            if not isinstance(identity, dict):
+                continue
+            value = _safe_int(identity.get("world_size"), allow_zero=False)
+            if value is not None:
+                candidates.append(value)
+
+    return max(candidates) if candidates else None
+
+
+def _final_meta_nodes_observed(
+    system_summary: Dict[str, Any],
+    sections: Sequence[Dict[str, Any]],
+) -> Optional[int]:
+    """Infer observed node count from system metadata or row identities."""
+    value = _safe_int(
+        _section_metadata(system_summary).get("nodes_observed"),
+        allow_zero=True,
+    )
+    if value is not None:
+        return value
+
+    node_ranks = set()
+    for section in sections:
+        for group_row in _section_group_rows(section).values():
+            if not isinstance(group_row, dict):
+                continue
+            identity = group_row.get("identity")
+            if not isinstance(identity, dict):
+                continue
+            node_rank = _safe_int(identity.get("node_rank"), allow_zero=True)
+            if node_rank is not None:
+                node_ranks.add(node_rank)
+    return len(node_ranks) if node_ranks else None
+
+
+def _final_meta_gpus_observed(
+    *,
+    system_summary: Dict[str, Any],
+    mode: str,
+    world_size: Optional[int],
+) -> Optional[int]:
+    """Infer observed GPU count from system metadata with a safe fallback."""
+    value = _safe_int(
+        _section_metadata(system_summary).get("gpus_observed"),
+        allow_zero=True,
+    )
+    if value is not None:
+        return value
+    if mode == "single_node" and world_size is not None:
+        return int(world_size)
+    return None
+
+
+def _build_final_meta(
+    *,
+    session_root: Optional[str],
+    system_summary: Dict[str, Any],
+    process_summary: Dict[str, Any],
+    step_time_summary: Dict[str, Any],
+    step_memory_summary: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build run-level identity and observed topology metadata."""
+    sections = (
+        system_summary,
+        process_summary,
+        step_time_summary,
+        step_memory_summary,
+    )
+    mode = _final_meta_mode(sections)
+    world_size = _final_meta_world_size(sections)
+    return {
+        "run_name": _run_name_from_manifest(session_root),
+        "mode": mode,
+        "world_size": world_size,
+        "nodes_observed": _final_meta_nodes_observed(
+            system_summary,
+            sections,
+        ),
+        "gpus_observed": _final_meta_gpus_observed(
+            system_summary=system_summary,
+            mode=mode,
+            world_size=world_size,
+        ),
+    }
 
 
 def _append_wrapped_card_lines(
@@ -211,7 +390,12 @@ class FinalReportGenerator:
 
     sections: Sequence[SummarySection]
 
-    def generate(self, db_path: str) -> Dict[str, Any]:
+    def generate(
+        self,
+        db_path: str,
+        *,
+        session_root: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Generate the structured final summary payload.
 
@@ -252,12 +436,19 @@ class FinalReportGenerator:
         )
 
         return {
-            "schema_version": 1.3,
+            "schema_version": 1.4,
             "generated_at": utc_now_iso(),
             "duration_s": _summary_duration_s(
                 step_time_summary,
                 process_summary,
                 system_summary,
+            ),
+            "meta": _build_final_meta(
+                session_root=session_root,
+                system_summary=system_summary,
+                process_summary=process_summary,
+                step_time_summary=step_time_summary,
+                step_memory_summary=step_memory_summary,
             ),
             "system": system_summary,
             "process": process_summary,
@@ -290,6 +481,7 @@ def build_summary_payload(
     db_path: str,
     *,
     generator: Optional[FinalReportGenerator] = None,
+    session_root: Optional[str] = None,
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
 ) -> Dict[str, Any]:
     """
@@ -298,7 +490,7 @@ def build_summary_payload(
     active_generator = generator or build_final_report_generator(
         summary_window_rows=summary_window_rows,
     )
-    return active_generator.generate(db_path)
+    return active_generator.generate(db_path, session_root=session_root)
 
 
 def write_summary_artifacts(
@@ -347,6 +539,7 @@ def generate_summary(
     """
     payload = build_summary_payload(
         db_path,
+        session_root=session_root,
         summary_window_rows=summary_window_rows,
     )
     write_summary_artifacts(

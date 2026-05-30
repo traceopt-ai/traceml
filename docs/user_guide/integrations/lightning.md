@@ -2,29 +2,25 @@
 
 Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
 
-`TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing memory drift.
+`TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a
+run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing
+memory drift.
 
-> Start with the [Quickstart](../quickstart.md) if you have not used TraceML yet.
-
----
-
-## Install
-
-Install TraceML with Lightning support:
+## 1. Install
 
 ```bash
 pip install "traceml-ai[lightning]"
 ```
 
----
+## 2. Add `TraceMLCallback`
 
-## Basic usage
-
-Add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
+Initialize the Lightning integration once, then add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
 
 ```python
 import lightning as L
-from traceml_ai.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations import lightning as traceml_lightning
+
+traceml_lightning.init()
 
 model = MyLightningModule()
 
@@ -33,28 +29,37 @@ trainer = L.Trainer(
     accelerator="auto",
     devices=1,
     enable_progress_bar=False,
-    callbacks=[TraceMLCallback()],
+    callbacks=[traceml_lightning.TraceMLCallback()],
 )
 
 trainer.fit(model, train_dataloaders=loader)
 ```
 
-Run with:
+You do not need to add `traceml.trace_step(...)` manually. Lightning still owns
+the training loop.
+
+## 3. Launch The Run
+
+Single GPU:
 
 ```bash
 traceml run train.py
 ```
 
-Or open the local UI:
+Single-node multi-GPU DDP:
+
+```bash
+traceml run train.py --nproc-per-node=4
+```
+
+For multi-node DDP launch commands, see
+[Distributed Training](../distributed-training.md).
+
+For browser dashboard mode on single-node runs:
 
 ```bash
 traceml run train.py --mode=dashboard
 ```
-
-Dashboard mode is intended for single-node runs, including single-node
-multi-GPU.
-
----
 
 ## What TraceML will show
 
@@ -72,10 +77,20 @@ You keep the normal Lightning workflow. TraceML adds diagnosis around the traini
 
 ## How it works
 
-`TraceMLCallback` hooks into Lightning’s training lifecycle automatically.
+`traceml_lightning.init()` enables PyTorch `DataLoader` fetch timing and
+installs the H2D `.to(...)` patch. `TraceMLCallback` records step, forward,
+backward, optimizer, and memory timing. It also scopes H2D timing around
+Lightning's internal `strategy.batch_to_device(...)` path.
 
-That means you do not need to wrap your code with `traceml.trace_step(...)`
-manually in Lightning.
+Normal PyTorch `DataLoader` input timing is automatic after
+`traceml_lightning.init()`. If you pass Lightning a custom iterator or
+non-PyTorch loader, wrap it with `traceml.wrap_dataloader_fetch(...)` before
+passing it to `trainer.fit(...)`. For Ray Data with Lightning, see
+[Ray Train](ray.md).
+
+Small batches may show `H2D 0.0ms` because the transfer is below display
+precision. The full example below uses a wider CPU tensor so H2D timing is
+visible.
 
 ---
 
@@ -138,20 +153,23 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
-from traceml_ai.integrations.lightning import TraceMLCallback
+from traceml_ai.integrations import lightning as traceml_lightning
 
 SEED = 42
-INPUT_DIM = 128
+MODEL_INPUT_DIM = 128
+TRANSFER_INPUT_DIM = 131072
 HIDDEN_DIM = 256
 NUM_CLASSES = 10
-NUM_SAMPLES = 4096
+NUM_SAMPLES = 512
 BATCH_SIZE = 64
 MAX_STEPS = 200
 
 
 class SyntheticClassificationDataset(Dataset):
     def __init__(self, num_samples: int):
-        self.x = torch.randn(num_samples, INPUT_DIM)
+        # Transfer a wider CPU batch so Lightning H2D timing is visible, while
+        # the model below only consumes MODEL_INPUT_DIM features for compute.
+        self.x = torch.randn(num_samples, TRANSFER_INPUT_DIM)
         self.y = torch.randint(0, NUM_CLASSES, (num_samples,))
 
     def __len__(self) -> int:
@@ -165,13 +183,14 @@ class TinyLightningModel(L.LightningModule):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(INPUT_DIM, HIDDEN_DIM),
+            nn.Linear(MODEL_INPUT_DIM, HIDDEN_DIM),
             nn.ReLU(),
             nn.Linear(HIDDEN_DIM, NUM_CLASSES),
         )
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, x):
+        x = x[..., :MODEL_INPUT_DIM].contiguous()
         return self.net(x)
 
     def training_step(self, batch, batch_idx):
@@ -179,8 +198,8 @@ class TinyLightningModel(L.LightningModule):
         logits = self(x)
         loss = self.loss_fn(logits, y)
 
-        if batch_idx % 50 == 0:
-            print(f"Step {batch_idx} | loss={loss.item():.4f}")
+        if self.global_step % 50 == 0:
+            print(f"Step {self.global_step} | loss={loss.item():.4f}")
 
         return loss
 
@@ -190,6 +209,7 @@ class TinyLightningModel(L.LightningModule):
 
 def main() -> None:
     torch.manual_seed(SEED)
+    traceml_lightning.init()
 
     dataset = SyntheticClassificationDataset(NUM_SAMPLES)
     loader = DataLoader(
@@ -197,6 +217,7 @@ def main() -> None:
         batch_size=BATCH_SIZE,
         shuffle=True,
         num_workers=0,
+        pin_memory=torch.cuda.is_available(),
     )
 
     model = TinyLightningModel()
@@ -206,7 +227,7 @@ def main() -> None:
         accelerator="auto",
         devices=1,
         enable_progress_bar=False,
-        callbacks=[TraceMLCallback()],
+        callbacks=[traceml_lightning.TraceMLCallback()],
         logger=False,
     )
 

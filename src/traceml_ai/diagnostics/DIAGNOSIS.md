@@ -1,7 +1,12 @@
 # Final Summary Diagnoses
 
-TraceML emits one primary diagnosis per section. `issues` contains the sorted
-supporting issues when more than one signal fires.
+TraceML emits a sorted list of `DiagnosticIssue` findings or states per final
+summary section. `issues[0]` is the primary diagnosis, and final-summary JSON
+also copies that same item to `diagnosis`.
+
+Use `kind` as the stable internal key for logic and comparisons. Use `status`
+as the user-facing display label. In many cases they are similar, but they are
+not required to match.
 
 Diagnoses are conservative. They identify likely bottleneck categories, not a
 complete root-cause proof.
@@ -29,7 +34,8 @@ Traced process pressure.
 - `NORMAL`: no process CPU, RSS, or available GPU memory pressure.
 - `VERY_HIGH_PROCESS_GPU_MEMORY`: critical process GPU memory pressure.
 - `HIGH_PROCESS_GPU_MEMORY`: elevated process GPU memory pressure.
-- `HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO`: PyTorch CUDA allocator
+- `GPU_MEMORY_RESERVED_OVERHANG` with status
+  `HIGH CUDA ALLOCATOR RESERVED/ALLOCATED RATIO`: PyTorch CUDA allocator
   reserved memory is much higher than allocated tensor memory.
 - `RANK_GPU_MEMORY_IMBALANCE`: GPU memory differs materially across ranks.
 - `HIGH_PROCESS_RSS`: elevated process RSS.
@@ -70,12 +76,14 @@ or synchronization timing.
 Per-step peak allocated/reserved memory.
 
 - `NO_DATA`: no usable step-memory data.
-- `NO GPU`: no GPU telemetry or CPU-only run.
+- `NO_GPU` with status `NO GPU`: no GPU telemetry or CPU-only run.
 - `BALANCED`: no clear memory pressure, imbalance, or rising trend.
 - `HIGH_PRESSURE`: peak memory is near device capacity.
 - `IMBALANCE`: peak memory differs materially across ranks.
-- `MEMORY RISING`: memory is rising, but below the confirmed-growth threshold.
-- `MEMORY CREEP`: memory is rising and crossed the confirmed-growth threshold.
+- `CREEP_EARLY` with status `MEMORY RISING`: memory is rising, but below the
+  confirmed-growth threshold.
+- `CREEP_CONFIRMED` with status `MEMORY CREEP`: memory is rising and crossed
+  the confirmed-growth threshold.
 
 `HIGH_PRESSURE` requires known GPU capacity. If capacity is unavailable,
 TraceML does not guess pressure.

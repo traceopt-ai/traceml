@@ -18,6 +18,7 @@ from ..common import BaseDiagnosis, Severity, validate_confidence
 from .policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
+    classify_imbalance_severity,
 )
 from .trend import (
     StepMemoryWindowCreepEvidence,
@@ -26,6 +27,7 @@ from .trend import (
 
 StepMemoryDiagnosisKind = Literal[
     "NO_DATA",
+    "NO_GPU",
     "BALANCED",
     "HIGH_PRESSURE",
     "IMBALANCE",
@@ -35,6 +37,7 @@ StepMemoryDiagnosisKind = Literal[
 
 _STATUS_BY_KIND = {
     "NO_DATA": "NO DATA",
+    "NO_GPU": "NO GPU",
     "BALANCED": "BALANCED",
     "HIGH_PRESSURE": "HIGH PRESSURE",
     "IMBALANCE": "IMBALANCE",
@@ -84,6 +87,7 @@ class StepMemoryDiagnosisInput:
 
     metrics: Sequence[StepMemoryCombinedMetric]
     gpu_total_bytes: Optional[float]
+    no_gpu_detected: bool = False
     thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS
 
 
@@ -210,14 +214,25 @@ def build_step_memory_diagnosis(
             confidence=0.9 if sev == "crit" else 0.8,
         )
 
-    imbalance_hits = [
-        item
-        for item in ready
-        if item.skew_pct >= float(thresholds.imbalance_skew_warn)
-    ]
+    imbalance_hits = []
+    for item in ready:
+        sev = classify_imbalance_severity(
+            skew_pct=item.skew_pct,
+            pressure_frac=item.pressure_frac,
+            thresholds=thresholds,
+        )
+        if sev is not None:
+            imbalance_hits.append((item, sev))
+
     if imbalance_hits:
-        best = max(imbalance_hits, key=lambda item: item.skew_pct)
-        sev = _severity(best.skew_pct, thresholds.imbalance_skew_crit)
+        best, sev = max(
+            imbalance_hits,
+            key=lambda pair: (
+                1 if pair[1] == "crit" else 0,
+                pair[0].skew_pct,
+                float(pair[0].pressure_frac or 0.0),
+            ),
+        )
         return _mk_diag(
             kind="IMBALANCE",
             severity=sev,
@@ -226,7 +241,9 @@ def build_step_memory_diagnosis(
             worst_rank=best.worst_rank,
             reason=(
                 f"{_metric_label(best.metric.metric)} shows "
-                f"+{best.skew_pct * 100.0:.1f}% cross-rank skew."
+                f"+{best.skew_pct * 100.0:.1f}% cross-rank skew "
+                f"at ~{float(best.pressure_frac or 0.0) * 100.0:.0f}% "
+                "of device capacity."
             ),
             action="Inspect per-rank workload.",
             confidence=0.85 if sev == "crit" else 0.75,
@@ -285,6 +302,7 @@ def build_step_memory_summary_diagnosis_result(
     metrics: Sequence[StepMemoryCombinedMetric],
     *,
     gpu_total_bytes: Optional[float] = None,
+    no_gpu_detected: bool = False,
     thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS,
 ) -> DiagnosticResult[StepMemoryDiagnosis]:
     """
@@ -294,6 +312,21 @@ def build_step_memory_summary_diagnosis_result(
     modular rules, sorted by priority, and the top issue becomes primary. The
     live renderer path keeps using `build_step_memory_diagnosis()`.
     """
+    if no_gpu_detected:
+        primary = _mk_diag(
+            kind="NO_GPU",
+            severity="info",
+            metric="peak_reserved",
+            steps_used=0,
+            reason=(
+                "No GPU detected. Step memory uses torch-based GPU memory "
+                "telemetry."
+            ),
+            action="Step memory is not applicable for this run.",
+            confidence=1.0,
+        )
+        return DiagnosticResult(primary=primary)
+
     from .adapters import build_step_memory_summary_signals
     from .rules import (
         run_step_memory_summary_rules,
@@ -382,6 +415,7 @@ def diagnose_step_memory_summary(
     return build_step_memory_summary_diagnosis_result(
         data.metrics,
         gpu_total_bytes=data.gpu_total_bytes,
+        no_gpu_detected=data.no_gpu_detected,
         thresholds=data.thresholds,
     )
 
