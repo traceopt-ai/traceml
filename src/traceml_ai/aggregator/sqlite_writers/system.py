@@ -147,12 +147,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
     Tables
     ------
     system_samples
-        One row per sampled system snapshot. Includes host fields plus
-        aggregated GPU statistics for the snapshot.
+        One row per sampled system snapshot. Includes node-level raw fields.
 
     system_gpu_samples
-        One row per GPU within a sampled system snapshot. Useful for detailed
-        per-GPU analysis and future imbalance/hotspot queries.
+        One row per GPU within a sampled system snapshot. Summary and live
+        views derive GPU rollups from this table instead of storing duplicate
+        per-snapshot aggregates in `system_samples`.
     """
     conn.execute(
         """
@@ -171,15 +171,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             ram_used_bytes         REAL,
             ram_total_bytes        REAL,
             gpu_available          INTEGER,
-            gpu_count              INTEGER,
-            gpu_util_avg           REAL,
-            gpu_util_peak          REAL,
-            gpu_mem_used_avg_bytes REAL,
-            gpu_mem_used_peak_bytes REAL,
-            gpu_temp_avg_c         REAL,
-            gpu_temp_peak_c        REAL,
-            gpu_power_avg_w        REAL,
-            gpu_power_peak_w       REAL
+            gpu_count              INTEGER
         );
         """
     )
@@ -378,11 +370,6 @@ def build_rows(
                 int(gpu_count_raw) if isinstance(gpu_count_raw, int) else None
             )
 
-            utils: list[float] = []
-            mem_useds_bytes: list[float] = []
-            temps_c: list[float] = []
-            powers_w: list[float] = []
-
             if isinstance(gpus_raw, list):
                 for gpu_idx, g in enumerate(gpus_raw):
                     if not (isinstance(g, list) and len(g) >= 6):
@@ -426,15 +413,6 @@ def build_rows(
                         else None
                     )
 
-                    if util is not None:
-                        utils.append(util)
-                    if mem_used_bytes is not None:
-                        mem_useds_bytes.append(mem_used_bytes)
-                    if temp_c is not None:
-                        temps_c.append(temp_c)
-                    if power_w is not None:
-                        powers_w.append(power_w)
-
                     out["system_gpu_samples"].append(
                         (
                             recv_ts_ns,
@@ -456,23 +434,6 @@ def build_rows(
                         )
                     )
 
-            gpu_util_avg = sum(utils) / len(utils) if utils else None
-            gpu_util_peak = max(utils) if utils else None
-            gpu_mem_used_avg_bytes = (
-                sum(mem_useds_bytes) / len(mem_useds_bytes)
-                if mem_useds_bytes
-                else None
-            )
-            gpu_mem_used_peak_bytes = (
-                max(mem_useds_bytes) if mem_useds_bytes else None
-            )
-            gpu_temp_avg_c = sum(temps_c) / len(temps_c) if temps_c else None
-            gpu_temp_peak_c = max(temps_c) if temps_c else None
-            gpu_power_avg_w = (
-                sum(powers_w) / len(powers_w) if powers_w else None
-            )
-            gpu_power_peak_w = max(powers_w) if powers_w else None
-
             out["system_samples"].append(
                 (
                     recv_ts_ns,
@@ -489,14 +450,6 @@ def build_rows(
                     ram_total_bytes,
                     gpu_available,
                     gpu_count,
-                    gpu_util_avg,
-                    gpu_util_peak,
-                    gpu_mem_used_avg_bytes,
-                    gpu_mem_used_peak_bytes,
-                    gpu_temp_avg_c,
-                    gpu_temp_peak_c,
-                    gpu_power_avg_w,
-                    gpu_power_peak_w,
                 )
             )
 
@@ -534,17 +487,9 @@ def insert_rows(
                 ram_used_bytes,
                 ram_total_bytes,
                 gpu_available,
-                gpu_count,
-                gpu_util_avg,
-                gpu_util_peak,
-                gpu_mem_used_avg_bytes,
-                gpu_mem_used_peak_bytes,
-                gpu_temp_avg_c,
-                gpu_temp_peak_c,
-                gpu_power_avg_w,
-                gpu_power_peak_w
+                gpu_count
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             system_rows,
         )

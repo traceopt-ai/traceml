@@ -294,17 +294,9 @@ def _insert_system_sample(
             ram_used_bytes,
             ram_total_bytes,
             gpu_available,
-            gpu_count,
-            gpu_util_avg,
-            gpu_util_peak,
-            gpu_mem_used_avg_bytes,
-            gpu_mem_used_peak_bytes,
-            gpu_temp_avg_c,
-            gpu_temp_peak_c,
-            gpu_power_avg_w,
-            gpu_power_peak_w
+            gpu_count
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -321,14 +313,6 @@ def _insert_system_sample(
             16_000.0,
             int(gpu_available),
             gpu_count,
-            gpu_util,
-            gpu_util,
-            2_000.0 if gpu_available else None,
-            2_500.0 if gpu_available else None,
-            None,
-            None,
-            None,
-            None,
         ),
     )
     if gpu_available and gpu_count > 0:
