@@ -37,7 +37,6 @@ Envelope:
             {
                 "seq": int,
                 "ts": float,
-                "model_id": int | null,
                 "device": str | null,
                 "step": int | null,
                 "peak_alloc": float | null,   # bytes
@@ -148,7 +147,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
             hostname             TEXT,
             sample_ts_s          REAL,
             seq                  INTEGER,
-            model_id             INTEGER,
             device               TEXT,
             step                 INTEGER,
             peak_alloc_bytes     REAL,
@@ -254,7 +252,6 @@ def build_rows(
 
             seq_raw = row.get("seq")
             ts_raw = row.get("ts")
-            model_id_raw = row.get("model_id")
             device_raw = row.get("device")
             step_raw = row.get("step")
             peak_alloc_raw = row.get("peak_alloc")
@@ -263,9 +260,6 @@ def build_rows(
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
             sample_ts_s = (
                 float(ts_raw) if isinstance(ts_raw, (int, float)) else None
-            )
-            model_id = (
-                int(model_id_raw) if isinstance(model_id_raw, int) else None
             )
             device = str(device_raw) if isinstance(device_raw, str) else None
             step = int(step_raw) if isinstance(step_raw, int) else None
@@ -292,7 +286,6 @@ def build_rows(
                     identity.hostname,
                     sample_ts_s,
                     seq,
-                    model_id,
                     device,
                     step,
                     peak_alloc_bytes,
@@ -324,13 +317,12 @@ def insert_rows(
                 hostname,
                 sample_ts_s,
                 seq,
-                model_id,
                 device,
                 step,
                 peak_alloc_bytes,
                 peak_reserved_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )

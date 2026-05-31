@@ -472,13 +472,12 @@ def _insert_step_time_sample(
             local_world_size,
             node_rank,
             hostname,
-            runtime_pid,
             sample_ts_s,
             seq,
             step,
             events_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -489,7 +488,6 @@ def _insert_step_time_sample(
             1,
             rank,
             f"worker-{rank}",
-            10_000 + rank,
             float(step),
             row_id,
             step,
@@ -529,13 +527,12 @@ def _insert_step_memory_sample(
             hostname,
             sample_ts_s,
             seq,
-            model_id,
             device,
             step,
             peak_alloc_bytes,
             peak_reserved_bytes
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -548,7 +545,6 @@ def _insert_step_memory_sample(
             f"worker-{rank}",
             float(step),
             row_id,
-            1,
             device,
             step,
             alloc,

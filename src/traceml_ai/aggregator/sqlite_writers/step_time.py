@@ -25,7 +25,7 @@ Step-time event names are not stable enough to justify fixed SQL columns.
 Therefore, the SQL schema keeps only stable fields in first-class columns:
 - rank, retained as a legacy alias for global_rank while live paths migrate
 - global_rank, local_rank, world_size, local_world_size, node_rank
-- hostname, runtime_pid
+- hostname
 - step
 - sample_ts_s
 - seq
@@ -108,7 +108,6 @@ class StepTimePayloadIdentity:
     local_world_size: Optional[int]
     node_rank: Optional[int]
     hostname: Optional[str]
-    runtime_pid: Optional[int]
 
 
 def _payload_identity(payload_dict: Dict[str, Any]) -> StepTimePayloadIdentity:
@@ -131,7 +130,6 @@ def _payload_identity(payload_dict: Dict[str, Any]) -> StepTimePayloadIdentity:
         local_world_size=_optional_int(payload_dict.get("local_world_size")),
         node_rank=_optional_int(payload_dict.get("node_rank")),
         hostname=_optional_str(payload_dict.get("hostname")),
-        runtime_pid=_optional_int(payload_dict.get("pid")),
     )
 
 
@@ -179,7 +177,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
             local_world_size   INTEGER,
             node_rank          INTEGER,
             hostname           TEXT,
-            runtime_pid        INTEGER,
             sample_ts_s        REAL,
             seq                INTEGER,
             step               INTEGER,
@@ -222,12 +219,6 @@ def init_schema(conn: sqlite3.Connection) -> None:
         table="step_time_samples",
         column="hostname",
         definition="TEXT",
-    )
-    _ensure_column(
-        conn,
-        table="step_time_samples",
-        column="runtime_pid",
-        definition="INTEGER",
     )
     conn.execute(
         """
@@ -392,7 +383,6 @@ def build_rows(
                     identity.local_world_size,
                     identity.node_rank,
                     identity.hostname,
-                    identity.runtime_pid,
                     sample_ts_s,
                     seq,
                     step,
@@ -429,13 +419,12 @@ def insert_rows(
                 local_world_size,
                 node_rank,
                 hostname,
-                runtime_pid,
                 sample_ts_s,
                 seq,
                 step,
                 events_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )
