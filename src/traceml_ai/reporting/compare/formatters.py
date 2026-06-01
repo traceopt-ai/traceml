@@ -170,7 +170,7 @@ def _section_title(section_name: str) -> str:
 
 def _format_table_rows(rows: Iterable[tuple[str, str, str, str]]) -> list[str]:
     rows = list(rows)
-    widths = [30, 16, 16, 17]
+    widths = [28, 17, 17, 17]
     out = [
         f"{'Metric':<{widths[0]}} "
         f"{'A':<{widths[1]}} "

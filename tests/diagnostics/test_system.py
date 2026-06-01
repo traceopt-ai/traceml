@@ -238,10 +238,10 @@ def test_system_primary_diagnosis_for_each_issue(
 @pytest.mark.parametrize(
     ("gpu_util", "expected_kind", "expected_status"),
     [
-        (29.999, "LOW_GPU_UTILIZATION", "LOW GPU UTILIZATION"),
-        (30.0, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTILIZATION"),
-        (37.8, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTILIZATION"),
-        (70.0, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTILIZATION"),
+        (29.999, "LOW_GPU_UTILIZATION", "LOW GPU UTIL"),
+        (30.0, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTIL"),
+        (37.8, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTIL"),
+        (70.0, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTIL"),
         (70.001, "NORMAL", "NORMAL"),
         (None, "NORMAL", "NORMAL"),
     ],

@@ -445,7 +445,7 @@ def test_compare_shows_system_gpu_utilization_diagnosis_change() -> None:
     lhs = _payload_with_sections()
     rhs = _payload_with_sections()
     lhs["system"]["diagnosis"] = {"status": "NORMAL"}
-    rhs["system"]["diagnosis"] = {"status": "MODERATE GPU UTILIZATION"}
+    rhs["system"]["diagnosis"] = {"status": "MODERATE GPU UTIL"}
     lhs["system"]["global"]["average"]["gpu_util_percent"] = 86.9
     rhs["system"]["global"]["average"]["gpu_util_percent"] = 37.8
 
@@ -455,14 +455,14 @@ def test_compare_shows_system_gpu_utilization_diagnosis_change() -> None:
 
     assert system["diagnosis"] == {
         "lhs": "NORMAL",
-        "rhs": "MODERATE GPU UTILIZATION",
+        "rhs": "MODERATE GPU UTIL",
         "changed": True,
     }
     assert (
         round(system["metrics"]["gpu_util_avg_percent"]["delta"], 1) == -49.1
     )
     assert "System diagnosis" in text
-    assert "MODERATE GPU UTILIZATION" in text
+    assert "MODERATE GPU UTIL" in text
     assert "GPU util avg" in text
     assert "-49.1 pp" in text
 

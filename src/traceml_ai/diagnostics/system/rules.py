@@ -65,7 +65,7 @@ class VeryHighGPUMemoryRule(_BaseSystemRule):
         gpu_idx = context.highest_mem_pressure_gpu_idx
         return self._issue(
             kind="VERY_HIGH_GPU_MEMORY",
-            status="VERY HIGH GPU MEMORY",
+            status="VERY HIGH GPU MEM",
             severity="crit",
             summary=(
                 "GPU memory was very high, peaking at "
@@ -97,7 +97,7 @@ class HighGPUMemoryRule(_BaseSystemRule):
         gpu_idx = context.highest_mem_pressure_gpu_idx
         return self._issue(
             kind="HIGH_GPU_MEMORY",
-            status="HIGH GPU MEMORY",
+            status="HIGH GPU MEM",
             severity="warn",
             summary=(
                 "GPU memory was high, peaking at "
@@ -129,7 +129,7 @@ class HighGPUTemperatureRule(_BaseSystemRule):
         gpu_idx = context.highest_temp_gpu_idx
         return self._issue(
             kind="HIGH_GPU_TEMPERATURE",
-            status="HIGH GPU TEMPERATURE",
+            status="HIGH GPU TEMP",
             severity="crit",
             summary=(
                 "GPU temperature was high, peaking at "
@@ -161,7 +161,7 @@ class HighGPUPowerRule(_BaseSystemRule):
         gpu_idx = context.highest_power_gpu_idx
         return self._issue(
             kind="HIGH_GPU_POWER",
-            status="HIGH GPU POWER",
+            status="HIGH GPU PWR",
             severity="warn",
             summary=(
                 "GPU power was high, averaging "
@@ -192,7 +192,7 @@ class HighHostMemoryRule(_BaseSystemRule):
 
         return self._issue(
             kind="HIGH_HOST_MEMORY",
-            status="HIGH HOST MEMORY",
+            status="HIGH RAM",
             severity="warn",
             summary=(
                 "Host RAM usage was high, peaking at "
@@ -238,7 +238,7 @@ class GPUUtilizationRule(_BaseSystemRule):
         self, context: SystemSummarySignals
     ) -> Optional[DiagnosticIssue]:
         pct = context.gpu_util_avg_percent
-        band = self.policy.gpu_util_avg_percent.classify(pct)
+        band = self.policy.gpu_utilization.classify(pct)
         if band not in {"low", "moderate"}:
             return None
 
@@ -246,13 +246,13 @@ class GPUUtilizationRule(_BaseSystemRule):
         gpu_idx = context.lowest_util_gpu_idx
         if band == "low":
             kind = "LOW_GPU_UTILIZATION"
-            status = "LOW GPU UTILIZATION"
+            status = "LOW GPU UTIL"
             summary = (
                 f"GPU utilization was low, averaging {_fmt_pct(pct_value)}."
             )
         else:
             kind = "MODERATE_GPU_UTILIZATION"
-            status = "MODERATE GPU UTILIZATION"
+            status = "MODERATE GPU UTIL"
             summary = (
                 "GPU utilization was moderate, averaging "
                 f"{_fmt_pct(pct_value)}."

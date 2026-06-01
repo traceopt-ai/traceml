@@ -77,7 +77,7 @@ def test_diagnostic_result_moves_matching_primary_issue_to_front() -> None:
     )
     secondary_issue = DiagnosticIssue(
         kind="LOW_GPU_UTILIZATION",
-        status="LOW GPU UTILIZATION",
+        status="LOW GPU UTIL",
         severity="info",
         summary="GPU utilization is low.",
         action="Inspect timing.",
@@ -105,7 +105,7 @@ def test_diagnosis_to_issue_preserves_structured_evidence() -> None:
 def test_ensure_primary_issue_prepends_primary_when_missing() -> None:
     secondary_issue = DiagnosticIssue(
         kind="LOW_GPU_UTILIZATION",
-        status="LOW GPU UTILIZATION",
+        status="LOW GPU UTIL",
         severity="info",
         summary="GPU utilization is low.",
         action="Inspect timing.",

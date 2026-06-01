@@ -151,7 +151,7 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.section == "system"
     assert result.payload["metadata"]["samples"] == 1
     assert "TraceML System Summary" in result.text
-    assert "- Diagnosis: MODERATE GPU UTILIZATION" in result.text
+    assert "- Diagnosis: MODERATE GPU UTIL" in result.text
     assert result.payload["diagnosis"]["kind"] == "MODERATE_GPU_UTILIZATION"
     assert result.payload["diagnosis"] == result.payload["issues"][0]
     assert result.payload["diagnosis"]["summary"].startswith(

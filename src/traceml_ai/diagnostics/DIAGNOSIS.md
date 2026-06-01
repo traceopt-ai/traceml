@@ -6,7 +6,8 @@ also copies that same item to `diagnosis`.
 
 Use `kind` as the stable internal key for logic and comparisons. Use `status`
 as the user-facing display label. In many cases they are similar, but they are
-not required to match.
+not required to match; System statuses intentionally use compact labels such as
+`HIGH GPU MEM` and `MODERATE GPU UTIL`.
 
 Diagnoses are conservative. They identify likely bottleneck categories, not a
 complete root-cause proof.

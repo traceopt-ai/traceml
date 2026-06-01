@@ -48,7 +48,7 @@ class SystemDiagnosisPolicy:
 
     cpu_avg_percent: BandThresholds
     ram_peak_percent: BandThresholds
-    gpu_util_avg_percent: GPUUtilizationBands
+    gpu_utilization: GPUUtilizationBands
     gpu_memory_peak_percent: BandThresholds
     gpu_temp_peak_c: BandThresholds
     gpu_power_avg_limit_percent: BandThresholds
@@ -57,7 +57,7 @@ class SystemDiagnosisPolicy:
 DEFAULT_SYSTEM_POLICY = SystemDiagnosisPolicy(
     cpu_avg_percent=BandThresholds(low_below=30.0, high_at=80.0),
     ram_peak_percent=BandThresholds(low_below=30.0, high_at=80.0),
-    gpu_util_avg_percent=GPUUtilizationBands(),
+    gpu_utilization=GPUUtilizationBands(),
     gpu_memory_peak_percent=BandThresholds(
         low_below=30.0,
         high_at=80.0,
