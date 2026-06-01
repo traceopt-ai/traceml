@@ -21,6 +21,44 @@ from traceml_ai.utils.formatting import fmt_mem_new
 COMPARE_WIDTH = 88
 COMPARE_INNER_WIDTH = COMPARE_WIDTH - 4
 
+TEXT_METRIC_ORDER_BY_SECTION: Dict[str, tuple[str, ...]] = {
+    "step_time": (
+        "total_step_ms",
+        "input_ms",
+        "h2d_ms",
+        "compute_ms",
+        "wait_ms",
+    ),
+    "step_memory": (
+        "peak_reserved_bytes",
+        "memory_skew_pct",
+    ),
+    "process": (
+        "cpu_avg_percent",
+        "rss_avg_gb",
+    ),
+    "system": (
+        "cpu_avg_percent",
+        "ram_avg_gb",
+        "gpu_util_avg_percent",
+        "gpu_memory_avg_percent",
+    ),
+}
+
+DIAGNOSIS_LABEL_BY_SECTION: Dict[str, str] = {
+    "step_time": "Step time diagnosis",
+    "step_memory": "Step memory diagnosis",
+    "process": "Process diagnosis",
+    "system": "System diagnosis",
+}
+
+SECTION_TITLE_BY_SECTION: Dict[str, str] = {
+    "step_time": "Step Time",
+    "step_memory": "Step Memory",
+    "process": "Process",
+    "system": "System",
+}
+
 
 def _as_float(value: Any) -> Optional[float]:
     try:
@@ -109,41 +147,14 @@ def _rows_for_section(
     section_name: str,
     section: Dict[str, Any],
 ) -> list[tuple[str, str, str, str]]:
-    metric_order = {
-        "step_time": (
-            "total_step_ms",
-            "input_ms",
-            "h2d_ms",
-            "compute_ms",
-            "wait_ms",
-            "forward_ms",
-            "backward_ms",
-            "optimizer_ms",
-        ),
-        "step_memory": (
-            "peak_reserved_bytes",
-            "memory_skew_pct",
-        ),
-        "process": (
-            "cpu_avg_percent",
-            "rss_avg_gb",
-        ),
-        "system": (
-            "cpu_avg_percent",
-            "ram_avg_gb",
-            "gpu_util_avg_percent",
-            "gpu_memory_avg_percent",
-        ),
-    }
-    diagnosis_labels = {
-        "step_time": "Step time diagnosis",
-        "step_memory": "Step memory diagnosis",
-        "process": "Process diagnosis",
-        "system": "System diagnosis",
-    }
-    rows = [_diagnosis_row(diagnosis_labels[section_name], section)]
+    rows = [
+        _diagnosis_row(
+            DIAGNOSIS_LABEL_BY_SECTION.get(section_name, "Diagnosis"),
+            section,
+        )
+    ]
     metrics = section.get("metrics", {})
-    for key in metric_order[section_name]:
+    for key in TEXT_METRIC_ORDER_BY_SECTION.get(section_name, ()):
         metric = metrics.get(key)
         if isinstance(metric, dict) and _has_signal(metric):
             rows.append(_metric_row(metric))
@@ -151,12 +162,10 @@ def _rows_for_section(
 
 
 def _section_title(section_name: str) -> str:
-    return {
-        "step_time": "Step Time",
-        "step_memory": "Step Memory",
-        "process": "Process",
-        "system": "System",
-    }[section_name]
+    return SECTION_TITLE_BY_SECTION.get(
+        section_name,
+        section_name.replace("_", " ").title(),
+    )
 
 
 def _format_table_rows(rows: Iterable[tuple[str, str, str, str]]) -> list[str]:

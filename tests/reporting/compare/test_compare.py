@@ -39,6 +39,7 @@ def _step_time_section(
     reason: str = "No clear timing issue.",
     action: str = "Keep monitoring.",
     total_step_ms: float = 300.0,
+    h2d_ms: Optional[float] = None,
     wait_ms: Optional[float] = None,
     split_ms: Optional[dict] = None,
 ) -> dict:
@@ -50,27 +51,34 @@ def _step_time_section(
     }
     compute_ms = splits["forward"] + splits["backward"] + splits["optimizer"]
     resolved_wait_ms = (
-        max(0.0, total_step_ms - splits["dataloader"] - compute_ms)
+        max(
+            0.0,
+            total_step_ms
+            - splits["dataloader"]
+            - float(h2d_ms or 0.0)
+            - compute_ms,
+        )
         if wait_ms is None
         else wait_ms
     )
+    average = {
+        "total_step_ms": total_step_ms,
+        "dataloader_ms": splits["dataloader"],
+        "compute_ms": compute_ms,
+        "wait_ms": resolved_wait_ms,
+        "forward_ms": splits["forward"],
+        "backward_ms": splits["backward"],
+        "optimizer_ms": splits["optimizer"],
+    }
+    if h2d_ms is not None:
+        average["h2d_ms"] = h2d_ms
     return {
         "diagnosis": {
             "status": status,
             "reason": reason,
             "action": action,
         },
-        "global": {
-            "average": {
-                "total_step_ms": total_step_ms,
-                "dataloader_ms": splits["dataloader"],
-                "compute_ms": compute_ms,
-                "wait_ms": resolved_wait_ms,
-                "forward_ms": splits["forward"],
-                "backward_ms": splits["backward"],
-                "optimizer_ms": splits["optimizer"],
-            }
-        },
+        "global": {"average": average},
     }
 
 
@@ -366,6 +374,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
         step_time=_step_time_section(
             status="COMPUTE-BOUND",
             total_step_ms=621.1,
+            h2d_ms=2.0,
             split_ms={
                 "dataloader": 1.3,
                 "forward": 228.4,
@@ -383,6 +392,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
         step_time=_step_time_section(
             status="COMPUTE-BOUND",
             total_step_ms=735.2,
+            h2d_ms=2.4,
             split_ms={
                 "dataloader": 1.9,
                 "forward": 300.0,
@@ -407,19 +417,23 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
         "process",
         "system",
     }
-    assert (
-        compare_payload["sections"]["step_time"]["metrics"]["total_step_ms"][
-            "pct_change"
-        ]
-        == compare_payload["sections"]["step_time"]["metrics"][
-            "total_step_ms"
-        ]["pct_change"]
-    )
+    step_time_metrics = compare_payload["sections"]["step_time"]["metrics"]
+    assert step_time_metrics["total_step_ms"]["pct_change"] is not None
+    assert "forward_ms" in step_time_metrics
+    assert "backward_ms" in step_time_metrics
+    assert "optimizer_ms" in step_time_metrics
     assert compare_payload["verdict"]["status"] == "REGRESSION"
     assert compare_payload["verdict"]["primary_domain"] == "step_time"
     assert "Metric" in text
     assert "Step time diagnosis" in text
     assert "Total step" in text
+    assert "Input" in text
+    assert "H2D" in text
+    assert "Compute" in text
+    assert "Wait" in text
+    assert "Forward" not in text
+    assert "Backward" not in text
+    assert "Optimizer" not in text
     assert "621.1 ms" in text
     assert "735.2 ms" in text
     assert "+114.1 ms (+18.4%)" in text
