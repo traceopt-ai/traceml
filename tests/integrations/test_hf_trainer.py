@@ -456,3 +456,63 @@ def test_hf_init_enables_dataloader_and_h2d_patches():
         "huggingface.init() must enable the H2D Tensor.to patch the "
         "per-step auto-timer relies on."
     )
+
+
+# --- TraceML telemetry-completeness guard (instrumentation hardening) -------
+# test_hf_init_enables_dataloader_and_h2d_patches proves init() REQUESTS the
+# DataLoader patch (config flags). This guard goes one step further and
+# proves the stream actually EMITS during a real Trainer run. Absences (a
+# stream silently dark) are the costly failure mode; a config flag cannot
+# catch a broken patch, a renamed event, or a buffer that never flushes.
+
+DATALOADER_STREAM = "_traceml_internal:dataloader_next"
+
+
+@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
+def test_hf_callback_run_emits_dataloader_fetch_events():
+    """
+    COMPLETENESS guard: with huggingface.init() called, a vanilla Trainer +
+    TraceMLTrainerCallback run must land `_traceml_internal:dataloader_next`
+    TimeEvents in the flushed StepTimeBatches, not merely set the
+    patch_dataloader config flag. Gates the full path: patch install ->
+    fetch timing -> step-buffer fold -> per-step flush.
+    """
+    _reset_traceml_state()
+
+    # Drop STEP-scope events still sitting in the unflushed buffer from
+    # earlier tests; they would otherwise fold into this run's first batch
+    # and could fake a pass.
+    from traceml_ai.utils.timing import _STEP_BUFFER
+
+    _STEP_BUFFER.clear()
+
+    # Explicit init is the documented HF path; the DataLoader fetch patch
+    # is process-wide and only installed here, never by the callback.
+    # init() is idempotent for the same effective config, so this is safe
+    # whether or not the patch-flag test already ran.
+    init()
+
+    max_steps = 5
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        output_dir = Path(tmp_dir) / "results"
+        model = _build_tiny_model()
+        train_dataset = _TinyTokenizedDataset()
+        training_args = _build_training_args(
+            str(output_dir), max_steps=max_steps
+        )
+
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            callbacks=[TraceMLTrainerCallback()],
+        )
+        trainer.train()
+
+    batches = _drain_step_time_queue()
+    names = sorted({evt.name for batch in batches for evt in batch.events})
+    assert DATALOADER_STREAM in names, (
+        "DataLoader-fetch telemetry is DARK: the HF run did not emit "
+        f"'{DATALOADER_STREAM}'. Streams seen: {names}"
+    )
