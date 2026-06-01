@@ -13,7 +13,7 @@ SQLite table while preserving the original sampler payload in `raw_messages`.
 Design
 ------
 - Keeps sampler-specific SQL logic out of the core SQLite writer
-- Accepts already-decoded payload dicts from the main writer
+- Accepts canonical telemetry envelopes from the main writer
 - Produces one query-friendly table:
     1) step_time_samples
        One row per (global rank, step) with stable metadata columns plus a
@@ -34,36 +34,11 @@ and stores the dynamic event map as JSON text in `events_json`.
 
 Expected payload shape
 ----------------------
-Envelope:
+Canonical telemetry envelope:
 {
-    "rank": int,          # legacy alias for global_rank
-    "global_rank": int,
-    "local_rank": int,
-    "world_size": int,
-    "local_world_size": int,
-    "node_rank": int,
-    "hostname": str,
-    "pid": int,
-    "sampler": "StepTimeSampler",
-    "timestamp": float,
-    "tables": {
-        "<table_name>": [
-            {
-                "seq": int,
-                "timestamp": float,
-                "step": int,
-                "events": {
-                    "<event_name>": {
-                        "<device>": {
-                            "is_gpu": bool,
-                            "duration_ms": float,
-                            "n_calls": int
-                        }
-                    }
-                }
-            },
-            ...
-        ]
+    "meta": {"sampler": "StepTimeSampler", ...},
+    "body": {
+        "tables": {"<table_name>": [StepTimeEventSample.to_wire(), ...]}
     }
 }
 """
@@ -74,6 +49,8 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
 
 SAMPLER_NAME = "StepTimeSampler"
 RETENTION_TABLES = ("step_time_samples",)
@@ -110,7 +87,7 @@ class StepTimePayloadIdentity:
     hostname: Optional[str]
 
 
-def _payload_identity(payload_dict: Dict[str, Any]) -> StepTimePayloadIdentity:
+def _payload_identity(meta: TelemetryMeta) -> StepTimePayloadIdentity:
     """
     Return storage identity for one StepTimeSampler payload.
 
@@ -118,18 +95,18 @@ def _payload_identity(payload_dict: Dict[str, Any]) -> StepTimePayloadIdentity:
     written as the same value so current live renderers keep working until they
     move to explicit identity fields.
     """
-    global_rank = _optional_int(payload_dict.get("global_rank"))
-    legacy_rank = _optional_int(payload_dict.get("rank"))
+    global_rank = _optional_int(meta.global_rank)
+    legacy_rank = _optional_int(meta.rank)
     rank = global_rank if global_rank is not None else legacy_rank
 
     return StepTimePayloadIdentity(
         rank=rank,
         global_rank=global_rank,
-        local_rank=_optional_int(payload_dict.get("local_rank")),
-        world_size=_optional_int(payload_dict.get("world_size")),
-        local_world_size=_optional_int(payload_dict.get("local_world_size")),
-        node_rank=_optional_int(payload_dict.get("node_rank")),
-        hostname=_optional_str(payload_dict.get("hostname")),
+        local_rank=_optional_int(meta.local_rank),
+        world_size=_optional_int(meta.world_size),
+        local_world_size=_optional_int(meta.local_world_size),
+        node_rank=_optional_int(meta.node_rank),
+        hostname=_optional_str(meta.hostname),
     )
 
 
@@ -307,7 +284,7 @@ def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:
 
 
 def build_rows(
-    payload_dict: Dict[str, Any],
+    envelope: TelemetryEnvelope,
     recv_ts_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
@@ -315,8 +292,8 @@ def build_rows(
 
     Parameters
     ----------
-    payload_dict:
-        Decoded sampler payload dict from the main SQLite writer.
+    envelope:
+        Canonical telemetry envelope from the main SQLite writer.
     recv_ts_ns:
         Receive timestamp assigned by the main writer for this payload.
 
@@ -337,13 +314,13 @@ def build_rows(
         "step_time_samples": [],
     }
 
-    sampler = payload_dict.get("sampler")
-    if not accepts_sampler(str(sampler) if sampler is not None else None):
+    sampler = envelope.meta.sampler
+    if not accepts_sampler(sampler):
         return out
 
-    identity = _payload_identity(payload_dict)
+    identity = _payload_identity(envelope.meta)
 
-    tables = payload_dict.get("tables")
+    tables = envelope.tables
     if not isinstance(tables, dict):
         return out
 

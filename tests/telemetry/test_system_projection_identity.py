@@ -8,7 +8,13 @@ from __future__ import annotations
 
 import sqlite3
 
+from traceml_ai.aggregator.sqlite_writer import (
+    SQLiteWriterConfig,
+    SQLiteWriterSimple,
+)
 from traceml_ai.aggregator.sqlite_writers import system as system_projection
+from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
+from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 
 def _system_payload() -> dict:
@@ -42,7 +48,9 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
     conn = sqlite3.connect(":memory:")
     system_projection.init_schema(conn)
 
-    rows = system_projection.build_rows(_system_payload(), recv_ts_ns=999)
+    envelope = normalize_telemetry_envelope(_system_payload())
+    assert envelope is not None
+    rows = system_projection.build_rows(envelope, recv_ts_ns=999)
     system_projection.insert_rows(conn, rows)
 
     sample = conn.execute(
@@ -62,3 +70,30 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
 
     assert sample == (5, 1, 8, 4, 1, "worker-1", 7)
     assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)
+
+
+def test_sqlite_writer_persists_canonical_raw_envelope(tmp_path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(SQLiteWriterConfig(path=str(db_path)))
+
+    conn = sqlite3.connect(db_path)
+    try:
+        writer._init_schema(conn)
+        system_projection.init_schema(conn)
+
+        raw_rows, projection_rows = writer._collect_flush_rows(
+            [_system_payload()]
+        )
+        writer._write_flush_rows(conn, raw_rows, projection_rows)
+
+        payload_mp = conn.execute(
+            "SELECT payload_mp FROM raw_messages;"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    payload = MsgpackDecoder().decode(payload_mp)
+    assert set(payload) == {"meta", "body"}
+    assert payload["meta"]["sampler"] == "SystemSampler"
+    assert payload["meta"]["global_rank"] == 5
+    assert payload["body"]["tables"]["SystemTable"][0]["seq"] == 7

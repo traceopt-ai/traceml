@@ -11,6 +11,7 @@ from typing import Any, Optional, Protocol
 
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.runtime.sender import SenderIdentity
+from traceml_ai.telemetry.envelope import build_telemetry_envelope
 
 
 class AppendOnlyDatabase(Protocol):
@@ -48,21 +49,24 @@ class DBIncrementalSender:
 
     Payload contract
     ----------------
-    This class returns a single payload dict from `collect_payload()`:
+    This class returns one canonical telemetry envelope from
+    `collect_payload()`:
 
     {
-        "rank": <int>,          # globally unique runtime rank
-        "global_rank": <int>,
-        "local_rank": <int>,
-        "world_size": <int>,
-        "local_world_size": <int>,
-        "node_rank": <int>,
-        "hostname": <str>,
-        "pid": <int>,
-        "sampler": <str>,
-        "timestamp": <float>,
-        "tables": {
-            table_name: [row, row, ...]
+        "meta": {
+            "rank": <int>,
+            "global_rank": <int>,
+            "local_rank": <int>,
+            "world_size": <int>,
+            "local_world_size": <int>,
+            "node_rank": <int>,
+            "hostname": <str>,
+            "pid": <int>,
+            "sampler": <str>,
+            "timestamp": <float>
+        },
+        "body": {
+            "tables": {table_name: [row, row, ...]}
         }
     }
 
@@ -162,12 +166,12 @@ class DBIncrementalSender:
             return None
         identity = self._payload_identity()
 
-        return {
-            **identity.to_payload_fields(),
-            "sampler": self.sampler_name,
-            "timestamp": time.time(),
-            "tables": tables_payload,
-        }
+        return build_telemetry_envelope(
+            identity=identity,
+            sampler_name=self.sampler_name,
+            tables=tables_payload,
+            timestamp=time.time(),
+        )
 
     def flush(self) -> None:
         """

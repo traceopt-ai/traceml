@@ -30,6 +30,10 @@ from traceml_ai.reporting.config import (
     DEFAULT_SUMMARY_WINDOW_ROWS,
     summary_retention_rows_for_window,
 )
+from traceml_ai.telemetry.envelope import (
+    TelemetryEnvelope,
+    normalize_telemetry_envelope,
+)
 from traceml_ai.utils.msgpack_codec import Encoder as MsgpackEncoder
 
 _PROJECTION_WRITERS = [
@@ -241,29 +245,14 @@ class SQLiteWriterSimple:
         return items
 
     def _extract_rank_sampler(
-        self, msg: Dict[str, Any]
+        self, envelope: TelemetryEnvelope
     ) -> tuple[Optional[int], Optional[str]]:
-        """Extract best-effort ``rank`` and ``sampler`` metadata from a message."""
-        rank_val = msg.get("global_rank", msg.get("rank", None))
-        sampler_val = msg.get("sampler", None)
+        """Extract best-effort ``rank`` and ``sampler`` from envelope metadata."""
+        return envelope.meta.rank, envelope.meta.sampler
 
-        rank: Optional[int]
-        try:
-            rank = int(rank_val) if rank_val is not None else None
-        except Exception:
-            rank = None
-
-        sampler: Optional[str]
-        try:
-            sampler = str(sampler_val) if sampler_val is not None else None
-        except Exception:
-            sampler = None
-
-        return rank, sampler
-
-    def _iter_payload_dicts(self, msg: Any) -> Iterator[Dict[str, Any]]:
+    def _iter_envelopes(self, msg: Any) -> Iterator[TelemetryEnvelope]:
         """
-        Yield payload dicts from a single message or batch.
+        Yield normalized telemetry envelopes from a single message or batch.
 
         Accepted forms:
         - dict
@@ -274,10 +263,13 @@ class SQLiteWriterSimple:
 
         if isinstance(msg, list):
             for item in msg:
-                if isinstance(item, dict):
-                    yield item
+                envelope = normalize_telemetry_envelope(item)
+                if envelope is not None:
+                    yield envelope
         elif isinstance(msg, dict):
-            yield msg
+            envelope = normalize_telemetry_envelope(msg)
+            if envelope is not None:
+                yield envelope
 
     def _collect_flush_rows(
         self,
@@ -298,11 +290,11 @@ class SQLiteWriterSimple:
         }
 
         for item in items:
-            for payload_dict in self._iter_payload_dicts(item):
+            for envelope in self._iter_envelopes(item):
                 try:
                     recv_ts_ns = time.time_ns()
-                    rank, sampler = self._extract_rank_sampler(payload_dict)
-                    payload = self._encoder.encode(payload_dict)
+                    rank, sampler = self._extract_rank_sampler(envelope)
+                    payload = self._encoder.encode(envelope.to_dict())
                     raw_rows.append((recv_ts_ns, rank, sampler, payload))
 
                     for writer in _PROJECTION_WRITERS:
@@ -310,7 +302,7 @@ class SQLiteWriterSimple:
                             continue
 
                         rows_by_table = writer.build_rows(
-                            payload_dict=payload_dict,
+                            envelope=envelope,
                             recv_ts_ns=recv_ts_ns,
                         )
                         for table_name, rows in rows_by_table.items():

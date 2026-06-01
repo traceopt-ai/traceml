@@ -27,33 +27,11 @@ This projection stores raw values wherever possible.
 
 Expected payload shape
 ----------------------
-Envelope:
+Canonical telemetry envelope:
 {
-    "global_rank": int,  # process that emitted this node-level sample
-    "local_rank": int,
-    "world_size": int,
-    "local_world_size": int,
-    "node_rank": int,    # canonical System grouping identity
-    "hostname": str,
-    "sampler": "SystemSampler",
-    "timestamp": float,
-    "tables": {
-        "<table_name>": [
-            {
-                "seq": int,
-                "ts": float,
-                "cpu": float,
-                "ram_used": float,   # bytes
-                "ram_total": float,  # bytes
-                "gpu_available": bool,
-                "gpu_count": int,
-                "gpus": [
-                    [util, mem_used, mem_total, temperature, power_usage, power_limit],
-                    ...
-                ]
-            },
-            ...
-        ]
+    "meta": {"sampler": "SystemSampler", ...},
+    "body": {
+        "tables": {"<table_name>": [SystemSample.to_wire(), ...]}
     }
 }
 """
@@ -63,6 +41,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
 
 SAMPLER_NAME = "SystemSampler"
 RETENTION_TABLES = ("system_samples",)
@@ -98,24 +78,20 @@ class SystemPayloadIdentity:
     hostname: Optional[str]
 
 
-def _payload_identity(
-    payload_dict: Dict[str, Any],
-) -> SystemPayloadIdentity:
+def _payload_identity(meta: TelemetryMeta) -> SystemPayloadIdentity:
     """
     Return storage identity for one payload.
 
     System projection tables store explicit distributed identity fields only.
     The legacy generic ``rank`` field is intentionally ignored.
     """
-    global_rank = _optional_int(payload_dict.get("global_rank"))
-
     return SystemPayloadIdentity(
-        global_rank=global_rank,
-        local_rank=_optional_int(payload_dict.get("local_rank")),
-        world_size=_optional_int(payload_dict.get("world_size")),
-        local_world_size=_optional_int(payload_dict.get("local_world_size")),
-        node_rank=_optional_int(payload_dict.get("node_rank")),
-        hostname=_optional_str(payload_dict.get("hostname")),
+        global_rank=_optional_int(meta.global_rank),
+        local_rank=_optional_int(meta.local_rank),
+        world_size=_optional_int(meta.world_size),
+        local_world_size=_optional_int(meta.local_world_size),
+        node_rank=_optional_int(meta.node_rank),
+        hostname=_optional_str(meta.hostname),
     )
 
 
@@ -285,7 +261,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def build_rows(
-    payload_dict: Dict[str, Any],
+    envelope: TelemetryEnvelope,
     recv_ts_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
@@ -293,8 +269,8 @@ def build_rows(
 
     Parameters
     ----------
-    payload_dict:
-        Decoded sampler payload dict from the main SQLite writer.
+    envelope:
+        Canonical telemetry envelope from the main SQLite writer.
     recv_ts_ns:
         Receive timestamp assigned by the main writer for this payload.
 
@@ -317,13 +293,13 @@ def build_rows(
         "system_gpu_samples": [],
     }
 
-    sampler = payload_dict.get("sampler")
-    if not accepts_sampler(str(sampler) if sampler is not None else None):
+    sampler = envelope.meta.sampler
+    if not accepts_sampler(sampler):
         return out
 
-    identity = _payload_identity(payload_dict)
+    identity = _payload_identity(envelope.meta)
 
-    tables = payload_dict.get("tables")
+    tables = envelope.tables
     if not isinstance(tables, dict):
         return out
 

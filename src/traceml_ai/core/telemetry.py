@@ -7,6 +7,8 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Dict, Generic, Mapping, Optional, Protocol, TypeVar
 
+from traceml_ai.telemetry.envelope import TelemetryEnvelope
+
 MetricResultT = TypeVar("MetricResultT")
 TelemetryPayload = Mapping[str, Any]
 
@@ -34,10 +36,10 @@ class ProjectionWriter(Protocol):
 
     def build_rows(
         self,
-        payload_dict: Dict[str, Any],
+        envelope: TelemetryEnvelope,
         recv_ts_ns: int,
     ) -> Dict[str, list[tuple]]:
-        """Build table-keyed SQLite rows from one decoded payload."""
+        """Build table-keyed SQLite rows from one canonical envelope."""
 
     def insert_rows(
         self,

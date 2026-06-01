@@ -103,6 +103,24 @@ class _FakeSampler:
         self.db = _FakeDB(writer) if writer is not None else None
 
 
+def _payload(sampler: str) -> dict:
+    return {
+        "meta": {
+            "rank": 0,
+            "global_rank": 0,
+            "local_rank": 0,
+            "world_size": 1,
+            "local_world_size": 1,
+            "node_rank": 0,
+            "hostname": "",
+            "pid": 0,
+            "sampler": sampler,
+            "timestamp": 1.0,
+        },
+        "body": {"tables": {"rows": [{"v": 1}]}},
+    }
+
+
 def test_publisher_attaches_senders_to_tcp_client_and_rank() -> None:
     tcp_client = _FakeTCPClient()
     sender = _FakeSender(payload={"rows": [1]})
@@ -146,7 +164,7 @@ def test_publisher_flushes_collects_and_sends_one_batch() -> None:
     writer = _FakeWriter()
     sampler_a = _FakeSampler(
         "SamplerA",
-        sender=_FakeSender(payload={"sampler": "a"}),
+        sender=_FakeSender(payload=_payload("a")),
         writer=writer,
     )
     sampler_b = _FakeSampler(
@@ -162,7 +180,7 @@ def test_publisher_flushes_collects_and_sends_one_batch() -> None:
     publisher.publish([sampler_a, sampler_b])
 
     assert writer.flush_count == 1
-    assert tcp_client.sent_batches == [[{"sampler": "a"}]]
+    assert tcp_client.sent_batches == [[_payload("a")]]
 
 
 def test_publisher_collects_empty_mapping_payloads() -> None:
@@ -204,12 +222,12 @@ def test_publisher_logs_failures_and_continues() -> None:
     logger = _FakeLogger()
     good_sampler = _FakeSampler(
         "GoodSampler",
-        sender=_FakeSender(payload={"sampler": "good"}),
+        sender=_FakeSender(payload=_payload("good")),
         writer=_FakeWriter(),
     )
     bad_flush_sampler = _FakeSampler(
         "BadFlushSampler",
-        sender=_FakeSender(payload={"sampler": "bad_flush"}),
+        sender=_FakeSender(payload=_payload("bad_flush")),
         writer=_FakeWriter(fail_flush=True),
     )
     bad_collect_sampler = _FakeSampler(
