@@ -231,32 +231,56 @@ class HighCPURule(_BaseSystemRule):
 
 
 @dataclass(frozen=True)
-class LowGPUUtilizationRule(_BaseSystemRule):
-    name: str = "low_gpu_utilization"
+class GPUUtilizationRule(_BaseSystemRule):
+    name: str = "gpu_utilization"
 
     def evaluate(
         self, context: SystemSummarySignals
     ) -> Optional[DiagnosticIssue]:
         pct = context.gpu_util_avg_percent
-        if self.policy.gpu_util_avg_percent.classify(pct) != "low":
+        band = self.policy.gpu_util_avg_percent.classify(pct)
+        if band not in {"low", "moderate"}:
             return None
 
+        pct_value = float(pct)
         gpu_idx = context.lowest_util_gpu_idx
+        if band == "low":
+            kind = "LOW_GPU_UTILIZATION"
+            status = "LOW GPU UTILIZATION"
+            summary = (
+                f"GPU utilization was low, averaging {_fmt_pct(pct_value)}."
+            )
+        else:
+            kind = "MODERATE_GPU_UTILIZATION"
+            status = "MODERATE GPU UTILIZATION"
+            summary = (
+                "GPU utilization was moderate, averaging "
+                f"{_fmt_pct(pct_value)}."
+            )
+
         return self._issue(
-            kind="LOW_GPU_UTILIZATION",
-            status="LOW GPU UTILIZATION",
+            kind=kind,
+            status=status,
             severity="info",
-            summary=f"GPU utilization was low, averaging {_fmt_pct(pct)}.",
-            action="Use step-time diagnostics to check host or input stalls.",
+            summary=summary,
+            action=(
+                "Use training diagnostics to identify why the GPU was not "
+                "fully utilized."
+            ),
             metric="gpu_util_avg_percent",
             phase="gpu_utilization",
-            score=100.0 - float(pct),
-            ranks=(() if gpu_idx is None else (gpu_idx,)),
+            score=max(0.0, 100.0 - pct_value),
+            ranks=(),
             evidence={
-                "gpu_util_avg_percent": pct,
+                "gpu_util_avg_percent": pct_value,
+                "gpu_utilization_band": band,
                 "lowest_util_gpu_idx": gpu_idx,
             },
         )
+
+
+# Keep the old import name stable; the rule now covers low and moderate bands.
+LowGPUUtilizationRule = GPUUtilizationRule
 
 
 DEFAULT_SYSTEM_RULES = (
@@ -266,7 +290,7 @@ DEFAULT_SYSTEM_RULES = (
     HighGPUPowerRule(),
     HighHostMemoryRule(),
     HighCPURule(),
-    LowGPUUtilizationRule(),
+    GPUUtilizationRule(),
 )
 
 
@@ -278,6 +302,7 @@ SYSTEM_ISSUE_PRIORITY = {
     "HIGH_HOST_MEMORY": 4,
     "HIGH_CPU": 5,
     "LOW_GPU_UTILIZATION": 6,
+    "MODERATE_GPU_UTILIZATION": 7,
 }
 
 
@@ -312,6 +337,7 @@ def run_system_rules(
 
 __all__ = [
     "DEFAULT_SYSTEM_RULES",
+    "GPUUtilizationRule",
     "HighCPURule",
     "HighGPUMemoryRule",
     "HighGPUPowerRule",

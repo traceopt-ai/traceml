@@ -151,7 +151,13 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.section == "system"
     assert result.payload["metadata"]["samples"] == 1
     assert "TraceML System Summary" in result.text
-    assert "- Diagnosis: NORMAL" in result.text
+    assert "- Diagnosis: MODERATE GPU UTILIZATION" in result.text
+    assert result.payload["diagnosis"]["kind"] == "MODERATE_GPU_UTILIZATION"
+    assert result.payload["diagnosis"] == result.payload["issues"][0]
+    assert result.payload["diagnosis"]["summary"].startswith(
+        "GPU utilization was moderate, averaging 55.0%"
+    )
+    assert result.payload["diagnosis"]["evidence"]["lowest_util_gpu_idx"] == 1
     assert (
         "- Stats: CPU 40% | RAM 50% | GPU util 55% | "
         "GPU memory 50% | GPU temp 68.0C"

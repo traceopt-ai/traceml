@@ -545,7 +545,9 @@ The delta row is a helpful clue, not the full diagnosis logic.
 
 ## System metrics
 
-The system panel is context, not the main bottleneck diagnosis.
+The system panel reports machine-level pressure and GPU-utilization symptoms.
+It is still context for the training diagnosis: low or moderate GPU
+utilization says the GPU was not fully busy, but it does not prove why.
 
 It helps answer:
 
@@ -553,7 +555,7 @@ It helps answer:
 - is CPU high?
 - is RAM high?
 - are GPUs hot or close to full memory?
-- is GPU utilization uneven?
+- are GPUs idle, partly utilized, or uneven?
 
 Common fields:
 
@@ -565,6 +567,18 @@ Common fields:
 - GPU headroom
 
 Use this panel to understand machine-level pressure around the training run.
+
+For average GPU utilization, System diagnosis uses these bands:
+
+- below 30%: `LOW_GPU_UTILIZATION`
+- 30% through 70%: `MODERATE_GPU_UTILIZATION`
+- above 70%: no GPU-utilization issue; System can stay `NORMAL` if no pressure
+  rule fires
+
+Use Step Time to explain the likely cause. For example, a System diagnosis of
+`MODERATE_GPU_UTILIZATION` plus a Step Time diagnosis of `INPUT-BOUND` means the
+GPU was only partly utilized and the step breakdown points to input loading as
+the likely reason.
 
 ---
 
@@ -688,6 +702,8 @@ not just a single raw delta
 ### System metrics are context, not the final explanation
 
 Low GPU utilization by itself does not prove an input bottleneck.
+Moderate GPU utilization is the same kind of symptom: it means the GPU was not
+fully busy, not that the GPU was slow.
 
 Always read:
 

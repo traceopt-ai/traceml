@@ -441,6 +441,32 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert "+2.70 GB (+43.5%)" in text
 
 
+def test_compare_shows_system_gpu_utilization_diagnosis_change() -> None:
+    lhs = _payload_with_sections()
+    rhs = _payload_with_sections()
+    lhs["system"]["diagnosis"] = {"status": "NORMAL"}
+    rhs["system"]["diagnosis"] = {"status": "MODERATE GPU UTILIZATION"}
+    lhs["system"]["global"]["average"]["gpu_util_percent"] = 86.9
+    rhs["system"]["global"]["average"]["gpu_util_percent"] = 37.8
+
+    compare_payload = _build_compare(lhs, rhs)
+    system = compare_payload["sections"]["system"]
+    text = build_compare_text(compare_payload)
+
+    assert system["diagnosis"] == {
+        "lhs": "NORMAL",
+        "rhs": "MODERATE GPU UTILIZATION",
+        "changed": True,
+    }
+    assert (
+        round(system["metrics"]["gpu_util_avg_percent"]["delta"], 1) == -49.1
+    )
+    assert "System diagnosis" in text
+    assert "MODERATE GPU UTILIZATION" in text
+    assert "GPU util avg" in text
+    assert "-49.1 pp" in text
+
+
 def test_compare_verdict_uses_priority_for_mixed_primary_signals() -> None:
     lhs = _payload_with_sections(
         step_time=_step_time_section(total_step_ms=700.0),
