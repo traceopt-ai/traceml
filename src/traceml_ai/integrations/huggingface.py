@@ -135,6 +135,25 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         if _traceml_disabled():
             return
 
+        # Fail-loud capability check (#88-class): warn, never raise,
+        # when the current init config leaves telemetry streams this
+        # integration owes dark. on_train_begin runs once per train()
+        # call, after user setup, so it reflects post-init() state and
+        # stays off the per-step hot path. Covers both the direct
+        # callback path and the TraceMLTrainer wrapper (which installs
+        # this callback).
+        try:
+            from traceml_ai.integrations._capability import (
+                warn_if_missing_streams,
+            )
+
+            warn_if_missing_streams(
+                "HuggingFace TraceMLTrainerCallback",
+                {"dataloader_fetch", "forward", "backward", "h2d"},
+            )
+        except Exception:
+            pass
+
         # Self-heal before training starts. If this callback instance is
         # reused and a previous run crashed mid-step, the leaked trace_step is
         # still suspended with its auto-timer flags armed. With
