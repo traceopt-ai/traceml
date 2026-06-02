@@ -108,8 +108,10 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
             logits = self(batch["input_ids"].long())
             loss = F.cross_entropy(logits, batch["labels"].long())
             acc = (logits.argmax(dim=-1) == batch["labels"]).float().mean()
-            self.log("train_loss", loss, prog_bar=True, sync_dist=True)
-            self.log("train_acc", acc, prog_bar=True, sync_dist=True)
+            # Keep metric logging local so straggler demos synchronize first in
+            # DDP backward instead of in Lightning's distributed metric reduce.
+            self.log("train_loss", loss, prog_bar=True, sync_dist=False)
+            self.log("train_acc", acc, prog_bar=True, sync_dist=False)
             return loss
 
         def configure_optimizers(self):
