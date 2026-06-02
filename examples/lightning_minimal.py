@@ -1,3 +1,6 @@
+import argparse
+import time
+
 import lightning as L
 import torch
 import torch.nn as nn
@@ -30,8 +33,10 @@ class SyntheticClassificationDataset(Dataset):
 
 
 class TinyLightningModel(L.LightningModule):
-    def __init__(self):
+    def __init__(self, *, delay_rank: int = -1, delay_ms: float = 0.0):
         super().__init__()
+        self.delay_rank = int(delay_rank)
+        self.delay_ms = float(delay_ms)
         self.net = nn.Sequential(
             nn.Linear(MODEL_INPUT_DIM, HIDDEN_DIM),
             nn.ReLU(),
@@ -44,6 +49,9 @@ class TinyLightningModel(L.LightningModule):
         return self.net(x)
 
     def training_step(self, batch, batch_idx):
+        if self.delay_ms > 0 and int(self.global_rank) == self.delay_rank:
+            time.sleep(self.delay_ms / 1000.0)
+
         x, y = batch
         logits = self(x)
         loss = self.loss_fn(logits, y)
@@ -58,6 +66,13 @@ class TinyLightningModel(L.LightningModule):
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--devices", type=int, default=1)
+    parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
+    parser.add_argument("--delay-rank", type=int, default=-1)
+    parser.add_argument("--delay-ms", type=float, default=0.0)
+    args = parser.parse_args()
+
     torch.manual_seed(SEED)
     traceml_lightning.init()
 
@@ -70,12 +85,18 @@ def main() -> None:
         pin_memory=torch.cuda.is_available(),
     )
 
-    model = TinyLightningModel()
+    model = TinyLightningModel(
+        delay_rank=args.delay_rank,
+        delay_ms=args.delay_ms,
+    )
+    accelerator = "gpu" if torch.cuda.is_available() else "cpu"
+    strategy = "ddp" if int(args.devices) > 1 else "auto"
 
     trainer = L.Trainer(
-        max_steps=MAX_STEPS,
-        accelerator="auto",
-        devices=1,
+        max_steps=int(args.max_steps),
+        accelerator=accelerator,
+        devices=int(args.devices),
+        strategy=strategy,
         enable_progress_bar=False,
         callbacks=[traceml_lightning.TraceMLCallback()],
         logger=False,
