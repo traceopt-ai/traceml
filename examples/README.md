@@ -76,6 +76,16 @@ Single-node DDP:
 traceml run examples/ddp_minimal.py --nproc-per-node=4
 ```
 
+Multi-node on Slurm:
+
+```bash
+sbatch examples/slurm/traceml_ddp.sbatch
+```
+
+See [`examples/slurm/`](slurm/README.md) and the
+[Slurm guide](../docs/user_guide/slurm.md) for the template and the
+network/aggregator model.
+
 Run without TraceML telemetry for a baseline:
 
 ```bash
@@ -156,6 +166,7 @@ That includes things like:
 
 - [Quickstart](../docs/user_guide/quickstart.md)
 - [Distributed Training](../docs/user_guide/distributed-training.md)
+- [Running on Slurm](../docs/user_guide/slurm.md)
 - [Compare Runs](../docs/user_guide/compare.md)
 - [How to Read TraceML Output](../docs/user_guide/reading-output.md)
 - [Use With Your Stack](../docs/user_guide/integrations.md)

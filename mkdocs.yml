@@ -75,6 +75,7 @@ nav:
   - User Guide:
       - Quickstart: user_guide/quickstart.md
       - Distributed Training: user_guide/distributed-training.md
+      - Slurm (multi-node): user_guide/slurm.md
       - Reading output: user_guide/reading-output.md
       - Integrations:
           - Overview: user_guide/integrations.md

@@ -156,12 +156,12 @@ changing the final saved artifacts.
 - Single GPU training
 - Single-node multi-GPU DDP / FSDP
 - Multi-node DDP summary reports
+- Multi-node runs on Slurm (sbatch template + guide)
 - Run-to-run comparison from `final_summary.json`
 - Custom PyTorch loops, Hugging Face, PyTorch Lightning, and Ray Train
 
 **On the roadmap:**
 
-- Slurm launch examples
 - Multi-node live CLI / browser dashboard
 - Explicit collective / NCCL timing
 
@@ -177,6 +177,7 @@ changing the final saved artifacts.
 
 - [Quickstart](docs/user_guide/quickstart.md)
 - [Distributed Training](docs/user_guide/distributed-training.md)
+- [Running on Slurm](docs/user_guide/slurm.md)
 - [Use With Your Stack](docs/user_guide/integrations.md)
 - [Compare Runs](docs/user_guide/compare.md)
 - [How to Read Output](docs/user_guide/reading-output.md)
