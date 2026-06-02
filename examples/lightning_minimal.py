@@ -1,4 +1,5 @@
 import argparse
+import os
 import time
 
 import lightning as L
@@ -16,6 +17,26 @@ NUM_CLASSES = 10
 NUM_SAMPLES = 512
 BATCH_SIZE = 64
 MAX_STEPS = 200
+
+
+def _env_int(name: str, default: int | None = None) -> int | None:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _infer_num_nodes() -> int:
+    traceml_nnodes = _env_int("TRACEML_NNODES")
+    if traceml_nnodes is not None:
+        return max(1, traceml_nnodes)
+
+    world_size = _env_int("WORLD_SIZE", 1) or 1
+    local_world_size = _env_int("LOCAL_WORLD_SIZE", 1) or 1
+    return max(1, world_size // max(1, local_world_size))
 
 
 class SyntheticClassificationDataset(Dataset):
@@ -87,13 +108,27 @@ class TinyLightningModel(L.LightningModule):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--devices", type=int, default=1)
+    parser.add_argument("--num-nodes", type=int, default=None)
     parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
     parser.add_argument("--delay-rank", type=int, default=-1)
     parser.add_argument("--delay-ms", type=float, default=0.0)
     args = parser.parse_args()
+
+    devices = max(1, int(args.devices))
+    num_nodes = max(
+        1,
+        (
+            int(args.num_nodes)
+            if args.num_nodes is not None
+            else _infer_num_nodes()
+        ),
+    )
+    world_size = devices * num_nodes
+
     print(
         "[TraceML Lightning Example] "
-        f"parsed args devices={args.devices} max_steps={args.max_steps} "
+        f"parsed args devices={devices} num_nodes={num_nodes} "
+        f"max_steps={args.max_steps} "
         f"delay_rank={args.delay_rank} delay_ms={args.delay_ms}",
         flush=True,
     )
@@ -115,18 +150,22 @@ def main() -> None:
         delay_ms=args.delay_ms,
     )
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
-    strategy = "ddp" if int(args.devices) > 1 else "auto"
+    strategy = "ddp" if world_size > 1 else "auto"
     print(
         "[TraceML Lightning Example] "
-        f"trainer accelerator={accelerator} devices={args.devices} "
-        f"strategy={strategy} cuda_available={torch.cuda.is_available()}",
+        f"trainer accelerator={accelerator} devices={devices} "
+        f"num_nodes={num_nodes} strategy={strategy} "
+        f"env_rank={os.environ.get('RANK', 'unset')} "
+        f"env_world_size={os.environ.get('WORLD_SIZE', 'unset')} "
+        f"cuda_available={torch.cuda.is_available()}",
         flush=True,
     )
 
     trainer = L.Trainer(
         max_steps=int(args.max_steps),
         accelerator=accelerator,
-        devices=int(args.devices),
+        devices=devices,
+        num_nodes=num_nodes,
         strategy=strategy,
         enable_progress_bar=False,
         callbacks=[traceml_lightning.TraceMLCallback()],
