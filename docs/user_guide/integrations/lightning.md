@@ -244,6 +244,10 @@ Run with:
 traceml run train_lightning.py
 ```
 
+The checked-in `examples/lightning_minimal.py` also accepts small demo flags:
+`--devices`, `--num-nodes`, `--max-steps`, `--delay-rank`, and `--delay-ms`.
+Use the delay flags only when you want to create a deliberate straggler.
+
 ---
 
 ## Gradient accumulation
