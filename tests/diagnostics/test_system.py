@@ -16,6 +16,7 @@ from traceml_ai.diagnostics.system.context import (
     build_system_summary_signals,
 )
 from traceml_ai.diagnostics.system.rules import (
+    GPUUtilizationRule,
     HighCPURule,
     HighGPUMemoryRule,
     HighGPUPowerRule,
@@ -28,7 +29,7 @@ from traceml_ai.diagnostics.system.rules import (
 
 def _per_gpu(
     *,
-    util: float = 70.0,
+    util: float | None = 80.0,
     mem_peak: float = 200.0,
     mem_total: float = 1000.0,
     temp_peak: float | None = None,
@@ -60,7 +61,7 @@ def _node_input(**overrides) -> SystemNodeDiagnosisInput:
         ram_total_bytes=1000.0,
         gpu_available=True,
         gpu_count=1,
-        gpu_util_avg_percent=70.0,
+        gpu_util_avg_percent=80.0,
         gpu_util_peak_percent=90.0,
         gpu_mem_avg_bytes=100.0,
         gpu_mem_peak_bytes=200.0,
@@ -103,16 +104,28 @@ def _signals(**overrides):
     return build_system_summary_signals(_node_input(**overrides))
 
 
+def test_low_gpu_utilization_rule_alias_keeps_legacy_import() -> None:
+    assert LowGPUUtilizationRule is GPUUtilizationRule
+
+
 @pytest.mark.parametrize(
     ("rule", "overrides", "expected_kind"),
     [
         (
-            LowGPUUtilizationRule(),
+            GPUUtilizationRule(),
             {
                 "gpu_util_avg_percent": 10.0,
                 "per_gpu": _per_gpu(util=10.0),
             },
             "LOW_GPU_UTILIZATION",
+        ),
+        (
+            GPUUtilizationRule(),
+            {
+                "gpu_util_avg_percent": 37.8,
+                "per_gpu": _per_gpu(util=37.8),
+            },
+            "MODERATE_GPU_UTILIZATION",
         ),
         (
             HighCPURule(),
@@ -163,7 +176,7 @@ def test_system_rules_trigger_one_condition(
 @pytest.mark.parametrize(
     ("rule", "overrides"),
     [
-        (LowGPUUtilizationRule(), {"gpu_util_avg_percent": 60.0}),
+        (GPUUtilizationRule(), {"gpu_util_avg_percent": 70.001}),
         (HighCPURule(), {"cpu_avg_percent": 50.0}),
         (HighHostMemoryRule(), {"ram_peak_bytes": 500.0}),
         (HighGPUMemoryRule(), {"per_gpu": _per_gpu(mem_peak=500.0)}),
@@ -204,6 +217,13 @@ def test_system_rules_do_not_trigger_normal_condition(rule, overrides) -> None:
             },
             "LOW_GPU_UTILIZATION",
         ),
+        (
+            {
+                "gpu_util_avg_percent": 37.8,
+                "per_gpu": _per_gpu(util=37.8),
+            },
+            "MODERATE_GPU_UTILIZATION",
+        ),
     ],
 )
 def test_system_primary_diagnosis_for_each_issue(
@@ -213,6 +233,33 @@ def test_system_primary_diagnosis_for_each_issue(
     result = _diagnose(**overrides)
 
     assert result.primary.kind == expected_primary
+
+
+@pytest.mark.parametrize(
+    ("gpu_util", "expected_kind", "expected_status"),
+    [
+        (29.999, "LOW_GPU_UTILIZATION", "LOW GPU UTIL"),
+        (30.0, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTIL"),
+        (37.8, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTIL"),
+        (70.0, "MODERATE_GPU_UTILIZATION", "MODERATE GPU UTIL"),
+        (70.001, "NORMAL", "NORMAL"),
+        (None, "NORMAL", "NORMAL"),
+    ],
+)
+def test_system_gpu_utilization_boundaries(
+    gpu_util,
+    expected_kind,
+    expected_status,
+) -> None:
+    result = _diagnose(
+        gpu_util_avg_percent=gpu_util,
+        gpu_util_peak_percent=gpu_util,
+        per_gpu=_per_gpu(util=gpu_util),
+    )
+
+    assert result.primary.kind == expected_kind
+    assert result.primary.status == expected_status
+    assert result.issues[0].kind == expected_kind
 
 
 def test_system_primary_priority_when_everything_triggers() -> None:
@@ -238,6 +285,20 @@ def test_system_primary_priority_when_everything_triggers() -> None:
         "HIGH_HOST_MEMORY",
         "HIGH_CPU",
         "LOW_GPU_UTILIZATION",
+    ]
+
+
+def test_system_pressure_issues_rank_before_utilization_symptoms() -> None:
+    result = _diagnose(
+        cpu_avg_percent=95.0,
+        gpu_util_avg_percent=37.8,
+        per_gpu=_per_gpu(util=37.8),
+    )
+
+    assert result.primary.kind == "HIGH_CPU"
+    assert [issue.kind for issue in result.issues] == [
+        "HIGH_CPU",
+        "MODERATE_GPU_UTILIZATION",
     ]
 
 

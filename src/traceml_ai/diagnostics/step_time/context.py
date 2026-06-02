@@ -64,6 +64,8 @@ class StepTimeAnalysisContext:
     wait_total: float
     compute_total: float
     typical_step_total: float
+    dataloader_excess_ms: float
+    compute_excess_ms: float
     compute_phase_excess_total: float
 
     dataloader_share: float
@@ -513,6 +515,7 @@ def build_step_time_context(
         optimizer=optimizer_metric,
         wait=wait_metric,
     )
+    dataloader_excess_value = metric_excess(dataloader_metric)
     compute_excess_value = compute_phase_excess_total(
         forward=forward_metric,
         backward=backward_metric,
@@ -608,6 +611,8 @@ def build_step_time_context(
         wait_total=wait_total,
         compute_total=compute_total_value,
         typical_step_total=typical_step_value,
+        dataloader_excess_ms=dataloader_excess_value,
+        compute_excess_ms=compute_excess_value,
         compute_phase_excess_total=compute_excess_value,
         dataloader_share=share(dataloader_total, step_total),
         wait_share=share(wait_total, step_total),

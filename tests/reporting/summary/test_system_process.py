@@ -37,15 +37,7 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
             ram_used_bytes REAL,
             ram_total_bytes REAL,
             gpu_available INTEGER,
-            gpu_count INTEGER,
-            gpu_util_avg REAL,
-            gpu_util_peak REAL,
-            gpu_mem_used_avg_bytes REAL,
-            gpu_mem_used_peak_bytes REAL,
-            gpu_temp_avg_c REAL,
-            gpu_temp_peak_c REAL,
-            gpu_power_avg_w REAL,
-            gpu_power_peak_w REAL
+            gpu_count INTEGER
         )
         """
     )
@@ -74,8 +66,7 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
         """
         INSERT INTO system_samples VALUES (
             1, 0, 0, 1, 1, 0, 'worker-0', 1, 10.0,
-            40.0, 8.0, 16.0, 1, 1,
-            55.0, 70.0, 4.0, 5.0, 60.0, 68.0, 100.0, 120.0
+            40.0, 8.0, 16.0, 1, 2
         )
         """
     )
@@ -84,6 +75,14 @@ def _create_system_tables(conn: sqlite3.Connection) -> None:
         INSERT INTO system_gpu_samples VALUES (
             1, 0, 0, 1, 1, 0, 'worker-0', 10.0, 1, 0,
             70.0, 5.0, 10.0, 68.0, 120.0
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO system_gpu_samples VALUES (
+            10, 0, 0, 1, 1, 0, 'worker-0', 10.0, 1, 1,
+            40.0, 5.0, 10.0, 52.0, 80.0
         )
         """
     )
@@ -152,7 +151,13 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     assert result.section == "system"
     assert result.payload["metadata"]["samples"] == 1
     assert "TraceML System Summary" in result.text
-    assert "- Diagnosis: NORMAL" in result.text
+    assert "- Diagnosis: MODERATE GPU UTIL" in result.text
+    assert result.payload["diagnosis"]["kind"] == "MODERATE_GPU_UTILIZATION"
+    assert result.payload["diagnosis"] == result.payload["issues"][0]
+    assert result.payload["diagnosis"]["summary"].startswith(
+        "GPU utilization was moderate, averaging 55.0%"
+    )
+    assert result.payload["diagnosis"]["evidence"]["lowest_util_gpu_idx"] == 1
     assert (
         "- Stats: CPU 40% | RAM 50% | GPU util 55% | "
         "GPU memory 50% | GPU temp 68.0C"
@@ -187,8 +192,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
             """
             INSERT INTO system_samples VALUES (
                 2, 1, 0, 2, 1, 1, 'worker-1', 2, 11.0,
-                41.0, 8.0, 16.0, 1, 1,
-                45.0, 80.0, 4.0, 5.0, 90.0, 95.0, 100.0, 120.0
+                41.0, 8.0, 16.0, 1, 1
             )
             """
         )
@@ -231,8 +235,7 @@ def test_system_loader_uses_latest_bounded_window(tmp_path):
             """
             INSERT INTO system_samples VALUES (
                 2, 0, 0, 1, 1, 0, 'worker-0', 2, 20.0,
-                90.0, 12.0, 16.0, 1, 1,
-                80.0, 85.0, 7.0, 8.0, 62.0, 70.0, 110.0, 130.0
+                90.0, 12.0, 16.0, 1, 1
             )
             """
         )
@@ -271,8 +274,7 @@ def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
                     """
                     INSERT INTO system_samples VALUES (
                         ?, ?, 0, 2, 1, ?, ?, ?, ?,
-                        ?, 8.0, 16.0, 1, 1,
-                        ?, ?, 4.0, 5.0, 60.0, 68.0, 100.0, 120.0
+                        ?, 8.0, 16.0, 1, 1
                     )
                     """,
                     (
@@ -283,8 +285,6 @@ def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
                         seq,
                         10.0 + seq,
                         10.0 * row_id,
-                        50.0 + row_id,
-                        60.0 + row_id,
                     ),
                 )
                 conn.execute(

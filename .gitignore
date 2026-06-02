@@ -59,6 +59,15 @@ checkpoints/
 *.zip
 
 
+# Local private keys / certificates
+
+*.pem
+*.rsa
+*.key
+*.p12
+*.pfx
+
+
 # IDE / Editor
 
 .vscode/

@@ -274,10 +274,37 @@ def test_compute_straggler_uses_typical_step_and_phase_blame() -> None:
     assert issue.ranks == (2,)
     assert ctx.typical_step_total == pytest.approx(167.3)
     assert ctx.compute_phase_excess_total == pytest.approx(24.0)
+    assert ctx.compute_excess_ms == pytest.approx(24.0)
+    assert ctx.dataloader_excess_ms == pytest.approx(0.0)
     assert issue.score == pytest.approx(24.0 / 167.3)
 
 
-def test_step_time_primary_selection_combines_stragglers() -> None:
+def test_step_time_primary_selection_input_explains_mixed_straggler() -> None:
+    result = build_step_diagnosis_result(
+        [
+            _time_metric("step_time", median=240.0, worst=330.0),
+            _time_metric(
+                "dataloader_fetch", median=10.0, worst=110.0, skew=0.2
+            ),
+            _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
+            _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
+            _time_metric("optimizer_step", median=20.0, worst=20.0),
+            _time_metric("wait_proxy", median=40.0, worst=40.0),
+        ]
+    )
+
+    assert result.primary.kind == "INPUT_STRAGGLER"
+    assert result.primary.worst_rank == 1
+    assert result.primary.note is not None
+    assert "downstream synchronization" in result.primary.note
+    assert {issue.kind for issue in result.issues} >= {
+        "INPUT_STRAGGLER",
+        "COMPUTE_STRAGGLER",
+        "STRAGGLER",
+    }
+
+
+def test_step_time_primary_selection_keeps_unexplained_mixed() -> None:
     result = build_step_diagnosis_result(
         [
             _time_metric("step_time", median=240.0, worst=330.0),
@@ -307,6 +334,10 @@ def test_step_time_live_and_summary_policies_are_explicit() -> None:
     assert (
         SUMMARY_STEP_TIME_POLICY.thresholds.wait_share_warn
         > LIVE_STEP_TIME_POLICY.thresholds.wait_share_warn
+    )
+    assert (
+        SUMMARY_STEP_TIME_POLICY.thresholds.input_straggler_compute_excess_tolerance
+        == pytest.approx(1.5)
     )
     assert (
         SUMMARY_STEP_TIME_POLICY.min_steps_for_diag

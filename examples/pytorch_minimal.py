@@ -82,9 +82,6 @@ def main():
 
     print("Done.")
 
-    summary = traceml.final_summary(print_text=True)
-    print(summary is not None)
-
 
 if __name__ == "__main__":
     main()

@@ -318,6 +318,10 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
+In distributed runs, this can still be the primary diagnosis when backward or
+compute skew is also visible, because a slow input rank can push synchronization
+wait into peer ranks.
+
 Common causes:
 
 - uneven data loading
@@ -333,6 +337,10 @@ See:
 ## What does `COMPUTE STRAGGLER` mean?
 
 It means one rank is slower in compute than the typical rank.
+
+If input and compute skew appear together, TraceML first checks whether the
+input excess is large enough to explain the compute skew. If yes, the primary
+diagnosis is `INPUT STRAGGLER`; otherwise the mixed case remains `STRAGGLER`.
 
 Common causes:
 

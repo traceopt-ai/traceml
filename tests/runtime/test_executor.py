@@ -30,7 +30,29 @@ sys.modules.setdefault(
     ),
 )
 
-from traceml_ai.runtime.executor import run_user_script
+from traceml_ai.runtime.executor import extract_script_args, run_user_script
+
+
+def test_extract_script_args_uses_separator_when_present(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["executor.py", "--", "--epochs", "2"],
+    )
+
+    assert extract_script_args() == ["--epochs", "2"]
+
+
+def test_extract_script_args_keeps_args_when_torchrun_strips_separator(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["executor.py", "--epochs", "2"],
+    )
+
+    assert extract_script_args() == ["--epochs", "2"]
 
 
 def test_run_user_script_adds_script_dir_to_sys_path(tmp_path, monkeypatch):

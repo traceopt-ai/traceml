@@ -103,7 +103,8 @@ Ray Data examples wrap `iter_torch_batches(...)` with
 `traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch
 `DataLoader` objects.
 
-Ray + Lightning can use `--input-delay-ms` to make input timing visible and
+Ray + Lightning can use `--input-delay-ms` / `--input-delay-rank` for input
+stragglers, `--delay-ms` / `--delay-rank` for compute stragglers, and
 `--transfer-dim` to make Lightning H2D timing visible.
 
 For explicit manual instrumentation, see:

@@ -252,7 +252,7 @@ def test_step_time_compute_straggler_card_shows_rank_evidence() -> None:
     _assert_compact_card(payload["card"])
 
 
-def test_step_time_combined_straggler_priority_keeps_all_rank_issues() -> None:
+def test_step_time_mixed_straggler_can_be_attributed_to_input() -> None:
     payload = _summary(
         {
             0: _rank(
@@ -269,14 +269,41 @@ def test_step_time_combined_straggler_priority_keeps_all_rank_issues() -> None:
     )
 
     assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "STRAGGLER"
+    assert payload["diagnosis"]["status"] == "INPUT STRAGGLER"
+    assert (
+        "downstream synchronization"
+        in payload["diagnosis"]["evidence"]["downstream_synchronization_note"]
+    )
     assert {issue["kind"] for issue in payload["issues"]} >= {
         "STRAGGLER",
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
     }
     assert "issues" not in payload["groups"]["rows"]["1"]
+    assert (
+        "- Why: r1 input was slower than median global rank" in payload["card"]
+    )
+    _assert_compact_card(payload["card"])
+
+
+def test_step_time_unexplained_mixed_straggler_stays_straggler() -> None:
+    payload = _summary(
+        {
+            0: _rank(
+                dataloader=10.0,
+                forward=40.0,
+                backward=130.0,
+            ),
+            1: _rank(
+                dataloader=90.0,
+                forward=160.0,
+                backward=260.0,
+            ),
+        }
+    )
+
+    assert payload["diagnosis"] == payload["issues"][0]
+    assert payload["diagnosis"]["status"] == "STRAGGLER"
     assert {issue["kind"] for issue in payload["issues"]} >= {
         "STRAGGLER",
         "INPUT_STRAGGLER",
@@ -296,10 +323,10 @@ def test_step_time_priority_prefers_straggler_over_wait_heavy() -> None:
                 step_cpu=350.0,
             ),
             1: _rank(
-                dataloader=100.0,
-                forward=100.0,
-                backward=170.0,
-                step_cpu=350.0,
+                dataloader=110.0,
+                forward=180.0,
+                backward=270.0,
+                step_cpu=500.0,
             ),
         }
     )

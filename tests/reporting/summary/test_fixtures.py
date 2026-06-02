@@ -294,17 +294,9 @@ def _insert_system_sample(
             ram_used_bytes,
             ram_total_bytes,
             gpu_available,
-            gpu_count,
-            gpu_util_avg,
-            gpu_util_peak,
-            gpu_mem_used_avg_bytes,
-            gpu_mem_used_peak_bytes,
-            gpu_temp_avg_c,
-            gpu_temp_peak_c,
-            gpu_power_avg_w,
-            gpu_power_peak_w
+            gpu_count
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -321,14 +313,6 @@ def _insert_system_sample(
             16_000.0,
             int(gpu_available),
             gpu_count,
-            gpu_util,
-            gpu_util,
-            2_000.0 if gpu_available else None,
-            2_500.0 if gpu_available else None,
-            None,
-            None,
-            None,
-            None,
         ),
     )
     if gpu_available and gpu_count > 0:
@@ -472,13 +456,12 @@ def _insert_step_time_sample(
             local_world_size,
             node_rank,
             hostname,
-            runtime_pid,
             sample_ts_s,
             seq,
             step,
             events_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -489,7 +472,6 @@ def _insert_step_time_sample(
             1,
             rank,
             f"worker-{rank}",
-            10_000 + rank,
             float(step),
             row_id,
             step,
@@ -529,13 +511,12 @@ def _insert_step_memory_sample(
             hostname,
             sample_ts_s,
             seq,
-            model_id,
             device,
             step,
             peak_alloc_bytes,
             peak_reserved_bytes
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -548,7 +529,6 @@ def _insert_step_memory_sample(
             f"worker-{rank}",
             float(step),
             row_id,
-            1,
             device,
             step,
             alloc,

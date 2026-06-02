@@ -99,9 +99,14 @@ It typically focuses on:
 - step-time diagnosis changes
 - average step time changes
 - wait-time changes
-- step split shifts across dataloader, forward, backward, and optimizer
+- high-level step split shifts across input, H2D, compute, and wait time
 - memory changes when they are meaningful
 - process or system changes when they add useful context
+
+The text report keeps step-time output compact by showing the aggregate compute
+bucket instead of printing forward, backward, and optimizer rows by default.
+The structured compare JSON still includes those compute sub-phases for deeper
+inspection and downstream tooling.
 
 The text report includes a small legend near the top:
 

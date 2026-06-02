@@ -236,13 +236,14 @@ def extract_script_args() -> list[str]:
         traceml run train.py --args --epochs 10 --lr 1e-3
 
     Everything after '--' is forwarded to the target script.
-    If '--' is absent, no extra script arguments are forwarded.
+    If torchrun strips the separator before this executor sees argv, all
+    remaining executor argv entries are user script arguments.
     """
     try:
         separator_index = sys.argv.index("--")
         return sys.argv[separator_index + 1 :]
     except ValueError:
-        return []
+        return sys.argv[1:]
 
 
 def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:

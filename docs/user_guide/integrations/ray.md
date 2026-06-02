@@ -106,8 +106,9 @@ TraceMLRayConfig(
 ```
 
 The ``examples/ray/lightning_text_classifier.py`` demo also includes
-``--input-delay-ms=10`` to make Ray input timing visible and
-``--transfer-dim=131072`` to make Lightning H2D timing visible.
+``--input-delay-ms`` / ``--input-delay-rank`` for input-straggler demos,
+``--delay-ms`` / ``--delay-rank`` for compute-straggler demos, and
+``--transfer-dim`` to make Lightning H2D timing visible.
 ``--transfer-dim`` creates a reusable per-batch CPU tensor; it does not add a
 full dataset-sized tensor.
 

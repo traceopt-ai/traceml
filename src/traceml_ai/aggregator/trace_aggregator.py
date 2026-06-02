@@ -22,6 +22,7 @@ from traceml_ai.aggregator.summary_service import FinalSummaryService
 from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.reporting.final import generate_summary
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
+from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 
 DASHBOARD_EXTRA_INSTALL_HINT = (
@@ -272,17 +273,11 @@ class TraceMLAggregator:
         Returns ``None`` when the payload is malformed or does not follow the
         expected envelope shape.
         """
-        if not isinstance(msg, dict):
+        envelope = normalize_telemetry_envelope(msg)
+        if envelope is None:
             return None
 
-        sampler = msg.get("sampler")
-        if sampler is None:
-            return None
-
-        try:
-            return str(sampler)
-        except Exception:
-            return None
+        return envelope.meta.sampler
 
     def _filter_remote_store_message(self, msg: Any) -> Any:
         """

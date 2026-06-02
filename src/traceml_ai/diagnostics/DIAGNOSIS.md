@@ -6,14 +6,15 @@ also copies that same item to `diagnosis`.
 
 Use `kind` as the stable internal key for logic and comparisons. Use `status`
 as the user-facing display label. In many cases they are similar, but they are
-not required to match.
+not required to match; System statuses intentionally use compact labels such as
+`HIGH GPU MEM` and `MODERATE GPU UTIL`.
 
 Diagnoses are conservative. They identify likely bottleneck categories, not a
 complete root-cause proof.
 
 ## System
 
-Host/node pressure.
+Host/node pressure and GPU-utilization symptoms.
 
 - `NO_DATA`: no system telemetry.
 - `NORMAL`: no CPU, RAM, or available GPU pressure.
@@ -23,8 +24,16 @@ Host/node pressure.
 - `HIGH_GPU_POWER`: elevated GPU power use.
 - `HIGH_HOST_MEMORY`: elevated host RAM use.
 - `HIGH_CPU`: elevated host CPU use.
-- `LOW_GPU_UTILIZATION`: GPU utilization is low while host-side signals suggest
-  the GPU may be underfed.
+- `LOW_GPU_UTILIZATION`: average GPU utilization is below 30%. The GPU was
+  mostly idle.
+- `MODERATE_GPU_UTILIZATION`: average GPU utilization is between 30% and 70%,
+  inclusive. The GPU was only partly utilized.
+
+`LOW_GPU_UTILIZATION` and `MODERATE_GPU_UTILIZATION` are observed System
+symptoms, not root-cause proof. Use Step Time to identify whether the likely
+cause is input loading, compute balance, waits, synchronization, or other
+training behavior. Average GPU utilization above 70% does not emit a
+GPU-utilization issue and can remain `NORMAL` when no pressure rules fire.
 
 ## Process
 
@@ -65,6 +74,12 @@ traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
 wait_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
+
+When input and compute straggler signals appear together, step-time diagnosis
+attributes the primary cause to `INPUT_STRAGGLER` if dataloader excess is within
+the configured tolerance of compute excess. Otherwise the primary diagnosis
+stays `STRAGGLER`, with both input and compute findings preserved as secondary
+issues.
 
 It can include validation, checkpointing, logging, framework orchestration, CPU
 stalls, unobserved transfer stalls, or other work inside the timed step but

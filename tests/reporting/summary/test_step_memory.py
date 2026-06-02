@@ -33,7 +33,6 @@ def _create_step_memory_db(path: str) -> None:
                 hostname             TEXT,
                 sample_ts_s          REAL,
                 seq                  INTEGER,
-                model_id             INTEGER,
                 device               TEXT,
                 step                 INTEGER,
                 peak_alloc_bytes     REAL,
@@ -53,7 +52,6 @@ def _create_step_memory_db(path: str) -> None:
                 "worker-0",
                 1.0,
                 1,
-                10,
                 "cuda:0",
                 1,
                 100.0,
@@ -70,7 +68,6 @@ def _create_step_memory_db(path: str) -> None:
                 "worker-0",
                 2.0,
                 2,
-                10,
                 "cuda:0",
                 2,
                 110.0,
@@ -87,7 +84,6 @@ def _create_step_memory_db(path: str) -> None:
                 "worker-0",
                 3.0,
                 3,
-                10,
                 "cuda:0",
                 3,
                 120.0,
@@ -107,13 +103,12 @@ def _create_step_memory_db(path: str) -> None:
                 hostname,
                 sample_ts_s,
                 seq,
-                model_id,
                 device,
                 step,
                 peak_alloc_bytes,
                 peak_reserved_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )
@@ -224,7 +219,6 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 "worker-0",
                 2.0,
                 1,
-                10,
                 "cuda:0",
                 2,
                 210.0,
@@ -241,7 +235,6 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 "worker-0",
                 3.0,
                 2,
-                10,
                 "cuda:0",
                 3,
                 220.0,
@@ -258,7 +251,6 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 "worker-0",
                 4.0,
                 3,
-                10,
                 "cuda:0",
                 4,
                 230.0,
@@ -278,13 +270,12 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 hostname,
                 sample_ts_s,
                 seq,
-                model_id,
                 device,
                 step,
                 peak_alloc_bytes,
                 peak_reserved_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )

@@ -13,7 +13,7 @@ table while preserving the original sampler payload in `raw_messages`.
 Design
 ------
 - Keeps sampler-specific SQL logic out of the core SQLite writer
-- Accepts already-decoded payload dicts from the main writer
+- Accepts canonical telemetry envelopes from the main writer
 - Produces one query-friendly table:
     1) process_samples
        One row per sampled process snapshot, keyed by global rank and sample
@@ -34,37 +34,11 @@ This projection stores raw values wherever possible.
 
 Expected payload shape
 ----------------------
-Envelope:
+Canonical telemetry envelope:
 {
-    "rank": int,          # legacy alias for global_rank
-    "global_rank": int,
-    "local_rank": int,
-    "world_size": int,
-    "local_world_size": int,
-    "node_rank": int,
-    "hostname": str,
-    "sampler": "ProcessSampler",
-    "timestamp": float,
-    "tables": {
-        "<table_name>": [
-            {
-                "seq": int,
-                "timestamp": float,
-                "cpu_percent": float,
-                "cpu_logical_core_count": int,
-                "ram_used": float,   # bytes
-                "ram_total": float,  # bytes
-                "gpu_available": bool,
-                "gpu_count": int,
-                "gpu": {
-                    "device_index": int,
-                    "mem_used": float,      # bytes
-                    "mem_reserved": float,  # bytes
-                    "mem_total": float      # bytes
-                } | None
-            },
-            ...
-        ]
+    "meta": {"sampler": "ProcessSampler", ...},
+    "body": {
+        "tables": {"<table_name>": [ProcessSample.to_wire(), ...]}
     }
 }
 """
@@ -74,6 +48,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
 
 SAMPLER_NAME = "ProcessSampler"
 RETENTION_TABLES = ("process_samples",)
@@ -110,7 +86,7 @@ class ProcessPayloadIdentity:
     hostname: Optional[str]
 
 
-def _payload_identity(payload_dict: Dict[str, Any]) -> ProcessPayloadIdentity:
+def _payload_identity(meta: TelemetryMeta) -> ProcessPayloadIdentity:
     """
     Return storage identity for one ProcessSampler payload.
 
@@ -118,18 +94,18 @@ def _payload_identity(payload_dict: Dict[str, Any]) -> ProcessPayloadIdentity:
     written as the same value to keep existing process summaries working while
     the reporting layer is migrated separately.
     """
-    global_rank = _optional_int(payload_dict.get("global_rank"))
-    legacy_rank = _optional_int(payload_dict.get("rank"))
+    global_rank = _optional_int(meta.global_rank)
+    legacy_rank = _optional_int(meta.rank)
     rank = global_rank if global_rank is not None else legacy_rank
 
     return ProcessPayloadIdentity(
         rank=rank,
         global_rank=global_rank,
-        local_rank=_optional_int(payload_dict.get("local_rank")),
-        world_size=_optional_int(payload_dict.get("world_size")),
-        local_world_size=_optional_int(payload_dict.get("local_world_size")),
-        node_rank=_optional_int(payload_dict.get("node_rank")),
-        hostname=_optional_str(payload_dict.get("hostname")),
+        local_rank=_optional_int(meta.local_rank),
+        world_size=_optional_int(meta.world_size),
+        local_world_size=_optional_int(meta.local_world_size),
+        node_rank=_optional_int(meta.node_rank),
+        hostname=_optional_str(meta.hostname),
     )
 
 
@@ -242,7 +218,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def build_rows(
-    payload_dict: Dict[str, Any],
+    envelope: TelemetryEnvelope,
     recv_ts_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
@@ -250,8 +226,8 @@ def build_rows(
 
     Parameters
     ----------
-    payload_dict:
-        Decoded sampler payload dict from the main SQLite writer.
+    envelope:
+        Canonical telemetry envelope from the main SQLite writer.
     recv_ts_ns:
         Receive timestamp assigned by the main writer for this payload.
 
@@ -272,13 +248,13 @@ def build_rows(
         "process_samples": [],
     }
 
-    sampler = payload_dict.get("sampler")
-    if not accepts_sampler(str(sampler) if sampler is not None else None):
+    sampler = envelope.meta.sampler
+    if not accepts_sampler(sampler):
         return out
 
-    identity = _payload_identity(payload_dict)
+    identity = _payload_identity(envelope.meta)
 
-    tables = payload_dict.get("tables")
+    tables = envelope.tables
     if not isinstance(tables, dict):
         return out
 
