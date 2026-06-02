@@ -75,6 +75,12 @@ wait_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
 
+When input and compute straggler signals appear together, step-time diagnosis
+attributes the primary cause to `INPUT_STRAGGLER` if dataloader excess is within
+the configured tolerance of compute excess. Otherwise the primary diagnosis
+stays `STRAGGLER`, with both input and compute findings preserved as secondary
+issues.
+
 It can include validation, checkpointing, logging, framework orchestration, CPU
 stalls, unobserved transfer stalls, or other work inside the timed step but
 outside the traced H2D and compute phases. It is not direct NCCL, all-reduce,

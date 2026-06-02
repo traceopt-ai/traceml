@@ -185,6 +185,9 @@ TraceML uses this idea:
 In simpler words:
 
 - one rank is slower in the input path, enough to matter to the overall run
+- this can remain the primary diagnosis even when compute or backward skew is
+  also visible, if the input excess is large enough to plausibly explain
+  downstream synchronization effects
 
 Common causes:
 
@@ -258,6 +261,11 @@ In the current policy, this is used when:
 - compute straggler score is high
 
 This is a mixed unevenness case.
+
+TraceML keeps this diagnosis when the mixed signal is not clearly explained by
+input skew alone. If input excess is within the configured tolerance of compute
+excess, TraceML reports `INPUT STRAGGLER` instead and keeps the compute signal
+as secondary evidence.
 
 Common causes:
 

@@ -156,6 +156,13 @@ def _pct(value: float) -> str:
     return f"{non_negative_finite(value) * 100.0:.1f}%"
 
 
+def _ms(value: float) -> str:
+    """
+    Format a millisecond value for compact diagnosis notes.
+    """
+    return f"{non_negative_finite(value):.1f}ms"
+
+
 def _rank_str(rank: Optional[int]) -> str:
     """
     Format a rank identifier for UI text.
@@ -188,6 +195,53 @@ def _issue_by_kind(
         if issue.kind == kind:
             return issue
     return None
+
+
+def _input_explains_compute_skew(
+    *,
+    dataloader_excess_ms: float,
+    compute_excess_ms: float,
+    thresholds: DiagnosisThresholds,
+) -> bool:
+    """
+    Return whether input excess can plausibly explain compute skew.
+
+    In distributed training, a slow input rank can surface as extra
+    backward/compute time on peer ranks because synchronization shifts where
+    waiting is observed. Treat input as primary when its absolute excess is
+    close enough to the compute excess, using a policy-controlled tolerance.
+    """
+    tolerance = max(
+        1.0,
+        non_negative_finite(
+            thresholds.input_straggler_compute_excess_tolerance
+        ),
+    )
+    compute_excess = non_negative_finite(compute_excess_ms)
+    if compute_excess <= 0.0:
+        return non_negative_finite(dataloader_excess_ms) > 0.0
+    return non_negative_finite(dataloader_excess_ms) >= (
+        compute_excess / tolerance
+    )
+
+
+def _input_explained_compute_note(
+    *,
+    dataloader_excess_ms: float,
+    compute_excess_ms: float,
+    thresholds: DiagnosisThresholds,
+) -> str:
+    tolerance = max(
+        1.0,
+        non_negative_finite(
+            thresholds.input_straggler_compute_excess_tolerance
+        ),
+    )
+    return (
+        f"Input excess {_ms(dataloader_excess_ms)} can explain compute excess "
+        f"{_ms(compute_excess_ms)} within {tolerance:.1f}x tolerance; "
+        "compute skew may be downstream synchronization."
+    )
 
 
 def _top_rank_entries(
@@ -383,8 +437,21 @@ def build_step_diagnosis_result(
 
     input_issue = _issue_by_kind(issue_list, "INPUT_STRAGGLER")
     compute_issue = _issue_by_kind(issue_list, "COMPUTE_STRAGGLER")
+    input_explains_compute = False
+    input_explained_note: Optional[str] = None
 
     if input_issue is not None and compute_issue is not None:
+        input_explains_compute = _input_explains_compute_skew(
+            dataloader_excess_ms=context.dataloader_excess_ms,
+            compute_excess_ms=context.compute_excess_ms,
+            thresholds=thresholds,
+        )
+        if input_explains_compute:
+            input_explained_note = _input_explained_compute_note(
+                dataloader_excess_ms=context.dataloader_excess_ms,
+                compute_excess_ms=context.compute_excess_ms,
+                thresholds=thresholds,
+            )
         combined_rank = (
             context.dataloader_worst_rank
             if context.input_straggler_score >= context.compute_straggler_score
@@ -429,40 +496,81 @@ def build_step_diagnosis_result(
                 evidence={
                     "input_score": context.input_straggler_score,
                     "compute_score": context.compute_straggler_score,
+                    "dataloader_excess_ms": context.dataloader_excess_ms,
+                    "compute_excess_ms": context.compute_excess_ms,
+                    "input_straggler_compute_excess_tolerance": (
+                        thresholds.input_straggler_compute_excess_tolerance
+                    ),
                 },
             )
         )
+        if input_explains_compute:
+            issue_list = [
+                (
+                    replace(
+                        issue,
+                        evidence={
+                            **issue.evidence,
+                            "dataloader_excess_ms": context.dataloader_excess_ms,
+                            "compute_excess_ms": context.compute_excess_ms,
+                            "input_straggler_compute_excess_tolerance": (
+                                thresholds.input_straggler_compute_excess_tolerance
+                            ),
+                            "downstream_synchronization_note": (
+                                input_explained_note
+                            ),
+                        },
+                    )
+                    if issue is input_issue
+                    else issue
+                )
+                for issue in issue_list
+            ]
+            input_issue = _issue_by_kind(issue_list, "INPUT_STRAGGLER")
 
     issues = sort_issues(issue_list)
     primary_issue = _select_primary_issue(issues)
 
     if input_issue is not None and compute_issue is not None:
-        dominant_rank = (
-            context.dataloader_worst_rank
-            if context.input_straggler_score >= context.compute_straggler_score
-            else context.compute_worst_rank
-        )
-        primary = _mk_diag(
-            kind="STRAGGLER",
-            severity=_severity(
-                max(
-                    context.input_straggler_score,
-                    context.compute_straggler_score,
-                ),
-                max(
-                    thresholds.input_straggler_score_crit,
-                    thresholds.compute_straggler_score_crit,
-                ),
+        mixed_severity = _severity(
+            max(
+                context.input_straggler_score,
+                context.compute_straggler_score,
             ),
-            reason="Both input and compute are uneven across ranks.",
-            action="Inspect the slowest rank and both dominant phases.",
-            steps_used=context.steps_used,
-            worst_rank=dominant_rank,
-            note=(
-                f"Input score {_pct(context.input_straggler_score)}, "
-                f"compute score {_pct(context.compute_straggler_score)}."
+            max(
+                thresholds.input_straggler_score_crit,
+                thresholds.compute_straggler_score_crit,
             ),
         )
+        if input_explains_compute:
+            primary = _mk_diag(
+                kind="INPUT_STRAGGLER",
+                severity=mixed_severity,
+                reason=input_issue.summary,
+                action=input_issue.action,
+                steps_used=context.steps_used,
+                worst_rank=context.dataloader_worst_rank,
+                note=input_explained_note,
+            )
+        else:
+            dominant_rank = (
+                context.dataloader_worst_rank
+                if context.input_straggler_score
+                >= context.compute_straggler_score
+                else context.compute_worst_rank
+            )
+            primary = _mk_diag(
+                kind="STRAGGLER",
+                severity=mixed_severity,
+                reason="Both input and compute are uneven across ranks.",
+                action="Inspect the slowest rank and both dominant phases.",
+                steps_used=context.steps_used,
+                worst_rank=dominant_rank,
+                note=(
+                    f"Input score {_pct(context.input_straggler_score)}, "
+                    f"compute score {_pct(context.compute_straggler_score)}."
+                ),
+            )
     elif input_issue is not None:
         primary = _mk_diag(
             kind="INPUT_STRAGGLER",
