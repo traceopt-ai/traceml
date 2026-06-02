@@ -1,3 +1,4 @@
+import functools
 import os
 import sys
 
@@ -23,16 +24,18 @@ except ImportError:
     IS_LIGHTNING_AVAILABLE = False
 
 TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
+_MISSING = object()
 
 
 def init():
     """
     Initialize TraceML for PyTorch Lightning runs.
 
-    Lightning owns forward/backward/optimizer timing through TraceMLCallback.
-    The integration init enables DataLoader fetch timing plus the H2D Tensor.to
-    patch. The callback turns H2D timing on only around Lightning's batch
-    transfer hooks, so forward/backward timing stays callback-owned.
+    Lightning owns the training loop, so TraceMLCallback owns step boundaries,
+    flushing, and framework hook integration. The integration init enables
+    DataLoader fetch timing plus the H2D Tensor.to patch. The callback turns H2D
+    timing on only around Lightning's batch transfer hooks and wraps
+    LightningModule.forward directly for model-forward timing.
     """
     import traceml_ai as traceml
 
@@ -97,11 +100,14 @@ class TraceMLCallback(Callback):
             )
         super().__init__()
         self._traceml_step_ctx = None
-        self._forward_ctx = None
         self._backward_ctx = None
         self._optimizer_ctx = None
         self._batch_to_device_strategy = None
         self._original_batch_to_device = None
+        self._forward_module = None
+        self._original_forward = None
+        self._original_forward_attr = _MISSING
+        self._wrapped_forward = None
 
         self._mem_tracker = None
         self._opt_step_occurred = False
@@ -117,6 +123,44 @@ class TraceMLCallback(Callback):
         setattr(self, ctx_attr, None)
 
     def setup(self, trainer, pl_module, stage=None):
+        self._wrap_forward(trainer, pl_module)
+        self._wrap_batch_to_device(trainer, pl_module)
+
+    def _wrap_forward(self, trainer, pl_module) -> None:
+        if self._original_forward is not None:
+            return
+
+        original_forward = getattr(pl_module, "forward", None)
+        if not callable(original_forward):
+            return
+        original_forward_attr = getattr(pl_module, "__dict__", {}).get(
+            "forward", _MISSING
+        )
+
+        @functools.wraps(original_forward)
+        def wrapped_forward(*args, **kwargs):
+            if TRACEML_DISABLED or not getattr(trainer, "training", False):
+                return original_forward(*args, **kwargs)
+
+            with timed_region(
+                "_traceml_internal:forward_time",
+                scope=TimeScope.STEP,
+                use_gpu=True,
+            ):
+                return original_forward(*args, **kwargs)
+
+        try:
+            pl_module.forward = wrapped_forward
+        except Exception as e:
+            _log_lightning_error("forward wrap failed", e)
+            return
+
+        self._forward_module = pl_module
+        self._original_forward = original_forward
+        self._original_forward_attr = original_forward_attr
+        self._wrapped_forward = wrapped_forward
+
+    def _wrap_batch_to_device(self, trainer, pl_module) -> None:
         if self._original_batch_to_device is not None:
             return
 
@@ -146,6 +190,33 @@ class TraceMLCallback(Callback):
         self._original_batch_to_device = original
 
     def teardown(self, trainer, pl_module, stage=None):
+        self._restore_forward()
+        self._restore_batch_to_device()
+
+    def _restore_forward(self) -> None:
+        module = self._forward_module
+        original = self._original_forward
+        if module is None or original is None:
+            return
+
+        try:
+            current_forward_attr = getattr(module, "__dict__", {}).get(
+                "forward", _MISSING
+            )
+            if current_forward_attr is self._wrapped_forward:
+                if self._original_forward_attr is _MISSING:
+                    delattr(module, "forward")
+                else:
+                    module.forward = self._original_forward_attr
+        except Exception as e:
+            _log_lightning_error("forward restore failed", e)
+        finally:
+            self._forward_module = None
+            self._original_forward = None
+            self._original_forward_attr = _MISSING
+            self._wrapped_forward = None
+
+    def _restore_batch_to_device(self) -> None:
         strategy = self._batch_to_device_strategy
         original = self._original_batch_to_device
         if strategy is None or original is None:
@@ -180,18 +251,9 @@ class TraceMLCallback(Callback):
             _log_lightning_error("memory reset failed", e)
             self._mem_tracker = None
 
-        # Start timing the forward pass (ends in on_before_backward)
-        self._forward_ctx = timed_region(
-            "_traceml_internal:forward_time", scope="step"
-        )
-        self._forward_ctx.__enter__()
-
     def on_before_backward(self, trainer, pl_module, loss):
         if TRACEML_DISABLED:
             return
-        # End forward timing
-        self._close_context("_forward_ctx")
-
         # Start backward timing
         self._backward_ctx = timed_region(
             "_traceml_internal:backward_time", scope="step"
@@ -228,7 +290,6 @@ class TraceMLCallback(Callback):
             return
         # Safety: end any active context managers (edge cases)
         for ctx_attr in (
-            "_forward_ctx",
             "_backward_ctx",
             "_optimizer_ctx",
             "_traceml_step_ctx",
