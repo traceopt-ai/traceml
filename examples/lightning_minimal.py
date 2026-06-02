@@ -37,6 +37,8 @@ class TinyLightningModel(L.LightningModule):
         super().__init__()
         self.delay_rank = int(delay_rank)
         self.delay_ms = float(delay_ms)
+        self._debug_printed = False
+        self._delay_printed = False
         self.net = nn.Sequential(
             nn.Linear(MODEL_INPUT_DIM, HIDDEN_DIM),
             nn.ReLU(),
@@ -49,7 +51,24 @@ class TinyLightningModel(L.LightningModule):
         return self.net(x)
 
     def training_step(self, batch, batch_idx):
+        if not self._debug_printed:
+            print(
+                "[TraceML Lightning Example] "
+                f"training_step rank={self.global_rank} "
+                f"delay_rank={self.delay_rank} delay_ms={self.delay_ms}",
+                flush=True,
+            )
+            self._debug_printed = True
+
         if self.delay_ms > 0 and int(self.global_rank) == self.delay_rank:
+            if not self._delay_printed:
+                print(
+                    "[TraceML Lightning Example] "
+                    f"applying delay rank={self.global_rank} "
+                    f"batch_idx={batch_idx} delay_ms={self.delay_ms}",
+                    flush=True,
+                )
+                self._delay_printed = True
             time.sleep(self.delay_ms / 1000.0)
 
         x, y = batch
@@ -72,6 +91,12 @@ def main() -> None:
     parser.add_argument("--delay-rank", type=int, default=-1)
     parser.add_argument("--delay-ms", type=float, default=0.0)
     args = parser.parse_args()
+    print(
+        "[TraceML Lightning Example] "
+        f"parsed args devices={args.devices} max_steps={args.max_steps} "
+        f"delay_rank={args.delay_rank} delay_ms={args.delay_ms}",
+        flush=True,
+    )
 
     torch.manual_seed(SEED)
     traceml_lightning.init()
@@ -91,6 +116,12 @@ def main() -> None:
     )
     accelerator = "gpu" if torch.cuda.is_available() else "cpu"
     strategy = "ddp" if int(args.devices) > 1 else "auto"
+    print(
+        "[TraceML Lightning Example] "
+        f"trainer accelerator={accelerator} devices={args.devices} "
+        f"strategy={strategy} cuda_available={torch.cuda.is_available()}",
+        flush=True,
+    )
 
     trainer = L.Trainer(
         max_steps=int(args.max_steps),
