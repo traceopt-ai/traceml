@@ -127,7 +127,11 @@ def train_loop_per_worker(config: Dict[str, Any]) -> None:
     )
 
     input_delay_s = float(config.get("input_delay_ms", 0.0)) / 1000.0
-    if input_delay_s > 0.0:
+    input_delay_rank = int(config.get("input_delay_rank", -1))
+    rank = int(os.environ.get("RANK", "0"))
+    if input_delay_s > 0.0 and (
+        input_delay_rank < 0 or rank == input_delay_rank
+    ):
         train_loader = _delay_batches(train_loader, input_delay_s)
 
     transfer_dim = int(config.get("transfer_dim", 0))
@@ -205,6 +209,15 @@ def main() -> None:
         help="Optional per-batch delay to make Ray input timing visible.",
     )
     parser.add_argument(
+        "--input-delay-rank",
+        type=int,
+        default=-1,
+        help=(
+            "Global rank to delay for input-straggler demos. "
+            "Default -1 delays all workers."
+        ),
+    )
+    parser.add_argument(
         "--delay-rank",
         type=int,
         default=-1,
@@ -246,6 +259,7 @@ def main() -> None:
             "lr": args.lr,
             "transfer_dim": args.transfer_dim,
             "input_delay_ms": args.input_delay_ms,
+            "input_delay_rank": args.input_delay_rank,
             "delay_rank": args.delay_rank,
             "delay_ms": args.delay_ms,
         },
