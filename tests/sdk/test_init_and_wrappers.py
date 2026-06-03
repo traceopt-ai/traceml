@@ -298,6 +298,67 @@ def test_trace_step_only_auto_installs_optimizer_timing(monkeypatch):
     )
 
 
+def test_trace_step_marks_recording_draining_after_configured_step(
+    monkeypatch,
+):
+    from traceml_ai.runtime.state import (
+        TraceMLRecordingStatus,
+        configure_trace_recording,
+        get_trace_recording_state,
+        reset_trace_session_state,
+    )
+
+    instrumentation = _reload_instrumentation_module()
+    reset_trace_session_state()
+    configure_trace_recording(max_steps=1)
+
+    monkeypatch.setattr(
+        instrumentation,
+        "timed_region",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "forward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "backward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "h2d_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "StepMemoryTracker",
+        _NoopStepMemoryTracker,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "flush_step_events",
+        lambda model, step: None,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "ensure_optimizer_timing_installed",
+        lambda: None,
+    )
+
+    with instrumentation.trace_step(nn.Linear(2, 2)):
+        pass
+
+    assert (
+        get_trace_recording_state().status == TraceMLRecordingStatus.DRAINING
+    )
+
+    configure_trace_recording()
+    reset_trace_session_state()
+
+
 def test_wrap_dataloader_fetch_allows_custom_iterator_when_torch_patch_active(
     monkeypatch,
 ):
@@ -398,6 +459,12 @@ def test_wrap_optimizer_preserves_identity_and_times_step(monkeypatch):
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
+    monkeypatch.setattr(
+        torch.optim.Optimizer,
+        "_traceml_opt_hooks_installed",
+        False,
+        raising=False,
+    )
 
     class DummyOptimizer:
         def __init__(self):

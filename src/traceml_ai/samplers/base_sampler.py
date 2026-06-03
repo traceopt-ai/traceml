@@ -56,6 +56,7 @@ class BaseSampler(ABC):
             self.sender.max_rows_per_flush = int(max_rows_per_flush)
 
         self.enable_send: bool = True
+        self.drain_on_recording_stop: bool = False
 
     def _add_record(
         self,
@@ -81,3 +82,12 @@ class BaseSampler(ABC):
         with training.
         """
         raise NotImplementedError("Must be implemented by subclasses.")
+
+    def has_pending_recording_data(self) -> bool:
+        """
+        Return True while a queue-backed sampler still has unresolved data.
+
+        Most samplers drain synchronously and can use the default. Async GPU
+        timing samplers override this while waiting for CUDA events to resolve.
+        """
+        return False

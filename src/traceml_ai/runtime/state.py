@@ -10,7 +10,17 @@ small compatibility facade for existing imports.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from threading import RLock
+from typing import Optional
+
+
+class TraceMLRecordingStatus(Enum):
+    """Lifecycle state for TraceML telemetry recording."""
+
+    RECORDING = "recording"
+    DRAINING = "draining"
+    COMPLETE = "complete"
 
 
 @dataclass
@@ -80,7 +90,70 @@ class TraceSessionState:
         return value
 
 
+@dataclass
+class TraceMLRecordingState:
+    """
+    Process-local state controlling whether TraceML should record telemetry.
+
+    Patch installation is separate from recording state: patches may remain
+    installed after the step budget is reached, but they should no-op.
+    """
+
+    max_steps: Optional[int] = None
+    _status: TraceMLRecordingStatus = field(
+        default=TraceMLRecordingStatus.RECORDING, init=False, repr=False
+    )
+    _lock: RLock = field(default_factory=RLock, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.max_steps is not None:
+            self.max_steps = self._validate_max_steps(self.max_steps)
+
+    @property
+    def status(self) -> TraceMLRecordingStatus:
+        """Return the current recording lifecycle status."""
+        with self._lock:
+            return self._status
+
+    def should_record(self) -> bool:
+        """Return True while instrumentation should emit telemetry."""
+        return self.status == TraceMLRecordingStatus.RECORDING
+
+    def mark_step_flushed(self, step: int) -> TraceMLRecordingStatus:
+        """
+        Update recording state after a TraceML step has been flushed.
+
+        The configured max step is inclusive: max_steps=100 records and flushes
+        step 100, then moves the runtime into final-drain mode.
+        """
+        TraceSessionState._validate_step(step)
+        with self._lock:
+            if (
+                self.max_steps is not None
+                and step >= self.max_steps
+                and self._status == TraceMLRecordingStatus.RECORDING
+            ):
+                self._status = TraceMLRecordingStatus.DRAINING
+            return self._status
+
+    def mark_drained(self) -> TraceMLRecordingStatus:
+        """Mark recording complete after the runtime performs its final drain."""
+        with self._lock:
+            if self._status == TraceMLRecordingStatus.DRAINING:
+                self._status = TraceMLRecordingStatus.COMPLETE
+            return self._status
+
+    @staticmethod
+    def _validate_max_steps(value: int) -> int:
+        if not isinstance(value, int):
+            raise TypeError("TraceML recording max_steps must be an integer.")
+        if value <= 0:
+            raise ValueError("TraceML recording max_steps must be positive.")
+        return value
+
+
 _DEFAULT_TRACE_SESSION_STATE = TraceSessionState()
+_DEFAULT_TRACE_RECORDING_STATE = TraceMLRecordingState()
 
 
 def get_trace_session_state() -> TraceSessionState:
@@ -98,8 +171,44 @@ def reset_trace_session_state(step: int = 0) -> int:
     return _DEFAULT_TRACE_SESSION_STATE.reset(step)
 
 
+def configure_trace_recording(
+    max_steps: Optional[int] = None,
+) -> TraceMLRecordingState:
+    """Configure process-local TraceML recording state."""
+    global _DEFAULT_TRACE_RECORDING_STATE
+    _DEFAULT_TRACE_RECORDING_STATE = TraceMLRecordingState(max_steps=max_steps)
+    return _DEFAULT_TRACE_RECORDING_STATE
+
+
+def get_trace_recording_state() -> TraceMLRecordingState:
+    """Return the active process-local TraceML recording state."""
+    return _DEFAULT_TRACE_RECORDING_STATE
+
+
+def should_record_trace_events() -> bool:
+    """Return True while TraceML instrumentation should emit telemetry."""
+    return _DEFAULT_TRACE_RECORDING_STATE.should_record()
+
+
+def mark_trace_step_flushed(step: int) -> TraceMLRecordingStatus:
+    """Update recording state after a TraceML step has been flushed."""
+    return _DEFAULT_TRACE_RECORDING_STATE.mark_step_flushed(step)
+
+
+def mark_trace_recording_drained() -> TraceMLRecordingStatus:
+    """Mark recording complete after runtime queue draining finishes."""
+    return _DEFAULT_TRACE_RECORDING_STATE.mark_drained()
+
+
 __all__ = [
+    "TraceMLRecordingState",
+    "TraceMLRecordingStatus",
     "TraceSessionState",
+    "configure_trace_recording",
+    "get_trace_recording_state",
     "get_trace_session_state",
+    "mark_trace_recording_drained",
+    "mark_trace_step_flushed",
     "reset_trace_session_state",
+    "should_record_trace_events",
 ]

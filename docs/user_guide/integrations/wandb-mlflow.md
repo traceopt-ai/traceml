@@ -142,8 +142,9 @@ This lets W&B stay your experiment system of record while TraceML contributes a
 clean bottleneck diagnosis at the end of the run.
 
 `traceml.summary()` returns a flat dict of diagnosis statuses and global
-average metrics. If you also store `final_summary.json` as a run artifact, you
-can reuse it later with `traceml compare`.
+average metrics. It is derived from the canonical `final_summary.json` artifact,
+which TraceML generates once per run and reuses on later calls. Keep that JSON
+as a run artifact when you want to use `traceml compare`.
 
 ---
 

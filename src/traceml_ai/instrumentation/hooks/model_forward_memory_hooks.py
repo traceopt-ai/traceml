@@ -6,6 +6,8 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 
+from traceml_ai.runtime.state import should_record_trace_events
+
 # Shared queue for model forward peak memory events
 model_forward_memory_queue: Queue = Queue(maxsize=128)
 
@@ -42,6 +44,9 @@ class ModelForwardMemoryPreHook:
         self.device = device
 
     def __call__(self, module: nn.Module, inputs):
+        if not should_record_trace_events():
+            return
+
         try:
             if self.device.type == "cuda":
                 torch.cuda.reset_peak_memory_stats(self.device)
@@ -61,6 +66,9 @@ class ModelForwardMemoryPostHook:
         self.device = device
 
     def __call__(self, module: nn.Module, inputs, output):
+        if not should_record_trace_events():
+            return
+
         try:
             if self.device.type != "cuda":
                 return
@@ -82,6 +90,9 @@ class ModelForwardMemoryPostHook:
 
 
 def flush_model_forward_memory_buffers(model: nn.Module, step: int) -> None:
+    if not should_record_trace_events():
+        return
+
     model_id = id(model)
     evt: Optional[ModelForwardMemoryEvent] = _model_forward_memory_buffer.pop(
         model_id, None

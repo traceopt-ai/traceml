@@ -89,6 +89,32 @@ When using Ray Data, wrap the ``iter_torch_batches(...)`` iterator with
 ``traceml.wrap_dataloader_fetch(...)``. Ray Data is not a PyTorch
 ``DataLoader``, so the PyTorch DataLoader patch cannot see those fetches.
 
+## Example scripts
+
+Use ``--ray-address=auto`` when you already have a Ray cluster running, or omit
+it for a local Ray run.
+
+Minimal Ray Train example:
+
+```bash
+python examples/ray/torchtrainer_minimal.py \
+  --ray-address=auto \
+  --num-workers=2 \
+  --steps=100 \
+  --use-gpu
+```
+
+To make input timing visible in the minimal example:
+
+```bash
+python examples/ray/torchtrainer_minimal.py \
+  --ray-address=auto \
+  --num-workers=2 \
+  --steps=100 \
+  --use-gpu \
+  --input-delay-ms=100
+```
+
 ## Ray + Lightning
 
 When combining Ray Train and PyTorch Lightning, add ``TraceMLCallback()`` to the
@@ -111,6 +137,42 @@ The ``examples/ray/lightning_text_classifier.py`` demo also includes
 ``--transfer-dim`` to make Lightning H2D timing visible.
 ``--transfer-dim`` creates a reusable per-batch CPU tensor; it does not add a
 full dataset-sized tensor.
+
+Baseline Ray + Lightning run:
+
+```bash
+python examples/ray/lightning_text_classifier.py \
+  --ray-address=auto \
+  --num-workers=2 \
+  --max-steps=100 \
+  --use-gpu
+```
+
+Input-straggler demo:
+
+```bash
+python examples/ray/lightning_text_classifier.py \
+  --ray-address=auto \
+  --num-workers=2 \
+  --max-steps=100 \
+  --use-gpu \
+  --input-delay-rank=0 \
+  --input-delay-ms=200
+```
+
+Compute-straggler demo:
+
+```bash
+python examples/ray/lightning_text_classifier.py \
+  --ray-address=auto \
+  --num-workers=2 \
+  --max-steps=100 \
+  --use-gpu \
+  --delay-rank=0 \
+  --delay-ms=200
+```
+
+For CPU-only runs, remove ``--use-gpu``.
 
 ## Network Model
 

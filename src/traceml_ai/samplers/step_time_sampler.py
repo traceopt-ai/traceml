@@ -130,3 +130,7 @@ class StepTimeSampler(BaseSampler):
 
         except Exception as e:
             self.logger.error(f"[TraceML] StepTimeSampler error: {e}")
+
+    def has_pending_recording_data(self) -> bool:
+        """Return True while unresolved step timing batches remain buffered."""
+        return bool(self._pending)

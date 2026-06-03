@@ -52,7 +52,11 @@ from traceml_ai.instrumentation.patches.forward_auto_timer_patch import (
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
 )
-from traceml_ai.runtime.state import TraceSessionState, get_trace_session_state
+from traceml_ai.runtime.state import (
+    TraceSessionState,
+    get_trace_session_state,
+    mark_trace_step_flushed,
+)
 from traceml_ai.utils.entry_hook import attach_execution_entry_hooks
 from traceml_ai.utils.flush_buffers import flush_step_events
 from traceml_ai.utils.layer_parameter_memory import (
@@ -200,6 +204,14 @@ def trace_step(model: nn.Module):
             flush_step_events(model, trace_state.step)
         except Exception as exc:
             _log_instrumentation_error("flush failed", exc)
+
+        if step_completed:
+            try:
+                mark_trace_step_flushed(trace_state.step)
+            except Exception as exc:
+                _log_instrumentation_error(
+                    "recording state update failed", exc
+                )
 
 
 def trace_model_instance(

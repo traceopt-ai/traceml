@@ -5,7 +5,10 @@ import sys
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
 )
-from traceml_ai.runtime.state import get_trace_session_state
+from traceml_ai.runtime.state import (
+    get_trace_session_state,
+    mark_trace_step_flushed,
+)
 from traceml_ai.utils.flush_buffers import flush_step_events
 from traceml_ai.utils.step_memory import StepMemoryTracker
 from traceml_ai.utils.timing import (
@@ -331,6 +334,11 @@ class TraceMLCallback(Callback):
             flush_step_events(pl_module, trace_state.step)
         except Exception as e:
             _log_lightning_error("flush failed", e)
+
+        try:
+            mark_trace_step_flushed(trace_state.step)
+        except Exception as e:
+            _log_lightning_error("recording state update failed", e)
 
 
 __all__ = ["TraceMLCallback", "init"]

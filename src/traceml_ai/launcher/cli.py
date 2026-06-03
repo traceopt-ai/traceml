@@ -104,6 +104,15 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--trace-max-steps",
+        type=int,
+        default=None,
+        help=(
+            "Record TraceML telemetry for only the first N TraceML steps. "
+            "Training continues after recording stops."
+        ),
+    )
+    parser.add_argument(
         "--nproc-per-node",
         type=int,
         default=1,

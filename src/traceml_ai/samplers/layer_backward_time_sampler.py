@@ -76,3 +76,7 @@ class LayerBackwardTimeSampler(BaseSampler):
 
         except Exception as e:
             self.logger.error(f"[TraceML] LayerBackwardTimeSampler error: {e}")
+
+    def has_pending_recording_data(self) -> bool:
+        """Return True while unresolved layer timing events remain buffered."""
+        return bool(self._local_buffer)

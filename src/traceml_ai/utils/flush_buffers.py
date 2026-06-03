@@ -14,6 +14,7 @@ from traceml_ai.instrumentation.hooks.layer_forward_memory_hooks import (
 from traceml_ai.instrumentation.hooks.layer_forward_time_hooks import (
     flush_layer_forward_time_buffers,
 )
+from traceml_ai.runtime.state import should_record_trace_events
 
 from .step_memory import flush_step_memory_buffer
 from .timing import flush_step_time_buffer
@@ -22,7 +23,7 @@ TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 
 
 def flush_step_events(model: nn.Module, step: int) -> None:
-    if TRACEML_DISABLED:
+    if TRACEML_DISABLED or not should_record_trace_events():
         return
 
     flush_layer_forward_memory_buffers(model, step)

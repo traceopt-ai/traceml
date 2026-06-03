@@ -55,6 +55,7 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.run_name == ""
     assert args.session_id == ""
     assert args.summary_window_rows == DEFAULT_SUMMARY_WINDOW_ROWS
+    assert args.trace_max_steps is None
     assert args.args == ["--epochs", "1"]
 
     default_args = parser.parse_args(["watch", "train.py"])
@@ -139,6 +140,28 @@ def test_summary_window_rows_must_be_positive() -> None:
         run_name="",
         session_id="",
         summary_window_rows=0,
+    )
+
+    with pytest.raises(SystemExit):
+        validate_launch_args(args)
+
+
+def test_trace_max_steps_must_be_positive() -> None:
+    args = argparse.Namespace(
+        mode="cli",
+        no_history=False,
+        nnodes=1,
+        nproc_per_node=1,
+        node_rank=0,
+        master_addr="127.0.0.1",
+        master_port=29500,
+        aggregator_host=None,
+        aggregator_bind_host=None,
+        aggregator_port=29765,
+        run_name="",
+        session_id="",
+        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        trace_max_steps=0,
     )
 
     with pytest.raises(SystemExit):

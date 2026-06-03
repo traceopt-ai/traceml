@@ -14,6 +14,12 @@ from traceml_ai.runtime.config import config
 from traceml_ai.runtime.identity import resolve_runtime_identity
 from traceml_ai.runtime.sampler_registry import build_samplers
 from traceml_ai.runtime.sender import SenderIdentity, TelemetryPublisher
+from traceml_ai.runtime.state import (
+    TraceMLRecordingStatus,
+    configure_trace_recording,
+    get_trace_recording_state,
+    mark_trace_recording_drained,
+)
 from traceml_ai.runtime.stdout_stderr_capture import StreamCapture
 from traceml_ai.samplers.base_sampler import BaseSampler
 from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig
@@ -38,6 +44,7 @@ class TraceMLRuntime:
         settings: Optional[TraceMLSettings] = None,
     ) -> None:
         self._settings = settings or TraceMLSettings()
+        configure_trace_recording(self._settings.trace_max_steps)
 
         # Global config
         config.enable_logging = bool(self._settings.enable_logging)
@@ -107,7 +114,7 @@ class TraceMLRuntime:
             logger=self._logger,
         )
 
-    def _tick(self) -> None:
+    def _tick(self, samplers: Optional[List[BaseSampler]] = None) -> None:
         """
         Run all samplers once and delegate publishing.
 
@@ -121,23 +128,59 @@ class TraceMLRuntime:
         TelemetryPublisher flushes sampler writers, collects incremental
         payloads, and sends a single TCP batch.
         """
-        for sampler in self._samplers:
+        target_samplers = self._samplers if samplers is None else samplers
+
+        for sampler in target_samplers:
             _safe(
                 self._logger,
                 f"{sampler.sampler_name}.sample failed",
                 sampler.sample,
             )
 
-        self._publisher.publish(self._samplers)
+        self._publisher.publish(target_samplers)
+
+    def _drain_recording_samplers(self) -> None:
+        """Drain queue-backed samplers after recording has stopped."""
+        drain_samplers = [
+            sampler
+            for sampler in self._samplers
+            if bool(getattr(sampler, "drain_on_recording_stop", False))
+        ]
+        if drain_samplers:
+            self._tick(drain_samplers)
+        pending = any(
+            bool(sampler.has_pending_recording_data())
+            for sampler in drain_samplers
+        )
+        if not pending:
+            mark_trace_recording_drained()
 
     def _sampler_loop(self) -> None:
         """Sampler loop (all ranks)."""
         while not self._stop_event.is_set():
+            status = get_trace_recording_state().status
+            if status == TraceMLRecordingStatus.COMPLETE:
+                return
+            if status == TraceMLRecordingStatus.DRAINING:
+                self._drain_recording_samplers()
+                if (
+                    get_trace_recording_state().status
+                    == TraceMLRecordingStatus.COMPLETE
+                ):
+                    return
+                self._stop_event.wait(
+                    float(self._settings.sampler_interval_sec)
+                )
+                continue
+
             self._tick()
             self._stop_event.wait(float(self._settings.sampler_interval_sec))
 
-        # final tick
-        self._tick()
+        status = get_trace_recording_state().status
+        if status == TraceMLRecordingStatus.RECORDING:
+            self._tick()
+        elif status == TraceMLRecordingStatus.DRAINING:
+            self._drain_recording_samplers()
 
     def start(self) -> None:
         """
