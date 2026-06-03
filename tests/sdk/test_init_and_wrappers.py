@@ -459,6 +459,12 @@ def test_wrap_optimizer_preserves_identity_and_times_step(monkeypatch):
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
+    monkeypatch.setattr(
+        torch.optim.Optimizer,
+        "_traceml_opt_hooks_installed",
+        False,
+        raising=False,
+    )
 
     class DummyOptimizer:
         def __init__(self):
