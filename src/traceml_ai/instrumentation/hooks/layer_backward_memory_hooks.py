@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Tuple
 import torch
 import torch.nn as nn
 
+from traceml_ai.runtime.state import should_record_trace_events
 from traceml_ai.utils.shared_utils import get_hookable_modules
 
 # Shared queue for gradient events
@@ -134,6 +135,9 @@ class LayerBackwardModuleHook:
         self.layer_name = layer_name
 
     def __call__(self, module: nn.Module, grad_input: Any, grad_output: Any):
+        if not should_record_trace_events():
+            return
+
         try:
             total_bytes = _accumulate_tensor_bytes(grad_output)
 
@@ -163,6 +167,9 @@ def flush_layer_backward_memory_buffers(model: nn.Module, step: int) -> None:
     step : int
         Current training step.
     """
+    if not should_record_trace_events():
+        return
+
     model_id = id(model)
     buf = _layer_backward_memory_buffer.pop(model_id, None)
 

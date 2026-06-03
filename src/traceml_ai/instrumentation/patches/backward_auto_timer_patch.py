@@ -75,14 +75,26 @@ def patch_backward() -> None:
 class backward_auto_timer:
     """
     Enables backward timing during its scope.
+
+    The previous thread-local state is restored on exit so nested tracing
+    contexts preserve the outer context's timing state.
+
     Assumes patch_backward() has been called once at startup/runtime init.
     """
 
+    def __init__(self):
+        self._prev_enabled = False
+        self._prev_depth = 0
+
     def __enter__(self):
+        self._prev_enabled = _enabled()
+        self._prev_depth = _depth()
+
         _BACKWARD_TLS._traceml_backward_enabled = True
+        _BACKWARD_TLS._traceml_backward_depth = 0
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        _BACKWARD_TLS._traceml_backward_enabled = False
-        _BACKWARD_TLS._traceml_backward_depth = 0
+        _BACKWARD_TLS._traceml_backward_enabled = self._prev_enabled
+        _BACKWARD_TLS._traceml_backward_depth = self._prev_depth
         return False

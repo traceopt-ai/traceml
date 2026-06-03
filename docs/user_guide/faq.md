@@ -72,6 +72,19 @@ The preferred public API is the top-level `traceml.*` from `import traceml_ai as
 
 ---
 
+## Can I trace only a small number of steps?
+
+Yes. Use `--trace-max-steps` with `traceml run`:
+
+```bash
+traceml run train.py --trace-max-steps 100 --args --epochs 5
+```
+
+TraceML records and flushes the first N TraceML steps, then stops recording
+telemetry while your training job continues normally.
+
+---
+
 ## Should I use `traceml.trace_step()` or `trace_step()`?
 
 Prefer:

@@ -47,6 +47,16 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _parse_optional_positive_int(value: Optional[str]) -> Optional[int]:
+    """Parse an optional positive integer from an environment variable."""
+    if value is None or str(value).strip() == "":
+        return None
+    parsed = int(value)
+    if parsed <= 0:
+        raise ValueError("Expected a positive integer.")
+    return parsed
+
+
 def _get_session_dir(cfg: Dict[str, Any]) -> Path:
     """Return the TraceML session directory for the current run."""
     logs_dir = Path(str(cfg.get("logs_dir", DEFAULT_LOGS_DIR)))
@@ -224,6 +234,9 @@ def read_traceml_env() -> Dict[str, Any]:
                 str(DEFAULT_SUMMARY_WINDOW_ROWS),
             )
         ),
+        "trace_max_steps": _parse_optional_positive_int(
+            os.environ.get("TRACEML_TRACE_MAX_STEPS")
+        ),
         "disable_traceml": os.environ.get("TRACEML_DISABLED", "0") == "1",
     }
 
@@ -261,6 +274,7 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
         summary_window_rows=int(cfg["summary_window_rows"]),
+        trace_max_steps=cfg.get("trace_max_steps"),
         aggregator=AggregatorTransportSettings(
             connect_host=str(cfg["aggregator_host"]),
             bind_host=str(cfg["aggregator_bind_host"]),

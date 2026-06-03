@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Tuple
 import torch
 import torch.nn as nn
 
+from traceml_ai.runtime.state import should_record_trace_events
 from traceml_ai.utils.shared_utils import get_hookable_modules
 
 # Shared queue for forward events
@@ -95,6 +96,9 @@ class LayerForwardMemoryHook:
         self.layer_name = layer_name
 
     def __call__(self, module: nn.Module, inputs: Any, output: Any):
+        if not should_record_trace_events():
+            return
+
         try:
             total_bytes = 0.0
 
@@ -139,6 +143,9 @@ def flush_layer_forward_memory_buffers(model: nn.Module, step: int) -> None:
     step : int
         Current training step.
     """
+    if not should_record_trace_events():
+        return
+
     model_id = id(model)
     buf = _layer_forward_memory_buffer.pop(model_id, None)
     if not buf:
