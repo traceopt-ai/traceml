@@ -12,8 +12,10 @@ from typing import Any, Dict, Optional
 
 from traceml_ai.sdk.protocol import (
     build_final_summary_request,
+    get_final_summary_json_path,
     get_final_summary_request_path,
     get_final_summary_response_path,
+    get_final_summary_txt_path,
     is_primary_rank,
     load_json_or_none,
     request_to_json,
@@ -31,6 +33,24 @@ def _read_text_or_empty(path: Path) -> str:
         return Path(path).read_text(encoding="utf-8")
     except Exception:
         return ""
+
+
+def _load_existing_final_summary(
+    session_root: Path,
+    *,
+    print_text: bool,
+) -> Optional[Dict[str, Any]]:
+    """Load existing canonical final-summary artifacts when available."""
+    summary = load_json_or_none(get_final_summary_json_path(session_root))
+    if summary is None:
+        return None
+
+    if print_text:
+        text = _read_text_or_empty(get_final_summary_txt_path(session_root))
+        if text:
+            print(text)
+
+    return summary
 
 
 def final_summary(
@@ -77,6 +97,13 @@ def final_summary(
         raise RuntimeError(
             "TraceML final_summary() requires history to be enabled."
         )
+
+    existing = _load_existing_final_summary(
+        ctx.session_root,
+        print_text=print_text,
+    )
+    if existing is not None:
+        return existing
 
     request = build_final_summary_request()
     request_path = get_final_summary_request_path(ctx.session_root)

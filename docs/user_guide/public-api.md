@@ -83,7 +83,8 @@ See `traceml --help` for the full set of options.
 ### `traceml.summary()`
 
 Returns a compact flat dict for experiment trackers such as W&B, MLflow, or
-internal dashboards.
+internal dashboards. Call it near the end of training; it reuses the canonical
+`final_summary.json` if one already exists.
 
 ```python
 summary = traceml.summary(print_text=True)
@@ -95,3 +96,5 @@ if summary is not None:
 
 Returns the full `final_summary.json` payload. Use this when you need the
 complete structured report or want to store the artifact for `traceml compare`.
+TraceML generates this canonical artifact once per run and reuses it on later
+calls.

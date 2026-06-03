@@ -296,6 +296,8 @@ recommended low-noise path is:
 3. log the returned flat dict into W&B or MLflow
 
 Use `traceml.final_summary()` if you need the full structured JSON payload.
+Both APIs reuse the same canonical `final_summary.json` once it has been
+generated.
 
 See:
 

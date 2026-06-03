@@ -80,6 +80,8 @@ def main():
 
                 time.sleep(PAUSE_BETWEEN_STEPS)
 
+    summary = traceml.summary(print_text=True)
+    print(summary)
     print("Done.")
 
 

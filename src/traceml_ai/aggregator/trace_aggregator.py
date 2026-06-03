@@ -22,6 +22,7 @@ from traceml_ai.aggregator.summary_service import FinalSummaryService
 from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.reporting.final import generate_summary
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
+from traceml_ai.sdk.protocol import get_final_summary_json_path
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 
@@ -130,6 +131,7 @@ class TraceMLAggregator:
             session_root=session_root,
             db_path=str(db_path),
             flush_history=self._sqlite_writer.flush_now,
+            settle_telemetry=self._settle_telemetry,
             summary_window_rows=int(settings.summary_window_rows),
         )
 
@@ -220,16 +222,20 @@ class TraceMLAggregator:
             self._sqlite_writer.stop,
         )
 
-        if self._settings.history_enabled and self._settings.db_path:
+        session_root = Path(str(self._settings.logs_dir)).resolve() / str(
+            self._settings.session_id or "default"
+        )
+        if (
+            self._settings.history_enabled
+            and self._settings.db_path
+            and not get_final_summary_json_path(session_root).is_file()
+        ):
             _safe(
                 self._logger,
                 "Final summary failed",
                 lambda: generate_summary(
                     str(self._settings.db_path),
-                    session_root=str(
-                        Path(str(self._settings.logs_dir)).resolve()
-                        / str(self._settings.session_id or "default")
-                    ),
+                    session_root=str(session_root),
                     print_to_stdout=True,
                     summary_window_rows=int(
                         self._settings.summary_window_rows
@@ -265,6 +271,28 @@ class TraceMLAggregator:
                 self._sqlite_writer.ingest(msg)
             except Exception:
                 self._logger.exception("[TraceML] SQLiteWriter.ingest failed")
+
+    def _settle_telemetry(self, timeout_sec: float) -> bool:
+        """
+        Best-effort drain of in-flight telemetry before first final summary.
+
+        This waits until TCP input is quiet for a short window or until the
+        timeout expires, then flushes SQLite history.
+        """
+        deadline = time.monotonic() + float(timeout_sec)
+        quiet_sec = min(0.5, max(0.0, float(timeout_sec)))
+
+        while time.monotonic() < deadline:
+            self._drain_tcp()
+            remaining = max(0.0, deadline - time.monotonic())
+            if not self._tcp_server.wait_for_data(
+                timeout=min(quiet_sec, remaining)
+            ):
+                self._drain_tcp()
+                return bool(self._sqlite_writer.flush_now(remaining))
+
+        self._drain_tcp()
+        return bool(self._sqlite_writer.flush_now(0.0))
 
     def _message_sampler_name(self, msg: Any) -> Optional[str]:
         """
