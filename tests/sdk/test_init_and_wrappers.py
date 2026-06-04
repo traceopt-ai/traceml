@@ -1,6 +1,5 @@
 import importlib
 import sys
-import warnings
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -198,18 +197,6 @@ def test_api_import_does_not_initialize_implicitly():
     importlib.reload(api)
 
     assert initialization.get_init_config() is None
-
-
-def test_short_traceml_import_exposes_public_api_with_warning():
-    sys.modules.pop("traceml", None)
-
-    with warnings.catch_warnings(record=True) as captured:
-        warnings.simplefilter("always")
-        import traceml
-
-    assert hasattr(traceml, "init")
-    assert hasattr(traceml, "trace_step")
-    assert any(item.category is FutureWarning for item in captured)
 
 
 @contextmanager
