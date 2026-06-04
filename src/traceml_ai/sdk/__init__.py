@@ -1,6 +1,5 @@
 from traceml_ai.sdk.initial import (
     TraceMLInitConfig,
-    enable_legacy_decorator_auto_init,
     get_init_config,
     init,
     is_initialized,
@@ -26,7 +25,6 @@ __all__ = [
     "TraceMLInitConfig",
     "get_init_config",
     "is_initialized",
-    "enable_legacy_decorator_auto_init",
     "init",
     "start",
     "TraceSessionState",

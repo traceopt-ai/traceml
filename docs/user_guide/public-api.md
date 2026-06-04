@@ -13,9 +13,9 @@ with traceml.trace_step(model):
     ...
 ```
 
-The old `import traceml` path still works for now, but emits a `FutureWarning`
-and will be removed in a future release. New code should use
-`import traceml_ai as traceml`.
+The old `import traceml` path remains available for compatibility, but emits a
+`FutureWarning` and may be removed in a future release. Do not import from
+decorator compatibility paths.
 
 ## Hugging Face integration
 

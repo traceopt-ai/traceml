@@ -127,8 +127,8 @@ trade-offs vs. the legacy subclass that are worth knowing:
   accumulation, open an issue.
 - **Optimizer timing.** Captured by TraceML's global optimizer hooks, which
   are installed automatically only when running under the default
-  `traceml.init(mode="auto")` path (or with no explicit `init` call). Under
-  `manual` or `selective` modes optimizer events are not emitted, but this
+  `traceml.init(mode="auto")` path. Under `manual` or `selective` modes
+  optimizer events are not emitted, but this
   applies consistently to every step, so dashboard step alignment still holds.
 - **Exception safety.** If `training_step` raises, Hugging Face does not call
   `on_step_end`. The callback defensively closes the trace_step context on

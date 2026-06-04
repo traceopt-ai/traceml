@@ -40,7 +40,7 @@ training work, and make stop paths safe to call more than once.
 
 Ray support lives in `traceml_ai.integrations.ray` and should stay separate from
 the core runtime. Do not import Ray from `traceml_ai.runtime`, `traceml_ai.aggregator`,
-or the public package surfaces (`traceml_ai` or the deprecated `traceml` shim).
+or the public package surfaces (`traceml_ai` or `traceml`).
 
 The integration has two owners:
 
@@ -54,8 +54,7 @@ internals, and no duplicated aggregator/runtime lifecycle code.
 
 
 The live implementation tree is `src/traceml_ai/`. The `src/traceml/` package is
-a deprecated compatibility shim for older imports and should not receive new
-implementation code.
+a deprecated compatibility alias and should not receive implementation code.
 
 ## Add a Diagnostic Rule
 
