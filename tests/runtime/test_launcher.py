@@ -14,6 +14,7 @@ import pytest
 from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
     resolve_existing_script_path,
+    run_view,
     validate_launch_args,
 )
 from traceml_ai.launcher.manifest import (
@@ -60,6 +61,15 @@ def test_build_parser_preserves_launch_commands() -> None:
 
     default_args = parser.parse_args(["watch", "train.py"])
     assert default_args.mode == "summary"
+
+
+def test_build_parser_accepts_view_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["view", "summary.json"])
+
+    assert args.command == "view"
+    assert args.summary == "summary.json"
 
 
 def test_build_parser_accepts_multinode_launch_args() -> None:
@@ -330,6 +340,20 @@ def test_collect_existing_artifacts_only_returns_existing_files(
         "db": str(db_path),
         "summary_card_txt": str(summary_path),
     }
+
+
+def test_run_view_reports_user_facing_errors(tmp_path, capsys) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        run_view(argparse.Namespace(summary=str(summary_path)))
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 1
+    assert captured.out == ""
+    assert "[TraceML] ERROR:" in captured.err
+    assert "does not contain printable text" in captured.err
 
 
 def test_distributed_launch_config_builds_torchrun_command() -> None:

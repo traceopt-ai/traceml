@@ -1,9 +1,13 @@
+import json
 from pathlib import Path
 from typing import Optional
+
+import pytest
 
 from traceml_ai.reporting.compare import build_compare_payload
 from traceml_ai.reporting.compare import build_compare_text
 from traceml_ai.reporting.compare.formatters import CompareTextFormatter
+from traceml_ai.reporting.compare.io import load_summary_json
 
 BYTES_PER_GB = 1024.0**3
 
@@ -224,6 +228,29 @@ def test_compare_text_formatter_matches_public_wrapper() -> None:
     assert CompareTextFormatter().format(
         compare_payload
     ) == build_compare_text(compare_payload)
+
+
+def test_compare_loader_still_requires_final_summary_sections(
+    tmp_path,
+) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1.4,
+                "system": {},
+                "process": {},
+                "step_time": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="missing required section 'step_memory'",
+    ):
+        load_summary_json(summary_path)
 
 
 def test_compare_text_wrapper_returns_fallback_if_formatter_fails(
