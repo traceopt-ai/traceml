@@ -1,64 +1,21 @@
 name: Feature request
-description: Tell us what TraceML should explain, detect, or recommend next.
+description: Suggest an improvement.
 title: "[Feature]: "
 labels:
   - enhancement
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Feature requests are strongest when they connect your training setup to a specific missing TraceML insight.
-
   - type: textarea
-    id: training-context
+    id: idea
     attributes:
-      label: What are you training?
-      description: Describe the model, data, scale, TraceML integration path, topology, and hardware that matter for this request.
-      placeholder: "Example: Fine-tuning a transformer with TraceMLTrainer on 8x H100s"
+      label: What would you like TraceML to do?
+      placeholder: I wish TraceML could...
     validations:
       required: true
 
   - type: textarea
-    id: current-traceml-output
-    attributes:
-      label: What did TraceML tell you?
-      description: Paste or summarize the relevant TraceML output from `final_summary.txt`, `final_summary.json`, the live CLI, dashboard, `traceml.summary()`, or `traceml compare`.
-      render: text
-    validations:
-      required: true
-
-  - type: textarea
-    id: wished-for-output
-    attributes:
-      label: What do you wish TraceML told you?
-      description: Describe the missing diagnosis, recommendation, visualization, export, or workflow.
-      placeholder: "I wish TraceML could tell me..."
-    validations:
-      required: true
-
-  - type: textarea
-    id: why-it-matters
+    id: context
     attributes:
       label: Why would this help?
-      description: Explain the decision this would unlock or the time it would save.
-      placeholder: "This would help me decide whether to..."
-    validations:
-      required: false
-
-  - type: dropdown
-    id: request-area
-    attributes:
-      label: Area
-      options:
-        - Step Time diagnosis
-        - Step Memory diagnosis
-        - System or Process diagnostics
-        - Run comparison
-        - Summary API or tracker logging
-        - CLI or dashboard display
-        - Framework integration
-        - Distributed training
-        - Documentation
-        - Other
+      description: Training setup, current output, screenshots, or examples if useful.
     validations:
       required: false

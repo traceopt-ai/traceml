@@ -56,17 +56,6 @@ def test_trace_state_facade_uses_runtime_session_state():
     assert TraceState.reset() == 0
 
 
-def test_decorators_import_path_shares_trace_state():
-    import traceml_ai.decorators as decorators
-
-    TraceState.reset()
-    decorators.TraceState.step += 2
-
-    assert TraceState.step == 2
-    assert decorators.TraceState.step == 2
-    assert decorators.trace_step is not None
-
-
 def test_trace_recording_state_is_unlimited_by_default():
     state = TraceMLRecordingState()
 

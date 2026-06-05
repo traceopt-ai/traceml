@@ -68,7 +68,9 @@ For supported integrations:
 - Hugging Face: use `TraceMLTrainer`
 - Lightning: call `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()`
 
-The preferred public API is the top-level `traceml.*` from `import traceml_ai as traceml`.
+The preferred public API is the top-level `traceml.*` API from
+`import traceml_ai as traceml`. The old `import traceml` path remains available
+for compatibility, but emits a deprecation warning.
 
 ---
 
@@ -98,7 +100,8 @@ with traceml.trace_step(model):
     ...
 ```
 
-Use the top-level `traceml.*` API from `import traceml_ai as traceml`.
+Use the top-level `traceml.*` API from `import traceml_ai as traceml`. Do not
+import from decorator compatibility paths.
 
 ---
 

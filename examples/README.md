@@ -125,9 +125,10 @@ For explicit manual instrumentation, see:
 - `traceml.wrap_backward(...)`
 - `traceml.wrap_optimizer(...)`
 
-The old decorator import path still works for backward compatibility, but it
-is deprecated and will be removed in a future version. New examples use the
-top-level `traceml.*` API from `import traceml_ai as traceml`.
+Examples use the top-level `traceml.*` API from
+`import traceml_ai as traceml`. The old `import traceml` path remains available
+for compatibility, but emits a deprecation warning. Do not import from
+decorator compatibility paths.
 
 ---
 

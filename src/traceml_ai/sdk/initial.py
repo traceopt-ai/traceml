@@ -300,29 +300,11 @@ def start(
     )
 
 
-def enable_legacy_decorator_auto_init() -> Optional[TraceMLInitConfig]:
-    """
-    Preserve historical `traceml.decorators` import behavior.
-
-    Legacy decorator imports previously triggered automatic patching as a module
-    import side effect. This function keeps that behavior for the compatibility
-    path without affecting the new explicit path.
-
-    If explicit init has already happened, this function does nothing and
-    respects the existing config.
-    """
-    if is_initialized():
-        return get_init_config()
-
-    return init(mode="auto", _source="traceml_ai.decorators")
-
-
 __all__ = [
     "TraceMLInitConfig",
     "TraceMLInitMode",
-    "get_init_config",
     "is_initialized",
+    "get_init_config",
     "init",
     "start",
-    "enable_legacy_decorator_auto_init",
 ]

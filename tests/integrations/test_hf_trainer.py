@@ -167,7 +167,7 @@ def test_hf_trainer_integration():
         )
         trainer.train()
 
-        from traceml_ai.sdk.decorators_compat import TraceState
+        from traceml_ai.sdk.instrumentation import TraceState
 
         assert TraceState.step >= 5, "TraceState.step should have incremented"
 
@@ -206,7 +206,7 @@ def test_hf_trainer_callback_integration():
             f"max_steps suggests the callback is double-recording memory."
         )
 
-        from traceml_ai.sdk.decorators_compat import TraceState
+        from traceml_ai.sdk.instrumentation import TraceState
 
         assert TraceState.step >= max_steps
 

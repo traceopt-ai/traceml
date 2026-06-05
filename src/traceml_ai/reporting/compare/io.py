@@ -18,11 +18,11 @@ It intentionally does not contain comparison logic.
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+from traceml_ai.reporting.summary_artifact import load_summary_artifact
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
 _REQUIRED_TOP_LEVEL_SECTIONS = (
@@ -51,29 +51,7 @@ def load_summary_json(path: str | Path) -> Dict[str, Any]:
         JSON.
     """
     resolved = Path(path).expanduser().resolve()
-
-    if not resolved.exists():
-        raise RuntimeError(f"Summary file not found: {resolved}")
-    if not resolved.is_file():
-        raise RuntimeError(f"Summary path is not a file: {resolved}")
-
-    try:
-        with open(resolved, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"Summary file is not valid JSON: {resolved} ({exc})"
-        ) from exc
-    except OSError as exc:
-        raise RuntimeError(
-            f"Summary file could not be read: {resolved} ({exc})"
-        ) from exc
-
-    if not isinstance(payload, dict):
-        raise RuntimeError(
-            f"Summary file must contain a JSON object: {resolved}"
-        )
-
+    payload = load_summary_artifact(resolved)
     validate_summary_payload(payload, path=resolved)
     return payload
 

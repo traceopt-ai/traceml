@@ -89,6 +89,12 @@ logs/<run_name>/final_summary.json
 logs/<run_name>/final_summary.txt
 ```
 
+You can re-print a saved summary later without rerunning training:
+
+```bash
+traceml view logs/<run_name>/final_summary.json
+```
+
 Instead of guessing why training feels slow, you get a compact diagnosis of
 where step time and memory went:
 

@@ -3,19 +3,15 @@ Core training instrumentation helpers used by TraceML.
 
 This module contains the actual tracing context managers and hook attachment
 logic. It intentionally has no import-time side effects. Patch installation is
-owned by `traceml.init(...)` and the legacy decorator compatibility layer.
+owned by `traceml.init(...)`.
 
-New path
---------
+Public path
+-----------
 - `import traceml_ai as traceml`
 - `traceml.init(...)`
 - `traceml.trace_step(...)`
 
-Legacy compatibility path
--------------------------
-- Old decorator imports still work for backward compatibility.
-- The decorator import path is deprecated and will be removed in a future
-  version.
+The old `import traceml` path remains as a deprecated compatibility alias.
 """
 
 from __future__ import annotations
@@ -102,7 +98,7 @@ def _should_auto_install_optimizer_timing() -> bool:
 
     Behavior
     --------
-    - Without an explicit init config, preserve historical behavior.
+    - Without an explicit init config, do not install hooks.
     - With explicit init:
       - auto      -> install optimizer hooks automatically
       - manual    -> do not install hooks
@@ -111,17 +107,17 @@ def _should_auto_install_optimizer_timing() -> bool:
     Rationale
     ---------
     Optimizer timing ownership must be unambiguous:
-    - legacy / auto path uses global optimizer hooks
+    - auto path uses global optimizer hooks
     - manual / selective path uses `traceml.wrap_optimizer(...)`
     """
     try:
         from traceml_ai.sdk.initial import get_init_config
     except Exception:
-        return True
+        return False
 
     cfg = get_init_config()
     if cfg is None:
-        return True
+        return False
 
     return getattr(cfg, "mode", "auto") == "auto"
 

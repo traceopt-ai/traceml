@@ -3,7 +3,7 @@ import os
 import sys
 from typing import Any, Dict, Optional
 
-from traceml_ai.sdk.decorators_compat import trace_model_instance, trace_step
+from traceml_ai.sdk.instrumentation import trace_model_instance, trace_step
 
 logger = logging.getLogger(__name__)
 

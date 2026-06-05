@@ -413,3 +413,18 @@ def run_compare(args: argparse.Namespace) -> None:
         _log_launcher_exception("compare failed unexpectedly", exc)
         print(f"[TraceML] ERROR: compare failed: {exc}", file=sys.stderr)
         raise SystemExit(1)
+
+
+def run_view(args: argparse.Namespace) -> None:
+    """Print the stored text from a TraceML summary JSON file."""
+    try:
+        from traceml_ai.reporting.view import view_summary
+
+        view_summary(args.summary, print_to_stdout=True)
+    except RuntimeError as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as exc:
+        _log_launcher_exception("view failed unexpectedly", exc)
+        print(f"[TraceML] ERROR: view failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)

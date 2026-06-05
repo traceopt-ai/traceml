@@ -38,7 +38,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Integrations | `src/traceml_ai/integrations/` | Hugging Face, Lightning, and Ray adapters |
 | Utils | `src/traceml_ai/utils/` | Hooks, patches, memory/timing helpers |
 
-The deprecated `src/traceml/` package is a compatibility shim for older import
+The `src/traceml/` package is a deprecated compatibility alias for older import
 paths. New implementation work should go under `src/traceml_ai/`.
 
 For the user-facing API surface (`trace_step`, `TraceMLTrainer`, `TraceMLCallback`, CLI usage), see the [Public API](../user_guide/public-api.md). The source tree above is the canonical reference for internals — start from the entry points and follow the imports.

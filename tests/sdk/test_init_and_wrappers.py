@@ -199,28 +199,6 @@ def test_api_import_does_not_initialize_implicitly():
     assert initialization.get_init_config() is None
 
 
-def test_decorators_import_preserves_legacy_auto_init(monkeypatch):
-    initialization = _reload_initialization_module()
-
-    calls = []
-
-    monkeypatch.setattr(
-        initialization,
-        "enable_legacy_decorator_auto_init",
-        lambda: calls.append("legacy"),
-    )
-
-    # Import-time compatibility behavior lives in the module body, so clear
-    # both public and SDK compatibility paths to force a fresh import.
-    sys.modules.pop("traceml_ai.decorators", None)
-    sys.modules.pop("traceml_ai.sdk.decorators_compat", None)
-    import traceml_ai.sdk.decorators_compat as decorators
-
-    importlib.reload(decorators)
-
-    assert calls == ["legacy", "legacy"]
-
-
 @contextmanager
 def _noop_context_manager(*args, **kwargs):
     yield
@@ -296,6 +274,55 @@ def test_trace_step_only_auto_installs_optimizer_timing(monkeypatch):
     assert (
         _run_trace_step_once(mode="selective", monkeypatch=monkeypatch) == []
     )
+
+
+def test_trace_step_without_init_does_not_auto_install_optimizer_timing(
+    monkeypatch,
+):
+    _reload_initialization_module()
+    instrumentation = _reload_instrumentation_module()
+    calls = []
+
+    monkeypatch.setattr(
+        instrumentation,
+        "timed_region",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "forward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "backward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "h2d_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "StepMemoryTracker",
+        _NoopStepMemoryTracker,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "flush_step_events",
+        lambda model, step: None,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "ensure_optimizer_timing_installed",
+        lambda: calls.append("optimizer"),
+    )
+
+    with instrumentation.trace_step(nn.Linear(2, 2)):
+        pass
+
+    assert calls == []
 
 
 def test_trace_step_marks_recording_draining_after_configured_step(
