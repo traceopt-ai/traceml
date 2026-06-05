@@ -4,45 +4,32 @@
 
 ## Why
 
-<!-- What problem does this solve for TraceML users or contributors? -->
+<!-- What problem does this solve? -->
 
 ## How I tested
 
-<!-- Include exact commands, examples, or environments used. -->
+<!-- Include commands, examples, or say why tests were not run. -->
 
-- [ ] Unit tests
-- [ ] Integration or smoke test
-- [ ] Example training script
-- [ ] Docs-only change
+- [ ] Tests added or updated
+- [ ] Existing tests run
+- [ ] Manual smoke test
 - [ ] Not run; reason:
 
 ## Runtime impact
 
-<!-- Required for tracing, sampler, transport, aggregator, or reporting changes. -->
+<!-- Especially important for tracing, samplers, transport, aggregator, or reporting changes. -->
 
-- [ ] No training-path runtime impact
-- [ ] May affect training-path overhead
-- [ ] May affect distributed launch, telemetry, or aggregator behavior
-- [ ] Not applicable
+- [ ] No training-path impact
+- [ ] May affect tracing, runtime, telemetry, or distributed behavior
+- [ ] Not sure
 
 Notes:
 
-## Documentation
+## Docs
 
-- [ ] README updated
-- [ ] User docs updated
-- [ ] Examples updated
-- [ ] API docs updated
+- [ ] Updated
 - [ ] Not needed
 
-## Risk checklist
+## Extra context
 
-- [ ] Does not add unnecessary CUDA synchronizations
-- [ ] Does not add blocking I/O on the training path
-- [ ] Fails safely without crashing user training
-- [ ] Keeps new dependencies optional unless discussed
-- [ ] Redacts or avoids sensitive training-environment data in examples
-
-## Screenshots or output
-
-<!-- Paste relevant CLI output, final_summary text, viewer screenshot, or compare output. -->
+<!-- Screenshots, CLI output, final_summary text, or anything reviewers should know. -->
