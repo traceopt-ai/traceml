@@ -1,0 +1,21 @@
+name: I found a bottleneck
+description: Share what TraceML found.
+title: "[Bottleneck]: "
+labels:
+  - bottleneck
+body:
+  - type: textarea
+    id: finding
+    attributes:
+      label: What did TraceML find?
+      placeholder: TraceML showed that...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: What happened next?
+      description: Training setup, TraceML output, fix, or improvement if useful.
+    validations:
+      required: false

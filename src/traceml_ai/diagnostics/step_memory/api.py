@@ -1,0 +1,754 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Step-memory diagnosis shared by live renderers and summaries."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, Literal, Optional, Sequence, cast
+
+from traceml_ai.diagnostics.common import DiagnosticResult
+from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
+
+from ..common import BaseDiagnosis, Severity, validate_confidence
+from .policy import (
+    DEFAULT_STEP_MEMORY_THRESHOLDS,
+    StepMemoryDiagnosisThresholds,
+    classify_imbalance_severity,
+)
+from .trend import (
+    StepMemoryWindowCreepEvidence,
+    evaluate_step_memory_window_creep,
+)
+
+StepMemoryDiagnosisKind = Literal[
+    "NO_DATA",
+    "NO_GPU",
+    "BALANCED",
+    "HIGH_PRESSURE",
+    "IMBALANCE",
+    "CREEP_EARLY",
+    "CREEP_CONFIRMED",
+]
+
+_STATUS_BY_KIND = {
+    "NO_DATA": "NO DATA",
+    "NO_GPU": "NO GPU",
+    "BALANCED": "BALANCED",
+    "HIGH_PRESSURE": "HIGH PRESSURE",
+    "IMBALANCE": "IMBALANCE",
+    "CREEP_EARLY": "MEMORY RISING",
+    "CREEP_CONFIRMED": "MEMORY CREEP",
+}
+
+
+def _log_step_memory_diagnostic_error(message: str, exc: Exception) -> None:
+    """
+    Log diagnostic enrichment failures without blocking training/reporting.
+
+    Step-memory diagnostics are advisory. A rule or adapter failure should be
+    visible to TraceML maintainers through the shared error logger, but it must
+    not prevent a final summary from being produced.
+    """
+    try:
+        from traceml_ai.loggers.error_log import get_error_logger
+
+        get_error_logger("StepMemoryDiagnostics").exception(
+            "[TraceML] %s", message
+        )
+    except Exception:
+        pass
+
+
+@dataclass(frozen=True)
+class StepMemoryDiagnosis(BaseDiagnosis):
+    """
+    Diagnosis payload for step-memory live and summary paths.
+    """
+
+    kind: StepMemoryDiagnosisKind
+    metric: str
+    steps_used: int
+    worst_rank: Optional[int] = None
+    note: Optional[str] = None
+    confidence: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        validate_confidence(self.confidence)
+
+
+@dataclass(frozen=True)
+class StepMemoryDiagnosisInput:
+    """Structured input for final-summary Step Memory diagnosis."""
+
+    metrics: Sequence[StepMemoryCombinedMetric]
+    gpu_total_bytes: Optional[float]
+    no_gpu_detected: bool = False
+    thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS
+
+
+@dataclass(frozen=True)
+class WindowCreepEvidence:
+    """
+    Memory creep evidence derived from the shared trend engine.
+
+    `early` means the memory bands are strictly increasing
+    (baseline < middle < recent). `confirmed` means that same rising shape has
+    also crossed the configured absolute-growth threshold.
+    """
+
+    eligible: bool
+
+    baseline_avg_bytes: Optional[float]
+    mid_avg_bytes: Optional[float]
+    recent_avg_bytes: Optional[float]
+
+    overall_abs_delta_bytes: Optional[float]
+    overall_worst_growth_pct: Optional[float]
+    overall_median_growth_pct: Optional[float]
+    trend_window_steps: Optional[int]
+    avg_growth_bytes_per_step: Optional[float]
+
+    early: bool
+    confirmed: bool
+    score: float
+
+
+@dataclass(frozen=True)
+class MetricAssessment:
+    """
+    Internal normalized assessment for one step-memory metric.
+    """
+
+    metric: StepMemoryCombinedMetric
+    steps_used: int
+    worst_rank: Optional[int]
+    worst_peak_bytes: float
+    skew_pct: float
+    pressure_frac: Optional[float]
+    creep: WindowCreepEvidence
+
+
+def build_step_memory_diagnosis(
+    metrics: Sequence[StepMemoryCombinedMetric],
+    *,
+    gpu_total_bytes: Optional[float] = None,
+    thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS,
+) -> StepMemoryDiagnosis:
+    """
+    Build one primary diagnosis from step-memory combined metrics.
+
+    This function evaluates both allocated and reserved memory metrics when
+    available, then selects the strongest signal according to the diagnosis
+    priority defined above.
+    """
+    if not metrics:
+        return _mk_diag(
+            kind="NO_DATA",
+            severity="info",
+            metric="peak_reserved",
+            steps_used=0,
+            reason="No step-memory data yet.",
+            action="Wait for more completed steps.",
+            confidence=0.0,
+        )
+
+    assessments = [
+        _assess_metric(
+            metric=metric,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
+        for metric in metrics
+    ]
+
+    ready = [
+        assessment
+        for assessment in assessments
+        if assessment.steps_used >= int(thresholds.min_steps_for_diag)
+    ]
+    if not ready:
+        best = max(assessments, key=lambda item: item.steps_used)
+        min_steps = int(thresholds.min_steps_for_diag)
+        return _mk_diag(
+            kind="NO_DATA",
+            severity="info",
+            metric=best.metric.metric,
+            steps_used=best.steps_used,
+            worst_rank=best.worst_rank,
+            reason=f"Need at least {min_steps} completed steps.",
+            action="Keep monitoring.",
+            confidence=0.0,
+        )
+
+    pressure_hits = [
+        item
+        for item in ready
+        if item.pressure_frac is not None
+        and item.pressure_frac >= float(thresholds.pressure_warn_fraction)
+    ]
+    if pressure_hits:
+        best = max(
+            pressure_hits,
+            key=lambda item: float(item.pressure_frac or 0.0),
+        )
+        sev = _severity(
+            float(best.pressure_frac or 0.0),
+            thresholds.pressure_crit_fraction,
+        )
+        return _mk_diag(
+            kind="HIGH_PRESSURE",
+            severity=sev,
+            metric=best.metric.metric,
+            steps_used=best.steps_used,
+            worst_rank=best.worst_rank,
+            reason=(
+                f"{_metric_label(best.metric.metric)} is near device capacity "
+                f"(~{float(best.pressure_frac or 0.0) * 100.0:.0f}%)."
+            ),
+            action="Reduce memory load.",
+            confidence=0.9 if sev == "crit" else 0.8,
+        )
+
+    imbalance_hits = []
+    for item in ready:
+        sev = classify_imbalance_severity(
+            skew_pct=item.skew_pct,
+            pressure_frac=item.pressure_frac,
+            thresholds=thresholds,
+        )
+        if sev is not None:
+            imbalance_hits.append((item, sev))
+
+    if imbalance_hits:
+        best, sev = max(
+            imbalance_hits,
+            key=lambda pair: (
+                1 if pair[1] == "crit" else 0,
+                pair[0].skew_pct,
+                float(pair[0].pressure_frac or 0.0),
+            ),
+        )
+        return _mk_diag(
+            kind="IMBALANCE",
+            severity=sev,
+            metric=best.metric.metric,
+            steps_used=best.steps_used,
+            worst_rank=best.worst_rank,
+            reason=(
+                f"{_metric_label(best.metric.metric)} shows "
+                f"+{best.skew_pct * 100.0:.1f}% cross-rank skew "
+                f"at ~{float(best.pressure_frac or 0.0) * 100.0:.0f}% "
+                "of device capacity."
+            ),
+            action="Inspect per-rank workload.",
+            confidence=0.85 if sev == "crit" else 0.75,
+        )
+
+    confirmed_hits = [item for item in ready if item.creep.confirmed]
+    if confirmed_hits:
+        best = max(confirmed_hits, key=lambda item: item.creep.score)
+        return _mk_diag(
+            kind="CREEP_CONFIRMED",
+            severity="warn",
+            metric=best.metric.metric,
+            steps_used=best.steps_used,
+            worst_rank=best.worst_rank,
+            reason=f"{_metric_label(best.metric.metric)} is rising across the window.",
+            action=(
+                "Check retained tensors or caches; continued growth can "
+                "lead to OOM."
+            ),
+            note=_format_creep_note(best.creep),
+            confidence=0.88,
+        )
+
+    early_hits = [item for item in ready if item.creep.early]
+    if early_hits:
+        best = max(early_hits, key=lambda item: item.creep.score)
+        return _mk_diag(
+            kind="CREEP_EARLY",
+            severity="info",
+            metric=best.metric.metric,
+            steps_used=best.steps_used,
+            worst_rank=best.worst_rank,
+            reason=(
+                f"{_metric_label(best.metric.metric)} is rising "
+                "from early to recent steps."
+            ),
+            action="Watch the next window.",
+            note=_format_creep_note(best.creep),
+            confidence=0.60,
+        )
+
+    baseline = _pick_balanced_metric(ready)
+    return _mk_diag(
+        kind="BALANCED",
+        severity="info",
+        metric=baseline.metric.metric,
+        steps_used=baseline.steps_used,
+        worst_rank=baseline.worst_rank,
+        reason="No clear pressure, imbalance, or creep signal.",
+        action="Keep monitoring.",
+        confidence=0.75,
+    )
+
+
+def build_step_memory_summary_diagnosis_result(
+    metrics: Sequence[StepMemoryCombinedMetric],
+    *,
+    gpu_total_bytes: Optional[float] = None,
+    no_gpu_detected: bool = False,
+    thresholds: StepMemoryDiagnosisThresholds = DEFAULT_STEP_MEMORY_THRESHOLDS,
+) -> DiagnosticResult[StepMemoryDiagnosis]:
+    """
+    Build the summary-oriented step-memory diagnosis result.
+
+    Summary diagnosis is rule-first: normalized metric signals are evaluated by
+    modular rules, sorted by priority, and the top issue becomes primary. The
+    live renderer path keeps using `build_step_memory_diagnosis()`.
+    """
+    if no_gpu_detected:
+        primary = _mk_diag(
+            kind="NO_GPU",
+            severity="info",
+            metric="peak_reserved",
+            steps_used=0,
+            reason=(
+                "No GPU detected. Step memory uses torch-based GPU memory "
+                "telemetry."
+            ),
+            action="Step memory is not applicable for this run.",
+            confidence=1.0,
+        )
+        return DiagnosticResult(primary=primary)
+
+    from .adapters import build_step_memory_summary_signals
+    from .rules import (
+        run_step_memory_summary_rules,
+        sort_step_memory_summary_issues,
+    )
+
+    try:
+        signals = build_step_memory_summary_signals(
+            metrics,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
+
+        issues = []
+        metric_attribution: Dict[str, Any] = {}
+        for metric in metrics:
+            signal = signals.get(metric.metric)
+            if signal is None:
+                continue
+            issues.extend(run_step_memory_summary_rules(signal))
+            metric_attribution[metric.metric] = {
+                "metric": signal.metric,
+                "device": signal.device,
+                "steps_used": signal.steps_used,
+                "window_size": signal.window_size,
+                "completed_step": signal.completed_step,
+                "ranks_seen": signal.ranks_seen,
+                "worst_rank": signal.worst_rank,
+                "worst_peak_bytes": signal.worst_peak_bytes,
+                "median_peak_bytes": signal.median_peak_bytes,
+                "skew_ratio": signal.skew_ratio,
+                "skew_pct": signal.skew_pct,
+                "pressure_frac": signal.pressure_frac,
+                "trend": {
+                    "eligible": signal.trend.eligible,
+                    "baseline_avg_bytes": signal.trend.baseline_avg_bytes,
+                    "mid_avg_bytes": signal.trend.mid_avg_bytes,
+                    "recent_avg_bytes": signal.trend.recent_avg_bytes,
+                    "overall_abs_delta_bytes": (
+                        signal.trend.overall_abs_delta_bytes
+                    ),
+                    "overall_worst_growth_pct": (
+                        signal.trend.overall_worst_growth_pct
+                    ),
+                    "overall_median_growth_pct": (
+                        signal.trend.overall_median_growth_pct
+                    ),
+                    "early": signal.trend.early,
+                    "confirmed": signal.trend.confirmed,
+                    "score": signal.trend.score,
+                },
+            }
+    except Exception as exc:
+        _log_step_memory_diagnostic_error(
+            "Step-memory summary diagnostic enrichment failed",
+            exc,
+        )
+        primary = build_step_memory_diagnosis(
+            metrics,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
+        metric_attribution = {}
+        issues = []
+    else:
+        issues = list(sort_step_memory_summary_issues(issues))
+        primary = _summary_primary_from_rule_result(
+            metrics=metrics,
+            issues=issues,
+            metric_attribution=metric_attribution,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
+
+    return DiagnosticResult(
+        primary=primary,
+        issues=tuple(issues),
+        metric_attribution=metric_attribution,
+    )
+
+
+def diagnose_step_memory_summary(
+    data: StepMemoryDiagnosisInput,
+) -> DiagnosticResult[StepMemoryDiagnosis]:
+    """Run final-summary Step Memory diagnosis from the typed input contract."""
+    return build_step_memory_summary_diagnosis_result(
+        data.metrics,
+        gpu_total_bytes=data.gpu_total_bytes,
+        no_gpu_detected=data.no_gpu_detected,
+        thresholds=data.thresholds,
+    )
+
+
+def _summary_primary_from_rule_result(
+    *,
+    metrics: Sequence[StepMemoryCombinedMetric],
+    issues: Sequence[Any],
+    metric_attribution: Dict[str, Any],
+    gpu_total_bytes: Optional[float],
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> StepMemoryDiagnosis:
+    """Build the summary primary diagnosis from sorted rule issues."""
+    if issues:
+        return _summary_primary_from_issue(
+            issue=issues[0],
+            metric_attribution=metric_attribution,
+        )
+
+    return _summary_fallback_primary(
+        metrics=metrics,
+        metric_attribution=metric_attribution,
+        gpu_total_bytes=gpu_total_bytes,
+        thresholds=thresholds,
+    )
+
+
+def _summary_primary_from_issue(
+    *,
+    issue: Any,
+    metric_attribution: Dict[str, Any],
+) -> StepMemoryDiagnosis:
+    metric = str(getattr(issue, "metric", None) or "peak_reserved")
+    signal = metric_attribution.get(metric, {})
+    steps_used = int(signal.get("steps_used") or 0)
+    ranks = tuple(getattr(issue, "ranks", ()) or ())
+    worst_rank = int(ranks[0]) if ranks else signal.get("worst_rank")
+    note = None
+    evidence = getattr(issue, "evidence", None)
+    if isinstance(evidence, dict):
+        raw_note = evidence.get("note")
+        note = str(raw_note) if raw_note else None
+
+    confidence_by_kind = {
+        "HIGH_PRESSURE": 0.9 if issue.severity == "crit" else 0.8,
+        "IMBALANCE": 0.85 if issue.severity == "crit" else 0.75,
+        "CREEP_CONFIRMED": 0.88,
+        "CREEP_EARLY": 0.60,
+    }
+
+    return _mk_diag(
+        kind=cast(StepMemoryDiagnosisKind, issue.kind),
+        severity=issue.severity,
+        metric=metric,
+        steps_used=steps_used,
+        worst_rank=worst_rank,
+        reason=issue.summary,
+        action=issue.action,
+        note=note,
+        confidence=confidence_by_kind.get(issue.kind),
+    )
+
+
+def _summary_fallback_primary(
+    *,
+    metrics: Sequence[StepMemoryCombinedMetric],
+    metric_attribution: Dict[str, Any],
+    gpu_total_bytes: Optional[float],
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> StepMemoryDiagnosis:
+    """Return NO_DATA or BALANCED when no summary rule fires."""
+    if not metrics:
+        return _mk_diag(
+            kind="NO_DATA",
+            severity="info",
+            metric="peak_reserved",
+            steps_used=0,
+            reason="No step-memory data yet.",
+            action="Wait for more completed steps.",
+            confidence=0.0,
+        )
+
+    signals = list(metric_attribution.values())
+    if not signals:
+        return build_step_memory_diagnosis(
+            metrics,
+            gpu_total_bytes=gpu_total_bytes,
+            thresholds=thresholds,
+        )
+
+    ready = [
+        signal
+        for signal in signals
+        if int(signal.get("steps_used") or 0)
+        >= int(thresholds.min_steps_for_diag)
+    ]
+    if not ready:
+        best = max(signals, key=lambda item: int(item.get("steps_used") or 0))
+        min_steps = int(thresholds.min_steps_for_diag)
+        return _mk_diag(
+            kind="NO_DATA",
+            severity="info",
+            metric=str(best.get("metric") or "peak_reserved"),
+            steps_used=int(best.get("steps_used") or 0),
+            worst_rank=best.get("worst_rank"),
+            reason=f"Need at least {min_steps} completed steps.",
+            action="Keep monitoring.",
+            confidence=0.0,
+        )
+
+    baseline = _pick_summary_balanced_signal(ready)
+    return _mk_diag(
+        kind="BALANCED",
+        severity="info",
+        metric=str(baseline.get("metric") or "peak_reserved"),
+        steps_used=int(baseline.get("steps_used") or 0),
+        worst_rank=baseline.get("worst_rank"),
+        reason="No clear pressure, imbalance, or creep signal.",
+        action="Keep monitoring.",
+        confidence=0.75,
+    )
+
+
+def _pick_summary_balanced_signal(
+    signals: Sequence[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Prefer reserved memory for neutral summary wording."""
+    by_metric = {str(item.get("metric")): item for item in signals}
+    if "peak_reserved" in by_metric:
+        return by_metric["peak_reserved"]
+    if "peak_allocated" in by_metric:
+        return by_metric["peak_allocated"]
+    return max(signals, key=lambda item: float(item.get("steps_used") or 0))
+
+
+def _assess_metric(
+    *,
+    metric: StepMemoryCombinedMetric,
+    gpu_total_bytes: Optional[float],
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> MetricAssessment:
+    steps_used = int(metric.summary.steps_used or 0)
+    worst_rank = metric.summary.worst_rank
+    worst_peak_bytes = _safe_non_negative(metric.summary.worst_peak)
+    skew_pct = _safe_non_negative(metric.summary.skew_pct)
+
+    pressure_frac = _pressure_fraction(worst_peak_bytes, gpu_total_bytes)
+    creep = _compute_window_creep_evidence(
+        worst_series_bytes=metric.series.worst,
+        median_series_bytes=metric.series.median,
+        steps_used=steps_used,
+        thresholds=thresholds,
+    )
+
+    return MetricAssessment(
+        metric=metric,
+        steps_used=steps_used,
+        worst_rank=worst_rank,
+        worst_peak_bytes=worst_peak_bytes,
+        skew_pct=skew_pct,
+        pressure_frac=pressure_frac,
+        creep=creep,
+    )
+
+
+def _compute_window_creep_evidence(
+    *,
+    worst_series_bytes: Sequence[float],
+    median_series_bytes: Sequence[float],
+    steps_used: int,
+    thresholds: StepMemoryDiagnosisThresholds,
+) -> WindowCreepEvidence:
+    """
+    Adapt shared window creep evidence to the live diagnosis payload.
+    """
+    evidence = evaluate_step_memory_window_creep(
+        worst_series_bytes=worst_series_bytes,
+        median_series_bytes=median_series_bytes,
+        steps_used=steps_used,
+        thresholds=thresholds,
+    )
+    return _window_creep_evidence_to_diagnosis(evidence)
+
+
+def _window_creep_evidence_to_diagnosis(
+    evidence: StepMemoryWindowCreepEvidence,
+) -> WindowCreepEvidence:
+    """Convert shared creep evidence into the API-local dataclass."""
+    return WindowCreepEvidence(
+        eligible=evidence.eligible,
+        baseline_avg_bytes=evidence.baseline_avg_bytes,
+        mid_avg_bytes=evidence.mid_avg_bytes,
+        recent_avg_bytes=evidence.recent_avg_bytes,
+        overall_abs_delta_bytes=evidence.overall_abs_delta_bytes,
+        overall_worst_growth_pct=evidence.overall_worst_growth_pct,
+        overall_median_growth_pct=evidence.overall_median_growth_pct,
+        trend_window_steps=evidence.trend_window_steps,
+        avg_growth_bytes_per_step=evidence.avg_growth_bytes_per_step,
+        early=evidence.early,
+        confirmed=evidence.confirmed,
+        score=evidence.score,
+    )
+
+
+def _pick_balanced_metric(
+    assessments: Sequence[MetricAssessment],
+) -> MetricAssessment:
+    """
+    Prefer reserved for neutral reporting, then allocated, then highest score.
+    """
+    by_name = {item.metric.metric: item for item in assessments}
+    if "peak_reserved" in by_name:
+        return by_name["peak_reserved"]
+    if "peak_allocated" in by_name:
+        return by_name["peak_allocated"]
+    return max(assessments, key=lambda item: item.creep.score)
+
+
+def _pressure_fraction(
+    worst_peak_bytes: float,
+    gpu_total_bytes: Optional[float],
+) -> Optional[float]:
+    try:
+        total = float(gpu_total_bytes) if gpu_total_bytes is not None else 0.0
+    except Exception:
+        total = 0.0
+    if total <= 0.0:
+        return None
+    return max(0.0, float(worst_peak_bytes) / total)
+
+
+def _format_creep_note(evidence: WindowCreepEvidence) -> Optional[str]:
+    """
+    Format a compact, action-oriented creep note for CLI and dashboard display.
+
+    Example:
+    Memory creep detected: increasing by ~1.2 MiB / step over the last 1000 steps.
+    """
+    if not evidence.eligible:
+        return None
+    prefix = "Memory creep detected" if evidence.confirmed else "Memory rising"
+
+    if (
+        evidence.avg_growth_bytes_per_step is not None
+        and evidence.trend_window_steps is not None
+        and evidence.avg_growth_bytes_per_step > 0.0
+        and evidence.trend_window_steps >= 2
+    ):
+        return (
+            f"{prefix}: increasing by "
+            f"~{_fmt_bytes(evidence.avg_growth_bytes_per_step)} / step "
+            f"over the last {int(evidence.trend_window_steps)} steps."
+        )
+
+    parts = []
+    if evidence.overall_abs_delta_bytes is not None:
+        parts.append(f"+{_fmt_bytes(abs(evidence.overall_abs_delta_bytes))}")
+    if evidence.overall_worst_growth_pct is not None:
+        parts.append(f"(~{evidence.overall_worst_growth_pct * 100.0:.0f}%)")
+    if not parts:
+        return None
+    return f"{prefix}: " + " ".join(parts)
+
+
+def _metric_label(metric_name: str) -> str:
+    return metric_name.replace("_", " ")
+
+
+def _mk_diag(
+    *,
+    kind: StepMemoryDiagnosisKind,
+    severity: Severity,
+    metric: str,
+    steps_used: int,
+    reason: str,
+    action: str,
+    worst_rank: Optional[int] = None,
+    note: Optional[str] = None,
+    confidence: Optional[float] = None,
+) -> StepMemoryDiagnosis:
+    return StepMemoryDiagnosis(
+        kind=kind,
+        severity=severity,
+        status=_STATUS_BY_KIND[kind],
+        reason=reason,
+        action=action,
+        metric=metric,
+        steps_used=int(steps_used),
+        worst_rank=worst_rank,
+        note=note,
+        confidence=confidence,
+    )
+
+
+def _safe_non_negative(value: float) -> float:
+    try:
+        out = float(value)
+    except Exception:
+        return 0.0
+    if out < 0.0:
+        return 0.0
+    return out
+
+
+def _severity(value: float, crit_threshold: float) -> Severity:
+    return (
+        "crit"
+        if _safe_non_negative(value) >= float(crit_threshold)
+        else "warn"
+    )
+
+
+def _fmt_bytes(v: float) -> str:
+    x = abs(float(v))
+    kib = 1024.0
+    mib = kib * 1024.0
+    gib = mib * 1024.0
+    if x >= gib:
+        return f"{x / gib:.2f} GiB"
+    if x >= mib:
+        return f"{x / mib:.1f} MiB"
+    if x >= kib:
+        return f"{x / kib:.1f} KiB"
+    return f"{x:.0f} B"
+
+
+__all__ = [
+    "StepMemoryDiagnosisKind",
+    "StepMemoryDiagnosisThresholds",
+    "DEFAULT_STEP_MEMORY_THRESHOLDS",
+    "StepMemoryDiagnosis",
+    "StepMemoryDiagnosisInput",
+    "build_step_memory_diagnosis",
+    "build_step_memory_summary_diagnosis_result",
+    "diagnose_step_memory_summary",
+]

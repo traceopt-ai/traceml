@@ -84,7 +84,7 @@ You can keep using W&B logging in your training script and launch the run throug
 Example:
 
 ```python
-import traceml
+import traceml_ai as traceml
 import wandb
 
 wandb.init(project="my-project")
@@ -109,46 +109,42 @@ traceml run train.py
 This gives you:
 
 - W&B for run tracking
-- TraceML for live bottleneck diagnosis
+- TraceML for the final bottleneck summary
 
 ---
 
 ## Log the final TraceML summary to W&B
 
-If you want a quieter run and a structured TraceML summary you can log at the
-end, launch in summary mode:
+TraceML runs in summary mode by default. If you want to make that explicit,
+launch with:
 
 ```bash
 traceml run train.py --mode=summary
 ```
 
-Then request the finalized TraceML summary near the end of your script and log
-selected fields into W&B:
+Then request TraceML's compact tracker summary near the end of your script and
+log it into W&B:
 
 ```python
-import traceml
+import traceml_ai as traceml
 import wandb
 
 wandb.init(project="my-project")
 
 # training loop ...
 
-summary = traceml.final_summary(print_text=True)
+summary = traceml.summary(print_text=True)
 if summary is not None:
-    wandb.summary["traceml/step_time_status"] = summary["step_time"][
-        "diagnosis"
-    ]["status"]
-    wandb.summary["traceml/step_memory_status"] = summary["step_memory"][
-        "diagnosis"
-    ]["status"]
-    wandb.summary["traceml/duration_s"] = summary.get("duration_s")
+    wandb.log(summary)
 ```
 
 This lets W&B stay your experiment system of record while TraceML contributes a
 clean bottleneck diagnosis at the end of the run.
 
-If you also store `final_summary.json` as a run artifact, you can reuse it
-later with `traceml compare`.
+`traceml.summary()` returns a flat dict of diagnosis statuses and global
+average metrics. It is derived from the canonical `final_summary.json` artifact,
+which TraceML generates once per run and reuses on later calls. Keep that JSON
+as a run artifact when you want to use `traceml compare`.
 
 ---
 
@@ -157,7 +153,7 @@ later with `traceml compare`.
 You can do the same with MLflow.
 
 ```python
-import traceml
+import traceml_ai as traceml
 import mlflow
 
 mlflow.start_run()
@@ -188,33 +184,43 @@ This gives you:
 
 ## Log the final TraceML summary to MLflow
 
-TraceML can also return a structured final summary for MLflow logging:
+TraceML can also return a compact tracker summary for MLflow logging:
 
 ```python
-import traceml
+import traceml_ai as traceml
 import mlflow
 
 mlflow.start_run()
 
 # training loop ...
 
-summary = traceml.final_summary(print_text=True)
+summary = traceml.summary(print_text=True)
 if summary is not None:
-    mlflow.log_param(
-        "traceml_step_time_status",
-        summary["step_time"]["diagnosis"]["status"],
-    )
-    mlflow.log_param(
-        "traceml_step_memory_status",
-        summary["step_memory"]["diagnosis"]["status"],
-    )
-    mlflow.log_dict(summary, "traceml/final_summary.json")
+    numeric = {
+        k: v for k, v in summary.items()
+        if isinstance(v, (int, float)) and not isinstance(v, bool)
+    }
+    tags = {
+        k.replace("/", "."): v for k, v in summary.items()
+        if isinstance(v, str)
+    }
+
+    mlflow.log_metrics(numeric)
+    mlflow.set_tags(tags)
 ```
 
-This is a good fit when you want both a compact diagnosis in your run metadata
-and the full TraceML summary JSON attached to the run.
+This is a good fit when you want a compact diagnosis in your run metadata.
 
-That attached JSON is also a good input for `traceml compare` later.
+If you also want the full TraceML artifact, call `traceml.final_summary()` and
+attach that JSON to the run:
+
+```python
+full = traceml.final_summary()
+if full is not None:
+    mlflow.log_dict(full, "traceml/final_summary.json")
+```
+
+That attached JSON is a good input for `traceml compare` later.
 
 ---
 
@@ -235,7 +241,7 @@ This is useful when:
 
 A practical workflow is:
 
-1. run training with TraceML summary mode
+1. run training with TraceML
 2. keep the TraceML final summary JSON as a W&B or MLflow artifact
 3. compare two saved summaries locally with `traceml compare`
 
@@ -251,14 +257,18 @@ Good ways to reduce that:
 
 - disable `tqdm` progress bars
 - reduce extra console logging
-- use `--mode=summary` if you only want the final TraceML summary
-- use the local UI if the terminal feels crowded
+- use the default summary mode if you only want the final TraceML summary
+- use the local UI on a single-node run if the terminal feels crowded
 
 Launch the local UI with:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
+
+Dashboard mode is intended for single-node runs. For multi-node runs, keep the
+default summary mode and log the final summary artifact.
 
 This is often the cleanest option when you want:
 
@@ -292,7 +302,7 @@ It is not a TraceML requirement.
 A clean adoption path is:
 
 1. start with `traceml run train.py`
-2. use `--mode=summary` when you want a quieter run and a structured final summary
+2. use `--mode=cli` or `--mode=dashboard` when you want live feedback on a single-node run
 3. log selected TraceML summary fields into W&B or MLflow if useful
 4. keep the TraceML final summary JSON for important runs
 5. compare two saved runs later with `traceml compare`

@@ -1,0 +1,58 @@
+"""
+Public TraceML package surface.
+
+This module intentionally keeps import-time work minimal so launcher entry
+points do not pull in optional training dependencies like PyTorch unless the
+user actually accesses the instrumentation API.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+__version__ = "0.3.1"
+
+__all__ = [
+    "__version__",
+    "trace_step",
+    "trace_model_instance",
+    "summary",
+    "final_summary",
+    "start",
+    "init",
+    "wrap_dataloader_fetch",
+    "wrap_forward",
+    "wrap_backward",
+    "wrap_optimizer",
+    "wrap_h2d",
+]
+
+
+if TYPE_CHECKING:
+    from traceml_ai.api import (
+        final_summary,
+        init,
+        start,
+        summary,
+        trace_model_instance,
+        trace_step,
+        wrap_backward,
+        wrap_dataloader_fetch,
+        wrap_forward,
+        wrap_h2d,
+        wrap_optimizer,
+    )
+
+
+def __getattr__(name: str) -> Any:
+    """
+    Lazily resolve public API symbols from `traceml_ai.api`.
+
+    This avoids importing the full SDK stack when callers only need light
+    utilities such as CLI helpers.
+    """
+    if name in __all__:
+        from traceml_ai import api as _api
+
+        return getattr(_api, name)
+    raise AttributeError(f"module 'traceml_ai' has no attribute {name!r}")

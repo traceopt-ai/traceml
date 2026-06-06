@@ -20,9 +20,45 @@ Live UI and final summaries are separate paths. They can share diagnostics, but
 they should pass explicit policies such as `LIVE_STEP_TIME_POLICY` or
 `SUMMARY_STEP_TIME_POLICY` when thresholds differ.
 
+## TraceML Lifecycle
+
+TraceML has two runtime pieces:
+
+- one aggregator, which receives TCP telemetry, writes SQLite history, and
+  creates the final summary
+- one runtime per training process, which samples local telemetry and sends
+  batches to the aggregator
+
+CLI launchers may run these pieces as subprocesses. Framework integrations may
+run them inside Ray actors or worker processes. Both paths should use
+`traceml_ai.runtime.lifecycle` so startup and shutdown stay consistent.
+
+The owner that starts a component must stop it. Use `try/finally` around
+training work, and make stop paths safe to call more than once.
+
+## Ray Integration
+
+Ray support lives in `traceml_ai.integrations.ray` and should stay separate from
+the core runtime. Do not import Ray from `traceml_ai.runtime`, `traceml_ai.aggregator`,
+or the public package surfaces (`traceml_ai` or `traceml`).
+
+The integration has two owners:
+
+- the Ray aggregator actor owns `start_aggregator(...)` and `handle.stop(...)`
+- the Ray worker wrapper owns `start_runtime(...)` and `handle.stop(...)`
+
+Ray owns scheduling, process groups, ranks, and DDP/NCCL/Gloo communication.
+TraceML only starts telemetry components inside the processes Ray already
+created. Keep future Ray changes in that shape: no second launcher, no Ray Train
+internals, and no duplicated aggregator/runtime lifecycle code.
+
+
+The live implementation tree is `src/traceml_ai/`. The `src/traceml/` package is
+a deprecated compatibility alias and should not receive implementation code.
+
 ## Add a Diagnostic Rule
 
-Diagnostics live under `src/traceml/diagnostics/<domain>/`.
+Diagnostics live under `src/traceml_ai/diagnostics/<domain>/`.
 
 Current domains include:
 
@@ -51,7 +87,7 @@ Tests should live in `tests/diagnostics/` and cover:
 
 ## Add a Summary Section
 
-Final-report sections live under `src/traceml/reporting/sections/`.
+Final-report sections live under `src/traceml_ai/reporting/sections/`.
 
 Current sections:
 
@@ -69,7 +105,7 @@ formatter.py  render section text
 model.py      section-local data helpers
 ```
 
-Register sections through `src/traceml/reporting/final.py`. Keep the aggregator
+Register sections through `src/traceml_ai/reporting/final.py`. Keep the aggregator
 as a caller only; report assembly belongs in `reporting`.
 
 Tests should live in `tests/reporting/summary/`. Prefer small SQLite fixtures
@@ -78,25 +114,26 @@ lines.
 
 ## Add a Sampler
 
-Runtime sampler selection is in `src/traceml/runtime/sampler_registry.py`.
+Runtime sampler selection is in `src/traceml_ai/runtime/sampler_registry.py`.
 
 To add a sampler:
 
-1. Implement a `BaseSampler` subclass under `src/traceml/samplers/`.
+1. Implement a `BaseSampler` subclass under `src/traceml_ai/samplers/`.
 2. Add a `SamplerSpec` to `DEFAULT_SAMPLER_REGISTRY`.
 3. Restrict it by `profiles` and `modes` so it only runs where needed.
 4. Add SQLite projection, renderer, or summary code only if the data is
    user-facing.
 
-Layer-level samplers are currently `deep` profile only. Keep advanced profiling
-out of normal `run` and `watch` paths unless there is a strong reason.
+Deep/layer profiling has been removed from the public CLI for now. Keep normal
+sampler changes scoped to `run` and `watch`, and do not document layer-level
+profiling as a public path unless that surface is reintroduced deliberately.
 
 Tests should live in `tests/runtime/` for selection behavior and in a more
 specific folder if the sampler has domain logic.
 
 ## Add a Compare Metric
 
-Compare code lives under `src/traceml/reporting/compare/`.
+Compare code lives under `src/traceml_ai/reporting/compare/`.
 
 Important files:
 
@@ -121,8 +158,8 @@ Live display code is renderer-driven. CLI and dashboard renderers may differ.
 
 Relevant paths:
 
-- `src/traceml/renderers/`
-- `src/traceml/aggregator/display_drivers/`
+- `src/traceml_ai/renderers/`
+- `src/traceml_ai/aggregator/display_drivers/`
 
 Keep renderer methods focused on presentation. Put data shaping in a compute
 object or formatter when the logic is reusable or non-trivial.
@@ -131,7 +168,7 @@ object or formatter when the logic is reusable or non-trivial.
 
 TraceML should not break user training because optional telemetry, rendering,
 or reporting failed. Existing code logs advisory failures through
-`traceml.loggers.error_log.get_error_logger`.
+`traceml_ai.loggers.error_log.get_error_logger`.
 
 Use that pattern for non-critical paths:
 

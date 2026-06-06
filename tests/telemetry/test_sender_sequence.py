@@ -1,3 +1,9 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 Tests for the seq-counter optimisation in Database, DBIncrementalSender,
 and DatabaseWriter.
@@ -13,8 +19,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from traceml.database.database import Database
-from traceml.utils.msgpack_codec import Decoder as MsgpackDecoder
+from traceml_ai.database.database import Database
+from traceml_ai.runtime.sender import SenderIdentity
+from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 # Database.get_append_count() tests
 
@@ -68,7 +75,7 @@ class TestDBIncrementalSender:
     """Verify the sender's seq-counter flush logic."""
 
     def _make_sender(self, db, max_rows_per_flush=-1):
-        from traceml.database.database_sender import DBIncrementalSender
+        from traceml_ai.database.database_sender import DBIncrementalSender
 
         mock_transport = MagicMock()
         sender = DBIncrementalSender(
@@ -79,6 +86,11 @@ class TestDBIncrementalSender:
             max_rows_per_flush=max_rows_per_flush,
         )
         return sender, mock_transport
+
+    def _tables(self, payload):
+        assert set(payload) == {"meta", "body"}
+        assert set(payload["body"]) == {"tables"}
+        return payload["body"]["tables"]
 
     def test_skip_when_no_new_rows(self):
         db = Database(sampler_name="test")
@@ -104,7 +116,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         assert len(rows_sent) == 3
 
         # Add 2 more, flush again
@@ -114,7 +126,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         assert len(rows_sent) == 2
         assert rows_sent[0]["step"] == 3
         assert rows_sent[1]["step"] == 4
@@ -136,7 +148,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         # new_count=5, len(deque)=3 → sends all 3 available
         assert len(rows_sent) == 3
         assert rows_sent[0]["i"] == 5
@@ -152,7 +164,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         assert len(rows_sent) == 1
         assert rows_sent[0]["step"] == 4  # latest
 
@@ -165,8 +177,9 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        assert "t1" in payload["tables"]
-        assert "t2" in payload["tables"]
+        tables = self._tables(payload)
+        assert "t1" in tables
+        assert "t2" in tables
 
         # Add only to t2
         transport.send.reset_mock()
@@ -174,9 +187,31 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        assert "t1" not in payload["tables"]
-        assert "t2" in payload["tables"]
-        assert len(payload["tables"]["t2"]) == 1
+        tables = self._tables(payload)
+        assert "t1" not in tables
+        assert "t2" in tables
+        assert len(tables["t2"]) == 1
+
+    def test_payload_rank_uses_attached_runtime_rank(self):
+        db = Database(sampler_name="test")
+        sender, transport = self._make_sender(db)
+        sender.identity = SenderIdentity(global_rank=5, local_rank=1)
+
+        db.add_record("t1", {"v": 1})
+        sender.flush()
+
+        payload = transport.send.call_args[0][0]
+        assert set(payload) == {"meta", "body"}
+        assert payload["meta"]["rank"] == 5
+        assert payload["meta"]["global_rank"] == 5
+        assert payload["meta"]["local_rank"] == 1
+        assert payload["meta"]["world_size"] == 1
+        assert payload["meta"]["local_world_size"] == 1
+        assert payload["meta"]["node_rank"] == 0
+        assert payload["meta"]["hostname"] == ""
+        assert payload["meta"]["pid"] == 0
+        assert payload["meta"]["sampler"] == "test_sampler"
+        assert isinstance(payload["meta"]["timestamp"], float)
 
 
 # DatabaseWriter tests
@@ -204,7 +239,7 @@ class TestDatabaseWriter:
         """Writer only writes new rows on subsequent flushes."""
         db = Database(sampler_name="test")
 
-        with patch("traceml.database.database_writer.config") as mock_cfg:
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
             mock_cfg.enable_logging = True
             mock_cfg.logs_dir = str(tmp_path)
 
@@ -234,7 +269,7 @@ class TestDatabaseWriter:
         """No disk I/O when nothing is new."""
         db = Database(sampler_name="test")
 
-        with patch("traceml.database.database_writer.config") as mock_cfg:
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
             mock_cfg.enable_logging = True
 
             writer = db.writer
@@ -256,7 +291,7 @@ class TestDatabaseWriter:
         """Writer handles eviction gracefully, writing available rows."""
         db = Database(sampler_name="test", max_rows=3)
 
-        with patch("traceml.database.database_writer.config") as mock_cfg:
+        with patch("traceml_ai.database.database_writer.config") as mock_cfg:
             mock_cfg.enable_logging = True
 
             writer = db.writer

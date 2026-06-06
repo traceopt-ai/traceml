@@ -1,7 +1,13 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from dataclasses import dataclass
 
-from traceml.core.summaries import SummaryResult
-from traceml.reporting.final import (
+from traceml_ai.core.summaries import SummaryResult
+from traceml_ai.reporting.final import (
     FinalReportGenerator,
     build_summary_payload,
 )
@@ -48,18 +54,26 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.2
+    assert payload["schema_version"] == 1.4
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
         "generated_at",
         "duration_s",
+        "meta",
         "system",
         "process",
         "step_time",
         "step_memory",
         "text",
     ]
+    assert payload["meta"] == {
+        "run_name": None,
+        "mode": "no_data",
+        "world_size": None,
+        "nodes_observed": None,
+        "gpus_observed": None,
+    }
     assert "TraceML Run Summary | duration 10.0s" in payload["text"]
     assert "System" in payload["text"]
     assert "Step Memory" in payload["text"]
@@ -76,13 +90,20 @@ def test_final_report_generator_fails_open_for_one_section():
         ),
     )
 
-    assert payload["process"]["status"] == "NO DATA"
-    assert payload["process"]["error"] == "Section summary unavailable."
+    assert payload["process"]["metadata"]["mode"] == "no_data"
+    assert payload["process"]["diagnosis"]["status"] == "NO DATA"
+    assert payload["process"]["diagnosis"] == payload["process"]["issues"][0]
+    assert payload["process"]["global"]["index_by"] == "global_rank"
+    assert payload["process"]["groups"] == {
+        "by": "global_rank",
+        "rows": {},
+    }
+    assert payload["process"]["units"] == {}
     assert "Process" in payload["text"]
 
 
 def test_reporting_final_is_the_summary_orchestration_owner():
-    import traceml.reporting.final as reporting_final
+    import traceml_ai.reporting.final as reporting_final
 
     assert reporting_final.generate_summary is not None
     assert reporting_final.build_summary_payload is build_summary_payload

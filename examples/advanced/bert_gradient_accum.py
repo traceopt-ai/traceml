@@ -13,7 +13,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-import traceml
+import traceml_ai as traceml
 
 SEED = 42
 MODEL_NAME = "bert-base-uncased"
@@ -144,7 +144,11 @@ def main():
                 for mb in micro_batches:
                     mb = load_batch_to_device(mb, device)
 
-                    with torch.cuda.amp.autocast(enabled=use_amp, dtype=dtype):
+                    with torch.amp.autocast(
+                        device_type="cuda" if use_amp else "cpu",
+                        enabled=use_amp,
+                        dtype=dtype,
+                    ):
                         out = model(**mb)
                         # scale loss down so accumulated grad matches non-accum
                         loss = out.loss / GRAD_ACC_STEPS

@@ -13,10 +13,13 @@ These are the main user-facing examples.
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
 | `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.final_summary()` | CPU / CUDA | Best first example |
+| `summary_logging_minimal.py` | Minimal tracker-friendly `traceml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
 | `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
+| `ray/torchtrainer_minimal.py` | Minimal Ray Train example with Ray Data input timing | CPU / CUDA | Uses `TraceMLTorchTrainer` |
+| `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data, `TraceMLCallback`, and optional input/H2D demo knobs |
 | `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
-| `lightning_minimal.py` | Minimal Lightning `TraceMLCallback` example | CPU / CUDA | No dataset download required |
+| `lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 
 If you only try one example first, use:
 
@@ -73,6 +76,16 @@ Single-node DDP:
 traceml run examples/ddp_minimal.py --nproc-per-node=4
 ```
 
+Multi-node on Slurm:
+
+```bash
+sbatch examples/slurm/traceml_ddp.sbatch
+```
+
+See [`examples/slurm/`](slurm/README.md) and the
+[Slurm guide](../docs/user_guide/slurm.md) for the template and the
+network/aggregator model.
+
 Run without TraceML telemetry for a baseline:
 
 ```bash
@@ -89,8 +102,20 @@ Starter examples now prefer the top-level public API:
 
 - `traceml.init(mode="auto")`
 - `traceml.trace_step(...)`
-- `traceml.trace_model_instance(...)`
+- `traceml.summary()`
 - `traceml.final_summary()`
+
+Lightning examples use `traceml_ai.integrations.lightning.init()` with
+`TraceMLCallback()` so Lightning can keep owning the training loop while
+TraceML records DataLoader, transfer, step, phase, and memory timing.
+
+Ray Data examples wrap `iter_torch_batches(...)` with
+`traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch
+`DataLoader` objects.
+
+Ray + Lightning can use `--input-delay-ms` / `--input-delay-rank` for input
+stragglers, `--delay-ms` / `--delay-rank` for compute stragglers, and
+`--transfer-dim` to make Lightning H2D timing visible.
 
 For explicit manual instrumentation, see:
 
@@ -100,9 +125,10 @@ For explicit manual instrumentation, see:
 - `traceml.wrap_backward(...)`
 - `traceml.wrap_optimizer(...)`
 
-Legacy imports from `traceml.decorators` still work for backward
-compatibility, but new examples use the top-level `traceml.*` API. Legacy
-decorator imports are planned for deprecation starting in `v0.3.0`.
+Examples use the top-level `traceml.*` API from
+`import traceml_ai as traceml`. The old `import traceml` path remains available
+for compatibility, but emits a deprecation warning. Do not import from
+decorator compatibility paths.
 
 ---
 
@@ -115,6 +141,7 @@ Use:
 - `ddp_minimal.py` if you want single-node distributed training
 - `huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
 - `lightning_minimal.py` if you use PyTorch Lightning
+- `ray/torchtrainer_minimal.py` if you use Ray Train
 
 Use the diagnosis demos when you want to see:
 
@@ -138,10 +165,10 @@ That includes things like:
 
 ## Related docs
 
-- [Quickstart](../docs/quickstart.md)
-- [Compare Runs](../docs/compare.md)
-- [How to Read TraceML Output](../docs/how-to-read-output.md)
-- [FAQ](../docs/faq.md)
-- [Use TraceML with W&B / MLflow](../docs/use-with-wandb-mlflow.md)
-- [Hugging Face Trainer](../docs/huggingface.md)
-- [PyTorch Lightning](../docs/lightning.md)
+- [Quickstart](../docs/user_guide/quickstart.md)
+- [Distributed Training](../docs/user_guide/distributed-training.md)
+- [Running on Slurm](../docs/user_guide/slurm.md)
+- [Compare Runs](../docs/user_guide/compare.md)
+- [How to Read TraceML Output](../docs/user_guide/reading-output.md)
+- [Use With Your Stack](../docs/user_guide/integrations.md)
+- [FAQ](../docs/user_guide/faq.md)

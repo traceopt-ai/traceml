@@ -39,14 +39,14 @@ See:
 
 ## How is TraceML different from `torch.profiler`?
 
-`torch.profiler` is a deeper profiling tool.
+`torch.profiler` is an operator-level profiling tool.
 
 TraceML is a lighter-weight bottleneck finder for real training runs.
 
 A simple rule:
 
 - use TraceML to find where the problem is
-- use `torch.profiler` when you need deeper low-level analysis
+- use `torch.profiler` when you need low-level operator analysis
 
 ---
 
@@ -55,7 +55,7 @@ A simple rule:
 Usually just this:
 
 ```python
-import traceml
+import traceml_ai as traceml
 
 traceml.init(mode="auto")
 
@@ -66,11 +66,24 @@ with traceml.trace_step(model):
 For supported integrations:
 
 - Hugging Face: use `TraceMLTrainer`
-- Lightning: add `TraceMLCallback()`
+- Lightning: call `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()`
 
-`from traceml.decorators import trace_step` still works for backward
-compatibility, but the preferred public API is now the top-level
-`traceml.*`.
+The preferred public API is the top-level `traceml.*` API from
+`import traceml_ai as traceml`. The old `import traceml` path remains available
+for compatibility, but emits a deprecation warning.
+
+---
+
+## Can I trace only a small number of steps?
+
+Yes. Use `--trace-max-steps` with `traceml run`:
+
+```bash
+traceml run train.py --trace-max-steps 100 --args --epochs 5
+```
+
+TraceML records and flushes the first N TraceML steps, then stops recording
+telemetry while your training job continues normally.
 
 ---
 
@@ -79,7 +92,7 @@ compatibility, but the preferred public API is now the top-level
 Prefer:
 
 ```python
-import traceml
+import traceml_ai as traceml
 
 traceml.init(mode="auto")
 
@@ -87,15 +100,8 @@ with traceml.trace_step(model):
     ...
 ```
 
-TraceML still supports:
-
-```python
-from traceml.sdk.decorators_compat import trace_step
-```
-
-for backward compatibility, but new examples and docs use the top-level
-`traceml.*` API. Legacy decorator imports are planned for deprecation
-starting in `v0.3.0`.
+Use the top-level `traceml.*` API from `import traceml_ai as traceml`. Do not
+import from decorator compatibility paths.
 
 ---
 
@@ -151,7 +157,7 @@ See:
 
 ## Does TraceML support DDP?
 
-Yes, for single-node DDP.
+Yes.
 
 TraceML can surface:
 
@@ -160,19 +166,29 @@ TraceML can surface:
 - rank imbalance
 - worst-rank vs median-rank skew
 
+Single-node DDP supports live CLI/dashboard views and final summaries.
+Multi-node DDP is supported for end-of-run summary reports.
+
 ---
 
 ## Does TraceML support multi-node?
 
-Not yet.
+Yes, for summary-mode DDP runs.
 
-Today the main distributed target is single-node DDP.
+Use the same `--run-name`, `--nnodes`, `--nproc-per-node`, and
+`--master-addr` on every node. Node 0 starts the TraceML aggregator; other
+nodes connect to it for telemetry. Multi-node live CLI/dashboard views are not
+yet supported.
+
+`--session-id` remains accepted as a backward-compatible alias for
+`--run-name`.
 
 ---
 
 ## Does TraceML support FSDP?
 
-Yes, for single-node FSDP.
+Yes, for single-node FSDP. Multi-node FSDP summary reports use the same
+distributed launch path as DDP, but should be validated on your environment.
 
 If you hit an issue on your setup, please open an issue with a minimal repro and environment details.
 
@@ -184,21 +200,21 @@ Not yet.
 
 ---
 
-## What is the difference between `watch`, `run`, and `deep`?
+## What is the difference between `watch` and `run`?
 
 `watch`
 - zero-code system and process visibility
 
 `run`
-- the default mode
+- the default command
 - step-aware bottleneck diagnosis
 - the best place to start for most users
 
-`deep`
-- optional deeper layer-level inspection
-- best for short follow-up diagnostic runs
-
 Start with `run`.
+
+Deep/layer profiling has been removed from the public CLI for now. If TraceML
+shows you need lower-level detail, use PyTorch Profiler, Nsight, or another
+operator-level profiler for that follow-up.
 
 ---
 
@@ -209,8 +225,12 @@ Yes.
 Run:
 
 ```bash
+pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
+
+The local UI is intended for single-node runs, including single-node
+multi-GPU. For multi-node runs, use summary mode.
 
 The local UI runs at:
 
@@ -220,19 +240,19 @@ http://localhost:8765
 
 ---
 
-## Is there a summary-only mode?
+## What is the default run mode?
 
-Yes.
+`traceml run train.py` uses summary mode by default.
 
-Run:
+You can also make that explicit:
 
 ```bash
 traceml run train.py --mode=summary
 ```
 
-This skips the live UI and focuses on the final end-of-run summary. It is a
-good fit when you want lower terminal noise or want to forward TraceML summary
-fields into W&B or MLflow.
+Summary mode skips live UI and focuses on the final end-of-run summary. It is
+a good fit when you want lower terminal noise or want to forward TraceML
+summary fields into W&B or MLflow.
 
 ---
 
@@ -274,9 +294,13 @@ Yes.
 TraceML is designed to work alongside your existing tracking stack. The
 recommended low-noise path is:
 
-1. launch with `traceml run train.py --mode=summary`
-2. call `traceml.final_summary()` near the end of your script
-3. log selected fields from the returned dict into W&B or MLflow
+1. launch with `traceml run train.py`
+2. call `traceml.summary()` near the end of your script
+3. log the returned flat dict into W&B or MLflow
+
+Use `traceml.final_summary()` if you need the full structured JSON payload.
+Both APIs reuse the same canonical `final_summary.json` once it has been
+generated.
 
 See:
 
@@ -312,6 +336,10 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
+In distributed runs, this can still be the primary diagnosis when backward or
+compute skew is also visible, because a slow input rank can push synchronization
+wait into peer ranks.
+
 Common causes:
 
 - uneven data loading
@@ -327,6 +355,10 @@ See:
 ## What does `COMPUTE STRAGGLER` mean?
 
 It means one rank is slower in compute than the typical rank.
+
+If input and compute skew appear together, TraceML first checks whether the
+input excess is large enough to explain the compute skew. If yes, the primary
+diagnosis is `INPUT STRAGGLER`; otherwise the mixed case remains `STRAGGLER`.
 
 Common causes:
 

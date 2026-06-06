@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest an improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like TraceML to do?
+      placeholder: I wish TraceML could...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Why would this help?
+      description: Training setup, current output, screenshots, or examples if useful.
+    validations:
+      required: false

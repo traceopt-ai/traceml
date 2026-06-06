@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-import traceml
+import traceml_ai as traceml
 
 SEED = 42
 INPUT_DIM = 128

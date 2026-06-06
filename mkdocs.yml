@@ -74,10 +74,14 @@ markdown_extensions:
 nav:
   - User Guide:
       - Quickstart: user_guide/quickstart.md
+      - Distributed Training: user_guide/distributed-training.md
+      - Slurm (multi-node): user_guide/slurm.md
       - Reading output: user_guide/reading-output.md
       - Integrations:
+          - Overview: user_guide/integrations.md
           - Hugging Face: user_guide/integrations/huggingface.md
           - PyTorch Lightning: user_guide/integrations/lightning.md
+          - Ray Train: user_guide/integrations/ray.md
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
       - FAQ: user_guide/faq.md
       - Compare Runs: user_guide/compare.md

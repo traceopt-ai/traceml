@@ -14,19 +14,19 @@ if str(SRC) not in sys.path:
 
 
 def _reload_initialization_module():
-    import traceml.sdk.initial as initialization
+    import traceml_ai.sdk.initial as initialization
 
     return importlib.reload(initialization)
 
 
 def _reload_instrumentation_module():
-    import traceml.sdk.instrumentation as instrumentation
+    import traceml_ai.sdk.instrumentation as instrumentation
 
     return importlib.reload(instrumentation)
 
 
 def _reload_wrappers_module():
-    import traceml.sdk.wrappers as wrappers
+    import traceml_ai.sdk.wrappers as wrappers
 
     return importlib.reload(wrappers)
 
@@ -36,9 +36,9 @@ def test_init_auto_enables_all_supported_patches(monkeypatch):
 
     calls = []
 
-    import traceml.instrumentation.patches.backward_auto_timer_patch as backward_patch
-    import traceml.instrumentation.patches.dataloader_patch as dataloader_patch
-    import traceml.instrumentation.patches.forward_auto_timer_patch as forward_patch
+    import traceml_ai.instrumentation.patches.backward_auto_timer_patch as backward_patch
+    import traceml_ai.instrumentation.patches.dataloader_patch as dataloader_patch
+    import traceml_ai.instrumentation.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         dataloader_patch,
@@ -81,9 +81,9 @@ def test_init_selective_only_installs_requested_patches(monkeypatch):
 
     calls = []
 
-    import traceml.instrumentation.patches.backward_auto_timer_patch as backward_patch
-    import traceml.instrumentation.patches.dataloader_patch as dataloader_patch
-    import traceml.instrumentation.patches.forward_auto_timer_patch as forward_patch
+    import traceml_ai.instrumentation.patches.backward_auto_timer_patch as backward_patch
+    import traceml_ai.instrumentation.patches.dataloader_patch as dataloader_patch
+    import traceml_ai.instrumentation.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         dataloader_patch,
@@ -149,7 +149,7 @@ def test_init_custom_alias_maps_to_selective(monkeypatch):
 
     calls = []
 
-    import traceml.instrumentation.patches.forward_auto_timer_patch as forward_patch
+    import traceml_ai.instrumentation.patches.forward_auto_timer_patch as forward_patch
 
     monkeypatch.setattr(
         forward_patch,
@@ -192,33 +192,11 @@ def test_start_is_alias_for_init():
 def test_api_import_does_not_initialize_implicitly():
     initialization = _reload_initialization_module()
 
-    import traceml.api as api
+    import traceml_ai.api as api
 
     importlib.reload(api)
 
     assert initialization.get_init_config() is None
-
-
-def test_decorators_import_preserves_legacy_auto_init(monkeypatch):
-    initialization = _reload_initialization_module()
-
-    calls = []
-
-    monkeypatch.setattr(
-        initialization,
-        "enable_legacy_decorator_auto_init",
-        lambda: calls.append("legacy"),
-    )
-
-    # Import-time compatibility behavior lives in the module body, so clear
-    # both public and SDK compatibility paths to force a fresh import.
-    sys.modules.pop("traceml.decorators", None)
-    sys.modules.pop("traceml.sdk.decorators_compat", None)
-    import traceml.sdk.decorators_compat as decorators
-
-    importlib.reload(decorators)
-
-    assert calls == ["legacy", "legacy"]
 
 
 @contextmanager
@@ -296,6 +274,116 @@ def test_trace_step_only_auto_installs_optimizer_timing(monkeypatch):
     assert (
         _run_trace_step_once(mode="selective", monkeypatch=monkeypatch) == []
     )
+
+
+def test_trace_step_without_init_does_not_auto_install_optimizer_timing(
+    monkeypatch,
+):
+    _reload_initialization_module()
+    instrumentation = _reload_instrumentation_module()
+    calls = []
+
+    monkeypatch.setattr(
+        instrumentation,
+        "timed_region",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "forward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "backward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "h2d_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "StepMemoryTracker",
+        _NoopStepMemoryTracker,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "flush_step_events",
+        lambda model, step: None,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "ensure_optimizer_timing_installed",
+        lambda: calls.append("optimizer"),
+    )
+
+    with instrumentation.trace_step(nn.Linear(2, 2)):
+        pass
+
+    assert calls == []
+
+
+def test_trace_step_marks_recording_draining_after_configured_step(
+    monkeypatch,
+):
+    from traceml_ai.runtime.state import (
+        TraceMLRecordingStatus,
+        configure_trace_recording,
+        get_trace_recording_state,
+        reset_trace_session_state,
+    )
+
+    instrumentation = _reload_instrumentation_module()
+    reset_trace_session_state()
+    configure_trace_recording(max_steps=1)
+
+    monkeypatch.setattr(
+        instrumentation,
+        "timed_region",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "forward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "backward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "h2d_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "StepMemoryTracker",
+        _NoopStepMemoryTracker,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "flush_step_events",
+        lambda model, step: None,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "ensure_optimizer_timing_installed",
+        lambda: None,
+    )
+
+    with instrumentation.trace_step(nn.Linear(2, 2)):
+        pass
+
+    assert (
+        get_trace_recording_state().status == TraceMLRecordingStatus.DRAINING
+    )
+
+    configure_trace_recording()
+    reset_trace_session_state()
 
 
 def test_wrap_dataloader_fetch_allows_custom_iterator_when_torch_patch_active(
@@ -398,6 +486,12 @@ def test_wrap_optimizer_preserves_identity_and_times_step(monkeypatch):
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
+    monkeypatch.setattr(
+        torch.optim.Optimizer,
+        "_traceml_opt_hooks_installed",
+        False,
+        raising=False,
+    )
 
     class DummyOptimizer:
         def __init__(self):

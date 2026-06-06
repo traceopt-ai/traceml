@@ -1,0 +1,22 @@
+name: Bug report
+description: Something did not work.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Share the error, command, or behavior you saw.
+      placeholder: TraceML did..., but I expected...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?
+      description: Version, environment, logs, final summary, or screenshots if useful.
+    validations:
+      required: false

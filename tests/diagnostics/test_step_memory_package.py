@@ -1,4 +1,4 @@
-from traceml.diagnostics.step_memory import (
+from traceml_ai.diagnostics.step_memory import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     LIVE_STEP_MEMORY_POLICY,
     SUMMARY_STEP_MEMORY_POLICY,
@@ -6,15 +6,15 @@ from traceml.diagnostics.step_memory import (
     build_step_memory_diagnosis,
     build_step_memory_summary_diagnosis_result,
 )
-from traceml.diagnostics.step_memory.adapters import (
+from traceml_ai.diagnostics.step_memory.adapters import (
     build_step_memory_summary_signals,
 )
-from traceml.diagnostics.step_memory.rules import (
+from traceml_ai.diagnostics.step_memory.rules import (
     DEFAULT_STEP_MEMORY_SUMMARY_RULES,
     run_step_memory_summary_rules,
 )
-from traceml.diagnostics.step_memory.trend import evaluate_step_memory_creep
-from traceml.renderers.step_memory.schema import (
+from traceml_ai.diagnostics.step_memory.trend import evaluate_step_memory_creep
+from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedSeries,
@@ -170,7 +170,7 @@ def test_step_memory_policies_are_explicit():
 
 
 def test_step_memory_summary_enrichment_fails_open(monkeypatch):
-    import traceml.diagnostics.step_memory.adapters as adapters
+    import traceml_ai.diagnostics.step_memory.adapters as adapters
 
     def broken_adapter(*args, **kwargs):
         raise RuntimeError("boom")
@@ -184,5 +184,29 @@ def test_step_memory_summary_enrichment_fails_open(monkeypatch):
     result = build_step_memory_summary_diagnosis_result([_metric()])
 
     assert result.primary.kind == "BALANCED"
-    assert result.issues == ()
+    assert result.issues[0].kind == "BALANCED"
+    assert result.metric_attribution == {}
+
+
+def test_step_memory_summary_fails_open_preserves_pressure_capacity(
+    monkeypatch,
+):
+    import traceml_ai.diagnostics.step_memory.adapters as adapters
+
+    def broken_adapter(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        adapters,
+        "build_step_memory_summary_signals",
+        broken_adapter,
+    )
+
+    result = build_step_memory_summary_diagnosis_result(
+        [_metric(worst_peak=96.0, median_peak=80.0)],
+        gpu_total_bytes=100.0,
+    )
+
+    assert result.primary.kind == "HIGH_PRESSURE"
+    assert result.issues[0].kind == "HIGH_PRESSURE"
     assert result.metric_attribution == {}

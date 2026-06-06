@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from traceml.diagnostics.step_memory import (
+from traceml_ai.diagnostics.step_memory import (
     build_step_memory_summary_diagnosis_result,
 )
-from traceml.diagnostics.step_memory.adapters import (
+from traceml_ai.diagnostics.step_memory.adapters import (
     StepMemorySummaryMetricSignals,
     StepMemorySummaryTrendSignals,
 )
-from traceml.diagnostics.step_memory.rules import (
+from traceml_ai.diagnostics.step_memory.rules import (
     CreepConfirmedRule,
     CreepEarlyRule,
     HighPressureRule,
     ImbalanceRule,
     sort_step_memory_summary_issues,
 )
-from traceml.diagnostics.common import DiagnosticIssue
-from traceml.renderers.step_memory.schema import (
+from traceml_ai.diagnostics.common import DiagnosticIssue
+from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedSeries,
@@ -151,11 +151,30 @@ def test_step_memory_rules_trigger_and_no_trigger_cases() -> None:
         HighPressureRule().evaluate(_memory_signal(pressure_frac=0.2)) is None
     )
 
-    assert (
-        ImbalanceRule().evaluate(_memory_signal(skew_pct=0.3)).kind
-        == "IMBALANCE"
+    warn_imbalance = ImbalanceRule().evaluate(
+        _memory_signal(skew_pct=0.2, pressure_frac=0.3)
     )
-    assert ImbalanceRule().evaluate(_memory_signal(skew_pct=0.01)) is None
+    assert warn_imbalance is not None
+    assert warn_imbalance.kind == "IMBALANCE"
+    assert warn_imbalance.severity == "warn"
+
+    crit_imbalance = ImbalanceRule().evaluate(
+        _memory_signal(skew_pct=0.3, pressure_frac=0.5)
+    )
+    assert crit_imbalance is not None
+    assert crit_imbalance.severity == "crit"
+    assert (
+        ImbalanceRule().evaluate(
+            _memory_signal(skew_pct=0.3, pressure_frac=0.1)
+        )
+        is None
+    )
+    assert (
+        ImbalanceRule().evaluate(
+            _memory_signal(skew_pct=0.01, pressure_frac=0.5)
+        )
+        is None
+    )
 
     assert (
         CreepConfirmedRule()
@@ -216,7 +235,7 @@ def test_step_memory_summary_primary_for_each_non_pressure_issue() -> None:
                 steps_used=60,
             )
         ],
-        gpu_total_bytes=1000.0,
+        gpu_total_bytes=250.0,
     )
     assert imbalance.primary.kind == "IMBALANCE"
 
@@ -281,3 +300,20 @@ def test_step_memory_issue_sort_uses_domain_priority() -> None:
         "IMBALANCE",
         "CREEP_CONFIRMED",
     ]
+
+
+def test_step_memory_summary_ignores_low_pressure_skew() -> None:
+    result = build_step_memory_summary_diagnosis_result(
+        [
+            _memory_metric(
+                worst_peak=26.0,
+                median_peak=21.0,
+                skew_pct=0.24,
+                steps_used=60,
+            )
+        ],
+        gpu_total_bytes=800.0,
+    )
+
+    assert result.primary.kind == "BALANCED"
+    assert result.issues[0].kind == "BALANCED"

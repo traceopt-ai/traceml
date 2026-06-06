@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 
-import traceml
+import traceml_ai as traceml
 
 SEED = 42
 INPUT_DIM = 128

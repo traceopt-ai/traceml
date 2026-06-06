@@ -1,0 +1,4 @@
+# Shell and Slurm batch scripts must keep LF line endings so they run on
+# Linux clusters (CRLF would break the shebang: "bad interpreter: /bin/bash^M").
+*.sh    text eol=lf
+*.sbatch text eol=lf

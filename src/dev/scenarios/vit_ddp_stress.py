@@ -6,13 +6,12 @@ from typing import Dict
 import torch
 import torch.distributed as dist
 from datasets import load_dataset
-from torch.cuda.amp import GradScaler, autocast
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, DistributedSampler
 from torchvision import transforms
 from torchvision.models import vit_b_16
 
-import traceml
+import traceml_ai as traceml
 
 # ============================================================
 # CONFIG
@@ -116,13 +115,13 @@ def compute_loss(logits, labels):
     return torch.nn.functional.cross_entropy(logits, labels)
 
 
-def backward_pass(loss, scaler: GradScaler):
+def backward_pass(loss, scaler: torch.amp.GradScaler):
     scaler.scale(loss).backward()
 
 
 def optimizer_step(
     optimizer: torch.optim.Optimizer,
-    scaler: GradScaler,
+    scaler: torch.amp.GradScaler,
 ):
     scaler.step(optimizer)
     scaler.update()
@@ -170,7 +169,7 @@ def main():
         weight_decay=WEIGHT_DECAY,
     )
 
-    scaler = GradScaler()
+    scaler = torch.amp.GradScaler(device="cuda")
 
     model.train()
     global_step = 0
@@ -193,7 +192,10 @@ def main():
 
                 batch = load_batch_to_device(batch, device)
 
-                with autocast(dtype=torch.float16):
+                with torch.amp.autocast(
+                    device_type="cuda",
+                    dtype=torch.float16,
+                ):
                     logits = forward_pass(model, batch["images"])
                     loss = compute_loss(logits, batch["labels"])
 

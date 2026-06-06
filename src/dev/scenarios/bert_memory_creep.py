@@ -13,7 +13,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
 )
 
-import traceml
+import traceml_ai as traceml
 
 SEED = 42
 MODEL_NAME = "distilbert-base-uncased"

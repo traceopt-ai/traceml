@@ -1,10 +1,19 @@
-from traceml.core import Registry
-from traceml.runtime.sampler_registry import (
+from traceml_ai.core import Registry
+from traceml_ai.runtime.sampler_registry import (
     SamplerSpec,
     build_samplers,
     select_sampler_specs,
 )
-from traceml.samplers.base_sampler import BaseSampler
+from traceml_ai.runtime.runtime import TraceMLRuntime
+from traceml_ai.runtime.state import (
+    TraceMLRecordingStatus,
+    configure_trace_recording,
+    get_trace_recording_state,
+    mark_trace_step_flushed,
+)
+from traceml_ai.samplers import process_sampler
+from traceml_ai.samplers.base_sampler import BaseSampler
+from traceml_ai.samplers.process_sampler import ProcessSampler
 
 
 class _FakeSampler(BaseSampler):
@@ -13,8 +22,10 @@ class _FakeSampler(BaseSampler):
             sampler_name="FakeSampler",
             table_name="fake_samples",
         )
+        self.sample_idx = 0
 
     def sample(self) -> None:
+        self.sample_idx += 1
         return None
 
 
@@ -24,6 +35,27 @@ class _FakeLogger:
 
     def exception(self, message: str, *args: object) -> None:
         self.exceptions.append((message, args))
+
+
+class _FakePublisher:
+    def __init__(self) -> None:
+        self.published: list[tuple[str, ...]] = []
+
+    def publish(self, samplers) -> None:
+        self.published.append(
+            tuple(getattr(s, "sampler_name", "") for s in samplers)
+        )
+
+
+class _PendingDrainSampler(_FakeSampler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sampler_name = "PendingDrainSampler"
+        self.drain_on_recording_stop = True
+        self.pending = True
+
+    def has_pending_recording_data(self) -> bool:
+        return self.pending
 
 
 def _selected_keys(
@@ -195,6 +227,140 @@ def test_build_samplers_logs_and_skips_constructor_failures() -> None:
     assert isinstance(samplers[0], _FakeSampler)
     assert len(logger.exceptions) == 1
     assert "Failed to initialize sampler" in logger.exceptions[0][0]
+
+
+def test_queue_backed_samplers_are_marked_for_final_recording_drain() -> None:
+    specs = {
+        spec.key: spec
+        for spec in select_sampler_specs(
+            profile="deep",
+            mode="summary",
+            is_ddp=False,
+            local_rank=0,
+        )
+    }
+
+    assert specs["system"].drain_on_recording_stop is False
+    assert specs["process"].drain_on_recording_stop is False
+    assert specs["step_time"].drain_on_recording_stop is True
+    assert specs["step_memory"].drain_on_recording_stop is True
+    assert specs["layer_forward_time"].drain_on_recording_stop is True
+
+
+def test_runtime_final_recording_drain_skips_periodic_samplers() -> None:
+    periodic = _FakeSampler()
+    periodic.sampler_name = "PeriodicSampler"
+    drain = _FakeSampler()
+    drain.sampler_name = "DrainSampler"
+    drain.drain_on_recording_stop = True
+
+    publisher = _FakePublisher()
+    runtime = TraceMLRuntime.__new__(TraceMLRuntime)
+    runtime._samplers = [periodic, drain]
+    runtime._publisher = publisher
+    runtime._logger = _FakeLogger()
+
+    configure_trace_recording(max_steps=1)
+    mark_trace_step_flushed(1)
+    runtime._drain_recording_samplers()
+
+    assert periodic.sample_idx == 0
+    assert drain.sample_idx == 1
+    assert publisher.published == [("DrainSampler",)]
+    assert (
+        get_trace_recording_state().status == TraceMLRecordingStatus.COMPLETE
+    )
+
+    configure_trace_recording()
+
+
+def test_runtime_recording_drain_waits_for_pending_timing_data() -> None:
+    drain = _PendingDrainSampler()
+    publisher = _FakePublisher()
+    runtime = TraceMLRuntime.__new__(TraceMLRuntime)
+    runtime._samplers = [drain]
+    runtime._publisher = publisher
+    runtime._logger = _FakeLogger()
+
+    configure_trace_recording(max_steps=1)
+    mark_trace_step_flushed(1)
+    runtime._drain_recording_samplers()
+
+    assert drain.sample_idx == 1
+    assert (
+        get_trace_recording_state().status == TraceMLRecordingStatus.DRAINING
+    )
+
+    drain.pending = False
+    runtime._drain_recording_samplers()
+
+    assert drain.sample_idx == 2
+    assert (
+        get_trace_recording_state().status == TraceMLRecordingStatus.COMPLETE
+    )
+
+    configure_trace_recording()
+
+
+def test_process_sampler_does_not_set_cuda_device_when_unavailable(
+    monkeypatch,
+) -> None:
+    set_device_calls: list[int] = []
+
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "is_available",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "device_count",
+        lambda: 0,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "set_device",
+        lambda device_index: set_device_calls.append(device_index),
+    )
+
+    sampler = ProcessSampler()
+
+    assert sampler._sample_gpu() is None
+    assert sampler.gpu_available is False
+    assert sampler.gpu_count == 0
+    assert set_device_calls == []
+
+
+def test_process_sampler_does_not_touch_cuda_before_ddp_init(
+    monkeypatch,
+) -> None:
+    cuda_calls: list[str] = []
+
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setattr(process_sampler.dist, "is_available", lambda: True)
+    monkeypatch.setattr(process_sampler.dist, "is_initialized", lambda: False)
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "is_available",
+        lambda: cuda_calls.append("is_available") or True,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "device_count",
+        lambda: cuda_calls.append("device_count") or 1,
+    )
+    monkeypatch.setattr(
+        process_sampler.torch.cuda,
+        "set_device",
+        lambda device_index: cuda_calls.append(f"set_device:{device_index}"),
+    )
+
+    sampler = ProcessSampler()
+
+    assert sampler._sample_gpu() is None
+    assert cuda_calls == []
 
 
 def test_build_samplers_continues_after_constructor_failure() -> None:

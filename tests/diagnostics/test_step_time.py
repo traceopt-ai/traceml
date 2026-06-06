@@ -1,27 +1,35 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
 from __future__ import annotations
 
-from traceml.diagnostics.step_time.api import (
+import pytest
+
+from traceml_ai.diagnostics.step_time.api import (
     DEFAULT_THRESHOLDS,
     build_step_diagnosis_result,
 )
-from traceml.diagnostics.step_time.adapters import (
+from traceml_ai.diagnostics.step_time.adapters import (
     DEFAULT_SUMMARY_DIAG_CONFIG,
     RankStepSignals,
     build_summary_step_diagnosis_result,
 )
-from traceml.diagnostics.step_time.context import build_step_time_context
-from traceml.diagnostics.step_time.policy import (
+from traceml_ai.diagnostics.step_time.context import build_step_time_context
+from traceml_ai.diagnostics.step_time.policy import (
     LIVE_STEP_TIME_POLICY,
     SUMMARY_STEP_TIME_POLICY,
 )
-from traceml.diagnostics.step_time.rules import (
+from traceml_ai.diagnostics.step_time.rules import (
     ComputeBoundRule,
     ComputeStragglerRule,
     InputBoundRule,
     InputStragglerRule,
     WaitHeavyRule,
 )
-from traceml.renderers.step_time.schema import (
+from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
     StepCombinedTimeMetric,
     StepCombinedTimeSeries,
@@ -215,9 +223,88 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     )
 
 
-def test_step_time_primary_selection_combines_input_and_compute_stragglers() -> (
-    None
-):
+def test_compute_straggler_uses_typical_step_and_phase_blame() -> None:
+    ctx = _time_context(
+        _time_metric("step_time", median=166.6, worst=166.7, world_size=4),
+        _time_metric(
+            "dataloader_fetch",
+            median=0.7,
+            worst=0.7,
+            worst_rank=2,
+            world_size=4,
+        ),
+        _time_metric("h2d", median=0.1, worst=0.1, world_size=4),
+        _time_metric(
+            "forward",
+            median=1.6,
+            worst=25.2,
+            worst_rank=2,
+            skew=14.75,
+            world_size=4,
+        ),
+        _time_metric(
+            "backward",
+            median=120.6,
+            worst=121.0,
+            worst_rank=0,
+            skew=0.003,
+            world_size=4,
+        ),
+        _time_metric(
+            "optimizer_step",
+            median=10.1,
+            worst=10.1,
+            worst_rank=3,
+            world_size=4,
+        ),
+        _time_metric(
+            "wait_proxy",
+            median=34.2,
+            worst=34.3,
+            worst_rank=3,
+            world_size=4,
+        ),
+    )
+
+    issue = ComputeStragglerRule().evaluate(ctx)
+
+    assert issue is not None
+    assert issue.kind == "COMPUTE_STRAGGLER"
+    assert issue.phase == "forward"
+    assert issue.ranks == (2,)
+    assert ctx.typical_step_total == pytest.approx(167.3)
+    assert ctx.compute_phase_excess_total == pytest.approx(24.0)
+    assert ctx.compute_excess_ms == pytest.approx(24.0)
+    assert ctx.dataloader_excess_ms == pytest.approx(0.0)
+    assert issue.score == pytest.approx(24.0 / 167.3)
+
+
+def test_step_time_primary_selection_input_explains_mixed_straggler() -> None:
+    result = build_step_diagnosis_result(
+        [
+            _time_metric("step_time", median=240.0, worst=330.0),
+            _time_metric(
+                "dataloader_fetch", median=10.0, worst=110.0, skew=0.2
+            ),
+            _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
+            _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
+            _time_metric("optimizer_step", median=20.0, worst=20.0),
+            _time_metric("wait_proxy", median=40.0, worst=40.0),
+        ]
+    )
+
+    assert result.primary.kind == "INPUT_STRAGGLER"
+    assert result.primary.worst_rank == 1
+    assert result.primary.note is not None
+    assert "downstream synchronization" in result.primary.note
+    assert {issue.kind for issue in result.issues} >= {
+        "INPUT_STRAGGLER",
+        "COMPUTE_STRAGGLER",
+        "STRAGGLER",
+    }
+
+
+def test_step_time_primary_selection_keeps_unexplained_mixed() -> None:
     result = build_step_diagnosis_result(
         [
             _time_metric("step_time", median=240.0, worst=330.0),
@@ -249,6 +336,10 @@ def test_step_time_live_and_summary_policies_are_explicit() -> None:
         > LIVE_STEP_TIME_POLICY.thresholds.wait_share_warn
     )
     assert (
+        SUMMARY_STEP_TIME_POLICY.thresholds.input_straggler_compute_excess_tolerance
+        == pytest.approx(1.5)
+    )
+    assert (
         SUMMARY_STEP_TIME_POLICY.min_steps_for_diag
         > LIVE_STEP_TIME_POLICY.min_steps_for_diag
     )
@@ -259,6 +350,7 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
         0: RankStepSignals(
             steps_analyzed=40,
             dataloader_ms=1.0,
+            h2d_ms=0.0,
             forward_ms=20.0,
             backward_ms=60.0,
             optimizer_ms=10.0,
@@ -266,13 +358,18 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
         )
     }
 
+    warmup = build_summary_step_diagnosis_result(rank_signals, max_rows=100)
+    assert warmup is not None
+    assert warmup.primary.kind == "WARMUP"
     assert (
-        build_summary_step_diagnosis_result(rank_signals, max_rows=100) is None
+        warmup.primary.reason
+        == "Only 40 steps per rank available; summary diagnosis requires 50."
     )
 
     rank_signals[0] = RankStepSignals(
         steps_analyzed=60,
         dataloader_ms=1.0,
+        h2d_ms=0.0,
         forward_ms=20.0,
         backward_ms=60.0,
         optimizer_ms=10.0,

@@ -38,6 +38,35 @@ htmlcov/
 .tox/
 .mypy_cache/
 
+# Local training outputs / generated telemetry
+
+logs/
+compare/
+
+
+# Local ML datasets, checkpoints, model weights, and export archives
+
+data/
+mnist/
+checkpoints/
+*_agnews_ddp/
+*_agnews_full/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.zip
+
+
+# Local private keys / certificates
+
+*.pem
+*.rsa
+*.key
+*.p12
+*.pfx
+
 
 # IDE / Editor
 

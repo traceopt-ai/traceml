@@ -6,7 +6,8 @@ TraceML is built to answer one question quickly:
 
 This guide explains how to read the output shown in:
 
-- the CLI
+- the default end-of-run summary
+- the live CLI view
 - the local UI
 
 The concepts are the same in both.
@@ -23,7 +24,7 @@ TraceML output has two layers:
 
 2. **Evidence**
    - the numbers and trends that support the diagnosis
-   - example: step breakdown, skew, wait share, memory peaks
+   - example: step breakdown, skew, wait time, memory peaks
 
 The diagnosis is the best place to start.
 
@@ -31,21 +32,24 @@ The tables and charts are there to explain **why** that diagnosis was chosen.
 
 ---
 
-## What the CLI and local UI show
+## What the summary, CLI, and local UI show
 
-### CLI
+### End-of-run summary
 
-During a run, the CLI shows:
+By default, `traceml run train.py` prints a compact final summary and writes
+`final_summary.json` plus `final_summary.txt`.
+
+### Live CLI
+
+When launched with `--mode=cli`, the terminal shows live:
 
 - system metrics
 - process metrics
 - step-time diagnosis and summary
 - step-memory diagnosis and summary
 
-In `deep` mode, it can also show:
-
-- layer timing
-- layer memory
+Live CLI mode is intended for single-node runs, including single-node
+multi-GPU.
 
 ### Local UI
 
@@ -55,7 +59,10 @@ The local UI shows the same ideas in a more compact review format:
 - process card
 - step-time analysis
 - step-memory analysis
-- model diagnostics rail
+- diagnostics rail
+
+The local UI is also intended for single-node runs. Multi-node runs should use
+the default final summary path.
 
 The CLI is best for live diagnosis while the job is running.
 
@@ -159,7 +166,7 @@ What to do next:
 
 - optimize model compute
 - check batch size / precision / kernels
-- use deeper profiling only after TraceML shows the hot path
+- use an operator-level profiler only after TraceML shows the hot path
 
 ---
 
@@ -178,6 +185,9 @@ TraceML uses this idea:
 In simpler words:
 
 - one rank is slower in the input path, enough to matter to the overall run
+- this can remain the primary diagnosis even when compute or backward skew is
+  also visible, if the input excess is large enough to plausibly explain
+  downstream synchronization effects
 
 Common causes:
 
@@ -252,6 +262,11 @@ In the current policy, this is used when:
 
 This is a mixed unevenness case.
 
+TraceML keeps this diagnosis when the mixed signal is not clearly explained by
+input skew alone. If input excess is within the configured tolerance of compute
+excess, TraceML reports `INPUT STRAGGLER` instead and keeps the compute signal
+as secondary evidence.
+
 Common causes:
 
 - one bad rank with multiple problems
@@ -270,33 +285,35 @@ What to do next:
 
 Meaning:
 
-- a meaningful part of the typical step is going into wait / overhead instead of useful model work
+- a meaningful part of the typical step is not attributed to dataloader,
+  H2D, forward, backward, or optimizer work
 
 In TraceML:
 
-- `WAIT* = step_time - (forward + backward + optimizer_step)`
+- `compute = forward + backward + optimizer`
+- `wait = total_step - dataloader - h2d - compute`
 
-This is a proxy, not a direct collective-wait measurement.
+This is residual unattributed time in the reported total step, not direct
+collective, NCCL, or all-reduce timing.
 
 Common causes:
 
-- synchronization delays
-- uneven progress across ranks
+- validation or evaluation inside the measured loop
+- checkpointing or logging work
+- framework orchestration outside the traced phases
 - CPU stalls
-- host-side delays
-- transfer / orchestration overhead
+- unobserved transfer or orchestration overhead
 
 What to look at:
 
-- `WAIT Share (%)`
-- `Wait*`
+- `Wait`
 - whether the run is also showing straggler behavior
 
 What to do next:
 
-- inspect sync points
+- inspect work happening around the traced training step
 - inspect rank imbalance
-- inspect CPU-side delays and transfer paths
+- inspect CPU-side delays, logging, checkpointing, validation, and unobserved transfer paths
 
 ---
 
@@ -322,12 +339,12 @@ What to do next:
 
 In the CLI step summary, the important columns are:
 
-- `Dataloader Fetch`
+- `Input`
 - `Forward`
 - `Backward`
-- `Optimizer Step`
-- `Step Time`
-- `Wait*`
+- `Optimizer`
+- `Total Step`
+- `Wait`
 
 Important rows:
 
@@ -347,9 +364,10 @@ Important rows:
 
 - how much larger the worst value is than the median
 
-### `WAIT Share (%)`
+### `Wait`
 
-- how much of the typical step is going into wait / overhead
+- how much of the typical step is unattributed to dataloader, forward,
+  backward, or optimizer work
 
 A good reading pattern is:
 
@@ -358,7 +376,7 @@ A good reading pattern is:
 3. compare worst vs median
 4. inspect `Worst Rank`
 5. inspect `Skew (%)`
-6. inspect `WAIT Share (%)`
+6. inspect `Wait`
 
 ---
 
@@ -535,7 +553,9 @@ The delta row is a helpful clue, not the full diagnosis logic.
 
 ## System metrics
 
-The system panel is context, not the main bottleneck diagnosis.
+The system panel reports machine-level pressure and GPU-utilization symptoms.
+It is still context for the training diagnosis: low or moderate GPU
+utilization says the GPU was not fully busy, but it does not prove why.
 
 It helps answer:
 
@@ -543,7 +563,7 @@ It helps answer:
 - is CPU high?
 - is RAM high?
 - are GPUs hot or close to full memory?
-- is GPU utilization uneven?
+- are GPUs idle, partly utilized, or uneven?
 
 Common fields:
 
@@ -555,6 +575,18 @@ Common fields:
 - GPU headroom
 
 Use this panel to understand machine-level pressure around the training run.
+
+For average GPU utilization, System diagnosis uses these bands:
+
+- below 30%: `LOW_GPU_UTILIZATION`
+- 30% through 70%: `MODERATE_GPU_UTILIZATION`
+- above 70%: no GPU-utilization issue; System can stay `NORMAL` if no pressure
+  rule fires
+
+Use Step Time to explain the likely cause. For example, a System diagnosis of
+`MODERATE_GPU_UTILIZATION` plus a Step Time diagnosis of `INPUT-BOUND` means the
+GPU was only partly utilized and the step breakdown points to input loading as
+the likely reason.
 
 ---
 
@@ -586,7 +618,7 @@ Use this panel when:
 
 The local UI shows the same ideas in a more compact form.
 
-### Model Diagnostics rail
+### Diagnostics rail
 
 This is the best place to start in the local UI.
 
@@ -604,7 +636,7 @@ This card shows:
 - median vs worst step breakdown
 - gap
 - worst rank
-- wait share
+- wait time
 - dominant split
 
 Use it to validate the step-time diagnosis.
@@ -638,7 +670,7 @@ Use these as context cards:
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `STRAGGLER` | inspect both input and compute unevenness |
-| `WAIT-HEAVY` | inspect sync points and uneven progress |
+| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY CREEP (EARLY)` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |
@@ -648,15 +680,15 @@ Use these as context cards:
 
 ## Common pitfalls
 
-### High `WAIT*` skew alone does not automatically mean a real wait bottleneck
+### High wait skew alone does not automatically mean a real wait bottleneck
 
 Look at:
 
-- `WAIT Share (%)`
+- `Wait`
 - the diagnosis
 - the rest of the step breakdown
 
-A tiny wait share with large percentage skew can still be minor in practice.
+A tiny wait value with large percentage skew can still be minor in practice.
 
 ### A high compute share does not mean every compute phase is equally important
 
@@ -678,6 +710,8 @@ not just a single raw delta
 ### System metrics are context, not the final explanation
 
 Low GPU utilization by itself does not prove an input bottleneck.
+Moderate GPU utilization is the same kind of symptom: it means the GPU was not
+fully busy, not that the GPU was slow.
 
 Always read:
 
@@ -693,7 +727,7 @@ If you are in a hurry:
 1. read the diagnosis
 2. identify the worst rank if shown
 3. compare worst vs median
-4. look at wait share or memory trend
+4. look at wait time or memory trend
 5. take the suggested next action
 
 That is usually enough to decide where to investigate next.
