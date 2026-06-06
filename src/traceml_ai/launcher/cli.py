@@ -13,6 +13,7 @@ import argparse
 from traceml_ai.launcher.commands import (
     run_compare,
     run_inspect,
+    run_view,
     run_with_tracing,
     validate_launch_args,
 )
@@ -104,6 +105,15 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--trace-max-steps",
+        type=int,
+        default=None,
+        help=(
+            "Record TraceML telemetry for only the first N TraceML steps. "
+            "Training continues after recording stops."
+        ),
+    )
+    parser.add_argument(
         "--nproc-per-node",
         type=int,
         default=1,
@@ -180,6 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  traceml watch train.py\n"
             "  traceml run train.py --args --epochs 10 --lr 1e-3\n"
+            "  traceml view logs/my_run/final_summary.json\n"
             "  traceml compare run_a.json run_b.json"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
@@ -221,6 +232,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    view_parser = sub.add_parser(
+        "view",
+        help="Print the stored text from a TraceML summary JSON file.",
+    )
+    view_parser.add_argument(
+        "summary",
+        help="Path to a TraceML summary JSON file.",
+    )
+
     inspect_parser = sub.add_parser(
         "inspect", help="Inspect binary .msgpack logs."
     )
@@ -243,6 +263,8 @@ def main() -> None:
         run_with_tracing(args, profile="run")
     elif args.command == "compare":
         run_compare(args)
+    elif args.command == "view":
+        run_view(args)
     elif args.command == "inspect":
         run_inspect(args)
     else:

@@ -8,9 +8,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
-from traceml_ai.diagnostics.common import DiagnosticIssue
+from traceml_ai.diagnostics.common import DiagnosticIssue, DiagnosticResult
 
 
 def issue_to_json(issue: DiagnosticIssue) -> Dict[str, Any]:
@@ -40,3 +40,18 @@ def issues_to_json(
     Serialize issues in the priority order provided by the diagnosis layer.
     """
     return [issue_to_json(issue) for issue in issues]
+
+
+def diagnostic_result_to_json(
+    result: DiagnosticResult,
+) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+    """
+    Serialize a diagnostic result using the shared final-summary contract.
+
+    `DiagnosticResult` guarantees a non-empty issue list, so the primary JSON
+    diagnosis is always the first serialized finding.
+    """
+    issues = issues_to_json(result.issues)
+    if not issues:
+        raise ValueError("DiagnosticResult.issues must not be empty")
+    return dict(issues[0]), issues

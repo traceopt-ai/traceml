@@ -2,6 +2,7 @@ import time
 from typing import Dict, Optional
 
 from traceml_ai.loggers.error_log import get_error_logger
+from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
 
 from .database import Database
 
@@ -45,8 +46,8 @@ class RemoteDBStore:
             A ``list`` of individual payload dicts.  Each item is ingested
             independently, exactly as if it had been sent in a separate message.
 
-        **Single format** (legacy — from ``TCPClient.send()``):
-            A single ``dict`` with keys ``rank``, ``sampler``, ``tables``.
+        **Single format**:
+            A canonical telemetry envelope with ``meta`` and ``body.tables``.
 
         Both formats are fully supported.  The type check on ``message`` is the
         only branching point; all ingestion logic lives in :meth:`_ingest_one`.
@@ -63,17 +64,13 @@ class RemoteDBStore:
 
     def _ingest_one(self, message: dict) -> None:
         """
-        Ingest a single telemetry payload dict into the store.
+        Ingest a single telemetry envelope into the store.
 
         Expected payload format
         -----------------------
             {
-              "rank": int,
-              "sampler": str,
-              "tables": {
-                  "table_name": [ {row...}, {row...}, ... ],
-                  ...
-              }
+              "meta": {"rank": int, "sampler": str, ...},
+              "body": {"tables": {"table_name": [{row...}, ...]}}
             }
 
         Behavior
@@ -86,8 +83,12 @@ class RemoteDBStore:
         if message is None:
             return
 
-        rank = message.get("rank")
-        sampler_name = message.get("sampler")
+        envelope = normalize_telemetry_envelope(message)
+        if envelope is None:
+            return
+
+        rank = envelope.meta.rank
+        sampler_name = envelope.meta.sampler
 
         try:
             rank = int(rank)
@@ -95,7 +96,7 @@ class RemoteDBStore:
             self.logger.warning(f"Invalid rank in message: {rank}")
             return
 
-        tables = message.get("tables", {})
+        tables = envelope.tables
 
         # Track last time we received telemetry from this rank
         self._last_seen[rank] = time.time()

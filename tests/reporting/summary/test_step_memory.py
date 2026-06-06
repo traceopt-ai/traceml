@@ -33,7 +33,6 @@ def _create_step_memory_db(path: str) -> None:
                 hostname             TEXT,
                 sample_ts_s          REAL,
                 seq                  INTEGER,
-                model_id             INTEGER,
                 device               TEXT,
                 step                 INTEGER,
                 peak_alloc_bytes     REAL,
@@ -53,7 +52,6 @@ def _create_step_memory_db(path: str) -> None:
                 "worker-0",
                 1.0,
                 1,
-                10,
                 "cuda:0",
                 1,
                 100.0,
@@ -70,7 +68,6 @@ def _create_step_memory_db(path: str) -> None:
                 "worker-0",
                 2.0,
                 2,
-                10,
                 "cuda:0",
                 2,
                 110.0,
@@ -87,7 +84,6 @@ def _create_step_memory_db(path: str) -> None:
                 "worker-0",
                 3.0,
                 3,
-                10,
                 "cuda:0",
                 3,
                 120.0,
@@ -107,13 +103,12 @@ def _create_step_memory_db(path: str) -> None:
                 hostname,
                 sample_ts_s,
                 seq,
-                model_id,
                 device,
                 step,
                 peak_alloc_bytes,
                 peak_reserved_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )
@@ -180,6 +175,7 @@ def test_step_memory_section_diagnosis_input_uses_summary_policy(tmp_path):
     diagnosis_input = section.to_diagnosis_input(data)
 
     assert diagnosis_input.thresholds is SUMMARY_STEP_MEMORY_POLICY.thresholds
+    assert diagnosis_input.no_gpu_detected is False
     assert len(diagnosis_input.metrics) == 2
 
 
@@ -199,6 +195,8 @@ def test_step_memory_section_reports_no_gpu_without_memory_rows(tmp_path):
     result = StepMemorySummarySection(window_size=3).build(str(db_path))
 
     assert result.payload["metadata"]["mode"] == "no_data"
+    assert result.payload["diagnosis"] == result.payload["issues"][0]
+    assert result.payload["diagnosis"]["kind"] == "NO_GPU"
     assert result.payload["diagnosis"]["status"] == "NO GPU"
     assert result.payload["card"].find("Diagnosis: NO GPU") > -1
 
@@ -221,7 +219,6 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 "worker-0",
                 2.0,
                 1,
-                10,
                 "cuda:0",
                 2,
                 210.0,
@@ -238,7 +235,6 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 "worker-0",
                 3.0,
                 2,
-                10,
                 "cuda:0",
                 3,
                 220.0,
@@ -255,7 +251,6 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 "worker-0",
                 4.0,
                 3,
-                10,
                 "cuda:0",
                 4,
                 230.0,
@@ -275,13 +270,12 @@ def test_step_memory_loader_uses_latest_common_steps_per_global_rank(tmp_path):
                 hostname,
                 sample_ts_s,
                 seq,
-                model_id,
                 device,
                 step,
                 peak_alloc_bytes,
                 peak_reserved_bytes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )

@@ -40,6 +40,7 @@ class SamplerSpec:
     profiles: Optional[tuple[str, ...]] = None
     modes: Optional[tuple[str, ...]] = None
     rank_zero_only: bool = False
+    drain_on_recording_stop: bool = False
 
     def enabled_for(
         self,
@@ -66,6 +67,7 @@ def _spec(
     profiles: Optional[Iterable[str]] = None,
     modes: Optional[Iterable[str]] = None,
     rank_zero_only: bool = False,
+    drain_on_recording_stop: bool = False,
 ) -> tuple[str, SamplerSpec]:
     """Build one registry item with the key stored inside the spec."""
     spec = SamplerSpec(
@@ -74,6 +76,7 @@ def _spec(
         profiles=tuple(profiles) if profiles is not None else None,
         modes=tuple(modes) if modes is not None else None,
         rank_zero_only=rank_zero_only,
+        drain_on_recording_stop=bool(drain_on_recording_stop),
     )
     return key, spec
 
@@ -83,27 +86,53 @@ DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
         _spec("system", SystemSampler, rank_zero_only=True),
         _spec("process", ProcessSampler),
         _spec("stdout_stderr", StdoutStderrSampler, modes=("cli",)),
-        _spec("step_time", StepTimeSampler, profiles=("run", "deep")),
-        _spec("step_memory", StepMemorySampler, profiles=("run", "deep")),
-        _spec("batch_size", BatchSizeSampler, profiles=("run", "deep")),
-        _spec("layer_memory", LayerMemorySampler, profiles=("deep",)),
+        _spec(
+            "step_time",
+            StepTimeSampler,
+            profiles=("run", "deep"),
+            drain_on_recording_stop=True,
+        ),
+        _spec(
+            "step_memory",
+            StepMemorySampler,
+            profiles=("run", "deep"),
+            drain_on_recording_stop=True,
+        ),
+        _spec(
+            "batch_size",
+            BatchSizeSampler,
+            profiles=("run", "deep"),
+            drain_on_recording_stop=True,
+        ),
+        _spec(
+            "layer_memory",
+            LayerMemorySampler,
+            profiles=("deep",),
+            drain_on_recording_stop=True,
+        ),
         _spec(
             "layer_forward_memory",
             LayerForwardMemorySampler,
             profiles=("deep",),
+            drain_on_recording_stop=True,
         ),
         _spec(
             "layer_backward_memory",
             LayerBackwardMemorySampler,
             profiles=("deep",),
+            drain_on_recording_stop=True,
         ),
         _spec(
-            "layer_forward_time", LayerForwardTimeSampler, profiles=("deep",)
+            "layer_forward_time",
+            LayerForwardTimeSampler,
+            profiles=("deep",),
+            drain_on_recording_stop=True,
         ),
         _spec(
             "layer_backward_time",
             LayerBackwardTimeSampler,
             profiles=("deep",),
+            drain_on_recording_stop=True,
         ),
     ]
 )
@@ -160,6 +189,7 @@ def build_samplers(
                 exc,
             )
             continue
+        sampler.drain_on_recording_stop = bool(spec.drain_on_recording_stop)
         samplers.append(sampler)
     return samplers
 

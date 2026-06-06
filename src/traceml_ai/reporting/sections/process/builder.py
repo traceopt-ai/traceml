@@ -11,7 +11,7 @@ from __future__ import annotations
 from statistics import median
 from typing import Any, Dict, Iterable, Optional
 
-from traceml_ai.diagnostics.common import DiagnosticResult, diagnosis_to_dict
+from traceml_ai.diagnostics.common import DiagnosticResult
 from traceml_ai.diagnostics.process import ProcessDiagnosis
 from traceml_ai.reporting.schema import (
     BaseGlobal,
@@ -28,7 +28,9 @@ from traceml_ai.reporting.sections.process.model import (
     build_process_stats_line,
     cpu_capacity_percent,
 )
-from traceml_ai.reporting.summaries.issue_summary import issues_to_json
+from traceml_ai.reporting.summaries.issue_summary import (
+    diagnostic_result_to_json,
+)
 from traceml_ai.reporting.summaries.summary_formatting import (
     bytes_to_gb,
     duration_from_bounds,
@@ -204,7 +206,7 @@ def build_process_payload(
         agg.gpu_mem_total_bytes,
     )
     primary_diagnosis = diagnosis_result.primary
-    issues = diagnosis_result.issues
+    diagnosis_json, issues_json = diagnostic_result_to_json(diagnosis_result)
 
     per_global_rank_json = _per_global_rank_to_json(per_global_rank)
     row_metrics = {
@@ -264,12 +266,8 @@ def build_process_payload(
     # Assemble the final common section envelope.
     summary = BaseSectionPayload(
         metadata=metadata.to_json(),
-        diagnosis=diagnosis_to_dict(
-            primary_diagnosis,
-            drop_none=True,
-            include_action=False,
-        ),
-        issues=issues_to_json(issues),
+        diagnosis=diagnosis_json,
+        issues=issues_json,
         global_summary=global_summary.to_json(),
         groups=BaseGroups(
             by="global_rank",

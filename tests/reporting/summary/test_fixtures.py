@@ -90,10 +90,31 @@ IDENTITY_KEYS = {
     "world_size",
 }
 
+ISSUE_KEYS = {
+    "kind",
+    "status",
+    "severity",
+    "summary",
+    "action",
+    "metric",
+    "phase",
+    "score",
+    "share_pct",
+    "skew_pct",
+    "ranks",
+    "evidence",
+}
+
 
 def _assert_section_shape(payload: dict, *, group_by: str) -> None:
     assert set(payload) == SECTION_KEYS
     assert set(payload["metadata"]) == METADATA_KEYS
+    assert set(payload["diagnosis"]) == ISSUE_KEYS
+    assert isinstance(payload["issues"], list)
+    assert payload["issues"]
+    assert payload["diagnosis"] == payload["issues"][0]
+    for issue in payload["issues"]:
+        assert set(issue) == ISSUE_KEYS
     assert set(payload["global"]) == GLOBAL_KEYS
     assert payload["global"]["index_by"] in {"node_rank", "global_rank"}
     assert payload["global"]["index_by"] == group_by
@@ -273,17 +294,9 @@ def _insert_system_sample(
             ram_used_bytes,
             ram_total_bytes,
             gpu_available,
-            gpu_count,
-            gpu_util_avg,
-            gpu_util_peak,
-            gpu_mem_used_avg_bytes,
-            gpu_mem_used_peak_bytes,
-            gpu_temp_avg_c,
-            gpu_temp_peak_c,
-            gpu_power_avg_w,
-            gpu_power_peak_w
+            gpu_count
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -300,14 +313,6 @@ def _insert_system_sample(
             16_000.0,
             int(gpu_available),
             gpu_count,
-            gpu_util,
-            gpu_util,
-            2_000.0 if gpu_available else None,
-            2_500.0 if gpu_available else None,
-            None,
-            None,
-            None,
-            None,
         ),
     )
     if gpu_available and gpu_count > 0:
@@ -451,13 +456,12 @@ def _insert_step_time_sample(
             local_world_size,
             node_rank,
             hostname,
-            runtime_pid,
             sample_ts_s,
             seq,
             step,
             events_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -468,7 +472,6 @@ def _insert_step_time_sample(
             1,
             rank,
             f"worker-{rank}",
-            10_000 + rank,
             float(step),
             row_id,
             step,
@@ -508,13 +511,12 @@ def _insert_step_memory_sample(
             hostname,
             sample_ts_s,
             seq,
-            model_id,
             device,
             step,
             peak_alloc_bytes,
             peak_reserved_bytes
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """,
         (
             row_id,
@@ -527,7 +529,6 @@ def _insert_step_memory_sample(
             f"worker-{rank}",
             float(step),
             row_id,
-            1,
             device,
             step,
             alloc,
@@ -788,7 +789,8 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
 
     assert payload["metadata"]["training_total_steps"] == 2
     assert payload["diagnosis"]["status"] == "NO GPU"
-    assert "action" not in payload["diagnosis"]
+    assert payload["diagnosis"]["action"]
+    assert payload["diagnosis"] == payload["issues"][0]
     assert "- Next:" not in payload["card"]
     assert payload["card"].index("- Diagnosis:") < payload["card"].index(
         "- Scope:"
@@ -799,7 +801,7 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
     assert payload["card"].index("- Stats:") < payload["card"].index("- Why:")
     assert payload["global"]["window"]["steps_analyzed"] == 0
     assert "steps_used" not in payload["global"]["window"]
-    assert payload["issues"] == []
+    assert payload["issues"][0]["kind"] == "NO_GPU"
 
 
 def test_final_summary_fixture_schema_contains_all_sections(
@@ -831,25 +833,39 @@ def test_final_summary_fixture_schema_contains_all_sections(
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.3
+    assert payload["schema_version"] == 1.4
     assert set(payload) == {
         "schema_version",
         "generated_at",
         "duration_s",
+        "meta",
         "system",
         "process",
         "step_time",
         "step_memory",
         "text",
     }
+    assert set(payload["meta"]) == {
+        "run_name",
+        "mode",
+        "world_size",
+        "nodes_observed",
+        "gpus_observed",
+    }
+    assert payload["meta"] == {
+        "run_name": None,
+        "mode": "single_node",
+        "world_size": 1,
+        "nodes_observed": 1,
+        "gpus_observed": 0,
+    }
     for key in ("system", "process", "step_time", "step_memory"):
         assert "metadata" in payload[key]
         assert "card" in payload[key]
         assert "diagnosis" in payload[key]
+        assert payload[key]["issues"]
+        assert payload[key]["diagnosis"] == payload[key]["issues"][0]
         assert "- Next:" not in payload[key]["card"]
-        diagnosis = payload[key]["diagnosis"]
-        if diagnosis is not None:
-            assert "action" not in diagnosis
     assert payload["system"]["diagnosis"]["status"] == "NORMAL"
     assert "NO GPU" not in payload["system"]["card"]
     assert "- Next:" not in payload["text"]

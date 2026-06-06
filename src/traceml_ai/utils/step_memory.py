@@ -7,6 +7,8 @@ from typing import Dict, Optional
 import torch
 import torch.nn as nn
 
+from traceml_ai.runtime.state import should_record_trace_events
+
 step_memory_queue: Queue = Queue(maxsize=2048)
 
 _temp_step_memory_buffer: Dict = {}
@@ -33,7 +35,7 @@ class StepMemoryTracker:
     """
 
     def __init__(self, model: nn.Module):
-        if TRACEML_DISABLED:
+        if TRACEML_DISABLED or not should_record_trace_events():
             return  # BYPASS: Do not attach any trackers
 
         self.model = model
@@ -50,7 +52,7 @@ class StepMemoryTracker:
         """
         Reset CUDA peak memory counters at step start.
         """
-        if TRACEML_DISABLED:
+        if TRACEML_DISABLED or not should_record_trace_events():
             return
 
         if self.device.type == "cuda":
@@ -66,7 +68,7 @@ class StepMemoryTracker:
           treat step memory as not applicable instead of a real zero-valued
           measurement
         """
-        if TRACEML_DISABLED:
+        if TRACEML_DISABLED or not should_record_trace_events():
             return
 
         if self.device.type == "cuda":
@@ -91,7 +93,7 @@ class StepMemoryTracker:
 
 
 def flush_step_memory_buffer(model: nn.Module, step: int) -> None:
-    if TRACEML_DISABLED:
+    if TRACEML_DISABLED or not should_record_trace_events():
         return
 
     model_id = id(model)

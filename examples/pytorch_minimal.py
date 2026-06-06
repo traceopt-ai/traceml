@@ -80,10 +80,9 @@ def main():
 
                 time.sleep(PAUSE_BETWEEN_STEPS)
 
+    summary = traceml.summary(print_text=True)
+    print(summary)
     print("Done.")
-
-    summary = traceml.final_summary(print_text=True)
-    print(summary is not None)
 
 
 if __name__ == "__main__":

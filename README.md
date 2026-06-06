@@ -6,9 +6,11 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/traceopt-ai/traceml/actions/workflows/codeql.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/codeql.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/traceopt-ai/traceml?style=social)](https://github.com/traceopt-ai/traceml)
+[![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml/stargazers)
+[![Discord](https://img.shields.io/badge/Discord-Join%20chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/rY3EQguZAN)
 
 [**Quickstart**](docs/user_guide/quickstart.md) •
 [**Compare Runs**](docs/user_guide/compare.md) •
@@ -87,6 +89,12 @@ logs/<run_name>/final_summary.json
 logs/<run_name>/final_summary.txt
 ```
 
+You can re-print a saved summary later without rerunning training:
+
+```bash
+traceml view logs/<run_name>/final_summary.json
+```
+
 Instead of guessing why training feels slow, you get a compact diagnosis of
 where step time and memory went:
 
@@ -154,12 +162,12 @@ changing the final saved artifacts.
 - Single GPU training
 - Single-node multi-GPU DDP / FSDP
 - Multi-node DDP summary reports
+- Multi-node runs on Slurm (sbatch template + guide)
 - Run-to-run comparison from `final_summary.json`
 - Custom PyTorch loops, Hugging Face, PyTorch Lightning, and Ray Train
 
 **On the roadmap:**
 
-- Slurm launch examples
 - Multi-node live CLI / browser dashboard
 - Explicit collective / NCCL timing
 
@@ -175,6 +183,7 @@ changing the final saved artifacts.
 
 - [Quickstart](docs/user_guide/quickstart.md)
 - [Distributed Training](docs/user_guide/distributed-training.md)
+- [Running on Slurm](docs/user_guide/slurm.md)
 - [Use With Your Stack](docs/user_guide/integrations.md)
 - [Compare Runs](docs/user_guide/compare.md)
 - [How to Read Output](docs/user_guide/reading-output.md)

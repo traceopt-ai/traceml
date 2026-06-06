@@ -66,9 +66,24 @@ with traceml.trace_step(model):
 For supported integrations:
 
 - Hugging Face: use `TraceMLTrainer`
-- Lightning: add `TraceMLCallback()`
+- Lightning: call `traceml_ai.integrations.lightning.init()` and add `TraceMLCallback()`
 
-The preferred public API is the top-level `traceml.*` from `import traceml_ai as traceml`.
+The preferred public API is the top-level `traceml.*` API from
+`import traceml_ai as traceml`. The old `import traceml` path remains available
+for compatibility, but emits a deprecation warning.
+
+---
+
+## Can I trace only a small number of steps?
+
+Yes. Use `--trace-max-steps` with `traceml run`:
+
+```bash
+traceml run train.py --trace-max-steps 100 --args --epochs 5
+```
+
+TraceML records and flushes the first N TraceML steps, then stops recording
+telemetry while your training job continues normally.
 
 ---
 
@@ -85,7 +100,8 @@ with traceml.trace_step(model):
     ...
 ```
 
-Use the top-level `traceml.*` API from `import traceml_ai as traceml`.
+Use the top-level `traceml.*` API from `import traceml_ai as traceml`. Do not
+import from decorator compatibility paths.
 
 ---
 
@@ -283,6 +299,8 @@ recommended low-noise path is:
 3. log the returned flat dict into W&B or MLflow
 
 Use `traceml.final_summary()` if you need the full structured JSON payload.
+Both APIs reuse the same canonical `final_summary.json` once it has been
+generated.
 
 See:
 
@@ -318,6 +336,10 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
+In distributed runs, this can still be the primary diagnosis when backward or
+compute skew is also visible, because a slow input rank can push synchronization
+wait into peer ranks.
+
 Common causes:
 
 - uneven data loading
@@ -333,6 +355,10 @@ See:
 ## What does `COMPUTE STRAGGLER` mean?
 
 It means one rank is slower in compute than the typical rank.
+
+If input and compute skew appear together, TraceML first checks whether the
+input excess is large enough to explain the compute skew. If yes, the primary
+diagnosis is `INPUT STRAGGLER`; otherwise the mixed case remains `STRAGGLER`.
 
 Common causes:
 

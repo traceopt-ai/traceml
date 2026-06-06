@@ -16,6 +16,7 @@ This module defines the shared configuration dataclasses used by:
 """
 
 from dataclasses import dataclass
+from typing import Optional
 
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
@@ -73,3 +74,4 @@ class TraceMLSettings:
     history_enabled: bool = True
     db_path: str = ""
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
+    trace_max_steps: Optional[int] = None

@@ -13,11 +13,21 @@ with traceml.trace_step(model):
     ...
 ```
 
-The old `import traceml` path still works for now, but emits a `FutureWarning`
-and will be removed in a future release. New code should use
-`import traceml_ai as traceml`.
+The old `import traceml` path remains available for compatibility, but emits a
+`FutureWarning` and may be removed in a future release. Do not import from
+decorator compatibility paths.
 
 ## Hugging Face integration
+
+::: traceml_ai.integrations.huggingface.init
+    options:
+      show_root_heading: true
+      show_source: true
+
+::: traceml_ai.integrations.huggingface.TraceMLTrainerCallback
+    options:
+      show_root_heading: true
+      show_source: true
 
 ::: traceml_ai.integrations.huggingface.TraceMLTrainer
     options:
@@ -25,6 +35,11 @@ and will be removed in a future release. New code should use
       show_source: true
 
 ## PyTorch Lightning integration
+
+::: traceml_ai.integrations.lightning.init
+    options:
+      show_root_heading: true
+      show_source: true
 
 ::: traceml_ai.integrations.lightning.TraceMLCallback
     options:
@@ -68,7 +83,8 @@ See `traceml --help` for the full set of options.
 ### `traceml.summary()`
 
 Returns a compact flat dict for experiment trackers such as W&B, MLflow, or
-internal dashboards.
+internal dashboards. Call it near the end of training; it reuses the canonical
+`final_summary.json` if one already exists.
 
 ```python
 summary = traceml.summary(print_text=True)
@@ -80,3 +96,5 @@ if summary is not None:
 
 Returns the full `final_summary.json` payload. Use this when you need the
 complete structured report or want to store the artifact for `traceml compare`.
+TraceML generates this canonical artifact once per run and reuses it on later
+calls.

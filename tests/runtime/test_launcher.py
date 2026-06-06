@@ -14,6 +14,7 @@ import pytest
 from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
     resolve_existing_script_path,
+    run_view,
     validate_launch_args,
 )
 from traceml_ai.launcher.manifest import (
@@ -55,10 +56,20 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.run_name == ""
     assert args.session_id == ""
     assert args.summary_window_rows == DEFAULT_SUMMARY_WINDOW_ROWS
+    assert args.trace_max_steps is None
     assert args.args == ["--epochs", "1"]
 
     default_args = parser.parse_args(["watch", "train.py"])
     assert default_args.mode == "summary"
+
+
+def test_build_parser_accepts_view_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["view", "summary.json"])
+
+    assert args.command == "view"
+    assert args.summary == "summary.json"
 
 
 def test_build_parser_accepts_multinode_launch_args() -> None:
@@ -139,6 +150,28 @@ def test_summary_window_rows_must_be_positive() -> None:
         run_name="",
         session_id="",
         summary_window_rows=0,
+    )
+
+    with pytest.raises(SystemExit):
+        validate_launch_args(args)
+
+
+def test_trace_max_steps_must_be_positive() -> None:
+    args = argparse.Namespace(
+        mode="cli",
+        no_history=False,
+        nnodes=1,
+        nproc_per_node=1,
+        node_rank=0,
+        master_addr="127.0.0.1",
+        master_port=29500,
+        aggregator_host=None,
+        aggregator_bind_host=None,
+        aggregator_port=29765,
+        run_name="",
+        session_id="",
+        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        trace_max_steps=0,
     )
 
     with pytest.raises(SystemExit):
@@ -307,6 +340,20 @@ def test_collect_existing_artifacts_only_returns_existing_files(
         "db": str(db_path),
         "summary_card_txt": str(summary_path),
     }
+
+
+def test_run_view_reports_user_facing_errors(tmp_path, capsys) -> None:
+    summary_path = tmp_path / "summary.json"
+    summary_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc:
+        run_view(argparse.Namespace(summary=str(summary_path)))
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 1
+    assert captured.out == ""
+    assert "[TraceML] ERROR:" in captured.err
+    assert "does not contain printable text" in captured.err
 
 
 def test_distributed_launch_config_builds_torchrun_command() -> None:

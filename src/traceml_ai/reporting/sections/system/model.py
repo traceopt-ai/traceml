@@ -50,12 +50,14 @@ def percent(
 @dataclass
 class SystemSummaryAgg:
     """
-    Aggregated system metrics loaded from `system_samples`.
+    Aggregated system metrics loaded from system projection tables.
 
     Notes
     -----
     - Memory values remain in raw bytes while aggregating and are converted
       only at formatting / serialization time.
+    - Node-level CPU/RAM fields come from `system_samples`; GPU rollups are
+      derived from raw `system_gpu_samples` rows.
     - GPU fields are optional because CPU-only runs are fully supported.
     """
 

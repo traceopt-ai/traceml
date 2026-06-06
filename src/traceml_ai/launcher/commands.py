@@ -94,6 +94,11 @@ def validate_launch_args(args: argparse.Namespace) -> None:
         raise SystemExit(
             "[TraceML] ERROR: --summary-window-rows must be greater than 0."
         )
+    trace_max_steps = getattr(args, "trace_max_steps", None)
+    if trace_max_steps is not None and int(trace_max_steps) <= 0:
+        raise SystemExit(
+            "[TraceML] ERROR: --trace-max-steps must be greater than 0."
+        )
     try:
         launch_cfg = DistributedLaunchConfig.from_args(args)
         RunIdentity.from_args(
@@ -137,6 +142,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_REMOTE_MAX_ROWS"] = str(args.remote_max_rows)
     env["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
         int(getattr(args, "summary_window_rows", DEFAULT_SUMMARY_WINDOW_ROWS))
+    )
+    trace_max_steps = getattr(args, "trace_max_steps", None)
+    env["TRACEML_TRACE_MAX_STEPS"] = (
+        "" if trace_max_steps is None else str(int(trace_max_steps))
     )
     env["TRACEML_NNODES"] = str(torchrun_cfg.nnodes)
     env["TRACEML_NPROC_PER_NODE"] = str(torchrun_cfg.nproc_per_node)
@@ -403,4 +412,19 @@ def run_compare(args: argparse.Namespace) -> None:
     except Exception as exc:
         _log_launcher_exception("compare failed unexpectedly", exc)
         print(f"[TraceML] ERROR: compare failed: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+def run_view(args: argparse.Namespace) -> None:
+    """Print the stored text from a TraceML summary JSON file."""
+    try:
+        from traceml_ai.reporting.view import view_summary
+
+        view_summary(args.summary, print_to_stdout=True)
+    except RuntimeError as exc:
+        print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1)
+    except Exception as exc:
+        _log_launcher_exception("view failed unexpectedly", exc)
+        print(f"[TraceML] ERROR: view failed: {exc}", file=sys.stderr)
         raise SystemExit(1)

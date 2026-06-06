@@ -32,7 +32,6 @@ def _create_step_time_db(path: str) -> None:
                 local_world_size   INTEGER,
                 node_rank          INTEGER,
                 hostname           TEXT,
-                runtime_pid        INTEGER,
                 sample_ts_s        REAL,
                 seq                INTEGER,
                 step               INTEGER,
@@ -87,7 +86,6 @@ def _create_step_time_db(path: str) -> None:
                 1,
                 0,
                 "worker-0",
-                10_000,
                 1.0,
                 1,
                 1,
@@ -102,7 +100,6 @@ def _create_step_time_db(path: str) -> None:
                 1,
                 0,
                 "worker-0",
-                10_000,
                 2.0,
                 2,
                 2,
@@ -120,13 +117,12 @@ def _create_step_time_db(path: str) -> None:
                 local_world_size,
                 node_rank,
                 hostname,
-                runtime_pid,
                 sample_ts_s,
                 seq,
                 step,
                 events_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             rows,
         )

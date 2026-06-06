@@ -39,7 +39,7 @@ class BaseDiagnosis:
 @dataclass(frozen=True)
 class DiagnosticIssue:
     """
-    One concrete issue detected in an analyzed window.
+    One concrete diagnostic finding or state in an analyzed window.
 
     Notes
     -----
@@ -47,6 +47,8 @@ class DiagnosticIssue:
     - `status` is the user-facing label shown in summaries and dashboards.
     - `score` is an optional normalized scalar used for ranking issues.
     - `ranks` contains the materially affected ranks in stable order.
+    - Neutral states such as NORMAL, BALANCED, NO_DATA, and WARMUP also use
+      this shape so final-summary JSON has one stable contract.
     """
 
     kind: str
@@ -71,15 +73,19 @@ class DiagnosticResult(Generic[PrimaryT]):
     """
     Full diagnosis output for one analyzed window.
 
-    Runtime UX usually consumes only `primary`. Richer downstream consumers
-    such as final summaries and dashboards can additionally use:
-    - `issues`
-    - `metric_attribution`
+    `issues` is the canonical ordered list of findings/states. It is never
+    empty: if no rule emitted a concrete issue, the neutral `primary`
+    diagnosis is converted into one issue-shaped state. Final-summary JSON can
+    therefore expose `diagnosis == issues[0]` across every section.
     """
 
     primary: PrimaryT
     issues: Tuple[DiagnosticIssue, ...] = ()
     metric_attribution: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        issues = ensure_primary_issue(self.primary, self.issues)
+        object.__setattr__(self, "issues", issues)
 
 
 class DiagnosticRule(Protocol, Generic[ContextT]):
@@ -131,26 +137,82 @@ def validate_confidence(confidence: Optional[float]) -> None:
         raise ValueError("confidence must be between 0.0 and 1.0")
 
 
-def diagnosis_to_dict(
-    diagnosis: Optional[Any],
-    *,
-    drop_none: bool = False,
-    include_action: bool = True,
-) -> Optional[Dict[str, Any]]:
+def diagnosis_to_issue(diagnosis: Any) -> DiagnosticIssue:
     """
-    Convert a diagnosis dataclass to a JSON-serializable dictionary.
-    """
-    if diagnosis is None:
-        return None
-    if not is_dataclass(diagnosis):
-        raise TypeError("diagnosis_to_dict expects a dataclass instance")
+    Convert a primary diagnosis into the shared issue/finding shape.
 
-    out: Dict[str, Any] = asdict(diagnosis)
-    if not include_action:
-        out.pop("action", None)
-    if drop_none:
-        out = {k: v for k, v in out.items() if v is not None}
-    return out
+    This is used for neutral states and data-availability states where no
+    diagnostic rule fired but the section still needs one canonical finding.
+    """
+    if not is_dataclass(diagnosis):
+        raise TypeError("diagnosis_to_issue expects a dataclass instance")
+
+    payload = asdict(diagnosis)
+    kind = str(payload.get("kind") or payload.get("status") or "UNKNOWN")
+    metric = payload.get("metric")
+    phase = payload.get("phase")
+    ranks: Tuple[int, ...] = ()
+    evidence: Dict[str, Any] = {}
+
+    evidence_fields = set(payload) - {
+        "kind",
+        "severity",
+        "status",
+        "reason",
+        "action",
+        "metric",
+        "phase",
+        "score",
+        "share_pct",
+        "skew_pct",
+    }
+    for key in sorted(evidence_fields):
+        value = payload.get(key)
+        if value is None or value == {}:
+            continue
+        if key == "worst_rank":
+            ranks = (int(value),)
+        evidence[key] = value
+
+    return DiagnosticIssue(
+        kind=kind,
+        status=str(payload.get("status") or kind),
+        severity=payload.get("severity") or "info",
+        summary=str(payload.get("reason") or ""),
+        action=str(payload.get("action") or ""),
+        metric=str(metric) if metric is not None else None,
+        phase=str(phase) if phase is not None else None,
+        score=payload.get("score"),
+        share_pct=payload.get("share_pct"),
+        skew_pct=payload.get("skew_pct"),
+        ranks=ranks,
+        evidence=evidence,
+    )
+
+
+def ensure_primary_issue(
+    primary: Any,
+    issues: Sequence[DiagnosticIssue],
+) -> Tuple[DiagnosticIssue, ...]:
+    """
+    Return a non-empty issue tuple with the primary diagnosis first.
+    """
+    issue_tuple = tuple(issues or ())
+    if not issue_tuple:
+        return (diagnosis_to_issue(primary),)
+
+    primary_kind = str(getattr(primary, "kind", "") or "")
+    if not primary_kind:
+        return issue_tuple
+
+    for idx, issue in enumerate(issue_tuple):
+        if issue.kind == primary_kind:
+            return (
+                issue,
+                *issue_tuple[:idx],
+                *issue_tuple[idx + 1 :],
+            )
+    return (diagnosis_to_issue(primary), *issue_tuple)
 
 
 __all__ = [
@@ -163,5 +225,6 @@ __all__ = [
     "severity_rank",
     "sort_issues",
     "validate_confidence",
-    "diagnosis_to_dict",
+    "diagnosis_to_issue",
+    "ensure_primary_issue",
 ]

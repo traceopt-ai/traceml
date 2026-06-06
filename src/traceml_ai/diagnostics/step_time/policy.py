@@ -19,6 +19,7 @@ class DiagnosisThresholds:
 
     compute_straggler_score_warn: float = 0.10
     compute_straggler_score_crit: float = 0.20
+    input_straggler_compute_excess_tolerance: float = 1.5
 
     input_share_warn: float = 0.25
     input_share_crit: float = 0.35

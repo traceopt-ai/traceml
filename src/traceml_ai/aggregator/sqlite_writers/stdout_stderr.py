@@ -8,7 +8,7 @@ query-friendly SQLite table while preserving the original sampler payload in
 Design
 ------
 - Keeps sampler-specific SQL logic out of the core SQLite writer
-- Accepts already-decoded payload dicts from the main writer
+- Accepts canonical telemetry envelopes from the main writer
 - Produces one append-only table:
     1) stdout_stderr_samples
        One row per captured output line
@@ -23,16 +23,11 @@ Stdout/stderr is intentionally stored as a very simple append-only stream:
 
 Expected payload shape
 ----------------------
-Envelope:
+Canonical telemetry envelope:
 {
-    "rank": int,
-    "sampler": "Stdout/Stderr",
-    "timestamp": float,
-    "tables": {
-        "stdout_stderr": [
-            {"line": "..."},
-            ...
-        ]
+    "meta": {"sampler": "Stdout/Stderr", ...},
+    "body": {
+        "tables": {"stdout_stderr": [{"line": "..."}, ...]}
     }
 }
 """
@@ -40,7 +35,9 @@ Envelope:
 from __future__ import annotations
 
 import sqlite3
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
+
+from traceml_ai.telemetry.envelope import TelemetryEnvelope
 
 SAMPLER_NAME = "Stdout/Stderr"
 
@@ -82,7 +79,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def build_rows(
-    payload_dict: Dict[str, Any],
+    envelope: TelemetryEnvelope,
     recv_ts_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
@@ -90,8 +87,8 @@ def build_rows(
 
     Parameters
     ----------
-    payload_dict:
-        Decoded sampler payload dict from the main SQLite writer.
+    envelope:
+        Canonical telemetry envelope from the main SQLite writer.
     recv_ts_ns:
         Receive timestamp assigned by the main writer for this payload.
 
@@ -111,20 +108,16 @@ def build_rows(
         "stdout_stderr_samples": [],
     }
 
-    sampler = payload_dict.get("sampler")
-    if not accepts_sampler(str(sampler) if sampler is not None else None):
+    sampler = envelope.meta.sampler
+    if not accepts_sampler(sampler):
         return out
 
-    rank_raw = payload_dict.get("rank")
-    try:
-        rank = int(rank_raw) if rank_raw is not None else None
-    except Exception:
-        rank = None
+    rank = envelope.meta.rank
 
-    ts_raw = payload_dict.get("timestamp")
+    ts_raw = envelope.meta.timestamp
     sample_ts_s = float(ts_raw) if isinstance(ts_raw, (int, float)) else None
 
-    tables = payload_dict.get("tables")
+    tables = envelope.tables
     if not isinstance(tables, dict):
         return out
 

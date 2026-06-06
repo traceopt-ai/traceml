@@ -13,10 +13,15 @@ payloads rather than live runtime UI changes.
 """
 
 from .api import SystemDiagnosis, diagnose_system
-from .policy import DEFAULT_SYSTEM_POLICY, SystemDiagnosisPolicy
+from .policy import (
+    DEFAULT_SYSTEM_POLICY,
+    GPUUtilizationBands,
+    SystemDiagnosisPolicy,
+)
 
 __all__ = [
     "DEFAULT_SYSTEM_POLICY",
+    "GPUUtilizationBands",
     "SystemDiagnosisPolicy",
     "SystemDiagnosis",
     "diagnose_system",

@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 import torch
 import torch.nn as nn
 
+from traceml_ai.runtime.state import should_record_trace_events
 from traceml_ai.utils.cuda_event_pool import get_cuda_event, return_cuda_event
 from traceml_ai.utils.shared_utils import (
     get_hookable_modules,
@@ -143,6 +144,9 @@ class LayerForwardTimePreHook:
         ).setdefault(self.layer_name, deque())
 
     def __call__(self, module, inputs):
+        if not should_record_trace_events():
+            return
+
         try:
             cpu_start = time.perf_counter()
             gpu_start = None
@@ -179,6 +183,9 @@ class LayerForwardTimePostHook:
         ).setdefault(self.layer_name, deque())
 
     def __call__(self, module, inputs, output):
+        if not should_record_trace_events():
+            return
+
         try:
             cpu_end = time.perf_counter()
 
@@ -220,6 +227,9 @@ def flush_layer_forward_time_buffers(model: nn.Module, step: int) -> None:
     Flush all forward timing events for `model` at a step boundary.
     Emits a single LayerForwardTimeStepEvent into the shared queue.
     """
+    if not should_record_trace_events():
+        return
+
     model_id = id(model)
     layers = _layer_forward_time_event_buffer.pop(model_id, None)
     if not layers:

@@ -35,12 +35,14 @@ class FinalSummaryService:
         session_root: Path,
         db_path: str,
         flush_history: Callable[[float], bool],
+        settle_telemetry: Optional[Callable[[float], bool]] = None,
         summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
     ) -> None:
         self._logger = logger
         self._session_root = Path(session_root).resolve()
         self._db_path = str(db_path)
         self._flush_history = flush_history
+        self._settle_telemetry = settle_telemetry
         self._summary_window_rows = int(summary_window_rows)
         self._last_request_id: Optional[str] = None
 
@@ -66,10 +68,15 @@ class FinalSummaryService:
         response_path = get_final_summary_response_path(self._session_root)
 
         try:
-            flushed = self._flush_history(5.0)
-            if not flushed:
+            if self._summary_exists():
+                self._write_ok_response(response_path, request_id=request_id)
+                self._last_request_id = request_id
+                return
+
+            settled = self._settle_before_generation(5.0)
+            if not settled:
                 raise RuntimeError(
-                    "Timed out while waiting for SQLite history to flush."
+                    "Timed out while waiting for TraceML telemetry to settle."
                 )
 
             generate_summary(
@@ -79,19 +86,7 @@ class FinalSummaryService:
                 summary_window_rows=self._summary_window_rows,
             )
 
-            response = FinalSummaryResponse(
-                request_id=request_id,
-                status="ok",
-                completed_at=utc_now_iso(),
-                summary_json_path=str(
-                    get_final_summary_json_path(self._session_root)
-                ),
-                summary_txt_path=str(
-                    get_final_summary_txt_path(self._session_root)
-                ),
-                error=None,
-            )
-            write_json_atomic(response_path, response_to_json(response))
+            self._write_ok_response(response_path, request_id=request_id)
             self._last_request_id = request_id
 
         except Exception as exc:
@@ -112,3 +107,34 @@ class FinalSummaryService:
             )
             write_json_atomic(response_path, response_to_json(response))
             self._last_request_id = request_id
+
+    def _summary_exists(self) -> bool:
+        """Return True when the canonical JSON artifact already exists."""
+        return get_final_summary_json_path(self._session_root).is_file()
+
+    def _settle_before_generation(self, timeout_sec: float) -> bool:
+        """Best-effort telemetry settle before first summary generation."""
+        if self._settle_telemetry is not None:
+            return bool(self._settle_telemetry(float(timeout_sec)))
+        return bool(self._flush_history(float(timeout_sec)))
+
+    def _write_ok_response(
+        self,
+        response_path: Path,
+        *,
+        request_id: str,
+    ) -> None:
+        """Publish an OK response pointing at canonical summary artifacts."""
+        response = FinalSummaryResponse(
+            request_id=request_id,
+            status="ok",
+            completed_at=utc_now_iso(),
+            summary_json_path=str(
+                get_final_summary_json_path(self._session_root)
+            ),
+            summary_txt_path=str(
+                get_final_summary_txt_path(self._session_root)
+            ),
+            error=None,
+        )
+        write_json_atomic(response_path, response_to_json(response))

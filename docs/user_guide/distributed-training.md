@@ -51,3 +51,9 @@ Override that only when needed with `--aggregator-bind-host=<bind-host>`.
 
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
+
+## Running on Slurm
+
+On a Slurm-managed cluster, derive these flags from the job environment instead
+of setting them by hand. See [Running on Slurm](slurm.md) for the mapping and a
+copy-paste sbatch template.

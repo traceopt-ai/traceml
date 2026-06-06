@@ -24,19 +24,24 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class ComputeSignal:
     """
-    Dominant compute-phase signal used for attribution and bound classification.
+    Dominant compute-phase signal used for attribution and bound
+    classification.
     """
 
     label: str
     share: float
     skew: float
+    median_ms: float
+    worst_ms: float
+    excess_ms: float
     worst_rank: Optional[int]
 
 
 @dataclass(frozen=True)
 class StepTimeAnalysisContext:
     """
-    Normalized step-time analysis state shared by all step-time diagnosis rules.
+    Normalized step-time analysis state shared by all step-time diagnosis
+    rules.
     """
 
     metrics: Sequence[StepCombinedTimeMetric]
@@ -47,6 +52,7 @@ class StepTimeAnalysisContext:
 
     step_metric: StepCombinedTimeMetric
     dataloader_metric: Optional[StepCombinedTimeMetric]
+    h2d_metric: Optional[StepCombinedTimeMetric]
     wait_metric: Optional[StepCombinedTimeMetric]
     forward_metric: Optional[StepCombinedTimeMetric]
     backward_metric: Optional[StepCombinedTimeMetric]
@@ -54,8 +60,13 @@ class StepTimeAnalysisContext:
 
     step_total: float
     dataloader_total: float
+    h2d_total: float
     wait_total: float
     compute_total: float
+    typical_step_total: float
+    dataloader_excess_ms: float
+    compute_excess_ms: float
+    compute_phase_excess_total: float
 
     dataloader_share: float
     wait_share: float
@@ -188,7 +199,11 @@ def compute_worst_total(
     optimizer: Optional[StepCombinedTimeMetric],
 ) -> float:
     """
-    Return worst-rank compute total.
+    Return the sum of per-phase worst totals for compute phases.
+
+    This is an excess detector input, not a real rank-local compute total:
+    worst forward, worst backward, and worst optimizer may come from different
+    ranks in distributed training.
     """
     return (
         metric_worst_total(forward)
@@ -214,69 +229,62 @@ def compute_total(
     )
 
 
-def typical_local_burden(
+def typical_step_total(
     *,
     dataloader: Optional[StepCombinedTimeMetric],
+    h2d: Optional[StepCombinedTimeMetric],
+    forward: Optional[StepCombinedTimeMetric],
+    backward: Optional[StepCombinedTimeMetric],
+    optimizer: Optional[StepCombinedTimeMetric],
+    wait: Optional[StepCombinedTimeMetric],
+) -> float:
+    """
+    Return the typical observed step used to normalize straggler scores.
+
+    Definition:
+        median dataloader + median H2D + median forward + median backward
+        + median optimizer + median residual wait
+
+    This keeps straggler scores user-facing: "extra phase time as a share of a
+    normal observed iteration", including residual overhead that is part of the
+    step seen by users.
+    """
+    return (
+        metric_median_total(dataloader)
+        + metric_median_total(h2d)
+        + compute_median_total(
+            forward=forward,
+            backward=backward,
+            optimizer=optimizer,
+        )
+        + metric_median_total(wait)
+    )
+
+
+def metric_excess(metric: Optional[StepCombinedTimeMetric]) -> float:
+    """
+    Return worst-vs-median excess for one timing metric.
+    """
+    return max(0.0, metric_worst_total(metric) - metric_median_total(metric))
+
+
+def compute_phase_excess_total(
+    *,
     forward: Optional[StepCombinedTimeMetric],
     backward: Optional[StepCombinedTimeMetric],
     optimizer: Optional[StepCombinedTimeMetric],
 ) -> float:
     """
-    Return the typical local burden used to normalize straggler scores.
+    Return total excess across compute phases.
+
+    Detection keeps the existing spirit:
+        (worst forward + worst backward + worst optimizer)
+        - (median forward + median backward + median optimizer)
+
+    Attribution is handled separately by selecting the phase with the largest
+    individual excess.
     """
-    return metric_median_total(dataloader) + compute_median_total(
-        forward=forward,
-        backward=backward,
-        optimizer=optimizer,
-    )
-
-
-def input_straggler_score(
-    *,
-    dataloader: Optional[StepCombinedTimeMetric],
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-) -> float:
-    """
-    Return the normalized input straggler score.
-    """
-    typical = typical_local_burden(
-        dataloader=dataloader,
-        forward=forward,
-        backward=backward,
-        optimizer=optimizer,
-    )
-    if typical <= 0.0:
-        return 0.0
-
-    excess = max(
-        0.0,
-        metric_worst_total(dataloader) - metric_median_total(dataloader),
-    )
-    return excess / typical
-
-
-def compute_straggler_score(
-    *,
-    dataloader: Optional[StepCombinedTimeMetric],
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-) -> float:
-    """
-    Return the normalized compute straggler score.
-    """
-    typical = typical_local_burden(
-        dataloader=dataloader,
-        forward=forward,
-        backward=backward,
-        optimizer=optimizer,
-    )
-    if typical <= 0.0:
-        return 0.0
-
-    excess = max(
+    return max(
         0.0,
         compute_worst_total(
             forward=forward,
@@ -288,6 +296,67 @@ def compute_straggler_score(
             backward=backward,
             optimizer=optimizer,
         ),
+    )
+
+
+def input_straggler_score(
+    *,
+    dataloader: Optional[StepCombinedTimeMetric],
+    h2d: Optional[StepCombinedTimeMetric],
+    forward: Optional[StepCombinedTimeMetric],
+    backward: Optional[StepCombinedTimeMetric],
+    optimizer: Optional[StepCombinedTimeMetric],
+    wait: Optional[StepCombinedTimeMetric],
+) -> float:
+    """
+    Return the normalized input straggler score.
+    """
+    typical = typical_step_total(
+        dataloader=dataloader,
+        h2d=h2d,
+        forward=forward,
+        backward=backward,
+        optimizer=optimizer,
+        wait=wait,
+    )
+    if typical <= 0.0:
+        return 0.0
+
+    excess = metric_excess(dataloader)
+    return excess / typical
+
+
+def compute_straggler_score(
+    *,
+    dataloader: Optional[StepCombinedTimeMetric],
+    h2d: Optional[StepCombinedTimeMetric],
+    forward: Optional[StepCombinedTimeMetric],
+    backward: Optional[StepCombinedTimeMetric],
+    optimizer: Optional[StepCombinedTimeMetric],
+    wait: Optional[StepCombinedTimeMetric],
+) -> float:
+    """
+    Return the normalized compute straggler score.
+
+    Compute straggler detection asks whether compute-phase excess is material
+    relative to a normal observed step. It does not claim that the summed
+    worst phases all came from one rank.
+    """
+    typical = typical_step_total(
+        dataloader=dataloader,
+        h2d=h2d,
+        forward=forward,
+        backward=backward,
+        optimizer=optimizer,
+        wait=wait,
+    )
+    if typical <= 0.0:
+        return 0.0
+
+    excess = compute_phase_excess_total(
+        forward=forward,
+        backward=backward,
+        optimizer=optimizer,
     )
     return excess / typical
 
@@ -301,7 +370,12 @@ def dominant_compute_signal(
     single_rank: bool,
 ) -> Optional[ComputeSignal]:
     """
-    Pick the compute component with strongest skew, then strongest share.
+    Pick the compute phase that best explains a straggler.
+
+    Blame rank selection follows the largest absolute phase excess:
+        worst_phase - median_phase
+
+    Relative skew is still carried for presentation and secondary thresholds.
     """
     candidates: list[ComputeSignal] = []
 
@@ -313,8 +387,11 @@ def dominant_compute_signal(
         if metric is None:
             continue
 
+        median = metric_median_total(metric)
+        worst = metric_worst_total(metric)
+        excess = metric_excess(metric)
         total = metric_total(metric, single_rank=single_rank)
-        if total <= 0.0:
+        if total <= 0.0 and worst <= 0.0:
             continue
 
         candidates.append(
@@ -322,13 +399,16 @@ def dominant_compute_signal(
                 label=label,
                 share=share(total, step_total),
                 skew=metric_skew(metric, single_rank=single_rank),
+                median_ms=median,
+                worst_ms=worst,
+                excess_ms=excess,
                 worst_rank=metric_worst_rank(metric),
             )
         )
 
     if not candidates:
         return None
-    return max(candidates, key=lambda item: (item.skew, item.share))
+    return max(candidates, key=lambda item: (item.excess_ms, item.share))
 
 
 def largest_compute_phase(
@@ -361,6 +441,9 @@ def largest_compute_phase(
                 label=label,
                 share=share(total, step_total),
                 skew=metric_skew(metric, single_rank=single_rank),
+                median_ms=metric_median_total(metric),
+                worst_ms=metric_worst_total(metric),
+                excess_ms=metric_excess(metric),
                 worst_rank=metric_worst_rank(metric),
             )
         )
@@ -403,6 +486,7 @@ def build_step_time_context(
 
     step_metric = by_key["step_time"]
     dataloader_metric = by_key.get("dataloader_fetch")
+    h2d_metric = by_key.get("h2d")
     wait_metric = by_key.get("wait_proxy")
     forward_metric = by_key.get("forward")
     backward_metric = by_key.get("backward")
@@ -415,12 +499,27 @@ def build_step_time_context(
 
     step_total = metric_total(step_metric, single_rank=single_rank)
     dataloader_total = metric_total(dataloader_metric, single_rank=single_rank)
+    h2d_total = metric_total(h2d_metric, single_rank=single_rank)
     wait_total = metric_total(wait_metric, single_rank=single_rank)
     compute_total_value = compute_total(
         forward=forward_metric,
         backward=backward_metric,
         optimizer=optimizer_metric,
         single_rank=single_rank,
+    )
+    typical_step_value = typical_step_total(
+        dataloader=dataloader_metric,
+        h2d=h2d_metric,
+        forward=forward_metric,
+        backward=backward_metric,
+        optimizer=optimizer_metric,
+        wait=wait_metric,
+    )
+    dataloader_excess_value = metric_excess(dataloader_metric)
+    compute_excess_value = compute_phase_excess_total(
+        forward=forward_metric,
+        backward=backward_metric,
+        optimizer=optimizer_metric,
     )
 
     dominant_compute = dominant_compute_signal(
@@ -449,6 +548,7 @@ def build_step_time_context(
 
     rank_values = {
         "dataloader_fetch": rank_values_from_metric(dataloader_metric),
+        "h2d": rank_values_from_metric(h2d_metric),
         "forward": rank_values_from_metric(forward_metric),
         "backward": rank_values_from_metric(backward_metric),
         "optimizer_step": rank_values_from_metric(optimizer_metric),
@@ -464,6 +564,10 @@ def build_step_time_context(
         rank_values = {
             "dataloader_fetch": {
                 rank: non_negative_finite(values.get("dataloader_fetch", 0.0))
+                for rank, values in local_per_rank_timing.items()
+            },
+            "h2d": {
+                rank: non_negative_finite(values.get("h2d", 0.0))
                 for rank, values in local_per_rank_timing.items()
             },
             "forward": {
@@ -496,14 +600,20 @@ def build_step_time_context(
         overall_worst_rank=overall_worst_rank,
         step_metric=step_metric,
         dataloader_metric=dataloader_metric,
+        h2d_metric=h2d_metric,
         wait_metric=wait_metric,
         forward_metric=forward_metric,
         backward_metric=backward_metric,
         optimizer_metric=optimizer_metric,
         step_total=step_total,
         dataloader_total=dataloader_total,
+        h2d_total=h2d_total,
         wait_total=wait_total,
         compute_total=compute_total_value,
+        typical_step_total=typical_step_value,
+        dataloader_excess_ms=dataloader_excess_value,
+        compute_excess_ms=compute_excess_value,
+        compute_phase_excess_total=compute_excess_value,
         dataloader_share=share(dataloader_total, step_total),
         wait_share=share(wait_total, step_total),
         compute_share=share(compute_total_value, step_total),
@@ -517,15 +627,19 @@ def build_step_time_context(
         largest_compute=largest_compute,
         input_straggler_score=input_straggler_score(
             dataloader=dataloader_metric,
+            h2d=h2d_metric,
             forward=forward_metric,
             backward=backward_metric,
             optimizer=optimizer_metric,
+            wait=wait_metric,
         ),
         compute_straggler_score=compute_straggler_score(
             dataloader=dataloader_metric,
+            h2d=h2d_metric,
             forward=forward_metric,
             backward=backward_metric,
             optimizer=optimizer_metric,
+            wait=wait_metric,
         ),
         rank_values=rank_values,
         per_rank_timing=local_per_rank_timing,
@@ -536,12 +650,14 @@ __all__ = [
     "ComputeSignal",
     "StepTimeAnalysisContext",
     "build_step_time_context",
+    "compute_phase_excess_total",
     "compute_median_total",
     "compute_total",
     "compute_worst_total",
     "dominant_compute_signal",
     "largest_compute_phase",
     "metric_median_total",
+    "metric_excess",
     "metric_skew",
     "metric_total",
     "metric_worst_rank",
@@ -549,4 +665,5 @@ __all__ = [
     "non_negative_finite",
     "rank_values_from_metric",
     "share",
+    "typical_step_total",
 ]

@@ -30,7 +30,34 @@ sys.modules.setdefault(
     ),
 )
 
-from traceml_ai.runtime.executor import run_user_script
+from traceml_ai.runtime.executor import (
+    build_runtime_settings,
+    extract_script_args,
+    read_traceml_env,
+    run_user_script,
+)
+
+
+def test_extract_script_args_uses_separator_when_present(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["executor.py", "--", "--epochs", "2"],
+    )
+
+    assert extract_script_args() == ["--epochs", "2"]
+
+
+def test_extract_script_args_keeps_args_when_torchrun_strips_separator(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["executor.py", "--epochs", "2"],
+    )
+
+    assert extract_script_args() == ["--epochs", "2"]
 
 
 def test_run_user_script_adds_script_dir_to_sys_path(tmp_path, monkeypatch):
@@ -99,3 +126,32 @@ def test_run_user_script_restores_sys_argv_and_sys_path(tmp_path, monkeypatch):
     assert output_path.read_text(encoding="utf-8").endswith("--epochs|2")
     assert sys.argv == original_argv
     assert sys.path == original_path
+
+
+def test_read_traceml_env_parses_trace_max_steps(monkeypatch):
+    monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
+    monkeypatch.setenv("TRACEML_TRACE_MAX_STEPS", "123")
+
+    cfg = read_traceml_env()
+
+    assert cfg["trace_max_steps"] == 123
+
+
+def test_build_runtime_settings_carries_trace_max_steps():
+    settings = build_runtime_settings(
+        {
+            "mode": "summary",
+            "profile": "run",
+            "interval": 1.0,
+            "enable_logging": False,
+            "logs_dir": "./logs",
+            "session_id": "test",
+            "summary_window_rows": 200,
+            "trace_max_steps": 5,
+            "aggregator_host": "127.0.0.1",
+            "aggregator_bind_host": "127.0.0.1",
+            "aggregator_port": 29765,
+        }
+    )
+
+    assert settings.trace_max_steps == 5

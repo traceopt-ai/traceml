@@ -87,6 +87,11 @@ class TestDBIncrementalSender:
         )
         return sender, mock_transport
 
+    def _tables(self, payload):
+        assert set(payload) == {"meta", "body"}
+        assert set(payload["body"]) == {"tables"}
+        return payload["body"]["tables"]
+
     def test_skip_when_no_new_rows(self):
         db = Database(sampler_name="test")
         db.add_record("t1", {"v": 1})
@@ -111,7 +116,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         assert len(rows_sent) == 3
 
         # Add 2 more, flush again
@@ -121,7 +126,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         assert len(rows_sent) == 2
         assert rows_sent[0]["step"] == 3
         assert rows_sent[1]["step"] == 4
@@ -143,7 +148,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         # new_count=5, len(deque)=3 → sends all 3 available
         assert len(rows_sent) == 3
         assert rows_sent[0]["i"] == 5
@@ -159,7 +164,7 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        rows_sent = payload["tables"]["t1"]
+        rows_sent = self._tables(payload)["t1"]
         assert len(rows_sent) == 1
         assert rows_sent[0]["step"] == 4  # latest
 
@@ -172,8 +177,9 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        assert "t1" in payload["tables"]
-        assert "t2" in payload["tables"]
+        tables = self._tables(payload)
+        assert "t1" in tables
+        assert "t2" in tables
 
         # Add only to t2
         transport.send.reset_mock()
@@ -181,9 +187,10 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        assert "t1" not in payload["tables"]
-        assert "t2" in payload["tables"]
-        assert len(payload["tables"]["t2"]) == 1
+        tables = self._tables(payload)
+        assert "t1" not in tables
+        assert "t2" in tables
+        assert len(tables["t2"]) == 1
 
     def test_payload_rank_uses_attached_runtime_rank(self):
         db = Database(sampler_name="test")
@@ -194,14 +201,17 @@ class TestDBIncrementalSender:
         sender.flush()
 
         payload = transport.send.call_args[0][0]
-        assert payload["rank"] == 5
-        assert payload["global_rank"] == 5
-        assert payload["local_rank"] == 1
-        assert payload["world_size"] == 1
-        assert payload["local_world_size"] == 1
-        assert payload["node_rank"] == 0
-        assert payload["hostname"] == ""
-        assert payload["pid"] == 0
+        assert set(payload) == {"meta", "body"}
+        assert payload["meta"]["rank"] == 5
+        assert payload["meta"]["global_rank"] == 5
+        assert payload["meta"]["local_rank"] == 1
+        assert payload["meta"]["world_size"] == 1
+        assert payload["meta"]["local_world_size"] == 1
+        assert payload["meta"]["node_rank"] == 0
+        assert payload["meta"]["hostname"] == ""
+        assert payload["meta"]["pid"] == 0
+        assert payload["meta"]["sampler"] == "test_sampler"
+        assert isinstance(payload["meta"]["timestamp"], float)
 
 
 # DatabaseWriter tests

@@ -51,6 +51,12 @@ class _SampleRow:
     ram_total_bytes: Optional[float]
     gpu_available: Optional[bool]
     gpu_count: Optional[int]
+
+
+@dataclass(frozen=True)
+class _SampleGpuRollup:
+    """Per-system-sample GPU rollup derived from raw GPU rows."""
+
     gpu_util_avg: Optional[float]
     gpu_util_peak: Optional[float]
     gpu_mem_used_avg_bytes: Optional[float]
@@ -75,6 +81,13 @@ class _GpuRow:
     power_limit_w: Optional[float]
 
 
+_SampleKey = tuple[Optional[int], Optional[int], Optional[int]]
+
+
+def _sample_key(row: _SampleRow | _GpuRow) -> _SampleKey:
+    return (row.global_rank, row.node_rank, row.seq)
+
+
 def _node_label(row: _SampleRow) -> str:
     if row.node_rank is not None:
         return str(int(row.node_rank))
@@ -94,7 +107,44 @@ def _node_identity(rows: list[_SampleRow]) -> SystemNodeIdentity:
     )
 
 
-def _aggregate_samples(rows: list[_SampleRow]) -> SystemSummaryAgg:
+def _aggregate_sample_gpu_rows(rows: list[_GpuRow]) -> _SampleGpuRollup:
+    return _SampleGpuRollup(
+        gpu_util_avg=average_optional(row.util for row in rows),
+        gpu_util_peak=max_optional(row.util for row in rows),
+        gpu_mem_used_avg_bytes=average_optional(
+            row.mem_used_bytes for row in rows
+        ),
+        gpu_mem_used_peak_bytes=max_optional(
+            row.mem_used_bytes for row in rows
+        ),
+        gpu_temp_avg_c=average_optional(row.temperature_c for row in rows),
+        gpu_temp_peak_c=max_optional(row.temperature_c for row in rows),
+        gpu_power_avg_w=average_optional(row.power_usage_w for row in rows),
+        gpu_power_peak_w=max_optional(row.power_usage_w for row in rows),
+    )
+
+
+def _gpu_rollups_by_sample(
+    rows: list[_GpuRow],
+) -> Dict[_SampleKey, _SampleGpuRollup]:
+    grouped: Dict[_SampleKey, list[_GpuRow]] = {}
+    for row in rows:
+        grouped.setdefault(_sample_key(row), []).append(row)
+    return {
+        key: _aggregate_sample_gpu_rows(gpu_rows)
+        for key, gpu_rows in grouped.items()
+    }
+
+
+def _aggregate_samples(
+    rows: list[_SampleRow],
+    gpu_rollups_by_key: Dict[_SampleKey, _SampleGpuRollup],
+) -> SystemSummaryAgg:
+    gpu_rollups = [
+        gpu_rollups_by_key[_sample_key(row)]
+        for row in rows
+        if _sample_key(row) in gpu_rollups_by_key
+    ]
     return SystemSummaryAgg(
         first_ts=min_timestamp(row.sample_ts_s for row in rows),
         last_ts=max_optional(row.sample_ts_s for row in rows),
@@ -109,19 +159,29 @@ def _aggregate_samples(rows: list[_SampleRow]) -> SystemSummaryAgg:
         ),
         gpu_count=max_int_optional(row.gpu_count for row in rows),
         gpu_util_avg_percent=average_optional(
-            row.gpu_util_avg for row in rows
+            rollup.gpu_util_avg for rollup in gpu_rollups
         ),
-        gpu_util_peak_percent=max_optional(row.gpu_util_peak for row in rows),
+        gpu_util_peak_percent=max_optional(
+            rollup.gpu_util_peak for rollup in gpu_rollups
+        ),
         gpu_mem_avg_bytes=average_optional(
-            row.gpu_mem_used_avg_bytes for row in rows
+            rollup.gpu_mem_used_avg_bytes for rollup in gpu_rollups
         ),
         gpu_mem_peak_bytes=max_optional(
-            row.gpu_mem_used_peak_bytes for row in rows
+            rollup.gpu_mem_used_peak_bytes for rollup in gpu_rollups
         ),
-        gpu_temp_avg_c=average_optional(row.gpu_temp_avg_c for row in rows),
-        gpu_temp_peak_c=max_optional(row.gpu_temp_peak_c for row in rows),
-        gpu_power_avg_w=average_optional(row.gpu_power_avg_w for row in rows),
-        gpu_power_peak_w=max_optional(row.gpu_power_peak_w for row in rows),
+        gpu_temp_avg_c=average_optional(
+            rollup.gpu_temp_avg_c for rollup in gpu_rollups
+        ),
+        gpu_temp_peak_c=max_optional(
+            rollup.gpu_temp_peak_c for rollup in gpu_rollups
+        ),
+        gpu_power_avg_w=average_optional(
+            rollup.gpu_power_avg_w for rollup in gpu_rollups
+        ),
+        gpu_power_peak_w=max_optional(
+            rollup.gpu_power_peak_w for rollup in gpu_rollups
+        ),
     )
 
 
@@ -211,10 +271,7 @@ def _sample_rows(
         + """
         SELECT global_rank, local_rank, world_size, local_world_size,
                node_rank, hostname, sample_ts_s, seq, cpu_percent,
-               ram_used_bytes, ram_total_bytes, gpu_available, gpu_count,
-               gpu_util_avg, gpu_util_peak, gpu_mem_used_avg_bytes,
-               gpu_mem_used_peak_bytes, gpu_temp_avg_c, gpu_temp_peak_c,
-               gpu_power_avg_w, gpu_power_peak_w
+               ram_used_bytes, ram_total_bytes, gpu_available, gpu_count
         FROM recent_system_samples
         ORDER BY COALESCE(node_rank, global_rank, 0) ASC, id ASC;
         """,
@@ -235,14 +292,6 @@ def _sample_rows(
             ram_total_bytes=row[10],
             gpu_available=bool(row[11]) if row[11] is not None else None,
             gpu_count=row[12],
-            gpu_util_avg=row[13],
-            gpu_util_peak=row[14],
-            gpu_mem_used_avg_bytes=row[15],
-            gpu_mem_used_peak_bytes=row[16],
-            gpu_temp_avg_c=row[17],
-            gpu_temp_peak_c=row[18],
-            gpu_power_avg_w=row[19],
-            gpu_power_peak_w=row[20],
         )
         for row in rows
     ]
@@ -317,15 +366,12 @@ def _load_cluster_summary(
         max_system_rows=max_system_rows,
     )
 
-    # Index GPU rows by the sample identity they were emitted with.
-    gpu_by_key: Dict[
-        tuple[Optional[int], Optional[int], Optional[int]],
-        list[_GpuRow],
-    ] = {}
-
+    # GPU summary fields are derived from raw GPU rows at read time so the
+    # storage projection does not duplicate per-sample aggregates.
+    gpu_by_key: Dict[_SampleKey, list[_GpuRow]] = {}
     for row in gpus:
-        key = (row.global_rank, row.node_rank, row.seq)
-        gpu_by_key.setdefault(key, []).append(row)
+        gpu_by_key.setdefault(_sample_key(row), []).append(row)
+    gpu_rollups_by_key = _gpu_rollups_by_sample(gpus)
 
     # Group system samples by node so each node gets its own rollup.
     sample_groups: Dict[str, list[_SampleRow]] = {}
@@ -338,22 +384,17 @@ def _load_cluster_summary(
         # Collect GPU rows that match this node's retained system samples.
         node_gpu_rows: list[_GpuRow] = []
         for row in node_rows:
-            node_gpu_rows.extend(
-                gpu_by_key.get(
-                    (row.global_rank, row.node_rank, row.seq),
-                    [],
-                )
-            )
+            node_gpu_rows.extend(gpu_by_key.get(_sample_key(row), []))
         # Store the final per-node identity, system rollup, and GPU rollup.
         nodes[label] = SystemNodeSummary(
             identity=_node_identity(node_rows),
-            aggregate=_aggregate_samples(node_rows),
+            aggregate=_aggregate_samples(node_rows, gpu_rollups_by_key),
             per_gpu=_aggregate_gpu(node_gpu_rows),
         )
 
     # Return the cluster-level rollup plus the per-node summaries.
     return SystemClusterSummary(
-        aggregate=_aggregate_samples(samples),
+        aggregate=_aggregate_samples(samples, gpu_rollups_by_key),
         nodes=nodes,
         expected_nodes=_expected_nodes(samples),
     )

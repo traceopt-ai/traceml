@@ -7,7 +7,7 @@ job already runs.
 | Stack | TraceML entry point | Start here |
 |---|---|---|
 | Plain PyTorch loop | `traceml.trace_step(...)` | [Quickstart](quickstart.md) |
-| Hugging Face Trainer | `TraceMLTrainer` | [Hugging Face](integrations/huggingface.md) |
-| PyTorch Lightning | `TraceMLCallback` | [PyTorch Lightning](integrations/lightning.md) |
+| Hugging Face Trainer | `TraceMLTrainerCallback` | [Hugging Face](integrations/huggingface.md) |
+| PyTorch Lightning | `traceml_ai.integrations.lightning.init()` + `TraceMLCallback` | [PyTorch Lightning](integrations/lightning.md) |
 | Ray Train | `TraceMLTorchTrainer` | [Ray Train](integrations/ray.md) |
 | W&B / MLflow | `traceml.summary()` | [W&B / MLflow](integrations/wandb-mlflow.md) |

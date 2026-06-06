@@ -19,6 +19,7 @@ from traceml_ai.diagnostics.common import (
 from traceml_ai.diagnostics.step_memory.policy import (
     DEFAULT_STEP_MEMORY_THRESHOLDS,
     StepMemoryDiagnosisThresholds,
+    classify_imbalance_severity,
 )
 
 from .adapters import StepMemorySummaryMetricSignals
@@ -132,23 +133,31 @@ class ImbalanceRule(_BaseStepMemorySummaryRule):
         context: StepMemorySummaryMetricSignals,
     ) -> Optional[DiagnosticIssue]:
         skew = context.skew_pct
-        if context.steps_used < int(
-            self.thresholds.min_steps_for_diag
-        ) or skew < float(self.thresholds.imbalance_skew_warn):
+        if context.steps_used < int(self.thresholds.min_steps_for_diag):
             return None
-        sev = _severity(skew, self.thresholds.imbalance_skew_crit)
+
+        sev = classify_imbalance_severity(
+            skew_pct=skew,
+            pressure_frac=context.pressure_frac,
+            thresholds=self.thresholds,
+        )
+        if sev is None:
+            return None
+
+        pressure = float(context.pressure_frac or 0.0)
         return self._issue(
             kind="IMBALANCE",
             status="IMBALANCE",
             severity=sev,
             summary=(
                 f"{_metric_label(context.metric)} shows "
-                f"+{skew * 100.0:.1f}% cross-rank skew."
+                f"+{skew * 100.0:.1f}% cross-rank skew "
+                f"at ~{pressure * 100.0:.0f}% of device capacity."
             ),
             action="Inspect per-rank workload.",
             metric=context,
             score=skew,
-            evidence={"skew_pct": skew},
+            evidence={"skew_pct": skew, "pressure_frac": pressure},
         )
 
 
