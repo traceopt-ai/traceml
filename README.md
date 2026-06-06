@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Runtime bottleneck detection for PyTorch training jobs.**
+**Find slow PyTorch training bottlenecks: DataLoader stalls, low GPU utilization, DDP/FSDP rank stragglers, memory creep, and run regressions.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -14,12 +14,16 @@
 
 [**Quickstart**](docs/user_guide/quickstart.md) •
 [**Compare Runs**](docs/user_guide/compare.md) •
-[**How to Read Output**](docs/user_guide/reading-output.md) •
+[**Read Output**](docs/user_guide/reading-output.md) •
 [**Use With Your Stack**](docs/user_guide/integrations.md) •
-[**FAQ**](docs/user_guide/faq.md) •
-[**Security**](SECURITY.md) •
-[**Issues**](https://github.com/traceopt-ai/traceml/issues) •
-[**Discussions**](https://github.com/traceopt-ai/traceml/discussions)
+[**FAQ**](docs/user_guide/faq.md)
+
+**Training bottleneck guides:**
+[Slow PyTorch Training](docs/guides/slow-pytorch-training.md) •
+[DataLoader Bottlenecks](docs/guides/pytorch-dataloader-bottleneck.md) •
+[Low GPU Utilization](docs/guides/low-gpu-utilization-pytorch.md) •
+[DDP Rank Stragglers](docs/guides/ddp-slow-training-rank-straggler.md) •
+[Memory Creep](docs/guides/pytorch-memory-creep.md)
 
 </div>
 
@@ -182,6 +186,11 @@ changing the final saved artifacts.
 ## Learn More
 
 - [Quickstart](docs/user_guide/quickstart.md)
+- [Find why PyTorch training is slow](docs/guides/slow-pytorch-training.md)
+- [Find DataLoader Bottlenecks](docs/guides/pytorch-dataloader-bottleneck.md)
+- [Debug Low GPU Utilization](docs/guides/low-gpu-utilization-pytorch.md)
+- [Debug DDP Rank Stragglers](docs/guides/ddp-slow-training-rank-straggler.md)
+- [Find PyTorch Memory Creep](docs/guides/pytorch-memory-creep.md)
 - [Distributed Training](docs/user_guide/distributed-training.md)
 - [Running on Slurm](docs/user_guide/slurm.md)
 - [Use With Your Stack](docs/user_guide/integrations.md)

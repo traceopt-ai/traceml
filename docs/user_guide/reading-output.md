@@ -455,7 +455,7 @@ What to do next:
 
 ---
 
-### `MEMORY CREEP (EARLY)`
+### `MEMORY RISING`
 
 Meaning:
 
@@ -464,9 +464,9 @@ Meaning:
 
 In the current policy, this is based on:
 
-- multiple head-vs-tail slice comparisons
+- early, middle, and recent memory bands increasing
 - both worst and median memory rising
-- a meaningful absolute increase
+- growth that has not yet crossed the stronger confirmed-creep threshold
 
 Common causes:
 
@@ -489,7 +489,7 @@ Meaning:
 
 - memory growth is stronger and more consistent across the visible window
 
-This is a stronger signal than `MEMORY CREEP (EARLY)`.
+This is a stronger signal than `MEMORY RISING`.
 
 Common causes:
 
@@ -671,7 +671,7 @@ Use these as context cards:
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `STRAGGLER` | inspect both input and compute unevenness |
 | `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
-| `MEMORY CREEP (EARLY)` | inspect retained state and watch the next window |
+| `MEMORY RISING` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |
 | `IMBALANCE` | inspect per-rank memory workload |
