@@ -18,11 +18,12 @@
 [**Use With Your Stack**](docs/user_guide/integrations.md) •
 [**FAQ**](docs/user_guide/faq.md)
 
-[**Slow PyTorch Training**](docs/guides/slow-pytorch-training.md) •
-[**DataLoader Bottlenecks**](docs/guides/pytorch-dataloader-bottleneck.md) •
-[**Low GPU Utilization**](docs/guides/low-gpu-utilization-pytorch.md) •
-[**DDP Rank Stragglers**](docs/guides/ddp-slow-training-rank-straggler.md) •
-[**Memory Creep**](docs/guides/pytorch-memory-creep.md)
+**Training bottleneck guides:**
+[Slow PyTorch Training](docs/guides/slow-pytorch-training.md) •
+[DataLoader Bottlenecks](docs/guides/pytorch-dataloader-bottleneck.md) •
+[Low GPU Utilization](docs/guides/low-gpu-utilization-pytorch.md) •
+[DDP Rank Stragglers](docs/guides/ddp-slow-training-rank-straggler.md) •
+[Memory Creep](docs/guides/pytorch-memory-creep.md)
 
 </div>
 
