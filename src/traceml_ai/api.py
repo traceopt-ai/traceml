@@ -91,6 +91,13 @@ def wrap_optimizer(*args: Any, **kwargs: Any) -> Any:
     return _wrap_optimizer(*args, **kwargs)
 
 
+def wrap_ddp(*args: Any, **kwargs: Any) -> Any:
+    """Instrument DDP gradient-sync comm timing."""
+    from traceml_ai.sdk.wrappers import wrap_ddp as _wrap_ddp
+
+    return _wrap_ddp(*args, **kwargs)
+
+
 def wrap_h2d(*args: Any, **kwargs: Any) -> Any:
     """
     Lazily resolve and apply TraceML H2D transfer wrapping.
@@ -151,5 +158,6 @@ __all__ = [
     "wrap_forward",
     "wrap_backward",
     "wrap_optimizer",
+    "wrap_ddp",
     "wrap_h2d",
 ]

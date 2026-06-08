@@ -267,6 +267,31 @@ def wrap_optimizer(optimizer: Any) -> Any:
     return optimizer
 
 
+def wrap_ddp(ddp_model: Any, base_hook: Any = None) -> Any:
+    """
+    Instrument a DDP model's gradient sync for per-step comm timing.
+
+    Installs a ``register_comm_hook`` that wraps *base_hook* (or PyTorch's
+    default ``allreduce_hook`` when ``None``) with CUDA-event timing. Events
+    flow through the existing step-time pipeline as
+    ``_traceml_comm:ddp_grad_sync``.
+
+    This preserves model identity (returns the same ``ddp_model`` instance,
+    like ``wrap_optimizer``) and is idempotent. Use the explicit path when you
+    pass a custom ``base_hook`` (e.g. ``fp16_compress_hook``, PowerSGD); the
+    default auto-install path (``trace_step`` under ``init(mode='auto')``) uses
+    PyTorch's default hook.
+
+    Note: installing any comm hook unfuses DDP's fused copy+divide-by-world-size
+    (sub-microsecond per bucket, numerically identical results).
+    """
+    from traceml_ai.instrumentation.hooks.ddp_comm_hook import (
+        install_ddp_comm_hook,
+    )
+
+    return install_ddp_comm_hook(ddp_model, base_hook=base_hook)
+
+
 class _WrappedH2D:
     """
     Proxy for a tensor or batch object that times ``.to(...)`` calls.
@@ -361,5 +386,6 @@ __all__ = [
     "wrap_forward",
     "wrap_backward",
     "wrap_optimizer",
+    "wrap_ddp",
     "wrap_h2d",
 ]

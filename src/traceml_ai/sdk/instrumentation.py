@@ -23,7 +23,11 @@ from contextlib import contextmanager
 from typing import Callable, List, Optional
 
 import torch.nn as nn
+from torch.nn.parallel import DistributedDataParallel
 
+from traceml_ai.instrumentation.hooks.ddp_comm_hook import (
+    ensure_ddp_comm_hook_installed,
+)
 from traceml_ai.instrumentation.hooks.layer_backward_memory_hooks import (
     attach_layer_backward_memory_hooks,
 )
@@ -122,6 +126,45 @@ def _should_auto_install_optimizer_timing() -> bool:
     return getattr(cfg, "mode", "auto") == "auto"
 
 
+def _should_auto_install_ddp_comm_timing() -> bool:
+    """
+    Return True when `trace_step(...)` should auto-install DDP gradient-sync
+    timing.
+
+    Gated identically to optimizer timing: only the 'auto' init mode installs
+    automatically. manual / selective users opt in via `traceml.wrap_ddp(...)`.
+    """
+    try:
+        from traceml_ai.sdk.initial import get_init_config
+    except Exception:
+        return False
+
+    cfg = get_init_config()
+    if cfg is None:
+        return False
+
+    return getattr(cfg, "mode", "auto") == "auto"
+
+
+def _maybe_unwrap_ddp(model: nn.Module) -> nn.Module:
+    """
+    Return the inner module if *model* is a DDP wrapper, else *model*.
+
+    Load-bearing: step-memory and layer hooks key their buffers by
+    ``id(model)`` (`flush_step_memory_buffer`, `flush_layer_*_time_buffers`),
+    and `trace_model_instance(inner_module)` registers layer hooks by
+    ``id(inner_module)``. Without unwrap, ``id(ddp_wrapper) != id(inner)`` and
+    those step-boundary flushes silently drain nothing.
+
+    NOTE: `forward_auto_timer` is the exception and must keep the wrapper,
+    since it already registers the wrapper id, its `.module`, and FSDP
+    `_fsdp_wrapped_module` (forward_auto_timer_patch.py).
+    """
+    if isinstance(model, DistributedDataParallel):
+        return model.module
+    return model
+
+
 class _TraceStateMeta(type):
     @property
     def step(cls) -> int:
@@ -166,7 +209,10 @@ def trace_step(model: nn.Module):
         return
 
     trace_state = get_trace_session_state()
-    mem_tracker = StepMemoryTracker(model)
+    # DDP wrappers route step-memory/layer flushes by id(model); unwrap so the
+    # inner module (where trace_model_instance registered hooks) matches.
+    effective_model = _maybe_unwrap_ddp(model)
+    mem_tracker = StepMemoryTracker(effective_model)
     step_completed = False
 
     try:
@@ -185,6 +231,10 @@ def trace_step(model: nn.Module):
             ):
                 if _should_auto_install_optimizer_timing():
                     ensure_optimizer_timing_installed()
+                if _should_auto_install_ddp_comm_timing() and isinstance(
+                    model, DistributedDataParallel
+                ):
+                    ensure_ddp_comm_hook_installed(model)
                 yield
                 step_completed = True
     finally:
@@ -197,7 +247,7 @@ def trace_step(model: nn.Module):
             _log_instrumentation_error("record failed", exc)
 
         try:
-            flush_step_events(model, trace_state.step)
+            flush_step_events(effective_model, trace_state.step)
         except Exception as exc:
             _log_instrumentation_error("flush failed", exc)
 
