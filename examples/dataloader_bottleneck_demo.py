@@ -12,7 +12,8 @@ Trace the contrast with:
     traceml run examples/dataloader_bottleneck_demo.py --args --scenario slow
 
 Use ``--sleep-ms`` and ``--num-workers`` to make the bottleneck stronger or to
-test whether adding DataLoader workers reduces input wait.
+test whether adding DataLoader workers reduces input wait. On a fast GPU, use
+``--hidden-dim`` or ``--depth`` to increase model compute.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 
 import traceml_ai as traceml
 
@@ -32,6 +33,7 @@ SEED = 42
 INPUT_DIM = 256
 HIDDEN_DIM = 512
 NUM_CLASSES = 10
+MODEL_DEPTH = 2
 
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_NUM_SAMPLES = 960
@@ -49,6 +51,9 @@ class DemoConfig:
     num_workers: int
     num_samples: int
     epochs: int
+    input_dim: int
+    hidden_dim: int
+    depth: int
     seed: int
     print_every: int
 
@@ -86,15 +91,21 @@ class SyntheticInputDataset(Dataset):
 
 
 class TinyMLP(nn.Module):
-    def __init__(self):
+    def __init__(self, input_dim: int, hidden_dim: int, depth: int):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(INPUT_DIM, HIDDEN_DIM),
+        layers: list[nn.Module] = [
+            nn.Linear(input_dim, hidden_dim),
             nn.GELU(),
-            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
-            nn.GELU(),
-            nn.Linear(HIDDEN_DIM, NUM_CLASSES),
-        )
+        ]
+        for _ in range(depth - 1):
+            layers.extend(
+                [
+                    nn.Linear(hidden_dim, hidden_dim),
+                    nn.GELU(),
+                ]
+            )
+        layers.append(nn.Linear(hidden_dim, NUM_CLASSES))
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
         return self.net(x)
@@ -129,7 +140,7 @@ def parse_args() -> DemoConfig:
     parser.add_argument(
         "--scenario",
         choices=["fast", "slow"],
-        default="slow",
+        default="fast",
         help="Preset input behavior for the demo.",
     )
     parser.add_argument(
@@ -155,6 +166,9 @@ def parse_args() -> DemoConfig:
     parser.add_argument(
         "--epochs", type=positive_int, default=DEFAULT_NUM_EPOCHS
     )
+    parser.add_argument("--input-dim", type=positive_int, default=INPUT_DIM)
+    parser.add_argument("--hidden-dim", type=positive_int, default=HIDDEN_DIM)
+    parser.add_argument("--depth", type=positive_int, default=MODEL_DEPTH)
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument(
         "--print-every", type=positive_int, default=DEFAULT_PRINT_EVERY
@@ -177,17 +191,34 @@ def parse_args() -> DemoConfig:
         num_workers=args.num_workers,
         num_samples=args.num_samples,
         epochs=args.epochs,
+        input_dim=args.input_dim,
+        hidden_dim=args.hidden_dim,
+        depth=args.depth,
         seed=args.seed,
         print_every=args.print_every,
     )
 
 
-def build_dataloader(config: DemoConfig, device: torch.device) -> DataLoader:
-    dataset = SyntheticInputDataset(
+def build_fast_dataset(config: DemoConfig) -> TensorDataset:
+    x = torch.randn(config.num_samples, config.input_dim)
+    y = torch.randint(0, NUM_CLASSES, (config.num_samples,))
+    return TensorDataset(x, y)
+
+
+def build_slow_dataset(config: DemoConfig) -> SyntheticInputDataset:
+    return SyntheticInputDataset(
         num_samples=config.num_samples,
-        input_dim=INPUT_DIM,
+        input_dim=config.input_dim,
         num_classes=NUM_CLASSES,
         sleep_s=config.sleep_s,
+    )
+
+
+def build_dataloader(config: DemoConfig, device: torch.device) -> DataLoader:
+    dataset = (
+        build_fast_dataset(config)
+        if config.scenario == "fast"
+        else build_slow_dataset(config)
     )
     generator = torch.Generator().manual_seed(config.seed)
     return DataLoader(
@@ -213,6 +244,9 @@ def print_run_config(config: DemoConfig, device: torch.device) -> None:
         f"num_workers={config.num_workers} "
         f"num_samples={config.num_samples} "
         f"epochs={config.epochs} "
+        f"input_dim={config.input_dim} "
+        f"hidden_dim={config.hidden_dim} "
+        f"depth={config.depth} "
         f"steps={steps_per_epoch * config.epochs}"
     )
 
@@ -228,7 +262,11 @@ def train(config: DemoConfig) -> None:
     traceml.init(mode="auto")
 
     loader = build_dataloader(config, device)
-    model = TinyMLP().to(device)
+    model = TinyMLP(
+        input_dim=config.input_dim,
+        hidden_dim=config.hidden_dim,
+        depth=config.depth,
+    ).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 

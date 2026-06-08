@@ -58,6 +58,12 @@ traceml run examples/dataloader_bottleneck_demo.py --args --scenario slow --slee
 Use `--num-workers` on the same demo to test whether adding DataLoader workers
 reduces the input wait.
 
+On a fast GPU, increase model compute while keeping the same fast/slow shape:
+
+```bash
+traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast --hidden-dim 4096 --depth 4
+```
+
 ---
 
 ## How to run examples
