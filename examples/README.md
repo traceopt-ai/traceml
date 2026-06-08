@@ -48,6 +48,16 @@ These examples are still user-facing, but they are more about showing specific T
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
+To contrast a normal input path with a synthetic DataLoader bottleneck:
+
+```bash
+traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast
+traceml run examples/dataloader_bottleneck_demo.py --args --scenario slow --sleep-ms 8
+```
+
+Use `--num-workers` on the same demo to test whether adding DataLoader workers
+reduces the input wait.
+
 ---
 
 ## How to run examples
