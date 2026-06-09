@@ -72,9 +72,24 @@ NUM_SAMPLES = 8192
 NUM_STEPS = 30
 
 COMM_EVENT = "_traceml_comm:ddp_grad_sync"
+DATA_EVENT = "_traceml_internal:dataloader_next"
+H2D_EVENT = "_traceml_internal:h2d_time"
 FWD_EVENT = "_traceml_internal:forward_time"
 BWD_EVENT = "_traceml_internal:backward_time"
+OPT_EVENT = "_traceml_internal:optimizer_step"
 STEP_EVENT = "_traceml_internal:step_time"
+
+# (column label, event name) — every step-scoped stream TraceML records,
+# in training-step execution order. Comm is the TRA-16 addition.
+COLUMNS = [
+    ("Data", DATA_EVENT),
+    ("H2D", H2D_EVENT),
+    ("Fwd", FWD_EVENT),
+    ("Bwd", BWD_EVENT),
+    ("Opt", OPT_EVENT),
+    ("Comm", COMM_EVENT),
+    ("Total", STEP_EVENT),
+]
 
 
 class TinyMLP(nn.Module):
@@ -128,13 +143,14 @@ def find_db() -> str | None:
     return None
 
 
-def _table_header() -> None:
-    print(
-        f"\n{'Step':>5}  {'Comm (ms)':>10}  {'Buckets':>7}  "
-        f"{'Forward (ms)':>13}  {'Backward (ms)':>14}  {'Step (ms)':>10}",
-        flush=True,
+def _print_header(lead: str) -> int:
+    """Print the timing-table header; return its width for separators."""
+    header = (
+        lead + "".join(f"{label:>9}" for label, _ in COLUMNS) + f"{'Bkts':>6}"
     )
-    print("-" * 70, flush=True)
+    print("\n" + header + "   (all times in ms)", flush=True)
+    print("-" * len(header), flush=True)
+    return len(header)
 
 
 def print_inprocess_results(use_cuda: bool) -> None:
@@ -174,45 +190,39 @@ def print_inprocess_results(use_cuda: bool) -> None:
             return evt.gpu_time_ms
         return (evt.cpu_end - evt.cpu_start) * 1000.0
 
-    _table_header()
-    total_comm = 0.0
+    width = _print_header(f"{'Step':>5}")
+    col_totals = {label: 0.0 for label, _ in COLUMNS}
     total_buckets = 0
+    n = len(batches)
+
     for batch in sorted(batches, key=lambda b: b.step):
-        comm_ms = 0.0
-        buckets = 0
-        fwd = bwd = step_ms = None
+        # Sum per event name: a step can carry several events of the same
+        # stream (e.g. one h2d per .to() call, one comm per DDP bucket).
+        sums: dict = {}
+        counts: dict = {}
         for evt in batch.events:
             d = duration_ms(evt)
-            if evt.name == COMM_EVENT:
-                comm_ms += d
-                buckets += 1
-            elif evt.name == FWD_EVENT:
-                fwd = d
-            elif evt.name == BWD_EVENT:
-                bwd = d
-            elif evt.name == STEP_EVENT:
-                step_ms = d
+            sums[evt.name] = sums.get(evt.name, 0.0) + d
+            counts[evt.name] = counts.get(evt.name, 0) + 1
 
-        total_comm += comm_ms
+        buckets = counts.get(COMM_EVENT, 0)
         total_buckets += buckets
 
-        def fmt(v):
-            return f"{v:.2f}" if v is not None else "—"
+        row = f"{batch.step:>5}"
+        for label, name in COLUMNS:
+            v = sums.get(name)
+            row += f"{v:>9.2f}" if v is not None else f"{'-':>9}"
+            if v is not None:
+                col_totals[label] += v
+        row += f"{buckets:>6}"
+        print(row, flush=True)
 
-        print(
-            f"{batch.step:>5}  {comm_ms:>10.2f}  {buckets:>7}  "
-            f"{fmt(fwd):>13}  {fmt(bwd):>14}  {fmt(step_ms):>10}",
-            flush=True,
-        )
-
-    n = len(batches)
-    print("-" * 70, flush=True)
-    print(
-        f"steps={n}  total_comm={total_comm:.1f} ms  "
-        f"avg_comm/step={total_comm / n:.2f} ms  "
-        f"avg_buckets/step={total_buckets / n:.1f}",
-        flush=True,
-    )
+    print("-" * width, flush=True)
+    avg_row = f"{'avg':>5}"
+    for label, _ in COLUMNS:
+        avg_row += f"{col_totals[label] / n:>9.2f}"
+    avg_row += f"{total_buckets / n:>6.1f}"
+    print(avg_row, flush=True)
 
 
 def print_db_results(db_path: str) -> None:
@@ -239,12 +249,7 @@ def print_db_results(db_path: str) -> None:
     rows = cur.fetchall()
     conn.close()
 
-    print(
-        f"\n{'Step':>5}  {'Rank':>4}  {'Comm (ms)':>10}  {'Buckets':>7}  "
-        f"{'Forward (ms)':>13}  {'Backward (ms)':>14}",
-        flush=True,
-    )
-    print("-" * 64, flush=True)
+    _print_header(f"{'Step':>5} {'Rank':>5}")
 
     for step, rank, events_json in rows:
         events = json.loads(events_json) if events_json else {}
@@ -255,16 +260,13 @@ def print_db_results(db_path: str) -> None:
                 v = device_stats.get(key)
                 if v is not None:
                     return fmt.format(v)
-            return "—"
+            return "-"
 
-        print(
-            f"{step:>5}  {rank:>4}  "
-            f"{stat(COMM_EVENT):>10}  "
-            f"{stat(COMM_EVENT, key='n_calls', fmt='{:.0f}'):>7}  "
-            f"{stat(FWD_EVENT):>13}  "
-            f"{stat(BWD_EVENT):>14}",
-            flush=True,
-        )
+        row = f"{step:>5} {rank:>5}"
+        for _, name in COLUMNS:
+            row += f"{stat(name):>9}"
+        row += f"{stat(COMM_EVENT, key='n_calls', fmt='{:.0f}'):>6}"
+        print(row, flush=True)
 
 
 def main() -> None:
