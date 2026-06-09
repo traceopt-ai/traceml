@@ -25,9 +25,6 @@ from typing import Callable, List, Optional
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 
-from traceml_ai.instrumentation.hooks.ddp_comm_hook import (
-    ensure_ddp_comm_hook_installed,
-)
 from traceml_ai.instrumentation.hooks.layer_backward_memory_hooks import (
     attach_layer_backward_memory_hooks,
 )
@@ -126,26 +123,6 @@ def _should_auto_install_optimizer_timing() -> bool:
     return getattr(cfg, "mode", "auto") == "auto"
 
 
-def _should_auto_install_ddp_comm_timing() -> bool:
-    """
-    Return True when `trace_step(...)` should auto-install DDP gradient-sync
-    timing.
-
-    Gated identically to optimizer timing: only the 'auto' init mode installs
-    automatically. manual / selective users opt in via `traceml.wrap_ddp(...)`.
-    """
-    try:
-        from traceml_ai.sdk.initial import get_init_config
-    except Exception:
-        return False
-
-    cfg = get_init_config()
-    if cfg is None:
-        return False
-
-    return getattr(cfg, "mode", "auto") == "auto"
-
-
 def _maybe_unwrap_ddp(model: nn.Module) -> nn.Module:
     """
     Return the inner module if *model* is a DDP wrapper, else *model*.
@@ -231,10 +208,6 @@ def trace_step(model: nn.Module):
             ):
                 if _should_auto_install_optimizer_timing():
                     ensure_optimizer_timing_installed()
-                if _should_auto_install_ddp_comm_timing() and isinstance(
-                    model, DistributedDataParallel
-                ):
-                    ensure_ddp_comm_hook_installed(model)
                 yield
                 step_completed = True
     finally:

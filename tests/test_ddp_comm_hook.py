@@ -316,122 +316,55 @@ class TestBaseHookComposition:
 # ---------------------------------------------------------------------------
 
 
-class TestAutoInstallViaTraceStep:
-    """trace_step auto-installs DDP comm hook when model is DDP wrapper."""
+class TestDDPCommPatch:
+    """patch_ddp_comm installs the comm hook lazily on first DDP forward."""
 
-    def _trace_step_patches(self):
-        """Context manager that mocks all trace_step internals."""
-        from contextlib import ExitStack
+    def test_patch_replaces_forward_and_is_idempotent(self):
+        from traceml_ai.instrumentation.patches import ddp_comm_patch
 
-        stack = ExitStack()
-        patches = {
-            "ensure_ddp": stack.enter_context(
-                patch(
-                    "traceml_ai.sdk.instrumentation."
-                    "ensure_ddp_comm_hook_installed"
-                )
+        orig = DistributedDataParallel.forward
+        try:
+            ddp_comm_patch.patch_ddp_comm()
+            assert DistributedDataParallel.forward is not orig
+            assert DistributedDataParallel._traceml_ddp_comm_patched is True
+
+            patched = DistributedDataParallel.forward
+            ddp_comm_patch.patch_ddp_comm()  # second call is a no-op
+            assert DistributedDataParallel.forward is patched
+        finally:
+            DistributedDataParallel.forward = orig
+            DistributedDataParallel._traceml_ddp_comm_patched = False
+
+    def test_first_forward_installs_hook_once(self):
+        """The patched forward installs once, then delegates to the original."""
+        from traceml_ai.instrumentation.patches import ddp_comm_patch
+
+        class _FakeDDP:
+            pass
+
+        fake_self = _FakeDDP()
+        calls = []
+
+        with (
+            patch.object(
+                ddp_comm_patch,
+                "_ORIG_DDP_FORWARD",
+                lambda self, *a, **k: "fwd_result",
             ),
-            "unwrap": stack.enter_context(
-                patch(
-                    "traceml_ai.sdk.instrumentation._maybe_unwrap_ddp",
-                    return_value=MagicMock(spec=nn.Module),
-                )
+            patch.object(
+                ddp_comm_patch,
+                "ensure_ddp_comm_hook_installed",
+                side_effect=lambda m: calls.append(m),
             ),
-            "mem_tracker": stack.enter_context(
-                patch("traceml_ai.sdk.instrumentation.StepMemoryTracker")
-            ),
-            "flush": stack.enter_context(
-                patch("traceml_ai.sdk.instrumentation.flush_step_events")
-            ),
-            "timed": stack.enter_context(
-                patch("traceml_ai.sdk.instrumentation.timed_region")
-            ),
-            "fwd": stack.enter_context(
-                patch("traceml_ai.sdk.instrumentation.forward_auto_timer")
-            ),
-            "bwd": stack.enter_context(
-                patch("traceml_ai.sdk.instrumentation.backward_auto_timer")
-            ),
-            "h2d": stack.enter_context(
-                patch("traceml_ai.sdk.instrumentation.h2d_auto_timer")
-            ),
-            "opt": stack.enter_context(
-                patch(
-                    "traceml_ai.sdk.instrumentation."
-                    "ensure_optimizer_timing_installed"
-                )
-            ),
-            "gate": stack.enter_context(
-                patch(
-                    "traceml_ai.sdk.instrumentation."
-                    "_should_auto_install_ddp_comm_timing",
-                    return_value=True,
-                )
-            ),
-        }
-        return stack, patches
+        ):
+            r1 = ddp_comm_patch._traceml_ddp_forward(fake_self, 1)
+            r2 = ddp_comm_patch._traceml_ddp_forward(fake_self, 2)
 
-    def test_auto_install_on_ddp_wrapper(self):
-        """trace_step(ddp_model) calls ensure_ddp_comm_hook_installed."""
-        mock_ddp = _make_mock_ddp()
-        stack, patches = self._trace_step_patches()
-
-        with stack:
-            from traceml_ai.sdk.instrumentation import trace_step
-
-            with trace_step(mock_ddp):
-                pass
-
-            patches["ensure_ddp"].assert_called_once_with(mock_ddp)
-
-    def test_no_auto_install_on_plain_module(self):
-        """trace_step(nn.Module) does NOT call ensure_ddp_comm_hook."""
-        model = nn.Linear(10, 10)
-        stack, patches = self._trace_step_patches()
-
-        with stack:
-            from traceml_ai.sdk.instrumentation import trace_step
-
-            with trace_step(model):
-                pass
-
-            patches["ensure_ddp"].assert_not_called()
-
-    def test_no_auto_install_when_gate_closed(self):
-        """When the init-mode gate is closed, no auto-install.
-
-        Mirrors init(mode='manual'/'selective') or no init config, where
-        `_should_auto_install_ddp_comm_timing()` returns False.
-        """
-        mock_ddp = _make_mock_ddp()
-        stack, patches = self._trace_step_patches()
-
-        with stack:
-            # _trace_step_patches opens the gate by default; close it here.
-            patches["gate"].return_value = False
-
-            from traceml_ai.sdk.instrumentation import trace_step
-
-            with trace_step(mock_ddp):
-                pass
-
-            patches["ensure_ddp"].assert_not_called()
-
-    def test_explicit_wrap_ddp_then_auto_install_is_idempotent(self):
-        """wrap_ddp + trace_step on same model doesn't double-install."""
-        mock_ddp = _make_mock_ddp()
-        install_ddp_comm_hook(mock_ddp)
-        assert mock_ddp._traceml_ddp_comm_hook_installed is True
-
-        stack, patches = self._trace_step_patches()
-
-        with stack:
-            from traceml_ai.sdk.instrumentation import trace_step
-
-            with trace_step(mock_ddp):
-                pass
-
-            assert mock_ddp.register_comm_hook.call_count == 1
+        assert r1 == "fwd_result"
+        assert r2 == "fwd_result"
+        # Installed exactly once across two forwards (one-shot guard).
+        assert calls == [fake_self]
+        assert fake_self._traceml_ddp_comm_patch_attempted is True
 
 
 class TestDDPUnwrap:

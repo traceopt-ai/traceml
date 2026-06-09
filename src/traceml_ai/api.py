@@ -114,6 +114,7 @@ def init(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    patch_ddp_comm: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """Initialize TraceML instrumentation for this process."""
     from traceml_ai.sdk.initial import init as _init
@@ -124,6 +125,7 @@ def init(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        patch_ddp_comm=patch_ddp_comm,
     )
 
 
@@ -134,6 +136,7 @@ def start(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    patch_ddp_comm: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """Alias for `traceml.init(...)`."""
     from traceml_ai.sdk.initial import start as _start
@@ -144,6 +147,7 @@ def start(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        patch_ddp_comm=patch_ddp_comm,
     )
 
 
