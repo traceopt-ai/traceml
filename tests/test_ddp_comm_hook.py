@@ -27,8 +27,8 @@ from traceml_ai.instrumentation.hooks.ddp_comm_hook import (
     install_ddp_comm_hook,
 )
 from traceml_ai.utils.timing import (
-    TimeScope,
     _STEP_BUFFER,
+    TimeScope,
 )
 
 # ---------------------------------------------------------------------------
