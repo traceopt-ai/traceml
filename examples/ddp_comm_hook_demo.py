@@ -32,6 +32,11 @@ Notes
 - Comm timing overlaps with backward compute for early buckets. Only the
   last bucket's all_reduce is pure communication (backward is done).
   See ``deep_dive_bucket_ordering_and_overlap.md`` for details.
+- Data-only for now: ``_traceml_comm:ddp_grad_sync`` events are persisted to
+  the telemetry DB but are NOT yet surfaced in the terminal/dashboard or the
+  diagnosis engine (until then the comm wall-time stays folded into the
+  ``wait_ms`` residual, as ``wait_ms`` always has for DDP). Wiring a comm
+  bucket + comm-bound diagnosis is the TRA-30 follow-up.
 """
 
 import os

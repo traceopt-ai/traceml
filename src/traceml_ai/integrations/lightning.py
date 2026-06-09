@@ -39,6 +39,11 @@ def init():
     DataLoader fetch timing plus the H2D Tensor.to patch. The callback turns H2D
     timing on only around Lightning's batch transfer hooks and wraps
     LightningModule.forward directly for model-forward timing.
+
+    ``patch_ddp_comm`` is enabled for parity with the HF/Ray integrations:
+    when Lightning's DDPStrategy wraps the module in DistributedDataParallel,
+    the DDP.forward patch installs the gradient-sync comm hook on first
+    forward. It is a no-op for non-DDP (single-device) Lightning runs.
     """
     import traceml_ai as traceml
 
@@ -46,6 +51,7 @@ def init():
         mode="selective",
         patch_dataloader=True,
         patch_h2d=True,
+        patch_ddp_comm=True,
     )
 
 

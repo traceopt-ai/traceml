@@ -439,6 +439,33 @@ class TestDDPUnwrap:
         assert result is model
 
 
+class TestIntegrationCommParity:
+    """
+    Every DDP-capable integration must enable ``patch_ddp_comm`` so the
+    ``_traceml_comm:ddp_grad_sync`` stream installs consistently. A flag left
+    unset would silently darken the stream for that integration (the
+    #88 / #135 absence class). Pins HF and Lightning so drift fails loudly.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_init(self):
+        from traceml_ai.sdk import initial
+
+        initial._INIT_CONFIG = None
+        yield
+        initial._INIT_CONFIG = None
+
+    def test_hf_integration_enables_patch_ddp_comm(self):
+        from traceml_ai.integrations.huggingface import init as hf_init
+
+        assert hf_init().patch_ddp_comm is True
+
+    def test_lightning_integration_enables_patch_ddp_comm(self):
+        from traceml_ai.integrations.lightning import init as lit_init
+
+        assert lit_init().patch_ddp_comm is True
+
+
 # ---------------------------------------------------------------------------
 # Commit 8: 2-rank gloo smoke test (gated)
 # ---------------------------------------------------------------------------
@@ -493,28 +520,50 @@ dist.destroy_process_group()
 print(f"RANK={rank} OK", flush=True)
 """
 
+# Exercises the REAL auto-install chain end-to-end: init(mode="auto") patches
+# DDP.forward, and the comm hook must install on the first forward with NO
+# explicit wrap_ddp/install_ddp_comm_hook call. The unit test of this path
+# mocks both the original forward and the installer, so this is the only check
+# that the patched dispatch actually reaches register_comm_hook and lands rows.
+_GLOO_PATCH_CHAIN_SCRIPT = """\
+import os, sys, torch, torch.nn as nn, torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 
-@pytest.mark.skipif(
-    not _RUN_DIST_TESTS,
-    reason="Set TRACEML_RUN_DIST_TESTS=1 to run distributed tests",
+sys.path.insert(0, os.environ["TRACEML_SRC"])
+import traceml_ai as traceml
+from traceml_ai.utils.timing import _STEP_BUFFER
+
+dist.init_process_group(backend="gloo")
+rank = dist.get_rank()
+
+traceml.init(mode="auto")  # patches DDP.forward; no explicit wrap_ddp below
+model = DDP(nn.Linear(10, 10))
+model(torch.randn(4, 10)).sum().backward()
+
+assert getattr(model, "_traceml_ddp_comm_hook_installed", False), (
+    f"rank {rank}: comm hook not auto-installed via the DDP.forward patch"
 )
-def test_two_rank_gloo_ddp_grad_sync_fires(tmp_path):
-    """
-    Spawn 2 gloo ranks, run one backward step, verify each rank
-    produces at least one _traceml_comm:ddp_grad_sync event.
-    """
+events = [e for e in _STEP_BUFFER if e.name == "_traceml_comm:ddp_grad_sync"]
+assert len(events) >= 1, f"rank {rank}: expected >=1 grad_sync event"
+
+dist.destroy_process_group()
+print(f"RANK={rank} OK", flush=True)
+"""
+
+
+def _run_gloo_workers(script_text, tmp_path, port):
+    """Spawn 2 gloo ranks running *script_text*; assert each prints OK."""
     import subprocess
 
     script_path = tmp_path / "gloo_worker.py"
-    script_path.write_text(_GLOO_WORKER_SCRIPT)
+    script_path.write_text(script_text)
 
     src_path = os.path.join(os.path.dirname(__file__), "..", "src")
-
     env = {
         **os.environ,
         "TRACEML_SRC": os.path.abspath(src_path),
         "MASTER_ADDR": "127.0.0.1",
-        "MASTER_PORT": "29500",
+        "MASTER_PORT": str(port),
     }
 
     procs = []
@@ -525,13 +574,14 @@ def test_two_rank_gloo_ddp_grad_sync_fires(tmp_path):
             "LOCAL_RANK": str(rank),
             "WORLD_SIZE": "2",
         }
-        p = subprocess.Popen(
-            [sys.executable, str(script_path)],
-            env=rank_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+        procs.append(
+            subprocess.Popen(
+                [sys.executable, str(script_path)],
+                env=rank_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
         )
-        procs.append(p)
 
     for p in procs:
         stdout, stderr = p.communicate(timeout=60)
@@ -542,3 +592,28 @@ def test_two_rank_gloo_ddp_grad_sync_fires(tmp_path):
             f"stderr: {stderr.decode()}"
         )
         assert "OK" in output
+
+
+@pytest.mark.skipif(
+    not _RUN_DIST_TESTS,
+    reason="Set TRACEML_RUN_DIST_TESTS=1 to run distributed tests",
+)
+def test_two_rank_gloo_ddp_grad_sync_fires(tmp_path):
+    """
+    Spawn 2 gloo ranks; verify each rank emits >=1 grad_sync event and that
+    the comm hook leaves gradients numerically identical to a no-hook run.
+    """
+    _run_gloo_workers(_GLOO_WORKER_SCRIPT, tmp_path, port=29500)
+
+
+@pytest.mark.skipif(
+    not _RUN_DIST_TESTS,
+    reason="Set TRACEML_RUN_DIST_TESTS=1 to run distributed tests",
+)
+def test_two_rank_gloo_auto_install_chain(tmp_path):
+    """
+    Real auto-install chain: init(mode="auto") -> DDP.forward patch -> first
+    forward installs the comm hook -> grad_sync rows land, with NO explicit
+    wrap_ddp call. Closes the gap where this path is only mock-tested.
+    """
+    _run_gloo_workers(_GLOO_PATCH_CHAIN_SCRIPT, tmp_path, port=29501)
