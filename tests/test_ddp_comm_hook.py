@@ -319,6 +319,35 @@ class TestBaseHookComposition:
 class TestDDPCommPatch:
     """patch_ddp_comm installs the comm hook lazily on first DDP forward."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_ddp_comm_patch(self):
+        """
+        Keep this class order-independent w.r.t. the global DDP.forward patch.
+
+        ``patch_ddp_comm()`` mutates process-global state
+        (``DistributedDataParallel.forward`` + the ``_traceml_ddp_comm_patched``
+        sentinel) with no built-in teardown, so any prior test that ran
+        ``init(mode="auto")`` would leave it installed and make the idempotency
+        assertion below fail. Snapshot-restore to a clean unpatched state around
+        each test so the leak can neither reach us nor escape us. (Proper home
+        for this is the central instrumentation-state reset in #141.)
+        """
+        from traceml_ai.instrumentation.patches import ddp_comm_patch
+
+        def _restore() -> None:
+            if getattr(
+                DistributedDataParallel, "_traceml_ddp_comm_patched", False
+            ):
+                if ddp_comm_patch._ORIG_DDP_FORWARD is not None:
+                    DistributedDataParallel.forward = (
+                        ddp_comm_patch._ORIG_DDP_FORWARD
+                    )
+                DistributedDataParallel._traceml_ddp_comm_patched = False
+
+        _restore()
+        yield
+        _restore()
+
     def test_patch_replaces_forward_and_is_idempotent(self):
         from traceml_ai.instrumentation.patches import ddp_comm_patch
 
