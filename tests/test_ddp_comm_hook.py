@@ -69,20 +69,24 @@ def _make_fake_future(
     """
     Return a MagicMock Future whose .then() fires the callback.
 
-    Mirrors real PyTorch .then() semantics: callback receives the
-    Future itself and must call .value() to get the result.
+    Mirrors real PyTorch .then() semantics: callback receives the Future
+    itself and must call .value() to get the result. The resolved value is
+    a **bare tensor**, matching the real ``allreduce_hook`` (which extracts
+    the tensor from the raw collective's list internally). Resolving to a
+    list here would let a buggy ``fut.value()[0]`` pass tests while
+    corrupting real gradients.
     """
     if tensor is None:
         tensor = torch.zeros(10)
 
     fut = MagicMock()
-    fut.value.return_value = [tensor]
+    fut.value.return_value = tensor
 
     def then_impl(callback):
         result_fut = MagicMock()
         result = callback(fut)
         result_fut.wait.return_value = result
-        result_fut.value.return_value = [result]
+        result_fut.value.return_value = result
         return result_fut
 
     fut.then.side_effect = then_impl
@@ -310,6 +314,24 @@ class TestBaseHookComposition:
             bucket = _make_fake_bucket()
             hook(None, bucket)
 
+    def test_returned_future_resolves_to_reduced_tensor_unchanged(self):
+        """
+        Regression guard: the instrumented hook must pass base_hook's
+        reduced tensor through UNCHANGED. DDP consumes this future value as
+        the bucket gradient, so slicing it (e.g. ``fut.value()[0]``)
+        silently corrupts gradients. base_hook's future resolves to a bare
+        tensor, exactly like the real ``allreduce_hook``.
+        """
+        reduced = torch.arange(10, dtype=torch.float32)
+
+        def base_hook(state, bucket):
+            return _make_fake_future(reduced)
+
+        hook = _traceml_ddp_comm_hook_factory(base_hook)
+        result_fut = hook(None, _make_fake_bucket())
+
+        assert result_fut.value() is reduced
+
 
 # ---------------------------------------------------------------------------
 # Commit 7.5: auto-install + DDP unwrap via trace_step
@@ -434,20 +456,38 @@ from traceml_ai.utils.timing import _STEP_BUFFER
 dist.init_process_group(backend="gloo")
 rank = dist.get_rank()
 
-model = DDP(nn.Linear(10, 10))
-install_ddp_comm_hook(model)
-
+# Fixed input + identical init so the reference and instrumented runs are
+# directly comparable (same on both ranks).
+torch.manual_seed(1234)
 x = torch.randn(4, 10)
-loss = model(x).sum()
-loss.backward()
+
+def build_model():
+    torch.manual_seed(42)
+    return nn.Linear(10, 10)
+
+# Reference: DDP WITHOUT the TraceML hook.
+ref = DDP(build_model())
+ref(x).sum().backward()
+ref_grads = [p.grad.clone() for p in ref.parameters()]
+
+# Instrumented: identical model WITH the TraceML comm hook.
+model = DDP(build_model())
+install_ddp_comm_hook(model)
+model(x).sum().backward()
 
 events = [e for e in _STEP_BUFFER if e.name == "_traceml_comm:ddp_grad_sync"]
 print(f"RANK={rank} EVENTS={len(events)}", flush=True)
-
 assert len(events) >= 1, f"rank {rank}: expected >=1 event, got {len(events)}"
-
 for evt in events:
     assert evt.cpu_end >= evt.cpu_start, "cpu_end < cpu_start"
+
+# The comm hook only TIMES the all_reduce; gradients must be numerically
+# identical to the no-hook reference. Guards against the value-passthrough
+# corruption class (returning a sliced / wrong-shaped bucket tensor).
+for i, (p, g_ref) in enumerate(zip(model.parameters(), ref_grads)):
+    assert torch.allclose(p.grad, g_ref, atol=1e-6), (
+        f"rank {rank}: grad {i} differs from no-hook reference"
+    )
 
 dist.destroy_process_group()
 print(f"RANK={rank} OK", flush=True)

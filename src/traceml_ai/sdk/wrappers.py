@@ -278,9 +278,10 @@ def wrap_ddp(ddp_model: Any, base_hook: Any = None) -> Any:
 
     This preserves model identity (returns the same ``ddp_model`` instance,
     like ``wrap_optimizer``) and is idempotent. Use the explicit path when you
-    pass a custom ``base_hook`` (e.g. ``fp16_compress_hook``, PowerSGD); the
-    default auto-install path (``trace_step`` under ``init(mode='auto')``) uses
-    PyTorch's default hook.
+    pass a custom ``base_hook`` (e.g. ``fp16_compress_hook``); state-bearing
+    hooks like PowerSGD are not yet supported. The auto-install path
+    (``init(mode='auto')`` patches ``DDP.forward`` to install the default hook
+    on first forward) needs no explicit call.
 
     Note: installing any comm hook unfuses DDP's fused copy+divide-by-world-size
     (sub-microsecond per bucket, numerically identical results).

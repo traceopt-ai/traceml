@@ -15,8 +15,12 @@ Or via the TraceML CLI::
 
 Convention
 ----------
-- Pass the DDP **wrapper** to ``trace_step(model)`` — this triggers
-  auto-install of the comm hook.
+- ``traceml.init(mode="auto")`` patches ``DDP.forward`` so the comm hook
+  auto-installs on each DDP model's first forward (no explicit call needed).
+  ``traceml.wrap_ddp(model)`` is the explicit equivalent and is required in
+  ``manual`` / ``selective`` mode.
+- Pass the DDP **wrapper** (not ``model.module``) to ``trace_step(model)``
+  so step-time and layer-buffer flushes route by the right model id.
 - Pass ``model.module`` (the inner module) to ``trace_model_instance()``
   for layer hooks.
 
@@ -86,8 +90,9 @@ def main() -> None:
     else:
         model = torch.nn.parallel.DistributedDataParallel(inner_model)
 
-    # Explicit wrap_ddp — alternatively, just pass `model` (the DDP
-    # wrapper) to trace_step() and auto-install handles it.
+    # Explicit wrap_ddp. Optional in auto mode: traceml.init(mode="auto")
+    # above already auto-installs the comm hook on the first forward.
+    # It is required in manual / selective mode.
     traceml.wrap_ddp(model)
 
     optimizer = optim.SGD(model.parameters(), lr=0.01)

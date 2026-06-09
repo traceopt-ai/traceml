@@ -100,7 +100,12 @@ def _traceml_ddp_comm_hook_factory(
 
         def _on_complete(fut: Any) -> torch.Tensor:
             # .then() passes the Future itself, not the resolved value.
-            result = fut.value()[0]
+            # base_hook's future already resolves to the reduced bucket
+            # tensor (allreduce_hook does the list-extraction internally),
+            # so pass it through unchanged. DDP consumes this return value
+            # as the bucket gradient -- slicing it (e.g. [0]) feeds DDP a
+            # wrong-shaped tensor and silently corrupts gradients.
+            result = fut.value()
 
             try:
                 cpu_end = time.time()
@@ -152,9 +157,11 @@ def install_ddp_comm_hook(
     ddp_model:
         A ``DistributedDataParallel``-wrapped model.
     base_hook:
-        Optional user-supplied comm hook (e.g. ``fp16_compress_hook``,
-        PowerSGD).  When ``None``, delegates to PyTorch's default
-        ``allreduce_hook``.
+        Optional user-supplied comm hook whose future resolves to the
+        reduced bucket tensor (e.g. ``fp16_compress_hook``).  Registered
+        with ``state=None``, so ``state``-bearing hooks such as PowerSGD
+        are not yet supported.  When ``None``, delegates to PyTorch's
+        default ``allreduce_hook``.
 
     Returns
     -------
@@ -224,4 +231,14 @@ def ensure_ddp_comm_hook_installed(model: torch.nn.Module) -> None:
     if not isinstance(model, DistributedDataParallel):
         return
 
-    install_ddp_comm_hook(model)
+    # Auto-path (called from the init() forward patch on every DDP forward):
+    # instrumentation must never break training, so swallow and report any
+    # failure. The explicit wrap_ddp() path calls install_ddp_comm_hook
+    # directly and still surfaces errors to the caller.
+    try:
+        install_ddp_comm_hook(model)
+    except Exception as exc:
+        print(
+            f"[TraceML] DDP comm-hook auto-install failed: {exc}",
+            file=sys.stderr,
+        )
