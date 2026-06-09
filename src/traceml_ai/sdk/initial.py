@@ -232,6 +232,12 @@ def init(
         Selective-mode-only override controlling forward timing patching.
     patch_backward:
         Selective-mode-only override controlling backward timing patching.
+    patch_h2d:
+        Selective-mode-only override controlling host-to-device
+        (``Tensor.to``) timing patching.
+    patch_ddp_comm:
+        Selective-mode-only override controlling DDP gradient-sync
+        comm-hook patching (``DistributedDataParallel.forward``).
 
     Returns
     -------

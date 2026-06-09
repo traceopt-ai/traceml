@@ -223,7 +223,9 @@ def ensure_ddp_comm_hook_installed(model: torch.nn.Module) -> None:
 
     No-op for non-DDP models.  Idempotent and best-effort, mirroring
     ``ensure_optimizer_timing_installed``: this is the auto-path entry
-    point called from ``trace_step``.  Errors never propagate into the
+    point, invoked on each DDP instance's first forward by the
+    ``DDP.forward`` patch that ``init()`` installs (see
+    ``patches/ddp_comm_patch.py``).  Errors never propagate into the
     user's training loop.
     """
     from torch.nn.parallel import DistributedDataParallel

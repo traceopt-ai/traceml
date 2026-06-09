@@ -5,8 +5,9 @@ Covers:
 - install_ddp_comm_hook: sentinel, idempotency, type checks, fail-open
 - Per-bucket event emission and step aggregation
 - base_hook composition and CUDA event pool cleanup
-- Auto-install via trace_step + DDP unwrap
-- 2-rank gloo smoke test (gated)
+- Auto-install via the init() DDP.forward patch + DDP unwrap in trace_step
+- Integration parity for patch_ddp_comm
+- 2-rank gloo smoke tests (gated): grad correctness + auto-install chain
 """
 
 from __future__ import annotations
@@ -94,7 +95,7 @@ def _make_fake_future(
 
 
 # ---------------------------------------------------------------------------
-# Commit 5: install + sentinel + error paths
+# install + sentinel + error paths
 # ---------------------------------------------------------------------------
 
 
@@ -152,7 +153,7 @@ class TestInstallDDPCommHook:
 
 
 # ---------------------------------------------------------------------------
-# Commit 6: per-bucket emission + per-step aggregation
+# per-bucket emission + per-step aggregation
 # ---------------------------------------------------------------------------
 
 
@@ -222,7 +223,7 @@ class TestPerBucketEmission:
 
 
 # ---------------------------------------------------------------------------
-# Commit 7: base_hook composition + pool cleanup
+# base_hook composition + pool cleanup
 # ---------------------------------------------------------------------------
 
 
@@ -334,7 +335,7 @@ class TestBaseHookComposition:
 
 
 # ---------------------------------------------------------------------------
-# Commit 7.5: auto-install + DDP unwrap via trace_step
+# init() forward-patch auto-install + DDP unwrap + integration parity
 # ---------------------------------------------------------------------------
 
 
@@ -441,16 +442,28 @@ class TestDDPUnwrap:
 
 class TestIntegrationCommParity:
     """
-    Every DDP-capable integration must enable ``patch_ddp_comm`` so the
-    ``_traceml_comm:ddp_grad_sync`` stream installs consistently. A flag left
-    unset would silently darken the stream for that integration (the
-    #88 / #135 absence class). Pins HF and Lightning so drift fails loudly.
+    DDP-capable integrations should enable ``patch_ddp_comm`` so the
+    ``_traceml_comm:ddp_grad_sync`` stream installs consistently. A flag
+    left unset silently darkens the stream for that integration (the
+    #88 / #135 absence class).
+
+    Currently pinned: HF (``mode="auto"``). Lightning and Ray are left
+    dark deliberately: ``TraceMLRayConfig`` cannot express
+    ``patch_ddp_comm`` yet, and enabling it in ``lightning.init()`` alone
+    would make the documented Ray+Lightning selective recipe fail
+    re-initialization. Per-integration enablement lands together as a
+    follow-up.
     """
 
     @pytest.fixture(autouse=True)
-    def _reset_init(self):
+    def _reset_init(self, monkeypatch):
         from traceml_ai.sdk import initial
 
+        # Assert effective configs only; never install real global patches
+        # from a unit test (they have no uninstall).
+        monkeypatch.setattr(
+            initial, "_apply_requested_patches", lambda cfg: None
+        )
         initial._INIT_CONFIG = None
         yield
         initial._INIT_CONFIG = None
@@ -460,14 +473,9 @@ class TestIntegrationCommParity:
 
         assert hf_init().patch_ddp_comm is True
 
-    def test_lightning_integration_enables_patch_ddp_comm(self):
-        from traceml_ai.integrations.lightning import init as lit_init
-
-        assert lit_init().patch_ddp_comm is True
-
 
 # ---------------------------------------------------------------------------
-# Commit 8: 2-rank gloo smoke test (gated)
+# 2-rank gloo smoke tests (gated)
 # ---------------------------------------------------------------------------
 
 _RUN_DIST_TESTS = os.environ.get("TRACEML_RUN_DIST_TESTS", "0") == "1"

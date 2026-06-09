@@ -37,7 +37,6 @@ Notes
   no communication happened).
 - Comm timing overlaps with backward compute for early buckets. Only the
   last bucket's all_reduce is pure communication (backward is done).
-  See ``deep_dive_bucket_ordering_and_overlap.md`` for details.
 - Data-only for now: ``_traceml_comm:ddp_grad_sync`` events are persisted to
   the telemetry DB but are NOT yet surfaced in the terminal/dashboard or the
   diagnosis engine (until then the comm wall-time stays folded into the
@@ -262,7 +261,10 @@ def print_db_results(db_path: str) -> None:
                     return fmt.format(v)
             return "-"
 
-        row = f"{step:>5} {rank:>5}"
+        # step/rank are nullable in the schema (best-effort writer).
+        step_s = step if step is not None else "-"
+        rank_s = rank if rank is not None else "-"
+        row = f"{step_s:>5} {rank_s:>5}"
         for _, name in COLUMNS:
             row += f"{stat(name):>9}"
         row += f"{stat(COMM_EVENT, key='n_calls', fmt='{:.0f}'):>6}"
@@ -365,6 +367,12 @@ def main() -> None:
         drop_last=True,
     )
 
+    if len(loader) == 0:
+        raise SystemExit(
+            "[demo] zero batches per rank (drop_last=True): lower "
+            "BATCH_SIZE or world size so each rank gets a full batch."
+        )
+
     model.train()
     step = 0
     epoch = 0
@@ -417,34 +425,41 @@ def main() -> None:
 
     under_launcher = bool(os.environ.get("TRACEML_SESSION_ID", "").strip())
 
-    if not under_launcher:
-        # Plain torchrun: no sampler drained the step-time queue, so each
-        # rank can print its own per-step table from in-process data.
-        log("per-step timings (in-process, this rank only):")
-        print_inprocess_results(use_cuda)
-    else:
-        # Under `traceml run`: the sampler shipped everything to the
-        # aggregator; read the per-rank timings back from the session DB.
-        traceml.final_summary()
-        if rank == 0:
-            db_path = find_db()
-            if db_path:
-                print(f"\n[demo] session DB: {db_path}", flush=True)
-                print_db_results(db_path)
-            else:
-                print(
-                    "DB not found on this node (it lives on node 0).",
-                    file=sys.stderr,
-                )
+    # Timing readout is best-effort: a failure here must not turn an
+    # otherwise successful training run into a non-zero exit.
+    try:
+        if not under_launcher:
+            # Plain torchrun: no sampler drained the step-time queue, so
+            # each rank can print its own per-step table from in-process
+            # data.
+            log("per-step timings (in-process, this rank only):")
+            print_inprocess_results(use_cuda)
+        else:
+            # Under `traceml run`: the sampler shipped everything to the
+            # aggregator; read the per-rank timings back from the DB.
+            traceml.final_summary()
+            if rank == 0:
+                db_path = find_db()
+                if db_path:
+                    print(f"\n[demo] session DB: {db_path}", flush=True)
+                    print_db_results(db_path)
+                else:
+                    print(
+                        "DB not found on this node (it lives on node 0).",
+                        file=sys.stderr,
+                    )
+    except Exception as exc:
+        print(f"[demo] timing readout failed: {exc}", file=sys.stderr)
 
     if rank == 0:
         print(
             "\nWhat you just saw: TraceML's comm hook wrapped DDP's "
-            "gradient all_reduce and timed every bucket with CUDA events "
-            "while training ran at full speed. Early buckets overlap "
-            "backward compute; only the last bucket is pure comm wait. "
-            f"Under `traceml run` these land in SQLite as {COMM_EVENT} "
-            "(dashboard/diagnosis wiring is the TRA-30 follow-up).",
+            "gradient all_reduce and timed every bucket asynchronously "
+            "(CUDA events on GPU, wall-clock on CPU) while training ran "
+            "at full speed. Early buckets overlap backward compute; only "
+            "the last bucket is pure comm wait. Under `traceml run` "
+            f"these land in SQLite as {COMM_EVENT} (dashboard/diagnosis "
+            "wiring is the TRA-30 follow-up).",
             flush=True,
         )
 
