@@ -220,6 +220,10 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches():
     events, validating that sub-phase auto-timers stay armed across the
     accumulated micro-batches within a single trace_step bracket.
     """
+    # The forward/backward auto-timers this test counts are no-ops unless
+    # the process-wide patches are installed; init() is the documented
+    # path and idempotent, so the test passes regardless of test order.
+    init()
     _reset_traceml_state()
     max_steps = 3
     grad_accum = 2
