@@ -16,6 +16,7 @@
 [**Compare Runs**](docs/user_guide/compare.md) •
 [**Read Output**](docs/user_guide/reading-output.md) •
 [**Use With Your Stack**](docs/user_guide/integrations.md) •
+[**Ask for Help**](https://github.com/traceopt-ai/traceml/discussions) •
 [**FAQ**](docs/user_guide/faq.md)
 
 **Training bottleneck guides:**
@@ -200,12 +201,14 @@ changing the final saved artifacts.
 
 ---
 
-## Feedback
+## Feedback and Help
 
-For bugs, unexpected results, or feature requests, open a GitHub issue and use
-the matching issue template. The templates ask for the details we need to
-reproduce training-environment problems, including hardware, topology, launch
-command, TraceML version, PyTorch/CUDA versions, and redacted summary output.
+If you want help interpreting a TraceML run, open a
+[GitHub Discussion](https://github.com/traceopt-ai/traceml/discussions) and paste
+your `final_summary.txt`, `final_summary.json`, or terminal summary.
+
+Use Issues for bugs, unexpected results, feature requests, and reproducible
+problems with TraceML itself:
 
 GitHub issues: [open an issue](https://github.com/traceopt-ai/traceml/issues)
 
