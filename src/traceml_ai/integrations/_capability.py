@@ -16,8 +16,10 @@ import os
 logger = logging.getLogger(__name__)
 
 # Logical stream -> the init-config flag that must be True to capture it.
-# (step_time/optimizer are not patch-gated — emitted by trace_step / auto hooks —
-# so they are intentionally not checked here.)
+# (step_time is emitted directly by trace_step. optimizer is mode-gated:
+# since upstream #146 the auto hooks install only when init mode == "auto".
+# Neither is flag-gated, so neither is checked here; warning on a dark
+# optimizer stream in manual/selective mode is a possible follow-up.)
 _PATCH_GATED = {
     "dataloader_fetch": "patch_dataloader",
     "forward": "patch_forward",

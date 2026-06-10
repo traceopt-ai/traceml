@@ -15,11 +15,11 @@ DISCIPLINE: a new telemetry stream (e.g. all_reduce) is not "done" until it is
 added to REQUIRED_STEP_TIME below AND emitted by every integration that owes it.
 
 SCOPE (Stage 1, additive, zero training-path/import behavior change): POSITIVE
-conformance only — it calls `init(mode='auto')` explicitly, so it regression-
-gates the init() path (e.g. catches a future change that drops the DataLoader
-patch from auto mode). The NEGATIVE control (assert the bare/no-init path lacks
-a stream and that this harness DETECTS it) requires decoupling the integration
-import from the legacy auto-init side-effect -> Stage 2.
+conformance only — it calls the integration's documented `init()` entry point,
+so it regression-gates that path (e.g. catches a future change that drops the
+DataLoader patch from auto mode). The NEGATIVE control (assert the bare/no-init
+path lacks a stream and that this harness DETECTS it) became feasible when
+upstream #146 removed the legacy import-time auto-init -> Stage 2.
 """
 
 import importlib.util
@@ -28,7 +28,6 @@ from pathlib import Path
 
 import pytest
 
-from traceml_ai.sdk.initial import init
 from traceml_ai.samplers.utils import drain_queue_nowait
 from traceml_ai.utils.timing import _STEP_BUFFER, get_step_time_queue
 
@@ -84,7 +83,10 @@ def _run_huggingface() -> set[str]:
         TrainingArguments,
     )
 
-    from traceml_ai.integrations.huggingface import TraceMLTrainer
+    from traceml_ai.integrations.huggingface import (
+        TraceMLTrainer,
+        init as hf_init,
+    )
 
     class _TinyDS(torch.utils.data.Dataset):
         def __init__(self, n=20, seq=16, vocab=128, labels=4):
@@ -103,7 +105,9 @@ def _run_huggingface() -> set[str]:
         def __getitem__(self, i):
             return self._rows[i]
 
-    init(mode="auto")  # documented path; idempotent if already auto
+    # Canonical documented path (#135); == traceml_ai.init(mode="auto"),
+    # idempotent if already initialized with the same effective config.
+    hf_init()
     drain_queue_nowait(get_step_time_queue())
     _STEP_BUFFER.clear()
 
