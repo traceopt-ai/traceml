@@ -1,5 +1,51 @@
 # TraceML Benchmarks
 
+## Simple End-To-End Timing
+
+For the simplest user-facing overhead check, run the same normal DDP MLP
+training script with and without TraceML and compare shell wall time.
+
+Single GPU native:
+
+```bash
+time torchrun --nproc_per_node=1 benchmarks/workloads/ddp_mlp_e2e.py \
+  --duration-sec 600 \
+  --batch-size 256 \
+  --hidden-dim 4096
+```
+
+Single GPU with TraceML:
+
+```bash
+time traceml run benchmarks/workloads/ddp_mlp_e2e.py \
+  --mode=summary \
+  --run-name=e2e_1gpu_traceml_r01 \
+  --nproc-per-node=1 \
+  --args \
+  --duration-sec 600 \
+  --batch-size 256 \
+  --hidden-dim 4096
+```
+
+Repeat both commands several times and alternate order:
+
+```text
+repeat 1: native, TraceML
+repeat 2: TraceML, native
+repeat 3: native, TraceML
+```
+
+Use the shell `real` time:
+
+```text
+overhead_pct = ((traceml_real_time / native_real_time) - 1) * 100
+```
+
+Increase `--batch-size`, `--hidden-dim`, or `--hidden-layers` if the training
+step is too fast. Keep the exact same arguments for native and TraceML runs.
+
+## Steady-State Paired Runner
+
 This folder starts with one practical overhead benchmark: a synthetic DDP MLP
 that does enough GPU work to make TraceML overhead measurable without needing a
 dataset download.
