@@ -23,9 +23,7 @@ def _messages(caplog) -> str:
 
 
 def test_warns_when_not_initialized(monkeypatch, caplog):
-    monkeypatch.setattr(
-        "traceml_ai.sdk.initial.get_init_config", lambda: None
-    )
+    monkeypatch.setattr("traceml_ai.sdk.initial.get_init_config", lambda: None)
     with caplog.at_level(logging.WARNING):
         warn_if_missing_streams("HF", HF_REQUIRES)
     assert "dataloader_fetch" in _messages(caplog)
@@ -60,9 +58,7 @@ def test_silent_in_auto_mode(monkeypatch, caplog):
 
 def test_disabled_env_is_silent(monkeypatch, caplog):
     monkeypatch.setenv("TRACEML_DISABLED", "1")
-    monkeypatch.setattr(
-        "traceml_ai.sdk.initial.get_init_config", lambda: None
-    )
+    monkeypatch.setattr("traceml_ai.sdk.initial.get_init_config", lambda: None)
     with caplog.at_level(logging.WARNING):
         warn_if_missing_streams("HF", HF_REQUIRES)
     assert _messages(caplog) == ""
