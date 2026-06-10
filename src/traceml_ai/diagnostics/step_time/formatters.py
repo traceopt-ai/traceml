@@ -13,6 +13,7 @@ Separated from core rule logic to keep diagnosis engine lean and reusable.
 from __future__ import annotations
 
 from .api import StepDiagnosis
+from .names import canonical_issue_kind
 
 
 def _styled_status(diagnosis: StepDiagnosis) -> str:
@@ -23,11 +24,11 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
         style = "bold bright_black"
     elif diagnosis.kind in {"INPUT_BOUND", "COMPUTE_BOUND"}:
         style = "bold yellow"
-    elif diagnosis.kind in {
+    elif canonical_issue_kind(diagnosis.kind) in {
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
         "STRAGGLER",
-        "WAIT_HEAVY",
+        "OVERHEAD_HEAVY",
     }:
         style = "bold red" if diagnosis.severity == "crit" else "bold yellow"
     else:

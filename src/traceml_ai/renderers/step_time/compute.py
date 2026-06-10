@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from traceml_ai.diagnostics.step_time.names import STEP_OVERHEAD_METRIC_KEY
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedRankHeatmap,
@@ -18,8 +19,7 @@ from traceml_ai.renderers.step_time.schema import (
 
 STEP_TIME_TABLE = "step_time_samples"
 
-WAIT_METRIC_KEY = "wait_proxy"
-WAIT_STEP_KEY = "step_time"
+STEP_METRIC_KEY = "step_time"
 
 EVENT_ALIASES = {
     "dataloader_fetch": "_traceml_internal:dataloader_next",
@@ -45,7 +45,7 @@ DEFAULT_HEATMAP_KEYS: Tuple[str, ...] = (
     "forward",
     "backward",
     "optimizer_step",
-    "wait_proxy",
+    STEP_OVERHEAD_METRIC_KEY,
     "step_time",
 )
 
@@ -188,7 +188,7 @@ class StepCombinedComputer:
         bwd_sums = per_metric_rank_sums.get("backward", {})
         opt_sums = per_metric_rank_sums.get("optimizer_step", {})
 
-        wait_rank_sums = {
+        step_overhead_rank_sums = {
             r: max(
                 0.0,
                 step_sums.get(r, 0.0)
@@ -199,7 +199,9 @@ class StepCombinedComputer:
             )
             for r in ranks_present
         }
-        per_metric_rank_sums[WAIT_METRIC_KEY] = wait_rank_sums
+        per_metric_rank_sums[STEP_OVERHEAD_METRIC_KEY] = (
+            step_overhead_rank_sums
+        )
 
         overall_rank_scores = self._overall_rank_scores(
             per_metric_rank_sums, ranks_present
@@ -229,7 +231,7 @@ class StepCombinedComputer:
             )
             if metric is not None:
                 if (
-                    metric_key == WAIT_STEP_KEY
+                    metric_key == STEP_METRIC_KEY
                     and overall_worst_rank is not None
                 ):
                     metric = StepCombinedTimeMetric(
@@ -249,17 +251,17 @@ class StepCombinedComputer:
                     )
                 metrics[metric_key] = metric
 
-        wait_metric = self._make_metric(
-            metric_key=WAIT_METRIC_KEY,
-            rank_sums=wait_rank_sums,
+        step_overhead_metric = self._make_metric(
+            metric_key=STEP_OVERHEAD_METRIC_KEY,
+            rank_sums=step_overhead_rank_sums,
             ranks=ranks_present,
             coverage=coverage,
             include_series=False,
             per_rank_steps=per_rank_steps,
             steps=steps,
         )
-        if wait_metric is not None:
-            metrics[WAIT_METRIC_KEY] = wait_metric
+        if step_overhead_metric is not None:
+            metrics[STEP_OVERHEAD_METRIC_KEY] = step_overhead_metric
 
         rank_heatmap = None
         if include_rank_heatmap and metrics:
@@ -572,7 +574,7 @@ class StepCombinedComputer:
             skew_pct = 0.0
 
         series = None
-        if include_series and metric_key != WAIT_METRIC_KEY:
+        if include_series and metric_key != STEP_OVERHEAD_METRIC_KEY:
             median_y, worst_y, sum_y = [], [], []
 
             for step in steps:

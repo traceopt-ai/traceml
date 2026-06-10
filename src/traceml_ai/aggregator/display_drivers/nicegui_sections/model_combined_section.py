@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import plotly.graph_objects as go
 from nicegui import ui
 
+from traceml_ai.diagnostics.step_time.names import STEP_OVERHEAD_METRIC_KEY
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeResult,
@@ -28,7 +29,7 @@ _STACK_KEYS = [
     ("FWD", "forward", "#1976d2"),
     ("BWD", "backward", "#512da8"),
     ("OPT", "optimizer_step", "#2e7d32"),
-    ("WAIT", "wait_proxy", "#f9a825"),
+    ("OVERHEAD", STEP_OVERHEAD_METRIC_KEY, "#f9a825"),
 ]
 
 _REQUIRED_KEYS = {
@@ -37,7 +38,7 @@ _REQUIRED_KEYS = {
     "forward",
     "backward",
     "optimizer_step",
-    "wait_proxy",
+    STEP_OVERHEAD_METRIC_KEY,
     "step_time",
 }
 
@@ -87,7 +88,7 @@ def update_model_combined_section(
         return
 
     step = metrics["step_time"]
-    wait = metrics["wait_proxy"]
+    step_overhead = metrics[STEP_OVERHEAD_METRIC_KEY]
 
     signature = (
         tuple(
@@ -115,7 +116,7 @@ def update_model_combined_section(
         panel["window_text"].content = window_text
         panel["_last_window_text"] = window_text
 
-    kpis_html = _render_kpis(metrics, step, wait)
+    kpis_html = _render_kpis(metrics, step, step_overhead)
     if panel.get("_last_kpis") != kpis_html:
         panel["kpis"].content = kpis_html
         panel["_last_kpis"] = kpis_html
@@ -178,12 +179,12 @@ def _index_metrics(
 def _render_kpis(
     metrics: Dict[str, StepCombinedTimeMetric],
     step: StepCombinedTimeMetric,
-    wait: StepCombinedTimeMetric,
+    step_overhead: StepCombinedTimeMetric,
 ) -> str:
     median_total = float(step.summary.median_total or 0.0)
     worst_total = float(step.summary.worst_total or 0.0)
-    wait_share = (
-        float(wait.summary.median_total or 0.0) / median_total
+    overhead_share = (
+        float(step_overhead.summary.median_total or 0.0) / median_total
         if median_total > 0.0
         else 0.0
     )
@@ -200,7 +201,7 @@ def _render_kpis(
                 else "-"
             ),
         ),
-        compact_metric_html("WAIT Share", safe_pct(wait_share)),
+        compact_metric_html("Overhead Share", safe_pct(overhead_share)),
         compact_metric_html(
             "Dominant Phase",
             _dominant_metric(metrics, mode="worst_total"),

@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, Protocol
 
+from traceml_ai.diagnostics.step_time.names import (
+    OVERHEAD_HEAVY_KIND,
+    canonical_issue_kind,
+)
 from traceml_ai.reporting.compare.model import (
     CompareDiagnosis,
     CompareMetric,
@@ -80,7 +84,13 @@ def diagnosis_status(section: Any) -> Optional[str]:
     block = section.get("diagnosis")
     if not isinstance(block, dict):
         return None
-    return as_str(block.get("status"))
+    kind = as_str(block.get("kind"))
+    if kind is not None and canonical_issue_kind(kind) == OVERHEAD_HEAVY_KIND:
+        return "OVERHEAD-HEAVY"
+    status = as_str(block.get("status"))
+    if status == "WAIT-HEAVY":
+        return "OVERHEAD-HEAVY"
+    return status
 
 
 def numeric_metric(

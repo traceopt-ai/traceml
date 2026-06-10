@@ -27,7 +27,7 @@ Use TraceML for:
 
 - bottleneck diagnosis
 - stragglers
-- wait-heavy behavior
+- overhead-heavy behavior
 - memory creep
 - run-to-run bottleneck comparison from saved TraceML summary JSON files
 
@@ -380,7 +380,7 @@ Use compare when you already have final summary JSON files and want to answer:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did memory or wait behavior regress?
+- did memory or step-overhead behavior regress?
 
 Live output is for in-run diagnosis.
 

@@ -21,6 +21,7 @@ from traceml_ai.diagnostics.step_time import (
     build_step_diagnosis,
     format_cli_diagnosis,
 )
+from traceml_ai.diagnostics.step_time.names import STEP_OVERHEAD_METRIC_KEY
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -39,7 +40,7 @@ METRIC_LABELS = {
     "backward": "BWD",
     "optimizer_step": "OPT",
     "step_time": "STEP",
-    "wait_proxy": "WAIT",
+    STEP_OVERHEAD_METRIC_KEY: "OVERHEAD",
 }
 
 
@@ -85,12 +86,15 @@ class StepCombinedRenderer(BaseRenderer):
         step_metric = next(
             (m for m in metrics if m.metric == "step_time"), None
         )
-        wait_metric = next(
-            (m for m in metrics if m.metric == "wait_proxy"), None
+        step_overhead_metric = next(
+            (m for m in metrics if m.metric == STEP_OVERHEAD_METRIC_KEY), None
         )
 
-        # Put wait_proxy last
-        metrics = sorted(metrics, key=lambda m: (m.metric == "wait_proxy"))
+        # Put step overhead last.
+        metrics = sorted(
+            metrics,
+            key=lambda m: (m.metric == STEP_OVERHEAD_METRIC_KEY),
+        )
 
         # All metrics share the same window size by construction
         K = metrics[0].summary.steps_used
@@ -156,23 +160,29 @@ class StepCombinedRenderer(BaseRenderer):
             )
             table.add_row("")
 
-        # Optional WAIT share line (still meaningful in both modes)
-        if step_metric and wait_metric and step_metric.summary.worst_total > 0:
+        # Optional overhead share line (still meaningful in both modes).
+        if (
+            step_metric
+            and step_overhead_metric
+            and step_metric.summary.worst_total > 0
+        ):
             denom = (
                 step_metric.summary.median_total
                 if not single_rank
                 else step_metric.summary.worst_total
             )
-            wait_share = (
-                wait_metric.summary.median_total / denom if denom > 0 else 0.0
+            overhead_share = (
+                step_overhead_metric.summary.median_total / denom
+                if denom > 0
+                else 0.0
             )
 
             table.add_row(
-                "WAIT Share (%)",
+                "Overhead Share (%)",
                 *[
                     (
-                        f"[red]{wait_share * 100:.1f}%[/red]"
-                        if m.metric == "wait_proxy"
+                        f"[red]{overhead_share * 100:.1f}%[/red]"
+                        if m.metric == STEP_OVERHEAD_METRIC_KEY
                         else ""
                     )
                     for m in metrics
@@ -186,7 +196,7 @@ class StepCombinedRenderer(BaseRenderer):
             "\n\n[dim]"
             "DL=dataloader fetch | H2D=host-to-device | FWD=forward | "
             "BWD=backward | OPT=optimizer | STEP=traced step | "
-            "WAIT=STEP−H2D−FWD−BWD−OPT"
+            "OVERHEAD=STEP−H2D−FWD−BWD−OPT"
             "[/dim]"
         )
         return Panel(

@@ -27,7 +27,7 @@ from traceml_ai.diagnostics.step_time.rules import (
     ComputeStragglerRule,
     InputBoundRule,
     InputStragglerRule,
-    WaitHeavyRule,
+    StepOverheadHeavyRule,
 )
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
@@ -129,7 +129,7 @@ def _single_rank_step_metrics(
             world_size=1,
         ),
         _time_metric(
-            "wait_proxy",
+            "step_overhead_proxy",
             median=wait,
             worst=wait,
             worst_rank=0,
@@ -145,7 +145,7 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
         _time_metric("forward", median=40.0, worst=40.0),
         _time_metric("backward", median=130.0, worst=130.0),
         _time_metric("optimizer_step", median=20.0, worst=20.0),
-        _time_metric("wait_proxy", median=20.0, worst=20.0),
+        _time_metric("step_overhead_proxy", median=20.0, worst=20.0),
     )
     assert InputStragglerRule().evaluate(input_ctx).kind == "INPUT_STRAGGLER"
     assert (
@@ -161,7 +161,7 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
         _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
         _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
         _time_metric("optimizer_step", median=20.0, worst=20.0),
-        _time_metric("wait_proxy", median=40.0, worst=40.0),
+        _time_metric("step_overhead_proxy", median=40.0, worst=40.0),
     )
     assert (
         ComputeStragglerRule().evaluate(compute_ctx).kind
@@ -193,13 +193,13 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     )
 
     assert (
-        WaitHeavyRule()
+        StepOverheadHeavyRule()
         .evaluate(_time_context(*_single_rank_step_metrics(wait=20.0)))
         .kind
-        == "WAIT_HEAVY"
+        == "OVERHEAD_HEAVY"
     )
     assert (
-        WaitHeavyRule().evaluate(
+        StepOverheadHeavyRule().evaluate(
             _time_context(*_single_rank_step_metrics(wait=5.0))
         )
         is None
@@ -258,7 +258,7 @@ def test_compute_straggler_uses_typical_step_and_phase_blame() -> None:
             world_size=4,
         ),
         _time_metric(
-            "wait_proxy",
+            "step_overhead_proxy",
             median=34.2,
             worst=34.3,
             worst_rank=3,
@@ -289,7 +289,7 @@ def test_step_time_primary_selection_input_explains_mixed_straggler() -> None:
             _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
             _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
             _time_metric("optimizer_step", median=20.0, worst=20.0),
-            _time_metric("wait_proxy", median=40.0, worst=40.0),
+            _time_metric("step_overhead_proxy", median=40.0, worst=40.0),
         ]
     )
 
@@ -314,7 +314,7 @@ def test_step_time_primary_selection_keeps_unexplained_mixed() -> None:
             _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
             _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
             _time_metric("optimizer_step", median=20.0, worst=20.0),
-            _time_metric("wait_proxy", median=40.0, worst=40.0),
+            _time_metric("step_overhead_proxy", median=40.0, worst=40.0),
         ]
     )
 

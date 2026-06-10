@@ -10,6 +10,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from traceml_ai.diagnostics.step_time.names import (
+    STEP_OVERHEAD_PUBLIC_METRIC,
+    public_metric_aliases,
+)
 from traceml_ai.reporting.compare.model import CompareSection
 from traceml_ai.reporting.compare.sections.base import (
     as_float,
@@ -68,12 +72,12 @@ class StepTimeComparer:
                     rhs=self._value(rhs, "compute_ms"),
                     direction="higher_is_worse",
                 ),
-                "wait_ms": numeric_metric(
-                    key="wait_ms",
-                    label="Wait",
+                STEP_OVERHEAD_PUBLIC_METRIC: numeric_metric(
+                    key=STEP_OVERHEAD_PUBLIC_METRIC,
+                    label="Step overhead",
                     unit="ms",
-                    lhs=self._value(lhs, "wait_ms"),
-                    rhs=self._value(rhs, "wait_ms"),
+                    lhs=self._value(lhs, STEP_OVERHEAD_PUBLIC_METRIC),
+                    rhs=self._value(rhs, STEP_OVERHEAD_PUBLIC_METRIC),
                     direction="higher_is_worse",
                 ),
                 "forward_ms": numeric_metric(
@@ -110,7 +114,11 @@ class StepTimeComparer:
         )
 
     def _value(self, section: Any, key: str) -> Any:
-        return global_average(section, key)
+        for alias in public_metric_aliases(key):
+            value = global_average(section, alias)
+            if value is not None:
+                return value
+        return None
 
     def _dominant_phase(self, section: Any) -> Any:
         phases = {
@@ -119,6 +127,9 @@ class StepTimeComparer:
             "forward": as_float(self._value(section, "forward_ms")),
             "backward": as_float(self._value(section, "backward_ms")),
             "optimizer": as_float(self._value(section, "optimizer_ms")),
+            "step_overhead": as_float(
+                self._value(section, STEP_OVERHEAD_PUBLIC_METRIC)
+            ),
         }
         present = {
             phase: value

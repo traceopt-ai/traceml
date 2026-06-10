@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 from traceml_ai.core.rendering import Formatter
+from traceml_ai.diagnostics.step_time.names import STEP_OVERHEAD_PUBLIC_METRIC
 from traceml_ai.reporting.summaries.summary_layout import (
     border,
     row,
@@ -27,7 +28,7 @@ TEXT_METRIC_ORDER_BY_SECTION: Dict[str, tuple[str, ...]] = {
         "input_ms",
         "h2d_ms",
         "compute_ms",
-        "wait_ms",
+        STEP_OVERHEAD_PUBLIC_METRIC,
     ),
     "step_memory": (
         "peak_reserved_bytes",

@@ -2,7 +2,7 @@
 
 Use this guide when PyTorch training is slow and you do not yet know whether
 the bottleneck is input loading, GPU utilization, distributed rank skew, memory
-growth, wait time, or a run-to-run regression.
+growth, step overhead, or a run-to-run regression.
 
 This is a triage guide. It points to focused guides instead of repeating every
 TraceML diagnosis.
@@ -37,7 +37,7 @@ diagnosis or symptom.
 | Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
 | Step Memory says `MEMORY CREEP` or `MEMORY RISING` | [Find PyTorch Memory Creep](pytorch-memory-creep.md) |
 | A recent change made the run slower | [Compare Runs](../user_guide/compare.md) |
-| Step Time says `COMPUTE-BOUND` or `WAIT-HEAVY` | [How to Read TraceML Output](../user_guide/reading-output.md) |
+| Step Time says `COMPUTE-BOUND` or `OVERHEAD-HEAVY` | [How to Read TraceML Output](../user_guide/reading-output.md) |
 
 ## Quick interpretation
 
@@ -58,15 +58,16 @@ retained tensors, caches, and per-step state that may stay alive.
 observed step. Use TraceML to choose the hot phase, then use an operator-level
 profiler if you need kernel or operator detail.
 
-`WAIT-HEAVY` is residual time not attributed to dataloader, H2D, forward,
-backward, or optimizer work. Inspect logging, checkpointing, validation,
-CPU-side stalls, framework orchestration, or unobserved transfers.
+`OVERHEAD-HEAVY` means step overhead is high: time inside the traced step that
+is not attributed to dataloader, H2D, forward, backward, or optimizer work.
+Inspect logging, checkpointing, validation, CPU-side stalls, framework
+orchestration, or unobserved transfers.
 
 ## What not to assume
 
 - Low GPU utilization alone does not prove a DataLoader bottleneck.
 - A DDP slowdown is not always NCCL. TraceML currently reports rank skew and
-  residual wait, not explicit collective timing.
+  step overhead, not explicit collective timing.
 - `BALANCED` means no clear bottleneck in the observed window. It does not
   prove the run is globally optimal.
 - A single slow run is easier to trust after comparing it with a known good

@@ -32,7 +32,7 @@ Use TraceML for:
 - input bottlenecks
 - compute-bound steps
 - DDP stragglers
-- wait-heavy behavior
+- overhead-heavy behavior
 - memory creep
 - step-aware bottleneck diagnosis
 - compact run-to-run comparison from saved TraceML summary JSON files
@@ -69,7 +69,7 @@ TraceML answers questions like:
 
 - is the job input-bound or compute-bound?
 - is one rank slower than the others?
-- is the job spending time waiting?
+- is the job spending time in step overhead?
 - is memory drifting upward over time?
 - which phase of the step is the real bottleneck?
 

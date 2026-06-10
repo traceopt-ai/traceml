@@ -177,7 +177,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     _assert_compact_card(payload["card"])
 
 
-def test_step_time_wait_heavy_card_uses_short_reason() -> None:
+def test_step_time_overhead_heavy_card_uses_short_reason() -> None:
     payload = _summary(
         {
             0: _rank(
@@ -191,9 +191,10 @@ def test_step_time_wait_heavy_card_uses_short_reason() -> None:
     )
 
     assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "WAIT-HEAVY"
+    assert payload["diagnosis"]["status"] == "OVERHEAD-HEAVY"
+    assert payload["diagnosis"]["kind"] == "OVERHEAD_HEAVY"
     assert (
-        "- Why: Wait was high inside the total step (30.0ms/102.0ms)."
+        "- Why: Step overhead was high inside the total step (30.0ms/102.0ms)."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
@@ -313,7 +314,7 @@ def test_step_time_unexplained_mixed_straggler_stays_straggler() -> None:
     _assert_compact_card(payload["card"])
 
 
-def test_step_time_priority_prefers_straggler_over_wait_heavy() -> None:
+def test_step_time_priority_prefers_straggler_over_overhead_heavy() -> None:
     payload = _summary(
         {
             0: _rank(
@@ -332,5 +333,5 @@ def test_step_time_priority_prefers_straggler_over_wait_heavy() -> None:
     )
 
     assert payload["diagnosis"]["status"] == "STRAGGLER"
-    assert "WAIT_HEAVY" in {issue["kind"] for issue in payload["issues"]}
+    assert "OVERHEAD_HEAVY" in {issue["kind"] for issue in payload["issues"]}
     assert "- Diagnosis: STRAGGLER" in payload["card"]

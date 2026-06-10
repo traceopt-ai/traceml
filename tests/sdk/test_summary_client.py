@@ -79,6 +79,17 @@ def test_summary_projects_existing_final_payload(monkeypatch, tmp_path):
                         }
                     },
                 },
+                "step_time": {
+                    "diagnosis": {
+                        "status": "OVERHEAD-HEAVY",
+                        "severity": "warn",
+                    },
+                    "global": {
+                        "average": {
+                            "step_overhead_ms": 4.5,
+                        }
+                    },
+                },
             }
         ),
         encoding="utf-8",
@@ -92,6 +103,45 @@ def test_summary_projects_existing_final_payload(monkeypatch, tmp_path):
         "traceml/system/status": "NORMAL",
         "traceml/system/severity": "ok",
         "traceml/system/cpu_percent": 22.0,
+        "traceml/step_time/status": "OVERHEAD-HEAVY",
+        "traceml/step_time/severity": "warn",
+        "traceml/step_time/step_overhead_ms": 4.5,
+    }
+
+
+def test_summary_projects_legacy_wait_metric_as_step_overhead(
+    monkeypatch,
+    tmp_path,
+):
+    session_root = _configure_session(monkeypatch, tmp_path)
+    session_root.mkdir(parents=True)
+    get_final_summary_json_path(session_root).write_text(
+        json.dumps(
+            {
+                "schema_version": "1",
+                "step_time": {
+                    "diagnosis": {
+                        "status": "WAIT-HEAVY",
+                        "severity": "warn",
+                    },
+                    "global": {
+                        "average": {
+                            "wait_ms": 7.0,
+                        }
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = summary_client.summary()
+
+    assert result == {
+        "traceml/schema_version": "1",
+        "traceml/step_time/status": "OVERHEAD-HEAVY",
+        "traceml/step_time/severity": "warn",
+        "traceml/step_time/step_overhead_ms": 7.0,
     }
 
 

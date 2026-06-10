@@ -13,6 +13,11 @@ from typing import Optional, Sequence, Tuple
 
 from ..common import DiagnosticIssue, DiagnosticRule
 from .context import StepTimeAnalysisContext, non_negative_finite
+from .names import (
+    OVERHEAD_HEAVY_KIND,
+    STEP_OVERHEAD_METRIC_KEY,
+    STEP_OVERHEAD_PHASE,
+)
 
 
 def _severity(value: float, crit_threshold: float) -> str:
@@ -210,37 +215,38 @@ class InputBoundRule(_BaseStepTimeRule):
 
 
 @dataclass(frozen=True)
-class WaitHeavyRule(_BaseStepTimeRule):
+class StepOverheadHeavyRule(_BaseStepTimeRule):
     """
-    Detect windows dominated by wait rather than local work.
+    Detect windows dominated by step overhead rather than local work.
     """
 
-    name: str = "wait_heavy"
+    name: str = "step_overhead_heavy"
 
     def evaluate(
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.wait_share < context.thresholds.wait_share_warn:
+        if context.step_overhead_share < context.thresholds.wait_share_warn:
             return None
 
         return self._issue(
-            kind="WAIT_HEAVY",
-            status="WAIT-HEAVY",
+            kind=OVERHEAD_HEAVY_KIND,
+            status="OVERHEAD-HEAVY",
             severity=_severity(
-                context.wait_share,
+                context.step_overhead_share,
                 context.thresholds.wait_share_crit,
             ),
             summary=(
-                f"WAIT* is {_pct(context.wait_share)} of the typical step."
+                "Step overhead is "
+                f"{_pct(context.step_overhead_share)} of the typical step."
             ),
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "
                 "checkpointing, validation, or unobserved transfers."
             ),
-            metric="wait_proxy",
-            phase="wait",
-            share_pct=context.wait_share,
+            metric=STEP_OVERHEAD_METRIC_KEY,
+            phase=STEP_OVERHEAD_PHASE,
+            share_pct=context.step_overhead_share,
             ranks=(context.overall_worst_rank,),
         )
 
@@ -261,7 +267,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
             return None
         if context.dataloader_share >= context.thresholds.input_share_warn:
             return None
-        if context.wait_share >= context.thresholds.wait_share_warn:
+        if context.step_overhead_share >= context.thresholds.wait_share_warn:
             return None
         if not context.single_rank and (
             context.compute_skew > context.thresholds.compute_bound_max_skew
@@ -296,7 +302,7 @@ DEFAULT_STEP_TIME_RULES: Tuple[
     InputStragglerRule(),
     ComputeStragglerRule(),
     InputBoundRule(),
-    WaitHeavyRule(),
+    StepOverheadHeavyRule(),
     ComputeBoundRule(),
 )
 
@@ -325,6 +331,6 @@ __all__ = [
     "ComputeStragglerRule",
     "InputBoundRule",
     "InputStragglerRule",
-    "WaitHeavyRule",
+    "StepOverheadHeavyRule",
     "run_step_time_rules",
 ]
