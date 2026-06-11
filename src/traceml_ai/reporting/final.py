@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
@@ -32,6 +33,7 @@ from traceml_ai.reporting.summaries.summary_layout import (
     wrap_lines,
 )
 from traceml_ai.sdk.protocol import (
+    get_final_summary_html_path,
     get_final_summary_json_path,
     get_final_summary_txt_path,
     utc_now_iso,
@@ -155,7 +157,7 @@ def _final_meta_mode(sections: Sequence[Dict[str, Any]]) -> str:
 
 
 def _final_meta_world_size(
-    sections: Sequence[Dict[str, Any]]
+    sections: Sequence[Dict[str, Any]],
 ) -> Optional[int]:
     """Infer observed world size from section metadata and rank identities."""
     candidates: List[int] = []
@@ -493,11 +495,34 @@ def build_summary_payload(
     return active_generator.generate(db_path, session_root=session_root)
 
 
+def _write_html_artifact(payload: Dict[str, Any], session_root: Path) -> None:
+    """
+    Render and write the optional HTML report (best-effort).
+
+    Runs after the JSON/TXT artifacts so that a rendering failure can never
+    block them. Any failure is logged and reported to stderr, never raised.
+    """
+    try:
+        from traceml_ai.reporting import html as html_report
+
+        html_report.write_html_report(
+            payload,
+            get_final_summary_html_path(session_root),
+        )
+    except Exception as exc:  # best-effort: never break the run
+        _log_final_report_error("HTML report failed", exc)
+        try:
+            print(f"[TraceML] HTML report failed: {exc}", file=sys.stderr)
+        except Exception:
+            pass
+
+
 def write_summary_artifacts(
     *,
     db_path: str,
     payload: Dict[str, Any],
     session_root: Optional[str] = None,
+    write_html: bool = False,
 ) -> None:
     """
     Write final summary artifacts to disk.
@@ -506,6 +531,7 @@ def write_summary_artifacts(
     -----------------
     - legacy DB-adjacent artifacts for compatibility
     - canonical session-root artifacts for public API consumers
+    - optional self-contained HTML report (``write_html``, best-effort)
     """
     final_text = str(payload.get("text", ""))
 
@@ -525,6 +551,8 @@ def write_summary_artifacts(
             get_final_summary_txt_path(session_root_path),
             final_text + "\n",
         )
+        if write_html:
+            _write_html_artifact(payload, session_root_path)
 
 
 def generate_summary(
@@ -533,6 +561,7 @@ def generate_summary(
     session_root: Optional[str] = None,
     print_to_stdout: bool = True,
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
+    write_html: bool = False,
 ) -> Dict[str, Any]:
     """
     Generate, write, and optionally print the final end-of-run summary.
@@ -546,6 +575,7 @@ def generate_summary(
         db_path=db_path,
         payload=payload,
         session_root=session_root,
+        write_html=write_html,
     )
 
     if print_to_stdout:

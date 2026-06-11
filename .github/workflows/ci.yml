@@ -89,4 +89,5 @@ jobs:
             tests/runtime/test_sampler_registry.py \
             tests/runtime/test_telemetry_publisher.py \
             tests/reporting/compare \
+            tests/reporting/html \
             -q

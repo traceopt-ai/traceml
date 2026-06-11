@@ -2,6 +2,9 @@
 
 TraceML uses launch flags similar to `torchrun` and writes the same
 `final_summary.json` artifact for single-node and multi-node summary runs.
+`--html-report` additionally writes `final_summary.html`; in multi-node runs it
+is produced only on the aggregator-owner node (node 0), like the JSON/TXT
+artifacts.
 
 ## Single-node DDP/FSDP
 

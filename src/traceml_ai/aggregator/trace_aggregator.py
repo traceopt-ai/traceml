@@ -133,6 +133,7 @@ class TraceMLAggregator:
             flush_history=self._sqlite_writer.flush_now,
             settle_telemetry=self._settle_telemetry,
             summary_window_rows=int(settings.summary_window_rows),
+            write_html=bool(settings.html_report),
         )
 
         # Display driver owns renderer selection and layout mapping.
@@ -240,6 +241,7 @@ class TraceMLAggregator:
                     summary_window_rows=int(
                         self._settings.summary_window_rows
                     ),
+                    write_html=bool(self._settings.html_report),
                 ),
             )
 

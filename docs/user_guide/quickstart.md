@@ -48,6 +48,10 @@ logs/<run_name>/final_summary.json
 logs/<run_name>/final_summary.txt
 ```
 
+Add `--html-report` (`traceml run train.py --html-report`) to also write a
+shareable `final_summary.html`. See
+[Reading the output](reading-output.md#shareable-html-report).
+
 For DDP, FSDP, and multi-node launches, see
 [Distributed Training](distributed-training.md).
 
