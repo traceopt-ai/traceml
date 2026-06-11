@@ -45,7 +45,9 @@ def accuracy_from_logits(
 
 
 def prepare_data():
-    raw = load_dataset("ag_news")
+    # "fancyzhx/ag_news" is the namespaced Hub id for AG News; the bare
+    # "ag_news" id is rejected by newer datasets / huggingface_hub.
+    raw = load_dataset("fancyzhx/ag_news")
 
     train_raw = raw["train"].select(
         range(min(MAX_TRAIN_EXAMPLES, len(raw["train"])))
