@@ -59,8 +59,11 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.trace_max_steps is None
     assert args.args == ["--epochs", "1"]
 
+    # The launcher defers UI/telemetry defaults to the traceml.yaml config
+    # resolver, so the argparse default is None ("flag not supplied"). The
+    # effective default ("summary") is applied by resolve_config / BUILT_IN_DEFAULTS.
     default_args = parser.parse_args(["watch", "train.py"])
-    assert default_args.mode == "summary"
+    assert default_args.mode is None
 
 
 def test_build_parser_accepts_view_command() -> None:

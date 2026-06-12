@@ -28,7 +28,7 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--mode",
         type=str,
-        default="summary",
+        default=None,
         choices=["cli", "dashboard", "summary"],
         help=(
             "TraceML mode. "
@@ -43,24 +43,26 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--interval",
         type=float,
-        default=2.0,
+        default=None,
         help="Polling interval in seconds.",
     )
     parser.add_argument(
         "--enable-logging",
-        action="store_true",
+        action="store_const",
+        const=True,
+        default=None,
         help="Enable TraceML logging output.",
     )
     parser.add_argument(
         "--logs-dir",
         type=str,
-        default="./logs",
+        default=None,
         help="Directory for TraceML session logs.",
     )
     parser.add_argument(
         "--num-display-layers",
         type=int,
-        default=5,
+        default=None,
         help="Maximum number of model layers to display in the live UI.",
     )
     parser.add_argument(
@@ -91,7 +93,7 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--remote-max-rows",
         type=int,
-        default=200,
+        default=None,
         help="Maximum number of rows returned by remote telemetry queries.",
     )
     parser.add_argument(
@@ -171,12 +173,16 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--no-history",
-        action="store_true",
+        action="store_const",
+        const=True,
+        default=None,
         help="Disable history saving (live view only; summaries and comparisons unavailable).",
     )
     parser.add_argument(
         "--disable-traceml",
-        action="store_true",
+        action="store_const",
+        const=True,
+        default=None,
         help="Disable TraceML telemetry and run the script natively via torchrun.",
     )
     parser.add_argument(

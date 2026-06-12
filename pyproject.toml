@@ -17,6 +17,7 @@ dependencies = [
     "nvidia-ml-py",
     "numpy<2",
     "msgspec",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
