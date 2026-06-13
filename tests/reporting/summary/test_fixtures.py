@@ -6,9 +6,9 @@
 
 """SQLite fixture coverage for final-report summary sections.
 
-These tests keep section assertions schema-oriented instead of snapshotting full
-cards. The goal is to make contributor changes safe while leaving copy/layout
-free to evolve intentionally.
+These tests keep section assertions schema-oriented instead of snapshotting
+full cards. The goal is to make contributor changes safe while leaving
+copy/layout free to evolve intentionally.
 """
 
 from __future__ import annotations
@@ -833,12 +833,13 @@ def test_final_summary_fixture_schema_contains_all_sections(
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.4
+    assert payload["schema_version"] == 1.5
     assert set(payload) == {
         "schema_version",
         "generated_at",
         "duration_s",
         "meta",
+        "primary_diagnosis",
         "system",
         "process",
         "step_time",
@@ -852,6 +853,9 @@ def test_final_summary_fixture_schema_contains_all_sections(
         "nodes_observed",
         "gpus_observed",
     }
+    assert payload["primary_diagnosis"]["kind"] == (
+        "INSUFFICIENT_STEP_TIME_DATA"
+    )
     assert payload["meta"] == {
         "run_name": None,
         "mode": "single_node",
@@ -868,4 +872,5 @@ def test_final_summary_fixture_schema_contains_all_sections(
         assert "- Next:" not in payload[key]["card"]
     assert payload["system"]["diagnosis"]["status"] == "NORMAL"
     assert "NO GPU" not in payload["system"]["card"]
-    assert "- Next:" not in payload["text"]
+    assert "Primary Diagnosis" in payload["text"]
+    assert "- Next:" in payload["text"]

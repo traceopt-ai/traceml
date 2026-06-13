@@ -1,0 +1,250 @@
+# Copyright 2026 OptAI UG (haftungsbeschraenkt)
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# SPDX-License-Identifier: Apache-2.0
+
+from __future__ import annotations
+
+import pytest
+
+from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
+
+
+def _system(kind: str = "NORMAL", gpu_util: float = 87.0) -> dict:
+    status_by_kind = {
+        "NORMAL": "NORMAL",
+        "LOW_GPU_UTILIZATION": "LOW GPU UTIL",
+        "MODERATE_GPU_UTILIZATION": "MODERATE GPU UTIL",
+    }
+    return {
+        "diagnosis": {
+            "kind": kind,
+            "status": status_by_kind.get(kind, kind),
+            "severity": "info",
+            "summary": "system summary",
+            "action": "system action",
+        },
+        "global": {
+            "average": {
+                "gpu_util_percent": gpu_util,
+            }
+        },
+    }
+
+
+def _step_time(
+    kind: str,
+    *,
+    status: str | None = None,
+    phase: str | None = None,
+    issues: list[dict] | None = None,
+) -> dict:
+    diagnosis = {
+        "kind": kind,
+        "status": status or kind.replace("_", "-"),
+        "severity": "warn",
+        "summary": "step-time summary",
+        "action": "step-time action",
+        "metric": None,
+        "phase": phase,
+    }
+    if issues is None:
+        issues = [diagnosis]
+    return {
+        "diagnosis": diagnosis,
+        "issues": issues,
+        "global": {
+            "window": {"steps_analyzed": 256},
+            "average": {
+                "total_step_ms": 200.0,
+                "dataloader_ms": 50.0,
+                "h2d_ms": 10.0,
+                "compute_ms": 120.0,
+                "wait_ms": 20.0,
+            },
+            "median": {
+                "dataloader_ms": {"value": 5.0, "idx": "0"},
+                "compute_ms": {"value": 100.0, "idx": "1"},
+                "optimizer_ms": {"value": 10.0, "idx": "3"},
+            },
+            "worst": {
+                "dataloader_ms": {"value": 80.0, "idx": "2"},
+                "compute_ms": {"value": 180.0, "idx": "2"},
+                "optimizer_ms": {"value": 90.0, "idx": "2"},
+            },
+        },
+    }
+
+
+def _primary(step_time: dict, system: dict | None = None) -> dict:
+    return build_primary_diagnosis(
+        system_summary=system or _system(),
+        process_summary={},
+        step_time_summary=step_time,
+        step_memory_summary={},
+    )
+
+
+def test_input_bound_uses_phase_share_evidence() -> None:
+    primary = _primary(
+        _step_time("INPUT_BOUND", status="INPUT-BOUND"),
+        _system(gpu_util=38.0),
+    )
+
+    assert primary["kind"] == "INPUT_BOUND"
+    assert primary["section"] == "step_time"
+    assert primary["scope"] == "performance"
+    assert primary["summary"] == (
+        "Input loading took 50.0ms of a 200.0ms average step."
+    )
+    assert primary["evidence"] == {
+        "type": "phase_share",
+        "basis": "average",
+        "steps_analyzed": 256,
+        "total_step_ms": 200.0,
+        "dataloader_ms": 50.0,
+        "h2d_ms": 10.0,
+        "compute_ms": 120.0,
+        "wait_ms": 20.0,
+        "shares": {
+            "dataloader_pct": 25.0,
+            "h2d_pct": 5.0,
+            "compute_pct": 60.0,
+            "wait_pct": 10.0,
+        },
+        "gpu_util_avg_percent": 38.0,
+    }
+
+
+def test_wait_heavy_uses_wait_phase_share() -> None:
+    primary = _primary(_step_time("WAIT_HEAVY", status="WAIT-HEAVY"))
+
+    assert primary["kind"] == "WAIT_HEAVY"
+    assert primary["summary"] == (
+        "Wait time took 20.0ms of a 200.0ms average step."
+    )
+    assert primary["evidence"]["type"] == "phase_share"
+    assert primary["evidence"]["shares"]["wait_pct"] == 10.0
+
+
+def test_compute_bound_uses_neutral_compute_phase_share() -> None:
+    primary = _primary(_step_time("COMPUTE_BOUND", status="COMPUTE-BOUND"))
+
+    assert primary["kind"] == "COMPUTE_BOUND"
+    assert primary["summary"] == (
+        "Model compute took 120.0ms of a 200.0ms average step."
+    )
+    assert primary["evidence"]["shares"]["compute_pct"] == 60.0
+
+
+def test_input_straggler_uses_rank_comparison_evidence() -> None:
+    primary = _primary(
+        _step_time(
+            "INPUT_STRAGGLER",
+            status="INPUT STRAGGLER",
+            phase="dataloader",
+        )
+    )
+
+    assert primary["kind"] == "INPUT_STRAGGLER"
+    assert primary["summary"] == (
+        "Rank r2 dataloader was 80.0ms vs median rank r0 at 5.0ms."
+    )
+    assert primary["evidence"] == {
+        "type": "rank_comparison",
+        "steps_analyzed": 256,
+        "gpu_util_avg_percent": 87.0,
+        "metric": "dataloader_ms",
+        "phase": "dataloader",
+        "median": {"rank": 0, "value_ms": 5.0},
+        "worst": {"rank": 2, "value_ms": 80.0},
+        "delta_ms": 75.0,
+        "ratio": 16.0,
+    }
+
+
+def test_compute_straggler_uses_diagnosed_compute_phase() -> None:
+    primary = _primary(
+        _step_time(
+            "COMPUTE_STRAGGLER",
+            status="COMPUTE STRAGGLER",
+            phase="optimizer",
+        )
+    )
+
+    assert primary["kind"] == "COMPUTE_STRAGGLER"
+    assert primary["evidence"]["metric"] == "optimizer_ms"
+    assert primary["evidence"]["phase"] == "optimizer"
+    assert primary["evidence"]["median"] == {"rank": 3, "value_ms": 10.0}
+    assert primary["evidence"]["worst"] == {"rank": 2, "value_ms": 90.0}
+    assert primary["evidence"]["delta_ms"] == 80.0
+    assert primary["evidence"]["ratio"] == 9.0
+
+
+def test_straggler_includes_input_and_compute_comparisons() -> None:
+    issues = [
+        {
+            "kind": "STRAGGLER",
+            "status": "STRAGGLER",
+            "severity": "crit",
+            "summary": "mixed",
+            "action": "inspect",
+        },
+        {
+            "kind": "INPUT_STRAGGLER",
+            "phase": "dataloader",
+        },
+        {
+            "kind": "COMPUTE_STRAGGLER",
+            "phase": "compute",
+        },
+    ]
+    primary = _primary(_step_time("STRAGGLER", issues=issues))
+
+    assert primary["kind"] == "STRAGGLER"
+    assert primary["evidence"]["type"] == "rank_comparison"
+    comparisons = primary["evidence"]["comparisons"]
+    assert [item["metric"] for item in comparisons] == [
+        "dataloader_ms",
+        "compute_ms",
+    ]
+
+
+def test_balanced_with_low_gpu_utilization_uses_utilization_fallback() -> None:
+    primary = _primary(
+        _step_time("BALANCED", status="BALANCED"),
+        _system(kind="LOW_GPU_UTILIZATION", gpu_util=38.0),
+    )
+
+    assert primary["kind"] == "LOW_GPU_UTILIZATION_UNEXPLAINED"
+    assert primary["section"] == "system"
+    assert primary["evidence"] == {
+        "type": "utilization_fallback",
+        "gpu_util_avg_percent": 38.0,
+        "step_time_status": "BALANCED",
+        "steps_analyzed": 256,
+    }
+
+
+def test_balanced_without_low_gpu_utilization_reports_no_clear_bottleneck() -> (
+    None
+):
+    primary = _primary(_step_time("BALANCED", status="BALANCED"))
+
+    assert primary["kind"] == "NO_CLEAR_PERFORMANCE_BOTTLENECK"
+    assert primary["section"] == "step_time"
+    assert primary["evidence"]["type"] == "no_clear_bottleneck"
+    assert primary["evidence"]["step_time_status"] == "BALANCED"
+
+
+@pytest.mark.parametrize("kind", ["WARMUP", "NO_DATA"])
+def test_warmup_and_no_data_report_insufficient_step_time_data(
+    kind: str,
+) -> None:
+    primary = _primary(_step_time(kind, status=kind.replace("_", " ")))
+
+    assert primary["kind"] == "INSUFFICIENT_STEP_TIME_DATA"
+    assert primary["status"] == "INSUFFICIENT STEP-TIME DATA"
+    assert primary["evidence"]["type"] == "insufficient_data"
+    assert primary["evidence"]["step_time_status"] == kind.replace("_", " ")
