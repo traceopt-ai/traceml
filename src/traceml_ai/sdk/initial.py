@@ -18,6 +18,7 @@ class TraceMLInitConfig:
     patch_forward: bool
     patch_backward: bool
     patch_h2d: bool
+    patch_ddp_comm: bool
     source: str = "user"
 
     def same_effective_configuration(self, other: "TraceMLInitConfig") -> bool:
@@ -30,6 +31,7 @@ class TraceMLInitConfig:
             and self.patch_forward == other.patch_forward
             and self.patch_backward == other.patch_backward
             and self.patch_h2d == other.patch_h2d
+            and self.patch_ddp_comm == other.patch_ddp_comm
         )
 
 
@@ -59,6 +61,7 @@ def _build_config(
     patch_forward: Optional[bool],
     patch_backward: Optional[bool],
     patch_h2d: Optional[bool],
+    patch_ddp_comm: Optional[bool],
     source: str,
 ) -> TraceMLInitConfig:
     """Validate user input and return the initialization config."""
@@ -68,13 +71,14 @@ def _build_config(
         patch_forward,
         patch_backward,
         patch_h2d,
+        patch_ddp_comm,
     )
     has_overrides = any(value is not None for value in override_values)
 
     if canonical_mode in {"auto", "manual"} and has_overrides:
         raise ValueError(
-            "patch_dataloader, patch_forward, patch_backward, and patch_h2d "
-            "may only be provided when mode='selective'. "
+            "patch_dataloader, patch_forward, patch_backward, patch_h2d, and "
+            "patch_ddp_comm may only be provided when mode='selective'. "
             f"Received overrides with mode={canonical_mode!r}."
         )
 
@@ -85,6 +89,7 @@ def _build_config(
             patch_forward=True,
             patch_backward=True,
             patch_h2d=True,
+            patch_ddp_comm=True,
             source=source,
         )
 
@@ -95,6 +100,7 @@ def _build_config(
             patch_forward=False,
             patch_backward=False,
             patch_h2d=False,
+            patch_ddp_comm=False,
             source=source,
         )
 
@@ -108,8 +114,9 @@ def _build_config(
     fwd = bool(patch_forward) if patch_forward is not None else False
     bwd = bool(patch_backward) if patch_backward is not None else False
     h2d = bool(patch_h2d) if patch_h2d is not None else False
+    ddp = bool(patch_ddp_comm) if patch_ddp_comm is not None else False
 
-    if not any((dl, fwd, bwd, h2d)):
+    if not any((dl, fwd, bwd, h2d, ddp)):
         raise ValueError(
             "mode='selective' must enable at least one automatic patch. "
             "Use mode='manual' when you want zero automatic patches."
@@ -121,6 +128,7 @@ def _build_config(
         patch_forward=fwd,
         patch_backward=bwd,
         patch_h2d=h2d,
+        patch_ddp_comm=ddp,
         source=source,
     )
 
@@ -133,6 +141,7 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
             config.patch_forward,
             config.patch_backward,
             config.patch_h2d,
+            config.patch_ddp_comm,
         )
     ):
         return
@@ -165,6 +174,13 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
             )
 
             patch_h2d()
+
+        if config.patch_ddp_comm:
+            from traceml_ai.instrumentation.patches.ddp_comm_patch import (
+                patch_ddp_comm,
+            )
+
+            patch_ddp_comm()
     except Exception as exc:
         raise RuntimeError(
             "TraceML initialization failed while installing automatic "
@@ -196,6 +212,7 @@ def init(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    patch_ddp_comm: Optional[bool] = None,
     _source: str = "user",
 ) -> TraceMLInitConfig:
     """
@@ -215,6 +232,12 @@ def init(
         Selective-mode-only override controlling forward timing patching.
     patch_backward:
         Selective-mode-only override controlling backward timing patching.
+    patch_h2d:
+        Selective-mode-only override controlling host-to-device
+        (``Tensor.to``) timing patching.
+    patch_ddp_comm:
+        Selective-mode-only override controlling DDP gradient-sync
+        comm-hook patching (``DistributedDataParallel.forward``).
 
     Returns
     -------
@@ -242,6 +265,7 @@ def init(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        patch_ddp_comm=patch_ddp_comm,
         source=_source,
     )
 
@@ -260,12 +284,14 @@ def init(
                 f"patch_forward={_INIT_CONFIG.patch_forward}, "
                 f"patch_backward={_INIT_CONFIG.patch_backward}, "
                 f"patch_h2d={_INIT_CONFIG.patch_h2d}, "
+                f"patch_ddp_comm={_INIT_CONFIG.patch_ddp_comm}, "
                 f"source={_INIT_CONFIG.source!r}. "
                 f"Requested config: mode={requested.mode!r}, "
                 f"patch_dataloader={requested.patch_dataloader}, "
                 f"patch_forward={requested.patch_forward}, "
                 f"patch_backward={requested.patch_backward}, "
                 f"patch_h2d={requested.patch_h2d}, "
+                f"patch_ddp_comm={requested.patch_ddp_comm}, "
                 f"source={requested.source!r}. "
                 "Initialize TraceML exactly once per process with the intended "
                 "mode at the start of the run."
@@ -283,6 +309,7 @@ def start(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    patch_ddp_comm: Optional[bool] = None,
 ) -> TraceMLInitConfig:
     """
     Alias for `init()` for the current transition period.
@@ -296,6 +323,7 @@ def start(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        patch_ddp_comm=patch_ddp_comm,
         _source="user",
     )
 

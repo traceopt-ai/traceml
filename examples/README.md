@@ -45,6 +45,7 @@ These examples are still user-facing, but they are more about showing specific T
 |---|---|---|---|
 | `dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
 | `input_straggler_ddp_demo.py` | Input straggler in single-node DDP | CPU / CUDA | One rank is deliberately slower in the input path |
+| `ddp_comm_hook_demo.py` | DDP gradient-sync (all_reduce) timing per step | CPU / CUDA | Single- or multi-node; prints a per-step table of all step phases incl. comm |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 

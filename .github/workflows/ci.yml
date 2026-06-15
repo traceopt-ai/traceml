@@ -89,4 +89,6 @@ jobs:
             tests/runtime/test_sampler_registry.py \
             tests/runtime/test_telemetry_publisher.py \
             tests/reporting/compare \
+            tests/test_ddp_comm_hook.py \
+            tests/sdk/test_instrumentation_namespace.py \
             -q
