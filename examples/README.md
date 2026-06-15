@@ -44,7 +44,7 @@ These examples are still user-facing, but they are more about showing specific T
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
 | `dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
-| `ddp_rank_straggler_demo.py` | Rank stragglers in single-node DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
+| `ddp_rank_straggler_demo.py` | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
