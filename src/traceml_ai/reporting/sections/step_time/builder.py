@@ -15,6 +15,10 @@ import numpy as np
 
 from traceml_ai.diagnostics.common import DiagnosticResult
 from traceml_ai.diagnostics.step_time.api import StepDiagnosis
+from traceml_ai.diagnostics.step_time.names import (
+    OVERHEAD_HEAVY_KIND,
+    canonical_issue_kind,
+)
 from traceml_ai.reporting.schema import (
     BaseGroups,
     BaseSectionPayload,
@@ -29,7 +33,7 @@ from traceml_ai.reporting.sections.step_time.model import (
     build_global_rollup,
     build_overview,
     closest_rank_to_median,
-    compute_wait_avg_ms,
+    compute_step_overhead_avg_ms,
     finite_float,
     summary_metric_values,
 )
@@ -58,7 +62,7 @@ class StepTimeCardStats:
     total_step: StepTimeMetricPair
     h2d: StepTimeMetricPair
     compute: StepTimeMetricPair
-    wait: StepTimeMetricPair
+    step_overhead: StepTimeMetricPair
     input: StepTimeMetricPair
 
     @property
@@ -139,9 +143,9 @@ def _build_card_stats(
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
-        wait=_metric_pair_from_rank_values(
+        step_overhead=_metric_pair_from_rank_values(
             {
-                int(rank): compute_wait_avg_ms(summary)
+                int(rank): compute_step_overhead_avg_ms(summary)
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
@@ -171,7 +175,10 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
             stats.compute.median_ms,
             stats.compute.worst_ms,
         )
-        wait = _format_ms_pair(stats.wait.median_ms, stats.wait.worst_ms)
+        overhead = _format_ms_pair(
+            stats.step_overhead.median_ms,
+            stats.step_overhead.worst_ms,
+        )
         input_ms = _format_ms_pair(
             stats.input.median_ms,
             stats.input.worst_ms,
@@ -183,7 +190,7 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         return (
             "- Stats: median/worst | "
             f"total {total} | input {input_ms} | H2D {h2d_ms} | "
-            f"compute {compute} | wait {wait}"
+            f"compute {compute} | overhead {overhead}"
         )
 
     return (
@@ -192,7 +199,7 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         f"input {format_ms(stats.input.worst_ms)} | "
         f"H2D {format_ms(stats.h2d.worst_ms)} | "
         f"compute {format_ms(stats.compute.worst_ms)} | "
-        f"wait {format_ms(stats.wait.worst_ms)}"
+        f"overhead {format_ms(stats.step_overhead.worst_ms)}"
     )
 
 
@@ -208,9 +215,9 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
         stats.compute.median_global_rank,
         stats.compute.worst_global_rank,
     )
-    wait = _format_rank_pair(
-        stats.wait.median_global_rank,
-        stats.wait.worst_global_rank,
+    overhead = _format_rank_pair(
+        stats.step_overhead.median_global_rank,
+        stats.step_overhead.worst_global_rank,
     )
     input_rank = _format_rank_pair(
         stats.input.median_global_rank,
@@ -223,7 +230,7 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
     return (
         "- Ranks: median/worst | "
         f"total {total} | input {input_rank} | H2D {h2d_rank} | "
-        f"compute {compute} | wait {wait}"
+        f"compute {compute} | overhead {overhead}"
     )
 
 
@@ -331,12 +338,12 @@ def _step_time_card_reason(
             f"{format_ms(stats.total_step.worst_ms)}"
         )
         return f"Input loading took a large share ({evidence})."
-    if kind == "WAIT_HEAVY":
+    if canonical_issue_kind(kind) == OVERHEAD_HEAVY_KIND:
         evidence = (
-            f"{format_ms(stats.wait.worst_ms)}/"
+            f"{format_ms(stats.step_overhead.worst_ms)}/"
             f"{format_ms(stats.total_step.worst_ms)}"
         )
-        return f"Wait was high inside the total step ({evidence})."
+        return "Step overhead was high inside the total step " f"({evidence})."
     if kind == "COMPUTE_BOUND":
         summary = per_global_rank_summary.get(stats.compute.worst_global_rank)
         phase = _largest_compute_phase(summary)

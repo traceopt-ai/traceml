@@ -4,7 +4,7 @@ Use this guide when PyTorch DDP training is slow, uneven, or controlled by one
 slow rank.
 
 TraceML compares worst-rank and median-rank timing in distributed runs. It can
-surface input stragglers, compute stragglers, mixed stragglers, and wait-heavy
+surface input stragglers, compute stragglers, mixed stragglers, and overhead-heavy
 windows.
 
 ## Run DDP with TraceML
@@ -32,7 +32,7 @@ Start with the Step Time diagnosis.
 | `COMPUTE STRAGGLER` | one rank has meaningfully more forward, backward, or optimizer burden than a typical rank |
 | `STRAGGLER` | input and compute are both materially uneven |
 | `INPUT-BOUND` | input work is broad, not just one bad rank |
-| `WAIT-HEAVY` | meaningful residual time is not attributed to dataloader, H2D, forward, backward, or optimizer work |
+| `OVERHEAD-HEAVY` | meaningful step overhead is not attributed to dataloader, H2D, forward, backward, or optimizer work |
 
 Then inspect:
 
@@ -42,7 +42,7 @@ Then inspect:
 - `Forward`
 - `Backward`
 - `Optimizer Step`
-- `Wait`
+- `Overhead`
 
 ## How to triage the worst rank
 
@@ -64,10 +64,10 @@ rank:
 If the diagnosis is `STRAGGLER`, reduce the problem one phase at a time. Start
 with the phase that has the largest worst-vs-median gap.
 
-If the diagnosis is `WAIT-HEAVY`, remember that TraceML reports wait as
-residual time. It is not direct NCCL or all-reduce timing. Inspect logging,
-checkpointing, validation, CPU stalls, framework orchestration, and unobserved
-transfer paths before assuming the cause.
+If the diagnosis is `OVERHEAD-HEAVY`, remember that TraceML reports step
+overhead. It is not proof of GPU idle time or direct NCCL/all-reduce timing.
+Inspect logging, checkpointing, validation, CPU stalls, framework
+orchestration, and unobserved transfer paths before assuming the cause.
 
 ## FSDP note
 
@@ -88,7 +88,7 @@ traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
 Look for changes in total step time, worst-rank skew, input time, compute time,
-wait time, and diagnosis.
+step overhead, and diagnosis.
 
 ## Related
 

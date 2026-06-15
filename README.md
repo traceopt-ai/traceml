@@ -43,7 +43,7 @@ first pass that tells you where to aim heavier profiling tools.
 
 | Tool | Best used for | Output | Cost / overhead |
 |---|---|---|---|
-| TraceML | Classifying high-level bottlenecks: input, compute, wait, memory, rank skew | JSON fingerprint, text summary, live views | <2% in current benchmark runs; small code wrapper |
+| TraceML | Classifying high-level bottlenecks: input, compute, step overhead, memory, rank skew | JSON fingerprint, text summary, live views | <2% in current benchmark runs; small code wrapper |
 | `torch.profiler` | Inspecting expensive ops, kernels, and CUDA activity | Profiler trace | Higher overhead; requires profiler context |
 | Nsight Systems | Debugging low-level CUDA and kernel behavior | GPU timeline | Separate profiler run |
 | W&B / MLflow | Tracking training metrics and experiment history | Metrics dashboard / run history | Logging integration |
@@ -107,7 +107,7 @@ where step time and memory went:
 |  Step Time                                                                 |
 |  - Diagnosis: INPUT STRAGGLER                                              |
 |  - Scope: compared over last 460 aligned steps across 4 global ranks       |
-|  - Stats: total 303.7ms | input 254.5ms | compute 259.5ms | wait 40.5ms    |
+|  - Stats: total 303.7ms | input 254.5ms | compute 259.5ms | overhead 40.5ms|
 |  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
 +----------------------------------------------------------------------------+
 ```

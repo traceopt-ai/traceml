@@ -15,6 +15,10 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
+from traceml_ai.diagnostics.step_time.names import (
+    LEGACY_WAIT_METRIC_KEY,
+    STEP_OVERHEAD_METRIC_KEY,
+)
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
 
 if TYPE_CHECKING:
@@ -53,7 +57,7 @@ class StepTimeAnalysisContext:
     step_metric: StepCombinedTimeMetric
     dataloader_metric: Optional[StepCombinedTimeMetric]
     h2d_metric: Optional[StepCombinedTimeMetric]
-    wait_metric: Optional[StepCombinedTimeMetric]
+    step_overhead_metric: Optional[StepCombinedTimeMetric]
     forward_metric: Optional[StepCombinedTimeMetric]
     backward_metric: Optional[StepCombinedTimeMetric]
     optimizer_metric: Optional[StepCombinedTimeMetric]
@@ -61,7 +65,7 @@ class StepTimeAnalysisContext:
     step_total: float
     dataloader_total: float
     h2d_total: float
-    wait_total: float
+    step_overhead_total: float
     compute_total: float
     typical_step_total: float
     dataloader_excess_ms: float
@@ -69,7 +73,7 @@ class StepTimeAnalysisContext:
     compute_phase_excess_total: float
 
     dataloader_share: float
-    wait_share: float
+    step_overhead_share: float
     compute_share: float
 
     dataloader_skew: float
@@ -236,14 +240,14 @@ def typical_step_total(
     forward: Optional[StepCombinedTimeMetric],
     backward: Optional[StepCombinedTimeMetric],
     optimizer: Optional[StepCombinedTimeMetric],
-    wait: Optional[StepCombinedTimeMetric],
+    step_overhead: Optional[StepCombinedTimeMetric],
 ) -> float:
     """
     Return the typical observed step used to normalize straggler scores.
 
     Definition:
         median dataloader + median H2D + median forward + median backward
-        + median optimizer + median residual wait
+        + median optimizer + median step overhead
 
     This keeps straggler scores user-facing: "extra phase time as a share of a
     normal observed iteration", including residual overhead that is part of the
@@ -257,7 +261,7 @@ def typical_step_total(
             backward=backward,
             optimizer=optimizer,
         )
-        + metric_median_total(wait)
+        + metric_median_total(step_overhead)
     )
 
 
@@ -306,7 +310,7 @@ def input_straggler_score(
     forward: Optional[StepCombinedTimeMetric],
     backward: Optional[StepCombinedTimeMetric],
     optimizer: Optional[StepCombinedTimeMetric],
-    wait: Optional[StepCombinedTimeMetric],
+    step_overhead: Optional[StepCombinedTimeMetric],
 ) -> float:
     """
     Return the normalized input straggler score.
@@ -317,7 +321,7 @@ def input_straggler_score(
         forward=forward,
         backward=backward,
         optimizer=optimizer,
-        wait=wait,
+        step_overhead=step_overhead,
     )
     if typical <= 0.0:
         return 0.0
@@ -333,7 +337,7 @@ def compute_straggler_score(
     forward: Optional[StepCombinedTimeMetric],
     backward: Optional[StepCombinedTimeMetric],
     optimizer: Optional[StepCombinedTimeMetric],
-    wait: Optional[StepCombinedTimeMetric],
+    step_overhead: Optional[StepCombinedTimeMetric],
 ) -> float:
     """
     Return the normalized compute straggler score.
@@ -348,7 +352,7 @@ def compute_straggler_score(
         forward=forward,
         backward=backward,
         optimizer=optimizer,
-        wait=wait,
+        step_overhead=step_overhead,
     )
     if typical <= 0.0:
         return 0.0
@@ -483,11 +487,16 @@ def build_step_time_context(
     Build one normalized context shared by all step-time diagnosis rules.
     """
     by_key = {metric.metric: metric for metric in metrics}
+    if (
+        STEP_OVERHEAD_METRIC_KEY not in by_key
+        and LEGACY_WAIT_METRIC_KEY in by_key
+    ):
+        by_key[STEP_OVERHEAD_METRIC_KEY] = by_key[LEGACY_WAIT_METRIC_KEY]
 
     step_metric = by_key["step_time"]
     dataloader_metric = by_key.get("dataloader_fetch")
     h2d_metric = by_key.get("h2d")
-    wait_metric = by_key.get("wait_proxy")
+    step_overhead_metric = by_key.get(STEP_OVERHEAD_METRIC_KEY)
     forward_metric = by_key.get("forward")
     backward_metric = by_key.get("backward")
     optimizer_metric = by_key.get("optimizer_step")
@@ -500,7 +509,10 @@ def build_step_time_context(
     step_total = metric_total(step_metric, single_rank=single_rank)
     dataloader_total = metric_total(dataloader_metric, single_rank=single_rank)
     h2d_total = metric_total(h2d_metric, single_rank=single_rank)
-    wait_total = metric_total(wait_metric, single_rank=single_rank)
+    step_overhead_total = metric_total(
+        step_overhead_metric,
+        single_rank=single_rank,
+    )
     compute_total_value = compute_total(
         forward=forward_metric,
         backward=backward_metric,
@@ -513,7 +525,7 @@ def build_step_time_context(
         forward=forward_metric,
         backward=backward_metric,
         optimizer=optimizer_metric,
-        wait=wait_metric,
+        step_overhead=step_overhead_metric,
     )
     dataloader_excess_value = metric_excess(dataloader_metric)
     compute_excess_value = compute_phase_excess_total(
@@ -553,7 +565,9 @@ def build_step_time_context(
         "backward": rank_values_from_metric(backward_metric),
         "optimizer_step": rank_values_from_metric(optimizer_metric),
         "step_time": rank_values_from_metric(step_metric),
-        "wait_proxy": rank_values_from_metric(wait_metric),
+        STEP_OVERHEAD_METRIC_KEY: rank_values_from_metric(
+            step_overhead_metric
+        ),
     }
 
     local_per_rank_timing = {
@@ -586,8 +600,13 @@ def build_step_time_context(
                 rank: non_negative_finite(values.get("step_time", 0.0))
                 for rank, values in local_per_rank_timing.items()
             },
-            "wait_proxy": {
-                rank: non_negative_finite(values.get("wait_proxy", 0.0))
+            STEP_OVERHEAD_METRIC_KEY: {
+                rank: non_negative_finite(
+                    values.get(
+                        STEP_OVERHEAD_METRIC_KEY,
+                        values.get(LEGACY_WAIT_METRIC_KEY, 0.0),
+                    )
+                )
                 for rank, values in local_per_rank_timing.items()
             },
         }
@@ -601,21 +620,21 @@ def build_step_time_context(
         step_metric=step_metric,
         dataloader_metric=dataloader_metric,
         h2d_metric=h2d_metric,
-        wait_metric=wait_metric,
+        step_overhead_metric=step_overhead_metric,
         forward_metric=forward_metric,
         backward_metric=backward_metric,
         optimizer_metric=optimizer_metric,
         step_total=step_total,
         dataloader_total=dataloader_total,
         h2d_total=h2d_total,
-        wait_total=wait_total,
+        step_overhead_total=step_overhead_total,
         compute_total=compute_total_value,
         typical_step_total=typical_step_value,
         dataloader_excess_ms=dataloader_excess_value,
         compute_excess_ms=compute_excess_value,
         compute_phase_excess_total=compute_excess_value,
         dataloader_share=share(dataloader_total, step_total),
-        wait_share=share(wait_total, step_total),
+        step_overhead_share=share(step_overhead_total, step_total),
         compute_share=share(compute_total_value, step_total),
         dataloader_skew=metric_skew(
             dataloader_metric, single_rank=single_rank
@@ -631,7 +650,7 @@ def build_step_time_context(
             forward=forward_metric,
             backward=backward_metric,
             optimizer=optimizer_metric,
-            wait=wait_metric,
+            step_overhead=step_overhead_metric,
         ),
         compute_straggler_score=compute_straggler_score(
             dataloader=dataloader_metric,
@@ -639,7 +658,7 @@ def build_step_time_context(
             forward=forward_metric,
             backward=backward_metric,
             optimizer=optimizer_metric,
-            wait=wait_metric,
+            step_overhead=step_overhead_metric,
         ),
         rank_values=rank_values,
         per_rank_timing=local_per_rank_timing,

@@ -62,16 +62,16 @@ Training-step timing.
 - `COMPUTE_STRAGGLER`: one rank has materially higher compute time.
 - `INPUT_BOUND`: dataloader time dominates the typical step.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
-- `WAIT_HEAVY`: unattributed residual time is a material share of the step.
+- `OVERHEAD_HEAVY`: step overhead is a material share of the step.
 
-`WAIT_HEAVY` is not a communication diagnosis. `wait_ms` is residual
-unattributed step time:
+`OVERHEAD_HEAVY` is not a communication diagnosis. `step_overhead_ms` is
+measured overhead inside the traced step:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
-wait_ms = traced_step_ms - known_step_ms
+step_overhead_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
 
@@ -83,8 +83,11 @@ issues.
 
 It can include validation, checkpointing, logging, framework orchestration, CPU
 stalls, unobserved transfer stalls, or other work inside the timed step but
-outside the traced H2D and compute phases. It is not direct NCCL, all-reduce,
-or synchronization timing.
+outside the traced H2D and compute phases. It is not proof of GPU idle time,
+direct NCCL, all-reduce, or synchronization timing.
+
+Legacy summaries may still contain `WAIT_HEAVY` or `wait_ms`; readers should
+treat them as aliases for `OVERHEAD_HEAVY` and `step_overhead_ms`.
 
 ## Step Memory
 

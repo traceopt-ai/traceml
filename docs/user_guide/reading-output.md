@@ -24,7 +24,7 @@ TraceML output has two layers:
 
 2. **Evidence**
    - the numbers and trends that support the diagnosis
-   - example: step breakdown, skew, wait time, memory peaks
+   - example: step breakdown, skew, step overhead, memory peaks
 
 The diagnosis is the best place to start.
 
@@ -85,7 +85,7 @@ It is based on:
 - backward time
 - optimizer time
 - step time
-- wait / overhead
+- step overhead
 - worst-rank vs median-rank differences in distributed runs
 
 ### `BALANCED`
@@ -99,7 +99,7 @@ This usually means:
 - no strong input bottleneck
 - no strong compute bottleneck
 - no clear straggler
-- no large wait-heavy pattern
+- no large overhead-heavy pattern
 
 What to do next:
 
@@ -281,7 +281,7 @@ What to do next:
 
 ---
 
-### `WAIT-HEAVY`
+### `OVERHEAD-HEAVY`
 
 Meaning:
 
@@ -291,10 +291,10 @@ Meaning:
 In TraceML:
 
 - `compute = forward + backward + optimizer`
-- `wait = total_step - dataloader - h2d - compute`
+- `step_overhead = total_step - dataloader - h2d - compute`
 
-This is residual unattributed time in the reported total step, not direct
-collective, NCCL, or all-reduce timing.
+This is measured overhead inside the traced step, not proof of GPU idle time or
+direct collective, NCCL, or all-reduce timing.
 
 Common causes:
 
@@ -306,7 +306,7 @@ Common causes:
 
 What to look at:
 
-- `Wait`
+- `Overhead`
 - whether the run is also showing straggler behavior
 
 What to do next:
@@ -344,7 +344,7 @@ In the CLI step summary, the important columns are:
 - `Backward`
 - `Optimizer`
 - `Total Step`
-- `Wait`
+- `Overhead`
 
 Important rows:
 
@@ -364,10 +364,10 @@ Important rows:
 
 - how much larger the worst value is than the median
 
-### `Wait`
+### `Overhead`
 
-- how much of the typical step is unattributed to dataloader, forward,
-  backward, or optimizer work
+- how much of the typical step is outside dataloader, H2D, forward, backward,
+  or optimizer timing
 
 A good reading pattern is:
 
@@ -376,7 +376,7 @@ A good reading pattern is:
 3. compare worst vs median
 4. inspect `Worst Rank`
 5. inspect `Skew (%)`
-6. inspect `Wait`
+6. inspect `Overhead`
 
 ---
 
@@ -636,7 +636,7 @@ This card shows:
 - median vs worst step breakdown
 - gap
 - worst rank
-- wait time
+- step overhead
 - dominant split
 
 Use it to validate the step-time diagnosis.
@@ -670,7 +670,7 @@ Use these as context cards:
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `STRAGGLER` | inspect both input and compute unevenness |
-| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
+| `OVERHEAD-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY RISING` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |
@@ -680,15 +680,15 @@ Use these as context cards:
 
 ## Common pitfalls
 
-### High wait skew alone does not automatically mean a real wait bottleneck
+### High overhead skew alone does not automatically mean a real overhead bottleneck
 
 Look at:
 
-- `Wait`
+- `Overhead`
 - the diagnosis
 - the rest of the step breakdown
 
-A tiny wait value with large percentage skew can still be minor in practice.
+A tiny overhead value with large percentage skew can still be minor in practice.
 
 ### A high compute share does not mean every compute phase is equally important
 
@@ -727,7 +727,7 @@ If you are in a hurry:
 1. read the diagnosis
 2. identify the worst rank if shown
 3. compare worst vs median
-4. look at wait time or memory trend
+4. look at step overhead or memory trend
 5. take the suggested next action
 
 That is usually enough to decide where to investigate next.

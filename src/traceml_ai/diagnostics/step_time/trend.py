@@ -13,6 +13,7 @@ from ..trends import (
     compute_trend_pct,
     format_trend_pct,
 )
+from .names import OVERHEAD_HEAVY_KIND, canonical_issue_kind
 
 
 @dataclass(frozen=True)
@@ -70,11 +71,11 @@ def build_step_trend_note(
     steps_used: int,
     single_rank: bool,
     step_metric: Optional[StepCombinedTimeMetric],
-    wait_metric: Optional[StepCombinedTimeMetric],
+    step_overhead_metric: Optional[StepCombinedTimeMetric],
     dataloader_metric: Optional[StepCombinedTimeMetric],
-    wait_share: float,
+    step_overhead_share: float,
     dataloader_share: float,
-    wait_warn_threshold: float,
+    step_overhead_warn_threshold: float,
     input_warn_threshold: float,
     cfg: StepTrendHeuristicConfig = DEFAULT_STEP_TREND_HEURISTICS,
 ) -> Optional[str]:
@@ -88,22 +89,23 @@ def build_step_trend_note(
         step_tr = _safe_metric_trend_pct(
             step_metric, single_rank=single_rank, cfg=cfg
         )
-        wait_tr = _safe_metric_trend_pct(
-            wait_metric, single_rank=single_rank, cfg=cfg
+        step_overhead_tr = _safe_metric_trend_pct(
+            step_overhead_metric, single_rank=single_rank, cfg=cfg
         )
         dl_tr = _safe_metric_trend_pct(
             dataloader_metric, single_rank=single_rank, cfg=cfg
         )
 
         step_state = _trend_state(step_tr, cfg=cfg)
-        wait_state = _trend_state(wait_tr, cfg=cfg)
+        step_overhead_state = _trend_state(step_overhead_tr, cfg=cfg)
         dl_state = _trend_state(dl_tr, cfg=cfg)
 
         if diagnosis_kind in {"INPUT_BOUND", "INPUT_STRAGGLER"} and dl_state:
-            return (
-                "Trend: dataloader is "
-                f"{dl_state} ({format_trend_pct(dl_tr, deadband_pct=cfg.deadband_pct)})."
+            trend = format_trend_pct(
+                dl_tr,
+                deadband_pct=cfg.deadband_pct,
             )
+            return "Trend: dataloader is " f"{dl_state} ({trend})."
 
         if (
             diagnosis_kind
@@ -114,19 +116,26 @@ def build_step_trend_note(
             }
             and step_state
         ):
+            trend = format_trend_pct(
+                step_tr,
+                deadband_pct=cfg.deadband_pct,
+            )
+            return "Trend: step time is " f"{step_state} ({trend})."
+
+        if (
+            canonical_issue_kind(diagnosis_kind) == OVERHEAD_HEAVY_KIND
+            and step_overhead_state
+        ):
+            trend = format_trend_pct(
+                step_overhead_tr,
+                deadband_pct=cfg.deadband_pct,
+            )
             return (
-                "Trend: step time is "
-                f"{step_state} ({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
+                "Trend: step overhead is " f"{step_overhead_state} ({trend})."
             )
 
-        if diagnosis_kind == "WAIT_HEAVY" and wait_state:
-            return (
-                "Trend: WAIT* is "
-                f"{wait_state} ({format_trend_pct(wait_tr, deadband_pct=cfg.deadband_pct)})."
-            )
-
-        near_wait_warn = wait_share >= (
-            wait_warn_threshold * cfg.near_warn_fraction
+        near_step_overhead_warn = step_overhead_share >= (
+            step_overhead_warn_threshold * cfg.near_warn_fraction
         )
         near_input_warn = dataloader_share >= (
             input_warn_threshold * cfg.near_warn_fraction
@@ -135,7 +144,7 @@ def build_step_trend_note(
         if (
             diagnosis_kind == "BALANCED"
             and step_state == "worsening"
-            and (near_wait_warn or near_input_warn)
+            and (near_step_overhead_warn or near_input_warn)
         ):
             return (
                 "Trend: step time is rising "

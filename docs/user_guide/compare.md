@@ -6,7 +6,7 @@ This is the cleanest way to answer questions like:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did wait time increase?
+- did step overhead increase?
 - did memory pressure or skew get worse?
 
 `traceml compare` is designed for comparing finalized run summaries, not raw logs or raw SQLite databases.
@@ -98,8 +98,8 @@ It typically focuses on:
 - overall duration
 - step-time diagnosis changes
 - average step time changes
-- wait-time changes
-- high-level step split shifts across input, H2D, compute, and wait time
+- step-overhead changes
+- high-level step split shifts across input, H2D, compute, and step overhead
 - memory changes when they are meaningful
 - process or system changes when they add useful context
 
@@ -143,7 +143,7 @@ traceml compare run_a.json run_b.json
 This is often enough to tell whether the slowdown is coming from:
 
 - more compute time
-- more wait time
+- more step overhead
 - a phase split change
 - worse memory behavior
 - a diagnosis shift

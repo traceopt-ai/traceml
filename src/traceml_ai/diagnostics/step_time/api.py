@@ -34,6 +34,13 @@ from .context import (
     non_negative_finite,
     share,
 )
+from .names import (
+    LEGACY_WAIT_METRIC_KEY,
+    OVERHEAD_HEAVY_KIND,
+    STEP_OVERHEAD_METRIC_KEY,
+    STEP_OVERHEAD_PHASE,
+    canonical_issue_kind,
+)
 from .policy import DEFAULT_THRESHOLDS, DiagnosisThresholds
 from .rules import run_step_time_rules
 from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
@@ -47,6 +54,7 @@ DiagnosisKind = Literal[
     "COMPUTE_STRAGGLER",
     "INPUT_BOUND",
     "COMPUTE_BOUND",
+    "OVERHEAD_HEAVY",
     "WAIT_HEAVY",
 ]
 
@@ -59,7 +67,8 @@ _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "COMPUTE_STRAGGLER": "COMPUTE STRAGGLER",
     "INPUT_BOUND": "INPUT-BOUND",
     "COMPUTE_BOUND": "COMPUTE-BOUND",
-    "WAIT_HEAVY": "WAIT-HEAVY",
+    "OVERHEAD_HEAVY": "OVERHEAD-HEAVY",
+    "WAIT_HEAVY": "OVERHEAD-HEAVY",
 }
 
 _PRIMARY_KIND_PRIORITY: dict[str, int] = {
@@ -67,6 +76,7 @@ _PRIMARY_KIND_PRIORITY: dict[str, int] = {
     "INPUT_STRAGGLER": 40,
     "COMPUTE_STRAGGLER": 39,
     "INPUT_BOUND": 30,
+    "OVERHEAD_HEAVY": 20,
     "WAIT_HEAVY": 20,
     "COMPUTE_BOUND": 10,
 }
@@ -181,7 +191,7 @@ def _primary_issue_rank(issue: DiagnosticIssue) -> int:
     """
     Rank contributor issues for primary-diagnosis selection.
     """
-    return _PRIMARY_KIND_PRIORITY.get(issue.kind, 0)
+    return _PRIMARY_KIND_PRIORITY.get(canonical_issue_kind(issue.kind), 0)
 
 
 def _issue_by_kind(
@@ -191,8 +201,9 @@ def _issue_by_kind(
     """
     Return the first issue matching one issue kind.
     """
+    canonical_kind = canonical_issue_kind(kind)
     for issue in issues:
-        if issue.kind == kind:
+        if canonical_issue_kind(issue.kind) == canonical_kind:
             return issue
     return None
 
@@ -333,10 +344,10 @@ def _apply_trend_note(
     diagnosis: StepDiagnosis,
     *,
     step_metric: Optional[StepCombinedTimeMetric],
-    wait_metric: Optional[StepCombinedTimeMetric],
+    step_overhead_metric: Optional[StepCombinedTimeMetric],
     dataloader_metric: Optional[StepCombinedTimeMetric],
     single_rank: bool,
-    wait_share: float,
+    step_overhead_share: float,
     dataloader_share: float,
     thresholds: DiagnosisThresholds,
 ) -> StepDiagnosis:
@@ -349,11 +360,11 @@ def _apply_trend_note(
             steps_used=diagnosis.steps_used,
             single_rank=single_rank,
             step_metric=step_metric,
-            wait_metric=wait_metric,
+            step_overhead_metric=step_overhead_metric,
             dataloader_metric=dataloader_metric,
-            wait_share=wait_share,
+            step_overhead_share=step_overhead_share,
             dataloader_share=dataloader_share,
-            wait_warn_threshold=thresholds.wait_share_warn,
+            step_overhead_warn_threshold=thresholds.wait_share_warn,
             input_warn_threshold=thresholds.input_share_warn,
             cfg=DEFAULT_STEP_TREND_HEURISTICS,
         )
@@ -602,9 +613,12 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.dataloader_worst_rank
             ),
         )
-    elif primary_issue is not None and primary_issue.kind == "WAIT_HEAVY":
+    elif (
+        primary_issue is not None
+        and canonical_issue_kind(primary_issue.kind) == OVERHEAD_HEAVY_KIND
+    ):
         primary = _mk_diag(
-            kind="WAIT_HEAVY",
+            kind=OVERHEAD_HEAVY_KIND,
             severity=primary_issue.severity,
             reason=primary_issue.summary,
             action=primary_issue.action,
@@ -613,8 +627,8 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.overall_worst_rank
             ),
             note=(
-                "wait_ms = total_step_ms - dataloader_ms - h2d_ms - "
-                "compute_ms."
+                "step_overhead_ms = total_step_ms - dataloader_ms - "
+                "h2d_ms - compute_ms."
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "COMPUTE_BOUND":
@@ -643,10 +657,10 @@ def build_step_diagnosis_result(
     primary = _apply_trend_note(
         primary,
         step_metric=context.step_metric,
-        wait_metric=context.wait_metric,
+        step_overhead_metric=context.step_overhead_metric,
         dataloader_metric=context.dataloader_metric,
         single_rank=context.single_rank,
-        wait_share=context.wait_share,
+        step_overhead_share=context.step_overhead_share,
         dataloader_share=context.dataloader_share,
         thresholds=thresholds,
     )
@@ -713,13 +727,16 @@ def build_step_diagnosis_result(
             single_rank=context.single_rank,
             phase="optimizer",
         ),
-        "wait_proxy": _metric_attribution_entry(
-            metric=context.wait_metric,
-            metric_key="wait_proxy",
-            rank_values=context.rank_values.get("wait_proxy", {}),
+        STEP_OVERHEAD_METRIC_KEY: _metric_attribution_entry(
+            metric=context.step_overhead_metric,
+            metric_key=STEP_OVERHEAD_METRIC_KEY,
+            rank_values=context.rank_values.get(
+                STEP_OVERHEAD_METRIC_KEY,
+                context.rank_values.get(LEGACY_WAIT_METRIC_KEY, {}),
+            ),
             step_total=context.step_total,
             single_rank=context.single_rank,
-            phase="wait",
+            phase=STEP_OVERHEAD_PHASE,
         ),
         "step_time": _metric_attribution_entry(
             metric=context.step_metric,

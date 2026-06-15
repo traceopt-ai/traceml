@@ -14,6 +14,10 @@ from traceml_ai.diagnostics.step_memory import (
     build_step_memory_diagnosis,
 )
 from traceml_ai.diagnostics.step_time import build_step_diagnosis
+from traceml_ai.diagnostics.step_time.names import (
+    LEGACY_WAIT_METRIC_KEY,
+    STEP_OVERHEAD_METRIC_KEY,
+)
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -258,7 +262,9 @@ def _build_step_time_evidence(
     """
     by_key = {metric.metric: metric for metric in metrics}
     step = by_key.get("step_time")
-    wait = by_key.get("wait_proxy")
+    step_overhead = by_key.get(STEP_OVERHEAD_METRIC_KEY) or by_key.get(
+        LEGACY_WAIT_METRIC_KEY
+    )
 
     if step is None:
         return {}
@@ -283,13 +289,15 @@ def _build_step_time_evidence(
 
     try:
         median_total = float(step.summary.median_total or 0.0)
-        wait_total = (
-            float(wait.summary.median_total or 0.0)
-            if wait is not None
+        step_overhead_total = (
+            float(step_overhead.summary.median_total or 0.0)
+            if step_overhead is not None
             else 0.0
         )
         if median_total > 0.0:
-            evidence["wait"] = f"{(wait_total / median_total) * 100.0:.1f}%"
+            evidence["overhead"] = (
+                f"{(step_overhead_total / median_total) * 100.0:.1f}%"
+            )
     except Exception:
         pass
 
@@ -363,7 +371,8 @@ def _dominant_step_component(
         "forward": "forward",
         "backward": "backward",
         "optimizer_step": "optimizer",
-        "wait_proxy": "wait",
+        STEP_OVERHEAD_METRIC_KEY: "overhead",
+        LEGACY_WAIT_METRIC_KEY: "overhead",
     }
 
     best_label: Optional[str] = None

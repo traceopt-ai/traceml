@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
+from traceml_ai.diagnostics.step_time.names import (
+    OVERHEAD_HEAVY_KIND,
+    STEP_OVERHEAD_PUBLIC_METRIC,
+    canonical_issue_kind,
+    public_metric_aliases,
+)
+
 TRACKER_PREFIX = "traceml"
 
 METRICS_BY_SECTION = {
@@ -18,7 +25,7 @@ METRICS_BY_SECTION = {
         "dataloader_ms",
         "h2d_ms",
         "compute_ms",
-        "wait_ms",
+        STEP_OVERHEAD_PUBLIC_METRIC,
         "forward_ms",
         "backward_ms",
         "optimizer_ms",
@@ -58,6 +65,21 @@ def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _diagnosis_status(section: str, diagnosis: Mapping[str, Any]) -> Any:
+    """Return canonical public diagnosis status for compact summaries."""
+    status = diagnosis.get("status")
+    kind = diagnosis.get("kind")
+    if section == "step_time":
+        if (
+            isinstance(kind, str)
+            and canonical_issue_kind(kind) == OVERHEAD_HEAVY_KIND
+        ):
+            return "OVERHEAD-HEAVY"
+        if status == "WAIT-HEAVY":
+            return "OVERHEAD-HEAVY"
+    return status
+
+
 def compact_summary(
     payload: Optional[Mapping[str, Any]],
 ) -> Optional[Dict[str, Any]]:
@@ -75,13 +97,20 @@ def compact_summary(
             continue
 
         diagnosis = _mapping(section_payload.get("diagnosis"))
-        _set_scalar(out, f"{section}/status", diagnosis.get("status"))
+        _set_scalar(
+            out, f"{section}/status", _diagnosis_status(section, diagnosis)
+        )
         _set_scalar(out, f"{section}/severity", diagnosis.get("severity"))
 
         global_summary = _mapping(section_payload.get("global"))
         average = _mapping(global_summary.get("average"))
         for metric in METRICS_BY_SECTION.get(section, ()):
-            _set_scalar(out, f"{section}/{metric}", average.get(metric))
+            value = None
+            for alias in public_metric_aliases(metric):
+                value = average.get(alias)
+                if value is not None:
+                    break
+            _set_scalar(out, f"{section}/{metric}", value)
 
     return out
 

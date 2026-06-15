@@ -44,7 +44,8 @@ def _step_time_section(
     action: str = "Keep monitoring.",
     total_step_ms: float = 300.0,
     h2d_ms: Optional[float] = None,
-    wait_ms: Optional[float] = None,
+    step_overhead_ms: Optional[float] = None,
+    legacy_wait_metric: bool = False,
     split_ms: Optional[dict] = None,
 ) -> dict:
     splits = split_ms or {
@@ -54,7 +55,7 @@ def _step_time_section(
         "optimizer": 36.0,
     }
     compute_ms = splits["forward"] + splits["backward"] + splits["optimizer"]
-    resolved_wait_ms = (
+    resolved_step_overhead_ms = (
         max(
             0.0,
             total_step_ms
@@ -62,18 +63,21 @@ def _step_time_section(
             - float(h2d_ms or 0.0)
             - compute_ms,
         )
-        if wait_ms is None
-        else wait_ms
+        if step_overhead_ms is None
+        else step_overhead_ms
     )
     average = {
         "total_step_ms": total_step_ms,
         "dataloader_ms": splits["dataloader"],
         "compute_ms": compute_ms,
-        "wait_ms": resolved_wait_ms,
         "forward_ms": splits["forward"],
         "backward_ms": splits["backward"],
         "optimizer_ms": splits["optimizer"],
     }
+    if legacy_wait_metric:
+        average["wait_ms"] = resolved_step_overhead_ms
+    else:
+        average["step_overhead_ms"] = resolved_step_overhead_ms
     if h2d_ms is not None:
         average["h2d_ms"] = h2d_ms
     return {
@@ -295,9 +299,10 @@ def test_compare_partial_step_time_stays_unclear() -> None:
     rhs = _payload_with_sections(
         step_time=_step_time_section(
             status="WAIT-HEAVY",
-            reason="Wait dominates total step.",
+            reason="Step overhead dominates total step.",
             action="Inspect synchronization and host stalls.",
             total_step_ms=301.0,
+            legacy_wait_metric=True,
         ),
         step_memory=_step_memory_section(),
     )
@@ -309,6 +314,10 @@ def test_compare_partial_step_time_stays_unclear() -> None:
     assert verdict["severity"] == "info"
     assert verdict["comparability"]["step_time"]["state"] == "partial"
     assert verdict["comparability"]["overall"]["state"] == "partial"
+    assert (
+        compare_payload["sections"]["step_time"]["diagnosis"]["rhs"]
+        == "OVERHEAD-HEAVY"
+    )
     assert "partial" in verdict["summary"].lower()
     assert (
         "partial" in verdict["why"].lower()
@@ -457,7 +466,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert "Input" in text
     assert "H2D" in text
     assert "Compute" in text
-    assert "Wait" in text
+    assert "Step overhead" in text
     assert "Forward" not in text
     assert "Backward" not in text
     assert "Optimizer" not in text
