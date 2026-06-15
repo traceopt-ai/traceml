@@ -4,6 +4,14 @@ TraceML emits a sorted list of `DiagnosticIssue` findings or states per final
 summary section. `issues[0]` is the primary diagnosis, and final-summary JSON
 also copies that same item to `diagnosis`.
 
+The final summary also includes a top-level `primary_diagnosis`. That field is
+a run-level performance finding promoted from existing section diagnoses. It is
+not a replacement for section diagnoses and it is not a health-warning rollup.
+In schema `1.5`, Step Time drives the top-level primary diagnosis; System GPU
+utilization can appear as supporting evidence or as an unexplained-utilization
+fallback. System, Process, and Step Memory resource findings remain canonical
+inside their sections.
+
 Use `kind` as the stable internal key for logic and comparisons. Use `status`
 as the user-facing display label. In many cases they are similar, but they are
 not required to match; System statuses intentionally use compact labels such as

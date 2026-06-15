@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from traceml_ai.reporting.compare.io import derive_compare_labels
+from traceml_ai.reporting.compare.model import CompareDiagnosis
 from traceml_ai.reporting.compare.sections import SECTION_COMPARERS
 from traceml_ai.reporting.compare.verdict import build_compare_verdict
 
@@ -29,6 +30,18 @@ def _as_float(value: Any) -> float | None:
 def _utc_now_iso() -> str:
     """Return a UTC timestamp without importing the training SDK."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _primary_diagnosis_status(payload: Dict[str, Any]) -> str | None:
+    """Return the top-level primary diagnosis status, if present."""
+    block = payload.get("primary_diagnosis")
+    if not isinstance(block, dict):
+        return None
+    value = block.get("status")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def build_compare_payload(
@@ -76,6 +89,10 @@ def build_compare_payload(
                 "lhs": _as_float(lhs_payload.get("duration_s")),
                 "rhs": _as_float(rhs_payload.get("duration_s")),
             },
+            "primary_diagnosis": CompareDiagnosis(
+                lhs=_primary_diagnosis_status(lhs_payload),
+                rhs=_primary_diagnosis_status(rhs_payload),
+            ).to_dict(),
         },
         "text": "",
     }

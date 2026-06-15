@@ -18,17 +18,31 @@ The concepts are the same in both.
 
 TraceML output has two layers:
 
-1. **Diagnosis**
-   - the short answer
-   - example: `INPUT-BOUND`, `COMPUTE STRAGGLER`, `MEMORY CREEP`
+1. **Primary Diagnosis**
+   - the first answer in the end-of-run summary
+   - focused on why training was slow
+   - example: `INPUT-BOUND`, `COMPUTE STRAGGLER`, `WAIT-HEAVY`
 
-2. **Evidence**
+2. **Section Diagnoses**
+   - detailed findings for System, Process, Step Time, and Step Memory
+   - includes performance findings and health/resource findings
+   - example: `HIGH GPU TEMP`, `MEMORY CREEP`, `HIGH PROCESS CPU`
+
+3. **Evidence**
    - the numbers and trends that support the diagnosis
    - example: step breakdown, skew, wait time, memory peaks
 
-The diagnosis is the best place to start.
+The top-level primary diagnosis is the best place to start when asking why a
+run was slow. Section diagnoses explain the details and keep health warnings
+visible.
 
 The tables and charts are there to explain **why** that diagnosis was chosen.
+
+The primary diagnosis is intentionally performance-focused. A high GPU
+temperature, memory creep, or high RSS finding can be important, but it stays
+in its section unless TraceML has step-time evidence that it explains slow
+training. GPU utilization is treated as supporting context or as an
+unexplained-utilization fallback, not as root-cause proof by itself.
 
 ---
 

@@ -26,10 +26,11 @@ PyTorch training can look normal while step time is lost to a slow input
 pipeline, low GPU utilization, memory growth, distributed rank skew, or a
 run-to-run regression.
 
-TraceML runs alongside your training loop and gives each run a **structured
-performance fingerprint** with low overhead (<2% in our current benchmark runs).
-It helps answer the questions that usually come before heavyweight operator-level
-profiling:
+TraceML runs alongside your PyTorch training loop and writes a compact
+runtime performance report at the end of each run. With low overhead
+(<2% in our current benchmark runs), it helps you see where step time and
+memory went before opening heavier tools like `torch.profiler` or Nsight.
+It helps answer:
 
 - Are my GPUs waiting on a slow dataloader?
 - Is one distributed rank consistently slower than the others?
@@ -48,6 +49,10 @@ balance, memory behavior, distributed rank skew, and run-to-run change.
 ```bash
 pip install traceml-ai
 ```
+
+Using Hugging Face Trainer, PyTorch Lightning, Ray Train, W&B, or MLflow?
+Start with the native integration path in
+[Use With Your Stack](docs/user_guide/integrations.md).
 
 ### 2. Wrap your training step
 

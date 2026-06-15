@@ -140,6 +140,20 @@ def _payload_with_sections(
     return payload
 
 
+def _set_primary(payload: dict, status: str) -> dict:
+    payload["primary_diagnosis"] = {
+        "kind": status.replace("-", "_").replace(" ", "_"),
+        "status": status,
+        "severity": "warn",
+        "section": "step_time",
+        "scope": "performance",
+        "summary": "primary summary",
+        "action": "primary action",
+        "evidence": {},
+    }
+    return payload
+
+
 def _build_compare(lhs: dict, rhs: dict) -> dict:
     return build_compare_payload(
         lhs_payload=lhs,
@@ -466,6 +480,33 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert "+114.1 ms (+18.4%)" in text
     assert "Peak reserved" in text
     assert "+2.70 GB (+43.5%)" in text
+
+
+def test_compare_includes_top_level_primary_diagnosis_change() -> None:
+    lhs = _set_primary(
+        _payload_with_sections(
+            step_time=_step_time_section(status="INPUT-BOUND"),
+        ),
+        "INPUT-BOUND",
+    )
+    rhs = _set_primary(
+        _payload_with_sections(
+            step_time=_step_time_section(status="COMPUTE-BOUND"),
+        ),
+        "COMPUTE-BOUND",
+    )
+
+    compare_payload = _build_compare(lhs, rhs)
+    text = build_compare_text(compare_payload)
+
+    assert compare_payload["overview"]["primary_diagnosis"] == {
+        "lhs": "INPUT-BOUND",
+        "rhs": "COMPUTE-BOUND",
+        "changed": True,
+    }
+    assert "Primary diagnosis" in text
+    assert "INPUT-BOUND -> COMPUTE-BOUND" in text
+    assert compare_payload["verdict"]["primary_domain"] == "compare"
 
 
 def test_compare_shows_system_gpu_utilization_diagnosis_change() -> None:

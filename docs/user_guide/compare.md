@@ -96,6 +96,7 @@ The compare report is designed to stay compact and useful.
 It typically focuses on:
 
 - overall duration
+- primary diagnosis changes
 - step-time diagnosis changes
 - average step time changes
 - wait-time changes

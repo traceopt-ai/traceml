@@ -65,6 +65,23 @@ supporting evidence, except for the fallback
 cause. Process, System health, and Step Memory health findings remain in their
 section diagnoses.
 
+Selection policy:
+
+- `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, and `STRAGGLER` use rank-comparison
+  evidence and are promoted from `step_time.diagnosis`.
+- `WAIT_HEAVY`, `INPUT_BOUND`, and `COMPUTE_BOUND` use phase-share evidence
+  and are promoted from `step_time.diagnosis`.
+- `LOW_GPU_UTILIZATION_UNEXPLAINED` appears only when Step Time is `BALANCED`
+  and System reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
+- `NO_CLEAR_PERFORMANCE_BOTTLENECK` appears when Step Time is `BALANCED` and
+  GPU utilization is not low/moderate.
+- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA` or
+  `WARMUP`.
+
+High temperature, memory pressure, memory creep, high RSS, high CPU, and other
+resource-health findings are not promoted into `primary_diagnosis` in schema
+`1.5`. They remain available under their section's `diagnosis` and `issues`.
+
 Primary diagnosis evidence uses a small union:
 
 ```json

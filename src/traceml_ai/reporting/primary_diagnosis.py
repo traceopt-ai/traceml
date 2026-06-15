@@ -6,25 +6,67 @@
 
 """Primary performance diagnosis for final run summaries.
 
-This module promotes existing section-level diagnoses into one top-level
-performance finding. It does not read telemetry databases or recompute
-diagnostics from tables; it only interprets already-built final-summary section
-payloads.
+The final summary already contains section-local diagnoses:
 
-Policy priority, from most actionable to least:
-1. INPUT_STRAGGLER
-2. COMPUTE_STRAGGLER
-3. STRAGGLER
-4. WAIT_HEAVY
-5. INPUT_BOUND
-6. COMPUTE_BOUND
-7. LOW_GPU_UTILIZATION_UNEXPLAINED
-8. NO_CLEAR_PERFORMANCE_BOTTLENECK
-9. INSUFFICIENT_STEP_TIME_DATA
+- ``system.diagnosis``
+- ``process.diagnosis``
+- ``step_time.diagnosis``
+- ``step_memory.diagnosis``
 
-Section-level system, process, and memory diagnoses remain canonical for
-resource health. The primary diagnosis answers a narrower question: "why was
-training slow?"
+Those section diagnoses remain the detailed source of truth for their domain.
+This module adds one run-level finding, ``primary_diagnosis``, for the first
+question most users ask after a run: "why was training slow?"
+
+The implementation is intentionally a promotion policy over existing final
+summary JSON. It does not read telemetry databases, query SQLite tables, or
+recompute diagnostics. Keeping the logic here pure makes the policy easy to
+test and easy for contributors to evolve.
+
+Primary diagnosis policy
+------------------------
+1. Step-time rank-skew findings become primary performance findings:
+   ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, ``STRAGGLER``.
+2. Step-time phase-share findings become primary performance findings:
+   ``WAIT_HEAVY``, ``INPUT_BOUND``, ``COMPUTE_BOUND``.
+3. If Step Time is ``BALANCED`` and System reports low or moderate GPU
+   utilization, the primary becomes ``LOW_GPU_UTILIZATION_UNEXPLAINED``.
+   GPU utilization is treated as a symptom or fallback, not root-cause proof.
+4. If Step Time is ``BALANCED`` and GPU utilization is not low/moderate, the
+   primary becomes ``NO_CLEAR_PERFORMANCE_BOTTLENECK``.
+5. If Step Time is ``NO_DATA`` or ``WARMUP``, the primary becomes
+   ``INSUFFICIENT_STEP_TIME_DATA``.
+
+The v1 policy deliberately does not promote System, Process, or Step Memory
+health/resource findings such as high GPU temperature, memory pressure, memory
+creep, high RSS, or high CPU. Those findings can matter, but they do not by
+themselves prove why step time was slow. They stay visible in their section
+diagnoses. If TraceML needs top-level health surfacing later, add a separate
+``run_health_warnings`` style field instead of overloading the performance
+primary.
+
+Evidence policy
+---------------
+``phase_share``
+    Used for ``INPUT_BOUND``, ``WAIT_HEAVY``, and ``COMPUTE_BOUND``. Values
+    come from ``step_time.global.average`` because the diagnosis describes
+    where the average step time went.
+
+``rank_comparison``
+    Used for ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, and ``STRAGGLER``.
+    Values come from ``step_time.global.median[metric]`` and
+    ``step_time.global.worst[metric]`` because the diagnosis compares ranks.
+
+``utilization_fallback``
+    Used only when Step Time is balanced and System GPU utilization is low or
+    moderate. This says utilization is unexplained by Step Time, not that GPU
+    utilization itself is the root cause.
+
+``no_clear_bottleneck``
+    Used when Step Time has enough data and no material performance bottleneck
+    is found.
+
+``insufficient_data``
+    Used when Step Time cannot make a stable diagnosis.
 """
 
 from __future__ import annotations
@@ -556,6 +598,10 @@ def build_primary_diagnosis(
 
     step_diag = _diagnosis(step_time_summary)
     kind = _diag_field(step_diag, "kind", "NO_DATA")
+
+    # The primary diagnosis is performance-first. Step Time is the only direct
+    # source of root-cause candidates in v1; System GPU utilization is a
+    # fallback symptom when Step Time is balanced.
     if kind in STRAGGLER_KINDS or kind in PHASE_SHARE_KINDS:
         return _promote_step_time_primary(
             kind=kind,
