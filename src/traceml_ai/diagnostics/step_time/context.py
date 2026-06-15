@@ -368,12 +368,17 @@ def dominant_compute_signal(
     optimizer: Optional[StepCombinedTimeMetric],
     step_total: float,
     single_rank: bool,
+    backward_attribution_tolerance: float,
 ) -> Optional[ComputeSignal]:
     """
     Pick the compute phase that best explains a straggler.
 
     Blame rank selection follows the largest absolute phase excess:
         worst_phase - median_phase
+
+    DDP-aware rank attribution: backward can be where a peer rank observes a
+    delay from nearby rank-local compute work. If backward only narrowly wins,
+    prefer forward or optimizer when its excess is within the shared tolerance.
 
     Relative skew is still carried for presentation and secondary thresholds.
     """
@@ -408,7 +413,25 @@ def dominant_compute_signal(
 
     if not candidates:
         return None
-    return max(candidates, key=lambda item: (item.excess_ms, item.share))
+
+    winner = max(candidates, key=lambda item: (item.excess_ms, item.share))
+    if winner.label != "Backward":
+        return winner
+
+    tolerance = max(1.0, non_negative_finite(backward_attribution_tolerance))
+    min_excess = (
+        winner.excess_ms / tolerance if winner.excess_ms > 0.0 else 0.0
+    )
+    alternatives = [
+        item
+        for item in candidates
+        if item.label in {"Forward", "Optimizer"}
+        and item.excess_ms > 0.0
+        and item.excess_ms >= min_excess
+    ]
+    if not alternatives:
+        return winner
+    return max(alternatives, key=lambda item: (item.excess_ms, item.share))
 
 
 def largest_compute_phase(
@@ -528,6 +551,9 @@ def build_step_time_context(
         optimizer=optimizer_metric,
         step_total=step_total,
         single_rank=single_rank,
+        backward_attribution_tolerance=(
+            thresholds.input_straggler_compute_excess_tolerance
+        ),
     )
     largest_compute = largest_compute_phase(
         forward=forward_metric,
