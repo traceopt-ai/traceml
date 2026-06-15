@@ -63,6 +63,31 @@ For publishable numbers, use at least:
 
 Two or three repeats are fine for smoke tests.
 
+## Results — first campaign (2026-06-11, `ddp_mlp_e2e`)
+
+5 paired repeats × 2 modes × 2 topologies, 600 s/trial, alternating order,
+identical args (`--duration-sec 600 --batch-size 256 --hidden-dim 4096`).
+20/20 trials, 0 failures. Hardware: 2× AWS `g4dn.xlarge` (1× Tesla T4 each),
+`eu-central-1`; torch 2.11.0+cu130, CUDA 13.0, NCCL 2.28.9.
+
+| Topology | Native real (s) | TraceML real (s) | Wall overhead | Throughput overhead |
+|---|---|---|---|---|
+| Single GPU (1× T4)   | 613.43 | 618.98 | **+0.90%** | **+1.02%** |
+| DDP (2 nodes × 1 T4) | 614.67 | 618.62 | **+0.64%** | **≈0%** (network-bound) |
+
+- **Single GPU:** ~5.5 s fixed startup + ~1% per-step — stable across repeats.
+- **DDP:** ~92% of the step is backward/all-reduce over TCP, so TraceML's
+  per-step cost is not measurable. (Repeat 1 ran on g4dn network burst
+  credits; repeats 2–5 sat at the stable floor — throughput is reported as
+  the median to exclude that confound.)
+- Wall overhead is the metric defined in "What To Publish" above; throughput
+  (`native_steps_per_s / traceml_steps_per_s − 1`) is shown alongside because
+  for a fixed-duration workload, wall time mainly captures fixed startup, not
+  per-step cost.
+
+Full write-up with plots:
+[`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md).
+
 ## Multi-Node Method
 
 Multi-node needs one launcher per node. Use the same `--run-name` on every
