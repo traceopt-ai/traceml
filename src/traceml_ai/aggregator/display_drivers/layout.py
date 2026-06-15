@@ -1,10 +1,7 @@
 ROOT_LAYOUT = "root"
-LIVE_METRICS_LAYOUT = "live_metrics_section"
 SYSTEM_LAYOUT = "system_section"
 PROCESS_LAYOUT = "process_section"
 LAYER_COMBINED_MEMORY_LAYOUT = "layer_combined_memory_section"
-ACTIVATION_GRADIENT_LAYOUT = "activation_gradient_section"
-STEPTIMER_LAYOUT = "steptimer_section"
 STDOUT_STDERR_LAYOUT = "stdout_stderr_section"
 
 LAYER_COMBINED_TIMER_LAYOUT = "layer_timing_section"
