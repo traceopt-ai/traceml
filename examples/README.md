@@ -44,7 +44,7 @@ These examples are still user-facing, but they are more about showing specific T
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
 | `dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
-| `input_straggler_ddp_demo.py` | Input straggler in single-node DDP | CPU / CUDA | One rank is deliberately slower in the input path |
+| `ddp_rank_straggler_demo.py` | Rank stragglers in single-node DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
@@ -63,6 +63,18 @@ On a fast GPU, increase model compute while keeping the same fast/slow shape:
 ```bash
 traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast --hidden-dim 4096 --depth 4
 ```
+
+To contrast balanced DDP with rank-local input and compute stragglers:
+
+```bash
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_balanced --args --scenario balanced
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_input_straggler --args --scenario input-straggler --straggler-rank 0 --input-sleep-ms 200
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+```
+
+The default DDP demo uses precomputed tensors plus a compute-heavy MLP so the
+balanced run is not dominated by tiny batches or synthetic input overhead on
+GPUs such as T4 or L4.
 
 ---
 
