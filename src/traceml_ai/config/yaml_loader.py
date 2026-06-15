@@ -37,6 +37,8 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "num_display_layers": ("TRACEML_NUM_DISPLAY_LAYERS", int),
     "remote_max_rows": ("TRACEML_REMOTE_MAX_ROWS", int),
     "history_enabled": ("TRACEML_HISTORY_ENABLED", bool),
+    "dashboard_port": ("TRACEML_DASHBOARD_PORT", int),
+    "dashboard_auto_open": ("TRACEML_DASHBOARD_AUTO_OPEN", bool),
 }
 
 # Fallback values used when no CLI flag, env var, or yaml entry is present.
@@ -48,6 +50,8 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "num_display_layers": 5,
     "remote_max_rows": 200,
     "history_enabled": True,
+    "dashboard_port": 8765,
+    "dashboard_auto_open": True,
 }
 
 # Env var strings treated as True for bool fields.

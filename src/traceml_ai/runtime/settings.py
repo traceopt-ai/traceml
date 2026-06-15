@@ -69,6 +69,8 @@ class TraceMLSettings:
     logs_dir: str = "./logs"
     enable_logging: bool = False
     remote_max_rows: int = 200
+    dashboard_port: int = 8765
+    dashboard_auto_open: bool = True
     aggregator: AggregatorTransportSettings = AggregatorTransportSettings()
     session_id: str = ""
     history_enabled: bool = True
