@@ -86,3 +86,8 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Offline-bundled dashboard fonts must ship in the wheel (served at runtime by
+# the NiceGUI driver); without this they fall back to the system font stack.
+traceml_ai = ["aggregator/display_drivers/assets/fonts/*.woff2"]

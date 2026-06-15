@@ -1,4 +1,6 @@
-from nicegui import ui
+"""Dashboard pages (PR2 revamp): brand chrome + Step-Time-first bento grid."""
+
+from nicegui import app, ui
 
 from traceml_ai.aggregator.display_drivers.layout import (
     LAYER_COMBINED_MEMORY_LAYOUT,
@@ -10,6 +12,7 @@ from traceml_ai.aggregator.display_drivers.layout import (
     SYSTEM_LAYOUT,
 )
 
+from . import theme
 from .layer_memory_table_section import (
     build_layer_memory_table_section,
     update_layer_memory_table_section,
@@ -31,145 +34,136 @@ from .step_memory_section import (
     build_step_memory_section,
     update_step_memory_section,
 )
-from .system_section import build_system_section, update_system_section
-from .ui_shell import PAGE_GAP_CLASS, VIEWPORT_STYLE
+from .system_section import (
+    build_gpu_gauge_section,
+    build_system_section,
+    update_gpu_gauge_section,
+    update_system_section,
+)
 
 
-def build_top_tabs(active: str, show_layers: bool, cls):
-    """Shared top navigation tabs."""
-    with ui.row().classes("w-full px-4 pt-1 pb-1 items-center"):
-        ui.label("TraceML").classes("text-3xl font-extrabold mr-6").style(
-            "color:#d47a00;"
-        )
-        with ui.tabs().classes("text-base") as tabs:
-            overview = ui.tab("Overview")
-            layers = ui.tab("Layer-wise") if show_layers else None
+def build_header(cls, show_layers: bool) -> None:
+    """Brand run-context header with the live-staleness chip."""
+    with ui.element("div").classes("glass reveal").style("padding:15px 22px;"):
+        with ui.row().classes("w-full items-center").style("gap:16px;"):
+            with ui.row().style("gap:0; align-items:baseline;"):
+                ui.label("Trace").classes("wm-trace")
+                ui.label("ML").classes("wm-ml")
+            ui.label("live training").classes("eyebrow")
+            if show_layers:
+                ui.link("layers", "/layers").style(
+                    "font-family:var(--mono); font-size:12px; color:var(--orange-strong); "
+                    "text-decoration:none; margin-left:4px;"
+                )
+            ui.element("div").style("flex:1;")
+            staleness = (
+                ui.label("").classes("staleband").style("display:none;")
+            )
+            cls.register_staleness_label(_StaleProxy(staleness))
+            with ui.row().classes("items-center").style("gap:7px;"):
+                ui.element("div").classes("livedot")
+                ui.label("live").style(
+                    "font-family:var(--mono); font-size:11px; color:#16a34a; font-weight:500;"
+                )
 
-        tabs.value = (
-            overview if active != "layers" or not show_layers else layers
-        )
-        overview.on("click", lambda: ui.navigate.to("/"))
-        if show_layers and layers is not None:
-            layers.on("click", lambda: ui.navigate.to("/layers"))
 
-        # Staleness indicator (empty when fresh). Styling is intentionally
-        # minimal here; the redesign restyles it (TRA-68 / PR2).
-        ui.space()
-        staleness_label = ui.label("").classes(
-            "text-sm text-orange-700 font-medium mr-2"
-        )
-        cls.register_staleness_label(staleness_label)
+class _StaleProxy:
+    """Show the staleness chip only when there is text (hide when fresh)."""
+
+    def __init__(self, label) -> None:
+        self._label = label
+
+    @property
+    def text(self):
+        return self._label.text
+
+    @text.setter
+    def text(self, value) -> None:
+        self._label.text = value or ""
+        self._label.style(f"display:{'inline-block' if value else 'none'};")
+
+
+def _cell(flex: str):
+    return ui.element("div").style(
+        f"flex:{flex}; min-width:300px; display:flex; flex-direction:column;"
+    )
 
 
 def define_pages(cls):
-    """Attach the NiceGUI pages using a dense left-rail overview layout."""
+    """Attach the NiceGUI pages with the revamped bento layout."""
+    theme.register_static_fonts(app)
     deep_enabled = getattr(cls._settings, "profile", "run") == "deep"
 
     @ui.page("/")
     def main_page():
-        ui.add_head_html(
-            """
-            <style>
-                body, .nicegui-content {
-                    width: 100% !important;
-                    max-width: 100% !important;
-                    padding: 0 !important;
-                    margin: 0 !important;
-                }
-                body {
-                    background-color: #fff7f0 !important;
-                    background-image: none !important;
-                }
-            </style>
-            """
-        )
-
-        build_top_tabs(active="overview", show_layers=deep_enabled, cls=cls)
-
+        ui.add_head_html(theme.head_html())
         with (
-            ui.row()
-            .classes(f"w-[99%] mx-2 {PAGE_GAP_CLASS} items-stretch")
-            .style(VIEWPORT_STYLE)
+            ui.column()
+            .classes("w-full")
+            .style(
+                "gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;"
+            )
         ):
+            build_header(cls, deep_enabled)
+
+            # Row 1: hero (step-time ribbon + verdict) | GPU gauge
             with (
-                ui.column()
-                .classes("h-full shrink-0")
-                .style(
-                    "width: 22%; min-width: 280px; max-width: 340px; overflow: hidden;"
-                )
+                ui.row()
+                .classes("w-full items-stretch")
+                .style("gap:16px; flex-wrap:wrap;")
             ):
-                cards = build_model_diagnostics_section()
-                cls.subscribe_layout(
-                    MODEL_DIAGNOSTICS_LAYOUT,
-                    cards,
-                    update_model_diagnostics_section,
-                )
+                with _cell("2.4"):
+                    cards = build_model_combined_section()
+                    cls.subscribe_layout(
+                        MODEL_COMBINED_LAYOUT,
+                        cards,
+                        update_model_combined_section,
+                    )
+                with _cell("1"):
+                    gauge_cards = build_gpu_gauge_section()
 
+            # Row 2: System | Process
             with (
-                ui.column()
-                .classes(f"h-full flex-1 {PAGE_GAP_CLASS}")
-                .style("min-width: 0; overflow: hidden;")
+                ui.row()
+                .classes("w-full items-stretch")
+                .style("gap:16px; flex-wrap:wrap;")
             ):
-                with (
-                    ui.row()
-                    .classes(f"w-full {PAGE_GAP_CLASS} items-stretch no-wrap")
-                    .style(
-                        "height: 45%; min-height: 210px; flex-wrap: nowrap; overflow: hidden;"
+                with _cell("2"):
+                    system_cards = build_system_section()
+                with _cell("1.3"):
+                    cards = build_process_section()
+                    cls.subscribe_layout(
+                        PROCESS_LAYOUT, cards, update_process_section
                     )
-                ):
-                    with (
-                        ui.column()
-                        .classes("h-full flex-1")
-                        .style("min-width: 0; overflow: hidden;")
-                    ):
-                        cards = build_system_section()
-                        cls.subscribe_layout(
-                            SYSTEM_LAYOUT, cards, update_system_section
-                        )
 
-                    with (
-                        ui.column()
-                        .classes("h-full flex-1")
-                        .style("min-width: 0; overflow: hidden;")
-                    ):
-                        cards = build_process_section()
-                        cls.subscribe_layout(
-                            PROCESS_LAYOUT, cards, update_process_section
-                        )
+            # One SYSTEM_LAYOUT subscriber drives both the chart and the gauge
+            # (two subscribers on one layout/client would evict each other).
+            def _update_system(_c, d, _sc=system_cards, _gc=gauge_cards):
+                update_system_section(_sc, d)
+                update_gpu_gauge_section(_gc, d)
 
-                with (
-                    ui.row()
-                    .classes(f"w-full {PAGE_GAP_CLASS} items-stretch no-wrap")
-                    .style(
-                        "height: 55%; min-height: 380px; flex-wrap: nowrap; overflow: hidden;"
+            cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
+
+            # Row 3: Step Memory | Diagnostics
+            with (
+                ui.row()
+                .classes("w-full items-stretch")
+                .style("gap:16px; flex-wrap:wrap;")
+            ):
+                with _cell("1.3"):
+                    cards = build_step_memory_section()
+                    cls.subscribe_layout(
+                        MODEL_MEMORY_LAYOUT, cards, update_step_memory_section
                     )
-                ):
-                    with (
-                        ui.column()
-                        .classes("h-full shrink-0")
-                        .style("width: 62%; min-width: 0; overflow: hidden;")
-                    ):
-                        cards = build_model_combined_section()
-                        cls.subscribe_layout(
-                            MODEL_COMBINED_LAYOUT,
-                            cards,
-                            update_model_combined_section,
-                        )
-
-                    with (
-                        ui.column()
-                        .classes("h-full flex-1")
-                        .style("min-width: 0; overflow: hidden;")
-                    ):
-                        cards = build_step_memory_section()
-                        cls.subscribe_layout(
-                            MODEL_MEMORY_LAYOUT,
-                            cards,
-                            update_step_memory_section,
-                        )
+                with _cell("1"):
+                    cards = build_model_diagnostics_section()
+                    cls.subscribe_layout(
+                        MODEL_DIAGNOSTICS_LAYOUT,
+                        cards,
+                        update_model_diagnostics_section,
+                    )
 
         cls.ensure_ui_timer(0.75)
-
         if not cls._ui_ready:
             cls._ui_ready = True
 
@@ -177,27 +171,35 @@ def define_pages(cls):
 
         @ui.page("/layers")
         def layer_page():
-            build_top_tabs(active="layers", show_layers=True, cls=cls)
-
-            with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
-                with ui.column().classes("w-[54%]"):
-                    cards = build_layer_memory_table_section()
-                    cls.subscribe_layout(
-                        LAYER_COMBINED_MEMORY_LAYOUT,
-                        cards,
-                        update_layer_memory_table_section,
-                    )
-
-                with ui.column().classes("w-[44%]"):
-                    cards = build_layer_timer_table_section()
-                    cls.subscribe_layout(
-                        LAYER_COMBINED_TIMER_LAYOUT,
-                        cards,
-                        update_layer_timer_table_section,
-                    )
-
+            ui.add_head_html(theme.head_html())
+            with (
+                ui.column()
+                .classes("w-full")
+                .style(
+                    "gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;"
+                )
+            ):
+                build_header(cls, True)
+                with (
+                    ui.row()
+                    .classes("w-full items-stretch")
+                    .style("gap:16px; flex-wrap:wrap;")
+                ):
+                    with _cell("1.2"):
+                        cards = build_layer_memory_table_section()
+                        cls.subscribe_layout(
+                            LAYER_COMBINED_MEMORY_LAYOUT,
+                            cards,
+                            update_layer_memory_table_section,
+                        )
+                    with _cell("1"):
+                        cards = build_layer_timer_table_section()
+                        cls.subscribe_layout(
+                            LAYER_COMBINED_TIMER_LAYOUT,
+                            cards,
+                            update_layer_timer_table_section,
+                        )
             cls.ensure_ui_timer(1.0)
-
             if not cls._ui_ready:
                 cls._ui_ready = True
 
