@@ -19,9 +19,8 @@ class _StaticSection:
     duration_s: float | None = None
 
     def build(self, db_path: str) -> SummaryResult:
-        payload = {
-            "card": f"TraceML {self.name.replace('_', ' ').title()} Summary\n- Status: OK"
-        }
+        title = self.name.replace("_", " ").title()
+        payload = {"card": f"TraceML {title} Summary\n- Status: OK"}
         if self.duration_s is not None:
             payload["duration_s"] = self.duration_s
         return SummaryResult(
@@ -54,13 +53,14 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.4
+    assert payload["schema_version"] == 1.5
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
         "generated_at",
         "duration_s",
         "meta",
+        "primary_diagnosis",
         "system",
         "process",
         "step_time",
@@ -74,7 +74,11 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         "nodes_observed": None,
         "gpus_observed": None,
     }
+    assert payload["primary_diagnosis"]["kind"] == (
+        "INSUFFICIENT_STEP_TIME_DATA"
+    )
     assert "TraceML Run Summary | duration 10.0s" in payload["text"]
+    assert "Primary Diagnosis" in payload["text"]
     assert "System" in payload["text"]
     assert "Step Memory" in payload["text"]
 
@@ -99,6 +103,9 @@ def test_final_report_generator_fails_open_for_one_section():
         "rows": {},
     }
     assert payload["process"]["units"] == {}
+    assert payload["primary_diagnosis"]["kind"] == (
+        "INSUFFICIENT_STEP_TIME_DATA"
+    )
     assert "Process" in payload["text"]
 
 

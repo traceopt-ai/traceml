@@ -68,6 +68,12 @@ def test_summary_projects_existing_final_payload(monkeypatch, tmp_path):
             {
                 "schema_version": "1",
                 "duration_s": 3.0,
+                "primary_diagnosis": {
+                    "kind": "NO_CLEAR_PERFORMANCE_BOTTLENECK",
+                    "status": "NO CLEAR PERFORMANCE BOTTLENECK",
+                    "severity": "info",
+                    "section": "step_time",
+                },
                 "system": {
                     "diagnosis": {
                         "status": "NORMAL",
@@ -89,6 +95,10 @@ def test_summary_projects_existing_final_payload(monkeypatch, tmp_path):
     assert result == {
         "traceml/schema_version": "1",
         "traceml/duration_s": 3.0,
+        "traceml/primary/kind": "NO_CLEAR_PERFORMANCE_BOTTLENECK",
+        "traceml/primary/status": "NO CLEAR PERFORMANCE BOTTLENECK",
+        "traceml/primary/severity": "info",
+        "traceml/primary/section": "step_time",
         "traceml/system/status": "NORMAL",
         "traceml/system/severity": "ok",
         "traceml/system/cpu_percent": 22.0,

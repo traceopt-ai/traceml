@@ -69,6 +69,12 @@ def compact_summary(
     _set_scalar(out, "schema_version", payload.get("schema_version"))
     _set_scalar(out, "duration_s", payload.get("duration_s"))
 
+    primary = _mapping(payload.get("primary_diagnosis"))
+    _set_scalar(out, "primary/kind", primary.get("kind"))
+    _set_scalar(out, "primary/status", primary.get("status"))
+    _set_scalar(out, "primary/severity", primary.get("severity"))
+    _set_scalar(out, "primary/section", primary.get("section"))
+
     for section in SECTIONS:
         section_payload = _mapping(payload.get(section))
         if not section_payload:

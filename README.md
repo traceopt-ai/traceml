@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Find slow PyTorch training bottlenecks: DataLoader stalls, low GPU utilization, DDP/FSDP rank stragglers, memory creep, and run regressions.**
+**A lightweight runtime health check for PyTorch training runs.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -18,36 +18,27 @@
 [**Use With Your Stack**](docs/user_guide/integrations.md) •
 [**FAQ**](docs/user_guide/faq.md)
 
-**Training bottleneck guides:**
-[Slow PyTorch Training](docs/guides/slow-pytorch-training.md) •
-[DataLoader Bottlenecks](docs/guides/pytorch-dataloader-bottleneck.md) •
-[Low GPU Utilization](docs/guides/low-gpu-utilization-pytorch.md) •
-[DDP Rank Stragglers](docs/guides/ddp-slow-training-rank-straggler.md) •
-[Memory Creep](docs/guides/pytorch-memory-creep.md)
-
 </div>
 
-TraceML gives every PyTorch training run a **structured performance fingerprint**
-with low overhead (<2% in our current benchmark runs). It answers the questions
-that usually come before heavyweight operator-level profiling:
+### Is your GPU training, waiting on data, or blocked by one slow rank?
 
-- Are my GPUs waiting on a slow dataloader (input-bound)?
-- Is one distributed rank consistently slower than the others (straggler)?
-- Is memory usage silently creeping upward during the run (memory creep)?
-- Did a recent code or infrastructure change slow training down (regression)?
+PyTorch training can look normal while step time is lost to a slow input
+pipeline, low GPU utilization, memory growth, distributed rank skew, or a
+run-to-run regression.
 
-## Where TraceML Fits in the Stack
+TraceML runs alongside your PyTorch training loop and writes a compact
+runtime performance report at the end of each run. With low overhead
+(<2% in our current benchmark runs), it helps you see where step time and
+memory went before opening heavier tools like `torch.profiler` or Nsight.
+It helps answer:
 
-TraceML does not replace `torch.profiler`. It is the low-overhead, always-on
-first pass that tells you where to aim heavier profiling tools.
+- Are my GPUs waiting on a slow dataloader?
+- Is one distributed rank consistently slower than the others?
+- Is memory usage silently creeping upward during the run?
+- Did a recent code, data, or infrastructure change slow training down?
 
-| Tool | Best used for | Output | Cost / overhead |
-|---|---|---|---|
-| TraceML | Classifying high-level bottlenecks: input, compute, wait, memory, rank skew | JSON fingerprint, text summary, live views | <2% in current benchmark runs; small code wrapper |
-| `torch.profiler` | Inspecting expensive ops, kernels, and CUDA activity | Profiler trace | Higher overhead; requires profiler context |
-| Nsight Systems | Debugging low-level CUDA and kernel behavior | GPU timeline | Separate profiler run |
-| W&B / MLflow | Tracking training metrics and experiment history | Metrics dashboard / run history | Logging integration |
-| `nvidia-smi` | Checking machine-level GPU health and utilization | Terminal metrics | No code changes |
+Here, **health** means runtime performance health: step time, input/compute/wait
+balance, memory behavior, distributed rank skew, and run-to-run change.
 
 ---
 
@@ -59,7 +50,14 @@ first pass that tells you where to aim heavier profiling tools.
 pip install traceml-ai
 ```
 
+Using Hugging Face Trainer, PyTorch Lightning, Ray Train, W&B, or MLflow?
+Start with the native integration path in
+[Use With Your Stack](docs/user_guide/integrations.md).
+
 ### 2. Wrap your training step
+
+Add TraceML around the core training step. You do not need to change your model,
+optimizer, loss function, or dataloader.
 
 ```python
 import traceml_ai as traceml
@@ -84,7 +82,9 @@ traceml run train.py
 For DDP, FSDP, and multi-node runs, see
 [Distributed Training](docs/user_guide/distributed-training.md).
 
-## What You Get: The Output
+---
+
+## What You Get
 
 TraceML writes two end-of-run artifacts:
 
@@ -100,7 +100,9 @@ traceml view logs/<run_name>/final_summary.json
 ```
 
 Instead of guessing why training feels slow, you get a compact diagnosis of
-where step time and memory went:
+where step time and memory went.
+
+Example TraceML output:
 
 ```text
 +----------------------------------------------------------------------------+
@@ -122,7 +124,24 @@ to get a flat dict of diagnosis statuses and average metrics. Keep
 
 ---
 
-### Catching Regressions (Compare Mode)
+## What TraceML Helps You Triage
+
+TraceML is meant to be the first check when a training run is slower than
+expected. It points you to the likely area before you decide whether to open a
+heavier profiler.
+
+| Area | What TraceML surfaces | What to inspect next |
+|---|---|---|
+| Input pipeline | High input time or slow input rank | `num_workers`, `pin_memory`, transforms, tokenization, `collate_fn`, dataset/storage latency |
+| GPU utilization / wait | Step time split across input, compute, and wait | input pipeline, CPU/GPU handoff, synchronization, distributed coordination |
+| Distributed skew | One DDP/FSDP rank slower than the others | rank-local dataloading, data imbalance, node variance, storage/network differences |
+| Memory creep | Memory usage growing during the run | retained tensors, logging references, loss accumulation, cached activations |
+| Run regression | Changed metrics versus a known-good run | code changes, data changes, batch size, container, driver, hardware, infrastructure |
+| Compute-heavy runs | Most time is spent in compute | open `torch.profiler` or Nsight for operator/kernel-level detail |
+
+---
+
+## Catching Regressions with Compare Mode
 
 Compare a slow run against a known good baseline to identify which metrics
 changed:
@@ -146,6 +165,8 @@ traceml compare input_slow/final_summary.json input_fixed/final_summary.json
 
 See [Compare Runs](docs/user_guide/compare.md) for the full report format.
 
+---
+
 ## Display Modes
 
 TraceML controls what you see during training with the `--mode` flag, without
@@ -159,7 +180,7 @@ changing the final saved artifacts.
 
 ---
 
-## Current support
+## Current Support
 
 **Works today:**
 
@@ -177,15 +198,34 @@ changing the final saved artifacts.
 
 ---
 
-## Overhead
+## Where TraceML Fits in the Stack
 
-**Overhead:** In our benchmark runs, TraceML adds <2% overhead on single GPU and <1% on single-node multi-GPU at default settings.
+TraceML does not replace `torch.profiler`. It is the low-overhead first pass that
+helps you decide where to aim heavier profiling tools.
+
+| Tool | Best used for | Output | Cost / overhead |
+|---|---|---|---|
+| TraceML | Classifying high-level bottlenecks: input, compute, wait, memory, rank skew | JSON fingerprint, text summary, live views | <2% in current benchmark runs; small code wrapper |
+| `torch.profiler` | Inspecting expensive ops, kernels, and CUDA activity | Profiler trace | Higher overhead; requires profiler context |
+| Nsight Systems | Debugging low-level CUDA and kernel behavior | GPU timeline | Separate profiler run |
+| W&B / MLflow | Tracking training metrics and experiment history | Metrics dashboard / run history | Logging integration |
+| `nvidia-smi` | Checking machine-level GPU health and utilization | Terminal metrics | No code changes |
 
 ---
 
-## Learn More
+## Overhead
 
-- [Quickstart](docs/user_guide/quickstart.md)
+In our benchmark runs, TraceML adds:
+
+- <2% overhead on single GPU at default settings
+- <1% overhead on single-node multi-GPU at default settings
+
+---
+
+## Troubleshooting Guides
+
+These guides cover the common bottlenecks TraceML is designed to identify:
+
 - [Find why PyTorch training is slow](docs/guides/slow-pytorch-training.md)
 - [Find DataLoader Bottlenecks](docs/guides/pytorch-dataloader-bottleneck.md)
 - [Debug Low GPU Utilization](docs/guides/low-gpu-utilization-pytorch.md)

@@ -19,6 +19,7 @@ from traceml_ai.reporting.config import (
     DEFAULT_SUMMARY_WINDOW_ROWS,
     normalize_summary_window_rows,
 )
+from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.schema import empty_section_payload
 from traceml_ai.reporting.sections.base import SummarySection
 from traceml_ai.reporting.sections.process import ProcessSummarySection
@@ -282,8 +283,31 @@ def _append_wrapped_card_lines(
             lines.append(row(wrapped, width=SUMMARY_WIDTH))
 
 
+def _append_primary_diagnosis_lines(
+    lines: List[str],
+    primary_diagnosis: Dict[str, Any],
+) -> None:
+    """Append the top-level primary diagnosis block to final text."""
+    status = str(primary_diagnosis.get("status") or "NO DATA")
+    summary = str(primary_diagnosis.get("summary") or "")
+    action = str(primary_diagnosis.get("action") or "")
+    block = [
+        "Primary Diagnosis",
+        f"- Diagnosis: {status}",
+    ]
+    if summary:
+        block.append(f"- Why: {summary}")
+    if action:
+        block.append(f"- Next: {action}")
+
+    for line in block:
+        for wrapped in wrap_lines(line, SUMMARY_INNER_TEXT_WIDTH):
+            lines.append(row(wrapped, width=SUMMARY_WIDTH))
+
+
 def _build_final_summary_text_from_sections(
     *,
+    primary_diagnosis: Dict[str, Any],
     system_summary: Dict[str, Any],
     process_summary: Dict[str, Any],
     step_time_summary: Dict[str, Any],
@@ -311,8 +335,16 @@ def _build_final_summary_text_from_sections(
         ),
         border(width=SUMMARY_WIDTH),
         row(width=SUMMARY_WIDTH),
-        row("System", width=SUMMARY_WIDTH),
     ]
+
+    _append_primary_diagnosis_lines(lines, primary_diagnosis)
+
+    lines.extend(
+        [
+            row(width=SUMMARY_WIDTH),
+            row("System", width=SUMMARY_WIDTH),
+        ]
+    )
 
     _append_wrapped_card_lines(
         lines,
@@ -399,9 +431,9 @@ class FinalReportGenerator:
         """
         Generate the structured final summary payload.
 
-        Section failures are isolated and logged. A failed section contributes a
-        schema-valid ``NO DATA`` payload so one broken report domain does not
-        prevent artifact generation during aggregator shutdown.
+        Section failures are isolated and logged. A failed section contributes
+        a schema-valid ``NO DATA`` payload so one broken report domain does
+        not prevent artifact generation during aggregator shutdown.
         """
         results: Dict[str, SummaryResult] = {}
         for section in self.sections:
@@ -409,7 +441,8 @@ class FinalReportGenerator:
                 result = section.build(db_path)
             except Exception as exc:
                 _log_final_report_error(
-                    f"Final summary section failed: {getattr(section, 'name', section)}",
+                    "Final summary section failed: "
+                    f"{getattr(section, 'name', section)}",
                     exc,
                 )
                 result = _fallback_section_result(section)
@@ -428,7 +461,15 @@ class FinalReportGenerator:
             results.get("step_memory", SummaryResult("step_memory")).payload
         )
 
+        primary_diagnosis = build_primary_diagnosis(
+            system_summary=system_summary,
+            process_summary=process_summary,
+            step_time_summary=step_time_summary,
+            step_memory_summary=step_memory_summary,
+        )
+
         final_text = _build_final_summary_text_from_sections(
+            primary_diagnosis=primary_diagnosis,
             system_summary=system_summary,
             process_summary=process_summary,
             step_time_summary=step_time_summary,
@@ -436,7 +477,7 @@ class FinalReportGenerator:
         )
 
         return {
-            "schema_version": 1.4,
+            "schema_version": 1.5,
             "generated_at": utc_now_iso(),
             "duration_s": _summary_duration_s(
                 step_time_summary,
@@ -450,6 +491,7 @@ class FinalReportGenerator:
                 step_time_summary=step_time_summary,
                 step_memory_summary=step_memory_summary,
             ),
+            "primary_diagnosis": primary_diagnosis,
             "system": system_summary,
             "process": process_summary,
             "step_time": step_time_summary,

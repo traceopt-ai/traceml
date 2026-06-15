@@ -1,6 +1,6 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.4`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.5`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
@@ -16,7 +16,7 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.4,
+  "schema_version": 1.5,
   "generated_at": "...",
   "duration_s": null,
   "meta": {
@@ -26,6 +26,7 @@ Sections:
     "nodes_observed": null,
     "gpus_observed": null
   },
+  "primary_diagnosis": {},
   "system": {},
   "process": {},
   "step_time": {},
@@ -36,6 +37,100 @@ Sections:
 
 `meta` contains run-level identity and observed topology. Section-level
 `metadata` remains section-specific coverage and metric-contract information.
+
+`primary_diagnosis` is a top-level performance finding promoted from existing
+section diagnoses. It answers "why was training slow?" and is intentionally
+narrower than section-level health/resource diagnoses.
+
+## Primary Diagnosis Shape
+
+```json
+{
+  "kind": "INPUT_BOUND",
+  "status": "INPUT-BOUND",
+  "severity": "info | warn | crit",
+  "section": "step_time | system",
+  "scope": "performance",
+  "summary": "...",
+  "action": "...",
+  "evidence": {}
+}
+```
+
+`primary_diagnosis` is derived from already-built section payloads. It does not
+read telemetry tables or recompute diagnostics. In schema `1.5`, Step Time
+diagnoses drive primary performance diagnosis. System GPU utilization is only
+supporting evidence, except for the fallback
+`LOW_GPU_UTILIZATION_UNEXPLAINED` when Step Time has no useful performance
+cause. Process, System health, and Step Memory health findings remain in their
+section diagnoses.
+
+Selection policy:
+
+- `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, and `STRAGGLER` use rank-comparison
+  evidence and are promoted from `step_time.diagnosis`.
+- `WAIT_HEAVY`, `INPUT_BOUND`, and `COMPUTE_BOUND` use phase-share evidence
+  and are promoted from `step_time.diagnosis`.
+- `LOW_GPU_UTILIZATION_UNEXPLAINED` appears only when Step Time is `BALANCED`
+  and System reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
+- `NO_CLEAR_PERFORMANCE_BOTTLENECK` appears when Step Time is `BALANCED` and
+  GPU utilization is not low/moderate.
+- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA` or
+  `WARMUP`.
+
+High temperature, memory pressure, memory creep, high RSS, high CPU, and other
+resource-health findings are not promoted into `primary_diagnosis` in schema
+`1.5`. They remain available under their section's `diagnosis` and `issues`.
+
+Primary diagnosis evidence uses a small union:
+
+```json
+{
+  "type": "phase_share",
+  "basis": "average",
+  "steps_analyzed": 256,
+  "total_step_ms": 272.3,
+  "dataloader_ms": 161.0,
+  "h2d_ms": 0.1,
+  "compute_ms": 109.6,
+  "wait_ms": 1.6,
+  "shares": {
+    "dataloader_pct": 59.1,
+    "h2d_pct": 0.0,
+    "compute_pct": 40.3,
+    "wait_pct": 0.6
+  },
+  "gpu_util_avg_percent": 37.8
+}
+```
+
+`phase_share` is used for `INPUT_BOUND`, `WAIT_HEAVY`, and `COMPUTE_BOUND`.
+Values come from `step_time.global.average`.
+
+```json
+{
+  "type": "rank_comparison",
+  "metric": "dataloader_ms",
+  "phase": "dataloader",
+  "steps_analyzed": 256,
+  "median": {"rank": 0, "value_ms": 0.7},
+  "worst": {"rank": 2, "value_ms": 180.9},
+  "delta_ms": 180.2,
+  "ratio": 262.4,
+  "gpu_util_avg_percent": 80.0
+}
+```
+
+`rank_comparison` is used for `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, and
+`STRAGGLER`. Values come from `step_time.global.median[metric]` and
+`step_time.global.worst[metric]`. Generic `STRAGGLER` may contain a
+`comparisons` array instead of a single metric comparison.
+
+Fallback evidence types are:
+
+- `utilization_fallback` for `LOW_GPU_UTILIZATION_UNEXPLAINED`
+- `no_clear_bottleneck` for `NO_CLEAR_PERFORMANCE_BOTTLENECK`
+- `insufficient_data` for `INSUFFICIENT_STEP_TIME_DATA`
 
 ## Section Shape
 
