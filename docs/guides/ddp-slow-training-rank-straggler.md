@@ -7,6 +7,10 @@ TraceML compares worst-rank and median-rank timing in distributed runs. It can
 surface input stragglers, compute stragglers, mixed stragglers, and wait-heavy
 windows.
 
+For whole-run triage, start with
+[Find why PyTorch training is slow](slow-pytorch-training.md). This page stays
+focused on DDP rank skew.
+
 ## Run DDP with TraceML
 
 For single-node DDP:
@@ -16,11 +20,70 @@ traceml run train.py --nproc-per-node=4
 ```
 
 For multi-node DDP, use the same `--run-name`, `--nnodes`,
-`--nproc-per-node`, and `--master-addr` on every node. See
+`--nproc-per-node`, `--master-addr`, `--master-port`, and script args on every
+node. See
 [Distributed Training](../user_guide/distributed-training.md).
 
 On Slurm, use the [Slurm guide](../user_guide/slurm.md) instead of writing
 the node flags by hand.
+
+## Reproduce rank stragglers
+
+The repo includes a small DDP demo with a compute-heavy baseline and two
+rank-local straggler modes.
+
+Balanced baseline:
+
+```bash
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_balanced --args --scenario balanced
+```
+
+Input straggler:
+
+```bash
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_input_straggler --args --scenario input-straggler --straggler-rank 0 --input-sleep-ms 200
+```
+
+Compute straggler:
+
+```bash
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+```
+
+For two nodes with one GPU each, run the same script on both nodes with
+`--nnodes=2 --nproc-per-node=1`, the same `--master-addr`,
+`--master-port`, and `--run-name`, and a different `--node-rank` on each node.
+
+Example node 0:
+
+```bash
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nnodes=2 --nproc-per-node=1 --node-rank=0 --master-addr <NODE_0_PRIVATE_IP> --master-port 29546 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+```
+
+Example node 1:
+
+```bash
+traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nnodes=2 --nproc-per-node=1 --node-rank=1 --master-addr <NODE_0_PRIVATE_IP> --master-port 29546 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+```
+
+## Demo fingerprints
+
+These fingerprints came from the DDP demo on two nodes with one GPU per node.
+
+| Scenario | Diagnosis | Key signal |
+|---|---|---|
+| Balanced | `COMPUTE-BOUND` | total `124.6/124.6ms`, input `1.4/1.4ms`, compute `122.4/122.4ms` |
+| Input straggler | `INPUT STRAGGLER` | r0 dataloader `201.6ms` vs r1 `1.4ms` |
+| Compute straggler | `COMPUTE STRAGGLER` | r0 optimizer `33.1ms` vs r1 `14.5ms` |
+
+Read the balanced run as the control: both ranks have similar total step time,
+input time is small, and the run is mostly compute.
+
+Read the input-straggler run as a rank-local input issue: rank 0 reaches compute
+late because its dataloader path is slower.
+
+Read the compute-straggler run as a rank-local compute issue: rank 0 spends more
+time in optimizer work than the peer rank.
 
 ## What to look for
 
@@ -33,6 +96,11 @@ Start with the Step Time diagnosis.
 | `STRAGGLER` | input and compute are both materially uneven |
 | `INPUT-BOUND` | input work is broad, not just one bad rank |
 | `WAIT-HEAVY` | meaningful residual time is not attributed to dataloader, H2D, forward, backward, or optimizer work |
+
+For `COMPUTE STRAGGLER`, TraceML uses DDP-aware rank attribution before blaming
+backward directly. DDP can make a slowdown on one rank show up later during
+synchronization on another rank, so TraceML checks nearby forward and optimizer
+evidence before selecting the reported phase and rank.
 
 Then inspect:
 

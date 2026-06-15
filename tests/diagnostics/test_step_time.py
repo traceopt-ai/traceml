@@ -279,6 +279,76 @@ def test_compute_straggler_uses_typical_step_and_phase_blame() -> None:
     assert issue.score == pytest.approx(24.0 / 167.3)
 
 
+def test_compute_straggler_prefers_close_optimizer_over_backward() -> None:
+    ctx = _time_context(
+        _time_metric("step_time", median=144.2, worst=144.3),
+        _time_metric("dataloader_fetch", median=1.3, worst=1.3),
+        _time_metric("h2d", median=0.1, worst=0.2),
+        _time_metric("forward", median=2.0, worst=2.1, worst_rank=0),
+        _time_metric(
+            "backward",
+            median=107.1,
+            worst=125.7,
+            worst_rank=1,
+            skew=0.17,
+        ),
+        _time_metric(
+            "optimizer_step",
+            median=14.5,
+            worst=33.1,
+            worst_rank=0,
+            skew=1.28,
+        ),
+        _time_metric("wait_proxy", median=0.5, worst=0.6),
+    )
+
+    issue = ComputeStragglerRule().evaluate(ctx)
+
+    assert issue is not None
+    assert issue.kind == "COMPUTE_STRAGGLER"
+    assert issue.phase == "optimizer"
+    assert issue.ranks == (0,)
+    assert ctx.dominant_compute is not None
+    assert ctx.dominant_compute.label == "Optimizer"
+    assert ctx.compute_worst_rank == 0
+
+
+def test_compute_straggler_keeps_backward_when_no_close_compute_phase() -> (
+    None
+):
+    ctx = _time_context(
+        _time_metric("step_time", median=144.2, worst=144.3),
+        _time_metric("dataloader_fetch", median=1.3, worst=1.3),
+        _time_metric("h2d", median=0.1, worst=0.2),
+        _time_metric("forward", median=2.0, worst=2.1, worst_rank=0),
+        _time_metric(
+            "backward",
+            median=90.0,
+            worst=130.0,
+            worst_rank=1,
+            skew=0.44,
+        ),
+        _time_metric(
+            "optimizer_step",
+            median=14.5,
+            worst=33.1,
+            worst_rank=0,
+            skew=1.28,
+        ),
+        _time_metric("wait_proxy", median=0.5, worst=0.6),
+    )
+
+    issue = ComputeStragglerRule().evaluate(ctx)
+
+    assert issue is not None
+    assert issue.kind == "COMPUTE_STRAGGLER"
+    assert issue.phase == "backward"
+    assert issue.ranks == (1,)
+    assert ctx.dominant_compute is not None
+    assert ctx.dominant_compute.label == "Backward"
+    assert ctx.compute_worst_rank == 1
+
+
 def test_step_time_primary_selection_input_explains_mixed_straggler() -> None:
     result = build_step_diagnosis_result(
         [
@@ -337,7 +407,7 @@ def test_step_time_live_and_summary_policies_are_explicit() -> None:
     )
     assert (
         SUMMARY_STEP_TIME_POLICY.thresholds.input_straggler_compute_excess_tolerance
-        == pytest.approx(1.5)
+        == pytest.approx(1.25)
     )
     assert (
         SUMMARY_STEP_TIME_POLICY.min_steps_for_diag

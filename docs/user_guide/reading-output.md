@@ -235,6 +235,8 @@ TraceML uses this idea:
 
 - compare worst compute vs median compute
 - normalize the excess by a typical local step burden
+- for DDP, check nearby forward and optimizer evidence before blaming backward
+  directly
 
 In simpler words:
 
