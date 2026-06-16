@@ -8,19 +8,6 @@ from typing import Callable, Iterable, Optional
 from traceml_ai.core import Registry
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.samplers.base_sampler import BaseSampler
-from traceml_ai.samplers.layer_backward_memory_sampler import (
-    LayerBackwardMemorySampler,
-)
-from traceml_ai.samplers.layer_backward_time_sampler import (
-    LayerBackwardTimeSampler,
-)
-from traceml_ai.samplers.layer_forward_memory_sampler import (
-    LayerForwardMemorySampler,
-)
-from traceml_ai.samplers.layer_forward_time_sampler import (
-    LayerForwardTimeSampler,
-)
-from traceml_ai.samplers.layer_memory_sampler import LayerMemorySampler
 from traceml_ai.samplers.process_sampler import ProcessSampler
 from traceml_ai.samplers.stdout_stderr_sampler import StdoutStderrSampler
 from traceml_ai.samplers.step_memory_sampler import StepMemorySampler
@@ -88,43 +75,13 @@ DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
         _spec(
             "step_time",
             StepTimeSampler,
-            profiles=("run", "deep"),
+            profiles=("run",),
             drain_on_recording_stop=True,
         ),
         _spec(
             "step_memory",
             StepMemorySampler,
-            profiles=("run", "deep"),
-            drain_on_recording_stop=True,
-        ),
-        _spec(
-            "layer_memory",
-            LayerMemorySampler,
-            profiles=("deep",),
-            drain_on_recording_stop=True,
-        ),
-        _spec(
-            "layer_forward_memory",
-            LayerForwardMemorySampler,
-            profiles=("deep",),
-            drain_on_recording_stop=True,
-        ),
-        _spec(
-            "layer_backward_memory",
-            LayerBackwardMemorySampler,
-            profiles=("deep",),
-            drain_on_recording_stop=True,
-        ),
-        _spec(
-            "layer_forward_time",
-            LayerForwardTimeSampler,
-            profiles=("deep",),
-            drain_on_recording_stop=True,
-        ),
-        _spec(
-            "layer_backward_time",
-            LayerBackwardTimeSampler,
-            profiles=("deep",),
+            profiles=("run",),
             drain_on_recording_stop=True,
         ),
     ]

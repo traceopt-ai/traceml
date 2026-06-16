@@ -74,7 +74,8 @@ multi-node runs, use the default summary mode.
 Dashboard mode requires the optional dashboard extra:
 `pip install "traceml-ai[dashboard]"`.
 
-Deep/layer profiling has been removed from the public CLI for now.
+TraceML no longer ships layer-level/deep profiling. Use PyTorch Profiler,
+Nsight, or another operator-level profiler when you need that detail.
 
 See `traceml --help` for the full set of options.
 

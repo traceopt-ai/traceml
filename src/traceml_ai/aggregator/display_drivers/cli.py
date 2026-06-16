@@ -16,8 +16,6 @@ from rich.text import Text
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.layout import (
-    LAYER_COMBINED_MEMORY_LAYOUT,
-    LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
     MODEL_MEMORY_LAYOUT,
     PROCESS_LAYOUT,
@@ -25,14 +23,7 @@ from traceml_ai.aggregator.display_drivers.layout import (
     STDOUT_STDERR_LAYOUT,
     SYSTEM_LAYOUT,
 )
-from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.renderers.base_renderer import CLIRenderer
-from traceml_ai.renderers.layer_combined_memory.renderer import (
-    LayerCombinedMemoryRenderer,
-)
-from traceml_ai.renderers.layer_combined_time.renderer import (
-    LayerCombinedTimeRenderer,
-)
 from traceml_ai.renderers.process.renderer import ProcessRenderer
 from traceml_ai.renderers.stdout_stderr_renderer import StdoutStderrRenderer
 from traceml_ai.renderers.step_memory.renderer import StepMemoryRenderer
@@ -77,16 +68,11 @@ class CLIDisplayDriver(BaseDisplayDriver):
 
     """
 
-    def __init__(
-        self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings
-    ) -> None:
-        self._logger = logger
-        self._store = store
-        self._settings = settings
+    def __init__(self, logger: Any, settings: TraceMLSettings) -> None:
+        super().__init__(logger=logger, settings=settings)
 
         self._profile = getattr(self._settings, "profile", "run")
         self._watch_profile = self._profile == "watch"
-        self._deep_profile = self._profile == "deep"
 
         self._console = Console()
         self._layout = Layout(name=ROOT_LAYOUT)
@@ -108,19 +94,6 @@ class CLIDisplayDriver(BaseDisplayDriver):
             self._renderers += [
                 StepCombinedRenderer(db_path=self._settings.db_path),
                 StepMemoryRenderer(db_path=self._settings.db_path),
-            ]
-
-        # Deep Profile
-        if self._deep_profile:
-            self._renderers += [
-                LayerCombinedMemoryRenderer(
-                    remote_store=store,
-                    top_n_layers=settings.num_display_layers,
-                ),
-                LayerCombinedTimeRenderer(
-                    remote_store=store,
-                    top_n_layers=settings.num_display_layers,
-                ),
             ]
 
     def start(self) -> None:
@@ -169,12 +142,10 @@ class CLIDisplayDriver(BaseDisplayDriver):
     def _create_layout(self) -> Layout:
         """
         Create the Rich layout tree.
-        Each profile builds its own full layout (outer + inner).
+        Each supported profile builds its own full layout (outer + inner).
         """
         if self._watch_profile:
             return self._create_watch_layout()
-        if self._deep_profile:
-            return self._create_deep_layout()
         return self._create_run_layout()
 
     def _create_watch_layout(self) -> Layout:
@@ -210,32 +181,6 @@ class CLIDisplayDriver(BaseDisplayDriver):
         )
         return dashboard
 
-    def _create_deep_layout(self) -> Layout:
-        # You can tune these independently for deep
-        self._layout.split_column(
-            Layout(name="dashboard", ratio=8),
-            Layout(name=STDOUT_STDERR_LAYOUT, ratio=2),
-        )
-        dashboard = self._layout["dashboard"]
-        dashboard.split_column(
-            Layout(name="upper_row", ratio=3),
-            Layout(name="middle_row", ratio=6),
-            Layout(name="layer_row", ratio=5),
-        )
-        dashboard["upper_row"].split_row(
-            Layout(name=SYSTEM_LAYOUT, ratio=4),
-            Layout(name=PROCESS_LAYOUT, ratio=5),
-        )
-        dashboard["middle_row"].split_row(
-            Layout(name=MODEL_COMBINED_LAYOUT, ratio=3),
-            Layout(name=MODEL_MEMORY_LAYOUT, ratio=2),
-        )
-        dashboard["layer_row"].split_row(
-            Layout(name=LAYER_COMBINED_MEMORY_LAYOUT, ratio=8),
-            Layout(name=LAYER_COMBINED_TIMER_LAYOUT, ratio=7),
-        )
-        return dashboard
-
     def _has_section(self, name: str) -> bool:
         try:
             self._layout[name]
@@ -264,16 +209,6 @@ class CLIDisplayDriver(BaseDisplayDriver):
         if self._has_section(MODEL_MEMORY_LAYOUT):
             self._layout[MODEL_MEMORY_LAYOUT].update(
                 Panel(Text("Waiting for Step Memory...", justify="center"))
-            )
-
-        if self._has_section(LAYER_COMBINED_MEMORY_LAYOUT):
-            self._layout[LAYER_COMBINED_MEMORY_LAYOUT].update(
-                Panel(Text("Waiting for Layer Memory...", justify="center"))
-            )
-
-        if self._has_section(LAYER_COMBINED_TIMER_LAYOUT):
-            self._layout[LAYER_COMBINED_TIMER_LAYOUT].update(
-                Panel(Text("Waiting for Layer Timing...", justify="center"))
             )
 
         if self._has_section(STDOUT_STDERR_LAYOUT):

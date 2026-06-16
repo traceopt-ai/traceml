@@ -155,8 +155,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "interval": args.interval,
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
-        "num_display_layers": args.num_display_layers,
-        "remote_max_rows": args.remote_max_rows,
         "history_enabled": (False if args.no_history else None),
     }
 
@@ -199,7 +197,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_INTERVAL"] = str(cfg["interval"])
     env["TRACEML_ENABLE_LOGGING"] = "1" if cfg["enable_logging"] else "0"
     env["TRACEML_LOGS_DIR"] = cfg["logs_dir"]
-    env["TRACEML_NUM_DISPLAY_LAYERS"] = str(cfg["num_display_layers"])
     run_identity = RunIdentity.from_args(
         args,
         generated_session_id=get_session_id(),
@@ -209,7 +206,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_AGGREGATOR_HOST"] = aggregator_cfg.connect_host
     env["TRACEML_AGGREGATOR_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_AGGREGATOR_PORT"] = str(aggregator_cfg.port)
-    env["TRACEML_REMOTE_MAX_ROWS"] = str(cfg["remote_max_rows"])
     env["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
         int(getattr(args, "summary_window_rows", DEFAULT_SUMMARY_WINDOW_ROWS))
     )

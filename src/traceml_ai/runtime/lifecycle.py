@@ -99,7 +99,6 @@ def _apply_settings_env(
         settings.aggregator.bind_host
     )
     os.environ["TRACEML_AGGREGATOR_PORT"] = str(settings.aggregator.port)
-    os.environ["TRACEML_REMOTE_MAX_ROWS"] = str(settings.remote_max_rows)
     os.environ["TRACEML_HISTORY_ENABLED"] = (
         "1" if settings.history_enabled else "0"
     )

@@ -64,8 +64,8 @@ bracket.
 
 The `TraceMLTrainer(Trainer)` subclass remains supported for users who already
 adopted it. It is now a thin wrapper that auto-installs
-`TraceMLTrainerCallback` on construction and accepts the same `traceml_enabled`
-and `traceml_kwargs` arguments as before:
+`TraceMLTrainerCallback` on construction and accepts `traceml_enabled` to turn
+step-level instrumentation on or off:
 
 ```python
 from traceml_ai.integrations import huggingface as traceml_hf
@@ -140,16 +140,11 @@ trade-offs vs. the legacy subclass that are worth knowing:
   legacy subclass's `with trace_step(model): super().training_step(...)`
   pattern ran the `finally` cleanup deterministically. If you need precise
   attribution on failing steps, the legacy `TraceMLTrainer` path is stricter.
-- **Wrapped models (DDP / FSDP).** Hugging Face passes the unwrapped
-  `trainer.model` to callbacks, not `trainer.model_wrapped`. For plain DDP
-  this is harmless (submodule forward hooks still fire), but for FSDP the
-  flattened parameter layout can change which forwards the deep-profile
-  hooks observe. Use the legacy `TraceMLTrainer` for FSDP deep-mode runs.
 - **Callback registration timing.** Pass `TraceMLTrainerCallback()` at
   `Trainer(...)` construction. Callbacks added via `trainer.add_callback(...)`
   *after* `trainer.train()` has started will not receive `on_train_begin`,
-  which means deep-mode lazy hook attachment will be skipped for the first
-  step.
+  which means the first step may be outside TraceML's callback-managed
+  `trace_step` bracket.
 
 ## Troubleshooting
 
@@ -367,17 +362,13 @@ install TraceML's process-wide patches (`DataLoader` fetch timing, H2D
 `Tensor.to`, and the forward/backward/optimizer auto-timers). It is idempotent
 and returns the effective `TraceMLInitConfig`.
 
-`TraceMLTrainerCallback(traceml_kwargs=None)` accepts:
-
-- `traceml_kwargs`: optional dict forwarded to `trace_model_instance` for
-  deep-profile layer-level tracing. `None` (the default) means standard
-  step-level instrumentation only.
+`TraceMLTrainerCallback()` takes no TraceML-specific arguments and records
+standard step-level timing and memory.
 
 `TraceMLTrainer` (legacy thin wrapper) accepts:
 
 - everything that normal `transformers.Trainer` accepts
 - `traceml_enabled=True|False`
-- `traceml_kwargs={...}`: forwarded to the installed callback
 
 ## Next Steps
 

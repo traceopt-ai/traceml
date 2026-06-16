@@ -61,14 +61,12 @@ class TraceMLSettings:
       loopback on local runs.
     """
 
-    profile: str = "run"  # "deep"
+    profile: str = "run"
     mode: str = "cli"
     sampler_interval_sec: float = 1.0
     render_interval_sec: float = 1.0
-    num_display_layers: int = 20
     logs_dir: str = "./logs"
     enable_logging: bool = False
-    remote_max_rows: int = 200
     aggregator: AggregatorTransportSettings = AggregatorTransportSettings()
     session_id: str = ""
     history_enabled: bool = True

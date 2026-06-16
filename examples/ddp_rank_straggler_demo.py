@@ -280,7 +280,6 @@ def main() -> None:
         depth=args.depth,
         num_classes=args.num_classes,
     ).to(device)
-    traceml.trace_model_instance(model)
 
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(

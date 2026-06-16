@@ -36,8 +36,6 @@ DEFAULT_AGGREGATOR_PORT = 29765
 DEFAULT_PROFILE = "run"
 DEFAULT_UI_MODE = "cli"
 DEFAULT_INTERVAL_SEC = 1.0
-DEFAULT_NUM_DISPLAY_LAYERS = 20
-DEFAULT_REMOTE_MAX_ROWS = 200
 USER_ERROR_LOG_NAME = "torchrun_error.log"
 RUNTIME_ERROR_LOG_NAME = "runtime_error.log"
 
@@ -201,12 +199,6 @@ def read_traceml_env() -> Dict[str, Any]:
             os.environ.get("TRACEML_ENABLE_LOGGING", "0") == "1"
         ),
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", DEFAULT_LOGS_DIR),
-        "num_display_layers": int(
-            os.environ.get(
-                "TRACEML_NUM_DISPLAY_LAYERS",
-                str(DEFAULT_NUM_DISPLAY_LAYERS),
-            )
-        ),
         "aggregator_host": os.environ.get(
             "TRACEML_AGGREGATOR_HOST",
             DEFAULT_AGGREGATOR_HOST,
@@ -219,12 +211,6 @@ def read_traceml_env() -> Dict[str, Any]:
             os.environ.get(
                 "TRACEML_AGGREGATOR_PORT",
                 str(DEFAULT_AGGREGATOR_PORT),
-            )
-        ),
-        "remote_max_rows": int(
-            os.environ.get(
-                "TRACEML_REMOTE_MAX_ROWS",
-                str(DEFAULT_REMOTE_MAX_ROWS),
             )
         ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),

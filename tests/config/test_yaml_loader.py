@@ -72,20 +72,16 @@ def test_load_yaml_config_valid(tmp_path: Path) -> None:
         mode: summary
         interval: 3.0
         logs_dir: ./runs
-        num_display_layers: 8
         history_enabled: true
         enable_logging: false
-        remote_max_rows: 100
         """,
     )
     result = load_yaml_config(p)
     assert result["mode"] == "summary"
     assert result["interval"] == 3.0
     assert result["logs_dir"] == "./runs"
-    assert result["num_display_layers"] == 8
     assert result["history_enabled"] is True
     assert result["enable_logging"] is False
-    assert result["remote_max_rows"] == 100
 
 
 def test_load_yaml_config_unknown_key_warns(tmp_path: Path) -> None:
@@ -100,12 +96,6 @@ def test_load_yaml_config_unknown_key_warns(tmp_path: Path) -> None:
 def test_load_yaml_config_type_error_bool_field(tmp_path: Path) -> None:
     p = _write(tmp_path, "enable_logging: not_a_bool\n")
     with pytest.raises(ValueError, match="enable_logging"):
-        load_yaml_config(p)
-
-
-def test_load_yaml_config_type_error_int_field(tmp_path: Path) -> None:
-    p = _write(tmp_path, "num_display_layers: abc\n")
-    with pytest.raises(ValueError, match="num_display_layers"):
         load_yaml_config(p)
 
 
@@ -200,7 +190,6 @@ def test_resolve_config_default_when_nothing_set() -> None:
     result = resolve_config(cli, _no_env(), _no_yaml(), _defaults())
     assert result["mode"] == BUILT_IN_DEFAULTS["mode"]
     assert result["interval"] == BUILT_IN_DEFAULTS["interval"]
-    assert result["remote_max_rows"] == BUILT_IN_DEFAULTS["remote_max_rows"]
     assert result["history_enabled"] == BUILT_IN_DEFAULTS["history_enabled"]
 
 
@@ -218,17 +207,6 @@ def test_resolve_config_env_bool_coercion() -> None:
     result = resolve_config(cli, env, _no_yaml(), _defaults())
     assert result["enable_logging"] is True
     assert result["history_enabled"] is False
-
-
-def test_resolve_config_env_int_coercion() -> None:
-    cli = _no_cli()
-    env = {
-        "TRACEML_REMOTE_MAX_ROWS": "12345",
-        "TRACEML_NUM_DISPLAY_LAYERS": "15",
-    }
-    result = resolve_config(cli, env, _no_yaml(), _defaults())
-    assert result["remote_max_rows"] == 12345
-    assert result["num_display_layers"] == 15
 
 
 def test_resolve_config_env_float_coercion() -> None:
@@ -263,14 +241,6 @@ def test_load_yaml_config_unreadable_file(tmp_path: Path) -> None:
             load_yaml_config(p)
     finally:
         p.chmod(0o644)
-
-
-def test_coerce_env_malformed_int_raises_value_error() -> None:
-    """A malformed TRACEML_* int env var gives a clear error, not a raw Python one."""
-    from traceml_ai.config.yaml_loader import _coerce_env
-
-    with pytest.raises(ValueError, match="TRACEML_REMOTE_MAX_ROWS"):
-        _coerce_env("remote_max_rows", "not_a_number")
 
 
 def test_coerce_env_malformed_float_raises_value_error() -> None:
