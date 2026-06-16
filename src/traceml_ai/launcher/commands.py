@@ -90,6 +90,13 @@ def validate_launch_args(args: argparse.Namespace) -> None:
             "[TraceML] ERROR: --mode=summary requires history. "
             "Remove --no-history to enable final summary generation."
         )
+    if getattr(args, "html_report", False) and getattr(
+        args, "no_history", False
+    ):
+        raise SystemExit(
+            "[TraceML] ERROR: --html-report requires history. "
+            "Remove --no-history to enable HTML report generation."
+        )
     if int(getattr(args, "summary_window_rows", 1)) <= 0:
         raise SystemExit(
             "[TraceML] ERROR: --summary-window-rows must be greater than 0."
@@ -216,6 +223,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_MASTER_ADDR"] = torchrun_cfg.master_addr
     env["TRACEML_MASTER_PORT"] = str(torchrun_cfg.master_port)
     env["TRACEML_HISTORY_ENABLED"] = "1" if cfg["history_enabled"] else "0"
+    env["TRACEML_HTML_REPORT"] = (
+        "1" if getattr(args, "html_report", False) else "0"
+    )
     env["NODE_RANK"] = str(torchrun_cfg.node_rank)
 
     env.update(launch_context.to_env())
@@ -268,6 +278,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         print(
             "[TraceML] TraceML is disabled via --disable-traceml. Running natively."
         )
+        if getattr(args, "html_report", False):
+            print(
+                "[TraceML] --html-report ignored: TraceML is disabled.",
+                file=sys.stderr,
+            )
         train_cmd = [
             *torchrun_cfg.to_command(),
             str(script_path),
@@ -471,8 +486,23 @@ def run_compare(args: argparse.Namespace) -> None:
 
 
 def run_view(args: argparse.Namespace) -> None:
-    """Print the stored text from a TraceML summary JSON file."""
+    """Print the stored text from a TraceML summary JSON file.
+
+    With ``--html`` (``args.html`` is not None), render an HTML report from
+    the JSON instead of printing text; an empty string means the default
+    ``<summary>.html`` output path.
+    """
+    html_out = getattr(args, "html", None)
     try:
+        if html_out is not None:
+            from traceml_ai.reporting.html import render_html_report_from_file
+
+            written = render_html_report_from_file(
+                args.summary, html_out or None
+            )
+            print(f"[TraceML] Wrote HTML report: {written}")
+            return
+
         from traceml_ai.reporting.view import view_summary
 
         view_summary(args.summary, print_to_stdout=True)

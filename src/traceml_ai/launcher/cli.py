@@ -185,6 +185,14 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Disable TraceML telemetry and run the script natively via torchrun.",
     )
+    parser.add_argument(
+        "--html-report",
+        action="store_true",
+        help=(
+            "Also write a self-contained final_summary.html next to the "
+            "JSON/TXT artifacts at end of run."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -245,6 +253,18 @@ def build_parser() -> argparse.ArgumentParser:
     view_parser.add_argument(
         "summary",
         help="Path to a TraceML summary JSON file.",
+    )
+    view_parser.add_argument(
+        "--html",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="OUT",
+        help=(
+            "Render an HTML report from the summary JSON instead of printing "
+            "text. Optional OUT path; defaults to <summary>.html next to the "
+            "input. Usage: traceml view <summary.json> --html [OUT]."
+        ),
     )
 
     inspect_parser = sub.add_parser(

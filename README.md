@@ -99,6 +99,15 @@ You can re-print a saved summary later without rerunning training:
 traceml view logs/<run_name>/final_summary.json
 ```
 
+Want a shareable report? Add `--html-report` to also write a self-contained
+`final_summary.html` (inline styling, no network, opens in any browser), or
+render one from a saved run after the fact:
+
+```bash
+traceml run train.py --html-report
+traceml view logs/<run_name>/final_summary.json --html   # writes <...>.html
+```
+
 Instead of guessing why training feels slow, you get a compact diagnosis of
 where step time and memory went.
 

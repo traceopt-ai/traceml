@@ -75,3 +75,4 @@ class TraceMLSettings:
     db_path: str = ""
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
     trace_max_steps: Optional[int] = None
+    html_report: bool = False
