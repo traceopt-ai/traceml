@@ -54,6 +54,7 @@ def _make_payload(
     *,
     meta: Any = "default",
     schema_version: Any = 1.4,
+    primary_diagnosis: Optional[Any] = None,
     step_time: Optional[Dict[str, Any]] = None,
     step_memory: Optional[Dict[str, Any]] = None,
     system: Optional[Dict[str, Any]] = None,
@@ -69,7 +70,7 @@ def _make_payload(
         }
     st_metrics = ["total_step_ms", "dataloader_ms", "compute_ms"]
     sm_metrics = ["peak_allocated_bytes", "peak_reserved_bytes"]
-    return {
+    payload = {
         "schema_version": schema_version,
         "generated_at": "2026-06-10T12:00:00+00:00",
         "duration_s": 120.0,
@@ -176,6 +177,9 @@ def _make_payload(
         ),
         "text": "TraceML summary card",
     }
+    if primary_diagnosis is not None:
+        payload["primary_diagnosis"] = primary_diagnosis
+    return payload
 
 
 @pytest.fixture

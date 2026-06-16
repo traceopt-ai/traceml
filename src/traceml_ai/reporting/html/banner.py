@@ -4,13 +4,13 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Verdict banner: select and render the worst existing diagnosis.
+"""Top-of-page diagnosis banner for the HTML report.
 
-The banner only *selects* among the per-section diagnoses already in the
-payload; it computes no new severity. Severity vocabulary is the real
-payload contract crit | warn | info (diagnostics/common.py). Within the
-info tier the presentation is kind-aware, because healthy and absent-data
-states are both info severity.
+Schema 1.5 payloads carry a top-level ``primary_diagnosis`` that answers the
+first performance question: why was training slow? The banner renders that
+payload when present. Older schema 1.4 payloads fall back to selecting the
+worst per-section diagnosis. The renderer computes no new diagnosis or
+severity; it only displays the final-summary payload.
 """
 
 from __future__ import annotations
@@ -24,18 +24,30 @@ _SECTION_ORDER = ("step_time", "step_memory", "system", "process")
 _SEVERITY_RANK = {"crit": 3, "warn": 2, "info": 1}
 _HEALTHY_KINDS = {"BALANCED", "NORMAL"}
 _NEUTRAL_KINDS = {"NO_DATA", "WARMUP", "NO_GPU"}
+_PRIMARY_SOURCE = "primary"
+
+
+def _valid_primary_diagnosis(value: Any) -> bool:
+    """Return True when ``value`` has enough content to render as primary."""
+    return isinstance(value, dict) and any(
+        value.get(key) for key in ("kind", "status", "summary")
+    )
 
 
 def select_verdict(
     payload: Dict[str, Any],
 ) -> Optional[Tuple[str, Dict[str, Any]]]:
     """
-    Return ``(section_name, diagnosis)`` for the worst existing diagnosis.
+    Return ``(source_name, diagnosis)`` for the banner diagnosis.
 
-    Worst = highest severity rank; ties broken by ``_SECTION_ORDER``.
-    Unknown severities rank below ``info``. Returns ``None`` when no section
-    carries a diagnosis.
+    Schema 1.5 ``primary_diagnosis`` wins when present. Otherwise, fall back to
+    the schema 1.4 behavior: pick the highest-severity section diagnosis, with
+    ties broken by ``_SECTION_ORDER``. Unknown severities rank below ``info``.
     """
+    primary = payload.get("primary_diagnosis")
+    if _valid_primary_diagnosis(primary):
+        return _PRIMARY_SOURCE, primary
+
     best: Optional[Tuple[str, Dict[str, Any]]] = None
     best_rank = -1
     for name in _SECTION_ORDER:
@@ -85,9 +97,14 @@ def render_banner(payload: Dict[str, Any]) -> str:
     ]
     action = diag.get("action")
     if action:
+        source_text = (
+            "Primary diagnosis"
+            if section == _PRIMARY_SOURCE
+            else f"from {esc(section)} diagnosis"
+        )
         parts.append(
             f'<p class="action"><b>Action:</b> {esc(action)} '
-            f'<span class="why">&middot; from {esc(section)} diagnosis</span>'
+            f'<span class="why">&middot; {source_text}</span>'
             "</p>"
         )
     parts.append("</div>")
