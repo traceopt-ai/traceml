@@ -87,7 +87,7 @@ def build_process_section() -> Dict[str, Any]:
         with (
             ui.row()
             .classes("w-full")
-            .style("gap:9px; margin-top:12px; flex-wrap:wrap;")
+            .style("gap:8px; margin-top:12px; flex-wrap:nowrap;")
         ):
             for key, lab, acc, qual in [
                 ("cpu", "CPU", theme.C_CPU, "max · rank"),
@@ -98,7 +98,7 @@ def build_process_section() -> Dict[str, Any]:
                 with (
                     ui.element("div")
                     .classes("kpi")
-                    .style(f"--acc:{acc}; min-width:102px;")
+                    .style(f"--acc:{acc}; flex:1 1 0; min-width:0;")
                 ):
                     ui.html(
                         f"{lab} <span class='kq'>{qual}</span>"
