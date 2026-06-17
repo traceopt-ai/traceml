@@ -144,7 +144,11 @@ def update_process_section(
         ]
         chart.options["series"][1]["data"] = gdata
     else:
+        gdata = []
         chart.options["series"][1]["data"] = []
+    ymax = theme.nice_ymax(ram_pct + [v for _, v in gdata])
+    chart.options["yAxis"][0]["max"] = ymax
+    chart.options["yAxis"][1]["max"] = ymax
     chart.update()
 
     roll = _compute_rollups(window)

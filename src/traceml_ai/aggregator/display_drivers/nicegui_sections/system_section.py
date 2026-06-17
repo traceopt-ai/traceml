@@ -83,6 +83,9 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
     chart.options["series"][1]["data"] = (
         [[t, v] for t, v in zip(xms, gpu) if t is not None] if gpu else []
     )
+    ymax = theme.nice_ymax(list(cpu) + list(gpu))
+    chart.options["yAxis"][0]["max"] = ymax
+    chart.options["yAxis"][1]["max"] = ymax
     chart.update()
 
     wl = data.get("window_len", 0)

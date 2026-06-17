@@ -153,6 +153,19 @@ def gb(b: Any) -> Optional[float]:
         return None
 
 
+def nice_ymax(values: Any, floor: float = 10.0) -> float:
+    """A 'nice' rounded y-axis ceiling for the given values: ~20% headroom
+    above the peak, never below `floor`, snapped to a 5/10/25 step. Anchors
+    the axis at 0 so low usage still reads as low, while a narrow band still
+    fills the chart instead of hugging the bottom."""
+    vals = [float(v) for v in values if v is not None]
+    m = (max(vals) * 1.2) if vals else 0.0
+    m = max(m, floor)
+    step = 5.0 if m <= 50 else (10.0 if m <= 120 else 25.0)
+    n = int(m / step)
+    return float((n + 1) * step) if m > n * step else float(n * step)
+
+
 def verdict_for(dom_key: str) -> Tuple[str, str]:
     """(bound-type, phase friendly name) for the plain-language verdict."""
     return {
@@ -209,7 +222,7 @@ def dual_line_options(
     left_col: str = C_CPU,
     right_col: str = C_GPU,
     unit: str = "%",
-    ymax: Optional[float] = 100,
+    ymax: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Dual-y-axis smooth area time-series (e.g. CPU/GPU or RAM/GPU-mem)."""
 
@@ -233,8 +246,8 @@ def dual_line_options(
                 "lineStyle": {"color": _GRID},
             },
         }
+        ax["min"] = 0
         if ymax is not None:
-            ax["min"] = 0
             ax["max"] = ymax
         return ax
 
