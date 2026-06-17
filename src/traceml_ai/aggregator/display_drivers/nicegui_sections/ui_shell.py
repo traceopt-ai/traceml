@@ -18,7 +18,6 @@ overflow: hidden;
 
 PAGE_GAP_CLASS = "gap-2"
 VIEWPORT_STYLE = "height: calc(100vh - 86px); overflow: auto;"
-BODY_CLASS = "text-[12px] text-gray-700 leading-tight"
 
 
 def severity_color(severity: str) -> str:

@@ -128,6 +128,13 @@ def read_traceml_env() -> dict[str, Any]:
         "remote_max_rows": int(
             os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
         ),
+        "dashboard_port": int(
+            os.environ.get("TRACEML_DASHBOARD_PORT", "8765")
+        ),
+        "dashboard_auto_open": os.environ.get(
+            "TRACEML_DASHBOARD_AUTO_OPEN", "1"
+        )
+        == "1",
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
         "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
         == "1",
@@ -194,6 +201,8 @@ def main() -> None:
             enable_logging=bool(cfg["enable_logging"]),
             logs_dir=str(cfg["logs_dir"]),
             remote_max_rows=int(cfg["remote_max_rows"]),
+            dashboard_port=int(cfg["dashboard_port"]),
+            dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
             session_id=session_id,
             history_enabled=bool(cfg["history_enabled"]),
             summary_window_rows=int(cfg["summary_window_rows"]),

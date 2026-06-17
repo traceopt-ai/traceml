@@ -35,7 +35,7 @@ from .system_section import build_system_section, update_system_section
 from .ui_shell import PAGE_GAP_CLASS, VIEWPORT_STYLE
 
 
-def build_top_tabs(active: str, show_layers: bool):
+def build_top_tabs(active: str, show_layers: bool, cls):
     """Shared top navigation tabs."""
     with ui.row().classes("w-full px-4 pt-1 pb-1 items-center"):
         ui.label("TraceML").classes("text-3xl font-extrabold mr-6").style(
@@ -51,6 +51,14 @@ def build_top_tabs(active: str, show_layers: bool):
         overview.on("click", lambda: ui.navigate.to("/"))
         if show_layers and layers is not None:
             layers.on("click", lambda: ui.navigate.to("/layers"))
+
+        # Staleness indicator (empty when fresh). Styling is intentionally
+        # minimal here; the redesign restyles it (TRA-68 / PR2).
+        ui.space()
+        staleness_label = ui.label("").classes(
+            "text-sm text-orange-700 font-medium mr-2"
+        )
+        cls.register_staleness_label(staleness_label)
 
 
 def define_pages(cls):
@@ -76,7 +84,7 @@ def define_pages(cls):
             """
         )
 
-        build_top_tabs(active="overview", show_layers=deep_enabled)
+        build_top_tabs(active="overview", show_layers=deep_enabled, cls=cls)
 
         with (
             ui.row()
@@ -169,7 +177,7 @@ def define_pages(cls):
 
         @ui.page("/layers")
         def layer_page():
-            build_top_tabs(active="layers", show_layers=True)
+            build_top_tabs(active="layers", show_layers=True, cls=cls)
 
             with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
                 with ui.column().classes("w-[54%]"):
