@@ -129,7 +129,7 @@ body{{
 .kpi:hover{{background:rgba(255,255,255,0.72); transform:translateY(-2px); box-shadow:0 8px 20px rgba(17,24,39,0.07);}}
 .kpi::before{{content:''; position:absolute; left:0; top:0; height:100%; width:3px; background:var(--acc,var(--orange)); opacity:.85;}}
 .klab{{font-family:var(--mono); font-size:10px; letter-spacing:.09em; text-transform:uppercase; color:var(--orange-strong); font-weight:600;}}
-.kq{{text-transform:none; letter-spacing:0; color:var(--muted); font-weight:500; font-size:9px;}}
+.kq{{display:block; margin-top:2px; text-transform:none; letter-spacing:0; color:var(--muted); font-weight:500; font-size:9px;}}
 .kval{{font-family:var(--mono); font-size:19px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums; margin-top:4px; line-height:1.1;}}
 .kunit{{font-size:0.62em; color:var(--muted); font-weight:500; margin-left:2px;}}
 .ksub{{font-family:var(--mono); font-size:10px; color:var(--muted); margin-top:2px;}}
