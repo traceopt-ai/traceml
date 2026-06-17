@@ -71,7 +71,6 @@ def build_model_combined_section() -> Dict[str, Any]:
             .classes("items-center")
             .style("gap:12px; margin-top:16px;")
         ):
-            sev = ui.label("").classes("sevpill")
             verdict = ui.label("analyzing step composition").classes("verdict")
 
         with (
@@ -94,7 +93,6 @@ def build_model_combined_section() -> Dict[str, Any]:
         "seg_divs": seg_divs,
         "seg_labs": seg_labs,
         "win": win,
-        "sev": sev,
         "verdict": verdict,
         "kpis": kpis,
         "_last_sig": None,
@@ -141,20 +139,13 @@ def update_model_combined_section(
 
     dom_key = max(theme.PHASES, key=lambda p: vals[p[1]])[1]
     share = vals[dom_key] / tot if tot > 0 else 0.0
-    bound, name = theme.verdict_for(dom_key)
-    panel["verdict"].text = f"{bound}. {name} is {share * 100:.0f}% of step."
-    if dom_key in ("dataloader_fetch", "wait_proxy"):
-        panel["sev"].text = "warn"
-        panel["sev"].style(
-            f"background:rgba(239,108,0,0.12); color:{theme.SEV['warn']}; "
-            "border:1px solid rgba(239,108,0,0.25);"
-        )
-    else:
-        panel["sev"].text = "healthy"
-        panel["sev"].style(
-            f"background:rgba(46,125,50,0.12); color:{theme.SEV['healthy']}; "
-            "border:1px solid rgba(46,125,50,0.25);"
-        )
+    # Descriptive only: severity/diagnosis lives in the Diagnostics rail
+    # (single source of truth); the step-time card never asserts health.
+    name = theme.verdict_for(dom_key)[1]
+    label = name[:1].upper() + name[1:]
+    panel["verdict"].text = (
+        f"{label} is the largest phase ({share * 100:.0f}% of step)."
+    )
 
     k = panel["kpis"]
     k["median"].content = theme.kval(
