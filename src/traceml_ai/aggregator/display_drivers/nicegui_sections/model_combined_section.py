@@ -2,9 +2,16 @@
 Step Time analysis — the dashboard hero (PR2 revamp).
 
 Signature element: a phase RIBBON (current-step phase proportions) plus a
-plain-language VERDICT sentence ("Compute-bound. optimizer is 62% of step."),
-then a compact step-KPI strip. The ribbon recomposes (CSS width transition) as
-the bottleneck shifts. Renderer payload (StepCombinedTimeResult) is unchanged.
+VERDICT, then a compact step-KPI strip. The ribbon recomposes (CSS width
+transition) as the bottleneck shifts.
+
+The ribbon and KPI strip are driven by StepCombinedTimeResult
+(``update_model_combined_section``). The VERDICT is NOT computed here: it is
+taken verbatim from the diagnosis engine's step-time ``status`` via
+``update_step_verdict`` (fed the model-diagnostics payload), so it is identical
+to the Diagnostics rail, the CLI, and final_summary, and tracks any future
+change to the diagnosis vocabulary automatically. The card never derives its
+own classification — interpretation belongs to the engine.
 """
 
 from __future__ import annotations
@@ -137,21 +144,22 @@ def update_model_combined_section(
         seg.style(f"width:{pct:.3f}%")
         sl.text = lab if pct >= 7.0 else ""
 
-    dom_key = max(theme.PHASES, key=lambda p: vals[p[1]])[1]
-    share = vals[dom_key] / tot if tot > 0 else 0.0
-    # Descriptive only: severity/diagnosis lives in the Diagnostics rail
-    # (single source of truth); the step-time card never asserts health.
-    name = theme.verdict_for(dom_key)[1]
-    label = name[:1].upper() + name[1:]
-    panel["verdict"].text = (
-        f"{label} is the largest phase ({share * 100:.0f}% of step)."
-    )
+    # The verdict is intentionally NOT set here. It is owned by the diagnosis
+    # engine and set via update_step_verdict (fed the model-diagnostics
+    # payload), so the card never asserts a classification of its own.
 
     k = panel["kpis"]
+    # median_total / worst_total are window SUMS (the median/worst rank's total
+    # over the aligned window). Divide by steps_used for the per-step value the
+    # "MEDIAN STEP" / "WORST STEP" tiles report (otherwise they read ~N x too
+    # large, e.g. 14725 ms instead of 147 ms over a 100-step window).
+    n_steps = max(int(st.steps_used or 1), 1)
     k["median"].content = theme.kval(
-        f"{float(st.median_total or 0):.0f}", "ms"
+        f"{float(st.median_total or 0) / n_steps:.0f}", "ms"
     )
-    k["worst"].content = theme.kval(f"{float(st.worst_total or 0):.0f}", "ms")
+    k["worst"].content = theme.kval(
+        f"{float(st.worst_total or 0) / n_steps:.0f}", "ms"
+    )
     k["gap"].content = theme.kval(f"{float(st.skew_pct or 0):.0f}", "%")
     wsh = vals["wait_proxy"] / tot * 100.0 if tot > 0 else 0.0
     k["wait"].content = theme.kval(f"{wsh:.0f}", "%")
@@ -159,3 +167,27 @@ def update_model_combined_section(
         f"r{int(st.worst_rank)}" if st.worst_rank is not None else "—"
     )
     panel["win"].text = f"{int(st.steps_used or 0)} aligned steps"
+
+
+def update_step_verdict(panel: Dict[str, Any], diag_payload: Any) -> None:
+    """Set the hero verdict from the diagnosis engine's step-time status.
+
+    Single source of truth: the verdict text is the engine's canonical
+    ``status`` string for the step-time domain — the exact value shown by the
+    Diagnostics rail, the CLI, and final_summary. The card derives no
+    classification of its own, so it tracks any change to the diagnosis
+    vocabulary automatically. Fed the model-diagnostics payload (the same
+    payload the Diagnostics rail consumes); missing/empty ticks leave the
+    previous verdict untouched rather than blanking it.
+    """
+    items = (
+        diag_payload.get("items") if isinstance(diag_payload, dict) else None
+    )
+    if not isinstance(items, list):
+        return
+    for it in items:
+        if isinstance(it, dict) and it.get("source") == "step_time":
+            status = str(it.get("status") or "").strip()
+            if status:
+                panel["verdict"].text = status
+            return

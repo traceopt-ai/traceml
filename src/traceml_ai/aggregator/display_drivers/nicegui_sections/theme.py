@@ -167,18 +167,6 @@ def nice_ymax(values: Any, floor: float = 10.0) -> float:
     return float((n + 1) * step) if m > n * step else float(n * step)
 
 
-def verdict_for(dom_key: str) -> Tuple[str, str]:
-    """(bound-type, phase friendly name) for the plain-language verdict."""
-    return {
-        "dataloader_fetch": ("Input-bound", "dataloader"),
-        "h2d": ("Transfer-bound", "host-to-device copy"),
-        "forward": ("Compute-bound", "forward"),
-        "backward": ("Compute-bound", "backward"),
-        "optimizer_step": ("Compute-bound", "optimizer"),
-        "wait_proxy": ("Wait-heavy", "idle wait"),
-    }.get(dom_key, ("", dom_key))
-
-
 # --- ECharts option builders ---------------------------------------------
 _GRID = "rgba(17,24,39,0.05)"
 _AXIS = "rgba(17,24,39,0.14)"

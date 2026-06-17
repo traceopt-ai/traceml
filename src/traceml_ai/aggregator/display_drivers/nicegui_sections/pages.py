@@ -24,6 +24,7 @@ from .layer_timer_table_section import (
 from .model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
+    update_step_verdict,
 )
 from .model_diagnostics_section import (
     build_model_diagnostics_section,
@@ -137,10 +138,10 @@ def define_pages(cls):
                 .style("gap:16px; flex-wrap:wrap;")
             ):
                 with _cell("2.4"):
-                    cards = build_model_combined_section()
+                    hero_cards = build_model_combined_section()
                     cls.subscribe_layout(
                         MODEL_COMBINED_LAYOUT,
-                        cards,
+                        hero_cards,
                         update_model_combined_section,
                     )
                 with _cell("1"):
@@ -189,11 +190,19 @@ def define_pages(cls):
                         MODEL_MEMORY_LAYOUT, cards, update_step_memory_section
                     )
                 with _cell("1"):
-                    cards = build_model_diagnostics_section()
+                    diag_cards = build_model_diagnostics_section()
+
+                    # One MODEL_DIAGNOSTICS_LAYOUT subscriber drives BOTH the
+                    # rail and the hero verdict, so the hero shows the engine's
+                    # step-time status verbatim (single source of truth) and
+                    # auto-tracks any diagnosis-vocab change. Two subscribers on
+                    # one layout/client would evict each other.
+                    def _update_diag(_c, d, _dc=diag_cards, _hc=hero_cards):
+                        update_model_diagnostics_section(_dc, d)
+                        update_step_verdict(_hc, d)
+
                     cls.subscribe_layout(
-                        MODEL_DIAGNOSTICS_LAYOUT,
-                        cards,
-                        update_model_diagnostics_section,
+                        MODEL_DIAGNOSTICS_LAYOUT, diag_cards, _update_diag
                     )
 
         cls.ensure_ui_timer(0.75)

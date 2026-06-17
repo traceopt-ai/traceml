@@ -19,27 +19,35 @@ _SOURCE_NAMES = {
     "system": "System",
     "process": "Process",
 }
-_WARN = (
-    "INPUT_BOUND",
-    "INPUT_STRAGGLER",
-    "COMPUTE_STRAGGLER",
-    "WAIT_HEAVY",
-    "STRAGGLER",
-    "CREEP",
-    "IMBALANCE",
-    "OVERHANG",
-)
-_CRIT = ("CRIT", "OOM", "HIGH_PRESSURE", "PRESSURE")
-_GOOD = ("COMPUTE_BOUND", "BALANCED", "NORMAL", "HEALTHY", "OK")
+# Color buckets come from the engine's own severity (info|warn|crit), already
+# present in the payload — never re-parsed from the status text. New diagnosis
+# kinds therefore color correctly with no change here (single source of truth).
+_NEUTRAL_KINDS = ("NO_DATA", "WARMUP", "NO_GPU")
 
 
-def _sev_of(status: str) -> str:
-    s = (status or "").upper()
-    if any(w in s for w in _CRIT):
+def _row_sev(item: Dict[str, Any]) -> str:
+    """Color bucket for one diagnosis row, from the engine's per-item severity.
+
+    ``info`` splits into neutral grey for 'no verdict yet' states
+    (NO_DATA/WARMUP/NO_GPU) and healthy green for a real all-clear diagnosis.
+    """
+    sev = str(item.get("severity", "")).lower()
+    if sev == "crit":
         return "crit"
-    if any(w in s for w in _GOOD):
-        return "healthy"
-    if any(w in s for w in _WARN):
+    if sev == "warn":
+        return "warn"
+    kind = str(item.get("kind", "")).upper()
+    if any(k in kind for k in _NEUTRAL_KINDS):
+        return "neutral"
+    return "healthy"
+
+
+def _overall_sev(severity: Any) -> str:
+    """Color bucket for the overall pill, from engine overall_severity."""
+    s = str(severity).lower()
+    if s == "crit":
+        return "crit"
+    if s == "warn":
         return "warn"
     return "neutral"
 
@@ -82,7 +90,7 @@ def update_model_diagnostics_section(
         panel["_last"] = payload
         panel["hint"].text = ""
 
-        sev = _sev_of(str(_overall(payload)))
+        sev = _overall_sev(_overall(payload))
         col = theme.SEV.get(sev, theme.SEV["neutral"])
         panel["overall"].text = str(_overall(payload)).upper()
         panel["overall"].style(
@@ -123,7 +131,7 @@ def _row_html(item: Dict[str, Any]) -> str:
     reason = html.escape(str(item.get("reason", "")).strip())
     if len(reason) > 130:
         reason = reason[:127] + "…"
-    sev = _sev_of(status)
+    sev = _row_sev(item)
     col = theme.SEV.get(sev, theme.SEV["neutral"])
     conf = str(item.get("confidence_label", "") or "").strip()
     conf_html = (
