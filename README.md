@@ -37,6 +37,12 @@ It helps answer:
 - Is memory usage silently creeping upward during the run?
 - Did a recent code, data, or infrastructure change slow training down?
 
+![TraceML live dashboard](docs/assets/dashboard_live.gif)
+
+*TraceML's live `--mode=dashboard` on a 2-GPU DDP run. The dataloader dominates
+each step while the GPUs sit mostly idle, so TraceML flags the run INPUT-BOUND
+(critical) in the Diagnostics rail.*
+
 Here, **health** means runtime performance health: step time, input/compute/wait
 balance, memory behavior, distributed rank skew, and run-to-run change.
 
