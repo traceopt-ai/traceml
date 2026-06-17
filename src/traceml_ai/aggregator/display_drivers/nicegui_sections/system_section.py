@@ -51,18 +51,20 @@ def build_system_section() -> Dict[str, Any]:
             .classes("w-full")
             .style("gap:9px; margin-top:12px; flex-wrap:wrap;")
         ):
-            for key, lab, acc in [
-                ("cpu", "CPU", theme.C_CPU),
-                ("ram", "RAM", theme.C_CPU),
-                ("gmem", "GPU MEM", theme.C_GPU),
-                ("gtemp", "GPU TEMP", theme.C_GPU),
+            for key, lab, acc, qual in [
+                ("cpu", "CPU", theme.C_CPU, "now"),
+                ("ram", "RAM", theme.C_CPU, "now"),
+                ("gmem", "GPU MEM", theme.C_GPU, "worst gpu"),
+                ("gtemp", "GPU TEMP", theme.C_GPU, "hottest"),
             ]:
                 with (
                     ui.element("div")
                     .classes("kpi")
                     .style(f"--acc:{acc}; min-width:104px;")
                 ):
-                    ui.label(lab).classes("klab")
+                    ui.html(
+                        f"{lab} <span class='kq'>{qual}</span>"
+                    ).classes("klab")
                     kpis[key] = ui.html("—").classes("kval")
     return {"chart": chart, "win": win, "kpis": kpis}
 
@@ -118,7 +120,9 @@ def build_gpu_gauge_section() -> Dict[str, Any]:
         "display:flex; flex-direction:column; overflow:hidden;"
     )
     with card:
-        ui.label("GPU utilization").classes("ctitle")
+        ui.html(
+            "GPU utilization <span class='kq'>avg · now</span>"
+        ).classes("ctitle")
         chart = ui.echart(theme.gauge_options()).style(
             "height:180px; width:100%; flex:1; min-height:150px;"
         )
