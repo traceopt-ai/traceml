@@ -42,14 +42,37 @@ from .system_section import (
 )
 
 
-def build_header(cls, show_layers: bool) -> None:
-    """Brand run-context header with the live-staleness chip."""
+def _run_context_text(payload) -> str:
+    """Run config (world_size / GPU count / host) from the system payload ctx."""
+    rollups = payload.get("rollups", {}) if isinstance(payload, dict) else {}
+    ctx = rollups.get("ctx") if isinstance(rollups, dict) else None
+    if not ctx:
+        return ""
+    ws = int(ctx.get("world_size") or 0)
+    gc = int(ctx.get("gpu_count") or 0)
+    host = str(ctx.get("hostname") or "").split(".")[0]
+    parts = []
+    if ws:
+        parts.append(f"world_size {ws}")
+    if gc:
+        parts.append(f"{gc}-GPU node")
+    if host:
+        parts.append(host)
+    return "  ·  ".join(parts)
+
+
+def build_header(cls, show_layers: bool):
+    """Brand run-context header: wordmark, run config, live-staleness chip."""
     with ui.element("div").classes("glass reveal").style("padding:15px 22px;"):
         with ui.row().classes("w-full items-center").style("gap:16px;"):
             with ui.row().style("gap:0; align-items:baseline;"):
                 ui.label("Trace").classes("wm-trace")
                 ui.label("ML").classes("wm-ml")
             ui.label("live training").classes("eyebrow")
+            ctx = ui.label("").style(
+                "font-family:var(--mono); font-size:11px; "
+                "color:var(--muted); display:none;"
+            )
             if show_layers:
                 ui.link("layers", "/layers").style(
                     "font-family:var(--mono); font-size:12px; color:var(--orange-strong); "
@@ -65,6 +88,7 @@ def build_header(cls, show_layers: bool) -> None:
                 ui.label("live").style(
                     "font-family:var(--mono); font-size:11px; color:#16a34a; font-weight:500;"
                 )
+    return ctx
 
 
 class _StaleProxy:
@@ -104,7 +128,7 @@ def define_pages(cls):
                 "gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;"
             )
         ):
-            build_header(cls, deep_enabled)
+            header_ctx = build_header(cls, deep_enabled)
 
             # Row 1: hero (step-time ribbon + verdict) | GPU gauge
             with (
@@ -138,9 +162,18 @@ def define_pages(cls):
 
             # One SYSTEM_LAYOUT subscriber drives both the chart and the gauge
             # (two subscribers on one layout/client would evict each other).
-            def _update_system(_c, d, _sc=system_cards, _gc=gauge_cards):
+            def _update_system(
+                _c, d, _sc=system_cards, _gc=gauge_cards, _h=header_ctx
+            ):
                 update_system_section(_sc, d)
                 update_gpu_gauge_section(_gc, d)
+                txt = _run_context_text(d)
+                if txt:
+                    _h.text = txt
+                    _h.style(
+                        "font-family:var(--mono); font-size:11px; "
+                        "color:var(--muted); display:inline-block;"
+                    )
 
             cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
 
