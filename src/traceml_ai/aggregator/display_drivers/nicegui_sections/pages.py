@@ -25,7 +25,7 @@ from .system_section import build_system_section, update_system_section
 from .ui_shell import PAGE_GAP_CLASS, VIEWPORT_STYLE
 
 
-def build_top_tabs(active: str, show_layers: bool, cls):
+def build_top_tabs(active: str, cls):
     """Shared top navigation tabs."""
     with ui.row().classes("w-full px-4 pt-1 pb-1 items-center"):
         ui.label("TraceML").classes("text-3xl font-extrabold mr-6").style(
@@ -68,7 +68,7 @@ def define_pages(cls):
             """
         )
 
-        build_top_tabs(active="overview", show_layers=deep_enabled, cls=cls)
+        build_top_tabs(active="overview", cls=cls)
 
         with (
             ui.row()
@@ -156,37 +156,3 @@ def define_pages(cls):
 
         if not cls._ui_ready:
             cls._ui_ready = True
-
-    if deep_enabled:
-
-        @ui.page("/layers")
-        def layer_page():
-            build_top_tabs(active="layers", show_layers=True, cls=cls)
-
-            with ui.row().classes("m-2 w-[99%] gap-2 flex-nowrap items-start"):
-                with ui.column().classes("w-[54%]"):
-                    cards = build_layer_memory_table_section()
-                    cls.subscribe_layout(
-                        LAYER_COMBINED_MEMORY_LAYOUT,
-                        cards,
-                        update_layer_memory_table_section,
-                    )
-
-                with ui.column().classes("w-[44%]"):
-                    cards = build_layer_timer_table_section()
-                    cls.subscribe_layout(
-                        LAYER_COMBINED_TIMER_LAYOUT,
-                        cards,
-                        update_layer_timer_table_section,
-                    )
-
-            cls.ensure_ui_timer(1.0)
-
-            if not cls._ui_ready:
-                cls._ui_ready = True
-
-    else:
-
-        @ui.page("/layers")
-        def layer_page_disabled():
-            ui.navigate.to("/")

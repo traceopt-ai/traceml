@@ -210,7 +210,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_AGGREGATOR_HOST"] = aggregator_cfg.connect_host
     env["TRACEML_AGGREGATOR_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_AGGREGATOR_PORT"] = str(aggregator_cfg.port)
-    env["TRACEML_REMOTE_MAX_ROWS"] = str(cfg["remote_max_rows"])
     env["TRACEML_DASHBOARD_PORT"] = str(cfg["dashboard_port"])
     env["TRACEML_DASHBOARD_AUTO_OPEN"] = (
         "1" if cfg["dashboard_auto_open"] else "0"

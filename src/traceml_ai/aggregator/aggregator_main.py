@@ -122,9 +122,6 @@ def read_traceml_env() -> dict[str, Any]:
         "aggregator_port": int(
             os.environ.get("TRACEML_AGGREGATOR_PORT", "29765")
         ),
-        "remote_max_rows": int(
-            os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
-        ),
         "dashboard_port": int(
             os.environ.get("TRACEML_DASHBOARD_PORT", "8765")
         ),
@@ -196,7 +193,6 @@ def main() -> None:
             render_interval_sec=float(cfg["interval"]),
             enable_logging=bool(cfg["enable_logging"]),
             logs_dir=str(cfg["logs_dir"]),
-            remote_max_rows=int(cfg["remote_max_rows"]),
             dashboard_port=int(cfg["dashboard_port"]),
             dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
             session_id=session_id,

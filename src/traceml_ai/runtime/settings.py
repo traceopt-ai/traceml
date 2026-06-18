@@ -67,7 +67,6 @@ class TraceMLSettings:
     render_interval_sec: float = 1.0
     logs_dir: str = "./logs"
     enable_logging: bool = False
-    remote_max_rows: int = 200
     dashboard_port: int = 8765
     dashboard_auto_open: bool = True
     aggregator: AggregatorTransportSettings = AggregatorTransportSettings()

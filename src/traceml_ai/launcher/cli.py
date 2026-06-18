@@ -85,12 +85,6 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="TraceML aggregator port.",
     )
     parser.add_argument(
-        "--remote-max-rows",
-        type=int,
-        default=None,
-        help="Maximum number of rows returned by remote telemetry queries.",
-    )
-    parser.add_argument(
         "--dashboard-port",
         type=int,
         default=None,
