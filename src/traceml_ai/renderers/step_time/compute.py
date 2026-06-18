@@ -204,6 +204,23 @@ class StepCombinedComputer:
         overall_rank_scores = self._overall_rank_scores(
             per_metric_rank_sums, ranks_present
         )
+        per_rank_timing = {
+            int(r): {
+                "dataloader_fetch": float(
+                    per_metric_rank_sums.get("dataloader_fetch", {}).get(
+                        r, 0.0
+                    )
+                ),
+                "h2d": float(h2d_sums.get(r, 0.0)),
+                "forward": float(fwd_sums.get(r, 0.0)),
+                "backward": float(bwd_sums.get(r, 0.0)),
+                "optimizer_step": float(opt_sums.get(r, 0.0)),
+                "step_time": float(step_sums.get(r, 0.0)),
+                "wait_proxy": float(wait_rank_sums.get(r, 0.0)),
+                "total_step": float(overall_rank_scores.get(r, 0.0)),
+            }
+            for r in ranks_present
+        }
         overall_worst_rank = (
             max(overall_rank_scores, key=overall_rank_scores.get)
             if overall_rank_scores
@@ -311,6 +328,7 @@ class StepCombinedComputer:
         return StepCombinedTimeResult(
             metrics=list(metrics.values()),
             status_message=status,
+            per_rank_timing=per_rank_timing,
             rank_heatmap=rank_heatmap,
         )
 
@@ -436,11 +454,13 @@ class StepCombinedComputer:
                 return StepCombinedTimeResult(
                     metrics=self._last_ok.metrics,
                     status_message=msg,
+                    per_rank_timing=self._last_ok.per_rank_timing,
                     rank_heatmap=self._last_ok.rank_heatmap,
                 )
         return StepCombinedTimeResult(
             metrics=[],
             status_message="No fresh step-combined data",
+            per_rank_timing={},
             rank_heatmap=None,
         )
 

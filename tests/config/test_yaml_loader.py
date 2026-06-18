@@ -228,7 +228,6 @@ def test_resolve_config_history_disabled_via_cli() -> None:
 
 def test_load_yaml_config_unreadable_file(tmp_path: Path) -> None:
     """A file that exists but cannot be read raises OSError with a clear message."""
-    import os
     import sys
 
     if sys.platform == "win32":
@@ -289,3 +288,49 @@ def test_resolve_config_ui_mode_takes_priority_over_deprecated_mode() -> None:
         normalised_env = raw_env
     result = resolve_config(cli, normalised_env, _no_yaml(), _defaults())
     assert result["mode"] == "dashboard"
+
+
+# dashboard_port / dashboard_auto_open  (TRA-68 config keys)
+
+
+def test_load_yaml_config_dashboard_keys(tmp_path: Path) -> None:
+    p = _write(
+        tmp_path,
+        """\
+        dashboard_port: 9000
+        dashboard_auto_open: false
+        """,
+    )
+    result = load_yaml_config(p)
+    assert result["dashboard_port"] == 9000
+    assert result["dashboard_auto_open"] is False
+
+
+def test_load_yaml_config_dashboard_port_type_error(tmp_path: Path) -> None:
+    p = _write(tmp_path, "dashboard_port: not_a_port\n")
+    with pytest.raises(ValueError, match="dashboard_port"):
+        load_yaml_config(p)
+
+
+def test_resolve_config_dashboard_defaults() -> None:
+    result = resolve_config(_no_cli(), _no_env(), _no_yaml(), _defaults())
+    assert result["dashboard_port"] == 8765
+    assert result["dashboard_auto_open"] is True
+
+
+def test_resolve_config_dashboard_env_coercion() -> None:
+    env = {
+        "TRACEML_DASHBOARD_PORT": "9000",
+        "TRACEML_DASHBOARD_AUTO_OPEN": "0",
+    }
+    result = resolve_config(_no_cli(), env, _no_yaml(), _defaults())
+    assert result["dashboard_port"] == 9000
+    assert result["dashboard_auto_open"] is False
+
+
+def test_resolve_config_dashboard_cli_beats_env_and_yaml() -> None:
+    cli = {**_no_cli(), "dashboard_port": 7000}
+    env = {"TRACEML_DASHBOARD_PORT": "9000"}
+    yaml = {"dashboard_port": 8000}
+    result = resolve_config(cli, env, yaml, _defaults())
+    assert result["dashboard_port"] == 7000

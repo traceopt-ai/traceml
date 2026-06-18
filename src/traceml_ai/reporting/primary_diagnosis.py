@@ -25,7 +25,8 @@ test and easy for contributors to evolve.
 Primary diagnosis policy
 ------------------------
 1. Step-time rank-skew findings become primary performance findings:
-   ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, ``STRAGGLER``.
+   ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, ``H2D_STRAGGLER``,
+   ``WAIT_STRAGGLER``, ``STRAGGLER``.
 2. Step-time phase-share findings become primary performance findings:
    ``WAIT_HEAVY``, ``INPUT_BOUND``, ``COMPUTE_BOUND``.
 3. If Step Time is ``BALANCED`` and System reports low or moderate GPU
@@ -52,8 +53,9 @@ Evidence policy
     where the average step time went.
 
 ``rank_comparison``
-    Used for ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, and ``STRAGGLER``.
-    Values come from ``step_time.global.median[metric]`` and
+    Used for ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``,
+    ``H2D_STRAGGLER``, ``WAIT_STRAGGLER``, and ``STRAGGLER``. Values come
+    from ``step_time.global.median[metric]`` and
     ``step_time.global.worst[metric]`` because the diagnosis compares ranks.
 
 ``utilization_fallback``
@@ -83,6 +85,8 @@ PHASE_SHARE_KINDS = {"INPUT_BOUND", "WAIT_HEAVY", "COMPUTE_BOUND"}
 STRAGGLER_KINDS = {
     "INPUT_STRAGGLER",
     "COMPUTE_STRAGGLER",
+    "H2D_STRAGGLER",
+    "WAIT_STRAGGLER",
     "STRAGGLER",
 }
 INSUFFICIENT_STEP_TIME_KINDS = {"NO_DATA", "WARMUP"}
@@ -258,6 +262,10 @@ def _metric_for_step_time_issue(issue: Mapping[str, Any]) -> Optional[str]:
         if phase in {"forward", "backward", "optimizer"}:
             return f"{phase}_ms"
         return "compute_ms"
+    if kind == "H2D_STRAGGLER":
+        return "h2d_ms"
+    if kind == "WAIT_STRAGGLER":
+        return "wait_ms"
     return None
 
 
@@ -273,6 +281,10 @@ def _metric_for_primary_diagnosis(
         if phase in {"forward", "backward", "optimizer"}:
             return f"{phase}_ms"
         return "compute_ms"
+    if kind == "H2D_STRAGGLER":
+        return "h2d_ms"
+    if kind == "WAIT_STRAGGLER":
+        return "wait_ms"
     return None
 
 
@@ -391,6 +403,16 @@ def _straggler_comparisons(
             metric="compute_ms",
             phase="compute",
         ),
+        _comparison(
+            step_time_summary=step_time_summary,
+            metric="h2d_ms",
+            phase="h2d",
+        ),
+        _comparison(
+            step_time_summary=step_time_summary,
+            metric="wait_ms",
+            phase="wait",
+        ),
     ]
 
 
@@ -430,7 +452,7 @@ def _rank_comparison_summary(
 ) -> str:
     """Return a concise primary summary for rank-comparison diagnoses."""
     if kind == "STRAGGLER":
-        return "Input and compute varied across ranks."
+        return "Multiple clean-step components varied across ranks."
 
     metric = str(evidence.get("metric") or "step_time")
     phase = str(evidence.get("phase") or metric.replace("_ms", ""))

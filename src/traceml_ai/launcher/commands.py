@@ -156,6 +156,10 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
         "history_enabled": (False if args.no_history else None),
+        "dashboard_port": args.dashboard_port,
+        "dashboard_auto_open": (
+            False if args.no_dashboard_auto_open else None
+        ),
     }
 
     cfg = resolve_config(
@@ -206,6 +210,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_AGGREGATOR_HOST"] = aggregator_cfg.connect_host
     env["TRACEML_AGGREGATOR_BIND_HOST"] = aggregator_cfg.bind_host
     env["TRACEML_AGGREGATOR_PORT"] = str(aggregator_cfg.port)
+    env["TRACEML_REMOTE_MAX_ROWS"] = str(cfg["remote_max_rows"])
+    env["TRACEML_DASHBOARD_PORT"] = str(cfg["dashboard_port"])
+    env["TRACEML_DASHBOARD_AUTO_OPEN"] = (
+        "1" if cfg["dashboard_auto_open"] else "0"
+    )
     env["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
         int(getattr(args, "summary_window_rows", DEFAULT_SUMMARY_WINDOW_ROWS))
     )

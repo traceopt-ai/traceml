@@ -35,6 +35,8 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "enable_logging": ("TRACEML_ENABLE_LOGGING", bool),
     "logs_dir": ("TRACEML_LOGS_DIR", str),
     "history_enabled": ("TRACEML_HISTORY_ENABLED", bool),
+    "dashboard_port": ("TRACEML_DASHBOARD_PORT", int),
+    "dashboard_auto_open": ("TRACEML_DASHBOARD_AUTO_OPEN", bool),
 }
 
 # Fallback values used when no CLI flag, env var, or yaml entry is present.
@@ -44,6 +46,8 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "enable_logging": False,
     "logs_dir": "./logs",
     "history_enabled": True,
+    "dashboard_port": 8765,
+    "dashboard_auto_open": True,
 }
 
 # Env var strings treated as True for bool fields.

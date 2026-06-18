@@ -9,8 +9,8 @@ diagnostics orchestration loop.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from traceml_ai.core.registry import Registry
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
@@ -29,6 +29,9 @@ class ModelDiagnosticContext:
 
     step_time_metrics: Sequence[StepCombinedTimeMetric]
     step_memory_metrics: Sequence[StepMemoryCombinedMetric]
+    step_time_per_rank_timing: Dict[int, Dict[str, float]] = field(
+        default_factory=dict
+    )
     step_memory_status_message: Optional[str] = None
     gpu_total_bytes: Optional[float] = None
 

@@ -85,6 +85,28 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="TraceML aggregator port.",
     )
     parser.add_argument(
+        "--remote-max-rows",
+        type=int,
+        default=None,
+        help="Maximum number of rows returned by remote telemetry queries.",
+    )
+    parser.add_argument(
+        "--dashboard-port",
+        type=int,
+        default=None,
+        help="Port for the dashboard web UI (mode=dashboard). Default: 8765.",
+    )
+    parser.add_argument(
+        "--no-dashboard-auto-open",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "Do not auto-open a browser for the dashboard UI. Use on "
+            "headless or remote machines."
+        ),
+    )
+    parser.add_argument(
         "--summary-window-rows",
         type=int,
         default=DEFAULT_SUMMARY_WINDOW_ROWS,

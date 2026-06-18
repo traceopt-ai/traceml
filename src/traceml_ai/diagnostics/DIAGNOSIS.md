@@ -65,9 +65,11 @@ Training-step timing.
 - `NO_DATA`: no usable step-time data.
 - `WARMUP`: some data exists, but not enough for a stable diagnosis.
 - `BALANCED`: no clear timing bottleneck or rank straggler.
-- `STRAGGLER`: one rank has materially slower total step time.
+- `STRAGGLER`: one rank has a mixed clean-step straggler signal.
 - `INPUT_STRAGGLER`: one rank has materially higher dataloader time.
-- `COMPUTE_STRAGGLER`: one rank has materially higher compute time.
+- `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
+- `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
+- `WAIT_STRAGGLER`: one rank has materially higher residual `wait_proxy`.
 - `INPUT_BOUND`: dataloader time dominates the typical step.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
 - `WAIT_HEAVY`: unattributed residual time is a material share of the step.
@@ -83,11 +85,22 @@ wait_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
 
-When input and compute straggler signals appear together, step-time diagnosis
-attributes the primary cause to `INPUT_STRAGGLER` if dataloader excess is within
-the configured tolerance of compute excess. Otherwise the primary diagnosis
-stays `STRAGGLER`, with both input and compute findings preserved as secondary
-issues.
+Rank-local stragglers use clean-step evidence. TraceML first discounts backward
+time that can be explained by another rank's non-backward work:
+
+```text
+wait_r = wait_proxy_r
+non_bwd_r = dataloader_r + h2d_r + forward_r + optimizer_r + wait_r
+clean_bwd_r = max(0, backward_r - max(0, max(non_bwd) - non_bwd_r))
+clean_compute_r = forward_r + clean_bwd_r + optimizer_r
+clean_step_r = dataloader_r + h2d_r + clean_compute_r + wait_r
+score = (max(clean_step) - median(clean_step)) / median(actual_step)
+```
+
+If `score < 0.10`, TraceML does not report a rank-local straggler. Otherwise it
+blames the largest worst-rank excess over peer median among dataloader, clean
+compute, H2D, and wait. The largest excess must dominate the next-largest
+excess by `1.25x`; otherwise the diagnosis stays mixed `STRAGGLER`.
 
 It can include validation, checkpointing, logging, framework orchestration, CPU
 stalls, unobserved transfer stalls, or other work inside the timed step but

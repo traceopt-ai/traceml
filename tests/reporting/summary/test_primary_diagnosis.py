@@ -65,13 +65,17 @@ def _step_time(
             },
             "median": {
                 "dataloader_ms": {"value": 5.0, "idx": "0"},
+                "h2d_ms": {"value": 10.0, "idx": "1"},
                 "compute_ms": {"value": 100.0, "idx": "1"},
                 "optimizer_ms": {"value": 10.0, "idx": "3"},
+                "wait_ms": {"value": 20.0, "idx": "0"},
             },
             "worst": {
                 "dataloader_ms": {"value": 80.0, "idx": "2"},
+                "h2d_ms": {"value": 40.0, "idx": "2"},
                 "compute_ms": {"value": 180.0, "idx": "2"},
                 "optimizer_ms": {"value": 90.0, "idx": "2"},
+                "wait_ms": {"value": 70.0, "idx": "2"},
             },
         },
     }
@@ -180,6 +184,40 @@ def test_compute_straggler_uses_diagnosed_compute_phase() -> None:
     assert primary["evidence"]["worst"] == {"rank": 2, "value_ms": 90.0}
     assert primary["evidence"]["delta_ms"] == 80.0
     assert primary["evidence"]["ratio"] == 9.0
+
+
+def test_h2d_straggler_uses_rank_comparison_evidence() -> None:
+    primary = _primary(
+        _step_time(
+            "H2D_STRAGGLER",
+            status="H2D STRAGGLER",
+            phase="h2d",
+        )
+    )
+
+    assert primary["kind"] == "H2D_STRAGGLER"
+    assert primary["summary"] == (
+        "Rank r2 h2d was 40.0ms vs median rank r1 at 10.0ms."
+    )
+    assert primary["evidence"]["metric"] == "h2d_ms"
+    assert primary["evidence"]["phase"] == "h2d"
+
+
+def test_wait_straggler_uses_rank_comparison_evidence() -> None:
+    primary = _primary(
+        _step_time(
+            "WAIT_STRAGGLER",
+            status="WAIT STRAGGLER",
+            phase="wait",
+        )
+    )
+
+    assert primary["kind"] == "WAIT_STRAGGLER"
+    assert primary["summary"] == (
+        "Rank r2 wait was 70.0ms vs median rank r0 at 20.0ms."
+    )
+    assert primary["evidence"]["metric"] == "wait_ms"
+    assert primary["evidence"]["phase"] == "wait"
 
 
 def test_straggler_includes_input_and_compute_comparisons() -> None:

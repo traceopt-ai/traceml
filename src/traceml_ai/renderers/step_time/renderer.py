@@ -79,6 +79,7 @@ class StepCombinedRenderer(BaseRenderer):
         diag = build_step_diagnosis(
             metrics,
             thresholds=LIVE_STEP_TIME_POLICY.thresholds,
+            per_rank_timing=payload.per_rank_timing,
         )
         diag_text = format_cli_diagnosis(diag)
 
