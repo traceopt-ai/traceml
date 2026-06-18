@@ -25,19 +25,21 @@ def _rank(
     *,
     steps: int = 64,
     dataloader: float = 5.0,
+    h2d: float = 0.0,
     forward: float = 30.0,
     backward: float = 50.0,
     optimizer: float = 10.0,
     step_cpu: float | None = None,
 ) -> RankStepSummary:
     compute = forward + backward + optimizer
+    known_step = h2d + compute
     effective_step = max(
-        step_cpu if step_cpu is not None else compute, compute
+        step_cpu if step_cpu is not None else known_step, known_step
     )
     return RankStepSummary(
         steps_analyzed=steps,
         avg_dataloader_ms=dataloader,
-        avg_h2d_ms=0.0,
+        avg_h2d_ms=h2d,
         avg_forward_ms=forward,
         avg_backward_ms=backward,
         avg_optimizer_ms=optimizer,
@@ -205,14 +207,12 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
             0: _rank(
                 dataloader=10.0,
                 forward=40.0,
-                backward=130.0,
-                step_cpu=219.0,
+                backward=190.0,
             ),
             1: _rank(
                 dataloader=70.0,
                 forward=40.0,
                 backward=130.0,
-                step_cpu=219.0,
             ),
         }
     )
@@ -242,7 +242,7 @@ def test_step_time_compute_straggler_card_shows_rank_evidence() -> None:
     assert payload["diagnosis"] == payload["issues"][0]
     assert payload["diagnosis"]["status"] == "COMPUTE STRAGGLER"
     assert (
-        "- Why: r1 forward was slower than peer median (90.0/65.0ms)."
+        "- Why: r1 compute was slower than median global rank (260.0/220.0ms)."
         in payload["card"]
     )
     assert "issues" not in payload["groups"]["rows"]["1"]
@@ -252,37 +252,63 @@ def test_step_time_compute_straggler_card_shows_rank_evidence() -> None:
     _assert_compact_card(payload["card"])
 
 
-def test_step_time_mixed_straggler_can_be_attributed_to_input() -> None:
+def test_step_time_h2d_straggler_card_shows_rank_evidence() -> None:
     payload = _summary(
         {
             0: _rank(
                 dataloader=10.0,
-                forward=40.0,
-                backward=130.0,
+                h2d=0.0,
+                forward=20.0,
+                backward=30.0,
             ),
             1: _rank(
-                dataloader=80.0,
-                forward=90.0,
-                backward=160.0,
+                dataloader=10.0,
+                h2d=80.0,
+                forward=20.0,
+                backward=30.0,
             ),
         }
     )
 
     assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "INPUT STRAGGLER"
+    assert payload["diagnosis"]["status"] == "H2D STRAGGLER"
     assert (
-        "downstream synchronization"
-        in payload["diagnosis"]["evidence"]["downstream_synchronization_note"]
+        "- Why: r1 H2D was slower than median global rank (80.0/40.0ms)."
+        in payload["card"]
+    )
+    assert {issue["kind"] for issue in payload["issues"]} == {"H2D_STRAGGLER"}
+    _assert_compact_card(payload["card"])
+
+
+def test_step_time_wait_straggler_card_shows_rank_evidence() -> None:
+    payload = _summary(
+        {
+            0: _rank(
+                dataloader=10.0,
+                forward=20.0,
+                backward=30.0,
+                step_cpu=60.0,
+            ),
+            1: _rank(
+                dataloader=10.0,
+                forward=20.0,
+                backward=30.0,
+                step_cpu=140.0,
+            ),
+        }
+    )
+
+    assert payload["diagnosis"] == payload["issues"][0]
+    assert payload["diagnosis"]["status"] == "WAIT STRAGGLER"
+    assert (
+        "- Why: r1 wait was higher than median global rank (80.0/40.0ms)."
+        in payload["card"]
     )
     assert {issue["kind"] for issue in payload["issues"]} >= {
-        "STRAGGLER",
-        "INPUT_STRAGGLER",
-        "COMPUTE_STRAGGLER",
+        "WAIT_STRAGGLER",
+        "WAIT_HEAVY",
     }
     assert "issues" not in payload["groups"]["rows"]["1"]
-    assert (
-        "- Why: r1 input was slower than median global rank" in payload["card"]
-    )
     _assert_compact_card(payload["card"])
 
 
@@ -291,25 +317,24 @@ def test_step_time_unexplained_mixed_straggler_stays_straggler() -> None:
         {
             0: _rank(
                 dataloader=10.0,
-                forward=40.0,
-                backward=130.0,
+                forward=20.0,
+                backward=30.0,
             ),
             1: _rank(
-                dataloader=90.0,
-                forward=160.0,
-                backward=260.0,
+                dataloader=60.0,
+                forward=40.0,
+                backward=30.0,
             ),
         }
     )
 
     assert payload["diagnosis"] == payload["issues"][0]
     assert payload["diagnosis"]["status"] == "STRAGGLER"
-    assert {issue["kind"] for issue in payload["issues"]} >= {
-        "STRAGGLER",
-        "INPUT_STRAGGLER",
-        "COMPUTE_STRAGGLER",
-    }
-    assert "- Why: Input and compute varied across ranks." in payload["card"]
+    assert {issue["kind"] for issue in payload["issues"]} == {"STRAGGLER"}
+    assert (
+        "- Why: Multiple clean-step components varied across ranks."
+        in payload["card"]
+    )
     _assert_compact_card(payload["card"])
 
 
@@ -318,19 +343,19 @@ def test_step_time_priority_prefers_straggler_over_wait_heavy() -> None:
         {
             0: _rank(
                 dataloader=10.0,
-                forward=40.0,
-                backward=130.0,
-                step_cpu=350.0,
+                forward=20.0,
+                backward=90.0,
+                step_cpu=200.0,
             ),
             1: _rank(
                 dataloader=110.0,
-                forward=180.0,
-                backward=270.0,
-                step_cpu=500.0,
+                forward=20.0,
+                backward=30.0,
+                step_cpu=140.0,
             ),
         }
     )
 
-    assert payload["diagnosis"]["status"] == "STRAGGLER"
+    assert payload["diagnosis"]["status"] == "INPUT STRAGGLER"
     assert "WAIT_HEAVY" in {issue["kind"] for issue in payload["issues"]}
-    assert "- Diagnosis: STRAGGLER" in payload["card"]
+    assert "- Diagnosis: INPUT STRAGGLER" in payload["card"]

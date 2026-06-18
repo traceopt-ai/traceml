@@ -92,15 +92,18 @@ Start with the Step Time diagnosis.
 | Diagnosis | Meaning |
 |---|---|
 | `INPUT STRAGGLER` | one rank has meaningfully more dataloader burden than a typical rank |
-| `COMPUTE STRAGGLER` | one rank has meaningfully more forward, backward, or optimizer burden than a typical rank |
-| `STRAGGLER` | input and compute are both materially uneven |
+| `COMPUTE STRAGGLER` | one rank has meaningfully more clean compute burden than a typical rank |
+| `H2D STRAGGLER` | one rank has meaningfully more host-to-device transfer burden than a typical rank |
+| `WAIT STRAGGLER` | one rank has meaningfully more rank-local residual `wait_proxy` than a typical rank |
+| `STRAGGLER` | one rank is slower, but dataloader, clean compute, H2D, and wait excess are mixed |
 | `INPUT-BOUND` | input work is broad, not just one bad rank |
 | `WAIT-HEAVY` | meaningful residual time is not attributed to dataloader, H2D, forward, backward, or optimizer work |
 
-For `COMPUTE STRAGGLER`, TraceML uses DDP-aware rank attribution before blaming
-backward directly. DDP can make a slowdown on one rank show up later during
-synchronization on another rank, so TraceML checks nearby forward and optimizer
-evidence before selecting the reported phase and rank.
+For rank-local stragglers, TraceML uses clean-step attribution before blaming a
+component. It discounts backward time that can be explained by another rank's
+non-backward work, then compares clean step across ranks. The component label is
+the largest worst-rank excess over peer median among dataloader, clean compute,
+H2D, and wait, and it must dominate the next-largest excess by `1.25x`.
 
 Then inspect:
 
@@ -129,8 +132,16 @@ rank:
 - extra forward, backward, or optimizer work
 - framework hooks or callbacks that run on one rank
 
+If the diagnosis is `H2D STRAGGLER`, inspect host-to-device transfer on the
+worst rank: batch shapes, transfer placement, pinned memory, and transfer
+jitter.
+
+If the diagnosis is `WAIT STRAGGLER`, inspect rank-local host-side work on the
+worst rank: logging, checkpointing, validation, callbacks, CPU stalls, or
+unobserved transfer work.
+
 If the diagnosis is `STRAGGLER`, reduce the problem one phase at a time. Start
-with the phase that has the largest worst-vs-median gap.
+with the largest clean-step component gap.
 
 If the diagnosis is `WAIT-HEAVY`, remember that TraceML reports wait as
 residual time. It is not direct NCCL or all-reduce timing. Inspect logging,

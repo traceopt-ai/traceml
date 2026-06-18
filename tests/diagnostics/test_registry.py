@@ -60,6 +60,7 @@ def test_model_diagnostics_payload_uses_registered_domains():
         context: ModelDiagnosticContext,
     ) -> ModelDiagnosisItem:
         assert context.step_time_metrics == ()
+        assert context.step_time_per_rank_timing == {}
         assert context.step_memory_metrics == ()
         return ModelDiagnosisItem(
             source="custom_domain",
@@ -92,6 +93,47 @@ def test_model_diagnostics_payload_uses_registered_domains():
 
     assert payload.status_message == "OK"
     assert [item.source for item in payload.items] == ["custom_domain"]
+    assert payload.items[0].status == "BALANCED"
+
+
+def test_model_step_time_diagnostics_receive_per_rank_timing(monkeypatch):
+    import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
+
+    per_rank_timing = {
+        0: {"dataloader_fetch": 1.0, "total_step": 10.0},
+        1: {"dataloader_fetch": 2.0, "total_step": 11.0},
+    }
+    captured = {}
+
+    def fake_diagnosis(metrics, *, per_rank_timing=None, **kwargs):
+        captured["metrics"] = metrics
+        captured["per_rank_timing"] = per_rank_timing
+        return SimpleNamespace(
+            kind="BALANCED",
+            severity="info",
+            status="BALANCED",
+            reason="No timing issue.",
+            action="Keep monitoring.",
+            note=None,
+            confidence=0.75,
+            steps_used=3,
+            worst_rank=1,
+        )
+
+    monkeypatch.setattr(
+        model_diagnostics,
+        "build_step_diagnosis",
+        fake_diagnosis,
+    )
+
+    payload = build_model_diagnostics_payload(
+        step_time_metrics=(),
+        step_time_per_rank_timing=per_rank_timing,
+        step_memory_metrics=(),
+    )
+
+    assert captured["per_rank_timing"] == per_rank_timing
+    assert payload.items[0].source == "step_time"
     assert payload.items[0].status == "BALANCED"
 
 

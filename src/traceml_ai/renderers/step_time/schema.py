@@ -83,6 +83,7 @@ class StepCombinedRankHeatmap:
 class StepCombinedTimeResult:
     metrics: List[StepCombinedTimeMetric]
     status_message: str = "OK"
+    per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
 
     # Optional dashboard payload (safe for older consumers)
     rank_heatmap: Optional[StepCombinedRankHeatmap] = None
