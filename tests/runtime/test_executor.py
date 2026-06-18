@@ -35,6 +35,7 @@ from traceml_ai.runtime.executor import (
     extract_script_args,
     read_traceml_env,
     run_user_script,
+    write_user_error_log,
 )
 
 
@@ -155,3 +156,16 @@ def test_build_runtime_settings_carries_trace_max_steps():
     )
 
     assert settings.trace_max_steps == 5
+
+
+def test_write_user_error_log_records_error(tmp_path):
+    cfg = {"logs_dir": str(tmp_path), "session_id": "session-a"}
+    error = RuntimeError("boom")
+
+    write_user_error_log(cfg, "User script failed", error)
+
+    log_text = (tmp_path / "session-a" / "torchrun_error.log").read_text(
+        encoding="utf-8"
+    )
+    assert "User script failed" in log_text
+    assert "RuntimeError: boom" in log_text

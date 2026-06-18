@@ -26,7 +26,6 @@ from traceml_ai.runtime.settings import (
     AggregatorTransportSettings,
     TraceMLSettings,
 )
-from traceml_ai.utils.shared_utils import EXECUTION_LAYER
 
 INTERRUPTED_EXIT_CODE = 130
 DEFAULT_LOGS_DIR = "./logs"
@@ -67,7 +66,6 @@ def _append_error_log(
     filename: str,
     header: str,
     error: Optional[BaseException] = None,
-    include_execution_layer: bool = False,
 ) -> None:
     """
     Append an error report to a session log file.
@@ -82,8 +80,6 @@ def _append_error_log(
         Short human-readable header describing the failure.
     error:
         Optional exception to serialize as a traceback.
-    include_execution_layer:
-        Whether to include the last known execution layer in the report.
 
     Notes
     -----
@@ -98,16 +94,6 @@ def _append_error_log(
         with open(path, "a", encoding="utf-8", errors="replace") as f:
             f.write("\n" + "=" * 80 + "\n")
             f.write(f"{_utc_now_iso()}  {header}\n")
-
-            if include_execution_layer:
-                current_execution_layer = getattr(
-                    EXECUTION_LAYER, "current", None
-                )
-                if current_execution_layer is not None:
-                    f.write(
-                        "[TraceML] Last execution point: "
-                        f"{current_execution_layer}\n"
-                    )
 
             if error is not None:
                 traceback.print_exception(
@@ -140,7 +126,6 @@ def write_user_error_log(
         filename=USER_ERROR_LOG_NAME,
         header=header,
         error=error,
-        include_execution_layer=True,
     )
 
 
@@ -161,7 +146,6 @@ def write_runtime_error_log(
         filename=RUNTIME_ERROR_LOG_NAME,
         header=header,
         error=error,
-        include_execution_layer=False,
     )
 
 
@@ -352,8 +336,7 @@ def report_crash(cfg: Dict[str, Any], error: BaseException) -> None:
     """
     Persist an enriched user-script crash report.
 
-    The crash report is written to torchrun_error.log and includes the last
-    known execution layer when available.
+    The crash report is written to torchrun_error.log.
 
     This function intentionally does not print large tracebacks to the terminal,
     because the aggregator may own the terminal UI and overwrite them.
