@@ -110,6 +110,7 @@ def build_step_trend_note(
             in {
                 "COMPUTE_BOUND",
                 "COMPUTE_STRAGGLER",
+                "H2D_STRAGGLER",
                 "STRAGGLER",
             }
             and step_state
@@ -119,7 +120,7 @@ def build_step_trend_note(
                 f"{step_state} ({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
             )
 
-        if diagnosis_kind == "WAIT_HEAVY" and wait_state:
+        if diagnosis_kind in {"WAIT_HEAVY", "WAIT_STRAGGLER"} and wait_state:
             return (
                 "Trend: WAIT* is "
                 f"{wait_state} ({format_trend_pct(wait_tr, deadband_pct=cfg.deadband_pct)})."

@@ -230,6 +230,7 @@ def _build_summary_per_rank_timing(
             "optimizer_step": optimizer,
             "step_time": step_effective,
             "wait_proxy": wait,
+            "total_step": dataloader + step_effective,
         }
     return out
 

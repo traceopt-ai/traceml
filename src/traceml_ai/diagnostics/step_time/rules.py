@@ -9,7 +9,7 @@ primary diagnosis and building richer result payloads.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from ..common import DiagnosticIssue, DiagnosticRule
 from .context import StepTimeAnalysisContext, non_negative_finite
@@ -58,6 +58,7 @@ class _BaseStepTimeRule(DiagnosticRule[StepTimeAnalysisContext]):
         share_pct: Optional[float] = None,
         skew_pct: Optional[float] = None,
         ranks: Sequence[Optional[int]] = (),
+        evidence: Optional[Dict[str, Any]] = None,
     ) -> DiagnosticIssue:
         clean_ranks: Tuple[int, ...] = tuple(
             int(rank) for rank in ranks if rank is not None
@@ -80,16 +81,17 @@ class _BaseStepTimeRule(DiagnosticRule[StepTimeAnalysisContext]):
                 non_negative_finite(skew_pct) if skew_pct is not None else None
             ),
             ranks=clean_ranks,
+            evidence=evidence or {},
         )
 
 
 @dataclass(frozen=True)
-class InputStragglerRule(_BaseStepTimeRule):
+class CleanStragglerRule(_BaseStepTimeRule):
     """
-    Detect excess dataloader burden on one rank relative to a typical rank.
+    Detect rank-local clean-step stragglers and classify the dominant cause.
     """
 
-    name: str = "input_straggler"
+    name: str = "clean_straggler"
 
     def evaluate(
         self,
@@ -98,74 +100,60 @@ class InputStragglerRule(_BaseStepTimeRule):
         if context.single_rank:
             return None
 
-        score = context.input_straggler_score
-        if score < context.thresholds.input_straggler_score_warn:
+        evidence = context.clean_straggler
+        if evidence is None:
             return None
 
-        rank = context.dataloader_worst_rank
+        rank = evidence.worst_rank
+        component_label = {
+            "input": "dataloader",
+            "compute": "clean compute",
+            "h2d": "H2D",
+            "wait": "wait",
+            "mixed": "multiple components",
+        }.get(evidence.component, evidence.component)
+        if evidence.kind == "STRAGGLER":
+            summary = (
+                f"{_rank_str(rank)} is slower after backward-wait discount "
+                f"(~{_pct(evidence.score)} of a typical step); no component "
+                "dominates."
+            )
+            action = "Inspect input, H2D, compute, and wait on the slow rank."
+        else:
+            summary = (
+                f"{_rank_str(rank)} has excess {component_label} burden "
+                f"(~{_pct(evidence.score)} of a typical step)."
+            )
+            action = f"Inspect {component_label} on {_rank_str(rank)}."
+
         return self._issue(
-            kind="INPUT_STRAGGLER",
-            status="INPUT STRAGGLER",
+            kind=evidence.kind,
+            status=evidence.status,
             severity=_severity(
-                score, context.thresholds.input_straggler_score_crit
+                evidence.score,
+                context.thresholds.straggler_score_crit,
             ),
-            summary=(
-                f"{_rank_str(rank)} has excess dataloader burden "
-                f"(~{_pct(score)} of a typical local step)."
+            summary=summary,
+            action=action,
+            metric=evidence.metric,
+            phase=evidence.phase,
+            score=evidence.score,
+            skew_pct=(
+                evidence.clean_step_slack_ms / evidence.clean_step_median_ms
+                if evidence.clean_step_median_ms > 0.0
+                else 0.0
             ),
-            action=f"Inspect input loading on {_rank_str(rank)}.",
-            metric="dataloader_fetch",
-            phase="dataloader",
-            score=score,
-            share_pct=context.dataloader_share,
-            skew_pct=context.dataloader_skew,
             ranks=(rank,),
-        )
-
-
-@dataclass(frozen=True)
-class ComputeStragglerRule(_BaseStepTimeRule):
-    """
-    Detect excess compute burden on one rank relative to a typical rank.
-    """
-
-    name: str = "compute_straggler"
-
-    def evaluate(
-        self,
-        context: StepTimeAnalysisContext,
-    ) -> Optional[DiagnosticIssue]:
-        if context.single_rank:
-            return None
-
-        score = context.compute_straggler_score
-        if score < context.thresholds.compute_straggler_score_warn:
-            return None
-
-        rank = context.compute_worst_rank
-        label = (
-            context.dominant_compute.label
-            if context.dominant_compute is not None
-            else "Compute"
-        )
-        return self._issue(
-            kind="COMPUTE_STRAGGLER",
-            status="COMPUTE STRAGGLER",
-            severity=_severity(
-                score,
-                context.thresholds.compute_straggler_score_crit,
-            ),
-            summary=(
-                f"{_rank_str(rank)} {label.lower()} has excess compute "
-                f"burden (~{_pct(score)} of a typical observed step)."
-            ),
-            action=f"Inspect {label.lower()} on {_rank_str(rank)}.",
-            metric="compute",
-            phase=label.lower(),
-            score=score,
-            share_pct=context.compute_share,
-            skew_pct=context.compute_skew,
-            ranks=(rank,),
+            evidence={
+                "component": evidence.component,
+                "clean_step_median_ms": evidence.clean_step_median_ms,
+                "clean_step_worst_ms": evidence.clean_step_worst_ms,
+                "clean_step_slack_ms": evidence.clean_step_slack_ms,
+                "typical_step_ms": evidence.typical_step_ms,
+                "top_excess_ms": evidence.top_excess_ms,
+                "second_excess_ms": evidence.second_excess_ms,
+                "component_excesses_ms": evidence.component_excesses_ms,
+            },
         )
 
 
@@ -257,6 +245,8 @@ class ComputeBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
+        if context.clean_straggler is not None:
+            return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
         if context.dataloader_share >= context.thresholds.input_share_warn:
@@ -293,8 +283,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
 DEFAULT_STEP_TIME_RULES: Tuple[
     DiagnosticRule[StepTimeAnalysisContext], ...
 ] = (
-    InputStragglerRule(),
-    ComputeStragglerRule(),
+    CleanStragglerRule(),
     InputBoundRule(),
     WaitHeavyRule(),
     ComputeBoundRule(),
@@ -321,10 +310,9 @@ def run_step_time_rules(
 
 __all__ = [
     "DEFAULT_STEP_TIME_RULES",
+    "CleanStragglerRule",
     "ComputeBoundRule",
-    "ComputeStragglerRule",
     "InputBoundRule",
-    "InputStragglerRule",
     "WaitHeavyRule",
     "run_step_time_rules",
 ]

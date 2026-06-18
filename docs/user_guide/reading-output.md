@@ -213,16 +213,15 @@ Meaning:
 
 TraceML uses this idea:
 
-- compare the worst rank to the median rank
-- measure how much extra dataloader work the worst rank is carrying
-- normalize that by a typical local step burden
+- compute each rank's clean step after discounting backward time that can be
+  explained by another rank's non-backward work
+- compare the worst clean step to the median clean step
+- blame dataloader when its worst-rank excess over peer median dominates the
+  other clean-step excesses by at least `1.25x`
 
 In simpler words:
 
 - one rank is slower in the input path, enough to matter to the overall run
-- this can remain the primary diagnosis even when compute or backward skew is
-  also visible, if the input excess is large enough to plausibly explain
-  downstream synchronization effects
 
 Common causes:
 
@@ -236,7 +235,7 @@ What to look at:
 - `Dataloader Fetch`
 - worst rank
 - skew (%)
-- diagnosis note
+- diagnosis evidence
 
 What to do next:
 
@@ -254,10 +253,10 @@ Meaning:
 
 TraceML uses this idea:
 
-- compare worst compute vs median compute
-- normalize the excess by a typical local step burden
-- for DDP, check nearby forward and optimizer evidence before blaming backward
-  directly
+- compute clean compute as `forward + clean_backward + optimizer`
+- compare the worst rank's clean compute to peer median
+- blame compute when clean-compute excess dominates dataloader, H2D, and wait
+  excesses by at least `1.25x`
 
 In simpler words:
 
@@ -286,33 +285,75 @@ What to do next:
 
 ---
 
+### `H2D STRAGGLER`
+
+Meaning:
+
+- one rank spends meaningfully more time in host-to-device transfer than a
+  typical rank
+
+TraceML uses the same clean-step comparison and reports this when H2D excess is
+the dominant worst-rank component.
+
+Common causes:
+
+- uneven CPU tensor sizes
+- rank-local transfer path differences
+- pinned-memory or device-transfer jitter on one rank
+
+What to do next:
+
+- inspect batch shapes and transfer placement on the worst rank
+- compare CPU-to-GPU copy timing across ranks
+
+---
+
+### `WAIT STRAGGLER`
+
+Meaning:
+
+- one rank has meaningfully more rank-local residual `wait_proxy` than a
+  typical rank
+
+This is rank-local excess wait. It differs from `WAIT-HEAVY`, which describes a
+window-wide residual wait share.
+
+Common causes:
+
+- rank-local logging, checkpointing, validation, callbacks, CPU stalls, or
+  unobserved transfer work inside the timed step
+
+What to do next:
+
+- inspect host-side work on the worst rank
+- compare callbacks and per-rank side effects
+
+---
+
 ### `STRAGGLER`
 
 Meaning:
 
-- both input and compute are materially uneven in the same window
+- one rank is slower after clean-step backward-wait discount, but no single
+  component clearly dominates
 
 In the current policy, this is used when:
 
-- input straggler score is high
-- compute straggler score is high
+- the clean-step score is at least `0.10`
+- the largest worst-rank excess among dataloader, clean compute, H2D, and wait
+  is less than `1.25x` the next-largest excess
 
 This is a mixed unevenness case.
-
-TraceML keeps this diagnosis when the mixed signal is not clearly explained by
-input skew alone. If input excess is within the configured tolerance of compute
-excess, TraceML reports `INPUT STRAGGLER` instead and keeps the compute signal
-as secondary evidence.
 
 Common causes:
 
 - one bad rank with multiple problems
-- one phase uneven in input and another uneven in compute
+- one phase uneven in input and another uneven in compute, H2D, or wait
 - more than one imbalance pattern at the same time
 
 What to do next:
 
-- inspect both dataloader and compute signals
+- inspect dataloader, H2D, compute, and wait signals
 - inspect the worst rank and the largest uneven phases
 - reduce complexity by isolating one issue at a time
 
@@ -706,7 +747,9 @@ Use these as context cards:
 | `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
-| `STRAGGLER` | inspect both input and compute unevenness |
+| `H2D STRAGGLER` | inspect host-to-device transfer on the worst rank |
+| `WAIT STRAGGLER` | inspect rank-local host-side work on the worst rank |
+| `STRAGGLER` | inspect mixed clean-step unevenness |
 | `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY RISING` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |

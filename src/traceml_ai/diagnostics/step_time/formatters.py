@@ -26,6 +26,8 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
     elif diagnosis.kind in {
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
+        "H2D_STRAGGLER",
+        "WAIT_STRAGGLER",
         "STRAGGLER",
         "WAIT_HEAVY",
     }:

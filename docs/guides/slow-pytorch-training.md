@@ -34,7 +34,7 @@ diagnosis or symptom.
 |---|---|
 | Step Time says `INPUT-BOUND` | [Find DataLoader Bottlenecks](pytorch-dataloader-bottleneck.md) |
 | System says `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION` | [Debug Low GPU Utilization](low-gpu-utilization-pytorch.md) |
-| Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
+| Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `WAIT STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
 | Step Memory says `MEMORY CREEP` or `MEMORY RISING` | [Find PyTorch Memory Creep](pytorch-memory-creep.md) |
 | A recent change made the run slower | [Compare Runs](../user_guide/compare.md) |
 | Step Time says `COMPUTE-BOUND` or `WAIT-HEAVY` | [How to Read TraceML Output](../user_guide/reading-output.md) |
@@ -48,8 +48,9 @@ typical step. Confirm the input path before tuning model compute.
 They say the GPU was not fully busy, not why it was not fully busy. Pair them
 with Step Time.
 
-`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, and `STRAGGLER` are distributed
-signals. Inspect the called-out worst rank and compare it with the median rank.
+`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `WAIT STRAGGLER`, and
+`STRAGGLER` are distributed clean-step signals. Inspect the called-out worst
+rank and compare it with the median rank.
 
 `MEMORY CREEP` and `MEMORY RISING` are step-memory trend signals. Inspect
 retained tensors, caches, and per-step state that may stay alive.
