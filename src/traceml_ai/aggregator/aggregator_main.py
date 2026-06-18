@@ -144,6 +144,7 @@ def read_traceml_env() -> dict[str, Any]:
                 str(DEFAULT_SUMMARY_WINDOW_ROWS),
             )
         ),
+        "html_report": os.environ.get("TRACEML_HTML_REPORT", "0") == "1",
     }
 
 
@@ -205,6 +206,7 @@ def main() -> None:
             session_id=session_id,
             history_enabled=bool(cfg["history_enabled"]),
             summary_window_rows=int(cfg["summary_window_rows"]),
+            html_report=bool(cfg["html_report"]),
             aggregator=AggregatorTransportSettings(
                 connect_host=str(cfg["aggregator_host"]),
                 bind_host=str(cfg["aggregator_bind_host"]),

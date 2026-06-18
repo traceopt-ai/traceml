@@ -53,6 +53,27 @@ unexplained-utilization fallback, not as root-cause proof by itself.
 By default, `traceml run train.py` prints a compact final summary and writes
 `final_summary.json` plus `final_summary.txt`.
 
+### Shareable HTML report
+
+Add `--html-report` to `traceml run` (or `traceml watch`) to also write
+`final_summary.html` next to the JSON/TXT. It is a single self-contained file
+(inline styling and charts, no JavaScript, no network requests) that opens in
+any browser and is easy to drop into Slack, an email, or an issue. It shows a
+run header, a top-level verdict from `primary_diagnosis` in schema 1.5 reports,
+and per-domain diagnosis cards, metric tables, and bars over the same data as
+the JSON. Older saved reports without `primary_diagnosis` fall back to the
+strongest section diagnosis for the top banner.
+
+You can also render it from a saved run after the fact:
+
+```bash
+traceml view logs/<run_name>/final_summary.json --html        # -> <...>.html
+traceml view logs/<run_name>/final_summary.json --html out.html
+```
+
+The HTML report is optional and additive: the JSON and TXT artifacts are
+unchanged whether or not you pass `--html-report`.
+
 ### Live CLI
 
 When launched with `--mode=cli`, the terminal shows live:
@@ -235,6 +256,8 @@ TraceML uses this idea:
 
 - compare worst compute vs median compute
 - normalize the excess by a typical local step burden
+- for DDP, check nearby forward and optimizer evidence before blaming backward
+  directly
 
 In simpler words:
 

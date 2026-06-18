@@ -9,6 +9,31 @@ readme = "README.md"
 license = { text = "Apache 2.0" }
 requires-python = ">=3.10"
 
+keywords = [
+    "pytorch",
+    "profiler",
+    "gpu",
+    "training",
+    "bottleneck",
+    "cuda",
+    "dataloader",
+    "observability",
+    "machine-learning",
+    "deep-learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+
 
 # Runtime dependencies
 dependencies = [

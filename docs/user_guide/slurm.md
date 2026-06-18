@@ -198,6 +198,10 @@ Node 0's aggregator writes the run report to:
 <logs-dir>/<run-name>/final_summary.txt
 ```
 
+`--html-report` adds `final_summary.html` in the same directory. As with the
+JSON/TXT artifacts, it is written only on the aggregator-owner node (node 0);
+passing the flag on every node in a symmetric launch command is harmless.
+
 `--logs-dir` defaults to `./logs` relative to the submit directory. Put it on a
 **shared filesystem** (for example your scratch space) so the summary is
 reachable after the job ends. You can compare two runs later with

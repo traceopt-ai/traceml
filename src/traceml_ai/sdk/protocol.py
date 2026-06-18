@@ -171,6 +171,13 @@ def get_final_summary_txt_path(session_root: Path) -> Path:
     return Path(session_root).resolve() / "final_summary.txt"
 
 
+def get_final_summary_html_path(session_root: Path) -> Path:
+    """
+    Return the canonical final summary HTML artifact path.
+    """
+    return Path(session_root).resolve() / "final_summary.html"
+
+
 def load_json_or_none(path: Path) -> Optional[Dict[str, Any]]:
     """
     Load JSON from disk if possible, otherwise return None.
