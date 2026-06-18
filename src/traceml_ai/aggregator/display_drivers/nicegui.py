@@ -60,14 +60,7 @@ from traceml_ai.aggregator.display_drivers.server_readiness import (
     wait_for_server_ready,
 )
 from traceml_ai.aggregator.display_drivers.staleness import format_staleness
-from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.renderers.base_renderer import DashboardRenderer
-from traceml_ai.renderers.layer_combined_memory.renderer import (
-    LayerCombinedMemoryRenderer,
-)
-from traceml_ai.renderers.layer_combined_time.renderer import (
-    LayerCombinedTimeRenderer,
-)
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
@@ -122,15 +115,8 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
     - pages define "how to display" per layout via subscribe_layout(...)
     """
 
-    def __init__(
-        self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings
-    ) -> None:
-        self._logger = logger
-        self._store = store
-        self._settings = settings
-        self._deep_profile = (
-            getattr(self._settings, "profile", "run") == "deep"
-        )
+    def __init__(self, logger: Any, settings: TraceMLSettings) -> None:
+        super().__init__(logger=logger, settings=settings)
 
         # ---- UI lifecycle ----
         self._ui_started: bool = False
@@ -172,18 +158,6 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             StepMemoryRenderer(db_path=self._settings.db_path),
             ModelDiagnosticsRenderer(db_path=self._settings.db_path),
         ]
-
-        if self._deep_profile:
-            self._renderers += [
-                LayerCombinedMemoryRenderer(
-                    remote_store=store,
-                    top_n_layers=settings.num_display_layers,
-                ),
-                LayerCombinedTimeRenderer(
-                    remote_store=store,
-                    top_n_layers=settings.num_display_layers,
-                ),
-            ]
 
         # ---- UI server config (resolved via traceml.yaml/env/CLI) ----
         self._port: int = settings.dashboard_port

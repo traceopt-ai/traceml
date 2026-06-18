@@ -20,9 +20,6 @@ from traceml_ai.aggregator.display_drivers.nicegui import (  # noqa: E402
     NiceGUIDisplayDriver,
     render_error,
 )
-from traceml_ai.database.remote_database_store import (  # noqa: E402
-    RemoteDBStore,
-)
 from traceml_ai.runtime.settings import TraceMLSettings  # noqa: E402
 
 
@@ -35,9 +32,7 @@ def _driver() -> NiceGUIDisplayDriver:
     settings = TraceMLSettings(
         mode="dashboard", db_path=tempfile.mktemp(suffix=".db")
     )
-    return NiceGUIDisplayDriver(
-        logging.getLogger("test"), RemoteDBStore(), settings
-    )
+    return NiceGUIDisplayDriver(logging.getLogger("test"), settings)
 
 
 def test_update_display_captures_error_as_layout_error() -> None:

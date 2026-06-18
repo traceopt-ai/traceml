@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.runtime.settings import TraceMLSettings
 
 
@@ -21,11 +20,8 @@ class BaseDisplayDriver(ABC):
       - stop()
     """
 
-    def __init__(
-        self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings
-    ) -> None:
+    def __init__(self, logger: Any, settings: TraceMLSettings) -> None:
         self._logger = logger
-        self._store = store
         self._settings = settings
 
     @abstractmethod

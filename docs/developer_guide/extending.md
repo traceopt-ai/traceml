@@ -124,9 +124,9 @@ To add a sampler:
 4. Add SQLite projection, renderer, or summary code only if the data is
    user-facing.
 
-Deep/layer profiling has been removed from the public CLI for now. Keep normal
-sampler changes scoped to `run` and `watch`, and do not document layer-level
-profiling as a public path unless that surface is reintroduced deliberately.
+TraceML no longer ships layer-level/deep profiling. Keep normal sampler changes
+scoped to `run` and `watch`, and do not document layer-level profiling as a
+public path unless that surface is reintroduced deliberately.
 
 Tests should live in `tests/runtime/` for selection behavior and in a more
 specific folder if the sampler has domain logic.

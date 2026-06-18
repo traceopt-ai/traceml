@@ -218,8 +218,9 @@ class TCPClient:
         with one ``sendall()`` call, replacing N individual ``send()`` calls
         with a single kernel syscall.
 
-        The aggregator's ``RemoteDBStore.ingest()`` detects the list envelope
-        and dispatches each item individually — fully backward compatible.
+        The aggregator detects the list envelope, dispatches each item
+        individually, and writes the resulting rows into SQLite-backed
+        history.
 
         Notes
         -----

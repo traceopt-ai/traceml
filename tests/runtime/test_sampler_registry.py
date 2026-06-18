@@ -1,5 +1,6 @@
 from traceml_ai.core import Registry
 from traceml_ai.runtime.sampler_registry import (
+    DEFAULT_SAMPLER_REGISTRY,
     SamplerSpec,
     build_samplers,
     select_sampler_specs,
@@ -101,18 +102,13 @@ def test_run_cli_selects_step_samplers() -> None:
     )
 
 
-def test_deep_profile_selects_layer_samplers_after_step_samplers() -> None:
-    assert _selected_keys(profile="deep", mode="summary") == (
-        "system",
-        "process",
-        "step_time",
-        "step_memory",
-        "layer_memory",
-        "layer_forward_memory",
-        "layer_backward_memory",
-        "layer_forward_time",
-        "layer_backward_time",
-    )
+def test_default_registry_has_no_deep_or_layer_samplers() -> None:
+    specs = DEFAULT_SAMPLER_REGISTRY.all()
+    all_keys = {spec.key for spec in specs}
+    assert "deep" not in {
+        profile for spec in specs for profile in (spec.profiles or ())
+    }
+    assert not any(key.startswith("layer_") for key in all_keys)
 
 
 def test_ddp_nonzero_rank_skips_rank_zero_only_system_sampler() -> None:
@@ -176,12 +172,12 @@ def test_custom_registry_filters_by_profile_mode_and_preserves_order() -> None:
                 ),
             ),
             (
-                "deep_cli",
+                "run_summary",
                 SamplerSpec(
-                    key="deep_cli",
+                    key="run_summary",
                     factory=_FakeSampler,
-                    profiles=("deep",),
-                    modes=("cli",),
+                    profiles=("run",),
+                    modes=("summary",),
                 ),
             ),
         ]
@@ -233,7 +229,7 @@ def test_queue_backed_samplers_are_marked_for_final_recording_drain() -> None:
     specs = {
         spec.key: spec
         for spec in select_sampler_specs(
-            profile="deep",
+            profile="run",
             mode="summary",
             is_ddp=False,
             local_rank=0,
@@ -244,7 +240,6 @@ def test_queue_backed_samplers_are_marked_for_final_recording_drain() -> None:
     assert specs["process"].drain_on_recording_stop is False
     assert specs["step_time"].drain_on_recording_stop is True
     assert specs["step_memory"].drain_on_recording_stop is True
-    assert specs["layer_forward_time"].drain_on_recording_stop is True
 
 
 def test_runtime_final_recording_drain_skips_periodic_samplers() -> None:

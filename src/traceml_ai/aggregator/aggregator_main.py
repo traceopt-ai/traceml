@@ -111,9 +111,6 @@ def read_traceml_env() -> dict[str, Any]:
         "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "0") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
-        "num_display_layers": int(
-            os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
-        ),
         "aggregator_host": os.environ.get(
             "TRACEML_AGGREGATOR_HOST",
             "127.0.0.1",
@@ -124,9 +121,6 @@ def read_traceml_env() -> dict[str, Any]:
         ),
         "aggregator_port": int(
             os.environ.get("TRACEML_AGGREGATOR_PORT", "29765")
-        ),
-        "remote_max_rows": int(
-            os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
         ),
         "dashboard_port": int(
             os.environ.get("TRACEML_DASHBOARD_PORT", "8765")
@@ -197,10 +191,8 @@ def main() -> None:
             mode=str(cfg["mode"]),
             profile=str(cfg["profile"]),
             render_interval_sec=float(cfg["interval"]),
-            num_display_layers=int(cfg["num_display_layers"]),
             enable_logging=bool(cfg["enable_logging"]),
             logs_dir=str(cfg["logs_dir"]),
-            remote_max_rows=int(cfg["remote_max_rows"]),
             dashboard_port=int(cfg["dashboard_port"]),
             dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
             session_id=session_id,

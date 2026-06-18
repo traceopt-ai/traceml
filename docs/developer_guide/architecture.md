@@ -13,14 +13,14 @@ flowchart LR
         DB -->|new rows| Sender[DBIncrementalSender]
     end
     Sender -->|length-prefixed msgpack| TCP([TCP])
-    TCP --> RS[RemoteDBStore]
     subgraph "Aggregator process"
-        RS --> R[Renderer]
+        TCP --> H[SQLite history]
+        H --> R[Renderer]
         R --> UI[CLI / NiceGUI driver]
     end
 ```
 
-Samplers maintain an incremental append counter per rank per table. The sender ships only new rows. The aggregator's `RemoteDBStore` keeps each rank's data separate, and renderers pull read-only views from it.
+Samplers maintain an incremental append counter per rank per table. The sender ships only new rows. The aggregator writes canonical telemetry into SQLite-backed history, and renderers pull read-only views from that history.
 
 ## Layers
 
@@ -30,7 +30,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Runtime | `src/traceml_ai/runtime/` | In-process agent per rank; user-script executor |
 | Aggregator | `src/traceml_ai/aggregator/` | TCP server, unified store, display orchestration |
 | Samplers | `src/traceml_ai/samplers/` | Periodic telemetry collection (timing, memory, system) |
-| Database | `src/traceml_ai/database/` | Bounded in-memory tables; rank-aware remote store |
+| Database | `src/traceml_ai/database/` | Bounded in-memory tables and SQLite-backed history |
 | Transport | `src/traceml_ai/transport/` | TCP bidirectional + DDP rank detection |
 | Renderers | `src/traceml_ai/renderers/` | Transform stored data into Rich/Plotly output |
 | Display drivers | `src/traceml_ai/aggregator/display_drivers/` | CLI vs NiceGUI output medium |
