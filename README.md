@@ -46,13 +46,6 @@ you need operator- or kernel-level detail.
 
 ---
 
-![TraceML live dashboard](docs/assets/dashboard_live.gif)
-
-*TraceML's live `--mode=dashboard` on a 2-GPU DDP run. The dataloader dominates
-each step while the GPUs sit mostly idle, so TraceML flags the run INPUT-BOUND
-(critical) in the Diagnostics rail.*
-
----
 
 ## 3-Minute Quickstart
 
