@@ -323,8 +323,20 @@ def _step_time_card_reason(
             f"{_global_rank_label(stats.compute.worst_global_rank)} compute "
             f"was slower than median global rank ({evidence})."
         )
+    if kind == "H2D_STRAGGLER":
+        evidence = _format_ms_pair(stats.h2d.worst_ms, stats.h2d.median_ms)
+        return (
+            f"{_global_rank_label(stats.h2d.worst_global_rank)} H2D was "
+            f"slower than median global rank ({evidence})."
+        )
+    if kind == "WAIT_STRAGGLER":
+        evidence = _format_ms_pair(stats.wait.worst_ms, stats.wait.median_ms)
+        return (
+            f"{_global_rank_label(stats.wait.worst_global_rank)} wait was "
+            f"higher than median global rank ({evidence})."
+        )
     if kind == "STRAGGLER":
-        return "Input and compute varied across ranks."
+        return "Multiple clean-step components varied across ranks."
     if kind == "INPUT_BOUND":
         evidence = (
             f"{format_ms(stats.input.worst_ms)}/"

@@ -212,9 +212,9 @@ Not yet.
 
 Start with `run`.
 
-Deep/layer profiling has been removed from the public CLI for now. If TraceML
-shows you need lower-level detail, use PyTorch Profiler, Nsight, or another
-operator-level profiler for that follow-up.
+TraceML no longer ships layer-level/deep profiling. If TraceML shows you need
+lower-level detail, use PyTorch Profiler, Nsight, or another operator-level
+profiler for that follow-up.
 
 ---
 
@@ -336,9 +336,10 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
-In distributed runs, this can still be the primary diagnosis when backward or
-compute skew is also visible, because a slow input rank can push synchronization
-wait into peer ranks.
+In distributed runs, TraceML first discounts backward time that can be explained
+by another rank's non-backward work. `INPUT STRAGGLER` means dataloader excess
+on the worst clean-step rank dominates compute, H2D, and wait excess by at
+least `1.25x`.
 
 Common causes:
 
@@ -354,11 +355,13 @@ See:
 
 ## What does `COMPUTE STRAGGLER` mean?
 
-It means one rank is slower in compute than the typical rank.
+It means one rank is slower in clean compute than the typical rank.
 
-If input and compute skew appear together, TraceML first checks whether the
-input excess is large enough to explain the compute skew. If yes, the primary
-diagnosis is `INPUT STRAGGLER`; otherwise the mixed case remains `STRAGGLER`.
+Clean compute is forward plus optimizer plus backward after discounting
+backward time that can be explained by another rank's non-backward work. TraceML
+uses `COMPUTE STRAGGLER` when clean-compute excess dominates dataloader, H2D,
+and wait excess by at least `1.25x`; otherwise the mixed case remains
+`STRAGGLER`.
 
 Common causes:
 

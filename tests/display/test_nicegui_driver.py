@@ -19,9 +19,6 @@ pytest.importorskip("nicegui")
 from traceml_ai.aggregator.display_drivers.nicegui import (  # noqa: E402
     NiceGUIDisplayDriver,
 )
-from traceml_ai.database.remote_database_store import (  # noqa: E402
-    RemoteDBStore,
-)
 from traceml_ai.runtime.settings import TraceMLSettings  # noqa: E402
 
 
@@ -31,9 +28,7 @@ def _driver(**settings_kwargs) -> NiceGUIDisplayDriver:
         db_path=tempfile.mktemp(suffix=".db"),
         **settings_kwargs,
     )
-    return NiceGUIDisplayDriver(
-        logging.getLogger("test"), RemoteDBStore(), settings
-    )
+    return NiceGUIDisplayDriver(logging.getLogger("test"), settings)
 
 
 def test_settings_dashboard_defaults() -> None:

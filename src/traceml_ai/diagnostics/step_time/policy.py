@@ -14,15 +14,9 @@ class DiagnosisThresholds:
     the same rules and produce the same diagnosis vocabulary.
     """
 
-    input_straggler_score_warn: float = 0.10
-    input_straggler_score_crit: float = 0.20
-
-    compute_straggler_score_warn: float = 0.10
-    compute_straggler_score_crit: float = 0.20
-    # Shared DDP-aware rank attribution tolerance. The historical name comes
-    # from input-vs-compute handling, but the same ratio now also decides when
-    # forward/optimizer evidence is close enough to avoid blaming backward.
-    input_straggler_compute_excess_tolerance: float = 1.25
+    straggler_score_warn: float = 0.10
+    straggler_score_crit: float = 0.20
+    straggler_dominance_tolerance: float = 1.25
 
     input_share_warn: float = 0.25
     input_share_crit: float = 0.35
@@ -59,10 +53,8 @@ LIVE_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
 SUMMARY_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
     name="summary",
     thresholds=DiagnosisThresholds(
-        input_straggler_score_warn=0.10,
-        input_straggler_score_crit=0.18,
-        compute_straggler_score_warn=0.10,
-        compute_straggler_score_crit=0.18,
+        straggler_score_warn=0.10,
+        straggler_score_crit=0.18,
         input_share_warn=0.30,
         input_share_crit=0.40,
         wait_share_warn=0.18,

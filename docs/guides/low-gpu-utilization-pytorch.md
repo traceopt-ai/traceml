@@ -33,6 +33,8 @@ After confirming low or moderate GPU utilization, read the Step Time diagnosis.
 |---|---|
 | `INPUT-BOUND` | Inspect the DataLoader and input path. |
 | `INPUT STRAGGLER` | Inspect the slow input rank. |
+| `H2D STRAGGLER` | Inspect host-to-device transfer on the worst rank. |
+| `WAIT STRAGGLER` | Inspect rank-local host-side work on the worst rank. |
 | `WAIT-HEAVY` | Inspect work outside traced phases, such as logging, checkpointing, validation, CPU stalls, framework orchestration, or unobserved transfers. |
 | `COMPUTE-BOUND` | Inspect forward, backward, and optimizer time before changing the DataLoader. |
 | `COMPUTE STRAGGLER` or `STRAGGLER` | Inspect rank skew and the called-out worst rank. |

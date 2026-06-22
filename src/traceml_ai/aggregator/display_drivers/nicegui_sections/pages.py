@@ -3,8 +3,6 @@
 from nicegui import app, ui
 
 from traceml_ai.aggregator.display_drivers.layout import (
-    LAYER_COMBINED_MEMORY_LAYOUT,
-    LAYER_COMBINED_TIMER_LAYOUT,
     MODEL_COMBINED_LAYOUT,
     MODEL_DIAGNOSTICS_LAYOUT,
     MODEL_MEMORY_LAYOUT,
@@ -13,14 +11,6 @@ from traceml_ai.aggregator.display_drivers.layout import (
 )
 
 from . import theme
-from .layer_memory_table_section import (
-    build_layer_memory_table_section,
-    update_layer_memory_table_section,
-)
-from .layer_timer_table_section import (
-    build_layer_timer_table_section,
-    update_layer_timer_table_section,
-)
 from .model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
@@ -208,45 +198,3 @@ def define_pages(cls):
         cls.ensure_ui_timer(0.75)
         if not cls._ui_ready:
             cls._ui_ready = True
-
-    if deep_enabled:
-
-        @ui.page("/layers")
-        def layer_page():
-            ui.add_head_html(theme.head_html())
-            with (
-                ui.column()
-                .classes("w-full")
-                .style(
-                    "gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;"
-                )
-            ):
-                build_header(cls, True)
-                with (
-                    ui.row()
-                    .classes("w-full items-stretch")
-                    .style("gap:16px; flex-wrap:wrap;")
-                ):
-                    with _cell("1.2"):
-                        cards = build_layer_memory_table_section()
-                        cls.subscribe_layout(
-                            LAYER_COMBINED_MEMORY_LAYOUT,
-                            cards,
-                            update_layer_memory_table_section,
-                        )
-                    with _cell("1"):
-                        cards = build_layer_timer_table_section()
-                        cls.subscribe_layout(
-                            LAYER_COMBINED_TIMER_LAYOUT,
-                            cards,
-                            update_layer_timer_table_section,
-                        )
-            cls.ensure_ui_timer(1.0)
-            if not cls._ui_ready:
-                cls._ui_ready = True
-
-    else:
-
-        @ui.page("/layers")
-        def layer_page_disabled():
-            ui.navigate.to("/")

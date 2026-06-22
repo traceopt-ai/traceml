@@ -41,6 +41,12 @@ Wrap the work from `zero_grad(...)` through `optimizer.step()`.
 traceml run train.py
 ```
 
+To try the same flow with a checked-in example first:
+
+```bash
+traceml run examples/quickstart.py --mode=summary
+```
+
 TraceML writes:
 
 ```text

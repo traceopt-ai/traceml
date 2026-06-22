@@ -1,10 +1,8 @@
 ROOT_LAYOUT = "root"
 SYSTEM_LAYOUT = "system_section"
 PROCESS_LAYOUT = "process_section"
-LAYER_COMBINED_MEMORY_LAYOUT = "layer_combined_memory_section"
 STDOUT_STDERR_LAYOUT = "stdout_stderr_section"
 
-LAYER_COMBINED_TIMER_LAYOUT = "layer_timing_section"
 MODEL_COMBINED_LAYOUT = "model_combined_section"
 MODEL_MEMORY_LAYOUT = "model_memory_section"
 MODEL_DIAGNOSTICS_LAYOUT = "model_diagnostics_section"

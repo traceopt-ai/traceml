@@ -60,12 +60,6 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="Directory for TraceML session logs.",
     )
     parser.add_argument(
-        "--num-display-layers",
-        type=int,
-        default=None,
-        help="Maximum number of model layers to display in the live UI.",
-    )
-    parser.add_argument(
         "--run-name",
         type=str,
         default="",
@@ -89,12 +83,6 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=29765,
         help="TraceML aggregator port.",
-    )
-    parser.add_argument(
-        "--remote-max-rows",
-        type=int,
-        default=None,
-        help="Maximum number of rows returned by remote telemetry queries.",
     )
     parser.add_argument(
         "--dashboard-port",
