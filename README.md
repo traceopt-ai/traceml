@@ -2,7 +2,7 @@
 
 # TraceML
 
-**A lightweight runtime health check for PyTorch training runs.**
+**Low-overhead PyTorch training performance diagnostics. Every step, every run.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -20,25 +20,29 @@
 
 </div>
 
-### Is your GPU training, waiting on data, or blocked by one slow rank?
+  TraceML runs alongside your training loop and writes a compact performance
+  report at the end of each run — with <2% overhead in current benchmarks,
+  across the full job, not just sampled steps. It helps answer:
 
-PyTorch training can look normal while step time is lost to a slow input
-pipeline, low GPU utilization, memory growth, distributed rank skew, or a
-run-to-run regression.
+  - Are my GPUs waiting on a slow dataloader?
+  - Is one distributed rank consistently slower than the others?
+  - Is memory usage silently creeping upward during the run?
+  - Did a recent code, data, or infrastructure change slow training down?
 
-TraceML runs alongside your PyTorch training loop and writes a compact
-runtime performance report at the end of each run. With low overhead
-(<2% in our current benchmark runs), it helps you see where step time and
-memory went before opening heavier tools like `torch.profiler` or Nsight.
-It helps answer:
+---
 
-- Are my GPUs waiting on a slow dataloader?
-- Is one distributed rank consistently slower than the others?
-- Is memory usage silently creeping upward during the run?
-- Did a recent code, data, or infrastructure change slow training down?
+## Where TraceML Fits
 
-Here, **health** means runtime performance health: step time, input/compute/wait
-balance, memory behavior, distributed rank skew, and run-to-run change.
+| Tool | Use it when you need | Not for |
+|---|---|---|
+| TraceML | Low-overhead, full-run diagnosis of training bottlenecks | Kernel/operator timelines |
+| `torch.profiler` / Kineto | Operator-level and CUDA activity traces for selected steps | Every-run summaries |
+| Nsight Systems | Deep GPU/kernel timeline debugging | Everyday training triage |
+| Holistic Trace Analysis | Post-hoc analysis of PyTorch profiler traces | Live/full-run collection |
+| W&B / MLflow | Experiment tracking, metrics, and run history | Runtime bottleneck diagnosis |
+
+Start with TraceML to find the bottleneck category; open deeper profilers when
+you need operator- or kernel-level detail.
 
 ---
 
@@ -100,7 +104,7 @@ traceml view logs/<run_name>/final_summary.json
 ```
 
 Want a shareable report? Add `--html-report` to also write a self-contained
-`final_summary.html` (inline styling, no network, opens in any browser), or
+`final_summary.html`, or
 render one from a saved run after the fact:
 
 ```bash
@@ -108,8 +112,8 @@ traceml run train.py --html-report
 traceml view logs/<run_name>/final_summary.json --html   # writes <...>.html
 ```
 
-Instead of guessing why training feels slow, you get a compact diagnosis of
-where step time and memory went.
+Instead of guessing where step time and memory went, you get a compact
+diagnosis at the end of every run.
 
 Example TraceML output:
 
@@ -135,9 +139,8 @@ to get a flat dict of diagnosis statuses and average metrics. Keep
 
 ## What TraceML Helps You Triage
 
-TraceML is meant to be the first check when a training run is slower than
-expected. It points you to the likely area before you decide whether to open a
-heavier profiler.
+Use TraceML as the first check before opening a heavier profiler — it surfaces
+the likely bottleneck area so you know where to look next.
 
 | Area | What TraceML surfaces | What to inspect next |
 |---|---|---|
@@ -204,21 +207,6 @@ changing the final saved artifacts.
 
 - Multi-node live CLI / browser dashboard
 - Explicit collective / NCCL timing
-
----
-
-## Where TraceML Fits in the Stack
-
-TraceML does not replace `torch.profiler`. It is the low-overhead first pass that
-helps you decide where to aim heavier profiling tools.
-
-| Tool | Best used for | Output | Cost / overhead |
-|---|---|---|---|
-| TraceML | Classifying high-level bottlenecks: input, compute, wait, memory, rank skew | JSON fingerprint, text summary, live views | <2% in current benchmark runs; small code wrapper |
-| `torch.profiler` | Inspecting expensive ops, kernels, and CUDA activity | Profiler trace | Higher overhead; requires profiler context |
-| Nsight Systems | Debugging low-level CUDA and kernel behavior | GPU timeline | Separate profiler run |
-| W&B / MLflow | Tracking training metrics and experiment history | Metrics dashboard / run history | Logging integration |
-| `nvidia-smi` | Checking machine-level GPU health and utilization | Terminal metrics | No code changes |
 
 ---
 
