@@ -35,19 +35,19 @@ rank-local straggler modes.
 Balanced baseline:
 
 ```bash
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_balanced --args --scenario balanced
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_balanced --args --scenario balanced
 ```
 
 Input straggler:
 
 ```bash
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_input_straggler --args --scenario input-straggler --straggler-rank 0 --input-sleep-ms 200
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_input_straggler --args --scenario input-straggler --straggler-rank 0 --input-sleep-ms 200
 ```
 
 Compute straggler:
 
 ```bash
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
 ```
 
 For two nodes with one GPU each, run the same script on both nodes with
@@ -57,13 +57,13 @@ For two nodes with one GPU each, run the same script on both nodes with
 Example node 0:
 
 ```bash
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nnodes=2 --nproc-per-node=1 --node-rank=0 --master-addr <NODE_0_PRIVATE_IP> --master-port 29546 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nnodes=2 --nproc-per-node=1 --node-rank=0 --master-addr <NODE_0_PRIVATE_IP> --master-port 29546 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
 ```
 
 Example node 1:
 
 ```bash
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nnodes=2 --nproc-per-node=1 --node-rank=1 --master-addr <NODE_0_PRIVATE_IP> --master-port 29546 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nnodes=2 --nproc-per-node=1 --node-rank=1 --master-addr <NODE_0_PRIVATE_IP> --master-port 29546 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
 ```
 
 ## Demo fingerprints
