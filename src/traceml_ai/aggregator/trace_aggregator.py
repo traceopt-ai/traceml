@@ -9,7 +9,7 @@
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, Type
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
@@ -19,11 +19,9 @@ from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterSimple,
 )
 from traceml_ai.aggregator.summary_service import FinalSummaryService
-from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.reporting.final import generate_summary
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
 from traceml_ai.sdk.protocol import get_final_summary_json_path
-from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 
 DASHBOARD_EXTRA_INSTALL_HINT = (
@@ -74,16 +72,6 @@ def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
 class TraceMLAggregator:
     """Telemetry aggregator process."""
 
-    _REMOTE_STORE_SAMPLERS = frozenset(
-        {
-            "LayerMemorySampler",
-            "LayerForwardMemorySampler",
-            "LayerBackwardMemorySampler",
-            "LayerForwardTimeSampler",
-            "LayerBackwardTimeSampler",
-        }
-    )
-
     def __init__(
         self,
         logger: Any,
@@ -93,10 +81,6 @@ class TraceMLAggregator:
         self._logger = logger
         self._stop_event = stop_event
         self._settings = settings
-
-        # Transitional live store for the remaining renderer paths that have
-        # not yet moved to SQLite-backed history.
-        self._store = RemoteDBStore(max_rows=int(settings.remote_max_rows))
 
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
@@ -141,7 +125,6 @@ class TraceMLAggregator:
 
         self._display_driver = driver_cls(
             logger=self._logger,
-            store=self._store,
             settings=self._settings,
         )
 
@@ -150,11 +133,6 @@ class TraceMLAggregator:
             name="TraceMLAggregator",
             daemon=True,
         )
-
-    @property
-    def store(self) -> RemoteDBStore:
-        """Expose the store for tests and read-only inspection."""
-        return self._store
 
     def start(self) -> None:
         """
@@ -247,28 +225,12 @@ class TraceMLAggregator:
 
     def _drain_tcp(self) -> None:
         """
-        Drain pending TCP messages and ingest them into the store and history.
+        Drain pending TCP messages and ingest them into SQLite history.
 
         Each message is expected to be a telemetry row or batch compatible with
-        ``SQLiteWriterSimple.ingest()``. A legacy subset is also mirrored into
-        ``RemoteDBStore`` for renderers that still depend on the in-memory path.
-
-        Design note
-        -----------
-        Errors in each sink are isolated: a failure in one does not prevent the
-        other from receiving the message.  Direct try/except is used instead of
-        ``_safe(lambda ...)`` to avoid allocating two closure objects per message
-        in the hot path.
+        ``SQLiteWriterSimple.ingest()``.
         """
         for msg in self._tcp_server.poll():
-            remote_msg = self._filter_remote_store_message(msg)
-            if remote_msg is not None:
-                try:
-                    self._store.ingest(remote_msg)
-                except Exception:
-                    self._logger.exception(
-                        "[TraceML] RemoteDBStore.ingest failed"
-                    )
             try:
                 self._sqlite_writer.ingest(msg)
             except Exception:
@@ -295,46 +257,6 @@ class TraceMLAggregator:
 
         self._drain_tcp()
         return bool(self._sqlite_writer.flush_now(0.0))
-
-    def _message_sampler_name(self, msg: Any) -> Optional[str]:
-        """
-        Return the sampler name carried by one logical telemetry payload.
-
-        Returns ``None`` when the payload is malformed or does not follow the
-        expected envelope shape.
-        """
-        envelope = normalize_telemetry_envelope(msg)
-        if envelope is None:
-            return None
-
-        return envelope.meta.sampler
-
-    def _filter_remote_store_message(self, msg: Any) -> Any:
-        """
-        Return the subset of a telemetry message still needed by RemoteDBStore.
-
-        Notes
-        -----
-        - SQLite remains the full history sink for every payload.
-        - RemoteDBStore is now treated as a transitional cache for the few
-          legacy renderers that still depend on it.
-        - Batch envelopes preserve their original list shape so
-          `RemoteDBStore.ingest()` can continue to process them normally.
-        """
-        if isinstance(msg, list):
-            filtered = [
-                item
-                for item in msg
-                if self._message_sampler_name(item)
-                in self._REMOTE_STORE_SAMPLERS
-            ]
-            return filtered if filtered else None
-
-        sampler_name = self._message_sampler_name(msg)
-        if sampler_name in self._REMOTE_STORE_SAMPLERS:
-            return msg
-
-        return None
 
     def _loop(self) -> None:
         """

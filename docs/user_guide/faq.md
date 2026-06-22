@@ -212,9 +212,9 @@ Not yet.
 
 Start with `run`.
 
-Deep/layer profiling has been removed from the public CLI for now. If TraceML
-shows you need lower-level detail, use PyTorch Profiler, Nsight, or another
-operator-level profiler for that follow-up.
+TraceML no longer ships layer-level/deep profiling. If TraceML shows you need
+lower-level detail, use PyTorch Profiler, Nsight, or another operator-level
+profiler for that follow-up.
 
 ---
 
