@@ -1,23 +1,18 @@
 """
-Step Time analysis — the dashboard hero (PR2 revamp).
+Unified Step Time analysis section for the overview dashboard.
 
-Signature element: a phase RIBBON (current-step phase proportions) plus a
-VERDICT, then a compact step-KPI strip. The ribbon recomposes (CSS width
-transition) as the bottleneck shifts.
+This card is intentionally compact and space-efficient:
+- one grouped stacked bar chart comparing Median vs Worst
+- one dense KPI strip
 
-The ribbon and KPI strip are driven by StepCombinedTimeResult
-(``update_model_combined_section``). The VERDICT is NOT computed here: it is
-taken verbatim from the diagnosis engine's step-time ``status`` via
-``update_step_verdict`` (fed the model-diagnostics payload), so it is identical
-to the Diagnostics rail, the CLI, and final_summary, and tracks any future
-change to the diagnosis vocabulary automatically. The card never derives its
-own classification — interpretation belongs to the engine.
+It does not render diagnosis prose; interpretation belongs in the diagnostics rail.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+import plotly.graph_objects as go
 from nicegui import ui
 
 from traceml_ai.renderers.step_time.schema import (
@@ -25,169 +20,211 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeResult,
 )
 
-from . import theme
+from .ui_shell import CARD_STYLE, compact_metric_html, safe_ms, safe_pct
 
-_REQUIRED = {k for _, k, _ in theme.PHASES} | {"step_time"}
+_STACK_KEYS = [
+    ("DL", "dataloader_fetch", "#d32f2f"),
+    ("H2D", "h2d", "#00897b"),
+    ("FWD", "forward", "#1976d2"),
+    ("BWD", "backward", "#512da8"),
+    ("OPT", "optimizer_step", "#2e7d32"),
+    ("WAIT", "wait_proxy", "#f9a825"),
+]
+
+_REQUIRED_KEYS = {
+    "dataloader_fetch",
+    "h2d",
+    "forward",
+    "backward",
+    "optimizer_step",
+    "wait_proxy",
+    "step_time",
+}
 
 
 def build_model_combined_section() -> Dict[str, Any]:
-    seg_divs: List[Any] = []
-    seg_labs: List[Any] = []
-    kpis: Dict[str, Any] = {}
-
-    card = ui.element("div").classes("glass reveal")
+    """Build the Step Time analysis card."""
+    card = ui.card().classes("w-full h-full p-3")
     card.style(
-        "padding:22px 24px; width:100%; height:100%; "
-        "display:flex; flex-direction:column; overflow:hidden;"
+        CARD_STYLE + "height: 100%; overflow-y: auto; overflow-x: hidden;"
     )
+
+    fig = _init_figure()
+
     with card:
-        with (
-            ui.row()
-            .classes("w-full items-center")
-            .style("margin-bottom:14px; gap:12px;")
-        ):
-            ui.label("Step time").classes("ctitle")
-            ui.element("div").style("flex:1;")
-            win = ui.label("waiting for steps").classes("cmeta")
+        with ui.row().classes("w-full items-center justify-between mb-1"):
+            ui.label("Step Time Analysis").classes("text-sm font-bold").style(
+                "color:#455a64;"
+            )
+            window_text = ui.html("window: -", sanitize=False).classes(
+                "text-[11px] text-gray-500"
+            )
 
-        with ui.element("div").classes("ribbon"):
-            for lab, _key, col in theme.PHASES:
-                seg = (
-                    ui.element("div")
-                    .classes("pseg")
-                    .style(f"background:{col}; width:0%;")
-                )
-                with seg:
-                    seg_labs.append(ui.label("").classes("seglab"))
-                seg_divs.append(seg)
-
-        with (
-            ui.row()
-            .classes("w-full")
-            .style("gap:14px; margin-top:9px; flex-wrap:wrap;")
-        ):
-            for lab, _key, col in theme.PHASES:
-                with ui.element("div").classes("legchip"):
-                    ui.element("div").classes("legdot").style(
-                        f"background:{col};"
-                    )
-                    ui.label(lab)
-
-        with (
-            ui.row()
-            .classes("items-center")
-            .style("gap:12px; margin-top:16px;")
-        ):
-            verdict = ui.label("analyzing step composition").classes("verdict")
-
-        with (
-            ui.row()
-            .classes("w-full")
-            .style("gap:11px; margin-top:16px; flex-wrap:wrap;")
-        ):
-            for key, lab, acc in [
-                ("median", "MEDIAN STEP", theme.C_GPU),
-                ("worst", "WORST STEP", "#512da8"),
-                ("gap", "GAP", "#f9a825"),
-                ("wait", "WAIT SHARE", theme.C_CPU),
-                ("rank", "WORST RANK", "#2e7d32"),
-            ]:
-                with ui.element("div").classes("kpi").style(f"--acc:{acc};"):
-                    ui.label(lab).classes("klab")
-                    kpis[key] = ui.html("—").classes("kval")
+        plot = ui.plotly(fig).classes("w-full")
+        kpis = ui.html("", sanitize=False).classes("mt-2")
 
     return {
-        "seg_divs": seg_divs,
-        "seg_labs": seg_labs,
-        "win": win,
-        "verdict": verdict,
+        "window_text": window_text,
+        "plot": plot,
         "kpis": kpis,
-        "_last_sig": None,
+        "_fig": fig,
+        "_last_kpis": None,
+        "_last_window_text": None,
+        "_last_signature": None,
     }
-
-
-def _index(
-    metrics: List[StepCombinedTimeMetric],
-) -> Dict[str, StepCombinedTimeMetric]:
-    return {m.metric: m for m in metrics}
 
 
 def update_model_combined_section(
-    panel: Dict[str, Any], payload: Optional[StepCombinedTimeResult]
+    panel: Dict[str, Any],
+    payload: Optional[StepCombinedTimeResult],
 ) -> None:
-    if not payload or not getattr(payload, "metrics", None):
-        return
-    m = _index(payload.metrics)
-    if not _REQUIRED.issubset(m):
+    """Update the Step Time analysis card in place with cached signatures."""
+    if not payload or not payload.metrics:
         return
 
-    vals = {
-        k: float(m[k].summary.median_total or 0.0) for _, k, _ in theme.PHASES
-    }
-    tot = sum(vals.values()) or 1.0
-    st = m["step_time"].summary
-
-    sig = tuple(round(vals[k], 3) for _, k, _ in theme.PHASES) + (
-        round(float(st.median_total or 0), 3),
-        round(float(st.worst_total or 0), 3),
-        int(st.steps_used or 0),
-        int(st.worst_rank if st.worst_rank is not None else -1),
-    )
-    if panel.get("_last_sig") == sig:
+    metrics = _index_metrics(payload.metrics)
+    if not _REQUIRED_KEYS.issubset(metrics):
         return
-    panel["_last_sig"] = sig
 
-    for (lab, key, _c), seg, sl in zip(
-        theme.PHASES, panel["seg_divs"], panel["seg_labs"]
-    ):
-        pct = vals[key] / tot * 100.0
-        seg.style(f"width:{pct:.3f}%")
-        sl.text = lab if pct >= 7.0 else ""
+    step = metrics["step_time"]
+    wait = metrics["wait_proxy"]
 
-    # The verdict is intentionally NOT set here. It is owned by the diagnosis
-    # engine and set via update_step_verdict (fed the model-diagnostics
-    # payload), so the card never asserts a classification of its own.
-
-    k = panel["kpis"]
-    # median_total / worst_total are window SUMS (the median/worst rank's total
-    # over the aligned window). Divide by steps_used for the per-step value the
-    # "MEDIAN STEP" / "WORST STEP" tiles report (otherwise they read ~N x too
-    # large, e.g. 14725 ms instead of 147 ms over a 100-step window).
-    n_steps = max(int(st.steps_used or 1), 1)
-    k["median"].content = theme.kval(
-        f"{float(st.median_total or 0) / n_steps:.0f}", "ms"
+    signature = (
+        tuple(
+            round(float(metrics[key].summary.median_total or 0.0), 4)
+            for _, key, _ in _STACK_KEYS
+        )
+        + tuple(
+            round(float(metrics[key].summary.worst_total or 0.0), 4)
+            for _, key, _ in _STACK_KEYS
+        )
+        + (
+            round(float(step.summary.median_total or 0.0), 4),
+            round(float(step.summary.worst_total or 0.0), 4),
+            int(step.summary.steps_used or 0),
+            int(step.summary.worst_rank or -1),
+        )
     )
-    k["worst"].content = theme.kval(
-        f"{float(st.worst_total or 0) / n_steps:.0f}", "ms"
-    )
-    k["gap"].content = theme.kval(f"{float(st.skew_pct or 0):.0f}", "%")
-    wsh = vals["wait_proxy"] / tot * 100.0 if tot > 0 else 0.0
-    k["wait"].content = theme.kval(f"{wsh:.0f}", "%")
-    k["rank"].content = theme.kval(
-        f"r{int(st.worst_rank)}" if st.worst_rank is not None else "—"
-    )
-    panel["win"].text = f"{int(st.steps_used or 0)} aligned steps"
+
+    if panel.get("_last_signature") != signature:
+        _update_plot(panel, metrics)
+        panel["_last_signature"] = signature
+
+    window_text = f"window: {int(step.summary.steps_used or 0)} aligned steps"
+    if panel.get("_last_window_text") != window_text:
+        panel["window_text"].content = window_text
+        panel["_last_window_text"] = window_text
+
+    kpis_html = _render_kpis(metrics, step, wait)
+    if panel.get("_last_kpis") != kpis_html:
+        panel["kpis"].content = kpis_html
+        panel["_last_kpis"] = kpis_html
 
 
-def update_step_verdict(panel: Dict[str, Any], diag_payload: Any) -> None:
-    """Set the hero verdict from the diagnosis engine's step-time status.
+def _init_figure() -> go.Figure:
+    fig = go.Figure()
+    for label, _metric_key, color in _STACK_KEYS:
+        fig.add_trace(
+            go.Bar(
+                x=["Median", "Worst"],
+                y=[0.0, 0.0],
+                name=label,
+                marker=dict(color=color),
+                hovertemplate="%{x}<br>"
+                + label
+                + ": %{y:.2f} ms<extra></extra>",
+            )
+        )
 
-    Single source of truth: the verdict text is the engine's canonical
-    ``status`` string for the step-time domain — the exact value shown by the
-    Diagnostics rail, the CLI, and final_summary. The card derives no
-    classification of its own, so it tracks any change to the diagnosis
-    vocabulary automatically. Fed the model-diagnostics payload (the same
-    payload the Diagnostics rail consumes); missing/empty ticks leave the
-    previous verdict untouched rather than blanking it.
-    """
-    items = (
-        diag_payload.get("items") if isinstance(diag_payload, dict) else None
+    fig.update_layout(
+        barmode="stack",
+        height=235,
+        margin=dict(l=8, r=8, t=8, b=28),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0.05)",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1.0,
+            font=dict(size=10),
+        ),
+        xaxis=dict(showgrid=False),
+        yaxis=dict(title="Time (ms)"),
     )
-    if not isinstance(items, list):
-        return
-    for it in items:
-        if isinstance(it, dict) and it.get("source") == "step_time":
-            status = str(it.get("status") or "").strip()
-            if status:
-                panel["verdict"].text = status
-            return
+    return fig
+
+
+def _update_plot(
+    panel: Dict[str, Any], metrics: Dict[str, StepCombinedTimeMetric]
+) -> None:
+    fig = panel["_fig"]
+    for idx, (_label, key, _color) in enumerate(_STACK_KEYS):
+        metric = metrics[key]
+        fig.data[idx].y = [
+            float(metric.summary.median_total or 0.0),
+            float(metric.summary.worst_total or 0.0),
+        ]
+    panel["plot"].update_figure(fig)
+
+
+def _index_metrics(
+    metrics: List[StepCombinedTimeMetric],
+) -> Dict[str, StepCombinedTimeMetric]:
+    return {metric.metric: metric for metric in metrics}
+
+
+def _render_kpis(
+    metrics: Dict[str, StepCombinedTimeMetric],
+    step: StepCombinedTimeMetric,
+    wait: StepCombinedTimeMetric,
+) -> str:
+    median_total = float(step.summary.median_total or 0.0)
+    worst_total = float(step.summary.worst_total or 0.0)
+    wait_share = (
+        float(wait.summary.median_total or 0.0) / median_total
+        if median_total > 0.0
+        else 0.0
+    )
+
+    items = [
+        compact_metric_html("Median Total", safe_ms(median_total)),
+        compact_metric_html("Worst Total", safe_ms(worst_total)),
+        compact_metric_html("Gap", safe_pct(step.summary.skew_pct)),
+        compact_metric_html(
+            "Worst Rank",
+            (
+                f"r{int(step.summary.worst_rank)}"
+                if step.summary.worst_rank is not None
+                else "-"
+            ),
+        ),
+        compact_metric_html("WAIT Share", safe_pct(wait_share)),
+        compact_metric_html(
+            "Dominant Phase",
+            _dominant_metric(metrics, mode="worst_total"),
+        ),
+    ]
+
+    return (
+        "<div style='display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); "
+        "gap:8px; padding-top:6px; border-top:1px solid #ececec;'>"
+        + "".join(items)
+        + "</div>"
+    )
+
+
+def _dominant_metric(
+    metrics: Dict[str, StepCombinedTimeMetric], mode: str
+) -> str:
+    best_label = "-"
+    best_value = -1.0
+
+    for label, key, _ in _STACK_KEYS:
+        value = float(getattr(metrics[key].summary, mode, 0.0) or 0.0)
+        if value > best_value:
+            best_value = value
+            best_label = label
+
+    return f"{best_label} ({best_value:.1f} ms)" if best_value >= 0.0 else "-"

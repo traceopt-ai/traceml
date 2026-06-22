@@ -192,12 +192,6 @@ class SystemDashboardComputer:
             },
         }
 
-        rollups["ctx"] = {
-            "world_size": int(last["world_size"] or 0),
-            "gpu_count": int(last["gpu_count"] or 0),
-            "hostname": str(last["hostname"] or ""),
-        }
-
         x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]
 
         return SystemDashboardPayload(
