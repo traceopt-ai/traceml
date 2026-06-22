@@ -33,13 +33,13 @@
 
 ## Where TraceML Fits
 
-| Tool | Use it when you need | Not for |
+| Tool | Use it for | Not for |
 |---|---|---|
-| TraceML | Low-overhead, full-run diagnosis of training bottlenecks | Kernel/operator timelines |
-| `torch.profiler` / Kineto | Operator-level and CUDA activity traces for selected steps | Always-on summaries |
-| Nsight Systems | Deep GPU/kernel timeline debugging | Everyday training triage |
-| Holistic Trace Analysis | Post-hoc analysis of PyTorch profiler traces | Live/full-run collection |
-| W&B / MLflow | Experiment tracking, metrics, and run history | Runtime bottleneck diagnosis |
+| TraceML | Full-run bottlenecks and rank skew | Kernel/operator timelines |
+| `torch.profiler` / Kineto | Op/CUDA traces for selected steps | Always-on summaries |
+| Nsight Systems | GPU/kernel timeline debugging | Everyday training triage |
+| Holistic Trace Analysis | Analyzing profiler traces | Live/full-run collection |
+| W&B / MLflow | Experiment tracking and run history | Runtime bottleneck diagnosis |
 
 Start with TraceML to find the bottleneck category; open deeper profilers when
 you need operator- or kernel-level detail.
