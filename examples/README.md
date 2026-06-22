@@ -18,8 +18,8 @@ These are the main user-facing examples.
 | `distributed/ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `ray/torchtrainer_minimal.py` | Minimal Ray Train example with Ray Data input timing | CPU / CUDA | Uses `TraceMLTorchTrainer` |
 | `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data, `TraceMLCallback`, and optional input/H2D demo knobs |
-| `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
-| `lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
+| `integrations/huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
+| `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 
 If you only try one example first, use:
 
@@ -161,8 +161,8 @@ Use:
 - `quickstart.py` if you have a normal PyTorch loop
 - `manual_custom_minimal.py` if you use a custom input pipeline or want full explicit control
 - `distributed/ddp_minimal.py` if you want single-node distributed training
-- `huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
-- `lightning_minimal.py` if you use PyTorch Lightning
+- `integrations/huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
+- `integrations/lightning_minimal.py` if you use PyTorch Lightning
 - `ray/torchtrainer_minimal.py` if you use Ray Train
 
 Use the diagnosis demos when you want to see:
