@@ -17,7 +17,7 @@ timings per step so you can see the data with no extra tooling.
 
 Usage
 -----
-    traceml run examples/h2d_timing_demo.py
+    traceml run examples/diagnosis/h2d_timing_demo.py
 
 Requires a CUDA GPU for meaningful H2D timings (works on CPU too, timings
 will just be near-zero).
@@ -209,7 +209,7 @@ def main():
         print_h2d_results(db_path)
     else:
         print(
-            "DB not found. Make sure you ran with: traceml run examples/h2d_timing_demo.py",
+            "DB not found. Make sure you ran with: traceml run examples/diagnosis/h2d_timing_demo.py",
             file=sys.stderr,
         )
 

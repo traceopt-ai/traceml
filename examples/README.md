@@ -37,7 +37,7 @@ These examples are still user-facing, but they are more about showing specific T
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
-| `dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
+| `diagnosis/dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
 | `distributed/ddp_rank_straggler_demo.py` | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
@@ -45,8 +45,8 @@ These are useful when you want to see how TraceML behaves on a known bottleneck.
 To contrast a normal input path with a synthetic DataLoader bottleneck:
 
 ```bash
-traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast
-traceml run examples/dataloader_bottleneck_demo.py --args --scenario slow --sleep-ms 8
+traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast
+traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario slow --sleep-ms 8
 ```
 
 Use `--num-workers` on the same demo to test whether adding DataLoader workers
@@ -55,7 +55,7 @@ reduces the input wait.
 On a fast GPU, increase model compute while keeping the same fast/slow shape:
 
 ```bash
-traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast --hidden-dim 4096 --depth 4
+traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast --hidden-dim 4096 --depth 4
 ```
 
 To contrast balanced DDP with rank-local input and compute stragglers:
