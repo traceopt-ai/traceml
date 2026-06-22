@@ -36,7 +36,7 @@
 | Tool | Use it when you need | Not for |
 |---|---|---|
 | TraceML | Low-overhead, full-run diagnosis of training bottlenecks | Kernel/operator timelines |
-| `torch.profiler` / Kineto | Operator-level and CUDA activity traces for selected steps | Every-run summaries |
+| `torch.profiler` / Kineto | Operator-level and CUDA activity traces for selected steps | Always-on summaries |
 | Nsight Systems | Deep GPU/kernel timeline debugging | Everyday training triage |
 | Holistic Trace Analysis | Post-hoc analysis of PyTorch profiler traces | Live/full-run collection |
 | W&B / MLflow | Experiment tracking, metrics, and run history | Runtime bottleneck diagnosis |
