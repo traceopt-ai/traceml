@@ -8,8 +8,8 @@ This example runs the same tiny PyTorch training loop in two scenarios:
 
 Trace the contrast with:
 
-    traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast
-    traceml run examples/dataloader_bottleneck_demo.py --args --scenario slow
+    traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast
+    traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario slow
 
 Use ``--sleep-ms`` and ``--num-workers`` to make the bottleneck stronger or to
 test whether adding DataLoader workers reduces input wait. On a fast GPU, use

@@ -12,25 +12,19 @@ These are the main user-facing examples.
 
 | Example | What it shows | Works on | Notes |
 |---|---|---|---|
-| `pytorch_minimal.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.final_summary()` | CPU / CUDA | Best first example |
+| `quickstart.py` | Minimal plain PyTorch loop with `traceml.init(mode="auto")`, `traceml.trace_step(...)`, and `traceml.summary(...)` | CPU / CUDA | Best first example |
 | `summary_logging_minimal.py` | Minimal tracker-friendly `traceml.summary()` output for W&B or MLflow logging | CPU / CUDA | Best summary API example |
 | `manual_custom_minimal.py` | Manual TraceML instrumentation with a custom batch source and explicit wrappers | CPU / CUDA | Best starting point for `mode="manual"` |
-| `ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
+| `distributed/ddp_minimal.py` | Minimal single-node DDP example | CPU / CUDA | Best distributed starter |
 | `ray/torchtrainer_minimal.py` | Minimal Ray Train example with Ray Data input timing | CPU / CUDA | Uses `TraceMLTorchTrainer` |
 | `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data, `TraceMLCallback`, and optional input/H2D demo knobs |
-| `huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
-| `lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
+| `integrations/huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
+| `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 
 If you only try one example first, use:
 
 ```bash
-traceml run examples/pytorch_minimal.py
-```
-
-If you want a quieter artifact-oriented flow, run an example with:
-
-```bash
-traceml run examples/pytorch_minimal.py --mode=summary
+traceml run examples/quickstart.py --mode=summary
 ```
 
 Then keep the TraceML final summary JSON if you want to compare runs later with `traceml compare`.
@@ -43,16 +37,16 @@ These examples are still user-facing, but they are more about showing specific T
 
 | Example | What it demonstrates | Works on | Notes |
 |---|---|---|---|
-| `dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
-| `ddp_rank_straggler_demo.py` | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
+| `diagnosis/dataloader_bottleneck_demo.py` | Slow input pipeline or input-bound training | CPU / CUDA | Simulates dataloader delay |
+| `distributed/ddp_rank_straggler_demo.py` | Rank stragglers in DDP | CPU / CUDA | Simulates balanced, input-straggler, and compute-straggler runs |
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
 To contrast a normal input path with a synthetic DataLoader bottleneck:
 
 ```bash
-traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast
-traceml run examples/dataloader_bottleneck_demo.py --args --scenario slow --sleep-ms 8
+traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast
+traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario slow --sleep-ms 8
 ```
 
 Use `--num-workers` on the same demo to test whether adding DataLoader workers
@@ -61,15 +55,15 @@ reduces the input wait.
 On a fast GPU, increase model compute while keeping the same fast/slow shape:
 
 ```bash
-traceml run examples/dataloader_bottleneck_demo.py --args --scenario fast --hidden-dim 4096 --depth 4
+traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast --hidden-dim 4096 --depth 4
 ```
 
 To contrast balanced DDP with rank-local input and compute stragglers:
 
 ```bash
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_balanced --args --scenario balanced
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_input_straggler --args --scenario input-straggler --straggler-rank 0 --input-sleep-ms 200
-traceml run examples/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_balanced --args --scenario balanced
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_input_straggler --args --scenario input-straggler --straggler-rank 0 --input-sleep-ms 200
+traceml run examples/distributed/ddp_rank_straggler_demo.py --mode=summary --nproc-per-node=2 --run-name ddp_compute_straggler --args --scenario compute-straggler --straggler-rank 0 --compute-extra-matmuls 8
 ```
 
 The default DDP demo uses precomputed tensors plus a compute-heavy MLP so the
@@ -83,25 +77,25 @@ GPUs such as T4 or L4.
 Standard run:
 
 ```bash
-traceml run examples/pytorch_minimal.py
+traceml run examples/quickstart.py
 ```
 
 Local UI:
 
 ```bash
-traceml run examples/pytorch_minimal.py --mode=dashboard
+traceml run examples/quickstart.py --mode=dashboard
 ```
 
 Summary mode:
 
 ```bash
-traceml run examples/pytorch_minimal.py --mode=summary
+traceml run examples/quickstart.py --mode=summary
 ```
 
 Single-node DDP:
 
 ```bash
-traceml run examples/ddp_minimal.py --nproc-per-node=4
+traceml run examples/distributed/ddp_minimal.py --nproc-per-node=4
 ```
 
 Multi-node on Slurm:
@@ -117,7 +111,7 @@ network/aggregator model.
 Run without TraceML telemetry for a baseline:
 
 ```bash
-traceml run examples/pytorch_minimal.py --disable-traceml
+traceml run examples/quickstart.py --disable-traceml
 ```
 
 Compare two saved TraceML final summary JSON files:
@@ -164,11 +158,11 @@ decorator compatibility paths.
 
 Use:
 
-- `pytorch_minimal.py` if you have a normal PyTorch loop
+- `quickstart.py` if you have a normal PyTorch loop
 - `manual_custom_minimal.py` if you use a custom input pipeline or want full explicit control
-- `ddp_minimal.py` if you want single-node distributed training
-- `huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
-- `lightning_minimal.py` if you use PyTorch Lightning
+- `distributed/ddp_minimal.py` if you want single-node distributed training
+- `integrations/huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
+- `integrations/lightning_minimal.py` if you use PyTorch Lightning
 - `ray/torchtrainer_minimal.py` if you use Ray Train
 
 Use the diagnosis demos when you want to see:
