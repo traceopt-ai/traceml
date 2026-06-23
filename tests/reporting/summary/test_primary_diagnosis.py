@@ -61,21 +61,21 @@ def _step_time(
                 "dataloader_ms": 50.0,
                 "h2d_ms": 10.0,
                 "compute_ms": 120.0,
-                "wait_ms": 20.0,
+                "residual_ms": 20.0,
             },
             "median": {
                 "dataloader_ms": {"value": 5.0, "idx": "0"},
                 "h2d_ms": {"value": 10.0, "idx": "1"},
                 "compute_ms": {"value": 100.0, "idx": "1"},
                 "optimizer_ms": {"value": 10.0, "idx": "3"},
-                "wait_ms": {"value": 20.0, "idx": "0"},
+                "residual_ms": {"value": 20.0, "idx": "0"},
             },
             "worst": {
                 "dataloader_ms": {"value": 80.0, "idx": "2"},
                 "h2d_ms": {"value": 40.0, "idx": "2"},
                 "compute_ms": {"value": 180.0, "idx": "2"},
                 "optimizer_ms": {"value": 90.0, "idx": "2"},
-                "wait_ms": {"value": 70.0, "idx": "2"},
+                "residual_ms": {"value": 70.0, "idx": "2"},
             },
         },
     }
@@ -110,26 +110,26 @@ def test_input_bound_uses_phase_share_evidence() -> None:
         "dataloader_ms": 50.0,
         "h2d_ms": 10.0,
         "compute_ms": 120.0,
-        "wait_ms": 20.0,
+        "residual_ms": 20.0,
         "shares": {
             "dataloader_pct": 25.0,
             "h2d_pct": 5.0,
             "compute_pct": 60.0,
-            "wait_pct": 10.0,
+            "residual_pct": 10.0,
         },
         "gpu_util_avg_percent": 38.0,
     }
 
 
-def test_wait_heavy_uses_wait_phase_share() -> None:
-    primary = _primary(_step_time("WAIT_HEAVY", status="WAIT-HEAVY"))
+def test_residual_heavy_uses_residual_phase_share() -> None:
+    primary = _primary(_step_time("RESIDUAL_HEAVY", status="RESIDUAL-HEAVY"))
 
-    assert primary["kind"] == "WAIT_HEAVY"
+    assert primary["kind"] == "RESIDUAL_HEAVY"
     assert primary["summary"] == (
-        "Wait time took 20.0ms of a 200.0ms average step."
+        "Residual time took 20.0ms of a 200.0ms average step."
     )
     assert primary["evidence"]["type"] == "phase_share"
-    assert primary["evidence"]["shares"]["wait_pct"] == 10.0
+    assert primary["evidence"]["shares"]["residual_pct"] == 10.0
 
 
 def test_compute_bound_uses_neutral_compute_phase_share() -> None:
@@ -203,21 +203,21 @@ def test_h2d_straggler_uses_rank_comparison_evidence() -> None:
     assert primary["evidence"]["phase"] == "h2d"
 
 
-def test_wait_straggler_uses_rank_comparison_evidence() -> None:
+def test_residual_straggler_uses_rank_comparison_evidence() -> None:
     primary = _primary(
         _step_time(
-            "WAIT_STRAGGLER",
-            status="WAIT STRAGGLER",
-            phase="wait",
+            "RESIDUAL_STRAGGLER",
+            status="RESIDUAL STRAGGLER",
+            phase="residual",
         )
     )
 
-    assert primary["kind"] == "WAIT_STRAGGLER"
+    assert primary["kind"] == "RESIDUAL_STRAGGLER"
     assert primary["summary"] == (
-        "Rank r2 wait was 70.0ms vs median rank r0 at 20.0ms."
+        "Rank r2 residual time was 70.0ms vs median rank r0 at 20.0ms."
     )
-    assert primary["evidence"]["metric"] == "wait_ms"
-    assert primary["evidence"]["phase"] == "wait"
+    assert primary["evidence"]["metric"] == "residual_ms"
+    assert primary["evidence"]["phase"] == "residual"
 
 
 def test_straggler_includes_input_and_compute_comparisons() -> None:

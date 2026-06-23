@@ -62,7 +62,7 @@ The load-bearing calls that shape the system, with the rationale and the main al
 | Length-prefixed msgpack frames, no version field, legacy flat shape still accepted | Keep the wire compact and simple while preserving existing v0.2.x senders (rejected: a versioned/handshaked protocol) | Wire evolution must stay additive and tolerant; there is no negotiated version to branch on |
 | Bounded in-memory deque tables for the live view, SQLite (WAL) for history | Cap per-rank memory yet keep a queryable history; renderers read from SQLite (rejected: unbounded in-memory retention) | Oldest in-memory rows evict at `maxlen`; SQLite retention is windowed and is the source of truth for renderers |
 | Rule-based diagnosis: stateless per-window thresholds, min-step damping, no hysteresis | Verdicts must be explainable, deterministic, and cheap, with no training data required (rejected: a learned/ML classifier) | Thresholds are hand-tuned and documented; verdicts are named (`INPUT_BOUND`, `COMPUTE_STRAGGLER`, `CREEP_CONFIRMED`, and so on) |
-| Report wait time as a residual: `wait = max(0, step - h2d - forward - backward - optimizer)` | No portable, in-process, cross-backend hook for collective/NCCL time exists today (rejected: backend-specific collective instrumentation) | Wait can absorb legitimate non-collective gaps; explicit collective timing is on the roadmap and flagged in the user docs |
+| Report residual time as a derived bucket: `residual = max(0, step - h2d - forward - backward - optimizer)` | No portable, in-process, cross-backend hook for collective/NCCL time exists today (rejected: backend-specific collective instrumentation) | Residual time can absorb legitimate non-collective gaps; explicit collective timing is on the roadmap and flagged in the user docs |
 | Lazy imports and optional extras: the core import pulls no heavy dependencies | `import traceml` should work in a plain notebook without torch, nicegui, or plotly installed (rejected: eager imports of the UI/integration stack) | Heavy UI and integrations (nicegui, plotly, transformers, lightning) sit behind extras; a missing extra disables that feature, not the core |
 
 ## Quality requirements
@@ -82,7 +82,7 @@ The load-bearing calls that shape the system, with the rationale and the main al
 Architectural risks and known structural debt. Day-to-day bugs live in the issue tracker; this is the design-level set.
 
 - **PyTorch-internals coupling.** Auto-instrumentation patches torch internals that can change between releases, so a torch upgrade is the most likely source of a silent metric regression. Mitigation: the patches are fail-open and instrumentation is the most heavily tested surface in the codebase.
-- **Wait time is a proxy, not a measurement.** `wait` is the residual after h2d, forward, backward, and optimizer are subtracted from step time, so it can include real non-collective gaps. There is no explicit collective/NCCL timing yet; adding it is the main planned step toward distributed defensibility.
+- **Residual time is a proxy, not a measurement.** `residual` is what remains after h2d, forward, backward, and optimizer are subtracted from step time, so it can include real non-collective gaps. There is no explicit collective/NCCL timing yet; adding it is the main planned step toward distributed defensibility.
 - **No version field on the wire.** Backward compatibility relies on tolerating the legacy envelope shape rather than negotiating a version, so any non-additive wire change needs an explicit migration path.
 - **Heterogeneous output schema versions.** `final_summary`, `compare`, and the run manifest each carry their own version number with no single shared contract. Downstream consumers (notably the viewer) couple to these shapes, so a version change must be coordinated across producer and consumer.
 - **Single model per training process.** Module-level instrumentation state means one traced model per process; multiple independent models in the same process are not isolated.
@@ -102,10 +102,10 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | H2D | Host-to-device copy (CPU to GPU), timed by patching `Tensor.to`. |
 | Phase | A timed region within a step: dataloader, h2d, forward, backward, or optimizer. |
 | Step / trace_step | A training iteration; `with trace_step(model)` marks the boundary that phase timing is computed against. |
-| Wait (wait_proxy) | Residual step time, `max(0, step - h2d - forward - backward - optimizer)`. |
+| Residual (residual_proxy) | Residual step time, `max(0, step - h2d - forward - backward - optimizer)`. |
 | INPUT_BOUND / COMPUTE_BOUND | The step is dominated by dataloading versus compute. |
-| INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / WAIT_STRAGGLER / STRAGGLER | One rank is slower than typical after clean-step backward-wait discount; the label names the dominant excess, or `STRAGGLER` when mixed. |
-| WAIT_HEAVY | A large window-wide share of step time is unattributed wait. |
+| INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / RESIDUAL_STRAGGLER / STRAGGLER | One rank is slower than typical after clean-step backward-delay discount; the label names the dominant excess, or `STRAGGLER` when mixed. |
+| RESIDUAL_HEAVY | A large window-wide share of step time is unattributed residual time. |
 | HIGH_PRESSURE / IMBALANCE | GPU memory is near capacity, or uneven across ranks. |
 | CREEP_EARLY / CREEP_CONFIRMED | Direction-confirmed GPU-memory growth across the run, early or confirmed. |
 | final_summary | The end-of-run `final_summary.{json,txt}`; the JSON carries `schema_version` (currently 1.4). |

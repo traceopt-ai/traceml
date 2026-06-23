@@ -42,7 +42,7 @@ PHASES: List[Tuple[str, str, str]] = [
     ("FWD", "forward", "#1976d2"),
     ("BWD", "backward", "#512da8"),
     ("OPT", "optimizer_step", "#2e7d32"),
-    ("WAIT", "wait_proxy", "#f9a825"),
+    ("RESIDUAL", "residual_proxy", "#f9a825"),
 ]
 SEV = {
     "crit": "#c62828",

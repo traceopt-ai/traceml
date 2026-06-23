@@ -89,7 +89,7 @@ def build_model_combined_section() -> Dict[str, Any]:
                 ("median", "MEDIAN STEP", theme.C_GPU),
                 ("worst", "WORST STEP", "#512da8"),
                 ("gap", "GAP", "#f9a825"),
-                ("wait", "WAIT SHARE", theme.C_CPU),
+                ("residual", "RESIDUAL SHARE", theme.C_CPU),
                 ("rank", "WORST RANK", "#2e7d32"),
             ]:
                 with ui.element("div").classes("kpi").style(f"--acc:{acc};"):
@@ -161,8 +161,8 @@ def update_model_combined_section(
         f"{float(st.worst_total or 0) / n_steps:.0f}", "ms"
     )
     k["gap"].content = theme.kval(f"{float(st.skew_pct or 0):.0f}", "%")
-    wsh = vals["wait_proxy"] / tot * 100.0 if tot > 0 else 0.0
-    k["wait"].content = theme.kval(f"{wsh:.0f}", "%")
+    residual_share = vals["residual_proxy"] / tot * 100.0 if tot > 0 else 0.0
+    k["residual"].content = theme.kval(f"{residual_share:.0f}", "%")
     k["rank"].content = theme.kval(
         f"r{int(st.worst_rank)}" if st.worst_rank is not None else "—"
     )

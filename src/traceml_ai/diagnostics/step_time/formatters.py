@@ -27,9 +27,9 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
         "H2D_STRAGGLER",
-        "WAIT_STRAGGLER",
+        "RESIDUAL_STRAGGLER",
         "STRAGGLER",
-        "WAIT_HEAVY",
+        "RESIDUAL_HEAVY",
     }:
         style = "bold red" if diagnosis.severity == "crit" else "bold yellow"
     else:

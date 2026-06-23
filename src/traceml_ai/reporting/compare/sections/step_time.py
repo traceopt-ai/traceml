@@ -68,12 +68,12 @@ class StepTimeComparer:
                     rhs=self._value(rhs, "compute_ms"),
                     direction="higher_is_worse",
                 ),
-                "wait_ms": numeric_metric(
-                    key="wait_ms",
-                    label="Wait",
+                "residual_ms": numeric_metric(
+                    key="residual_ms",
+                    label="Residual",
                     unit="ms",
-                    lhs=self._value(lhs, "wait_ms"),
-                    rhs=self._value(rhs, "wait_ms"),
+                    lhs=self._value(lhs, "residual_ms"),
+                    rhs=self._value(rhs, "residual_ms"),
                     direction="higher_is_worse",
                 ),
                 "forward_ms": numeric_metric(

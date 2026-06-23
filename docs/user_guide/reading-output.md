@@ -21,7 +21,7 @@ TraceML output has two layers:
 1. **Primary Diagnosis**
    - the first answer in the end-of-run summary
    - focused on why training was slow
-   - example: `INPUT-BOUND`, `COMPUTE STRAGGLER`, `WAIT-HEAVY`
+   - example: `INPUT-BOUND`, `COMPUTE STRAGGLER`, `RESIDUAL-HEAVY`
 
 2. **Section Diagnoses**
    - detailed findings for System, Process, Step Time, and Step Memory
@@ -30,7 +30,7 @@ TraceML output has two layers:
 
 3. **Evidence**
    - the numbers and trends that support the diagnosis
-   - example: step breakdown, skew, wait time, memory peaks
+   - example: step breakdown, skew, residual time, memory peaks
 
 The top-level primary diagnosis is the best place to start when asking why a
 run was slow. Section diagnoses explain the details and keep health warnings
@@ -120,7 +120,7 @@ It is based on:
 - backward time
 - optimizer time
 - step time
-- wait / overhead
+- residual / overhead
 - worst-rank vs median-rank differences in distributed runs
 
 ### `BALANCED`
@@ -134,7 +134,7 @@ This usually means:
 - no strong input bottleneck
 - no strong compute bottleneck
 - no clear straggler
-- no large wait-heavy pattern
+- no large residual-heavy pattern
 
 What to do next:
 
@@ -255,7 +255,7 @@ TraceML uses this idea:
 
 - compute clean compute as `forward + clean_backward + optimizer`
 - compare the worst rank's clean compute to peer median
-- blame compute when clean-compute excess dominates dataloader, H2D, and wait
+- blame compute when clean-compute excess dominates dataloader, H2D, and residual
   excesses by at least `1.25x`
 
 In simpler words:
@@ -308,15 +308,15 @@ What to do next:
 
 ---
 
-### `WAIT STRAGGLER`
+### `RESIDUAL STRAGGLER`
 
 Meaning:
 
-- one rank has meaningfully more rank-local residual `wait_proxy` than a
+- one rank has meaningfully more rank-local residual `residual_proxy` than a
   typical rank
 
-This is rank-local excess wait. It differs from `WAIT-HEAVY`, which describes a
-window-wide residual wait share.
+This is rank-local residual excess. It differs from `RESIDUAL-HEAVY`, which
+describes a window-wide residual time share.
 
 Common causes:
 
@@ -334,13 +334,13 @@ What to do next:
 
 Meaning:
 
-- one rank is slower after clean-step backward-wait discount, but no single
+- one rank is slower after clean-step backward-delay discount, but no single
   component clearly dominates
 
 In the current policy, this is used when:
 
 - the clean-step score is at least `0.10`
-- the largest worst-rank excess among dataloader, clean compute, H2D, and wait
+- the largest worst-rank excess among dataloader, clean compute, H2D, and residual
   is less than `1.25x` the next-largest excess
 
 This is a mixed unevenness case.
@@ -348,18 +348,18 @@ This is a mixed unevenness case.
 Common causes:
 
 - one bad rank with multiple problems
-- one phase uneven in input and another uneven in compute, H2D, or wait
+- one phase uneven in input and another uneven in compute, H2D, or residual
 - more than one imbalance pattern at the same time
 
 What to do next:
 
-- inspect dataloader, H2D, compute, and wait signals
+- inspect dataloader, H2D, compute, and residual signals
 - inspect the worst rank and the largest uneven phases
 - reduce complexity by isolating one issue at a time
 
 ---
 
-### `WAIT-HEAVY`
+### `RESIDUAL-HEAVY`
 
 Meaning:
 
@@ -369,7 +369,7 @@ Meaning:
 In TraceML:
 
 - `compute = forward + backward + optimizer`
-- `wait = total_step - dataloader - h2d - compute`
+- `residual = total_step - dataloader - h2d - compute`
 
 This is residual unattributed time in the reported total step, not direct
 collective, NCCL, or all-reduce timing.
@@ -384,7 +384,7 @@ Common causes:
 
 What to look at:
 
-- `Wait`
+- `Residual`
 - whether the run is also showing straggler behavior
 
 What to do next:
@@ -422,7 +422,7 @@ In the CLI step summary, the important columns are:
 - `Backward`
 - `Optimizer`
 - `Total Step`
-- `Wait`
+- `Residual`
 
 Important rows:
 
@@ -442,7 +442,7 @@ Important rows:
 
 - how much larger the worst value is than the median
 
-### `Wait`
+### `Residual`
 
 - how much of the typical step is unattributed to dataloader, forward,
   backward, or optimizer work
@@ -454,7 +454,7 @@ A good reading pattern is:
 3. compare worst vs median
 4. inspect `Worst Rank`
 5. inspect `Skew (%)`
-6. inspect `Wait`
+6. inspect `Residual`
 
 ---
 
@@ -714,7 +714,7 @@ This card shows:
 - median vs worst step breakdown
 - gap
 - worst rank
-- wait time
+- residual time
 - dominant split
 
 Use it to validate the step-time diagnosis.
@@ -748,9 +748,9 @@ Use these as context cards:
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `H2D STRAGGLER` | inspect host-to-device transfer on the worst rank |
-| `WAIT STRAGGLER` | inspect rank-local host-side work on the worst rank |
+| `RESIDUAL STRAGGLER` | inspect rank-local host-side work on the worst rank |
 | `STRAGGLER` | inspect mixed clean-step unevenness |
-| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
+| `RESIDUAL-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY RISING` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |
@@ -760,15 +760,15 @@ Use these as context cards:
 
 ## Common pitfalls
 
-### High wait skew alone does not automatically mean a real wait bottleneck
+### High residual skew alone does not automatically mean a material bottleneck
 
 Look at:
 
-- `Wait`
+- `Residual`
 - the diagnosis
 - the rest of the step breakdown
 
-A tiny wait value with large percentage skew can still be minor in practice.
+A tiny residual value with large percentage skew can still be minor in practice.
 
 ### A high compute share does not mean every compute phase is equally important
 
@@ -807,7 +807,7 @@ If you are in a hurry:
 1. read the diagnosis
 2. identify the worst rank if shown
 3. compare worst vs median
-4. look at wait time or memory trend
+4. look at residual time or memory trend
 5. take the suggested next action
 
 That is usually enough to decide where to investigate next.

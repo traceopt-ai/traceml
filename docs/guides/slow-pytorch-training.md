@@ -2,7 +2,7 @@
 
 Use this guide when PyTorch training is slow and you do not yet know whether
 the bottleneck is input loading, GPU utilization, distributed rank skew, memory
-growth, wait time, or a run-to-run regression.
+growth, residual time, or a run-to-run regression.
 
 This is a triage guide. It points to focused guides instead of repeating every
 TraceML diagnosis.
@@ -34,10 +34,10 @@ diagnosis or symptom.
 |---|---|
 | Step Time says `INPUT-BOUND` | [Find DataLoader Bottlenecks](pytorch-dataloader-bottleneck.md) |
 | System says `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION` | [Debug Low GPU Utilization](low-gpu-utilization-pytorch.md) |
-| Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `WAIT STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
+| Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `RESIDUAL STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
 | Step Memory says `MEMORY CREEP` or `MEMORY RISING` | [Find PyTorch Memory Creep](pytorch-memory-creep.md) |
 | A recent change made the run slower | [Compare Runs](../user_guide/compare.md) |
-| Step Time says `COMPUTE-BOUND` or `WAIT-HEAVY` | [How to Read TraceML Output](../user_guide/reading-output.md) |
+| Step Time says `COMPUTE-BOUND` or `RESIDUAL-HEAVY` | [How to Read TraceML Output](../user_guide/reading-output.md) |
 
 ## Quick interpretation
 
@@ -48,7 +48,7 @@ typical step. Confirm the input path before tuning model compute.
 They say the GPU was not fully busy, not why it was not fully busy. Pair them
 with Step Time.
 
-`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `WAIT STRAGGLER`, and
+`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `RESIDUAL STRAGGLER`, and
 `STRAGGLER` are distributed clean-step signals. Inspect the called-out worst
 rank and compare it with the median rank.
 
@@ -59,7 +59,7 @@ retained tensors, caches, and per-step state that may stay alive.
 observed step. Use TraceML to choose the hot phase, then use an operator-level
 profiler if you need kernel or operator detail.
 
-`WAIT-HEAVY` is residual time not attributed to dataloader, H2D, forward,
+`RESIDUAL-HEAVY` is residual time not attributed to dataloader, H2D, forward,
 backward, or optimizer work. Inspect logging, checkpointing, validation,
 CPU-side stalls, framework orchestration, or unobserved transfers.
 
@@ -67,7 +67,7 @@ CPU-side stalls, framework orchestration, or unobserved transfers.
 
 - Low GPU utilization alone does not prove a DataLoader bottleneck.
 - A DDP slowdown is not always NCCL. TraceML currently reports rank skew and
-  residual wait, not explicit collective timing.
+  residual residual, not explicit collective timing.
 - `BALANCED` means no clear bottleneck in the observed window. It does not
   prove the run is globally optimal.
 - A single slow run is easier to trust after comparing it with a known good

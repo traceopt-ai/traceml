@@ -40,7 +40,7 @@ class ComputeSignal:
 @dataclass(frozen=True)
 class _CleanStragglerEvidence:
     """
-    Rank-local straggler evidence after discounting backward wait that can be
+    Rank-local straggler evidence after discounting backward delay that can be
     explained by non-backward rank skew.
     """
 
@@ -75,18 +75,18 @@ class StepTimeAnalysisContext:
     step_metric: StepCombinedTimeMetric
     dataloader_metric: Optional[StepCombinedTimeMetric]
     h2d_metric: Optional[StepCombinedTimeMetric]
-    wait_metric: Optional[StepCombinedTimeMetric]
+    residual_metric: Optional[StepCombinedTimeMetric]
     forward_metric: Optional[StepCombinedTimeMetric]
     backward_metric: Optional[StepCombinedTimeMetric]
     optimizer_metric: Optional[StepCombinedTimeMetric]
 
     step_total: float
     dataloader_total: float
-    wait_total: float
+    residual_total: float
     compute_total: float
 
     dataloader_share: float
-    wait_share: float
+    residual_share: float
     compute_share: float
 
     dataloader_skew: float
@@ -250,11 +250,11 @@ def _clean_rank_timings(
     The policy discounts backward time that can be explained by another rank's
     non-backward work in the same averaged/aligned window:
 
-        wait_r = current wait_proxy_r
-        non_bwd_r = DL_r + H2D_r + FWD_r + OPT_r + WAIT_r
+        residual_r = current residual_proxy_r
+        non_bwd_r = DL_r + H2D_r + FWD_r + OPT_r + RESIDUAL_r
         clean_bwd_r = max(0, BWD_r - max(0, max(non_bwd) - non_bwd_r))
         clean_compute_r = FWD_r + clean_bwd_r + OPT_r
-        clean_step_r = DL_r + H2D_r + clean_compute_r + WAIT_r
+        clean_step_r = DL_r + H2D_r + clean_compute_r + RESIDUAL_r
         score = (max(clean_step) - median(clean_step)) / median(actual_step)
     """
     if not per_rank_timing:
@@ -271,7 +271,9 @@ def _clean_rank_timings(
             + non_negative_finite(
                 per_rank_timing[rank].get("optimizer_step", 0.0)
             )
-            + non_negative_finite(per_rank_timing[rank].get("wait_proxy", 0.0))
+            + non_negative_finite(
+                per_rank_timing[rank].get("residual_proxy", 0.0)
+            )
         )
         for rank in ranks
     }
@@ -283,7 +285,7 @@ def _clean_rank_timings(
         "forward": {},
         "backward": {},
         "optimizer_step": {},
-        "wait_proxy": {},
+        "residual_proxy": {},
         "total_step": {},
         "non_backward": {},
         "clean_backward": {},
@@ -297,7 +299,7 @@ def _clean_rank_timings(
         forward = non_negative_finite(values.get("forward", 0.0))
         backward = non_negative_finite(values.get("backward", 0.0))
         optimizer = non_negative_finite(values.get("optimizer_step", 0.0))
-        wait = non_negative_finite(values.get("wait_proxy", 0.0))
+        residual = non_negative_finite(values.get("residual_proxy", 0.0))
         total_step = non_negative_finite(
             values.get(
                 "total_step",
@@ -309,17 +311,17 @@ def _clean_rank_timings(
             )
         )
 
-        explained_bwd_wait = max(0.0, non_bwd_max - non_bwd[rank])
-        clean_backward = max(0.0, backward - explained_bwd_wait)
+        explained_bwd_delay = max(0.0, non_bwd_max - non_bwd[rank])
+        clean_backward = max(0.0, backward - explained_bwd_delay)
         clean_compute = forward + clean_backward + optimizer
-        clean_step = dataloader + h2d + clean_compute + wait
+        clean_step = dataloader + h2d + clean_compute + residual
 
         out["dataloader_fetch"][rank] = dataloader
         out["h2d"][rank] = h2d
         out["forward"][rank] = forward
         out["backward"][rank] = backward
         out["optimizer_step"][rank] = optimizer
-        out["wait_proxy"][rank] = wait
+        out["residual_proxy"][rank] = residual
         out["total_step"][rank] = total_step
         out["non_backward"][rank] = non_bwd[rank]
         out["clean_backward"][rank] = clean_backward
@@ -368,18 +370,18 @@ def _clean_straggler_evidence(
             "compute",
         ),
         "h2d": ("H2D_STRAGGLER", "H2D STRAGGLER", "h2d", "h2d"),
-        "wait": (
-            "WAIT_STRAGGLER",
-            "WAIT STRAGGLER",
-            "wait_proxy",
-            "wait",
+        "residual": (
+            "RESIDUAL_STRAGGLER",
+            "RESIDUAL STRAGGLER",
+            "residual_proxy",
+            "residual",
         ),
     }
     source_by_component = {
         "input": clean_rank_values.get("dataloader_fetch", {}),
         "compute": clean_rank_values.get("clean_compute", {}),
         "h2d": clean_rank_values.get("h2d", {}),
-        "wait": clean_rank_values.get("wait_proxy", {}),
+        "residual": clean_rank_values.get("residual_proxy", {}),
     }
     component_excesses = {
         name: max(
@@ -504,7 +506,7 @@ def build_step_time_context(
     step_metric = by_key["step_time"]
     dataloader_metric = by_key.get("dataloader_fetch")
     h2d_metric = by_key.get("h2d")
-    wait_metric = by_key.get("wait_proxy")
+    residual_metric = by_key.get("residual_proxy")
     forward_metric = by_key.get("forward")
     backward_metric = by_key.get("backward")
     optimizer_metric = by_key.get("optimizer_step")
@@ -516,7 +518,7 @@ def build_step_time_context(
 
     step_total = metric_total(step_metric, single_rank=single_rank)
     dataloader_total = metric_total(dataloader_metric, single_rank=single_rank)
-    wait_total = metric_total(wait_metric, single_rank=single_rank)
+    residual_total = metric_total(residual_metric, single_rank=single_rank)
     compute_total_value = compute_total(
         forward=forward_metric,
         backward=backward_metric,
@@ -538,7 +540,7 @@ def build_step_time_context(
         "backward": rank_values_from_metric(backward_metric),
         "optimizer_step": rank_values_from_metric(optimizer_metric),
         "step_time": rank_values_from_metric(step_metric),
-        "wait_proxy": rank_values_from_metric(wait_metric),
+        "residual_proxy": rank_values_from_metric(residual_metric),
     }
 
     local_per_rank_timing = {
@@ -571,8 +573,8 @@ def build_step_time_context(
                 rank: non_negative_finite(values.get("step_time", 0.0))
                 for rank, values in local_per_rank_timing.items()
             },
-            "wait_proxy": {
-                rank: non_negative_finite(values.get("wait_proxy", 0.0))
+            "residual_proxy": {
+                rank: non_negative_finite(values.get("residual_proxy", 0.0))
                 for rank, values in local_per_rank_timing.items()
             },
         }
@@ -597,16 +599,16 @@ def build_step_time_context(
         step_metric=step_metric,
         dataloader_metric=dataloader_metric,
         h2d_metric=h2d_metric,
-        wait_metric=wait_metric,
+        residual_metric=residual_metric,
         forward_metric=forward_metric,
         backward_metric=backward_metric,
         optimizer_metric=optimizer_metric,
         step_total=step_total,
         dataloader_total=dataloader_total,
-        wait_total=wait_total,
+        residual_total=residual_total,
         compute_total=compute_total_value,
         dataloader_share=share(dataloader_total, step_total),
-        wait_share=share(wait_total, step_total),
+        residual_share=share(residual_total, step_total),
         compute_share=share(compute_total_value, step_total),
         dataloader_skew=metric_skew(
             dataloader_metric, single_rank=single_rank

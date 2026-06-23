@@ -26,9 +26,9 @@ Primary diagnosis policy
 ------------------------
 1. Step-time rank-skew findings become primary performance findings:
    ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, ``H2D_STRAGGLER``,
-   ``WAIT_STRAGGLER``, ``STRAGGLER``.
+   ``RESIDUAL_STRAGGLER``, ``STRAGGLER``.
 2. Step-time phase-share findings become primary performance findings:
-   ``WAIT_HEAVY``, ``INPUT_BOUND``, ``COMPUTE_BOUND``.
+   ``RESIDUAL_HEAVY``, ``INPUT_BOUND``, ``COMPUTE_BOUND``.
 3. If Step Time is ``BALANCED`` and System reports low or moderate GPU
    utilization, the primary becomes ``LOW_GPU_UTILIZATION_UNEXPLAINED``.
    GPU utilization is treated as a symptom or fallback, not root-cause proof.
@@ -48,13 +48,13 @@ primary.
 Evidence policy
 ---------------
 ``phase_share``
-    Used for ``INPUT_BOUND``, ``WAIT_HEAVY``, and ``COMPUTE_BOUND``. Values
+    Used for ``INPUT_BOUND``, ``RESIDUAL_HEAVY``, and ``COMPUTE_BOUND``. Values
     come from ``step_time.global.average`` because the diagnosis describes
     where the average step time went.
 
 ``rank_comparison``
     Used for ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``,
-    ``H2D_STRAGGLER``, ``WAIT_STRAGGLER``, and ``STRAGGLER``. Values come
+    ``H2D_STRAGGLER``, ``RESIDUAL_STRAGGLER``, and ``STRAGGLER``. Values come
     from ``step_time.global.median[metric]`` and
     ``step_time.global.worst[metric]`` because the diagnosis compares ranks.
 
@@ -81,12 +81,12 @@ JsonDict = Dict[str, Any]
 STEP_TIME_SECTION = "step_time"
 PERFORMANCE_SCOPE = "performance"
 
-PHASE_SHARE_KINDS = {"INPUT_BOUND", "WAIT_HEAVY", "COMPUTE_BOUND"}
+PHASE_SHARE_KINDS = {"INPUT_BOUND", "RESIDUAL_HEAVY", "COMPUTE_BOUND"}
 STRAGGLER_KINDS = {
     "INPUT_STRAGGLER",
     "COMPUTE_STRAGGLER",
     "H2D_STRAGGLER",
-    "WAIT_STRAGGLER",
+    "RESIDUAL_STRAGGLER",
     "STRAGGLER",
 }
 INSUFFICIENT_STEP_TIME_KINDS = {"NO_DATA", "WARMUP"}
@@ -99,7 +99,7 @@ PHASE_METRICS = (
     "dataloader_ms",
     "h2d_ms",
     "compute_ms",
-    "wait_ms",
+    "residual_ms",
 )
 
 
@@ -264,8 +264,8 @@ def _metric_for_step_time_issue(issue: Mapping[str, Any]) -> Optional[str]:
         return "compute_ms"
     if kind == "H2D_STRAGGLER":
         return "h2d_ms"
-    if kind == "WAIT_STRAGGLER":
-        return "wait_ms"
+    if kind == "RESIDUAL_STRAGGLER":
+        return "residual_ms"
     return None
 
 
@@ -283,8 +283,8 @@ def _metric_for_primary_diagnosis(
         return "compute_ms"
     if kind == "H2D_STRAGGLER":
         return "h2d_ms"
-    if kind == "WAIT_STRAGGLER":
-        return "wait_ms"
+    if kind == "RESIDUAL_STRAGGLER":
+        return "residual_ms"
     return None
 
 
@@ -410,8 +410,8 @@ def _straggler_comparisons(
         ),
         _comparison(
             step_time_summary=step_time_summary,
-            metric="wait_ms",
-            phase="wait",
+            metric="residual_ms",
+            phase="residual",
         ),
     ]
 
@@ -427,14 +427,14 @@ def _phase_share_summary(kind: str, evidence: Mapping[str, Any]) -> str:
                 f"{total:.1f}ms average step."
             )
         return "Input loading took a large share of step time."
-    if kind == "WAIT_HEAVY":
-        value = _float_or_none(evidence.get("wait_ms"))
+    if kind == "RESIDUAL_HEAVY":
+        value = _float_or_none(evidence.get("residual_ms"))
         if value is not None and total is not None:
             return (
-                f"Wait time took {value:.1f}ms of a "
+                f"Residual time took {value:.1f}ms of a "
                 f"{total:.1f}ms average step."
             )
-        return "Wait time took a large share of step time."
+        return "Residual time took a large share of step time."
     if kind == "COMPUTE_BOUND":
         value = _float_or_none(evidence.get("compute_ms"))
         if value is not None and total is not None:
@@ -456,6 +456,7 @@ def _rank_comparison_summary(
 
     metric = str(evidence.get("metric") or "step_time")
     phase = str(evidence.get("phase") or metric.replace("_ms", ""))
+    phase_label = {"residual": "residual time"}.get(phase, phase)
     median = _mapping(evidence.get("median"))
     worst = _mapping(evidence.get("worst"))
     worst_rank = _int_or_none(worst.get("rank"))
@@ -470,7 +471,7 @@ def _rank_comparison_summary(
         and median_value is not None
     ):
         return (
-            f"Rank r{worst_rank} {phase} was {worst_value:.1f}ms "
+            f"Rank r{worst_rank} {phase_label} was {worst_value:.1f}ms "
             f"vs median rank r{median_rank} at {median_value:.1f}ms."
         )
     return "One rank was materially slower than its peers."
@@ -560,7 +561,7 @@ def _low_gpu_util_unexplained_primary(
         section="system",
         summary=(
             "GPU utilization was low, but step timing did not identify input, "
-            "wait, compute-skew, or rank-skew as the cause."
+            "residual time, compute-skew, or rank-skew as the cause."
         ),
         action=(
             "Inspect untraced work, validation/checkpointing, kernel "
@@ -589,8 +590,8 @@ def _no_clear_bottleneck_primary(
         severity="info",
         section=STEP_TIME_SECTION,
         summary=(
-            "Step timing did not show material input, wait, compute-skew, or "
-            "rank-skew bottlenecks."
+            "Step timing did not show material input, residual time, "
+            "compute-skew, or rank-skew bottlenecks."
         ),
         action=(
             "No data-pipeline or rank-skew bottleneck was detected; use "

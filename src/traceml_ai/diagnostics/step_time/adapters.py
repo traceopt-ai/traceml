@@ -206,7 +206,7 @@ def _build_summary_per_rank_timing(
 
     These per-rank values mirror the summary semantics used elsewhere:
     - `step_time` is the effective local step time
-    - `wait_proxy = max(0, effective_step - compute)`
+    - `residual_proxy = max(0, effective_step - h2d - compute)`
     """
     out: Dict[int, Dict[str, float]] = {}
     for rank, item in rank_signals.items():
@@ -220,7 +220,7 @@ def _build_summary_per_rank_timing(
         compute = forward + backward + optimizer
         known_step = h2d + compute
         step_effective = max(step_cpu, known_step)
-        wait = max(0.0, step_effective - known_step)
+        residual = max(0.0, step_effective - known_step)
 
         out[int(rank)] = {
             "dataloader_fetch": dataloader,
@@ -229,7 +229,7 @@ def _build_summary_per_rank_timing(
             "backward": backward,
             "optimizer_step": optimizer,
             "step_time": step_effective,
-            "wait_proxy": wait,
+            "residual_proxy": residual,
             "total_step": dataloader + step_effective,
         }
     return out
@@ -283,7 +283,7 @@ def build_summary_step_diagnosis_result(
             "backward",
             "optimizer_step",
             "step_time",
-            "wait_proxy",
+            "residual_proxy",
         ):
             metric_series[mk] = _build_metric_series(
                 metric_key=mk,
@@ -316,7 +316,7 @@ def build_summary_step_diagnosis_result(
     compute = {r: fwd[r] + bwd[r] + opt[r] for r in ranks}
     known_step = {r: h2d[r] + compute[r] for r in ranks}
     step_effective = {r: max(step_raw[r], known_step[r]) for r in ranks}
-    wait = {r: max(0.0, step_effective[r] - known_step[r]) for r in ranks}
+    residual = {r: max(0.0, step_effective[r] - known_step[r]) for r in ranks}
 
     # Keep overall rank identity aligned with summary-card semantics.
     overall_rank_scores = {r: dl[r] + step_effective[r] for r in ranks}
@@ -331,7 +331,7 @@ def build_summary_step_diagnosis_result(
         "backward": bwd,
         "optimizer_step": opt,
         "step_time": step_effective,
-        "wait_proxy": wait,
+        "residual_proxy": residual,
     }
 
     metrics: List[StepCombinedTimeMetric] = []
@@ -342,7 +342,7 @@ def build_summary_step_diagnosis_result(
         "backward",
         "optimizer_step",
         "step_time",
-        "wait_proxy",
+        "residual_proxy",
     ):
         metric = _metric_from_rank_values(
             metric_key=key,

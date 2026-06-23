@@ -67,7 +67,8 @@ For DDP, FSDP, and multi-node launches, see
 +----------------------------------------------------------------------------+
 |  Step Time                                                                 |
 |  - Diagnosis: INPUT STRAGGLER                                              |
-|  - Stats: total 303.7ms | input 254.5ms | compute 259.5ms | wait 40.5ms    |
+|  - Stats: total 303.7ms | input 254.5ms | compute 259.5ms             |
+|  - Residual: 40.5ms                                                       |
 |  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
 +----------------------------------------------------------------------------+
 ```

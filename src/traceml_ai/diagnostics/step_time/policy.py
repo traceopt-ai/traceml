@@ -21,8 +21,8 @@ class DiagnosisThresholds:
     input_share_warn: float = 0.25
     input_share_crit: float = 0.35
 
-    wait_share_warn: float = 0.15
-    wait_share_crit: float = 0.25
+    residual_share_warn: float = 0.15
+    residual_share_crit: float = 0.25
 
     input_bound_max_skew: float = 0.06
     compute_bound_max_skew: float = 0.06
@@ -57,8 +57,8 @@ SUMMARY_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
         straggler_score_crit=0.18,
         input_share_warn=0.30,
         input_share_crit=0.40,
-        wait_share_warn=0.18,
-        wait_share_crit=0.28,
+        residual_share_warn=0.18,
+        residual_share_crit=0.28,
         input_bound_max_skew=0.05,
         compute_bound_max_skew=0.05,
         compute_bound_share_warn=0.88,

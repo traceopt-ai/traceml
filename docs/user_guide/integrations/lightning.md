@@ -3,7 +3,7 @@
 Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
 
 `TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a
-run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing
+run is input-bound, compute-bound, straggler-heavy, residual-heavy, or showing
 memory drift.
 
 ## 1. Install
@@ -67,7 +67,7 @@ In Lightning runs, TraceML helps you spot:
 
 - input-bound training
 - compute-bound steps
-- wait-heavy behavior
+- residual-heavy behavior
 - rank imbalance and stragglers
 - memory creep over time
 

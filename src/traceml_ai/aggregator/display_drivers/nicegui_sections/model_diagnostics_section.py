@@ -161,7 +161,7 @@ def _evidence_html(value: Any) -> str:
         "window",
         "worst",
         "gap",
-        "wait",
+        "residual",
         "dominant",
         "imb",
         "trend",

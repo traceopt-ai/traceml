@@ -27,7 +27,7 @@ Use TraceML for:
 
 - bottleneck diagnosis
 - stragglers
-- wait-heavy behavior
+- residual-heavy behavior
 - memory creep
 - run-to-run bottleneck comparison from saved TraceML summary JSON files
 
@@ -338,7 +338,7 @@ It means one rank is slower in the input path than the typical rank.
 
 In distributed runs, TraceML first discounts backward time that can be explained
 by another rank's non-backward work. `INPUT STRAGGLER` means dataloader excess
-on the worst clean-step rank dominates compute, H2D, and wait excess by at
+on the worst clean-step rank dominates compute, H2D, and residual excess by at
 least `1.25x`.
 
 Common causes:
@@ -360,7 +360,7 @@ It means one rank is slower in clean compute than the typical rank.
 Clean compute is forward plus optimizer plus backward after discounting
 backward time that can be explained by another rank's non-backward work. TraceML
 uses `COMPUTE STRAGGLER` when clean-compute excess dominates dataloader, H2D,
-and wait excess by at least `1.25x`; otherwise the mixed case remains
+and residual excess by at least `1.25x`; otherwise the mixed case remains
 `STRAGGLER`.
 
 Common causes:
@@ -383,7 +383,7 @@ Use compare when you already have final summary JSON files and want to answer:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did memory or wait behavior regress?
+- did memory or residual behavior regress?
 
 Live output is for in-run diagnosis.
 
