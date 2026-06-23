@@ -32,7 +32,7 @@ Use TraceML for:
 - input bottlenecks
 - compute-bound steps
 - DDP stragglers
-- wait-heavy behavior
+- residual-heavy behavior
 - memory creep
 - step-aware bottleneck diagnosis
 - compact run-to-run comparison from saved TraceML summary JSON files

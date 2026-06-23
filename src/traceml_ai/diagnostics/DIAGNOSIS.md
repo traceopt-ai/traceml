@@ -39,7 +39,7 @@ Host/node pressure and GPU-utilization symptoms.
 
 `LOW_GPU_UTILIZATION` and `MODERATE_GPU_UTILIZATION` are observed System
 symptoms, not root-cause proof. Use Step Time to identify whether the likely
-cause is input loading, compute balance, waits, synchronization, or other
+cause is input loading, compute balance, residuals, synchronization, or other
 training behavior. Average GPU utilization above 70% does not emit a
 GPU-utilization issue and can remain `NORMAL` when no pressure rules fire.
 
@@ -69,19 +69,19 @@ Training-step timing.
 - `INPUT_STRAGGLER`: one rank has materially higher dataloader time.
 - `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
 - `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
-- `WAIT_STRAGGLER`: one rank has materially higher residual `wait_proxy`.
+- `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
 - `INPUT_BOUND`: dataloader time dominates the typical step.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
-- `WAIT_HEAVY`: unattributed residual time is a material share of the step.
+- `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
 
-`WAIT_HEAVY` is not a communication diagnosis. `wait_ms` is residual
+`RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
-wait_ms = traced_step_ms - known_step_ms
+residual_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
 
@@ -89,17 +89,17 @@ Rank-local stragglers use clean-step evidence. TraceML first discounts backward
 time that can be explained by another rank's non-backward work:
 
 ```text
-wait_r = wait_proxy_r
-non_bwd_r = dataloader_r + h2d_r + forward_r + optimizer_r + wait_r
+residual_r = residual_proxy_r
+non_bwd_r = dataloader_r + h2d_r + forward_r + optimizer_r + residual_r
 clean_bwd_r = max(0, backward_r - max(0, max(non_bwd) - non_bwd_r))
 clean_compute_r = forward_r + clean_bwd_r + optimizer_r
-clean_step_r = dataloader_r + h2d_r + clean_compute_r + wait_r
+clean_step_r = dataloader_r + h2d_r + clean_compute_r + residual_r
 score = (max(clean_step) - median(clean_step)) / median(actual_step)
 ```
 
 If `score < 0.10`, TraceML does not report a rank-local straggler. Otherwise it
 blames the largest worst-rank excess over peer median among dataloader, clean
-compute, H2D, and wait. The largest excess must dominate the next-largest
+compute, H2D, and residual. The largest excess must dominate the next-largest
 excess by `1.25x`; otherwise the diagnosis stays mixed `STRAGGLER`.
 
 It can include validation, checkpointing, logging, framework orchestration, CPU

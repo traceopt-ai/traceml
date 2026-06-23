@@ -20,7 +20,7 @@ _PHASES = (
     ("forward_ms", "forward", "var(--fwd)"),
     ("backward_ms", "backward", "var(--bwd)"),
     ("optimizer_ms", "optimizer", "var(--opt)"),
-    ("wait_ms", "wait", "var(--wait)"),
+    ("residual_ms", "residual", "var(--residual)"),
 )
 
 

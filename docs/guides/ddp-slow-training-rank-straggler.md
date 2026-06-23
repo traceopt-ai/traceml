@@ -4,7 +4,7 @@ Use this guide when PyTorch DDP training is slow, uneven, or controlled by one
 slow rank.
 
 TraceML compares worst-rank and median-rank timing in distributed runs. It can
-surface input stragglers, compute stragglers, mixed stragglers, and wait-heavy
+surface input stragglers, compute stragglers, mixed stragglers, and residual-heavy
 windows.
 
 For whole-run triage, start with
@@ -94,16 +94,16 @@ Start with the Step Time diagnosis.
 | `INPUT STRAGGLER` | one rank has meaningfully more dataloader burden than a typical rank |
 | `COMPUTE STRAGGLER` | one rank has meaningfully more clean compute burden than a typical rank |
 | `H2D STRAGGLER` | one rank has meaningfully more host-to-device transfer burden than a typical rank |
-| `WAIT STRAGGLER` | one rank has meaningfully more rank-local residual `wait_proxy` than a typical rank |
-| `STRAGGLER` | one rank is slower, but dataloader, clean compute, H2D, and wait excess are mixed |
+| `RESIDUAL STRAGGLER` | one rank has meaningfully more rank-local residual `residual_proxy` than a typical rank |
+| `STRAGGLER` | one rank is slower, but dataloader, clean compute, H2D, and residual excess are mixed |
 | `INPUT-BOUND` | input work is broad, not just one bad rank |
-| `WAIT-HEAVY` | meaningful residual time is not attributed to dataloader, H2D, forward, backward, or optimizer work |
+| `RESIDUAL-HEAVY` | meaningful residual time is not attributed to dataloader, H2D, forward, backward, or optimizer work |
 
 For rank-local stragglers, TraceML uses clean-step attribution before blaming a
 component. It discounts backward time that can be explained by another rank's
 non-backward work, then compares clean step across ranks. The component label is
 the largest worst-rank excess over peer median among dataloader, clean compute,
-H2D, and wait, and it must dominate the next-largest excess by `1.25x`.
+H2D, and residual, and it must dominate the next-largest excess by `1.25x`.
 
 Then inspect:
 
@@ -113,7 +113,7 @@ Then inspect:
 - `Forward`
 - `Backward`
 - `Optimizer Step`
-- `Wait`
+- `Residual`
 
 ## How to triage the worst rank
 
@@ -136,15 +136,15 @@ If the diagnosis is `H2D STRAGGLER`, inspect host-to-device transfer on the
 worst rank: batch shapes, transfer placement, pinned memory, and transfer
 jitter.
 
-If the diagnosis is `WAIT STRAGGLER`, inspect rank-local host-side work on the
+If the diagnosis is `RESIDUAL STRAGGLER`, inspect rank-local host-side work on the
 worst rank: logging, checkpointing, validation, callbacks, CPU stalls, or
 unobserved transfer work.
 
 If the diagnosis is `STRAGGLER`, reduce the problem one phase at a time. Start
 with the largest clean-step component gap.
 
-If the diagnosis is `WAIT-HEAVY`, remember that TraceML reports wait as
-residual time. It is not direct NCCL or all-reduce timing. Inspect logging,
+If the diagnosis is `RESIDUAL-HEAVY`, remember that TraceML reports residual
+time as a derived bucket. It is not direct NCCL or all-reduce timing. Inspect logging,
 checkpointing, validation, CPU stalls, framework orchestration, and unobserved
 transfer paths before assuming the cause.
 
@@ -167,7 +167,7 @@ traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
 Look for changes in total step time, worst-rank skew, input time, compute time,
-wait time, and diagnosis.
+residual time, and diagnosis.
 
 ## Related
 

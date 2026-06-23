@@ -263,7 +263,7 @@ def _build_step_time_evidence(
     """
     by_key = {metric.metric: metric for metric in metrics}
     step = by_key.get("step_time")
-    wait = by_key.get("wait_proxy")
+    residual = by_key.get("residual_proxy")
 
     if step is None:
         return {}
@@ -288,13 +288,15 @@ def _build_step_time_evidence(
 
     try:
         median_total = float(step.summary.median_total or 0.0)
-        wait_total = (
-            float(wait.summary.median_total or 0.0)
-            if wait is not None
+        residual_total = (
+            float(residual.summary.median_total or 0.0)
+            if residual is not None
             else 0.0
         )
         if median_total > 0.0:
-            evidence["wait"] = f"{(wait_total / median_total) * 100.0:.1f}%"
+            evidence["residual"] = (
+                f"{(residual_total / median_total) * 100.0:.1f}%"
+            )
     except Exception:
         pass
 
@@ -368,7 +370,7 @@ def _dominant_step_component(
         "forward": "forward",
         "backward": "backward",
         "optimizer_step": "optimizer",
-        "wait_proxy": "wait",
+        "residual_proxy": "residual",
     }
 
     best_label: Optional[str] = None

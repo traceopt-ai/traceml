@@ -17,7 +17,7 @@ STYLESHEET = """
     --info:#2f6db8; --info-bg:#eef4fb; --good:#2e7d52; --good-bg:#edf7f1;
     --neutral:#6b7684; --neutral-bg:#f1f3f5;
     --dl:#d97742; --h2d:#8e6fd8; --fwd:#3b82c4; --bwd:#1e5a96;
-    --opt:#3aa17e; --wait:#98a2ae;
+    --opt:#3aa17e; --residual:#98a2ae;
   }
   @media (prefers-color-scheme: dark) {
     :root {

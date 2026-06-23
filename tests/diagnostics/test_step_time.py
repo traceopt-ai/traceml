@@ -26,7 +26,7 @@ from traceml_ai.diagnostics.step_time.rules import (
     CleanStragglerRule,
     ComputeBoundRule,
     InputBoundRule,
-    WaitHeavyRule,
+    ResidualHeavyRule,
 )
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
@@ -101,12 +101,12 @@ def _timing_row(
     forward: float = 20.0,
     backward: float = 30.0,
     optimizer: float = 10.0,
-    wait: float = 0.0,
+    residual: float = 0.0,
     step_time: float | None = None,
     total_step: float | None = None,
 ) -> dict[str, float]:
     known_step = h2d + forward + backward + optimizer
-    local_step = known_step + wait if step_time is None else step_time
+    local_step = known_step + residual if step_time is None else step_time
     return {
         "dataloader_fetch": dataloader,
         "h2d": h2d,
@@ -114,7 +114,7 @@ def _timing_row(
         "backward": backward,
         "optimizer_step": optimizer,
         "step_time": local_step,
-        "wait_proxy": wait,
+        "residual_proxy": residual,
         "total_step": (
             dataloader + local_step if total_step is None else total_step
         ),
@@ -135,7 +135,7 @@ def _metrics_from_per_rank_timing(
         "backward",
         "optimizer_step",
         "step_time",
-        "wait_proxy",
+        "residual_proxy",
     ):
         values_by_rank = {
             int(rank): float(values.get(key, 0.0))
@@ -178,7 +178,7 @@ def _single_rank_step_metrics(
     forward: float = 30.0,
     backward: float = 50.0,
     optimizer: float = 10.0,
-    wait: float = 5.0,
+    residual: float = 5.0,
 ) -> tuple[StepCombinedTimeMetric, ...]:
     return (
         _time_metric(
@@ -217,9 +217,9 @@ def _single_rank_step_metrics(
             world_size=1,
         ),
         _time_metric(
-            "wait_proxy",
-            median=wait,
-            worst=wait,
+            "residual_proxy",
+            median=residual,
+            worst=residual,
             worst_rank=0,
             world_size=1,
         ),
@@ -258,7 +258,7 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
             forward=20.0,
             backward=30.0,
             optimizer=5.0,
-            wait=10.0,
+            residual=10.0,
         )
     )
     assert InputBoundRule().evaluate(input_bound).kind == "INPUT_BOUND"
@@ -270,14 +270,14 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     )
 
     assert (
-        WaitHeavyRule()
-        .evaluate(_time_context(*_single_rank_step_metrics(wait=20.0)))
+        ResidualHeavyRule()
+        .evaluate(_time_context(*_single_rank_step_metrics(residual=20.0)))
         .kind
-        == "WAIT_HEAVY"
+        == "RESIDUAL_HEAVY"
     )
     assert (
-        WaitHeavyRule().evaluate(
-            _time_context(*_single_rank_step_metrics(wait=5.0))
+        ResidualHeavyRule().evaluate(
+            _time_context(*_single_rank_step_metrics(residual=5.0))
         )
         is None
     )
@@ -285,7 +285,9 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     assert (
         ComputeBoundRule()
         .evaluate(
-            _time_context(*_single_rank_step_metrics(dataloader=2.0, wait=3.0))
+            _time_context(
+                *_single_rank_step_metrics(dataloader=2.0, residual=3.0)
+            )
         )
         .kind
         == "COMPUTE_BOUND"
@@ -293,14 +295,14 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     assert (
         ComputeBoundRule().evaluate(
             _time_context(
-                *_single_rank_step_metrics(dataloader=35.0, wait=3.0)
+                *_single_rank_step_metrics(dataloader=35.0, residual=3.0)
             )
         )
         is None
     )
 
 
-def test_clean_backward_discount_removes_telescoped_wait_from_peer() -> None:
+def test_clean_backward_discount_removes_telescoped_delay_from_peer() -> None:
     per_rank = {
         0: _timing_row(
             dataloader=100.0,
@@ -353,11 +355,11 @@ def test_clean_backward_discount_removes_telescoped_wait_from_peer() -> None:
         ),
         (
             {
-                0: _timing_row(wait=0.0),
-                1: _timing_row(wait=80.0),
+                0: _timing_row(residual=0.0),
+                1: _timing_row(residual=80.0),
             },
-            "WAIT_STRAGGLER",
-            "wait",
+            "RESIDUAL_STRAGGLER",
+            "residual",
         ),
         (
             {
@@ -385,10 +387,12 @@ def test_clean_straggler_classifies_component_excess(
     assert result.issues[0].evidence["clean_step_slack_ms"] > 0.0
 
 
-def test_step_time_primary_prefers_clean_straggler_over_wait_heavy() -> None:
+def test_step_time_primary_prefers_clean_straggler_over_residual_heavy() -> (
+    None
+):
     per_rank = {
-        0: _timing_row(dataloader=10.0, wait=80.0),
-        1: _timing_row(dataloader=110.0, wait=80.0),
+        0: _timing_row(dataloader=10.0, residual=80.0),
+        1: _timing_row(dataloader=110.0, residual=80.0),
     }
 
     result = build_step_diagnosis_result(
@@ -399,7 +403,7 @@ def test_step_time_primary_prefers_clean_straggler_over_wait_heavy() -> None:
     assert result.primary.kind == "INPUT_STRAGGLER"
     assert {issue.kind for issue in result.issues} >= {
         "INPUT_STRAGGLER",
-        "WAIT_HEAVY",
+        "RESIDUAL_HEAVY",
     }
 
 
@@ -409,8 +413,8 @@ def test_step_time_live_and_summary_policies_are_explicit() -> None:
     assert DEFAULT_THRESHOLDS == LIVE_STEP_TIME_POLICY.thresholds
     assert DEFAULT_SUMMARY_DIAG_CONFIG == SUMMARY_STEP_TIME_POLICY
     assert (
-        SUMMARY_STEP_TIME_POLICY.thresholds.wait_share_warn
-        > LIVE_STEP_TIME_POLICY.thresholds.wait_share_warn
+        SUMMARY_STEP_TIME_POLICY.thresholds.residual_share_warn
+        > LIVE_STEP_TIME_POLICY.thresholds.residual_share_warn
     )
     assert (
         SUMMARY_STEP_TIME_POLICY.thresholds.straggler_dominance_tolerance

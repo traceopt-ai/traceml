@@ -29,7 +29,7 @@ from traceml_ai.reporting.sections.step_time.model import (
     build_global_rollup,
     build_overview,
     closest_rank_to_median,
-    compute_wait_avg_ms,
+    compute_residual_avg_ms,
     finite_float,
     summary_metric_values,
 )
@@ -58,7 +58,7 @@ class StepTimeCardStats:
     total_step: StepTimeMetricPair
     h2d: StepTimeMetricPair
     compute: StepTimeMetricPair
-    wait: StepTimeMetricPair
+    residual: StepTimeMetricPair
     input: StepTimeMetricPair
 
     @property
@@ -139,9 +139,9 @@ def _build_card_stats(
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
-        wait=_metric_pair_from_rank_values(
+        residual=_metric_pair_from_rank_values(
             {
-                int(rank): compute_wait_avg_ms(summary)
+                int(rank): compute_residual_avg_ms(summary)
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
@@ -171,7 +171,10 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
             stats.compute.median_ms,
             stats.compute.worst_ms,
         )
-        wait = _format_ms_pair(stats.wait.median_ms, stats.wait.worst_ms)
+        residual = _format_ms_pair(
+            stats.residual.median_ms,
+            stats.residual.worst_ms,
+        )
         input_ms = _format_ms_pair(
             stats.input.median_ms,
             stats.input.worst_ms,
@@ -183,7 +186,8 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         return (
             "- Stats: median/worst | "
             f"total {total} | input {input_ms} | H2D {h2d_ms} | "
-            f"compute {compute} | wait {wait}"
+            f"compute {compute}\n"
+            f"- Residual: median/worst {residual}"
         )
 
     return (
@@ -191,8 +195,8 @@ def _format_card_stats(stats: StepTimeCardStats) -> str:
         f"total {format_ms(stats.total_step.worst_ms)} | "
         f"input {format_ms(stats.input.worst_ms)} | "
         f"H2D {format_ms(stats.h2d.worst_ms)} | "
-        f"compute {format_ms(stats.compute.worst_ms)} | "
-        f"wait {format_ms(stats.wait.worst_ms)}"
+        f"compute {format_ms(stats.compute.worst_ms)}\n"
+        f"- Residual: {format_ms(stats.residual.worst_ms)}"
     )
 
 
@@ -208,9 +212,9 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
         stats.compute.median_global_rank,
         stats.compute.worst_global_rank,
     )
-    wait = _format_rank_pair(
-        stats.wait.median_global_rank,
-        stats.wait.worst_global_rank,
+    residual = _format_rank_pair(
+        stats.residual.median_global_rank,
+        stats.residual.worst_global_rank,
     )
     input_rank = _format_rank_pair(
         stats.input.median_global_rank,
@@ -223,7 +227,8 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
     return (
         "- Ranks: median/worst | "
         f"total {total} | input {input_rank} | H2D {h2d_rank} | "
-        f"compute {compute} | wait {wait}"
+        f"compute {compute}\n"
+        f"- Residual ranks: median/worst {residual}"
     )
 
 
@@ -329,11 +334,14 @@ def _step_time_card_reason(
             f"{_global_rank_label(stats.h2d.worst_global_rank)} H2D was "
             f"slower than median global rank ({evidence})."
         )
-    if kind == "WAIT_STRAGGLER":
-        evidence = _format_ms_pair(stats.wait.worst_ms, stats.wait.median_ms)
+    if kind == "RESIDUAL_STRAGGLER":
+        evidence = _format_ms_pair(
+            stats.residual.worst_ms,
+            stats.residual.median_ms,
+        )
         return (
-            f"{_global_rank_label(stats.wait.worst_global_rank)} wait was "
-            f"higher than median global rank ({evidence})."
+            f"{_global_rank_label(stats.residual.worst_global_rank)} residual "
+            f"time was higher than median global rank ({evidence})."
         )
     if kind == "STRAGGLER":
         return "Multiple clean-step components varied across ranks."
@@ -343,12 +351,12 @@ def _step_time_card_reason(
             f"{format_ms(stats.total_step.worst_ms)}"
         )
         return f"Input loading took a large share ({evidence})."
-    if kind == "WAIT_HEAVY":
+    if kind == "RESIDUAL_HEAVY":
         evidence = (
-            f"{format_ms(stats.wait.worst_ms)}/"
+            f"{format_ms(stats.residual.worst_ms)}/"
             f"{format_ms(stats.total_step.worst_ms)}"
         )
-        return f"Wait was high inside the total step ({evidence})."
+        return f"Residual time was high inside the total step ({evidence})."
     if kind == "COMPUTE_BOUND":
         summary = per_global_rank_summary.get(stats.compute.worst_global_rank)
         phase = _largest_compute_phase(summary)

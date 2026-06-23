@@ -109,16 +109,16 @@ class CleanStragglerRule(_BaseStepTimeRule):
             "input": "dataloader",
             "compute": "clean compute",
             "h2d": "H2D",
-            "wait": "wait",
+            "residual": "residual",
             "mixed": "multiple components",
         }.get(evidence.component, evidence.component)
         if evidence.kind == "STRAGGLER":
             summary = (
-                f"{_rank_str(rank)} is slower after backward-wait discount "
+                f"{_rank_str(rank)} is slower after backward-delay discount "
                 f"(~{_pct(evidence.score)} of a typical step); no component "
                 "dominates."
             )
-            action = "Inspect input, H2D, compute, and wait on the slow rank."
+            action = "Inspect input, H2D, compute, and residual time on the slow rank."
         else:
             summary = (
                 f"{_rank_str(rank)} has excess {component_label} burden "
@@ -198,37 +198,38 @@ class InputBoundRule(_BaseStepTimeRule):
 
 
 @dataclass(frozen=True)
-class WaitHeavyRule(_BaseStepTimeRule):
+class ResidualHeavyRule(_BaseStepTimeRule):
     """
-    Detect windows dominated by wait rather than local work.
+    Detect windows dominated by residual time rather than traced local work.
     """
 
-    name: str = "wait_heavy"
+    name: str = "residual_heavy"
 
     def evaluate(
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.wait_share < context.thresholds.wait_share_warn:
+        if context.residual_share < context.thresholds.residual_share_warn:
             return None
 
         return self._issue(
-            kind="WAIT_HEAVY",
-            status="WAIT-HEAVY",
+            kind="RESIDUAL_HEAVY",
+            status="RESIDUAL-HEAVY",
             severity=_severity(
-                context.wait_share,
-                context.thresholds.wait_share_crit,
+                context.residual_share,
+                context.thresholds.residual_share_crit,
             ),
             summary=(
-                f"WAIT* is {_pct(context.wait_share)} of the typical step."
+                f"Residual time is {_pct(context.residual_share)} of the "
+                "typical step."
             ),
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "
                 "checkpointing, validation, or unobserved transfers."
             ),
-            metric="wait_proxy",
-            phase="wait",
-            share_pct=context.wait_share,
+            metric="residual_proxy",
+            phase="residual",
+            share_pct=context.residual_share,
             ranks=(context.overall_worst_rank,),
         )
 
@@ -251,7 +252,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
             return None
         if context.dataloader_share >= context.thresholds.input_share_warn:
             return None
-        if context.wait_share >= context.thresholds.wait_share_warn:
+        if context.residual_share >= context.thresholds.residual_share_warn:
             return None
         if not context.single_rank and (
             context.compute_skew > context.thresholds.compute_bound_max_skew
@@ -285,7 +286,7 @@ DEFAULT_STEP_TIME_RULES: Tuple[
 ] = (
     CleanStragglerRule(),
     InputBoundRule(),
-    WaitHeavyRule(),
+    ResidualHeavyRule(),
     ComputeBoundRule(),
 )
 
@@ -313,6 +314,6 @@ __all__ = [
     "CleanStragglerRule",
     "ComputeBoundRule",
     "InputBoundRule",
-    "WaitHeavyRule",
+    "ResidualHeavyRule",
     "run_step_time_rules",
 ]

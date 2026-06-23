@@ -70,11 +70,11 @@ def build_step_trend_note(
     steps_used: int,
     single_rank: bool,
     step_metric: Optional[StepCombinedTimeMetric],
-    wait_metric: Optional[StepCombinedTimeMetric],
+    residual_metric: Optional[StepCombinedTimeMetric],
     dataloader_metric: Optional[StepCombinedTimeMetric],
-    wait_share: float,
+    residual_share: float,
     dataloader_share: float,
-    wait_warn_threshold: float,
+    residual_warn_threshold: float,
     input_warn_threshold: float,
     cfg: StepTrendHeuristicConfig = DEFAULT_STEP_TREND_HEURISTICS,
 ) -> Optional[str]:
@@ -88,15 +88,15 @@ def build_step_trend_note(
         step_tr = _safe_metric_trend_pct(
             step_metric, single_rank=single_rank, cfg=cfg
         )
-        wait_tr = _safe_metric_trend_pct(
-            wait_metric, single_rank=single_rank, cfg=cfg
+        residual_tr = _safe_metric_trend_pct(
+            residual_metric, single_rank=single_rank, cfg=cfg
         )
         dl_tr = _safe_metric_trend_pct(
             dataloader_metric, single_rank=single_rank, cfg=cfg
         )
 
         step_state = _trend_state(step_tr, cfg=cfg)
-        wait_state = _trend_state(wait_tr, cfg=cfg)
+        residual_state = _trend_state(residual_tr, cfg=cfg)
         dl_state = _trend_state(dl_tr, cfg=cfg)
 
         if diagnosis_kind in {"INPUT_BOUND", "INPUT_STRAGGLER"} and dl_state:
@@ -120,14 +120,17 @@ def build_step_trend_note(
                 f"{step_state} ({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
             )
 
-        if diagnosis_kind in {"WAIT_HEAVY", "WAIT_STRAGGLER"} and wait_state:
+        if (
+            diagnosis_kind in {"RESIDUAL_HEAVY", "RESIDUAL_STRAGGLER"}
+            and residual_state
+        ):
             return (
-                "Trend: WAIT* is "
-                f"{wait_state} ({format_trend_pct(wait_tr, deadband_pct=cfg.deadband_pct)})."
+                "Trend: residual time is "
+                f"{residual_state} ({format_trend_pct(residual_tr, deadband_pct=cfg.deadband_pct)})."
             )
 
-        near_wait_warn = wait_share >= (
-            wait_warn_threshold * cfg.near_warn_fraction
+        near_residual_warn = residual_share >= (
+            residual_warn_threshold * cfg.near_warn_fraction
         )
         near_input_warn = dataloader_share >= (
             input_warn_threshold * cfg.near_warn_fraction
@@ -136,7 +139,7 @@ def build_step_trend_note(
         if (
             diagnosis_kind == "BALANCED"
             and step_state == "worsening"
-            and (near_wait_warn or near_input_warn)
+            and (near_residual_warn or near_input_warn)
         ):
             return (
                 "Trend: step time is rising "

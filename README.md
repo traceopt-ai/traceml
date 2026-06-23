@@ -123,7 +123,8 @@ Example TraceML output:
 |  Step Time                                                                 |
 |  - Diagnosis: INPUT STRAGGLER                                              |
 |  - Scope: compared over last 460 aligned steps across 4 global ranks       |
-|  - Stats: total 303.7ms | input 254.5ms | compute 259.5ms | wait 40.5ms    |
+|  - Stats: total 303.7ms | input 254.5ms | compute 259.5ms             |
+|  - Residual: 40.5ms                                                       |
 |  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
 +----------------------------------------------------------------------------+
 ```
@@ -146,7 +147,7 @@ the likely bottleneck area so you know where to look next.
 | Area | What TraceML surfaces | What to inspect next |
 |---|---|---|
 | Input pipeline | High input time or slow input rank | `num_workers`, `pin_memory`, transforms, tokenization, `collate_fn`, dataset/storage latency |
-| GPU utilization / wait | Step time split across input, compute, and wait | input pipeline, CPU/GPU handoff, synchronization, distributed coordination |
+| GPU utilization / residual | Step time split across input, compute, and residual | input pipeline, CPU/GPU handoff, synchronization, distributed coordination |
 | Distributed skew | One DDP/FSDP rank slower than the others | rank-local dataloading, data imbalance, node variance, storage/network differences |
 | Memory creep | Memory usage growing during the run | retained tensors, logging references, loss accumulation, cached activations |
 | Run regression | Changed metrics versus a known-good run | code changes, data changes, batch size, container, driver, hardware, infrastructure |

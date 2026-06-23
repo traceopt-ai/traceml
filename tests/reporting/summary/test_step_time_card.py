@@ -126,7 +126,9 @@ def test_step_time_balanced_card_is_compact() -> None:
     assert payload["diagnosis"]["status"] == "BALANCED"
     assert "- Diagnosis: BALANCED" in payload["card"]
     assert "- Stats: median/worst |" in payload["card"]
+    assert "- Residual: median/worst" in payload["card"]
     assert "- Ranks: median/worst |" in payload["card"]
+    assert "- Residual ranks: median/worst" in payload["card"]
     assert "- Why: No clear timing bottleneck." in payload["card"]
     _assert_compact_card(payload["card"])
 
@@ -150,6 +152,7 @@ def test_step_time_compute_bound_card_uses_short_reason() -> None:
         "- Stats: total 97.0ms | input 2.0ms | H2D 0.0ms | compute 90.0ms"
         in payload["card"]
     )
+    assert "- Residual: 5.0ms" in payload["card"]
     assert (
         "- Why: Compute dominated (90.0ms/97.0ms); backward was largest."
         in payload["card"]
@@ -179,7 +182,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     _assert_compact_card(payload["card"])
 
 
-def test_step_time_wait_heavy_card_uses_short_reason() -> None:
+def test_step_time_residual_heavy_card_uses_short_reason() -> None:
     payload = _summary(
         {
             0: _rank(
@@ -193,9 +196,9 @@ def test_step_time_wait_heavy_card_uses_short_reason() -> None:
     )
 
     assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "WAIT-HEAVY"
+    assert payload["diagnosis"]["status"] == "RESIDUAL-HEAVY"
     assert (
-        "- Why: Wait was high inside the total step (30.0ms/102.0ms)."
+        "- Why: Residual time was high inside the total step (30.0ms/102.0ms)."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
@@ -280,7 +283,7 @@ def test_step_time_h2d_straggler_card_shows_rank_evidence() -> None:
     _assert_compact_card(payload["card"])
 
 
-def test_step_time_wait_straggler_card_shows_rank_evidence() -> None:
+def test_step_time_residual_straggler_card_shows_rank_evidence() -> None:
     payload = _summary(
         {
             0: _rank(
@@ -299,14 +302,14 @@ def test_step_time_wait_straggler_card_shows_rank_evidence() -> None:
     )
 
     assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "WAIT STRAGGLER"
+    assert payload["diagnosis"]["status"] == "RESIDUAL STRAGGLER"
     assert (
-        "- Why: r1 wait was higher than median global rank (80.0/40.0ms)."
+        "- Why: r1 residual time was higher than median global rank (80.0/40.0ms)."
         in payload["card"]
     )
     assert {issue["kind"] for issue in payload["issues"]} >= {
-        "WAIT_STRAGGLER",
-        "WAIT_HEAVY",
+        "RESIDUAL_STRAGGLER",
+        "RESIDUAL_HEAVY",
     }
     assert "issues" not in payload["groups"]["rows"]["1"]
     _assert_compact_card(payload["card"])
@@ -338,7 +341,7 @@ def test_step_time_unexplained_mixed_straggler_stays_straggler() -> None:
     _assert_compact_card(payload["card"])
 
 
-def test_step_time_priority_prefers_straggler_over_wait_heavy() -> None:
+def test_step_time_priority_prefers_straggler_over_residual_heavy() -> None:
     payload = _summary(
         {
             0: _rank(
@@ -357,5 +360,5 @@ def test_step_time_priority_prefers_straggler_over_wait_heavy() -> None:
     )
 
     assert payload["diagnosis"]["status"] == "INPUT STRAGGLER"
-    assert "WAIT_HEAVY" in {issue["kind"] for issue in payload["issues"]}
+    assert "RESIDUAL_HEAVY" in {issue["kind"] for issue in payload["issues"]}
     assert "- Diagnosis: INPUT STRAGGLER" in payload["card"]

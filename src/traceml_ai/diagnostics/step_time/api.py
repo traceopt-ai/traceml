@@ -43,10 +43,10 @@ DiagnosisKind = Literal[
     "INPUT_STRAGGLER",
     "COMPUTE_STRAGGLER",
     "H2D_STRAGGLER",
-    "WAIT_STRAGGLER",
+    "RESIDUAL_STRAGGLER",
     "INPUT_BOUND",
     "COMPUTE_BOUND",
-    "WAIT_HEAVY",
+    "RESIDUAL_HEAVY",
 ]
 
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
@@ -57,10 +57,10 @@ _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
     "COMPUTE_STRAGGLER": "COMPUTE STRAGGLER",
     "H2D_STRAGGLER": "H2D STRAGGLER",
-    "WAIT_STRAGGLER": "WAIT STRAGGLER",
+    "RESIDUAL_STRAGGLER": "RESIDUAL STRAGGLER",
     "INPUT_BOUND": "INPUT-BOUND",
     "COMPUTE_BOUND": "COMPUTE-BOUND",
-    "WAIT_HEAVY": "WAIT-HEAVY",
+    "RESIDUAL_HEAVY": "RESIDUAL-HEAVY",
 }
 
 _PRIMARY_KIND_PRIORITY: dict[str, int] = {
@@ -68,9 +68,9 @@ _PRIMARY_KIND_PRIORITY: dict[str, int] = {
     "INPUT_STRAGGLER": 40,
     "COMPUTE_STRAGGLER": 40,
     "H2D_STRAGGLER": 40,
-    "WAIT_STRAGGLER": 40,
+    "RESIDUAL_STRAGGLER": 40,
     "INPUT_BOUND": 30,
-    "WAIT_HEAVY": 20,
+    "RESIDUAL_HEAVY": 20,
     "COMPUTE_BOUND": 10,
 }
 
@@ -293,10 +293,10 @@ def _apply_trend_note(
     diagnosis: StepDiagnosis,
     *,
     step_metric: Optional[StepCombinedTimeMetric],
-    wait_metric: Optional[StepCombinedTimeMetric],
+    residual_metric: Optional[StepCombinedTimeMetric],
     dataloader_metric: Optional[StepCombinedTimeMetric],
     single_rank: bool,
-    wait_share: float,
+    residual_share: float,
     dataloader_share: float,
     thresholds: DiagnosisThresholds,
 ) -> StepDiagnosis:
@@ -309,11 +309,11 @@ def _apply_trend_note(
             steps_used=diagnosis.steps_used,
             single_rank=single_rank,
             step_metric=step_metric,
-            wait_metric=wait_metric,
+            residual_metric=residual_metric,
             dataloader_metric=dataloader_metric,
-            wait_share=wait_share,
+            residual_share=residual_share,
             dataloader_share=dataloader_share,
-            wait_warn_threshold=thresholds.wait_share_warn,
+            residual_warn_threshold=thresholds.residual_share_warn,
             input_warn_threshold=thresholds.input_share_warn,
             cfg=DEFAULT_STEP_TREND_HEURISTICS,
         )
@@ -403,7 +403,7 @@ def build_step_diagnosis_result(
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
         "H2D_STRAGGLER",
-        "WAIT_STRAGGLER",
+        "RESIDUAL_STRAGGLER",
     }:
         worst_rank = primary_issue.ranks[0] if primary_issue.ranks else None
         primary = _mk_diag(
@@ -425,9 +425,9 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.dataloader_worst_rank
             ),
         )
-    elif primary_issue is not None and primary_issue.kind == "WAIT_HEAVY":
+    elif primary_issue is not None and primary_issue.kind == "RESIDUAL_HEAVY":
         primary = _mk_diag(
-            kind="WAIT_HEAVY",
+            kind="RESIDUAL_HEAVY",
             severity=primary_issue.severity,
             reason=primary_issue.summary,
             action=primary_issue.action,
@@ -436,7 +436,7 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.overall_worst_rank
             ),
             note=(
-                "wait_ms = total_step_ms - dataloader_ms - h2d_ms - "
+                "residual_ms = total_step_ms - dataloader_ms - h2d_ms - "
                 "compute_ms."
             ),
         )
@@ -466,10 +466,10 @@ def build_step_diagnosis_result(
     primary = _apply_trend_note(
         primary,
         step_metric=context.step_metric,
-        wait_metric=context.wait_metric,
+        residual_metric=context.residual_metric,
         dataloader_metric=context.dataloader_metric,
         single_rank=context.single_rank,
-        wait_share=context.wait_share,
+        residual_share=context.residual_share,
         dataloader_share=context.dataloader_share,
         thresholds=thresholds,
     )
@@ -552,13 +552,13 @@ def build_step_diagnosis_result(
             single_rank=context.single_rank,
             phase="optimizer",
         ),
-        "wait_proxy": _metric_attribution_entry(
-            metric=context.wait_metric,
-            metric_key="wait_proxy",
-            rank_values=context.rank_values.get("wait_proxy", {}),
+        "residual_proxy": _metric_attribution_entry(
+            metric=context.residual_metric,
+            metric_key="residual_proxy",
+            rank_values=context.rank_values.get("residual_proxy", {}),
             step_total=context.step_total,
             single_rank=context.single_rank,
-            phase="wait",
+            phase="residual",
         ),
         "step_time": _metric_attribution_entry(
             metric=context.step_metric,

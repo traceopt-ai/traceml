@@ -42,7 +42,7 @@ _METRIC_LABELS = {
     "dataloader_ms": "Dataloader",
     "h2d_ms": "H2D",
     "compute_ms": "Compute",
-    "wait_ms": "Wait",
+    "residual_ms": "Residual",
     "forward_ms": "Forward",
     "backward_ms": "Backward",
     "optimizer_ms": "Optimizer",

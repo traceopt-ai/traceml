@@ -68,9 +68,9 @@ section diagnoses.
 Selection policy:
 
 - `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, `H2D_STRAGGLER`,
-  `WAIT_STRAGGLER`, and `STRAGGLER` use rank-comparison evidence and are
+  `RESIDUAL_STRAGGLER`, and `STRAGGLER` use rank-comparison evidence and are
   promoted from `step_time.diagnosis`.
-- `WAIT_HEAVY`, `INPUT_BOUND`, and `COMPUTE_BOUND` use phase-share evidence
+- `RESIDUAL_HEAVY`, `INPUT_BOUND`, and `COMPUTE_BOUND` use phase-share evidence
   and are promoted from `step_time.diagnosis`.
 - `LOW_GPU_UTILIZATION_UNEXPLAINED` appears only when Step Time is `BALANCED`
   and System reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
@@ -94,18 +94,18 @@ Primary diagnosis evidence uses a small union:
   "dataloader_ms": 161.0,
   "h2d_ms": 0.1,
   "compute_ms": 109.6,
-  "wait_ms": 1.6,
+  "residual_ms": 1.6,
   "shares": {
     "dataloader_pct": 59.1,
     "h2d_pct": 0.0,
     "compute_pct": 40.3,
-    "wait_pct": 0.6
+    "residual_pct": 0.6
   },
   "gpu_util_avg_percent": 37.8
 }
 ```
 
-`phase_share` is used for `INPUT_BOUND`, `WAIT_HEAVY`, and `COMPUTE_BOUND`.
+`phase_share` is used for `INPUT_BOUND`, `RESIDUAL_HEAVY`, and `COMPUTE_BOUND`.
 Values come from `step_time.global.average`.
 
 ```json
@@ -123,7 +123,7 @@ Values come from `step_time.global.average`.
 ```
 
 `rank_comparison` is used for `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`,
-`H2D_STRAGGLER`, `WAIT_STRAGGLER`, and `STRAGGLER`. Values come from
+`H2D_STRAGGLER`, `RESIDUAL_STRAGGLER`, and `STRAGGLER`. Values come from
 `step_time.global.median[metric]` and
 `step_time.global.worst[metric]`. Generic `STRAGGLER` may contain a
 `comparisons` array instead of a single metric comparison.
@@ -277,7 +277,7 @@ in `global_ranks_used`.
     "dataloader_ms",
     "h2d_ms",
     "compute_ms",
-    "wait_ms",
+    "residual_ms",
     "forward_ms",
     "backward_ms",
     "optimizer_ms"
@@ -297,26 +297,26 @@ Metric suffixes are units:
 - `_c`
 - `_w`
 
-## Step Time Wait
+## Step Time Residual
 
-`wait_ms` is residual unattributed step time:
+`residual_ms` is residual unattributed step time:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
-wait_ms = traced_step_ms - known_step_ms
+residual_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
 
 The public contract is:
 
 ```text
-total_step_ms = dataloader_ms + h2d_ms + compute_ms + wait_ms
+total_step_ms = dataloader_ms + h2d_ms + compute_ms + residual_ms
 ```
 
 `traced_step_ms` and the raw `trace_step` wall timer are internal measurement
-details and are not emitted in final-summary JSON. `wait_ms` can include
+details and are not emitted in final-summary JSON. `residual_ms` can include
 validation, checkpointing, logging, framework orchestration, CPU stalls,
 unobserved transfer stalls, or other work outside the traced H2D and compute
 phases. Do not treat it as NCCL, all-reduce, or synchronization overhead

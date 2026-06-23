@@ -27,7 +27,7 @@ TEXT_METRIC_ORDER_BY_SECTION: Dict[str, tuple[str, ...]] = {
         "input_ms",
         "h2d_ms",
         "compute_ms",
-        "wait_ms",
+        "residual_ms",
     ),
     "step_memory": (
         "peak_reserved_bytes",
