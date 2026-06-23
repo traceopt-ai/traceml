@@ -87,9 +87,9 @@ def _write_payload_through_sqlite_writer(db_path) -> None:
     writer.start()
     try:
         writer.ingest(_system_payload())
-        assert writer.flush_now(timeout_sec=2.0)
+        assert writer.force_flush(timeout_sec=2.0)
     finally:
-        writer.stop()
+        writer.finalize(timeout_sec=2.0)
 
 
 def test_sqlite_writer_persists_projection_without_raw_table(tmp_path) -> None:
@@ -156,3 +156,147 @@ def test_sqlite_writer_leaves_existing_raw_table_untouched(tmp_path) -> None:
 
     assert raw_count == 1
     assert projected_count == 1
+
+
+def test_sqlite_writer_finalize_drains_multiple_batches(tmp_path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(
+            path=str(db_path),
+            flush_interval_sec=60.0,
+            max_flush_items=1,
+        )
+    )
+    writer.start()
+    try:
+        for _ in range(3):
+            writer.ingest(_system_payload())
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+    assert result.checkpoint_ok
+    assert result.queue_size == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        projected_count = conn.execute(
+            "SELECT COUNT(*) FROM system_samples;"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert projected_count == 3
+    assert not db_path.with_name(db_path.name + "-wal").exists()
+    assert not db_path.with_name(db_path.name + "-shm").exists()
+
+
+def test_sqlite_writer_force_flush_keeps_writer_open(tmp_path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(db_path), flush_interval_sec=60.0)
+    )
+    writer.start()
+    try:
+        writer.ingest(_system_payload())
+        assert writer.force_flush(timeout_sec=2.0)
+        assert not writer.stats()["last_error"]
+        writer.ingest(_system_payload())
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+
+    conn = sqlite3.connect(db_path)
+    try:
+        projected_count = conn.execute(
+            "SELECT COUNT(*) FROM system_samples;"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert projected_count == 2
+
+
+def test_sqlite_writer_finalize_timeout_reports_failure(monkeypatch, tmp_path):
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(SQLiteWriterConfig(path=str(db_path)))
+    writer._started = True
+    monkeypatch.setattr(writer._closed, "wait", lambda timeout: False)
+
+    result = writer.finalize(timeout_sec=0.01)
+
+    assert not result.ok
+    assert not result.checkpoint_ok
+    assert "Timed out" in str(result.error)
+
+
+def test_sqlite_writer_final_prune_failure_is_nonfatal(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(db_path), flush_interval_sec=60.0)
+    )
+    monkeypatch.setattr(
+        writer,
+        "_prune_all_retained_rows",
+        lambda conn: (_ for _ in ()).throw(RuntimeError("prune boom")),
+    )
+    writer.start()
+    try:
+        writer.ingest(_system_payload())
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+    assert result.checkpoint_ok
+    assert not result.prune_ok
+    assert "prune boom" in str(result.prune_error)
+    assert result.error is None
+    assert result.checkpoint_error is None
+
+
+def test_sqlite_writer_finalize_preserves_prune_and_checkpoint_errors(
+    tmp_path,
+) -> None:
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(tmp_path / "telemetry.db"))
+    )
+
+    result = writer._build_finalize_result(
+        elapsed_sec=1.0,
+        checkpoint_ok=False,
+        error="SQLite checkpoint/close failed: checkpoint boom",
+        prune_error="Final SQLite retention prune failed: prune boom",
+        checkpoint_error="SQLite checkpoint/close failed: checkpoint boom",
+    )
+
+    assert not result.ok
+    assert not result.checkpoint_ok
+    assert not result.prune_ok
+    assert "checkpoint boom" in str(result.error)
+    assert "checkpoint boom" in str(result.checkpoint_error)
+    assert "prune boom" in str(result.prune_error)
+
+
+def test_sqlite_writer_checkpoint_failure_is_fatal(tmp_path) -> None:
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(tmp_path / "telemetry.db"))
+    )
+
+    result = writer._build_finalize_result(
+        elapsed_sec=1.0,
+        checkpoint_ok=False,
+        error=None,
+        checkpoint_error="SQLite checkpoint/close failed: checkpoint boom",
+    )
+
+    assert not result.ok
+    assert not result.checkpoint_ok
+    assert result.prune_ok
+    assert "checkpoint boom" in str(result.error)

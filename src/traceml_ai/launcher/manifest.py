@@ -110,6 +110,7 @@ def write_run_manifest(
     nproc_per_node: int,
     history_enabled: bool,
     summary_window_rows: int,
+    finalize_timeout_sec: float,
     status: str,
     launch_cwd: str,
     run: Optional[Dict[str, Any]] = None,
@@ -151,6 +152,7 @@ def write_run_manifest(
             "master_port": int(master_port),
             "history_enabled": bool(history_enabled),
             "summary_window_rows": int(summary_window_rows),
+            "finalize_timeout_sec": float(finalize_timeout_sec),
             "launch_cwd": str(Path(launch_cwd).resolve()),
         },
         "paths": {
@@ -208,8 +210,10 @@ def collect_existing_artifacts(
     """Return only launcher artifacts that currently exist on disk."""
     candidates = {
         "db": db_path,
-        "summary_card_json": Path(str(db_path) + ".summary_card.json"),
-        "summary_card_txt": Path(str(db_path) + ".summary_card.txt"),
+        "summary_card_json": Path(str(db_path) + "_summary_card.json"),
+        "summary_card_txt": Path(str(db_path) + "_summary_card.txt"),
+        "legacy_summary_card_json": Path(str(db_path) + ".summary_card.json"),
+        "legacy_summary_card_txt": Path(str(db_path) + ".summary_card.txt"),
     }
     if session_root is not None:
         candidates["code_manifest"] = (

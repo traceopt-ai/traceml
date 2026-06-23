@@ -10,7 +10,7 @@ import queue
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
@@ -53,6 +53,7 @@ _RETENTION_PARTITION_SQL = {
     "step_time_samples": "COALESCE(global_rank, rank, 0)",
     "step_memory_samples": "COALESCE(global_rank, rank, 0)",
 }
+_RETENTION_PRUNE_INTERVAL_BATCHES = 10
 
 
 @dataclass(frozen=True)
@@ -75,6 +76,39 @@ class SQLiteWriterConfig:
     synchronous: str = "NORMAL"
 
 
+@dataclass(frozen=True)
+class SQLiteFinalizeResult:
+    """Outcome of closing the SQLite history writer at end of run."""
+
+    ok: bool
+    elapsed_sec: float
+    enqueued: int
+    written: int
+    dropped: int
+    queue_size: int
+    checkpoint_ok: bool
+    error: Optional[str] = None
+    prune_ok: bool = True
+    prune_error: Optional[str] = None
+    checkpoint_error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serializable representation for diagnostics."""
+        return {
+            "ok": bool(self.ok),
+            "elapsed_sec": float(self.elapsed_sec),
+            "enqueued": int(self.enqueued),
+            "written": int(self.written),
+            "dropped": int(self.dropped),
+            "queue_size": int(self.queue_size),
+            "checkpoint_ok": bool(self.checkpoint_ok),
+            "error": self.error,
+            "prune_ok": bool(self.prune_ok),
+            "prune_error": self.prune_error,
+            "checkpoint_error": self.checkpoint_error,
+        }
+
+
 class SQLiteWriterSimple:
     """Asynchronous SQLite telemetry writer."""
 
@@ -87,18 +121,22 @@ class SQLiteWriterSimple:
         self._q: "queue.Queue[Any]" = queue.Queue(maxsize=int(cfg.max_queue))
         self._wake = threading.Event()
         self._stop = threading.Event()
+        self._closed = threading.Event()
         self._thread = threading.Thread(
             target=self._run,
             name="TraceML-SQLiteWriter",
             daemon=True,
         )
         self._started = False
+        self._accepting = True
 
         # Stats (best-effort; telemetry doesn't need perfect atomicity)
         self._enqueued = 0
         self._dropped = 0
         self._written = 0
+        self._batches_since_prune = 0
         self._last_error: Optional[str] = None
+        self._finalize_result: Optional[SQLiteFinalizeResult] = None
 
     def start(self) -> None:
         """Start the writer thread (idempotent)."""
@@ -113,7 +151,12 @@ class SQLiteWriterSimple:
 
         If the internal queue is full, the message is dropped.
         """
-        if not self._cfg.enabled or msg is None:
+        if (
+            not self._cfg.enabled
+            or not self._accepting
+            or self._stop.is_set()
+            or msg is None
+        ):
             return
         try:
             self._q.put_nowait(msg)
@@ -122,7 +165,7 @@ class SQLiteWriterSimple:
         except queue.Full:
             self._dropped += 1
 
-    def flush_now(self, timeout_sec: float = 5.0) -> bool:
+    def force_flush(self, timeout_sec: float = 5.0) -> bool:
         """
         Block until all messages enqueued before this call have been flushed.
 
@@ -144,6 +187,10 @@ class SQLiteWriterSimple:
         """
         if not self._cfg.enabled or not self._started:
             return True
+        if self._closed.is_set():
+            return True
+        if self._stop.is_set():
+            return False
 
         done = threading.Event()
         barrier = _FlushBarrier(done=done)
@@ -156,24 +203,73 @@ class SQLiteWriterSimple:
 
         return done.wait(timeout=float(timeout_sec))
 
-    def stop(self, timeout_sec: float = 2.0) -> None:
+    def finalize(self, timeout_sec: float = 300.0) -> SQLiteFinalizeResult:
         """
-        Request stop and flush best-effort.
+        Stop accepting writes, drain queued telemetry, checkpoint WAL, and close.
 
-        The writer thread is daemonized; shutdown should never hang the process.
+        ``force_flush`` is for on-demand readers while the aggregator keeps
+        running. ``finalize`` is the end-of-run close path: after this call the
+        writer is closed and summary generation can safely open a new SQLite
+        reader without racing the writer connection.
         """
+        start = time.monotonic()
         if not self._cfg.enabled:
-            return
+            return SQLiteFinalizeResult(
+                ok=True,
+                elapsed_sec=0.0,
+                enqueued=self._enqueued,
+                written=self._written,
+                dropped=self._dropped,
+                queue_size=0,
+                checkpoint_ok=True,
+                error=None,
+            )
+        if not self._started:
+            return SQLiteFinalizeResult(
+                ok=True,
+                elapsed_sec=0.0,
+                enqueued=self._enqueued,
+                written=self._written,
+                dropped=self._dropped,
+                queue_size=self._q.qsize(),
+                checkpoint_ok=True,
+                error=None,
+            )
 
+        self._accepting = False
         self._stop.set()
         self._wake.set()
 
-        if self._started:
-            self._thread.join(timeout=float(timeout_sec))
-            if self._thread.is_alive():
-                self._log_error(
-                    "[TraceML] SQLiteWriter thread did not terminate cleanly"
-                )
+        if not self._closed.wait(timeout=float(timeout_sec)):
+            error = (
+                "Timed out while finalizing SQLite history writer "
+                f"after {float(timeout_sec):.1f}s."
+            )
+            self._log_error(f"[TraceML] {error}")
+            return SQLiteFinalizeResult(
+                ok=False,
+                elapsed_sec=time.monotonic() - start,
+                enqueued=self._enqueued,
+                written=self._written,
+                dropped=self._dropped,
+                queue_size=self._q.qsize(),
+                checkpoint_ok=False,
+                error=error,
+            )
+
+        result = self._finalize_result
+        if result is None:
+            result = SQLiteFinalizeResult(
+                ok=False,
+                elapsed_sec=0.0,
+                enqueued=self._enqueued,
+                written=self._written,
+                dropped=self._dropped,
+                queue_size=self._q.qsize(),
+                checkpoint_ok=False,
+                error="SQLite writer closed without a finalization result.",
+            )
+        return replace(result, elapsed_sec=time.monotonic() - start)
 
     def stats(self) -> Dict[str, Any]:
         """Return basic counters for debugging/observability."""
@@ -293,6 +389,8 @@ class SQLiteWriterSimple:
         self,
         conn: sqlite3.Connection,
         projection_rows: dict[Any, dict[str, list[tuple]]],
+        *,
+        prune: bool = True,
     ) -> None:
         """Write prepared projection rows in one SQLite transaction."""
         row_count = self._projection_row_count(projection_rows)
@@ -304,7 +402,13 @@ class SQLiteWriterSimple:
         for writer in _PROJECTION_WRITERS:
             writer.insert_rows(conn, projection_rows[writer])
 
-        self._prune_retained_rows(conn, projection_rows)
+        self._batches_since_prune += 1
+        if (
+            prune
+            and self._batches_since_prune >= _RETENTION_PRUNE_INTERVAL_BATCHES
+        ):
+            self._prune_retained_rows(conn, projection_rows)
+            self._batches_since_prune = 0
 
         conn.execute("COMMIT;")
         self._written += row_count
@@ -338,6 +442,20 @@ class SQLiteWriterSimple:
 
             if writer is system_sql_writer:
                 self._prune_system_gpu_samples_to_retained_system_samples(conn)
+
+    def _prune_all_retained_rows(self, conn: sqlite3.Connection) -> None:
+        """Run one final retention pass before checkpointing and closing SQLite."""
+        retention_rows = summary_retention_rows_for_window(
+            self._cfg.summary_window_rows
+        )
+        for table in _RETENTION_TABLES:
+            self._prune_table_by_identity(
+                conn,
+                table=str(table),
+                retention_rows=retention_rows,
+            )
+        self._prune_system_gpu_samples_to_retained_system_samples(conn)
+        self._batches_since_prune = 0
 
     @staticmethod
     def _prune_table_by_identity(
@@ -445,12 +563,25 @@ class SQLiteWriterSimple:
         - Flush pending messages
         - On stop: perform one final best-effort flush
         """
+        run_start = time.monotonic()
+        conn: Optional[sqlite3.Connection] = None
+        fatal_error: Optional[str] = None
+        prune_error: Optional[str] = None
+        checkpoint_error: Optional[str] = None
+        checkpoint_ok = False
         try:
             conn = self._connect()
             for writer in _PROJECTION_WRITERS:
                 writer.init_schema(conn)
         except Exception as exc:
-            self._log_error(f"[TraceML] SQLiteWriter init failed: {exc}")
+            fatal_error = f"SQLiteWriter init failed: {exc}"
+            self._log_error(f"[TraceML] {fatal_error}")
+            self._finalize_result = self._build_finalize_result(
+                elapsed_sec=time.monotonic() - run_start,
+                checkpoint_ok=False,
+                error=fatal_error,
+            )
+            self._closed.set()
             return
 
         interval = float(self._cfg.flush_interval_sec)
@@ -464,9 +595,53 @@ class SQLiteWriterSimple:
                 # Best-effort final flush on stop.
             while not self._q.empty():
                 self._flush_once(conn)
+            try:
+                self._prune_all_retained_rows(conn)
+            except Exception as exc:
+                prune_error = f"Final SQLite retention prune failed: {exc}"
+                self._log_error(f"[TraceML] {prune_error}")
         finally:
             try:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-                conn.close()
-            except Exception:
-                pass
+                if conn is not None:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                    checkpoint_ok = True
+                    conn.close()
+            except Exception as exc:
+                checkpoint_ok = False
+                checkpoint_error = f"SQLite checkpoint/close failed: {exc}"
+                fatal_error = checkpoint_error
+                self._log_error(f"[TraceML] {checkpoint_error}")
+            finally:
+                self._finalize_result = self._build_finalize_result(
+                    elapsed_sec=time.monotonic() - run_start,
+                    checkpoint_ok=checkpoint_ok,
+                    error=fatal_error,
+                    prune_error=prune_error,
+                    checkpoint_error=checkpoint_error,
+                )
+                self._closed.set()
+
+    def _build_finalize_result(
+        self,
+        *,
+        elapsed_sec: float,
+        checkpoint_ok: bool,
+        error: Optional[str],
+        prune_error: Optional[str] = None,
+        checkpoint_error: Optional[str] = None,
+    ) -> SQLiteFinalizeResult:
+        """Build a finalization result from current writer counters."""
+        fatal_error = error or checkpoint_error
+        return SQLiteFinalizeResult(
+            ok=bool(fatal_error is None and checkpoint_ok),
+            elapsed_sec=float(elapsed_sec),
+            enqueued=int(self._enqueued),
+            written=int(self._written),
+            dropped=int(self._dropped),
+            queue_size=int(self._q.qsize()),
+            checkpoint_ok=bool(checkpoint_ok),
+            error=fatal_error,
+            prune_ok=prune_error is None,
+            prune_error=prune_error,
+            checkpoint_error=checkpoint_error,
+        )

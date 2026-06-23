@@ -73,6 +73,7 @@ def test_load_yaml_config_valid(tmp_path: Path) -> None:
         interval: 3.0
         logs_dir: ./runs
         history_enabled: true
+        finalize_timeout_sec: 120
         enable_logging: false
         """,
     )
@@ -81,6 +82,7 @@ def test_load_yaml_config_valid(tmp_path: Path) -> None:
     assert result["interval"] == 3.0
     assert result["logs_dir"] == "./runs"
     assert result["history_enabled"] is True
+    assert result["finalize_timeout_sec"] == 120.0
     assert result["enable_logging"] is False
 
 
@@ -211,9 +213,13 @@ def test_resolve_config_env_bool_coercion() -> None:
 
 def test_resolve_config_env_float_coercion() -> None:
     cli = _no_cli()
-    env = {"TRACEML_INTERVAL": "0.5"}
+    env = {
+        "TRACEML_INTERVAL": "0.5",
+        "TRACEML_FINALIZE_TIMEOUT_SEC": "42.5",
+    }
     result = resolve_config(cli, env, _no_yaml(), _defaults())
     assert result["interval"] == 0.5
+    assert result["finalize_timeout_sec"] == 42.5
 
 
 def test_resolve_config_history_disabled_via_cli() -> None:

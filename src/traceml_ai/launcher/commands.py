@@ -41,6 +41,7 @@ from traceml_ai.launcher.process import (
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.launch_context import LaunchContext
 from traceml_ai.runtime.session import get_session_id
+from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 DASHBOARD_EXTRA_INSTALL_HINT = (
@@ -101,6 +102,11 @@ def validate_launch_args(args: argparse.Namespace) -> None:
         raise SystemExit(
             "[TraceML] ERROR: --summary-window-rows must be greater than 0."
         )
+    finalize_timeout_sec = getattr(args, "finalize_timeout_sec", None)
+    if finalize_timeout_sec is not None and float(finalize_timeout_sec) <= 0.0:
+        raise SystemExit(
+            "[TraceML] ERROR: --finalize-timeout-sec must be greater than 0."
+        )
     trace_max_steps = getattr(args, "trace_max_steps", None)
     if trace_max_steps is not None and int(trace_max_steps) <= 0:
         raise SystemExit(
@@ -156,6 +162,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         "enable_logging": args.enable_logging,
         "logs_dir": args.logs_dir,
         "history_enabled": (False if args.no_history else None),
+        "finalize_timeout_sec": args.finalize_timeout_sec,
         "dashboard_port": args.dashboard_port,
         "dashboard_auto_open": (
             False if args.no_dashboard_auto_open else None
@@ -167,6 +174,9 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         parent_env=launcher_env,
         yaml_config=yaml_cfg,
         defaults=BUILT_IN_DEFAULTS,
+    )
+    cfg["finalize_timeout_sec"] = float(
+        cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
     )
 
     # Cross-field validation after all sources are merged.
@@ -217,12 +227,18 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
         int(getattr(args, "summary_window_rows", DEFAULT_SUMMARY_WINDOW_ROWS))
     )
+    env["TRACEML_FINALIZE_TIMEOUT_SEC"] = str(
+        float(cfg["finalize_timeout_sec"])
+    )
     trace_max_steps = getattr(args, "trace_max_steps", None)
     env["TRACEML_TRACE_MAX_STEPS"] = (
         "" if trace_max_steps is None else str(int(trace_max_steps))
     )
     env["TRACEML_NNODES"] = str(torchrun_cfg.nnodes)
     env["TRACEML_NPROC_PER_NODE"] = str(torchrun_cfg.nproc_per_node)
+    env["TRACEML_EXPECTED_WORLD_SIZE"] = str(
+        int(torchrun_cfg.nnodes) * int(torchrun_cfg.nproc_per_node)
+    )
     env["TRACEML_NODE_RANK"] = str(torchrun_cfg.node_rank)
     env["TRACEML_MASTER_ADDR"] = torchrun_cfg.master_addr
     env["TRACEML_MASTER_PORT"] = str(torchrun_cfg.master_port)
@@ -263,6 +279,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         nproc_per_node=torchrun_cfg.nproc_per_node,
         history_enabled=cfg["history_enabled"],
         summary_window_rows=int(env["TRACEML_SUMMARY_WINDOW_ROWS"]),
+        finalize_timeout_sec=float(env["TRACEML_FINALIZE_TIMEOUT_SEC"]),
         status="starting",
         launch_cwd=execution_cwd,
         aggregator_dir=aggregator_dir,
@@ -385,7 +402,11 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     file=sys.stderr,
                 )
                 terminate_process_group(
-                    agg_proc, timeout_sec=DEFAULT_SHUTDOWN_TIMEOUT_SEC
+                    agg_proc,
+                    timeout_sec=(
+                        float(env["TRACEML_FINALIZE_TIMEOUT_SEC"])
+                        + DEFAULT_SHUTDOWN_TIMEOUT_SEC
+                    ),
                 )
 
             final_status = "completed" if train_rc == 0 else "failed"
@@ -396,6 +417,23 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
                     db_path, session_root=session_root
                 ),
             )
+            if (
+                train_rc == 0
+                and owns_aggregator
+                and cfg["mode"] == "summary"
+                and cfg["history_enabled"]
+                and not (session_root / "final_summary.json").is_file()
+            ):
+                print(
+                    "[TraceML] ERROR: training finished successfully, but "
+                    "TraceML did not produce final_summary.json.",
+                    file=sys.stderr,
+                )
+                update_run_manifest(manifest_path, status="failed")
+                raise SystemExit(1)
+            if agg_proc is not None and agg_proc.returncode not in (0, None):
+                if train_rc == 0:
+                    raise SystemExit(int(agg_proc.returncode))
             raise SystemExit(train_rc)
 
         if agg_proc is not None and agg_proc.poll() is not None:

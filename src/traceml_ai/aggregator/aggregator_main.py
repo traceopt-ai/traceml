@@ -38,6 +38,7 @@ from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.lifecycle import start_aggregator
 from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -132,6 +133,15 @@ def read_traceml_env() -> dict[str, Any]:
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
         "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
         == "1",
+        "finalize_timeout_sec": float(
+            os.environ.get(
+                "TRACEML_FINALIZE_TIMEOUT_SEC",
+                str(DEFAULT_FINALIZE_TIMEOUT_SEC),
+            )
+        ),
+        "expected_world_size": int(
+            os.environ.get("TRACEML_EXPECTED_WORLD_SIZE", "1")
+        ),
         "summary_window_rows": int(
             os.environ.get(
                 "TRACEML_SUMMARY_WINDOW_ROWS",
@@ -199,6 +209,8 @@ def main() -> None:
             history_enabled=bool(cfg["history_enabled"]),
             summary_window_rows=int(cfg["summary_window_rows"]),
             html_report=bool(cfg["html_report"]),
+            finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
+            expected_world_size=int(cfg["expected_world_size"]),
             aggregator=AggregatorTransportSettings(
                 connect_host=str(cfg["aggregator_host"]),
                 bind_host=str(cfg["aggregator_bind_host"]),
@@ -222,9 +234,10 @@ def main() -> None:
         if handle is not None:
             try:
                 logger.info("[TraceML] Stopping aggregator")
-                handle.stop(timeout_sec=5.0)
-            except Exception:
-                pass
+                handle.stop(timeout_sec=float(cfg["finalize_timeout_sec"]))
+            except Exception as stop_exc:
+                if err is None:
+                    err = stop_exc
 
         print(
             f"[TraceML] Logs saved under: {session_root}",
