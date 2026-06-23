@@ -2,8 +2,7 @@
 SQLite projection writer for StdoutStderrSampler.
 
 This module projects TraceML stdout/stderr sampler payloads into a simple,
-query-friendly SQLite table while preserving the original sampler payload in
-`raw_messages`.
+query-friendly SQLite table.
 
 Design
 ------

@@ -14,7 +14,6 @@ from traceml_ai.aggregator.sqlite_writer import (
 )
 from traceml_ai.aggregator.sqlite_writers import system as system_projection
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
-from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 
 def _system_payload() -> dict:
@@ -72,28 +71,88 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
     assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)
 
 
-def test_sqlite_writer_persists_canonical_raw_envelope(tmp_path) -> None:
+def _sqlite_table_names(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table';"
+        )
+    }
+
+
+def _write_payload_through_sqlite_writer(db_path) -> None:
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(db_path), flush_interval_sec=0.01)
+    )
+    writer.start()
+    try:
+        writer.ingest(_system_payload())
+        assert writer.flush_now(timeout_sec=2.0)
+    finally:
+        writer.stop()
+
+
+def test_sqlite_writer_persists_projection_without_raw_table(tmp_path) -> None:
     db_path = tmp_path / "telemetry.db"
-    writer = SQLiteWriterSimple(SQLiteWriterConfig(path=str(db_path)))
+    _write_payload_through_sqlite_writer(db_path)
 
     conn = sqlite3.connect(db_path)
     try:
-        writer._init_schema(conn)
-        system_projection.init_schema(conn)
+        assert "raw_messages" not in _sqlite_table_names(conn)
+        sample = conn.execute(
+            """
+            SELECT global_rank, local_rank, world_size, local_world_size,
+                   node_rank, hostname, seq
+            FROM system_samples;
+            """
+        ).fetchone()
+        gpu_sample = conn.execute(
+            """
+            SELECT global_rank, local_rank, world_size, local_world_size,
+                   node_rank, hostname, gpu_idx
+            FROM system_gpu_samples;
+            """
+        ).fetchone()
+    finally:
+        conn.close()
 
-        raw_rows, projection_rows = writer._collect_flush_rows(
-            [_system_payload()]
+    assert sample == (5, 1, 8, 4, 1, "worker-1", 7)
+    assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)
+
+
+def test_sqlite_writer_leaves_existing_raw_table_untouched(tmp_path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE raw_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload_mp BLOB NOT NULL
+            );
+            """
         )
-        writer._write_flush_rows(conn, raw_rows, projection_rows)
+        conn.execute(
+            "INSERT INTO raw_messages(payload_mp) VALUES (?);",
+            (b"old-raw-payload",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
-        payload_mp = conn.execute(
-            "SELECT payload_mp FROM raw_messages;"
+    _write_payload_through_sqlite_writer(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert "raw_messages" in _sqlite_table_names(conn)
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM raw_messages;"
+        ).fetchone()[0]
+        projected_count = conn.execute(
+            "SELECT COUNT(*) FROM system_samples;"
         ).fetchone()[0]
     finally:
         conn.close()
 
-    payload = MsgpackDecoder().decode(payload_mp)
-    assert set(payload) == {"meta", "body"}
-    assert payload["meta"]["sampler"] == "SystemSampler"
-    assert payload["meta"]["global_rank"] == 5
-    assert payload["body"]["tables"]["SystemTable"][0]["seq"] == 7
+    assert raw_count == 1
+    assert projected_count == 1

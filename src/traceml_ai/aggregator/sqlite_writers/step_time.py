@@ -8,7 +8,7 @@
 SQLite projection writer for StepTimeSampler.
 
 This module projects TraceML StepTimeSampler payloads into a query-friendly
-SQLite table while preserving the original sampler payload in `raw_messages`.
+SQLite table.
 
 Design
 ------

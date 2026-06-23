@@ -34,7 +34,6 @@ from traceml_ai.telemetry.envelope import (
     TelemetryEnvelope,
     normalize_telemetry_envelope,
 )
-from traceml_ai.utils.msgpack_codec import Encoder as MsgpackEncoder
 
 _PROJECTION_WRITERS = [
     system_sql_writer,
@@ -94,8 +93,6 @@ class SQLiteWriterSimple:
             daemon=True,
         )
         self._started = False
-
-        self._encoder = MsgpackEncoder()
 
         # Stats (best-effort; telemetry doesn't need perfect atomicity)
         self._enqueued = 0
@@ -214,26 +211,6 @@ class SQLiteWriterSimple:
         conn.execute("PRAGMA foreign_keys=ON;")
         return conn
 
-    def _init_schema(self, conn: sqlite3.Connection) -> None:
-        """Create the base raw message schema and indexes if needed."""
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS raw_messages (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns INTEGER NOT NULL,
-                rank       INTEGER,
-                sampler    TEXT,
-                payload_mp BLOB NOT NULL
-            );
-            """
-        )
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_raw_sampler_rank_id
-            ON raw_messages(sampler, rank, id);
-            """
-        )
-
     def _drain_nowait(self, max_items: int) -> list[Dict[str, Any]]:
         """Drain up to ``max_items`` messages from the in-memory queue."""
         items: list[Dict[str, Any]] = []
@@ -243,12 +220,6 @@ class SQLiteWriterSimple:
             except queue.Empty:
                 break
         return items
-
-    def _extract_rank_sampler(
-        self, envelope: TelemetryEnvelope
-    ) -> tuple[Optional[int], Optional[str]]:
-        """Extract best-effort ``rank`` and ``sampler`` from envelope metadata."""
-        return envelope.meta.rank, envelope.meta.sampler
 
     def _iter_envelopes(self, msg: Any) -> Iterator[TelemetryEnvelope]:
         """
@@ -271,20 +242,11 @@ class SQLiteWriterSimple:
             if envelope is not None:
                 yield envelope
 
-    def _collect_flush_rows(
+    def _collect_projection_rows(
         self,
         items: list[Dict[str, Any]],
-    ) -> tuple[
-        list[tuple[int, Optional[int], Optional[str], bytes]],
-        dict[Any, dict[str, list[tuple]]],
-    ]:
-        """
-        Convert queued payloads into raw SQLite rows and projection rows.
-
-        All decodable payloads are preserved in ``raw_messages``. A selected
-        subset of samplers is also expanded into structured projection tables.
-        """
-        raw_rows: list[tuple[int, Optional[int], Optional[str], bytes]] = []
+    ) -> dict[Any, dict[str, list[tuple]]]:
+        """Convert queued telemetry payloads into structured projection rows."""
         projection_rows: dict[Any, dict[str, list[tuple]]] = {
             writer: {} for writer in _PROJECTION_WRITERS
         }
@@ -293,9 +255,7 @@ class SQLiteWriterSimple:
             for envelope in self._iter_envelopes(item):
                 try:
                     recv_ts_ns = time.time_ns()
-                    rank, sampler = self._extract_rank_sampler(envelope)
-                    payload = self._encoder.encode(envelope.to_dict())
-                    raw_rows.append((recv_ts_ns, rank, sampler, payload))
+                    sampler = envelope.meta.sampler
 
                     for writer in _PROJECTION_WRITERS:
                         if not writer.accepts_sampler(sampler):
@@ -316,27 +276,30 @@ class SQLiteWriterSimple:
                     # Best-effort persistence: skip malformed payloads and continue.
                     continue
 
-        return raw_rows, projection_rows
+        return projection_rows
 
-    def _write_flush_rows(
+    @staticmethod
+    def _projection_row_count(
+        projection_rows: dict[Any, dict[str, list[tuple]]],
+    ) -> int:
+        """Return the total number of structured projection rows prepared."""
+        return sum(
+            len(rows)
+            for rows_by_table in projection_rows.values()
+            for rows in rows_by_table.values()
+        )
+
+    def _write_projection_rows(
         self,
         conn: sqlite3.Connection,
-        raw_rows: list[tuple[int, Optional[int], Optional[str], bytes]],
         projection_rows: dict[Any, dict[str, list[tuple]]],
     ) -> None:
-        """
-        Write prepared raw rows and projection rows in one SQLite transaction.
-        """
-        if not raw_rows:
+        """Write prepared projection rows in one SQLite transaction."""
+        row_count = self._projection_row_count(projection_rows)
+        if row_count <= 0:
             return
 
         conn.execute("BEGIN;")
-
-        conn.executemany(
-            "INSERT INTO raw_messages(recv_ts_ns, rank, sampler, payload_mp) "
-            "VALUES (?, ?, ?, ?);",
-            raw_rows,
-        )
 
         for writer in _PROJECTION_WRITERS:
             writer.insert_rows(conn, projection_rows[writer])
@@ -344,7 +307,7 @@ class SQLiteWriterSimple:
         self._prune_retained_rows(conn, projection_rows)
 
         conn.execute("COMMIT;")
-        self._written += len(raw_rows)
+        self._written += row_count
 
     def _prune_retained_rows(
         self,
@@ -375,14 +338,6 @@ class SQLiteWriterSimple:
 
             if writer is system_sql_writer:
                 self._prune_system_gpu_samples_to_retained_system_samples(conn)
-
-            sampler = getattr(writer, "SAMPLER_NAME", None)
-            if sampler is not None:
-                self._prune_raw_messages_for_sampler(
-                    conn,
-                    sampler=str(sampler),
-                    retention_rows=retention_rows,
-                )
 
     @staticmethod
     def _prune_table_by_identity(
@@ -435,34 +390,6 @@ class SQLiteWriterSimple:
             """
         )
 
-    @staticmethod
-    def _prune_raw_messages_for_sampler(
-        conn: sqlite3.Connection,
-        *,
-        sampler: str,
-        retention_rows: int,
-    ) -> None:
-        """Delete raw sampler blobs outside the retained per-rank window."""
-        conn.execute(
-            """
-            DELETE FROM raw_messages
-            WHERE id IN (
-                SELECT id FROM (
-                    SELECT
-                        id,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY sampler, COALESCE(rank, 0)
-                            ORDER BY id DESC
-                        ) AS row_num
-                    FROM raw_messages
-                    WHERE sampler = ?
-                )
-                WHERE row_num > ?
-            );
-            """,
-            (sampler, int(retention_rows)),
-        )
-
     def _flush_once(self, conn: sqlite3.Connection) -> None:
         """
         Drain up to ``max_flush_items`` queued items and write them to SQLite.
@@ -481,12 +408,12 @@ class SQLiteWriterSimple:
             if not batch:
                 return
 
-            raw_rows, projection_rows = self._collect_flush_rows(batch)
-            if not raw_rows:
+            projection_rows = self._collect_projection_rows(batch)
+            if self._projection_row_count(projection_rows) <= 0:
                 return
 
             try:
-                self._write_flush_rows(conn, raw_rows, projection_rows)
+                self._write_projection_rows(conn, projection_rows)
             except Exception as exc:
                 try:
                     conn.execute("ROLLBACK;")
@@ -513,14 +440,13 @@ class SQLiteWriterSimple:
         Flow
         ----
         - Open and configure SQLite
-        - Initialize raw + projection schemas
+        - Initialize projection schemas
         - Sleep for ``flush_interval_sec``
         - Flush pending messages
         - On stop: perform one final best-effort flush
         """
         try:
             conn = self._connect()
-            self._init_schema(conn)
             for writer in _PROJECTION_WRITERS:
                 writer.init_schema(conn)
         except Exception as exc:
