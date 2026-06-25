@@ -311,3 +311,151 @@ def test_aggregator_main_does_not_swallow_keyboard_interrupt_during_stop(
 
     with pytest.raises(KeyboardInterrupt):
         aggregator_main.main()
+
+
+def _sys_payload(global_rank: int = 5) -> dict:
+    return {
+        "global_rank": global_rank,
+        "local_rank": 0,
+        "world_size": 2,
+        "local_world_size": 1,
+        "node_rank": global_rank,
+        "hostname": f"worker-{global_rank}",
+        "sampler": "SystemSampler",
+        "timestamp": 123.0,
+        "tables": {
+            "SystemTable": [
+                {
+                    "seq": 1,
+                    "ts": 123.0,
+                    "cpu": 42.0,
+                    "ram_used": 4_000.0,
+                    "ram_total": 16_000.0,
+                    "gpu_available": False,
+                    "gpu_count": 0,
+                    "gpus": [],
+                }
+            ]
+        },
+    }
+
+
+def test_sqlite_finalize_budget_clamp_regimes() -> None:
+    budget = TraceMLAggregator._sqlite_finalize_budget
+    assert budget(0.0) == 0.0
+    assert budget(-5.0) == 0.0
+    # total < MIN (5s): a fraction of total, floored at the tiny floor.
+    assert budget(4.0) == pytest.approx(1.0)
+    assert budget(2.0) == pytest.approx(0.5)
+    # total >= MIN: 25% clamped into [5, 60].
+    assert budget(16.0) == pytest.approx(5.0)  # 4.0 -> clamped up to MIN
+    assert budget(40.0) == pytest.approx(10.0)  # 25% lands in-range
+    assert budget(400.0) == pytest.approx(60.0)  # clamped down to MAX
+
+
+def test_split_telemetry_payloads_duplicate_rank_is_idempotent(tmp_path):
+    agg = _make_aggregator(tmp_path, writer=_Writer(_ok_result()), tcp=_TCP())
+    marker = build_rank_finished_payload(
+        global_rank=0, world_size=2, node_rank=0, hostname="worker"
+    )
+    agg._split_telemetry_payloads([marker, marker])
+    agg._split_telemetry_payloads(marker)
+    assert agg._finished_ranks_snapshot() == [0]
+
+
+def test_stop_writes_no_warning_when_all_ranks_finished(monkeypatch, tmp_path):
+    control_messages = [
+        build_rank_finished_payload(
+            global_rank=rank, world_size=2, node_rank=0, hostname="worker"
+        )
+        for rank in (0, 1)
+    ]
+    agg = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(messages=control_messages),
+    )
+    monkeypatch.setattr(
+        trace_aggregator,
+        "generate_summary",
+        lambda *args, **kwargs: _write_fake_summary(tmp_path),
+    )
+
+    agg.stop(timeout_sec=0.5)
+
+    agg_dir = tmp_path / "run" / "aggregator"
+    assert not (agg_dir / "finalization_warning.json").exists()
+    assert not (agg_dir / "finalization_error.json").exists()
+    assert get_final_summary_json_path(tmp_path / "run").is_file()
+
+
+def test_stop_downgrades_post_write_summary_error_to_warning(
+    monkeypatch,
+    tmp_path,
+):
+    control_messages = [
+        build_rank_finished_payload(
+            global_rank=rank, world_size=2, node_rank=0, hostname="worker"
+        )
+        for rank in (0, 1)
+    ]
+    agg = _make_aggregator(
+        tmp_path,
+        writer=_Writer(_ok_result()),
+        tcp=_TCP(messages=control_messages),
+    )
+
+    def _summary_then_raise(*args, **kwargs):
+        _write_fake_summary(tmp_path)
+        raise RuntimeError("post-write render boom")
+
+    monkeypatch.setattr(
+        trace_aggregator, "generate_summary", _summary_then_raise
+    )
+
+    # The artifact is written before the raise, so stop() must NOT fail.
+    agg.stop(timeout_sec=0.5)
+
+    agg_dir = tmp_path / "run" / "aggregator"
+    assert get_final_summary_json_path(tmp_path / "run").is_file()
+    assert not (agg_dir / "finalization_error.json").exists()
+    warning = json.loads(
+        (agg_dir / "finalization_warning.json").read_text(encoding="utf-8")
+    )
+    assert "post-write render boom" in warning["generate_summary_error"]
+
+
+def test_stop_generates_summary_through_real_writer(tmp_path):
+    from traceml_ai.aggregator.sqlite_writer import (
+        SQLiteWriterConfig,
+        SQLiteWriterSimple,
+    )
+
+    db_path = tmp_path / "run" / "aggregator" / "telemetry"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(db_path), flush_interval_sec=0.01)
+    )
+    writer.start()
+    for _ in range(3):
+        writer.ingest(_sys_payload())
+    control_messages = [
+        build_rank_finished_payload(
+            global_rank=rank, world_size=2, node_rank=0, hostname="worker"
+        )
+        for rank in (0, 1)
+    ]
+    agg = _make_aggregator(
+        tmp_path, writer=writer, tcp=_TCP(messages=control_messages)
+    )
+
+    # Real finalize + real generate_summary (NOT monkeypatched): the literal
+    # inverse of #164 -- finalize cleanly, then the summary must appear.
+    agg.stop(timeout_sec=10.0)
+
+    assert get_final_summary_json_path(tmp_path / "run").is_file()
+    assert not Path(str(db_path) + "-wal").exists()
+    assert not Path(str(db_path) + "-shm").exists()
+    assert not (
+        tmp_path / "run" / "aggregator" / "finalization_error.json"
+    ).exists()

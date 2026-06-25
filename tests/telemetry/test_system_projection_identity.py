@@ -300,3 +300,50 @@ def test_sqlite_writer_checkpoint_failure_is_fatal(tmp_path) -> None:
     assert not result.checkpoint_ok
     assert result.prune_ok
     assert "checkpoint boom" in str(result.error)
+
+
+def _system_payload_rank(global_rank: int) -> dict:
+    payload = _system_payload()
+    payload["global_rank"] = global_rank
+    payload["hostname"] = f"worker-{global_rank}"
+    return payload
+
+
+def test_sqlite_writer_finalize_drains_multi_rank_backlog(tmp_path) -> None:
+    # #164 was a MULTI-rank failure; the single-rank drain test above does not
+    # exercise interleaved per-rank backlog surviving the terminal drain.
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(
+            path=str(db_path),
+            flush_interval_sec=60.0,
+            max_flush_items=1,
+        )
+    )
+    writer.start()
+    try:
+        for rank in (0, 1, 2, 3):
+            for _ in range(2):
+                writer.ingest(_system_payload_rank(rank))
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+    assert result.checkpoint_ok
+    assert result.queue_size == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        per_rank = dict(
+            conn.execute(
+                "SELECT global_rank, COUNT(*) FROM system_samples "
+                "GROUP BY global_rank;"
+            ).fetchall()
+        )
+    finally:
+        conn.close()
+
+    assert per_rank == {0: 2, 1: 2, 2: 2, 3: 2}
+    assert not db_path.with_name(db_path.name + "-wal").exists()
+    assert not db_path.with_name(db_path.name + "-shm").exists()
