@@ -254,15 +254,26 @@ class TraceMLAggregator:
                 and self._settings.db_path
                 and not get_final_summary_json_path(session_root).is_file()
             ):
-                generate_summary(
-                    str(self._settings.db_path),
-                    session_root=str(session_root),
-                    print_to_stdout=True,
-                    summary_window_rows=int(
-                        self._settings.summary_window_rows
-                    ),
-                    write_html=bool(self._settings.html_report),
-                )
+                try:
+                    generate_summary(
+                        str(self._settings.db_path),
+                        session_root=str(session_root),
+                        print_to_stdout=True,
+                        summary_window_rows=int(
+                            self._settings.summary_window_rows
+                        ),
+                        write_html=bool(self._settings.html_report),
+                    )
+                except Exception as summary_exc:
+                    # A summary-generation error is only fatal if it left no
+                    # artifact: the missing-file gate below makes that call.
+                    # A post-write render/print error (final_summary.json is
+                    # already on disk) is downgraded to a warning so it does
+                    # not fail an otherwise-successful run.
+                    self._logger.exception("[TraceML] generate_summary raised")
+                    warning_payload = self._add_generate_summary_warning(
+                        warning_payload, summary_exc
+                    )
 
             if (
                 self._started
@@ -289,7 +300,7 @@ class TraceMLAggregator:
                     "status": "error",
                     "completed_at": utc_now_iso(),
                     "error": str(exc),
-                    "finished_ranks": sorted(self._finished_ranks),
+                    "finished_ranks": self._finished_ranks_snapshot(),
                     "expected_world_size": self._expected_world_size,
                     "sqlite_finalize": finalize_payload,
                     "writer": self._sqlite_writer.stats(),
@@ -363,6 +374,41 @@ class TraceMLAggregator:
         warning_payload["sqlite_finalize"] = finalize_payload
         return warning_payload
 
+    @staticmethod
+    def _add_generate_summary_warning(
+        warning_payload: Optional[dict[str, Any]],
+        exc: Exception,
+    ) -> Optional[dict[str, Any]]:
+        """Record a nonfatal post-write summary-generation error.
+
+        Reached only when ``final_summary.json`` already exists (the
+        missing-file gate handles the fatal, no-artifact case), so a
+        render/print error after the write did not cost the artifact and must
+        not fail the run.
+        """
+        if warning_payload is None:
+            warning_payload = {
+                "status": "warning",
+                "completed_at": utc_now_iso(),
+                "message": (
+                    "Summary artifact was written, but summary generation "
+                    "raised after the write; continuing without failing the "
+                    "run."
+                ),
+            }
+        warning_payload["generate_summary_error"] = str(exc)
+        return warning_payload
+
+    def _finished_ranks_snapshot(self) -> List[int]:
+        """Return a sorted snapshot of finished global ranks (lock-safe).
+
+        ``_finished_ranks`` is mutated under ``_drain_lock`` by the drain
+        path; snapshotting under the same lock avoids a ``RuntimeError`` if a
+        late/zombie drain mutates the dict mid-iteration.
+        """
+        with self._drain_lock:
+            return sorted(self._finished_ranks)
+
     def _split_telemetry_payloads(self, msg: Any) -> List[Any]:
         """
         Consume control messages and return sampler telemetry payloads.
@@ -400,7 +446,10 @@ class TraceMLAggregator:
         """
         deadline = time.monotonic() + max(0.0, float(timeout_sec))
         quiet_sec = 0.5
-
+        # Back-compat: workers from older releases do not send a rank_finished
+        # marker, so _finished_ranks never reaches expected_world_size and this
+        # loop waits the full settle budget, then emits a nonfatal "missing
+        # ranks" warning. New workers short-circuit once all ranks report.
         while time.monotonic() < deadline:
             self._drain_tcp()
             if len(self._finished_ranks) >= self._expected_world_size:
@@ -434,7 +483,7 @@ class TraceMLAggregator:
                 "end-of-run finalization."
             ),
             "expected_world_size": self._expected_world_size,
-            "finished_ranks": sorted(self._finished_ranks),
+            "finished_ranks": self._finished_ranks_snapshot(),
             "missing_ranks": missing,
         }
         try:
