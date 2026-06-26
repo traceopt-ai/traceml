@@ -6,6 +6,7 @@
 
 """Out-of-process telemetry server and display driver host."""
 
+import logging
 import threading
 import time
 from pathlib import Path
@@ -37,6 +38,8 @@ _SQLITE_FINALIZE_BUDGET_FRACTION = 0.25
 _SQLITE_FINALIZE_BUDGET_MIN_SEC = 5.0
 _SQLITE_FINALIZE_BUDGET_MAX_SEC = 60.0
 _SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -504,8 +507,12 @@ class TraceMLAggregator:
         try:
             path = Path(session_root).resolve() / "aggregator" / filename
             write_json_atomic(path, payload)
-        except Exception:
-            pass
+        except Exception as exc:
+            _LOGGER.warning(
+                "[TraceML] Failed to write finalization artifact '%s': %s",
+                filename,
+                exc,
+            )
 
     def _settle_telemetry(self, timeout_sec: float) -> bool:
         """
