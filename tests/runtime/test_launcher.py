@@ -28,6 +28,7 @@ from traceml_ai.launcher.launch_config import (
     RunIdentity,
 )
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
 
 
 def test_build_parser_preserves_launch_commands() -> None:
@@ -56,6 +57,7 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.run_name == ""
     assert args.session_id == ""
     assert args.summary_window_rows == DEFAULT_SUMMARY_WINDOW_ROWS
+    assert args.finalize_timeout_sec is None
     assert args.trace_max_steps is None
     assert args.args == ["--epochs", "1"]
 
@@ -100,6 +102,8 @@ def test_build_parser_accepts_multinode_launch_args() -> None:
             "29888",
             "--summary-window-rows",
             "2048",
+            "--finalize-timeout-sec",
+            "120",
             "--run-name",
             "multi_node_run",
         ]
@@ -114,6 +118,7 @@ def test_build_parser_accepts_multinode_launch_args() -> None:
     assert args.aggregator_bind_host == "0.0.0.0"
     assert args.aggregator_port == 29888
     assert args.summary_window_rows == 2048
+    assert args.finalize_timeout_sec == 120.0
     assert args.run_name == "multi_node_run"
 
 
@@ -296,6 +301,7 @@ def test_run_manifest_write_and_update_are_atomic(tmp_path) -> None:
         nproc_per_node=1,
         history_enabled=True,
         summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+        finalize_timeout_sec=DEFAULT_FINALIZE_TIMEOUT_SEC,
         status="starting",
         launch_cwd=str(tmp_path),
     )
@@ -317,6 +323,10 @@ def test_run_manifest_write_and_update_are_atomic(tmp_path) -> None:
     assert (
         payload["launch"]["summary_window_rows"] == DEFAULT_SUMMARY_WINDOW_ROWS
     )
+    assert (
+        payload["launch"]["finalize_timeout_sec"]
+        == DEFAULT_FINALIZE_TIMEOUT_SEC
+    )
     assert payload["paths"]["run_root"] == str(session_root.resolve())
     assert payload["artifacts"]["summary_card_json"] == "summary.json"
 
@@ -333,7 +343,7 @@ def test_collect_existing_artifacts_only_returns_existing_files(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "telemetry"
-    summary_path = Path(str(db_path) + ".summary_card.txt")
+    summary_path = Path(str(db_path) + "_summary_card.txt")
     db_path.write_text("", encoding="utf-8")
     summary_path.write_text("summary", encoding="utf-8")
 

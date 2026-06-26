@@ -207,6 +207,11 @@ passing the flag on every node in a symmetric launch command is harmless.
 reachable after the job ends. You can compare two runs later with
 [`traceml compare`](compare.md).
 
+Large jobs can spend time flushing late telemetry and checkpointing SQLite at
+shutdown. If your cluster has slow scratch storage or delayed cross-node TCP
+delivery, pass `--finalize-timeout-sec <seconds>` in the shared launch command
+or set `TRACEML_FINALIZE_TIMEOUT_SEC`.
+
 ## Cluster-specific notes
 
 !!! tip "Adapt these for your cluster"

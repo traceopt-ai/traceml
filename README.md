@@ -113,6 +113,12 @@ traceml run train.py --html-report
 traceml view logs/<run_name>/final_summary.json --html   # writes <...>.html
 ```
 
+For very large or slow multi-node jobs, TraceML waits at shutdown for late
+telemetry, SQLite checkpointing, and final summary writing. Tune that single
+end-of-run budget with `--finalize-timeout-sec` or
+`TRACEML_FINALIZE_TIMEOUT_SEC` when running on slow filesystems or congested
+networks.
+
 Instead of guessing where step time and memory went, you get a compact
 diagnosis at the end of every run.
 

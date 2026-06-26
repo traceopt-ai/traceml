@@ -138,6 +138,13 @@ class TelemetryPublisher:
         except Exception as exc:
             self._log_exception("TCPClient.send_batch failed", exc)
 
+    def send_control(self, payload: Dict[str, Any]) -> None:
+        """Send one internal control payload best-effort."""
+        try:
+            self._tcp_client.send(payload)
+        except Exception as exc:
+            self._log_exception("TCPClient.send control failed", exc)
+
     def close(self) -> None:
         """Close the underlying TCP client best-effort."""
         try:

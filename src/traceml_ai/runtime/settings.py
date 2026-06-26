@@ -20,6 +20,8 @@ from typing import Optional
 
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
+DEFAULT_FINALIZE_TIMEOUT_SEC = 300.0
+
 
 @dataclass(frozen=True)
 class AggregatorEndpoint:
@@ -76,3 +78,5 @@ class TraceMLSettings:
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
     trace_max_steps: Optional[int] = None
     html_report: bool = False
+    finalize_timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC
+    expected_world_size: int = 1

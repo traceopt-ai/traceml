@@ -20,6 +20,8 @@ import warnings
 from pathlib import Path
 from typing import Any, Mapping
 
+from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+
 _log = logging.getLogger(__name__)
 
 CONFIG_FILENAME = "traceml.yaml"
@@ -35,6 +37,7 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "enable_logging": ("TRACEML_ENABLE_LOGGING", bool),
     "logs_dir": ("TRACEML_LOGS_DIR", str),
     "history_enabled": ("TRACEML_HISTORY_ENABLED", bool),
+    "finalize_timeout_sec": ("TRACEML_FINALIZE_TIMEOUT_SEC", float),
     "dashboard_port": ("TRACEML_DASHBOARD_PORT", int),
     "dashboard_auto_open": ("TRACEML_DASHBOARD_AUTO_OPEN", bool),
 }
@@ -46,6 +49,7 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "enable_logging": False,
     "logs_dir": "./logs",
     "history_enabled": True,
+    "finalize_timeout_sec": DEFAULT_FINALIZE_TIMEOUT_SEC,
     "dashboard_port": 8765,
     "dashboard_auto_open": True,
 }

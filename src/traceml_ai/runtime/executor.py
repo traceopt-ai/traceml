@@ -23,6 +23,7 @@ from traceml_ai.runtime.lifecycle import NoOpRuntime
 from traceml_ai.runtime.lifecycle import start_runtime as start_runtime_handle
 from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -204,6 +205,15 @@ def read_traceml_env() -> Dict[str, Any]:
                 str(DEFAULT_SUMMARY_WINDOW_ROWS),
             )
         ),
+        "finalize_timeout_sec": float(
+            os.environ.get(
+                "TRACEML_FINALIZE_TIMEOUT_SEC",
+                str(DEFAULT_FINALIZE_TIMEOUT_SEC),
+            )
+        ),
+        "expected_world_size": int(
+            os.environ.get("TRACEML_EXPECTED_WORLD_SIZE", "1")
+        ),
         "trace_max_steps": _parse_optional_positive_int(
             os.environ.get("TRACEML_TRACE_MAX_STEPS")
         ),
@@ -244,6 +254,10 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
         summary_window_rows=int(cfg["summary_window_rows"]),
+        finalize_timeout_sec=float(
+            cfg.get("finalize_timeout_sec", DEFAULT_FINALIZE_TIMEOUT_SEC)
+        ),
+        expected_world_size=int(cfg.get("expected_world_size", 1)),
         trace_max_steps=cfg.get("trace_max_steps"),
         aggregator=AggregatorTransportSettings(
             connect_host=str(cfg["aggregator_host"]),

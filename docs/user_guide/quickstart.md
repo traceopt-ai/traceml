@@ -58,6 +58,16 @@ Add `--html-report` (`traceml run train.py --html-report`) to also write a
 shareable `final_summary.html`. See
 [Reading the output](reading-output.md#shareable-html-report).
 
+TraceML finalizes summaries after training by settling late telemetry, closing
+SQLite cleanly, and checkpointing WAL. Large distributed jobs can raise that
+end-of-run budget with `--finalize-timeout-sec <seconds>`.
+
+In `--mode=summary`, if training finishes but TraceML cannot produce
+`final_summary.json`, `traceml run` exits non-zero, so a silently missing
+summary fails loudly instead of passing. (Reused history databases keep any
+rows written by older releases; new runs only write the structured projection
+tables.)
+
 For DDP, FSDP, and multi-node launches, see
 [Distributed Training](distributed-training.md).
 

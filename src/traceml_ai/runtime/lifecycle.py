@@ -16,7 +16,11 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.runtime.runtime import TraceMLRuntime
-from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
+from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
+    AggregatorEndpoint,
+    TraceMLSettings,
+)
 
 if TYPE_CHECKING:
     from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
@@ -52,7 +56,7 @@ class AggregatorHandle:
             session_id=str(self.settings.session_id),
         )
 
-    def stop(self, timeout_sec: float = 5.0) -> None:
+    def stop(self, timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC) -> None:
         """Stop the aggregator once, flushing history and final summary."""
         if self._stopped:
             return
@@ -104,6 +108,12 @@ def _apply_settings_env(
     )
     os.environ["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
         settings.summary_window_rows
+    )
+    os.environ["TRACEML_FINALIZE_TIMEOUT_SEC"] = str(
+        settings.finalize_timeout_sec
+    )
+    os.environ["TRACEML_EXPECTED_WORLD_SIZE"] = str(
+        settings.expected_world_size
     )
 
 

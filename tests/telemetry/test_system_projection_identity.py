@@ -14,7 +14,6 @@ from traceml_ai.aggregator.sqlite_writer import (
 )
 from traceml_ai.aggregator.sqlite_writers import system as system_projection
 from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
-from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 
 def _system_payload() -> dict:
@@ -72,28 +71,279 @@ def test_system_projection_stores_global_and_local_rank_identity() -> None:
     assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)
 
 
-def test_sqlite_writer_persists_canonical_raw_envelope(tmp_path) -> None:
+def _sqlite_table_names(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table';"
+        )
+    }
+
+
+def _write_payload_through_sqlite_writer(db_path) -> None:
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(db_path), flush_interval_sec=0.01)
+    )
+    writer.start()
+    try:
+        writer.ingest(_system_payload())
+        assert writer.force_flush(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+
+def test_sqlite_writer_persists_projection_without_raw_table(tmp_path) -> None:
     db_path = tmp_path / "telemetry.db"
-    writer = SQLiteWriterSimple(SQLiteWriterConfig(path=str(db_path)))
+    _write_payload_through_sqlite_writer(db_path)
 
     conn = sqlite3.connect(db_path)
     try:
-        writer._init_schema(conn)
-        system_projection.init_schema(conn)
+        assert "raw_messages" not in _sqlite_table_names(conn)
+        sample = conn.execute(
+            """
+            SELECT global_rank, local_rank, world_size, local_world_size,
+                   node_rank, hostname, seq
+            FROM system_samples;
+            """
+        ).fetchone()
+        gpu_sample = conn.execute(
+            """
+            SELECT global_rank, local_rank, world_size, local_world_size,
+                   node_rank, hostname, gpu_idx
+            FROM system_gpu_samples;
+            """
+        ).fetchone()
+    finally:
+        conn.close()
 
-        raw_rows, projection_rows = writer._collect_flush_rows(
-            [_system_payload()]
+    assert sample == (5, 1, 8, 4, 1, "worker-1", 7)
+    assert gpu_sample == (5, 1, 8, 4, 1, "worker-1", 0)
+
+
+def test_sqlite_writer_leaves_existing_raw_table_untouched(tmp_path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE raw_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload_mp BLOB NOT NULL
+            );
+            """
         )
-        writer._write_flush_rows(conn, raw_rows, projection_rows)
+        conn.execute(
+            "INSERT INTO raw_messages(payload_mp) VALUES (?);",
+            (b"old-raw-payload",),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
-        payload_mp = conn.execute(
-            "SELECT payload_mp FROM raw_messages;"
+    _write_payload_through_sqlite_writer(db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        assert "raw_messages" in _sqlite_table_names(conn)
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM raw_messages;"
+        ).fetchone()[0]
+        projected_count = conn.execute(
+            "SELECT COUNT(*) FROM system_samples;"
         ).fetchone()[0]
     finally:
         conn.close()
 
-    payload = MsgpackDecoder().decode(payload_mp)
-    assert set(payload) == {"meta", "body"}
-    assert payload["meta"]["sampler"] == "SystemSampler"
-    assert payload["meta"]["global_rank"] == 5
-    assert payload["body"]["tables"]["SystemTable"][0]["seq"] == 7
+    assert raw_count == 1
+    assert projected_count == 1
+
+
+def test_sqlite_writer_finalize_drains_multiple_batches(tmp_path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(
+            path=str(db_path),
+            flush_interval_sec=60.0,
+            max_flush_items=1,
+        )
+    )
+    writer.start()
+    try:
+        for _ in range(3):
+            writer.ingest(_system_payload())
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+    assert result.checkpoint_ok
+    assert result.queue_size == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        projected_count = conn.execute(
+            "SELECT COUNT(*) FROM system_samples;"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert projected_count == 3
+    assert not db_path.with_name(db_path.name + "-wal").exists()
+    assert not db_path.with_name(db_path.name + "-shm").exists()
+
+
+def test_sqlite_writer_force_flush_keeps_writer_open(tmp_path) -> None:
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(db_path), flush_interval_sec=60.0)
+    )
+    writer.start()
+    try:
+        writer.ingest(_system_payload())
+        assert writer.force_flush(timeout_sec=2.0)
+        assert not writer.stats()["last_error"]
+        writer.ingest(_system_payload())
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+
+    conn = sqlite3.connect(db_path)
+    try:
+        projected_count = conn.execute(
+            "SELECT COUNT(*) FROM system_samples;"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert projected_count == 2
+
+
+def test_sqlite_writer_finalize_timeout_reports_failure(monkeypatch, tmp_path):
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(SQLiteWriterConfig(path=str(db_path)))
+    writer._started = True
+    monkeypatch.setattr(writer._closed, "wait", lambda timeout: False)
+
+    result = writer.finalize(timeout_sec=0.01)
+
+    assert not result.ok
+    assert not result.checkpoint_ok
+    assert "Timed out" in str(result.error)
+
+
+def test_sqlite_writer_final_prune_failure_is_nonfatal(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(db_path), flush_interval_sec=60.0)
+    )
+    monkeypatch.setattr(
+        writer,
+        "_prune_all_retained_rows",
+        lambda conn: (_ for _ in ()).throw(RuntimeError("prune boom")),
+    )
+    writer.start()
+    try:
+        writer.ingest(_system_payload())
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+    assert result.checkpoint_ok
+    assert not result.prune_ok
+    assert "prune boom" in str(result.prune_error)
+    assert result.error is None
+    assert result.checkpoint_error is None
+
+
+def test_sqlite_writer_finalize_preserves_prune_and_checkpoint_errors(
+    tmp_path,
+) -> None:
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(tmp_path / "telemetry.db"))
+    )
+
+    result = writer._build_finalize_result(
+        elapsed_sec=1.0,
+        checkpoint_ok=False,
+        error="SQLite checkpoint/close failed: checkpoint boom",
+        prune_error="Final SQLite retention prune failed: prune boom",
+        checkpoint_error="SQLite checkpoint/close failed: checkpoint boom",
+    )
+
+    assert not result.ok
+    assert not result.checkpoint_ok
+    assert not result.prune_ok
+    assert "checkpoint boom" in str(result.error)
+    assert "checkpoint boom" in str(result.checkpoint_error)
+    assert "prune boom" in str(result.prune_error)
+
+
+def test_sqlite_writer_checkpoint_failure_is_fatal(tmp_path) -> None:
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(path=str(tmp_path / "telemetry.db"))
+    )
+
+    result = writer._build_finalize_result(
+        elapsed_sec=1.0,
+        checkpoint_ok=False,
+        error=None,
+        checkpoint_error="SQLite checkpoint/close failed: checkpoint boom",
+    )
+
+    assert not result.ok
+    assert not result.checkpoint_ok
+    assert result.prune_ok
+    assert "checkpoint boom" in str(result.error)
+
+
+def _system_payload_rank(global_rank: int) -> dict:
+    payload = _system_payload()
+    payload["global_rank"] = global_rank
+    payload["hostname"] = f"worker-{global_rank}"
+    return payload
+
+
+def test_sqlite_writer_finalize_drains_multi_rank_backlog(tmp_path) -> None:
+    # #164 was a MULTI-rank failure; the single-rank drain test above does not
+    # exercise interleaved per-rank backlog surviving the terminal drain.
+    db_path = tmp_path / "telemetry.db"
+    writer = SQLiteWriterSimple(
+        SQLiteWriterConfig(
+            path=str(db_path),
+            flush_interval_sec=60.0,
+            max_flush_items=1,
+        )
+    )
+    writer.start()
+    try:
+        for rank in (0, 1, 2, 3):
+            for _ in range(2):
+                writer.ingest(_system_payload_rank(rank))
+        result = writer.finalize(timeout_sec=2.0)
+    finally:
+        writer.finalize(timeout_sec=2.0)
+
+    assert result.ok
+    assert result.checkpoint_ok
+    assert result.queue_size == 0
+
+    conn = sqlite3.connect(db_path)
+    try:
+        per_rank = dict(
+            conn.execute(
+                "SELECT global_rank, COUNT(*) FROM system_samples "
+                "GROUP BY global_rank;"
+            ).fetchall()
+        )
+    finally:
+        conn.close()
+
+    assert per_rank == {0: 2, 1: 2, 2: 2, 3: 2}
+    assert not db_path.with_name(db_path.name + "-wal").exists()
+    assert not db_path.with_name(db_path.name + "-shm").exists()
