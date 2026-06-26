@@ -489,6 +489,8 @@ class TraceMLAggregator:
         try:
             self._logger.warning("[TraceML] %s", warning["message"])
         except Exception:
+            # Best-effort warning emission: logging failures must not interrupt
+            # finalization or alter the warning payload returned to callers.
             pass
         return warning
 
