@@ -85,6 +85,18 @@ def test_final_summary_json_smoke(tmp_path):
         part for part in (str(SRC_DIR), env.get("PYTHONPATH", "")) if part
     )
 
+    # Warm bytecode/import caches so the aggregator binds within the launcher's
+    # fixed 15s readiness window. On a cold checkout the first import compiles
+    # .pyc for the whole stack, which can otherwise blow the startup budget.
+    subprocess.run(
+        [sys.executable, "-c", "import traceml_ai.aggregator.aggregator_main"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT_SEC,
+    )
+
     cmd = [
         sys.executable,
         "-c",
