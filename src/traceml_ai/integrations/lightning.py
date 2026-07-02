@@ -1,6 +1,8 @@
 import functools
 import os
 import sys
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
@@ -18,13 +20,83 @@ from traceml_ai.utils.timing import (
     timed_region,
 )
 
-try:
-    from lightning.pytorch.callbacks import Callback
+if TYPE_CHECKING:
+    from lightning.pytorch.callbacks import Callback as _CallbackBase
+else:
+    _CallbackBase = object
 
+
+def _dedupe_callback_bases(bases: tuple[type, ...]) -> tuple[type, ...]:
+    """Return callback bases without duplicates while preserving order."""
+    out: list[type] = []
+    for base in bases:
+        if any(base is existing for existing in out):
+            continue
+        out.append(base)
+    return tuple(out)
+
+
+def _build_callback_base(bases: tuple[type, ...]) -> Any:
+    """Build one runtime callback base from available namespace bases."""
+    unique_bases = _dedupe_callback_bases(bases)
+    if not unique_bases:
+        return SimpleNamespace(base=object, available=False)
+
+    if len(unique_bases) == 1:
+        return SimpleNamespace(base=unique_bases[0], available=True)
+
+    try:
+        base = type(
+            "_TraceMLLightningCallbackBase",
+            unique_bases,
+            {},
+        )
+    except TypeError:
+        # If the namespaces expose incompatible callback classes, prefer the
+        # legacy package because that is the namespace most likely to hit the
+        # mixed-import error this compatibility path fixes.
+        base = unique_bases[-1]
+
+    return SimpleNamespace(base=base, available=True)
+
+
+def _resolve_callback_base() -> Any:
+    """
+    Build a callback base accepted by either Lightning namespace.
+
+    ``lightning.pytorch`` and ``pytorch_lightning`` can be installed side by
+    side, but their ``Callback`` classes are not always identical. Inheriting
+    from every available callback base lets the same TraceML callback work with
+    whichever Trainer namespace the user already has.
+    """
+    bases: list[type] = []
+
+    try:
+        from lightning.pytorch.callbacks import Callback as LightningCallback
+
+        bases.append(LightningCallback)
+    except ImportError:
+        pass
+
+    try:
+        from pytorch_lightning.callbacks import (
+            Callback as PyTorchLightningCallback,
+        )
+
+        bases.append(PyTorchLightningCallback)
+    except ImportError:
+        pass
+
+    return _build_callback_base(tuple(bases))
+
+
+if not TYPE_CHECKING:
+    _callback_resolution = _resolve_callback_base()
+    _CallbackBase = _callback_resolution.base
+    IS_LIGHTNING_AVAILABLE = bool(_callback_resolution.available)
+else:
     IS_LIGHTNING_AVAILABLE = True
-except ImportError:
-    Callback = object
-    IS_LIGHTNING_AVAILABLE = False
+
 
 TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 _MISSING = object()
@@ -86,7 +158,7 @@ def _lightning_uses_cuda(trainer, pl_module) -> bool:
     return _device_is_cuda(module_device)
 
 
-class TraceMLCallback(Callback):
+class TraceMLCallback(_CallbackBase):
     """
     Official TraceML Callback for PyTorch Lightning.
 
@@ -99,7 +171,8 @@ class TraceMLCallback(Callback):
     def __init__(self):
         if not IS_LIGHTNING_AVAILABLE:
             raise ImportError(
-                "Install traceml[lightning] to use Lightning integration"
+                "Install either 'lightning' or 'pytorch-lightning' to use "
+                "TraceML's Lightning integration."
             )
         super().__init__()
         self._traceml_step_ctx = None
