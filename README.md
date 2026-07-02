@@ -84,6 +84,12 @@ for batch in dataloader:
 traceml run train.py
 ```
 
+Or try the self-contained example first:
+
+```bash
+traceml run examples/quickstart.py --mode=summary
+```
+
 For DDP, FSDP, and multi-node runs, see
 [Distributed Training](docs/user_guide/distributed-training.md).
 
@@ -137,6 +143,10 @@ Example TraceML output:
 
 In this example, rank 0 is the slow input rank, which can hold back the aligned
 distributed step.
+
+Want to try a specific bottleneck? See [examples/](examples/) for
+self-contained demos covering dataloader bottlenecks, H2D timing, DDP rank
+stragglers, Lightning, Hugging Face, Ray, and tracker-friendly summary logging.
 
 For experiment trackers, call `traceml.summary()` near the end of your script
 to get a flat dict of diagnosis statuses and average metrics. Keep
