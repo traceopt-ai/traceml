@@ -96,7 +96,7 @@ def _require_ray() -> tuple[Any, Any]:
     except ImportError as exc:
         raise ImportError(
             "TraceML Ray integration requires Ray. Install it with "
-            "`pip install traceml-ai[ray]`."
+            "`pip install 'traceml-ai[ray]'`."
         ) from exc
     return ray, TorchTrainer
 
