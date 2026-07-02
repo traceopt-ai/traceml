@@ -98,8 +98,13 @@ def init(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    disabled: Optional[bool] = None,
+    aggregator_host: Optional[str] = None,
+    aggregator_port: Optional[int] = None,
+    connect_timeout_sec: float = 10.0,
+    connect_retry_interval_sec: float = 0.25,
 ) -> TraceMLInitConfig:
-    """Initialize TraceML instrumentation for this process."""
+    """Initialize TraceML and start its runtime for this process."""
     from traceml_ai.sdk.initial import init as _init
 
     return _init(
@@ -108,6 +113,11 @@ def init(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        disabled=disabled,
+        aggregator_host=aggregator_host,
+        aggregator_port=aggregator_port,
+        connect_timeout_sec=connect_timeout_sec,
+        connect_retry_interval_sec=connect_retry_interval_sec,
     )
 
 
@@ -118,6 +128,11 @@ def start(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    disabled: Optional[bool] = None,
+    aggregator_host: Optional[str] = None,
+    aggregator_port: Optional[int] = None,
+    connect_timeout_sec: float = 10.0,
+    connect_retry_interval_sec: float = 0.25,
 ) -> TraceMLInitConfig:
     """Alias for `traceml.init(...)`."""
     from traceml_ai.sdk.initial import start as _start
@@ -128,6 +143,11 @@ def start(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        disabled=disabled,
+        aggregator_host=aggregator_host,
+        aggregator_port=aggregator_port,
+        connect_timeout_sec=connect_timeout_sec,
+        connect_retry_interval_sec=connect_retry_interval_sec,
     )
 
 

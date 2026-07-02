@@ -58,7 +58,11 @@ from traceml_ai.sdk.wrappers import wrap_h2d
 def _reload_initialization():
     import traceml_ai.sdk.initial as m
 
-    return importlib.reload(m)
+    importlib.reload(m)
+    # These tests exercise instrumentation patch policy, not runtime startup.
+    # Stub the runtime bootstrap so init() does not try to reach an aggregator.
+    m._start_runtime_for_init = lambda **kwargs: None
+    return m
 
 
 def _reload_h2d_patch():

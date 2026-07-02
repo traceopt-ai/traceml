@@ -9,7 +9,9 @@ lifecycle inside one process.
 from __future__ import annotations
 
 import os
+import socket
 import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -34,6 +36,49 @@ class NoOpRuntime:
 
     def stop(self) -> None:
         return None
+
+
+_RUNTIME_STATE_LOCK = threading.Lock()
+_ACTIVE_RUNTIME_HANDLE: Optional["RuntimeHandle"] = None
+
+
+def get_active_runtime_handle() -> Optional["RuntimeHandle"]:
+    """Return the RuntimeHandle started in this process, or None.
+
+    Lets ``traceml.init()`` detect a runtime already started by the CLI
+    executor (the ``traceml run`` path) and avoid starting a second one.
+    """
+    return _ACTIVE_RUNTIME_HANDLE
+
+
+def _register_active_runtime_handle(handle: "RuntimeHandle") -> None:
+    """Record the runtime handle started in this process."""
+    global _ACTIVE_RUNTIME_HANDLE
+    with _RUNTIME_STATE_LOCK:
+        _ACTIVE_RUNTIME_HANDLE = handle
+
+
+def wait_for_aggregator(
+    host: str,
+    port: int,
+    *,
+    timeout_sec: float = 10.0,
+    poll_interval_sec: float = 0.25,
+) -> bool:
+    """Return True once ``(host, port)`` accepts a TCP connection.
+    Retries for a bounded period. Used by ``traceml.init()`` to fail fast and
+    clearly when the aggregator is not running, instead of silently producing
+    no telemetry.
+    """
+    deadline = time.monotonic() + float(timeout_sec)
+    while True:
+        try:
+            with socket.create_connection((host, int(port)), timeout=0.5):
+                return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(float(poll_interval_sec))
 
 
 @dataclass
@@ -201,12 +246,16 @@ def start_runtime(
     _apply_settings_env(normalized, disabled=disabled)
 
     if disabled:
-        return RuntimeHandle(NoOpRuntime())
+        handle = RuntimeHandle(NoOpRuntime())
+        _register_active_runtime_handle(handle)
+        return handle
 
     try:
         runtime = TraceMLRuntime(settings=normalized)
         runtime.start()
-        return RuntimeHandle(runtime)
+        handle = RuntimeHandle(runtime)
+        _register_active_runtime_handle(handle)
+        return handle
     except BaseException as exc:
         if on_error is not None:
             on_error(exc)
@@ -219,6 +268,8 @@ __all__ = [
     "AggregatorHandle",
     "NoOpRuntime",
     "RuntimeHandle",
+    "get_active_runtime_handle",
     "start_aggregator",
     "start_runtime",
+    "wait_for_aggregator",
 ]
