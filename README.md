@@ -125,8 +125,9 @@ end-of-run budget with `--finalize-timeout-sec` or
 `TRACEML_FINALIZE_TIMEOUT_SEC` when running on slow filesystems or congested
 networks.
 
-Instead of guessing where step time and memory went, you get a compact
-diagnosis at the end of every run.
+Instead of guessing where training time went, you get an end-of-run verdict:
+what slowed the run down, which rank or phase is suspicious, and where to look
+next.
 
 Example TraceML output:
 
@@ -143,6 +144,8 @@ Example TraceML output:
 
 In this example, rank 0 is the slow input rank, which can hold back the aligned
 distributed step.
+
+![TraceML end-of-run summary](docs/assets/end-of-run-summary.png)
 
 Want to try a specific bottleneck? See [examples/](examples/) for
 self-contained demos covering dataloader bottlenecks, H2D timing, DDP rank
