@@ -42,6 +42,12 @@ Sections:
 section diagnoses. It answers "why was training slow?" and is intentionally
 narrower than section-level health/resource diagnoses.
 
+`text` is a compact human-readable verdict report. It is presentation text for
+the CLI/TXT artifact, not a structured contract for downstream parsers. It
+starts with `TraceML Verdict`, `Why`, and `Next`, then shows compact section
+status plus System and Step Time evidence tables. Detailed section prose
+remains in each section-local `card` field.
+
 ## Primary Diagnosis Shape
 
 ```json
@@ -242,6 +248,8 @@ Fallback evidence types are:
 - `metadata.global_ranks_seen` is all observed ranks.
 - `metadata.global_ranks_used` is the ranks included in `groups.rows` and the
   `global` comparison.
+- `card` is the section-local detailed text block used by section tooling and
+  retained in JSON even when top-level `text` uses the compact verdict report.
 
 `step_time` and `step_memory` use `common_steps` alignment. If a rank does not
 have the common step window, it can be counted in `global_ranks_seen` but not
