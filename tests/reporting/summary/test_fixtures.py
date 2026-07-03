@@ -872,5 +872,5 @@ def test_final_summary_fixture_schema_contains_all_sections(
         assert "- Next:" not in payload[key]["card"]
     assert payload["system"]["diagnosis"]["status"] == "NORMAL"
     assert "NO GPU" not in payload["system"]["card"]
-    assert "TraceML Verdict:" in payload["text"]
-    assert "Next:" in payload["text"]
+    assert "Primary Diagnosis" in payload["text"]
+    assert "- Next:" in payload["text"]

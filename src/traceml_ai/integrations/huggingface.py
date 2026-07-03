@@ -89,9 +89,8 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
     def __init__(self) -> None:
         if not HAS_TRANSFORMERS:
             raise ImportError(
-                "TraceMLTrainerCallback requires the Hugging Face "
-                "integration. Install it with "
-                "`pip install 'traceml-ai[hf]'`."
+                "TraceMLTrainerCallback requires 'transformers' to be "
+                "installed. Please run `pip install transformers`."
             )
         super().__init__()
         self._step_cm = None
@@ -170,8 +169,8 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
     ):
         if not HAS_TRANSFORMERS:
             raise ImportError(
-                "TraceMLTrainer requires the Hugging Face integration. "
-                "Install it with `pip install 'traceml-ai[hf]'`."
+                "TraceMLTrainer requires 'transformers' to be installed. "
+                "Please run `pip install transformers`."
             )
 
         super().__init__(*args, **kwargs)

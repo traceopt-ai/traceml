@@ -38,71 +38,8 @@ class _BrokenSection:
         raise RuntimeError("section failed")
 
 
-@dataclass(frozen=True)
-class _PayloadSection:
-    name: str
-    payload: dict
-
-    def build(self, db_path: str) -> SummaryResult:
-        return SummaryResult(
-            section=self.name,
-            payload=self.payload,
-            text=str(self.payload.get("card", "")),
-        )
-
-
 def _generator(*sections) -> FinalReportGenerator:
     return FinalReportGenerator(sections=sections)
-
-
-def _diagnosis(
-    kind: str,
-    status: str,
-    *,
-    severity: str = "info",
-    summary: str = "summary",
-    action: str = "action",
-    phase: str | None = None,
-) -> dict:
-    return {
-        "kind": kind,
-        "status": status,
-        "severity": severity,
-        "summary": summary,
-        "action": action,
-        "phase": phase,
-    }
-
-
-def _payload(
-    *,
-    metadata: dict,
-    diagnosis: dict,
-    global_summary: dict | None = None,
-    groups: dict | None = None,
-    card: str = "ORIGINAL SECTION CARD",
-) -> dict:
-    return {
-        "metadata": metadata,
-        "diagnosis": diagnosis,
-        "issues": [diagnosis],
-        "global": global_summary or {},
-        "groups": groups or {"by": "global_rank", "rows": {}},
-        "units": {},
-        "card": card,
-    }
-
-
-def _point(value: float, idx: int) -> dict:
-    return {"value": value, "idx": str(idx)}
-
-
-def _status_payload(status: str) -> dict:
-    return _payload(
-        metadata={},
-        diagnosis=_diagnosis(status, status),
-        card=f"{status} SECTION CARD",
-    )
 
 
 def test_final_report_generator_preserves_summary_schema_and_order():
@@ -141,10 +78,9 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         "INSUFFICIENT_STEP_TIME_DATA"
     )
     assert "TraceML Run Summary | duration 10.0s" in payload["text"]
-    assert "TraceML Verdict:" in payload["text"]
-    assert "Section Status" in payload["text"]
-    assert "System Evidence" in payload["text"]
-    assert "Step Time Evidence" in payload["text"]
+    assert "Primary Diagnosis" in payload["text"]
+    assert "System" in payload["text"]
+    assert "Step Memory" in payload["text"]
 
 
 def test_final_report_generator_fails_open_for_one_section():
@@ -171,168 +107,6 @@ def test_final_report_generator_fails_open_for_one_section():
         "INSUFFICIENT_STEP_TIME_DATA"
     )
     assert "Process" in payload["text"]
-
-
-def test_final_text_uses_single_process_average_layout():
-    step_diag = _diagnosis(
-        "INPUT_BOUND",
-        "INPUT-BOUND",
-        severity="crit",
-        action="Increase workers, prefetch, or storage throughput.",
-    )
-    step_time = _payload(
-        metadata={"global_ranks_used": 1},
-        diagnosis=step_diag,
-        global_summary={
-            "window": {"steps_analyzed": 60},
-            "average": {
-                "total_step_ms": 139.1,
-                "dataloader_ms": 130.8,
-                "compute_ms": 6.9,
-                "residual_ms": 1.3,
-                "h2d_ms": 0.2,
-            },
-        },
-        card="STEP TIME ORIGINAL CARD",
-    )
-    system = _payload(
-        metadata={"mode": "single_node", "gpus_observed": 1},
-        diagnosis=_diagnosis("LOW_GPU_UTILIZATION", "LOW GPU UTIL"),
-        global_summary={
-            "average": {
-                "cpu_percent": 18.4,
-                "gpu_util_percent": 0.0,
-                "gpu_mem_bytes": 570_000_000.0,
-                "gpu_temp_c": 30.0,
-            }
-        },
-        groups={"by": "node_rank", "rows": {}},
-        card="SYSTEM ORIGINAL CARD",
-    )
-
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", system),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
-
-    text = payload["text"]
-    assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
-    assert "Why: Input loading took 130.8ms of a 139.1ms average step." in text
-    assert "Next: Increase workers, prefetch, or storage throughput." in text
-    assert "System Evidence" in text
-    assert "Metric            Average" in text
-    assert "Step Time Evidence" in text
-    assert "Phase             Average           Share" in text
-    assert "Dataloader        130.8ms           94.0%" in text
-    assert "Median" not in text
-    assert "Worst" not in text
-    assert "Skew" not in text
-    assert "rank=r" not in text
-    assert "node=n" not in text
-    assert payload["step_time"]["card"] == "STEP TIME ORIGINAL CARD"
-    assert payload["system"]["card"] == "SYSTEM ORIGINAL CARD"
-
-
-def test_final_text_uses_multi_process_comparison_layout():
-    step_diag = _diagnosis(
-        "INPUT_STRAGGLER",
-        "INPUT STRAGGLER",
-        severity="crit",
-        phase="dataloader",
-        action=(
-            "Inspect dataloader, collate_fn, preprocessing, and storage "
-            "on the slow rank."
-        ),
-    )
-    step_time = _payload(
-        metadata={"global_ranks_used": 2},
-        diagnosis=step_diag,
-        global_summary={
-            "window": {"steps_analyzed": 60},
-            "median": {
-                "total_step_ms": _point(303.7, 1),
-                "dataloader_ms": _point(3.8, 1),
-                "compute_ms": _point(259.5, 1),
-                "residual_ms": _point(40.5, 1),
-                "h2d_ms": _point(0.2, 1),
-            },
-            "worst": {
-                "total_step_ms": _point(304.1, 0),
-                "dataloader_ms": _point(254.5, 0),
-                "compute_ms": _point(261.0, 0),
-                "residual_ms": _point(42.1, 0),
-                "h2d_ms": _point(0.4, 0),
-            },
-        },
-        groups={
-            "by": "global_rank",
-            "rows": {
-                "0": {
-                    "identity": {"global_rank": 0, "node_rank": 0},
-                    "metrics": {},
-                },
-                "1": {
-                    "identity": {"global_rank": 1, "node_rank": 1},
-                    "metrics": {},
-                },
-            },
-        },
-    )
-    system = _payload(
-        metadata={"mode": "multi_node", "nodes_observed": 2},
-        diagnosis=_diagnosis("LOW_GPU_UTILIZATION", "LOW GPU UTIL"),
-        global_summary={
-            "median": {
-                "cpu_percent": _point(18.4, 0),
-                "gpu_util_percent": _point(14.0, 0),
-                "gpu_mem_bytes": _point(6_200_000_000.0, 0),
-                "gpu_temp_c": _point(42.0, 0),
-            },
-            "worst": {
-                "cpu_percent": _point(71.2, 1),
-                "gpu_util_percent": _point(0.0, 0),
-                "gpu_mem_bytes": _point(8_900_000_000.0, 1),
-                "gpu_temp_c": _point(58.0, 1),
-            },
-        },
-        groups={
-            "by": "node_rank",
-            "rows": {
-                "0": {"identity": {"node_rank": 0}, "metrics": {}},
-                "1": {"identity": {"node_rank": 1}, "metrics": {}},
-            },
-        },
-    )
-
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", system),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
-
-    text = payload["text"]
-    assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text
-    assert "Rank r0 dataloader was 254.5ms vs median rank r1 at 3.8ms." in text
-    assert (
-        "Metric          Median        Worst         Skew        Scope" in text
-    )
-    assert "GPU Util        14.0%         0.0%          14.0pp" in text
-    assert "node=n1" in text
-    assert (
-        "Phase           Median        Worst         Skew        Scope" in text
-    )
-    assert "Dataloader      3.8ms         254.5ms       6597.4%" in text
-    assert "rank=r0 node=n0" in text
-    assert "Average" not in text
 
 
 def test_reporting_final_is_the_summary_orchestration_owner():

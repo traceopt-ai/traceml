@@ -51,7 +51,7 @@ traceml view logs/<run_name>/final_summary.json
 
 ## What to look for
 
-Start with `TraceML Verdict`, then check the `Step Time Evidence` table.
+Start with the `Step Time` section.
 
 For DataLoader problems, the most relevant diagnoses are:
 
@@ -60,19 +60,14 @@ For DataLoader problems, the most relevant diagnoses are:
 - `INPUT STRAGGLER`: one rank has meaningfully more dataloader burden than a
   typical rank
 
-Example excerpt:
+Example:
 
 ```text
-TraceML Verdict: INPUT STRAGGLER / CRITICAL
-Why: Rank r0 dataloader was 254.5ms vs median rank r1 at 3.8ms.
-Next: Inspect dataloader, collate_fn, preprocessing, and storage on the slow rank.
-
-Step Time Evidence
-Phase           Median        Worst         Skew        Scope
---------------------------------------------------------------------------
-Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0
-Dataloader      3.8ms         254.5ms       6597.4%     rank=r0 node=n0
-Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1
+Step Time
+- Diagnosis: INPUT STRAGGLER
+- Stats: total 303.7ms | input 254.5ms | compute 259.5ms
+- Residual: 40.5ms
+- Why: r0 input was slower than median global rank (254.5/3.8ms).
 ```
 
 Read this as:

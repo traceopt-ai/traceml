@@ -53,19 +53,6 @@ unexplained-utilization fallback, not as root-cause proof by itself.
 By default, `traceml run train.py` prints a compact final summary and writes
 `final_summary.json` plus `final_summary.txt`.
 
-The text summary is intentionally verdict-first:
-
-- `TraceML Verdict`: the promoted performance diagnosis and severity
-- `Why`: the short evidence-backed reason
-- `Next`: the first action to try or inspect
-- `Section Status`: compact health/status across System, Process, Step Time,
-  and Step Memory
-- `System Evidence` and `Step Time Evidence`: the core numbers behind the
-  verdict
-
-Detailed section prose remains in the `system.card`, `process.card`,
-`step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
-
 ### Shareable HTML report
 
 Add `--html-report` to `traceml run` (or `traceml watch`) to also write
