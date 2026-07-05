@@ -63,6 +63,8 @@ class StepTimeSampler(BaseSampler):
         Build a single per-step payload containing all aggregated event timings.
         """
         sum_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
+        sum_cpu_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
+        sum_gpu_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
         n_calls: Dict[Tuple[str, str, bool], int] = defaultdict(int)
 
         ts_max = 0.0
@@ -71,14 +73,15 @@ class StepTimeSampler(BaseSampler):
             ts_max = float(max(ts_max, float(evt.cpu_end)))
 
             is_gpu = evt.gpu_time_ms is not None
-            duration_ms = (
-                float(evt.gpu_time_ms)
-                if is_gpu
-                else float(self._cpu_duration_ms(evt))
-            )
+            cpu_ms = float(self._cpu_duration_ms(evt))
+            gpu_ms = float(evt.gpu_time_ms) if is_gpu else None
+            duration_ms = float(gpu_ms) if is_gpu else float(cpu_ms)
 
             key = (str(evt.name), str(evt.device), bool(is_gpu))
             sum_ms[key] += duration_ms
+            sum_cpu_ms[key] += cpu_ms
+            if gpu_ms is not None:
+                sum_gpu_ms[key] += gpu_ms
             n_calls[key] += 1
 
         events: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
@@ -86,6 +89,12 @@ class StepTimeSampler(BaseSampler):
             events[name][device] = {
                 "is_gpu": bool(is_gpu),
                 "duration_ms": float(total_ms),
+                "cpu_ms": float(sum_cpu_ms[(name, device, is_gpu)]),
+                "gpu_ms": (
+                    float(sum_gpu_ms[(name, device, is_gpu)])
+                    if is_gpu
+                    else None
+                ),
                 "n_calls": int(n_calls[(name, device, is_gpu)]),
             }
 
