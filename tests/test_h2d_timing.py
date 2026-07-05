@@ -167,7 +167,7 @@ class TestH2DAutoTimerPatch:
         tensor = torch.ones(4)
         recorded = []
 
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             # Should never be reached when disabled
             recorded.append(name)
 
@@ -191,7 +191,7 @@ class TestH2DAutoTimerPatch:
         tensor = torch.ones(4)
         recorded = []
 
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
 
             @contextmanager
@@ -220,7 +220,7 @@ class TestH2DAutoTimerPatch:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 
@@ -246,7 +246,7 @@ class TestH2DAutoTimerPatch:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 
@@ -279,7 +279,7 @@ class TestH2DAutoTimerPatch:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 
@@ -404,7 +404,7 @@ class TestWrapH2D:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 
