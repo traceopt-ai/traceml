@@ -16,6 +16,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.utils.step_time_input_bound import (
+    INPUT_BOUND_CLOCK_CPU,
+    INPUT_BOUND_CLOCK_GPU,
+    INPUT_BOUND_CLOCK_IS_GPU_KEY,
+    INPUT_BOUND_STEP_MS_KEY,
+    INPUT_WAIT_MS_KEY,
+)
 
 if TYPE_CHECKING:
     from .policy import DiagnosisThresholds
@@ -88,10 +95,16 @@ class StepTimeAnalysisContext:
     dataloader_share: float
     residual_share: float
     compute_share: float
+    input_bound_share: float
 
     dataloader_skew: float
+    input_bound_skew: float
     compute_skew: float
     dataloader_worst_rank: Optional[int]
+    input_bound_worst_rank: Optional[int]
+    input_bound_clock: str
+    input_wait_total: float
+    input_bound_step_total: float
 
     largest_compute: Optional[ComputeSignal]
 
@@ -579,6 +592,45 @@ def build_step_time_context(
             },
         }
 
+    input_wait_rank_values = {
+        rank: non_negative_finite(values.get(INPUT_WAIT_MS_KEY, 0.0))
+        for rank, values in local_per_rank_timing.items()
+        if INPUT_WAIT_MS_KEY in values and INPUT_BOUND_STEP_MS_KEY in values
+    }
+    input_step_rank_values = {
+        rank: non_negative_finite(values.get(INPUT_BOUND_STEP_MS_KEY, 0.0))
+        for rank, values in local_per_rank_timing.items()
+        if INPUT_WAIT_MS_KEY in values and INPUT_BOUND_STEP_MS_KEY in values
+    }
+    input_clock_markers = {
+        rank: non_negative_finite(
+            values.get(INPUT_BOUND_CLOCK_IS_GPU_KEY, 0.0)
+        )
+        for rank, values in local_per_rank_timing.items()
+        if INPUT_WAIT_MS_KEY in values and INPUT_BOUND_STEP_MS_KEY in values
+    }
+    input_wait_median, input_wait_worst, input_wait_worst_rank, input_slack = (
+        _rank_stats(input_wait_rank_values)
+    )
+    input_step_median, input_step_worst, _, _ = _rank_stats(
+        input_step_rank_values
+    )
+    input_wait_total = input_wait_worst if single_rank else input_wait_median
+    input_bound_step_total = (
+        input_step_worst if single_rank else input_step_median
+    )
+    input_bound_skew = (
+        0.0
+        if single_rank or input_wait_median <= 0.0
+        else input_slack / input_wait_median
+    )
+    input_bound_clock = (
+        INPUT_BOUND_CLOCK_GPU
+        if input_clock_markers
+        and all(value >= 0.5 for value in input_clock_markers.values())
+        else INPUT_BOUND_CLOCK_CPU
+    )
+
     clean_rank_values = _clean_rank_timings(local_per_rank_timing)
     clean_straggler = _clean_straggler_evidence(
         clean_rank_values=clean_rank_values,
@@ -610,11 +662,17 @@ def build_step_time_context(
         dataloader_share=share(dataloader_total, step_total),
         residual_share=share(residual_total, step_total),
         compute_share=share(compute_total_value, step_total),
+        input_bound_share=share(input_wait_total, input_bound_step_total),
         dataloader_skew=metric_skew(
             dataloader_metric, single_rank=single_rank
         ),
+        input_bound_skew=input_bound_skew,
         compute_skew=compute_skew_value,
         dataloader_worst_rank=metric_worst_rank(dataloader_metric),
+        input_bound_worst_rank=input_wait_worst_rank,
+        input_bound_clock=input_bound_clock,
+        input_wait_total=input_wait_total,
+        input_bound_step_total=input_bound_step_total,
         largest_compute=largest_compute,
         rank_values=rank_values,
         clean_rank_values=clean_rank_values,

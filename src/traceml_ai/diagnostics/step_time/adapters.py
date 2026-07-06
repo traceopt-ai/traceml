@@ -28,6 +28,11 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
+from traceml_ai.utils.step_time_input_bound import (
+    INPUT_BOUND_CLOCK_IS_GPU_KEY,
+    INPUT_BOUND_STEP_MS_KEY,
+    INPUT_WAIT_MS_KEY,
+)
 from traceml_ai.utils.step_windows import common_suffix_steps
 
 _LOGGER = get_error_logger("StepTimeDiagnostics")
@@ -198,8 +203,49 @@ def _metric_from_rank_values(
     )
 
 
+def _input_bound_averages_from_step_metrics(
+    step_metrics: Dict[int, Dict[str, float]],
+) -> Dict[str, float]:
+    """
+    Average diagnosis-only input-bound clocks over one rank's step window.
+
+    These fields are optional and do not affect public summary metrics. They
+    are present only when every analyzed step has explicit input-bound clocks.
+    """
+    if not step_metrics:
+        return {}
+
+    input_wait_sum = 0.0
+    step_time_sum = 0.0
+    gpu_count = 0
+    count = 0
+
+    for metrics in step_metrics.values():
+        if (
+            INPUT_WAIT_MS_KEY not in metrics
+            or INPUT_BOUND_STEP_MS_KEY not in metrics
+        ):
+            continue
+        input_wait_sum += _finite_float(metrics.get(INPUT_WAIT_MS_KEY))
+        step_time_sum += _finite_float(metrics.get(INPUT_BOUND_STEP_MS_KEY))
+        gpu_count += int(
+            _finite_float(metrics.get(INPUT_BOUND_CLOCK_IS_GPU_KEY)) >= 0.5
+        )
+        count += 1
+
+    if count != len(step_metrics):
+        return {}
+
+    return {
+        INPUT_WAIT_MS_KEY: input_wait_sum / count,
+        INPUT_BOUND_STEP_MS_KEY: step_time_sum / count,
+        INPUT_BOUND_CLOCK_IS_GPU_KEY: 1.0 if gpu_count == count else 0.0,
+    }
+
+
 def _build_summary_per_rank_timing(
     rank_signals: Dict[int, RankStepSignals],
+    per_rank_step_metrics: Optional[RankStepMetricSeries] = None,
 ) -> Dict[int, Dict[str, float]]:
     """
     Build canonical per-rank timing maps for the shared diagnosis result path.
@@ -222,7 +268,7 @@ def _build_summary_per_rank_timing(
         step_effective = max(step_cpu, known_step)
         residual = max(0.0, step_effective - known_step)
 
-        out[int(rank)] = {
+        timing = {
             "dataloader_fetch": dataloader,
             "h2d": h2d,
             "forward": forward,
@@ -232,6 +278,13 @@ def _build_summary_per_rank_timing(
             "residual_proxy": residual,
             "total_step": dataloader + step_effective,
         }
+        if per_rank_step_metrics is not None:
+            timing.update(
+                _input_bound_averages_from_step_metrics(
+                    per_rank_step_metrics.get(int(rank), {})
+                )
+            )
+        out[int(rank)] = timing
     return out
 
 
@@ -362,7 +415,10 @@ def build_summary_step_diagnosis_result(
     return build_step_diagnosis_result(
         metrics,
         thresholds=policy.thresholds,
-        per_rank_timing=_build_summary_per_rank_timing(rank_signals),
+        per_rank_timing=_build_summary_per_rank_timing(
+            rank_signals,
+            per_rank_step_metrics=per_rank_step_metrics,
+        ),
     )
 
 

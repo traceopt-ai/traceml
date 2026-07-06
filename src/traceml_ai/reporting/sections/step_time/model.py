@@ -15,6 +15,12 @@ from traceml_ai.diagnostics.step_time.adapters import RankStepSignals
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.summaries.summary_formatting import safe_float
+from traceml_ai.utils.step_time_input_bound import (
+    INPUT_BOUND_CLOCK_IS_GPU_KEY,
+    INPUT_BOUND_STEP_MS_KEY,
+    INPUT_WAIT_MS_KEY,
+    input_bound_timing_fields,
+)
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
@@ -194,6 +200,8 @@ def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
             continue
         metrics[bucket] += _event_total_ms(by_dev)
 
+    metrics.update(input_bound_timing_fields(events))
+
     if (
         metrics["dataloader"] <= 0.0
         and metrics["forward"] <= 0.0
@@ -254,7 +262,7 @@ def build_rank_summary(
         residual_proxy = max(0.0, traced_step - known_step_ms)
         total_step = dl + traced_step
 
-        per_step_metrics[int(step_id)] = {
+        per_step_metric = {
             "dataloader_fetch": dl,
             "h2d": h2d,
             "forward": fwd,
@@ -263,6 +271,14 @@ def build_rank_summary(
             "step_time": traced_step,
             "residual_proxy": residual_proxy,
         }
+        for key in (
+            INPUT_WAIT_MS_KEY,
+            INPUT_BOUND_STEP_MS_KEY,
+            INPUT_BOUND_CLOCK_IS_GPU_KEY,
+        ):
+            if key in metrics:
+                per_step_metric[key] = finite_float(metrics[key])
+        per_step_metrics[int(step_id)] = per_step_metric
 
         sum_dl += dl
         sum_h2d += h2d

@@ -14,7 +14,13 @@ from traceml_ai.reporting.sections.step_time.loader import (
     StepTimeSectionData,
     load_step_time_section_data,
 )
+from traceml_ai.reporting.sections.step_time.model import build_rank_summary
 from traceml_ai.reporting.sections.step_time.model import to_rank_signals
+from traceml_ai.utils.step_time_input_bound import (
+    INPUT_BOUND_CLOCK_IS_GPU_KEY,
+    INPUT_BOUND_STEP_MS_KEY,
+    INPUT_WAIT_MS_KEY,
+)
 
 
 def _create_step_time_db(path: str) -> None:
@@ -144,6 +150,44 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
     assert summary["global"]["window"]["steps_analyzed"] == 2
     assert summary["global"]["median"]["total_step_ms"]["value"] == 31.0
     assert "Global: n/a" not in summary["card"]
+
+
+def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
+    analysis = build_rank_summary(
+        [
+            {
+                "step": 1,
+                "events": {
+                    "_traceml_internal:dataloader_next": {
+                        "cuda:0": {
+                            "is_gpu": False,
+                            "duration_ms": 12.0,
+                            "cpu_ms": 12.0,
+                            "gpu_ms": 4.0,
+                            "n_calls": 1,
+                        }
+                    },
+                    "_traceml_internal:step_time": {
+                        "cuda:0": {
+                            "is_gpu": False,
+                            "duration_ms": 60.0,
+                            "cpu_ms": 60.0,
+                            "gpu_ms": 20.0,
+                            "n_calls": 1,
+                        }
+                    },
+                },
+            }
+        ]
+    )
+
+    assert analysis is not None
+    metrics = analysis.per_step_metrics[1]
+    assert metrics["dataloader_fetch"] == 12.0
+    assert metrics["step_time"] == 60.0
+    assert metrics[INPUT_WAIT_MS_KEY] == 4.0
+    assert metrics[INPUT_BOUND_STEP_MS_KEY] == 20.0
+    assert metrics[INPUT_BOUND_CLOCK_IS_GPU_KEY] == 1.0
 
 
 def test_step_time_section_loader_and_builder_use_sqlite_fixture(

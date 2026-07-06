@@ -15,6 +15,12 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
+from traceml_ai.utils.step_time_input_bound import (
+    INPUT_BOUND_CLOCK_IS_GPU_KEY,
+    INPUT_BOUND_STEP_MS_KEY,
+    INPUT_WAIT_MS_KEY,
+    input_bound_timing_from_events,
+)
 
 STEP_TIME_TABLE = "step_time_samples"
 
@@ -181,6 +187,9 @@ class StepCombinedComputer:
         per_metric_rank_sums = self._build_metric_sums(
             per_rank_steps, steps, self.metric_keys
         )
+        input_bound_rank_sums = self._build_input_bound_rank_sums(
+            per_rank_steps, steps
+        )
 
         step_sums = per_metric_rank_sums.get("step_time", {})
         h2d_sums = per_metric_rank_sums.get("h2d", {})
@@ -218,6 +227,7 @@ class StepCombinedComputer:
                 "step_time": float(step_sums.get(r, 0.0)),
                 "residual_proxy": float(residual_rank_sums.get(r, 0.0)),
                 "total_step": float(overall_rank_scores.get(r, 0.0)),
+                **input_bound_rank_sums.get(int(r), {}),
             }
             for r in ranks_present
         }
@@ -547,6 +557,53 @@ class StepCombinedComputer:
 
             for k, total in totals.items():
                 out[k][int(rank)] = float(total)
+
+        return out
+
+    def _build_input_bound_rank_sums(
+        self,
+        per_rank_steps: Dict[int, Dict[int, Dict[str, Any]]],
+        steps: Sequence[int],
+    ) -> Dict[int, Dict[str, float]]:
+        """
+        Build diagnosis-only input-bound timing sums over the common window.
+
+        These values are not rendered as public phase metrics. They let
+        INPUT_BOUND use explicit `gpu_ms` or `cpu_ms` clocks without changing
+        existing `duration_ms` consumers.
+        """
+        out: Dict[int, Dict[str, float]] = {}
+        expected = len(steps)
+        if expected <= 0:
+            return out
+
+        for rank, step_map in per_rank_steps.items():
+            input_wait_ms = 0.0
+            step_time_ms = 0.0
+            gpu_count = 0
+            count = 0
+
+            for step in steps:
+                timing = input_bound_timing_from_events(
+                    step_map.get(int(step), {})
+                )
+                if timing is None:
+                    continue
+                input_wait_ms += float(timing.input_wait_ms)
+                step_time_ms += float(timing.step_time_ms)
+                gpu_count += int(timing.clock_is_gpu)
+                count += 1
+
+            if count != expected:
+                continue
+
+            out[int(rank)] = {
+                INPUT_WAIT_MS_KEY: float(input_wait_ms),
+                INPUT_BOUND_STEP_MS_KEY: float(step_time_ms),
+                INPUT_BOUND_CLOCK_IS_GPU_KEY: (
+                    1.0 if gpu_count == count else 0.0
+                ),
+            }
 
         return out
 

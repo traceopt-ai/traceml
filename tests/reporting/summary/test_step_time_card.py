@@ -19,6 +19,11 @@ from traceml_ai.reporting.sections.step_time.builder import (
 )
 from traceml_ai.reporting.sections.step_time.loader import StepTimeSectionData
 from traceml_ai.reporting.sections.step_time.model import to_rank_signals
+from traceml_ai.utils.step_time_input_bound import (
+    INPUT_BOUND_CLOCK_IS_GPU_KEY,
+    INPUT_BOUND_STEP_MS_KEY,
+    INPUT_WAIT_MS_KEY,
+)
 
 
 def _rank(
@@ -50,13 +55,19 @@ def _rank(
     )
 
 
-def _summary(per_global_rank: dict[int, RankStepSummary]):
+def _summary(
+    per_global_rank: dict[int, RankStepSummary],
+    per_rank_step_metrics: (
+        dict[int, dict[int, dict[str, float]]] | None
+    ) = None,
+):
     window_size = 64
+    step_metrics = per_rank_step_metrics or {}
     data = StepTimeSectionData(
         training_steps=100,
         latest_step_observed=99,
         aligned_summary=per_global_rank,
-        aligned_step_metrics={},
+        aligned_step_metrics=step_metrics,
         aligned_window=AlignedStepWindow(
             alignment="common_steps",
             steps_analyzed=min(
@@ -70,18 +81,41 @@ def _summary(per_global_rank: dict[int, RankStepSummary]):
             global_ranks_observed=len(per_global_rank),
         ),
         per_global_rank_summary=per_global_rank,
-        per_global_rank_step_metrics={},
+        per_global_rank_step_metrics=step_metrics,
         identities={},
         max_rows=window_size,
     )
     diagnosis = diagnose_step_time_summary(
         StepTimeDiagnosisInput(
             rank_signals=to_rank_signals(per_global_rank),
-            per_rank_step_metrics={},
+            per_rank_step_metrics=step_metrics,
             max_rows=window_size,
         )
     )
     return build_step_time_payload(data, diagnosis)
+
+
+def _input_bound_step_metrics(
+    *,
+    input_wait: float,
+    input_bound_step: float,
+    steps: int = 64,
+) -> dict[int, dict[str, float]]:
+    return {
+        step: {
+            "dataloader_fetch": 40.0,
+            "h2d": 0.0,
+            "forward": 20.0,
+            "backward": 35.0,
+            "optimizer_step": 5.0,
+            "step_time": 100.0,
+            "residual_proxy": 40.0,
+            INPUT_WAIT_MS_KEY: input_wait,
+            INPUT_BOUND_STEP_MS_KEY: input_bound_step,
+            INPUT_BOUND_CLOCK_IS_GPU_KEY: 1.0,
+        }
+        for step in range(steps)
+    }
 
 
 def _assert_compact_card(card: str) -> None:
@@ -170,7 +204,13 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
                 optimizer=5.0,
                 step_cpu=100.0,
             )
-        }
+        },
+        per_rank_step_metrics={
+            0: _input_bound_step_metrics(
+                input_wait=40.0,
+                input_bound_step=100.0,
+            )
+        },
     )
 
     assert payload["diagnosis"] == payload["issues"][0]

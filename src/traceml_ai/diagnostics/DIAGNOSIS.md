@@ -70,7 +70,10 @@ Training-step timing.
 - `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
 - `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
 - `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
-- `INPUT_BOUND`: dataloader time dominates the typical step.
+- `INPUT_BOUND`: explicit input wait dominates the typical step. When
+  dataloader and step-envelope GPU event timings are available, this uses
+  `gpu_ms`; otherwise it uses explicit `cpu_ms`. It does not use
+  compatibility `duration_ms`.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
 

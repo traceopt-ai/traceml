@@ -422,7 +422,7 @@ def build_step_diagnosis_result(
             action=primary_issue.action,
             steps_used=context.steps_used,
             worst_rank=(
-                None if context.single_rank else context.dataloader_worst_rank
+                None if context.single_rank else context.input_bound_worst_rank
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "RESIDUAL_HEAVY":
