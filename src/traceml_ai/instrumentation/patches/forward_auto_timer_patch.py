@@ -58,7 +58,9 @@ def _traceml_module_call(self: nn.Module, *args, **kwargs):
     _set_depth(_depth() + 1)
     try:
         with timed_region(
-            "_traceml_internal:forward_time", scope="step", use_gpu=True
+            "_traceml_internal:forward_time",
+            scope="step",
+            record_gpu_events=True,
         ):
             return _ORIG_MODULE_CALL(self, *args, **kwargs)
     finally:
