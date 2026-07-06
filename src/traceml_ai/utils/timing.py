@@ -185,7 +185,7 @@ def flush_step_time_buffer(step: int) -> None:
 def timed_region(
     name: str,
     scope: TimeScope = TimeScope.STEP,
-    use_gpu: bool = True,
+    record_gpu_events: bool = True,
 ):
     """
     Context manager for timing arbitrary code regions.
@@ -195,6 +195,14 @@ def timed_region(
     - User code always runs
     - Timing is best-effort
     - User exceptions are never swallowed
+
+    Timing clocks
+    -------------
+    CPU wall time is always recorded. When ``record_gpu_events`` is true and
+    PyTorch CUDA is available, TraceML also records CUDA stream events and
+    resolves them later without synchronizing training. Timing events do not
+    currently include GPU backend metadata; CUDA and ROCm-specific labeling can
+    be added as a separate schema change when needed.
     """
     if TRACEML_DISABLED or not should_record_trace_events():
         yield
@@ -203,7 +211,7 @@ def timed_region(
     cpu_start = time.time()
 
     try:
-        if use_gpu and torch.cuda.is_available():
+        if record_gpu_events and torch.cuda.is_available():
             device = f"cuda:{torch.cuda.current_device()}"
             start_evt = get_cuda_event()
             end_evt = get_cuda_event()

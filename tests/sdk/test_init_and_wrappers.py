@@ -420,8 +420,8 @@ def test_wrap_forward_times_model_instance(monkeypatch):
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
@@ -448,8 +448,8 @@ def test_wrap_backward_times_backward(monkeypatch):
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
@@ -481,8 +481,8 @@ def test_wrap_optimizer_preserves_identity_and_times_step(monkeypatch):
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)

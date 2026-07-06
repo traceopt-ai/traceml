@@ -36,7 +36,9 @@ def _traceml_tensor_backward(
     _set_depth(_depth() + 1)
     try:
         with timed_region(
-            "_traceml_internal:backward_time", scope="step", use_gpu=True
+            "_traceml_internal:backward_time",
+            scope="step",
+            record_gpu_events=True,
         ):
             return _ORIG_TENSOR_BACKWARD(self, *args, **kwargs)
     finally:
@@ -54,7 +56,9 @@ def _traceml_autograd_backward(*args: Any, **kwargs: Any) -> Any:
     _set_depth(_depth() + 1)
     try:
         with timed_region(
-            "_traceml_internal:backward_time", scope="step", use_gpu=True
+            "_traceml_internal:backward_time",
+            scope="step",
+            record_gpu_events=True,
         ):
             return _ORIG_AUTOGRAD_BACKWARD(*args, **kwargs)
     finally:
