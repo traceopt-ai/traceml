@@ -29,9 +29,10 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSummary,
 )
 from traceml_ai.utils.step_time_input_bound import (
-    INPUT_BOUND_CLOCK_IS_GPU_KEY,
-    INPUT_BOUND_STEP_MS_KEY,
-    INPUT_WAIT_MS_KEY,
+    INPUT_WAIT_CPU_MS_KEY,
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
 )
 from traceml_ai.utils.step_windows import common_suffix_steps
 
@@ -215,32 +216,46 @@ def _input_bound_averages_from_step_metrics(
     if not step_metrics:
         return {}
 
-    input_wait_sum = 0.0
-    step_time_sum = 0.0
+    input_wait_cpu_sum = 0.0
+    input_wait_gpu_sum = 0.0
+    step_time_cpu_sum = 0.0
+    step_time_gpu_sum = 0.0
+    cpu_count = 0
     gpu_count = 0
-    count = 0
 
     for metrics in step_metrics.values():
         if (
-            INPUT_WAIT_MS_KEY not in metrics
-            or INPUT_BOUND_STEP_MS_KEY not in metrics
+            INPUT_WAIT_CPU_MS_KEY in metrics
+            and STEP_TIME_CPU_MS_KEY in metrics
         ):
-            continue
-        input_wait_sum += _finite_float(metrics.get(INPUT_WAIT_MS_KEY))
-        step_time_sum += _finite_float(metrics.get(INPUT_BOUND_STEP_MS_KEY))
-        gpu_count += int(
-            _finite_float(metrics.get(INPUT_BOUND_CLOCK_IS_GPU_KEY)) >= 0.5
-        )
-        count += 1
+            input_wait_cpu_sum += _finite_float(
+                metrics.get(INPUT_WAIT_CPU_MS_KEY)
+            )
+            step_time_cpu_sum += _finite_float(
+                metrics.get(STEP_TIME_CPU_MS_KEY)
+            )
+            cpu_count += 1
+        if (
+            INPUT_WAIT_GPU_MS_KEY in metrics
+            and STEP_TIME_GPU_MS_KEY in metrics
+        ):
+            input_wait_gpu_sum += _finite_float(
+                metrics.get(INPUT_WAIT_GPU_MS_KEY)
+            )
+            step_time_gpu_sum += _finite_float(
+                metrics.get(STEP_TIME_GPU_MS_KEY)
+            )
+            gpu_count += 1
 
-    if count != len(step_metrics):
-        return {}
+    fields: Dict[str, float] = {}
+    if cpu_count == len(step_metrics):
+        fields[INPUT_WAIT_CPU_MS_KEY] = input_wait_cpu_sum / cpu_count
+        fields[STEP_TIME_CPU_MS_KEY] = step_time_cpu_sum / cpu_count
+    if gpu_count == len(step_metrics):
+        fields[INPUT_WAIT_GPU_MS_KEY] = input_wait_gpu_sum / gpu_count
+        fields[STEP_TIME_GPU_MS_KEY] = step_time_gpu_sum / gpu_count
 
-    return {
-        INPUT_WAIT_MS_KEY: input_wait_sum / count,
-        INPUT_BOUND_STEP_MS_KEY: step_time_sum / count,
-        INPUT_BOUND_CLOCK_IS_GPU_KEY: 1.0 if gpu_count == count else 0.0,
-    }
+    return fields
 
 
 def _build_summary_per_rank_timing(

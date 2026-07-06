@@ -19,9 +19,10 @@ from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
 from traceml_ai.utils.step_time_input_bound import (
     INPUT_BOUND_CLOCK_CPU,
     INPUT_BOUND_CLOCK_GPU,
-    INPUT_BOUND_CLOCK_IS_GPU_KEY,
-    INPUT_BOUND_STEP_MS_KEY,
-    INPUT_WAIT_MS_KEY,
+    INPUT_WAIT_CPU_MS_KEY,
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
 )
 
 if TYPE_CHECKING:
@@ -592,23 +593,51 @@ def build_step_time_context(
             },
         }
 
-    input_wait_rank_values = {
-        rank: non_negative_finite(values.get(INPUT_WAIT_MS_KEY, 0.0))
+    input_candidates = {
+        rank: values
         for rank, values in local_per_rank_timing.items()
-        if INPUT_WAIT_MS_KEY in values and INPUT_BOUND_STEP_MS_KEY in values
+        if (INPUT_WAIT_GPU_MS_KEY in values and STEP_TIME_GPU_MS_KEY in values)
+        or (INPUT_WAIT_CPU_MS_KEY in values and STEP_TIME_CPU_MS_KEY in values)
     }
-    input_step_rank_values = {
-        rank: non_negative_finite(values.get(INPUT_BOUND_STEP_MS_KEY, 0.0))
-        for rank, values in local_per_rank_timing.items()
-        if INPUT_WAIT_MS_KEY in values and INPUT_BOUND_STEP_MS_KEY in values
-    }
-    input_clock_markers = {
-        rank: non_negative_finite(
-            values.get(INPUT_BOUND_CLOCK_IS_GPU_KEY, 0.0)
-        )
-        for rank, values in local_per_rank_timing.items()
-        if INPUT_WAIT_MS_KEY in values and INPUT_BOUND_STEP_MS_KEY in values
-    }
+    has_gpu_for_all_input_ranks = bool(input_candidates) and all(
+        INPUT_WAIT_GPU_MS_KEY in values and STEP_TIME_GPU_MS_KEY in values
+        for values in input_candidates.values()
+    )
+    has_cpu_for_all_input_ranks = bool(input_candidates) and all(
+        INPUT_WAIT_CPU_MS_KEY in values and STEP_TIME_CPU_MS_KEY in values
+        for values in input_candidates.values()
+    )
+    # Select one clock for the diagnosis window: GPU pair when available for
+    # all considered ranks, otherwise CPU pair when GPU timing is absent.
+    if has_gpu_for_all_input_ranks:
+        input_wait_key = INPUT_WAIT_GPU_MS_KEY
+        input_step_key = STEP_TIME_GPU_MS_KEY
+        input_bound_clock = INPUT_BOUND_CLOCK_GPU
+    elif has_cpu_for_all_input_ranks:
+        input_wait_key = INPUT_WAIT_CPU_MS_KEY
+        input_step_key = STEP_TIME_CPU_MS_KEY
+        input_bound_clock = INPUT_BOUND_CLOCK_CPU
+    else:
+        input_wait_key = None
+        input_step_key = None
+        input_bound_clock = INPUT_BOUND_CLOCK_CPU
+
+    input_wait_rank_values = (
+        {
+            rank: non_negative_finite(values.get(input_wait_key, 0.0))
+            for rank, values in input_candidates.items()
+        }
+        if input_wait_key is not None
+        else {}
+    )
+    input_step_rank_values = (
+        {
+            rank: non_negative_finite(values.get(input_step_key, 0.0))
+            for rank, values in input_candidates.items()
+        }
+        if input_step_key is not None
+        else {}
+    )
     input_wait_median, input_wait_worst, input_wait_worst_rank, input_slack = (
         _rank_stats(input_wait_rank_values)
     )
@@ -624,13 +653,6 @@ def build_step_time_context(
         if single_rank or input_wait_median <= 0.0
         else input_slack / input_wait_median
     )
-    input_bound_clock = (
-        INPUT_BOUND_CLOCK_GPU
-        if input_clock_markers
-        and all(value >= 0.5 for value in input_clock_markers.values())
-        else INPUT_BOUND_CLOCK_CPU
-    )
-
     clean_rank_values = _clean_rank_timings(local_per_rank_timing)
     clean_straggler = _clean_straggler_evidence(
         clean_rank_values=clean_rank_values,

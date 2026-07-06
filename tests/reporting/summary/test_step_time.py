@@ -17,9 +17,10 @@ from traceml_ai.reporting.sections.step_time.loader import (
 from traceml_ai.reporting.sections.step_time.model import build_rank_summary
 from traceml_ai.reporting.sections.step_time.model import to_rank_signals
 from traceml_ai.utils.step_time_input_bound import (
-    INPUT_BOUND_CLOCK_IS_GPU_KEY,
-    INPUT_BOUND_STEP_MS_KEY,
-    INPUT_WAIT_MS_KEY,
+    INPUT_WAIT_CPU_MS_KEY,
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
 )
 
 
@@ -185,9 +186,10 @@ def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
     metrics = analysis.per_step_metrics[1]
     assert metrics["dataloader_fetch"] == 12.0
     assert metrics["step_time"] == 60.0
-    assert metrics[INPUT_WAIT_MS_KEY] == 4.0
-    assert metrics[INPUT_BOUND_STEP_MS_KEY] == 20.0
-    assert metrics[INPUT_BOUND_CLOCK_IS_GPU_KEY] == 1.0
+    assert metrics[INPUT_WAIT_CPU_MS_KEY] == 12.0
+    assert metrics[STEP_TIME_CPU_MS_KEY] == 60.0
+    assert metrics[INPUT_WAIT_GPU_MS_KEY] == 4.0
+    assert metrics[STEP_TIME_GPU_MS_KEY] == 20.0
 
 
 def test_step_time_section_loader_and_builder_use_sqlite_fixture(

@@ -16,9 +16,10 @@ from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.summaries.summary_formatting import safe_float
 from traceml_ai.utils.step_time_input_bound import (
-    INPUT_BOUND_CLOCK_IS_GPU_KEY,
-    INPUT_BOUND_STEP_MS_KEY,
-    INPUT_WAIT_MS_KEY,
+    INPUT_WAIT_CPU_MS_KEY,
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
     input_bound_timing_fields,
 )
 
@@ -272,9 +273,10 @@ def build_rank_summary(
             "residual_proxy": residual_proxy,
         }
         for key in (
-            INPUT_WAIT_MS_KEY,
-            INPUT_BOUND_STEP_MS_KEY,
-            INPUT_BOUND_CLOCK_IS_GPU_KEY,
+            INPUT_WAIT_CPU_MS_KEY,
+            INPUT_WAIT_GPU_MS_KEY,
+            STEP_TIME_CPU_MS_KEY,
+            STEP_TIME_GPU_MS_KEY,
         ):
             if key in metrics:
                 per_step_metric[key] = finite_float(metrics[key])

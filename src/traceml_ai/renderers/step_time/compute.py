@@ -16,9 +16,10 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSummary,
 )
 from traceml_ai.utils.step_time_input_bound import (
-    INPUT_BOUND_CLOCK_IS_GPU_KEY,
-    INPUT_BOUND_STEP_MS_KEY,
-    INPUT_WAIT_MS_KEY,
+    INPUT_WAIT_CPU_MS_KEY,
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
     input_bound_timing_from_events,
 )
 
@@ -578,10 +579,12 @@ class StepCombinedComputer:
             return out
 
         for rank, step_map in per_rank_steps.items():
-            input_wait_ms = 0.0
-            step_time_ms = 0.0
+            input_wait_cpu_ms = 0.0
+            input_wait_gpu_ms = 0.0
+            step_time_cpu_ms = 0.0
+            step_time_gpu_ms = 0.0
+            cpu_count = 0
             gpu_count = 0
-            count = 0
 
             for step in steps:
                 timing = input_bound_timing_from_events(
@@ -589,21 +592,27 @@ class StepCombinedComputer:
                 )
                 if timing is None:
                     continue
-                input_wait_ms += float(timing.input_wait_ms)
-                step_time_ms += float(timing.step_time_ms)
-                gpu_count += int(timing.clock_is_gpu)
-                count += 1
+                if timing.has_cpu_pair:
+                    input_wait_cpu_ms += float(timing.input_wait_cpu_ms)
+                    step_time_cpu_ms += float(timing.step_time_cpu_ms)
+                    cpu_count += 1
+                if timing.has_gpu_pair:
+                    input_wait_gpu_ms += float(timing.input_wait_gpu_ms)
+                    step_time_gpu_ms += float(timing.step_time_gpu_ms)
+                    gpu_count += 1
 
-            if count != expected:
+            fields: Dict[str, float] = {}
+            if cpu_count == expected:
+                fields[INPUT_WAIT_CPU_MS_KEY] = float(input_wait_cpu_ms)
+                fields[STEP_TIME_CPU_MS_KEY] = float(step_time_cpu_ms)
+            if gpu_count == expected:
+                fields[INPUT_WAIT_GPU_MS_KEY] = float(input_wait_gpu_ms)
+                fields[STEP_TIME_GPU_MS_KEY] = float(step_time_gpu_ms)
+
+            if not fields:
                 continue
 
-            out[int(rank)] = {
-                INPUT_WAIT_MS_KEY: float(input_wait_ms),
-                INPUT_BOUND_STEP_MS_KEY: float(step_time_ms),
-                INPUT_BOUND_CLOCK_IS_GPU_KEY: (
-                    1.0 if gpu_count == count else 0.0
-                ),
-            }
+            out[int(rank)] = fields
 
         return out
 

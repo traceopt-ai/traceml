@@ -20,9 +20,8 @@ from traceml_ai.reporting.sections.step_time.builder import (
 from traceml_ai.reporting.sections.step_time.loader import StepTimeSectionData
 from traceml_ai.reporting.sections.step_time.model import to_rank_signals
 from traceml_ai.utils.step_time_input_bound import (
-    INPUT_BOUND_CLOCK_IS_GPU_KEY,
-    INPUT_BOUND_STEP_MS_KEY,
-    INPUT_WAIT_MS_KEY,
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
 )
 
 
@@ -97,8 +96,8 @@ def _summary(
 
 def _input_bound_step_metrics(
     *,
-    input_wait: float,
-    input_bound_step: float,
+    input_wait_gpu: float,
+    step_time_gpu: float,
     steps: int = 64,
 ) -> dict[int, dict[str, float]]:
     return {
@@ -110,9 +109,8 @@ def _input_bound_step_metrics(
             "optimizer_step": 5.0,
             "step_time": 100.0,
             "residual_proxy": 40.0,
-            INPUT_WAIT_MS_KEY: input_wait,
-            INPUT_BOUND_STEP_MS_KEY: input_bound_step,
-            INPUT_BOUND_CLOCK_IS_GPU_KEY: 1.0,
+            INPUT_WAIT_GPU_MS_KEY: input_wait_gpu,
+            STEP_TIME_GPU_MS_KEY: step_time_gpu,
         }
         for step in range(steps)
     }
@@ -207,8 +205,8 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
         },
         per_rank_step_metrics={
             0: _input_bound_step_metrics(
-                input_wait=40.0,
-                input_bound_step=100.0,
+                input_wait_gpu=40.0,
+                step_time_gpu=100.0,
             )
         },
     )

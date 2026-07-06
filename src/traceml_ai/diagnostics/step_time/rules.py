@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence, Tuple
 
+from traceml_ai.utils.step_time_input_bound import INPUT_BOUND_CLOCK_GPU
+
 from ..common import DiagnosticIssue, DiagnosticRule
 from .context import StepTimeAnalysisContext, non_negative_finite
 
@@ -177,6 +179,17 @@ class InputBoundRule(_BaseStepTimeRule):
         ):
             return None
 
+        wait_key = (
+            "input_wait_gpu_ms"
+            if context.input_bound_clock == INPUT_BOUND_CLOCK_GPU
+            else "input_wait_cpu_ms"
+        )
+        step_key = (
+            "step_time_gpu_ms"
+            if context.input_bound_clock == INPUT_BOUND_CLOCK_GPU
+            else "step_time_cpu_ms"
+        )
+
         return self._issue(
             kind="INPUT_BOUND",
             status="INPUT-BOUND",
@@ -195,8 +208,8 @@ class InputBoundRule(_BaseStepTimeRule):
             skew_pct=context.input_bound_skew,
             ranks=(context.input_bound_worst_rank,),
             evidence={
-                "input_wait_ms": context.input_wait_total,
-                "input_bound_step_ms": context.input_bound_step_total,
+                wait_key: context.input_wait_total,
+                step_key: context.input_bound_step_total,
                 "input_bound_share": context.input_bound_share,
                 "input_bound_clock": context.input_bound_clock,
             },

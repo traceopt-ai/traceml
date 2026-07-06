@@ -35,9 +35,10 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSummary,
 )
 from traceml_ai.utils.step_time_input_bound import (
-    INPUT_BOUND_CLOCK_IS_GPU_KEY,
-    INPUT_BOUND_STEP_MS_KEY,
-    INPUT_WAIT_MS_KEY,
+    INPUT_WAIT_CPU_MS_KEY,
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
     input_bound_timing_from_events,
 )
 
@@ -110,9 +111,10 @@ def _timing_row(
     residual: float = 0.0,
     step_time: float | None = None,
     total_step: float | None = None,
-    input_wait: float | None = None,
-    input_bound_step: float | None = None,
-    input_bound_clock_is_gpu: float = 0.0,
+    input_wait_cpu: float | None = None,
+    input_wait_gpu: float | None = None,
+    step_time_cpu: float | None = None,
+    step_time_gpu: float | None = None,
 ) -> dict[str, float]:
     known_step = h2d + forward + backward + optimizer
     local_step = known_step + residual if step_time is None else step_time
@@ -128,10 +130,12 @@ def _timing_row(
             dataloader + local_step if total_step is None else total_step
         ),
     }
-    if input_wait is not None and input_bound_step is not None:
-        row[INPUT_WAIT_MS_KEY] = input_wait
-        row[INPUT_BOUND_STEP_MS_KEY] = input_bound_step
-        row[INPUT_BOUND_CLOCK_IS_GPU_KEY] = input_bound_clock_is_gpu
+    if input_wait_cpu is not None and step_time_cpu is not None:
+        row[INPUT_WAIT_CPU_MS_KEY] = input_wait_cpu
+        row[STEP_TIME_CPU_MS_KEY] = step_time_cpu
+    if input_wait_gpu is not None and step_time_gpu is not None:
+        row[INPUT_WAIT_GPU_MS_KEY] = input_wait_gpu
+        row[STEP_TIME_GPU_MS_KEY] = step_time_gpu
     return row
 
 
@@ -281,9 +285,8 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
                 backward=30.0,
                 optimizer=5.0,
                 residual=10.0,
-                input_wait=35.0,
-                input_bound_step=100.0,
-                input_bound_clock_is_gpu=1.0,
+                input_wait_gpu=35.0,
+                step_time_gpu=100.0,
             )
         },
     )
@@ -298,9 +301,8 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
                 per_rank_timing={
                     0: _timing_row(
                         dataloader=50.0,
-                        input_wait=5.0,
-                        input_bound_step=100.0,
-                        input_bound_clock_is_gpu=1.0,
+                        input_wait_gpu=5.0,
+                        step_time_gpu=100.0,
                     )
                 },
             )
@@ -363,16 +365,18 @@ def test_input_bound_clock_selection_prefers_gpu_then_cpu() -> None:
 
     assert selected is not None
     assert selected.clock == "gpu"
-    assert selected.input_wait_ms == pytest.approx(4.0)
-    assert selected.step_time_ms == pytest.approx(20.0)
+    assert selected.input_wait_gpu_ms == pytest.approx(4.0)
+    assert selected.step_time_gpu_ms == pytest.approx(20.0)
+    assert selected.input_wait_cpu_ms == pytest.approx(12.0)
+    assert selected.step_time_cpu_ms == pytest.approx(60.0)
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
     selected = input_bound_timing_from_events(events)
 
     assert selected is not None
     assert selected.clock == "cpu"
-    assert selected.input_wait_ms == pytest.approx(12.0)
-    assert selected.step_time_ms == pytest.approx(60.0)
+    assert selected.input_wait_cpu_ms == pytest.approx(12.0)
+    assert selected.step_time_cpu_ms == pytest.approx(60.0)
 
 
 def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
@@ -381,9 +385,8 @@ def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
         per_rank_timing={
             0: _timing_row(
                 dataloader=5.0,
-                input_wait=35.0,
-                input_bound_step=100.0,
-                input_bound_clock_is_gpu=0.0,
+                input_wait_cpu=35.0,
+                step_time_cpu=100.0,
             )
         },
     )
@@ -394,8 +397,8 @@ def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
     assert issue.kind == "INPUT_BOUND"
     assert issue.share_pct == pytest.approx(0.35)
     assert issue.evidence["input_bound_clock"] == "cpu"
-    assert issue.evidence["input_wait_ms"] == pytest.approx(35.0)
-    assert issue.evidence["input_bound_step_ms"] == pytest.approx(100.0)
+    assert issue.evidence["input_wait_cpu_ms"] == pytest.approx(35.0)
+    assert issue.evidence["step_time_cpu_ms"] == pytest.approx(100.0)
 
 
 def test_input_bound_rule_ignores_duration_without_explicit_clocks() -> None:
@@ -411,15 +414,13 @@ def test_input_bound_rule_uses_input_wait_skew() -> None:
         {
             0: _timing_row(
                 dataloader=10.0,
-                input_wait=10.0,
-                input_bound_step=100.0,
-                input_bound_clock_is_gpu=1.0,
+                input_wait_gpu=10.0,
+                step_time_gpu=100.0,
             ),
             1: _timing_row(
                 dataloader=10.0,
-                input_wait=60.0,
-                input_bound_step=100.0,
-                input_bound_clock_is_gpu=1.0,
+                input_wait_gpu=60.0,
+                step_time_gpu=100.0,
             ),
         }
     )
@@ -594,9 +595,8 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
 
 def _summary_step_metrics(
     *,
-    input_wait: float,
-    input_bound_step: float = 60.0,
-    clock_is_gpu: float = 1.0,
+    input_wait_gpu: float,
+    step_time_gpu: float = 60.0,
 ) -> dict[int, dict[str, float]]:
     return {
         step: {
@@ -607,9 +607,8 @@ def _summary_step_metrics(
             "optimizer_step": 10.0,
             "step_time": 60.0,
             "residual_proxy": 0.0,
-            INPUT_WAIT_MS_KEY: input_wait,
-            INPUT_BOUND_STEP_MS_KEY: input_bound_step,
-            INPUT_BOUND_CLOCK_IS_GPU_KEY: clock_is_gpu,
+            INPUT_WAIT_GPU_MS_KEY: input_wait_gpu,
+            STEP_TIME_GPU_MS_KEY: step_time_gpu,
         }
         for step in range(60)
     }
@@ -631,15 +630,17 @@ def test_summary_input_bound_uses_explicit_input_clocks() -> None:
     low_wait = build_summary_step_diagnosis_result(
         rank_signals,
         max_rows=100,
-        per_rank_step_metrics={0: _summary_step_metrics(input_wait=5.0)},
+        per_rank_step_metrics={0: _summary_step_metrics(input_wait_gpu=5.0)},
     )
     high_wait = build_summary_step_diagnosis_result(
         rank_signals,
         max_rows=100,
-        per_rank_step_metrics={0: _summary_step_metrics(input_wait=25.0)},
+        per_rank_step_metrics={0: _summary_step_metrics(input_wait_gpu=25.0)},
     )
 
     assert low_wait.primary.kind != "INPUT_BOUND"
     assert high_wait.primary.kind == "INPUT_BOUND"
     assert high_wait.issues[0].evidence["input_bound_clock"] == "gpu"
-    assert high_wait.issues[0].evidence["input_wait_ms"] == pytest.approx(25.0)
+    assert high_wait.issues[0].evidence["input_wait_gpu_ms"] == pytest.approx(
+        25.0
+    )

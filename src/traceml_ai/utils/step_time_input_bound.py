@@ -14,9 +14,10 @@ from typing import Any, Mapping, Optional
 DATALOADER_EVENT_NAME = "_traceml_internal:dataloader_next"
 STEP_TIME_EVENT_NAME = "_traceml_internal:step_time"
 
-INPUT_WAIT_MS_KEY = "input_wait_ms"
-INPUT_BOUND_STEP_MS_KEY = "input_bound_step_ms"
-INPUT_BOUND_CLOCK_IS_GPU_KEY = "input_bound_clock_is_gpu"
+INPUT_WAIT_CPU_MS_KEY = "input_wait_cpu_ms"
+INPUT_WAIT_GPU_MS_KEY = "input_wait_gpu_ms"
+STEP_TIME_CPU_MS_KEY = "step_time_cpu_ms"
+STEP_TIME_GPU_MS_KEY = "step_time_gpu_ms"
 
 INPUT_BOUND_CLOCK_CPU = "cpu"
 INPUT_BOUND_CLOCK_GPU = "gpu"
@@ -25,21 +26,44 @@ INPUT_BOUND_CLOCK_GPU = "gpu"
 @dataclass(frozen=True)
 class InputBoundTiming:
     """
-    Selected timing values used only for INPUT_BOUND diagnosis.
+    Explicit timing values used only for INPUT_BOUND diagnosis.
 
-    `input_wait_ms` and `step_time_ms` use the same clock. When both dataloader
-    and step envelope GPU event timings are present, the clock is `gpu`;
-    otherwise CPU timing is used when both CPU fields are present.
+    `input_wait_gpu_ms` is a GPU-stream observed wait/gap around input fetch,
+    not GPU dataloader work. When the GPU pair is present, INPUT_BOUND selects
+    `input_wait_gpu_ms` and `step_time_gpu_ms`. CPU fields may also be recorded
+    in that payload, but they are selected only when the GPU pair is absent and
+    the CPU pair is present.
     """
 
-    input_wait_ms: float
-    step_time_ms: float
-    clock: str
+    input_wait_cpu_ms: Optional[float] = None
+    input_wait_gpu_ms: Optional[float] = None
+    step_time_cpu_ms: Optional[float] = None
+    step_time_gpu_ms: Optional[float] = None
 
     @property
-    def clock_is_gpu(self) -> float:
-        """Return a numeric marker suitable for per-rank timing maps."""
-        return 1.0 if self.clock == INPUT_BOUND_CLOCK_GPU else 0.0
+    def has_gpu_pair(self) -> bool:
+        """Return whether both GPU-clock fields are available."""
+        return (
+            self.input_wait_gpu_ms is not None
+            and self.step_time_gpu_ms is not None
+        )
+
+    @property
+    def has_cpu_pair(self) -> bool:
+        """Return whether both CPU-clock fields are available."""
+        return (
+            self.input_wait_cpu_ms is not None
+            and self.step_time_cpu_ms is not None
+        )
+
+    @property
+    def clock(self) -> str:
+        """Return the clock selected for INPUT_BOUND diagnosis."""
+        return (
+            INPUT_BOUND_CLOCK_GPU
+            if self.has_gpu_pair
+            else INPUT_BOUND_CLOCK_CPU
+        )
 
 
 def _safe_non_negative_float(value: Any) -> Optional[float]:
@@ -78,9 +102,9 @@ def input_bound_timing_from_events(events: Any) -> Optional[InputBoundTiming]:
     """
     Select explicit clocks for input-bound diagnosis from one step event map.
 
-    Selection order:
-    1. dataloader `gpu_ms` and step envelope `gpu_ms` when both are present.
-    2. dataloader `cpu_ms` and step envelope `cpu_ms` when both are present.
+    The returned object carries complete CPU and GPU pairs independently. When
+    both pairs exist, the GPU pair is the selected diagnosis clock; the CPU pair
+    remains available only as explicit recorded data, not as the selected value.
 
     `duration_ms` is deliberately ignored so INPUT_BOUND is not coupled to
     compatibility/public metric semantics.
@@ -93,32 +117,37 @@ def input_bound_timing_from_events(events: Any) -> Optional[InputBoundTiming]:
 
     dataloader_gpu_ms = _sum_clock(dataloader, "gpu_ms")
     step_gpu_ms = _sum_clock(step_time, "gpu_ms")
-    if dataloader_gpu_ms is not None and step_gpu_ms is not None:
-        return InputBoundTiming(
-            input_wait_ms=float(dataloader_gpu_ms),
-            step_time_ms=float(step_gpu_ms),
-            clock=INPUT_BOUND_CLOCK_GPU,
-        )
-
     dataloader_cpu_ms = _sum_clock(dataloader, "cpu_ms")
     step_cpu_ms = _sum_clock(step_time, "cpu_ms")
-    if dataloader_cpu_ms is not None and step_cpu_ms is not None:
+
+    has_gpu_pair = dataloader_gpu_ms is not None and step_gpu_ms is not None
+    has_cpu_pair = dataloader_cpu_ms is not None and step_cpu_ms is not None
+    if has_gpu_pair or has_cpu_pair:
         return InputBoundTiming(
-            input_wait_ms=float(dataloader_cpu_ms),
-            step_time_ms=float(step_cpu_ms),
-            clock=INPUT_BOUND_CLOCK_CPU,
+            input_wait_cpu_ms=(
+                float(dataloader_cpu_ms) if has_cpu_pair else None
+            ),
+            input_wait_gpu_ms=(
+                float(dataloader_gpu_ms) if has_gpu_pair else None
+            ),
+            step_time_cpu_ms=float(step_cpu_ms) if has_cpu_pair else None,
+            step_time_gpu_ms=float(step_gpu_ms) if has_gpu_pair else None,
         )
 
     return None
 
 
 def input_bound_timing_fields(events: Any) -> dict[str, float]:
-    """Return numeric per-step timing fields for diagnosis maps."""
+    """Return explicit per-step timing fields for diagnosis maps."""
     timing = input_bound_timing_from_events(events)
     if timing is None:
         return {}
-    return {
-        INPUT_WAIT_MS_KEY: float(timing.input_wait_ms),
-        INPUT_BOUND_STEP_MS_KEY: float(timing.step_time_ms),
-        INPUT_BOUND_CLOCK_IS_GPU_KEY: float(timing.clock_is_gpu),
-    }
+
+    fields: dict[str, float] = {}
+    if timing.has_cpu_pair:
+        fields[INPUT_WAIT_CPU_MS_KEY] = float(timing.input_wait_cpu_ms)
+        fields[STEP_TIME_CPU_MS_KEY] = float(timing.step_time_cpu_ms)
+    if timing.has_gpu_pair:
+        fields[INPUT_WAIT_GPU_MS_KEY] = float(timing.input_wait_gpu_ms)
+        fields[STEP_TIME_GPU_MS_KEY] = float(timing.step_time_gpu_ms)
+    return fields
