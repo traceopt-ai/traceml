@@ -228,6 +228,8 @@ def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:
             "<device>": {
                 "is_gpu": bool | None,
                 "duration_ms": float | None,
+                "cpu_ms": float | None,
+                "gpu_ms": float | None,
                 "n_calls": int | None
             }
         }
@@ -259,6 +261,8 @@ def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:
 
             is_gpu_raw = stats.get("is_gpu")
             duration_raw = stats.get("duration_ms")
+            cpu_raw = stats.get("cpu_ms")
+            gpu_raw = stats.get("gpu_ms")
             n_calls_raw = stats.get("n_calls")
 
             is_gpu = bool(is_gpu_raw) if isinstance(is_gpu_raw, bool) else None
@@ -267,6 +271,12 @@ def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:
                 if isinstance(duration_raw, (int, float))
                 else None
             )
+            cpu_ms = (
+                float(cpu_raw) if isinstance(cpu_raw, (int, float)) else None
+            )
+            gpu_ms = (
+                float(gpu_raw) if isinstance(gpu_raw, (int, float)) else None
+            )
             n_calls = (
                 int(n_calls_raw) if isinstance(n_calls_raw, int) else None
             )
@@ -274,6 +284,8 @@ def _normalize_events(events_raw: Any) -> Dict[str, Dict[str, Dict[str, Any]]]:
             out[event_key][device_key] = {
                 "is_gpu": is_gpu,
                 "duration_ms": duration_ms,
+                "cpu_ms": cpu_ms,
+                "gpu_ms": gpu_ms,
                 "n_calls": n_calls,
             }
 
