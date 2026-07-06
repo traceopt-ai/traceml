@@ -52,6 +52,52 @@ def test_step_time_sampler_emits_cpu_and_gpu_clocks_for_gpu_event() -> None:
     assert stats["n_calls"] == 1
 
 
+def test_step_time_sampler_keeps_dataloader_duration_cpu_with_gpu_event() -> (
+    None
+):
+    payload = _payload_for(
+        TimeEvent(
+            name="_traceml_internal:dataloader_next",
+            device="cuda:0",
+            cpu_start=30.0,
+            cpu_end=30.006,
+            gpu_time_ms=1.5,
+            resolved=True,
+        )
+    )
+
+    stats = payload["_traceml_internal:dataloader_next"]["cuda:0"]
+
+    assert stats["is_gpu"] is False
+    assert stats["duration_ms"] == pytest.approx(6.0)
+    assert stats["cpu_ms"] == pytest.approx(6.0)
+    assert stats["gpu_ms"] == pytest.approx(1.5)
+    assert stats["n_calls"] == 1
+
+
+def test_step_time_sampler_keeps_step_envelope_duration_cpu_with_gpu_event() -> (
+    None
+):
+    payload = _payload_for(
+        TimeEvent(
+            name="_traceml_internal:step_time",
+            device="cuda:0",
+            cpu_start=40.0,
+            cpu_end=40.025,
+            gpu_time_ms=12.0,
+            resolved=True,
+        )
+    )
+
+    stats = payload["_traceml_internal:step_time"]["cuda:0"]
+
+    assert stats["is_gpu"] is False
+    assert stats["duration_ms"] == pytest.approx(25.0)
+    assert stats["cpu_ms"] == pytest.approx(25.0)
+    assert stats["gpu_ms"] == pytest.approx(12.0)
+    assert stats["n_calls"] == 1
+
+
 def test_step_time_sampler_aggregates_repeated_event_clocks() -> None:
     payload = _payload_for(
         TimeEvent(

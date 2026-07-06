@@ -22,6 +22,13 @@ from traceml_ai.utils.timing import (
     get_step_time_queue,
 )
 
+_CPU_DURATION_EVENT_NAMES = frozenset(
+    {
+        "_traceml_internal:dataloader_next",
+        "_traceml_internal:step_time",
+    }
+)
+
 
 class StepTimeSampler(BaseSampler):
     """
@@ -50,6 +57,20 @@ class StepTimeSampler(BaseSampler):
     def _cpu_duration_ms(evt: TimeEvent) -> float:
         return (evt.cpu_end - evt.cpu_start) * 1000.0
 
+    @staticmethod
+    def _duration_uses_gpu(evt: TimeEvent) -> bool:
+        """
+        Return whether `duration_ms` should use the recorded GPU clock.
+
+        Dataloader fetch and full step envelope events keep CPU-wall
+        `duration_ms` for compatibility while still carrying nullable
+        `gpu_ms` evidence for later analysis.
+        """
+        return (
+            evt.gpu_time_ms is not None
+            and str(evt.name) not in _CPU_DURATION_EVENT_NAMES
+        )
+
     def _step_is_resolved(self, batch: StepTimeBatch) -> bool:
         """
         Return True if all events in the batch are resolved.
@@ -65,6 +86,7 @@ class StepTimeSampler(BaseSampler):
         sum_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
         sum_cpu_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
         sum_gpu_ms: Dict[Tuple[str, str, bool], float] = defaultdict(float)
+        has_gpu_ms: Dict[Tuple[str, str, bool], bool] = defaultdict(bool)
         n_calls: Dict[Tuple[str, str, bool], int] = defaultdict(int)
 
         ts_max = 0.0
@@ -72,16 +94,18 @@ class StepTimeSampler(BaseSampler):
         for evt in batch.events:
             ts_max = float(max(ts_max, float(evt.cpu_end)))
 
-            is_gpu = evt.gpu_time_ms is not None
+            has_gpu_timing = evt.gpu_time_ms is not None
+            duration_uses_gpu = self._duration_uses_gpu(evt)
             cpu_ms = float(self._cpu_duration_ms(evt))
-            gpu_ms = float(evt.gpu_time_ms) if is_gpu else None
-            duration_ms = float(gpu_ms) if is_gpu else float(cpu_ms)
+            gpu_ms = float(evt.gpu_time_ms) if has_gpu_timing else None
+            duration_ms = float(gpu_ms) if duration_uses_gpu else float(cpu_ms)
 
-            key = (str(evt.name), str(evt.device), bool(is_gpu))
+            key = (str(evt.name), str(evt.device), bool(duration_uses_gpu))
             sum_ms[key] += duration_ms
             sum_cpu_ms[key] += cpu_ms
             if gpu_ms is not None:
                 sum_gpu_ms[key] += gpu_ms
+                has_gpu_ms[key] = True
             n_calls[key] += 1
 
         events: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
@@ -92,7 +116,7 @@ class StepTimeSampler(BaseSampler):
                 "cpu_ms": float(sum_cpu_ms[(name, device, is_gpu)]),
                 "gpu_ms": (
                     float(sum_gpu_ms[(name, device, is_gpu)])
-                    if is_gpu
+                    if has_gpu_ms[(name, device, is_gpu)]
                     else None
                 ),
                 "n_calls": int(n_calls[(name, device, is_gpu)]),

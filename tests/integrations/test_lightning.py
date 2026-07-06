@@ -121,4 +121,4 @@ def test_lightning_batch_start_does_not_open_forward_region(monkeypatch):
     )
     callback._close_context("_traceml_step_ctx")
 
-    assert calls == [("_traceml_internal:step_time", "step", False)]
+    assert calls == [("_traceml_internal:step_time", "step", True)]
