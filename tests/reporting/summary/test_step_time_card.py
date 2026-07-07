@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from traceml_ai.diagnostics.common import DiagnosticResult
+from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.diagnostics.step_time.adapters import (
     StepTimeDiagnosisInput,
     diagnose_step_time_summary,
@@ -160,6 +162,17 @@ def _assert_compact_card(card: str) -> None:
     assert "- Dominant:" not in card
 
 
+def _assert_public_step_metrics_keep_dataloader(payload) -> None:
+    public_metric_keys = set(payload["global"]["median"])
+    assert "dataloader_ms" in public_metric_keys
+    assert "input_wait_ms" not in public_metric_keys
+
+    for row in payload["groups"]["rows"].values():
+        row_metric_keys = set(row["metrics"])
+        assert "dataloader_ms" in row_metric_keys
+        assert "input_wait_ms" not in row_metric_keys
+
+
 def test_step_time_no_data_card_is_compact() -> None:
     payload = _summary({})
 
@@ -250,11 +263,63 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
 
     assert payload["diagnosis"] == payload["issues"][0]
     assert payload["diagnosis"]["status"] == "INPUT-BOUND"
+    assert payload["diagnosis"]["metric"] == "input_wait"
+    assert payload["diagnosis"]["phase"] == "input"
+    assert payload["diagnosis"]["evidence"]["input_wait_ms"] == 40.0
+    assert payload["diagnosis"]["evidence"]["step_time_ms"] == 100.0
+    assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
+    _assert_public_step_metrics_keep_dataloader(payload)
     assert (
-        "- Why: Input loading took a large share (40.0ms/140.0ms)."
+        "- Why: Input wait took 40.0ms of a 100.0ms gpu step."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
+
+
+def test_step_time_input_bound_card_without_evidence_uses_reason() -> None:
+    data = StepTimeSectionData(
+        training_steps=100,
+        latest_step_observed=99,
+        aligned_summary={
+            0: _rank(
+                dataloader=40.0,
+                forward=20.0,
+                backward=35.0,
+                optimizer=5.0,
+                step_cpu=100.0,
+            )
+        },
+        aligned_step_metrics={},
+        aligned_window=AlignedStepWindow(
+            alignment="common_steps",
+            steps_analyzed=64,
+            start_step=None,
+            end_step=None,
+            window_size=64,
+            global_ranks_used=1,
+            global_ranks_observed=1,
+        ),
+        per_global_rank_summary={},
+        per_global_rank_step_metrics={},
+        identities={},
+        max_rows=64,
+    )
+    diagnosis = StepDiagnosis(
+        kind="INPUT_BOUND",
+        status="INPUT-BOUND",
+        severity="warn",
+        reason="Input wait was high.",
+        action="Increase workers.",
+        steps_used=64,
+    )
+
+    payload = build_step_time_payload(
+        data,
+        DiagnosticResult(primary=diagnosis),
+    )
+
+    assert "- Why: Input wait was high." in payload["card"]
+    assert "Input loading took" not in payload["card"]
 
 
 def test_step_time_residual_heavy_card_uses_short_reason() -> None:
@@ -297,6 +362,9 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
 
     assert payload["diagnosis"] == payload["issues"][0]
     assert payload["diagnosis"]["status"] == "INPUT STRAGGLER"
+    assert payload["diagnosis"]["metric"] == "input_wait"
+    assert payload["diagnosis"]["phase"] == "input"
+    _assert_public_step_metrics_keep_dataloader(payload)
     assert "- Ranks: median/worst |" in payload["card"]
     assert (
         "- Why: r1 input was slower than median global rank (70.0/40.0ms)."
