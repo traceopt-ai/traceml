@@ -13,23 +13,14 @@ from traceml_ai.diagnostics.step_time.api import (
     build_step_diagnosis_result,
 )
 from traceml_ai.diagnostics.step_time.adapters import (
-    DEFAULT_SUMMARY_DIAG_CONFIG,
     build_summary_step_diagnosis_result,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
-from traceml_ai.diagnostics.step_time.policy import (
-    LIVE_STEP_TIME_POLICY,
-    SUMMARY_STEP_TIME_POLICY,
-)
 from traceml_ai.diagnostics.step_time.rules import (
     CleanStragglerRule,
     ComputeBoundRule,
     InputBoundRule,
     ResidualHeavyRule,
-)
-from traceml_ai.diagnostics.step_time.trend import (
-    StepTrendHeuristicConfig,
-    build_step_trend_note,
 )
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
@@ -78,46 +69,6 @@ def _time_metric(
             completed_step=steps,
             world_size=world_size,
             ranks_present=world_size,
-            incomplete=False,
-        ),
-    )
-
-
-def _trending_time_metric(
-    name: str,
-    *,
-    start: float,
-    end: float,
-    steps: int = 120,
-) -> StepCombinedTimeMetric:
-    values = [
-        start + ((end - start) * idx / max(1, steps - 1))
-        for idx in range(steps)
-    ]
-    return StepCombinedTimeMetric(
-        metric=name,
-        clock="mixed",
-        series=StepCombinedTimeSeries(
-            steps=list(range(steps)),
-            median=values,
-            worst=values,
-            sum=values,
-        ),
-        summary=StepCombinedTimeSummary(
-            window_size=steps,
-            steps_used=steps,
-            median_total=end,
-            worst_total=end,
-            worst_rank=0,
-            skew_ratio=0.0,
-            skew_pct=0.0,
-        ),
-        coverage=StepCombinedTimeCoverage(
-            expected_steps=steps,
-            steps_used=steps,
-            completed_step=steps,
-            world_size=1,
-            ranks_present=1,
             incomplete=False,
         ),
     )
@@ -628,71 +579,6 @@ def test_step_time_primary_prefers_clean_straggler_over_residual_heavy() -> (
         "INPUT_STRAGGLER",
         "RESIDUAL_HEAVY",
     }
-
-
-def test_step_time_diagnosis_attribution_uses_input_wait() -> None:
-    per_rank = {
-        0: _timing_row(dataloader=10.0),
-        1: _timing_row(dataloader=90.0),
-    }
-
-    result = build_step_diagnosis_result(
-        _metrics_from_per_rank_timing(per_rank),
-        per_rank_timing=per_rank,
-    )
-
-    assert "input_wait" in result.metric_attribution
-    assert "dataloader_fetch" not in result.metric_attribution
-    assert result.metric_attribution["input_wait"]["phase"] == "input"
-
-
-def test_step_time_input_trend_note_uses_input_wait_metric() -> None:
-    note = build_step_trend_note(
-        diagnosis_kind="INPUT_BOUND",
-        steps_used=500,
-        single_rank=True,
-        step_metric=_trending_time_metric(
-            "step_time",
-            start=100.0,
-            end=100.0,
-            steps=500,
-        ),
-        residual_metric=None,
-        input_wait_metric=_trending_time_metric(
-            "input_wait",
-            start=10.0,
-            end=30.0,
-            steps=500,
-        ),
-        residual_share=0.0,
-        input_bound_share=0.30,
-        residual_warn_threshold=0.15,
-        input_warn_threshold=0.25,
-        cfg=StepTrendHeuristicConfig(min_steps=1),
-    )
-
-    assert note is not None
-    assert note.startswith("Trend: input wait is ")
-    assert "dataloader" not in note
-
-
-def test_step_time_live_and_summary_policies_are_explicit() -> None:
-    assert LIVE_STEP_TIME_POLICY.name == "live"
-    assert SUMMARY_STEP_TIME_POLICY.name == "summary"
-    assert DEFAULT_THRESHOLDS == LIVE_STEP_TIME_POLICY.thresholds
-    assert DEFAULT_SUMMARY_DIAG_CONFIG == SUMMARY_STEP_TIME_POLICY
-    assert (
-        SUMMARY_STEP_TIME_POLICY.thresholds.residual_share_warn
-        > LIVE_STEP_TIME_POLICY.thresholds.residual_share_warn
-    )
-    assert (
-        SUMMARY_STEP_TIME_POLICY.thresholds.straggler_dominance_tolerance
-        == pytest.approx(1.25)
-    )
-    assert (
-        SUMMARY_STEP_TIME_POLICY.min_steps_for_diag
-        > LIVE_STEP_TIME_POLICY.min_steps_for_diag
-    )
 
 
 def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:

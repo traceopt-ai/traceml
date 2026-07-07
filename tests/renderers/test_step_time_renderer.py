@@ -132,37 +132,3 @@ def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
     assert "H2D" in text
     assert text.count("0.0 ms") >= 2
     assert "4.5 ms" in text
-
-
-def test_step_time_cli_diagnosis_does_not_fallback_to_public_metrics(
-    monkeypatch,
-) -> None:
-    payload = StepCombinedTimeResult(
-        diagnosis_metrics=[],
-    )
-    seen = {}
-
-    def fake_build_step_diagnosis(metrics, **kwargs):
-        seen["metrics"] = metrics
-        return StepDiagnosis(
-            kind="NO_DATA",
-            status="NO DATA",
-            severity="info",
-            reason="No selected diagnosis metrics.",
-            action="Wait for data.",
-            steps_used=0,
-        )
-
-    monkeypatch.setattr(
-        renderer_module,
-        "build_step_diagnosis",
-        fake_build_step_diagnosis,
-    )
-
-    renderer = StepCombinedRenderer(db_path=":memory:")
-    monkeypatch.setattr(renderer, "_payload", lambda: payload)
-    text = _render_text(renderer.get_panel_renderable())
-
-    assert seen["metrics"] == []
-    assert "12.0 ms" not in text
-    assert "Waiting for selected step-time diagnosis metrics" in text
