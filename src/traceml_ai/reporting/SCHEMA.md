@@ -307,12 +307,17 @@ Metric suffixes are units:
 
 ## Step Time Residual
 
+Step Time uses one selected clock per aligned window. GPU timing is used when
+the window has complete GPU event timings; otherwise explicit CPU timing is
+used. The public `dataloader_ms` key is kept for compatibility and represents
+selected-clock input wait.
+
 `residual_ms` is residual unattributed step time:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
+traced_step_ms = selected step envelope timing
 residual_ms = traced_step_ms - known_step_ms
 total_step_ms = dataloader_ms + traced_step_ms
 ```
@@ -323,9 +328,10 @@ The public contract is:
 total_step_ms = dataloader_ms + h2d_ms + compute_ms + residual_ms
 ```
 
-`traced_step_ms` and the raw `trace_step` wall timer are internal measurement
-details and are not emitted in final-summary JSON. `residual_ms` can include
-validation, checkpointing, logging, framework orchestration, CPU stalls,
-unobserved transfer stalls, or other work outside the traced H2D and compute
-phases. Do not treat it as NCCL, all-reduce, or synchronization overhead
-without profiler evidence.
+`traced_step_ms` is an internal selected-clock value and is not emitted in
+final-summary JSON. `duration_ms` is stored compatibility timing and is not a
+Step Time display or diagnosis fallback. `residual_ms` can include validation,
+checkpointing, logging, framework orchestration, CPU stalls, unobserved
+transfer stalls, or other work outside the traced H2D and compute phases. Do
+not treat it as NCCL, all-reduce, or synchronization overhead without profiler
+evidence.

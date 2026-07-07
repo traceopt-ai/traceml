@@ -20,7 +20,7 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
             );
             """
         )
-        events = {
+        events_1 = {
             "_traceml_internal:dataloader_next": {
                 "cuda:0": {
                     "duration_ms": 12.0,
@@ -40,12 +40,39 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
                 }
             },
         }
+        events_2 = {
+            "_traceml_internal:dataloader_next": {
+                "cuda:0": {
+                    "duration_ms": 18.0,
+                    "cpu_ms": 18.0,
+                    "gpu_ms": 6.0,
+                    "is_gpu": False,
+                    "n_calls": 1,
+                }
+            },
+            "_traceml_internal:step_time": {
+                "cuda:0": {
+                    "duration_ms": 90.0,
+                    "cpu_ms": 90.0,
+                    "gpu_ms": 40.0,
+                    "is_gpu": False,
+                    "n_calls": 1,
+                }
+            },
+        }
         conn.execute(
             """
             INSERT INTO step_time_samples(rank, step, events_json)
             VALUES (?, ?, ?);
             """,
-            (0, 1, json.dumps(events)),
+            (0, 1, json.dumps(events_1)),
+        )
+        conn.execute(
+            """
+            INSERT INTO step_time_samples(rank, step, events_json)
+            VALUES (?, ?, ?);
+            """,
+            (0, 2, json.dumps(events_2)),
         )
         conn.commit()
     finally:
@@ -53,18 +80,18 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
 
     result = StepCombinedComputer(
         db_path=str(db_path),
-        window_size=1,
+        window_size=2,
     ).compute_cli()
 
     metrics = {metric.metric: metric for metric in result.diagnosis_metrics}
     assert "dataloader_fetch" not in metrics
-    assert metrics["input_wait"].summary.worst_total == 4.0
-    assert metrics["step_time"].summary.worst_total == 20.0
+    assert metrics["input_wait"].summary.worst_total == 5.0
+    assert metrics["step_time"].summary.worst_total == 30.0
     assert metrics["input_wait"].series is not None
-    assert metrics["input_wait"].series.worst == [4.0]
-    assert metrics["input_wait"].series.sum == [4.0]
+    assert metrics["input_wait"].series.worst == [4.0, 6.0]
+    assert metrics["input_wait"].series.sum == [4.0, 6.0]
     assert result.diagnosis_clock == "gpu"
 
     per_rank = result.per_rank_timing[0]
-    assert per_rank["input_wait"] == 4.0
-    assert per_rank["step_time"] == 20.0
+    assert per_rank["input_wait"] == 5.0
+    assert per_rank["step_time"] == 30.0

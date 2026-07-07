@@ -396,7 +396,7 @@ def _straggler_comparisons(
         _comparison(
             step_time_summary=step_time_summary,
             metric="dataloader_ms",
-            phase="dataloader",
+            phase="input",
         ),
         _comparison(
             step_time_summary=step_time_summary,
@@ -423,10 +423,10 @@ def _phase_share_summary(kind: str, evidence: Mapping[str, Any]) -> str:
         value = _float_or_none(evidence.get("dataloader_ms"))
         if value is not None and total is not None:
             return (
-                f"Input loading took {value:.1f}ms of a "
+                f"Input wait took {value:.1f}ms of a "
                 f"{total:.1f}ms average step."
             )
-        return "Input loading took a large share of step time."
+        return "Input wait took a large share of step time."
     if kind == "RESIDUAL_HEAVY":
         value = _float_or_none(evidence.get("residual_ms"))
         if value is not None and total is not None:
@@ -456,7 +456,11 @@ def _rank_comparison_summary(
 
     metric = str(evidence.get("metric") or "step_time")
     phase = str(evidence.get("phase") or metric.replace("_ms", ""))
-    phase_label = {"residual": "residual time"}.get(phase, phase)
+    phase_label = {
+        "dataloader": "input wait",
+        "input": "input wait",
+        "residual": "residual time",
+    }.get(phase, phase)
     median = _mapping(evidence.get("median"))
     worst = _mapping(evidence.get("worst"))
     worst_rank = _int_or_none(worst.get("rank"))

@@ -77,11 +77,11 @@ Training-step timing.
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
 input wait, and traced phase events present in the window. Otherwise it uses
-explicit `cpu_ms` timing. The live CLI Step Time table shows the same selected
-diagnosis metrics. Summary/public JSON metrics keep their existing
-`duration_ms` semantics; `duration_ms` is not a diagnosis fallback. Legacy
-`dataloader_fetch` / `dataloader_ms` values remain summary/public metrics and
-are not used for Step Time diagnosis decisions.
+explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
+summary use this same selected-clock window. Summary JSON keeps compatibility
+field names such as `dataloader_ms`, but that value maps to selected-clock
+input wait. `duration_ms` stays stored compatibility timing and is not used for
+Step Time display or diagnosis.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time:
@@ -89,7 +89,7 @@ unattributed step time:
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
+traced_step_ms = selected step envelope timing
 residual_ms = traced_step_ms - known_step_ms
 total_step_ms = input_wait_ms + traced_step_ms
 ```

@@ -505,8 +505,8 @@ def build_step_time_payload(
         lines.append(f"- Diagnosis: {diagnosis_status}")
         lines.append(
             "- Scope: compared over "
-            f"last {aligned_window.steps_analyzed} aligned steps "
-            f"across {aligned_window.global_ranks_used} global ranks"
+            f"last {aligned_window.coverage.steps_used} aligned steps "
+            f"across {aligned_window.coverage.ranks_present} global ranks"
         )
         if card_stats is not None:
             lines.append(_format_card_stats(card_stats))

@@ -1,9 +1,8 @@
-"""
-Step Time analysis — the dashboard hero (PR2 revamp).
+"""Step Time analysis dashboard hero.
 
-Signature element: a phase RIBBON (current-step phase proportions) plus a
-VERDICT, then a compact step-KPI strip. The ribbon recomposes (CSS width
-transition) as the bottleneck shifts.
+Signature element: a phase RIBBON (selected-clock average phase proportions)
+plus a VERDICT, then a compact step-KPI strip. The ribbon recomposes as the
+bottleneck shifts.
 
 The ribbon and KPI strip are driven by StepCombinedTimeResult diagnosis
 metrics (``update_model_combined_section``). The VERDICT is NOT computed here:
@@ -149,17 +148,11 @@ def update_model_combined_section(
     # payload), so the card never asserts a classification of its own.
 
     k = panel["kpis"]
-    # median_total / worst_total are window SUMS (the median/worst rank's total
-    # over the aligned window). Divide by steps_used for the per-step value the
-    # "MEDIAN STEP" / "WORST STEP" tiles report (otherwise they read ~N x too
-    # large, e.g. 14725 ms instead of 147 ms over a 100-step window).
-    n_steps = max(int(st.steps_used or 1), 1)
+    # Step Time metrics are already selected-clock per-step averages.
     k["median"].content = theme.kval(
-        f"{float(st.median_total or 0) / n_steps:.0f}", "ms"
+        f"{float(st.median_total or 0):.0f}", "ms"
     )
-    k["worst"].content = theme.kval(
-        f"{float(st.worst_total or 0) / n_steps:.0f}", "ms"
-    )
+    k["worst"].content = theme.kval(f"{float(st.worst_total or 0):.0f}", "ms")
     k["gap"].content = theme.kval(f"{float(st.skew_pct or 0):.0f}", "%")
     residual_share = vals["residual_proxy"] / tot * 100.0 if tot > 0 else 0.0
     k["residual"].content = theme.kval(f"{residual_share:.0f}", "%")

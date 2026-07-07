@@ -419,19 +419,49 @@ def _step_time_events(
 ) -> str:
     events = {
         "_traceml_internal:dataloader_next": {
-            "cpu": {"is_gpu": False, "duration_ms": dataloader, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": dataloader,
+                "cpu_ms": dataloader,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:forward_time": {
-            "cpu": {"is_gpu": False, "duration_ms": forward, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": forward,
+                "cpu_ms": forward,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:backward_time": {
-            "cpu": {"is_gpu": False, "duration_ms": backward, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": backward,
+                "cpu_ms": backward,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:optimizer_step": {
-            "cpu": {"is_gpu": False, "duration_ms": optimizer, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": optimizer,
+                "cpu_ms": optimizer,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:step_time": {
-            "cpu": {"is_gpu": False, "duration_ms": step_time, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": step_time,
+                "cpu_ms": step_time,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
     }
     return json.dumps(events)

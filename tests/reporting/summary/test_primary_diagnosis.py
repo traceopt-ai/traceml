@@ -100,7 +100,7 @@ def test_input_bound_uses_phase_share_evidence() -> None:
     assert primary["section"] == "step_time"
     assert primary["scope"] == "performance"
     assert primary["summary"] == (
-        "Input loading took 50.0ms of a 200.0ms average step."
+        "Input wait took 50.0ms of a 200.0ms average step."
     )
     assert primary["evidence"] == {
         "type": "phase_share",
@@ -153,7 +153,7 @@ def test_input_straggler_uses_rank_comparison_evidence() -> None:
 
     assert primary["kind"] == "INPUT_STRAGGLER"
     assert primary["summary"] == (
-        "Rank r2 dataloader was 80.0ms vs median rank r0 at 5.0ms."
+        "Rank r2 input wait was 80.0ms vs median rank r0 at 5.0ms."
     )
     assert primary["evidence"] == {
         "type": "rank_comparison",

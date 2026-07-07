@@ -4,13 +4,9 @@ import time
 from typing import Any, Dict, List, Optional, Sequence
 
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeResult,
-)
-from traceml_ai.utils.step_time_diagnosis_clock import (
-    build_diagnosis_metrics_from_timing,
-    build_diagnosis_timing_from_events,
+from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
+from traceml_ai.utils.step_time_window import (
+    build_step_time_window_from_events,
 )
 
 STEP_TIME_TABLE = "step_time_samples"
@@ -90,64 +86,26 @@ class StepCombinedComputer:
                 status_message="No StepTime data available",
             )
 
-        max_steps = [max(m.keys()) for m in per_rank_steps.values() if m]
-        if not max_steps:
-            return StepCombinedTimeResult(
-                status_message="No usable StepTime data available",
-            )
-
-        completed_step = min(max_steps)
-        steps = self._common_steps(
-            per_rank_steps, completed_step, self.window_size
+        window = build_step_time_window_from_events(
+            per_rank_steps,
+            max_rows=self.window_size,
+            expected_ranks=ranks,
         )
-        if not steps:
+        if not window.metrics:
             return StepCombinedTimeResult(
                 status_message="No common step window yet",
             )
 
-        coverage = StepCombinedTimeCoverage(
-            expected_steps=self.window_size,
-            steps_used=len(steps),
-            completed_step=int(completed_step),
-            world_size=len(ranks),
-            ranks_present=len(per_rank_steps),
-            incomplete=(len(per_rank_steps) < len(ranks)),
-        )
-
-        ranks_present = list(per_rank_steps.keys())
-        diagnosis_timing = build_diagnosis_timing_from_events(
-            per_rank_steps, steps
-        )
-        per_rank_timing = diagnosis_timing.per_rank_timing
-        diagnosis_rank_scores = {
-            int(r): float(
-                per_rank_timing.get(int(r), {}).get("total_step", 0.0)
-            )
-            for r in ranks_present
-        }
-        diagnosis_worst_rank = (
-            max(diagnosis_rank_scores, key=diagnosis_rank_scores.get)
-            if diagnosis_rank_scores
-            else None
-        )
-        diagnosis_metrics = build_diagnosis_metrics_from_timing(
-            per_rank_timing,
-            coverage=coverage,
-            include_series=True,
-            series_steps=steps,
-            per_rank_step_timing=diagnosis_timing.per_rank_step_timing,
-            worst_rank_override=diagnosis_worst_rank,
-        )
-
         status = "OK"
+        diagnosis_worst_rank = _worst_rank_from_window(window.per_rank_timing)
         if diagnosis_worst_rank is not None:
             status += f" | diagnosis_worst_rank=r{diagnosis_worst_rank}"
 
         return StepCombinedTimeResult(
             status_message=status,
-            per_rank_timing=per_rank_timing,
-            diagnosis_clock=diagnosis_timing.clock,
-            diagnosis_metrics=diagnosis_metrics,
+            per_rank_timing=window.per_rank_timing,
+            diagnosis_clock=window.clock,
+            diagnosis_metrics=window.metrics,
         )
 
     # ------------------------------------------------------------------
@@ -282,28 +240,17 @@ class StepCombinedComputer:
             diagnosis_metrics=[],
         )
 
-    # ------------------------------------------------------------------
-    # Step alignment helpers
-    # ------------------------------------------------------------------
 
-    @staticmethod
-    def _common_steps(
-        per_rank_steps: Dict[int, Dict[int, Dict[str, Any]]],
-        completed_step: int,
-        window_size: int,
-    ) -> List[int]:
-        """
-        Return the last common suffix of step ids across all available ranks.
-        """
-        maps = list(per_rank_steps.values())
-        if not maps:
-            return []
-
-        out: List[int] = []
-        for s in range(int(completed_step), -1, -1):
-            if all(s in m for m in maps):
-                out.append(s)
-                if len(out) >= int(window_size):
-                    break
-        out.reverse()
-        return out
+def _worst_rank_from_window(
+    per_rank_timing: Dict[int, Dict[str, float]],
+) -> Optional[int]:
+    """Return the slowest rank by selected average total step."""
+    if not per_rank_timing:
+        return None
+    return max(
+        per_rank_timing,
+        key=lambda rank: (
+            float(per_rank_timing.get(rank, {}).get("total_step", 0.0)),
+            -int(rank),
+        ),
+    )

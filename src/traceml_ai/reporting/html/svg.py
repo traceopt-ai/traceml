@@ -15,7 +15,7 @@ from .textutils import esc, fmt_value
 
 # step_time phase breakdown, in stacking order: (metric, label, css var).
 _PHASES = (
-    ("dataloader_ms", "dataloader", "var(--dl)"),
+    ("dataloader_ms", "input wait", "var(--dl)"),
     ("h2d_ms", "h2d", "var(--h2d)"),
     ("forward_ms", "forward", "var(--fwd)"),
     ("backward_ms", "backward", "var(--bwd)"),

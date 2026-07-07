@@ -28,10 +28,12 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
-from traceml_ai.utils.step_time_diagnosis_clock import (
+from traceml_ai.utils.step_time_window import (
+    INPUT_WAIT_CPU_MS_KEY,
     INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
     STEP_TIME_GPU_MS_KEY,
-    build_diagnosis_timing_from_events,
+    build_step_time_window_from_events,
 )
 
 
@@ -381,9 +383,10 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
         },
     }
 
-    selected = build_diagnosis_timing_from_events(
+    selected = build_step_time_window_from_events(
         {0: {1: events}},
-        [1],
+        max_rows=1,
+        expected_ranks=[0],
     )
 
     assert selected.clock == "gpu"
@@ -398,7 +401,11 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     )
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
-    selected = build_diagnosis_timing_from_events({0: {1: events}}, [1])
+    selected = build_step_time_window_from_events(
+        {0: {1: events}},
+        max_rows=1,
+        expected_ranks=[0],
+    )
 
     assert selected.clock == "cpu"
     assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(12.0)
@@ -413,9 +420,10 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
         "_traceml_internal:backward_time": {"cpu": {"duration_ms": 30.0}},
         "_traceml_internal:optimizer_step": {"cpu": {"duration_ms": 5.0}},
     }
-    selected = build_diagnosis_timing_from_events(
+    selected = build_step_time_window_from_events(
         {0: {1: duration_only_events}},
-        [1],
+        max_rows=1,
+        expected_ranks=[0],
     )
 
     assert selected.clock == "cpu"
@@ -611,15 +619,19 @@ def _summary_step_metrics(
     out: dict[int, dict[str, float]] = {}
     for step in range(steps):
         metrics = {
-            "h2d": 0.0,
-            "forward": 20.0,
-            "backward": 30.0,
-            "optimizer_step": 10.0,
-            "step_time": 60.0,
-            "residual_proxy": 0.0,
+            INPUT_WAIT_CPU_MS_KEY: 5.0,
+            "h2d_cpu_ms": 0.0,
+            "forward_cpu_ms": 20.0,
+            "backward_cpu_ms": 30.0,
+            "optimizer_step_cpu_ms": 10.0,
+            STEP_TIME_CPU_MS_KEY: 60.0,
         }
         if input_wait_gpu is not None:
             metrics[INPUT_WAIT_GPU_MS_KEY] = input_wait_gpu
+            metrics["h2d_gpu_ms"] = 0.0
+            metrics["forward_gpu_ms"] = 20.0
+            metrics["backward_gpu_ms"] = 30.0
+            metrics["optimizer_step_gpu_ms"] = 10.0
             metrics[STEP_TIME_GPU_MS_KEY] = step_time_gpu
         out[step] = metrics
     return out

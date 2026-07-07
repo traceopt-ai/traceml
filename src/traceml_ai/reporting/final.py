@@ -52,7 +52,7 @@ _SYSTEM_EVIDENCE_METRICS = (
 )
 _STEP_TIME_EVIDENCE_METRICS = (
     ("Total", "total_step_ms"),
-    ("Dataloader", "dataloader_ms"),
+    ("Input Wait", "dataloader_ms"),
     ("Compute", "compute_ms"),
     ("Residual", "residual_ms"),
     ("H2D", "h2d_ms"),

@@ -222,13 +222,13 @@ def test_final_text_uses_single_process_average_layout():
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
-    assert "Why: Input loading took 130.8ms of a 139.1ms average step." in text
+    assert "Why: Input wait took 130.8ms of a 139.1ms average step." in text
     assert "Next: Increase workers, prefetch, or storage throughput." in text
     assert "System Evidence" in text
     assert "Metric            Average" in text
     assert "Step Time Evidence" in text
     assert "Phase             Average           Share" in text
-    assert "Dataloader        130.8ms           94.0%" in text
+    assert "Input Wait        130.8ms           94.0%" in text
     assert "Median" not in text
     assert "Worst" not in text
     assert "Skew" not in text
@@ -243,9 +243,9 @@ def test_final_text_uses_multi_process_comparison_layout():
         "INPUT_STRAGGLER",
         "INPUT STRAGGLER",
         severity="crit",
-        phase="dataloader",
+        phase="input",
         action=(
-            "Inspect dataloader, collate_fn, preprocessing, and storage "
+            "Inspect input wait, collate_fn, preprocessing, and storage "
             "on the slow rank."
         ),
     )
@@ -321,7 +321,7 @@ def test_final_text_uses_multi_process_comparison_layout():
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text
-    assert "Rank r0 dataloader was 254.5ms vs median rank r1 at 3.8ms." in text
+    assert "Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms." in text
     assert (
         "Metric          Median        Worst         Skew        Scope" in text
     )
@@ -330,7 +330,7 @@ def test_final_text_uses_multi_process_comparison_layout():
     assert (
         "Phase           Median        Worst         Skew        Scope" in text
     )
-    assert "Dataloader      3.8ms         254.5ms       6597.4%" in text
+    assert "Input Wait      3.8ms         254.5ms       6597.4%" in text
     assert "rank=r0 node=n0" in text
     assert "Average" not in text
 

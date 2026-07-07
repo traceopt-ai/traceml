@@ -97,19 +97,19 @@ Start with the Step Time diagnosis.
 | `RESIDUAL STRAGGLER` | one rank has meaningfully more rank-local residual `residual_proxy` than a typical rank |
 | `STRAGGLER` | one rank is slower, but dataloader, clean compute, H2D, and residual excess are mixed |
 | `INPUT-BOUND` | input work is broad, not just one bad rank |
-| `RESIDUAL-HEAVY` | meaningful residual time is not attributed to dataloader, H2D, forward, backward, or optimizer work |
+| `RESIDUAL-HEAVY` | meaningful residual time is not attributed to input wait, H2D, forward, backward, or optimizer work |
 
 For rank-local stragglers, TraceML uses clean-step attribution before blaming a
 component. It discounts backward time that can be explained by another rank's
 non-backward work, then compares clean step across ranks. The component label is
-the largest worst-rank excess over peer median among dataloader, clean compute,
+the largest worst-rank excess over peer median among input wait, clean compute,
 H2D, and residual, and it must dominate the next-largest excess by `1.25x`.
 
 Then inspect:
 
 - `Worst Rank`
 - worst vs median timing
-- `Dataloader Fetch`
+- `Input Wait`
 - `Forward`
 - `Backward`
 - `Optimizer Step`

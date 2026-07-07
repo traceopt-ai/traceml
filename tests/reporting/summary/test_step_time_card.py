@@ -10,7 +10,6 @@ from traceml_ai.diagnostics.step_time.adapters import (
     StepTimeDiagnosisInput,
     diagnose_step_time_summary,
 )
-from traceml_ai.reporting.sections.step_time.alignment import AlignedStepWindow
 from traceml_ai.reporting.summaries.step_time import (
     RankStepSummary,
 )
@@ -18,11 +17,15 @@ from traceml_ai.reporting.sections.step_time.builder import (
     build_step_time_payload,
 )
 from traceml_ai.reporting.sections.step_time.loader import StepTimeSectionData
-from traceml_ai.utils.step_time_diagnosis_clock import (
+from traceml_ai.reporting.sections.step_time.model import (
+    rank_summaries_from_window,
+)
+from traceml_ai.utils.step_time_window import (
     INPUT_WAIT_CPU_MS_KEY,
     INPUT_WAIT_GPU_MS_KEY,
     STEP_TIME_CPU_MS_KEY,
     STEP_TIME_GPU_MS_KEY,
+    build_step_time_window_from_step_metrics,
 )
 
 
@@ -70,32 +73,27 @@ def _summary(
             for rank, summary in per_global_rank.items()
         }
     )
+    window = build_step_time_window_from_step_metrics(
+        step_metrics,
+        max_rows=window_size,
+        expected_ranks=sorted(per_global_rank),
+    )
+    selected_summary = rank_summaries_from_window(window)
     data = StepTimeSectionData(
         training_steps=100,
         latest_step_observed=99,
-        aligned_summary=per_global_rank,
-        aligned_step_metrics=step_metrics,
-        aligned_window=AlignedStepWindow(
-            alignment="common_steps",
-            steps_analyzed=min(
-                (item.steps_analyzed for item in per_global_rank.values()),
-                default=0,
-            ),
-            start_step=None,
-            end_step=None,
-            window_size=window_size,
-            global_ranks_used=len(per_global_rank),
-            global_ranks_observed=len(per_global_rank),
-        ),
-        per_global_rank_summary=per_global_rank,
-        per_global_rank_step_metrics=step_metrics,
+        step_time_window=window,
+        aligned_summary=selected_summary,
+        aligned_step_metrics=window.per_rank_step_timing,
+        aligned_window=window,
+        per_global_rank_summary=selected_summary,
+        per_global_rank_step_metrics=window.per_rank_step_timing,
         identities={},
         max_rows=window_size,
     )
     diagnosis = diagnose_step_time_summary(
         StepTimeDiagnosisInput(
-            per_rank_step_metrics=step_metrics,
-            max_rows=window_size,
+            window=window,
         )
     )
     return build_step_time_payload(data, diagnosis)
@@ -106,20 +104,6 @@ def _step_metrics_from_rank(
 ) -> dict[int, dict[str, float]]:
     return {
         step: {
-            "dataloader_fetch": summary.avg_dataloader_ms,
-            "h2d": summary.avg_h2d_ms,
-            "forward": summary.avg_forward_ms,
-            "backward": summary.avg_backward_ms,
-            "optimizer_step": summary.avg_optimizer_ms,
-            "step_time": summary.avg_traced_step_ms,
-            "residual_proxy": max(
-                0.0,
-                summary.avg_traced_step_ms
-                - summary.avg_h2d_ms
-                - summary.avg_forward_ms
-                - summary.avg_backward_ms
-                - summary.avg_optimizer_ms,
-            ),
             INPUT_WAIT_CPU_MS_KEY: summary.avg_dataloader_ms,
             "h2d_cpu_ms": summary.avg_h2d_ms,
             "forward_cpu_ms": summary.avg_forward_ms,
@@ -139,13 +123,6 @@ def _input_bound_step_metrics(
 ) -> dict[int, dict[str, float]]:
     return {
         step: {
-            "dataloader_fetch": 40.0,
-            "h2d": 0.0,
-            "forward": 20.0,
-            "backward": 35.0,
-            "optimizer_step": 5.0,
-            "step_time": 100.0,
-            "residual_proxy": 40.0,
             INPUT_WAIT_GPU_MS_KEY: input_wait_gpu,
             STEP_TIME_GPU_MS_KEY: step_time_gpu,
         }

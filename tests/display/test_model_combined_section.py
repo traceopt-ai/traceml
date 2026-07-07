@@ -100,3 +100,6 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert panel["seg_labs"][0].text == "IW"
     assert panel["seg_divs"][0].styles[-1] == "width:10.000%"
     assert panel["win"].text == "5 aligned steps"
+    assert panel["kpis"]["median"].content.startswith("100")
+    assert panel["kpis"]["worst"].content.startswith("100")
+    assert not panel["kpis"]["median"].content.startswith("20")
