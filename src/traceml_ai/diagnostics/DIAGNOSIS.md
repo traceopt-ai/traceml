@@ -66,7 +66,7 @@ Training-step timing.
 - `WARMUP`: some data exists, but not enough for a stable diagnosis.
 - `BALANCED`: no clear timing bottleneck or rank straggler.
 - `STRAGGLER`: one rank has a mixed clean-step straggler signal.
-- `INPUT_STRAGGLER`: one rank has materially higher dataloader time.
+- `INPUT_STRAGGLER`: one rank has materially higher selected-clock input wait.
 - `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
 - `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
 - `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
@@ -96,15 +96,15 @@ time that can be explained by another rank's non-backward work:
 
 ```text
 residual_r = residual_proxy_r
-non_bwd_r = dataloader_r + h2d_r + forward_r + optimizer_r + residual_r
+non_bwd_r = input_wait_r + h2d_r + forward_r + optimizer_r + residual_r
 clean_bwd_r = max(0, backward_r - max(0, max(non_bwd) - non_bwd_r))
 clean_compute_r = forward_r + clean_bwd_r + optimizer_r
-clean_step_r = dataloader_r + h2d_r + clean_compute_r + residual_r
+clean_step_r = input_wait_r + h2d_r + clean_compute_r + residual_r
 score = (max(clean_step) - median(clean_step)) / median(actual_step)
 ```
 
 If `score < 0.10`, TraceML does not report a rank-local straggler. Otherwise it
-blames the largest worst-rank excess over peer median among dataloader, clean
+blames the largest worst-rank excess over peer median among input wait, clean
 compute, H2D, and residual. The largest excess must dominate the next-largest
 excess by `1.25x`; otherwise the diagnosis stays mixed `STRAGGLER`.
 

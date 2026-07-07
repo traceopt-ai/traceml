@@ -118,6 +118,7 @@ def _timing_row(
     known_step = h2d + forward + backward + optimizer
     local_step = known_step + residual if step_time is None else step_time
     row = {
+        "input_wait": dataloader,
         "dataloader_fetch": dataloader,
         "h2d": h2d,
         "forward": forward,
