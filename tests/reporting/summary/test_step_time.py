@@ -15,8 +15,7 @@ from traceml_ai.reporting.sections.step_time.loader import (
     load_step_time_section_data,
 )
 from traceml_ai.reporting.sections.step_time.model import build_rank_summary
-from traceml_ai.reporting.sections.step_time.model import to_rank_signals
-from traceml_ai.utils.step_time_input_bound import (
+from traceml_ai.utils.step_time_diagnosis_clock import (
     INPUT_WAIT_CPU_MS_KEY,
     INPUT_WAIT_GPU_MS_KEY,
     STEP_TIME_CPU_MS_KEY,
@@ -240,12 +239,27 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         )
         for rank in range(4)
     }
+    per_global_rank_step_metrics = {
+        rank: {
+            step: {
+                "dataloader_fetch": 1.0,
+                "h2d": 0.0,
+                "forward": 2.0,
+                "backward": 3.0,
+                "optimizer_step": 1.0,
+                "step_time": 8.0,
+                "residual_proxy": 2.0,
+            }
+            for step in range(1, 129)
+        }
+        for rank in range(4)
+    }
 
     data = StepTimeSectionData(
         training_steps=129,
         latest_step_observed=128,
         aligned_summary=per_global_rank,
-        aligned_step_metrics={},
+        aligned_step_metrics=per_global_rank_step_metrics,
         aligned_window=AlignedStepWindow(
             alignment="common_steps",
             steps_analyzed=128,
@@ -256,14 +270,13 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
             global_ranks_observed=4,
         ),
         per_global_rank_summary=per_global_rank,
-        per_global_rank_step_metrics={},
+        per_global_rank_step_metrics=per_global_rank_step_metrics,
         identities={},
         max_rows=10000,
     )
     diagnosis = diagnose_step_time_summary(
         StepTimeDiagnosisInput(
-            rank_signals=to_rank_signals(per_global_rank),
-            per_rank_step_metrics={},
+            per_rank_step_metrics=per_global_rank_step_metrics,
             max_rows=10000,
         )
     )

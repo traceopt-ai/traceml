@@ -96,7 +96,11 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
 def build_model_diagnostics_payload(
     *,
     step_time_metrics: Sequence[StepCombinedTimeMetric],
+    step_time_diagnosis_metrics: Optional[
+        Sequence[StepCombinedTimeMetric]
+    ] = None,
     step_time_per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    step_time_diagnosis_clock: str = "cpu",
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
@@ -112,7 +116,11 @@ def build_model_diagnostics_payload(
     items: List[ModelDiagnosisItem] = []
     context = ModelDiagnosticContext(
         step_time_metrics=step_time_metrics,
+        step_time_diagnosis_metrics=tuple(
+            step_time_diagnosis_metrics or step_time_metrics
+        ),
         step_time_per_rank_timing=dict(step_time_per_rank_timing or {}),
+        step_time_diagnosis_clock=str(step_time_diagnosis_clock or "cpu"),
         step_memory_metrics=step_memory_metrics,
         step_memory_status_message=step_memory_status_message,
         gpu_total_bytes=gpu_total_bytes,
@@ -150,8 +158,9 @@ def _build_step_time_item(
 ) -> ModelDiagnosisItem:
     """Build the registered step-time model diagnostic item."""
     step_time_diag = build_step_diagnosis(
-        context.step_time_metrics,
+        context.step_time_diagnosis_metrics,
         per_rank_timing=context.step_time_per_rank_timing,
+        diagnosis_clock=context.step_time_diagnosis_clock,
     )
     return ModelDiagnosisItem(
         source="step_time",

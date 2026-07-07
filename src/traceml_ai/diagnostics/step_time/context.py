@@ -16,14 +16,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
-from traceml_ai.utils.step_time_input_bound import (
-    INPUT_BOUND_CLOCK_CPU,
-    INPUT_BOUND_CLOCK_GPU,
-    INPUT_WAIT_CPU_MS_KEY,
-    INPUT_WAIT_GPU_MS_KEY,
-    STEP_TIME_CPU_MS_KEY,
-    STEP_TIME_GPU_MS_KEY,
-)
 
 if TYPE_CHECKING:
     from .policy import DiagnosisThresholds
@@ -103,7 +95,7 @@ class StepTimeAnalysisContext:
     compute_skew: float
     dataloader_worst_rank: Optional[int]
     input_bound_worst_rank: Optional[int]
-    input_bound_clock: str
+    diagnosis_clock: str
     input_wait_total: float
     input_bound_step_total: float
 
@@ -511,6 +503,7 @@ def build_step_time_context(
     metrics: Sequence[StepCombinedTimeMetric],
     thresholds: "DiagnosisThresholds",
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    diagnosis_clock: str = "cpu",
 ) -> StepTimeAnalysisContext:
     """
     Build one normalized context shared by all step-time diagnosis rules.
@@ -596,48 +589,17 @@ def build_step_time_context(
     input_candidates = {
         rank: values
         for rank, values in local_per_rank_timing.items()
-        if (INPUT_WAIT_GPU_MS_KEY in values and STEP_TIME_GPU_MS_KEY in values)
-        or (INPUT_WAIT_CPU_MS_KEY in values and STEP_TIME_CPU_MS_KEY in values)
+        if "input_wait" in values and "step_time" in values
     }
-    has_gpu_for_all_input_ranks = bool(input_candidates) and all(
-        INPUT_WAIT_GPU_MS_KEY in values and STEP_TIME_GPU_MS_KEY in values
-        for values in input_candidates.values()
-    )
-    has_cpu_for_all_input_ranks = bool(input_candidates) and all(
-        INPUT_WAIT_CPU_MS_KEY in values and STEP_TIME_CPU_MS_KEY in values
-        for values in input_candidates.values()
-    )
-    # Select one clock for the diagnosis window: GPU pair when available for
-    # all considered ranks, otherwise CPU pair when GPU timing is absent.
-    if has_gpu_for_all_input_ranks:
-        input_wait_key = INPUT_WAIT_GPU_MS_KEY
-        input_step_key = STEP_TIME_GPU_MS_KEY
-        input_bound_clock = INPUT_BOUND_CLOCK_GPU
-    elif has_cpu_for_all_input_ranks:
-        input_wait_key = INPUT_WAIT_CPU_MS_KEY
-        input_step_key = STEP_TIME_CPU_MS_KEY
-        input_bound_clock = INPUT_BOUND_CLOCK_CPU
-    else:
-        input_wait_key = None
-        input_step_key = None
-        input_bound_clock = INPUT_BOUND_CLOCK_CPU
 
-    input_wait_rank_values = (
-        {
-            rank: non_negative_finite(values.get(input_wait_key, 0.0))
-            for rank, values in input_candidates.items()
-        }
-        if input_wait_key is not None
-        else {}
-    )
-    input_step_rank_values = (
-        {
-            rank: non_negative_finite(values.get(input_step_key, 0.0))
-            for rank, values in input_candidates.items()
-        }
-        if input_step_key is not None
-        else {}
-    )
+    input_wait_rank_values = {
+        rank: non_negative_finite(values.get("input_wait", 0.0))
+        for rank, values in input_candidates.items()
+    }
+    input_step_rank_values = {
+        rank: non_negative_finite(values.get("step_time", 0.0))
+        for rank, values in input_candidates.items()
+    }
     input_wait_median, input_wait_worst, input_wait_worst_rank, input_slack = (
         _rank_stats(input_wait_rank_values)
     )
@@ -692,7 +654,9 @@ def build_step_time_context(
         compute_skew=compute_skew_value,
         dataloader_worst_rank=metric_worst_rank(dataloader_metric),
         input_bound_worst_rank=input_wait_worst_rank,
-        input_bound_clock=input_bound_clock,
+        diagnosis_clock=(
+            "gpu" if str(diagnosis_clock).lower() == "gpu" else "cpu"
+        ),
         input_wait_total=input_wait_total,
         input_bound_step_total=input_bound_step_total,
         largest_compute=largest_compute,

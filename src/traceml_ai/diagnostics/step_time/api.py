@@ -297,7 +297,7 @@ def _apply_trend_note(
     dataloader_metric: Optional[StepCombinedTimeMetric],
     single_rank: bool,
     residual_share: float,
-    dataloader_share: float,
+    input_bound_share: float,
     thresholds: DiagnosisThresholds,
 ) -> StepDiagnosis:
     """
@@ -312,7 +312,7 @@ def _apply_trend_note(
             residual_metric=residual_metric,
             dataloader_metric=dataloader_metric,
             residual_share=residual_share,
-            dataloader_share=dataloader_share,
+            input_bound_share=input_bound_share,
             residual_warn_threshold=thresholds.residual_share_warn,
             input_warn_threshold=thresholds.input_share_warn,
             cfg=DEFAULT_STEP_TREND_HEURISTICS,
@@ -329,6 +329,7 @@ def build_step_diagnosis_result(
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    diagnosis_clock: str = "cpu",
 ) -> DiagnosticResult[StepDiagnosis]:
     """
     Build a rich step-time diagnosis result from one analyzed window.
@@ -391,6 +392,7 @@ def build_step_diagnosis_result(
         metrics=metrics,
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
+        diagnosis_clock=diagnosis_clock,
     )
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
@@ -470,7 +472,7 @@ def build_step_diagnosis_result(
         dataloader_metric=context.dataloader_metric,
         single_rank=context.single_rank,
         residual_share=context.residual_share,
-        dataloader_share=context.dataloader_share,
+        input_bound_share=context.input_bound_share,
         thresholds=thresholds,
     )
 
@@ -592,6 +594,7 @@ def build_step_diagnosis(
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    diagnosis_clock: str = "cpu",
 ) -> StepDiagnosis:
     """
     Build one primary diagnosis from step-combined metrics.
@@ -603,6 +606,7 @@ def build_step_diagnosis(
         metrics,
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
+        diagnosis_clock=diagnosis_clock,
     ).primary
     if not isinstance(primary, StepDiagnosis):
         raise TypeError(

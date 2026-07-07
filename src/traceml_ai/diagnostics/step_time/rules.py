@@ -11,8 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence, Tuple
 
-from traceml_ai.utils.step_time_input_bound import INPUT_BOUND_CLOCK_GPU
-
 from ..common import DiagnosticIssue, DiagnosticRule
 from .context import StepTimeAnalysisContext, non_negative_finite
 
@@ -179,17 +177,6 @@ class InputBoundRule(_BaseStepTimeRule):
         ):
             return None
 
-        wait_key = (
-            "input_wait_gpu_ms"
-            if context.input_bound_clock == INPUT_BOUND_CLOCK_GPU
-            else "input_wait_cpu_ms"
-        )
-        step_key = (
-            "step_time_gpu_ms"
-            if context.input_bound_clock == INPUT_BOUND_CLOCK_GPU
-            else "step_time_cpu_ms"
-        )
-
         return self._issue(
             kind="INPUT_BOUND",
             status="INPUT-BOUND",
@@ -199,19 +186,19 @@ class InputBoundRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"Input wait is {_pct(context.input_bound_share)} of the "
-                f"typical {context.input_bound_clock} step."
+                f"typical {context.diagnosis_clock} step."
             ),
             action="Increase workers, prefetch, or storage throughput.",
-            metric="dataloader_fetch",
-            phase="dataloader",
+            metric="input_wait",
+            phase="input",
             share_pct=context.input_bound_share,
             skew_pct=context.input_bound_skew,
             ranks=(context.input_bound_worst_rank,),
             evidence={
-                wait_key: context.input_wait_total,
-                step_key: context.input_bound_step_total,
+                "input_wait_ms": context.input_wait_total,
+                "step_time_ms": context.input_bound_step_total,
                 "input_bound_share": context.input_bound_share,
-                "input_bound_clock": context.input_bound_clock,
+                "diagnosis_clock": context.diagnosis_clock,
             },
         )
 
@@ -269,7 +256,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
             return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
-        if context.dataloader_share >= context.thresholds.input_share_warn:
+        if context.input_bound_share >= context.thresholds.input_share_warn:
             return None
         if context.residual_share >= context.thresholds.residual_share_warn:
             return None

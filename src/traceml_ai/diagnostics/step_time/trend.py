@@ -73,7 +73,7 @@ def build_step_trend_note(
     residual_metric: Optional[StepCombinedTimeMetric],
     dataloader_metric: Optional[StepCombinedTimeMetric],
     residual_share: float,
-    dataloader_share: float,
+    input_bound_share: float,
     residual_warn_threshold: float,
     input_warn_threshold: float,
     cfg: StepTrendHeuristicConfig = DEFAULT_STEP_TREND_HEURISTICS,
@@ -132,7 +132,7 @@ def build_step_trend_note(
         near_residual_warn = residual_share >= (
             residual_warn_threshold * cfg.near_warn_fraction
         )
-        near_input_warn = dataloader_share >= (
+        near_input_warn = input_bound_share >= (
             input_warn_threshold * cfg.near_warn_fraction
         )
 

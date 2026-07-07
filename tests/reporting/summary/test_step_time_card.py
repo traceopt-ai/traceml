@@ -18,9 +18,10 @@ from traceml_ai.reporting.sections.step_time.builder import (
     build_step_time_payload,
 )
 from traceml_ai.reporting.sections.step_time.loader import StepTimeSectionData
-from traceml_ai.reporting.sections.step_time.model import to_rank_signals
-from traceml_ai.utils.step_time_input_bound import (
+from traceml_ai.utils.step_time_diagnosis_clock import (
+    INPUT_WAIT_CPU_MS_KEY,
     INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_CPU_MS_KEY,
     STEP_TIME_GPU_MS_KEY,
 )
 
@@ -61,7 +62,14 @@ def _summary(
     ) = None,
 ):
     window_size = 64
-    step_metrics = per_rank_step_metrics or {}
+    step_metrics = (
+        per_rank_step_metrics
+        if per_rank_step_metrics is not None
+        else {
+            rank: _step_metrics_from_rank(summary)
+            for rank, summary in per_global_rank.items()
+        }
+    )
     data = StepTimeSectionData(
         training_steps=100,
         latest_step_observed=99,
@@ -86,12 +94,41 @@ def _summary(
     )
     diagnosis = diagnose_step_time_summary(
         StepTimeDiagnosisInput(
-            rank_signals=to_rank_signals(per_global_rank),
             per_rank_step_metrics=step_metrics,
             max_rows=window_size,
         )
     )
     return build_step_time_payload(data, diagnosis)
+
+
+def _step_metrics_from_rank(
+    summary: RankStepSummary,
+) -> dict[int, dict[str, float]]:
+    return {
+        step: {
+            "dataloader_fetch": summary.avg_dataloader_ms,
+            "h2d": summary.avg_h2d_ms,
+            "forward": summary.avg_forward_ms,
+            "backward": summary.avg_backward_ms,
+            "optimizer_step": summary.avg_optimizer_ms,
+            "step_time": summary.avg_traced_step_ms,
+            "residual_proxy": max(
+                0.0,
+                summary.avg_traced_step_ms
+                - summary.avg_h2d_ms
+                - summary.avg_forward_ms
+                - summary.avg_backward_ms
+                - summary.avg_optimizer_ms,
+            ),
+            INPUT_WAIT_CPU_MS_KEY: summary.avg_dataloader_ms,
+            "h2d_cpu_ms": summary.avg_h2d_ms,
+            "forward_cpu_ms": summary.avg_forward_ms,
+            "backward_cpu_ms": summary.avg_backward_ms,
+            "optimizer_step_cpu_ms": summary.avg_optimizer_ms,
+            STEP_TIME_CPU_MS_KEY: summary.avg_traced_step_ms,
+        }
+        for step in range(int(summary.steps_analyzed))
+    }
 
 
 def _input_bound_step_metrics(

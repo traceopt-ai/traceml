@@ -15,27 +15,16 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
-from traceml_ai.utils.step_time_input_bound import (
-    INPUT_WAIT_CPU_MS_KEY,
-    INPUT_WAIT_GPU_MS_KEY,
-    STEP_TIME_CPU_MS_KEY,
-    STEP_TIME_GPU_MS_KEY,
-    input_bound_timing_from_events,
+from traceml_ai.utils.step_time_diagnosis_clock import (
+    EVENT_ALIASES,
+    build_diagnosis_metrics_from_timing,
+    build_diagnosis_timing_from_events,
 )
 
 STEP_TIME_TABLE = "step_time_samples"
 
 RESIDUAL_METRIC_KEY = "residual_proxy"
 STEP_METRIC_KEY = "step_time"
-
-EVENT_ALIASES = {
-    "dataloader_fetch": "_traceml_internal:dataloader_next",
-    "h2d": "_traceml_internal:h2d_time",
-    "forward": "_traceml_internal:forward_time",
-    "backward": "_traceml_internal:backward_time",
-    "optimizer_step": "_traceml_internal:optimizer_step",
-    "step_time": "_traceml_internal:step_time",
-}
 
 DEFAULT_METRIC_KEYS: Tuple[str, ...] = (
     "dataloader_fetch",
@@ -188,7 +177,7 @@ class StepCombinedComputer:
         per_metric_rank_sums = self._build_metric_sums(
             per_rank_steps, steps, self.metric_keys
         )
-        input_bound_rank_sums = self._build_input_bound_rank_sums(
+        diagnosis_timing = build_diagnosis_timing_from_events(
             per_rank_steps, steps
         )
 
@@ -214,24 +203,23 @@ class StepCombinedComputer:
         overall_rank_scores = self._overall_rank_scores(
             per_metric_rank_sums, ranks_present
         )
-        per_rank_timing = {
-            int(r): {
-                "dataloader_fetch": float(
-                    per_metric_rank_sums.get("dataloader_fetch", {}).get(
-                        r, 0.0
-                    )
-                ),
-                "h2d": float(h2d_sums.get(r, 0.0)),
-                "forward": float(fwd_sums.get(r, 0.0)),
-                "backward": float(bwd_sums.get(r, 0.0)),
-                "optimizer_step": float(opt_sums.get(r, 0.0)),
-                "step_time": float(step_sums.get(r, 0.0)),
-                "residual_proxy": float(residual_rank_sums.get(r, 0.0)),
-                "total_step": float(overall_rank_scores.get(r, 0.0)),
-                **input_bound_rank_sums.get(int(r), {}),
-            }
+        per_rank_timing = diagnosis_timing.per_rank_timing
+        diagnosis_rank_scores = {
+            int(r): float(
+                per_rank_timing.get(int(r), {}).get("total_step", 0.0)
+            )
             for r in ranks_present
         }
+        diagnosis_worst_rank = (
+            max(diagnosis_rank_scores, key=diagnosis_rank_scores.get)
+            if diagnosis_rank_scores
+            else None
+        )
+        diagnosis_metrics = build_diagnosis_metrics_from_timing(
+            per_rank_timing,
+            coverage=coverage,
+            worst_rank_override=diagnosis_worst_rank,
+        )
         overall_worst_rank = (
             max(overall_rank_scores, key=overall_rank_scores.get)
             if overall_rank_scores
@@ -340,6 +328,8 @@ class StepCombinedComputer:
             metrics=list(metrics.values()),
             status_message=status,
             per_rank_timing=per_rank_timing,
+            diagnosis_clock=diagnosis_timing.clock,
+            diagnosis_metrics=diagnosis_metrics,
             rank_heatmap=rank_heatmap,
         )
 
@@ -466,12 +456,16 @@ class StepCombinedComputer:
                     metrics=self._last_ok.metrics,
                     status_message=msg,
                     per_rank_timing=self._last_ok.per_rank_timing,
+                    diagnosis_clock=self._last_ok.diagnosis_clock,
+                    diagnosis_metrics=self._last_ok.diagnosis_metrics,
                     rank_heatmap=self._last_ok.rank_heatmap,
                 )
         return StepCombinedTimeResult(
             metrics=[],
             status_message="No fresh step-combined data",
             per_rank_timing={},
+            diagnosis_clock="cpu",
+            diagnosis_metrics=[],
             rank_heatmap=None,
         )
 
@@ -558,61 +552,6 @@ class StepCombinedComputer:
 
             for k, total in totals.items():
                 out[k][int(rank)] = float(total)
-
-        return out
-
-    def _build_input_bound_rank_sums(
-        self,
-        per_rank_steps: Dict[int, Dict[int, Dict[str, Any]]],
-        steps: Sequence[int],
-    ) -> Dict[int, Dict[str, float]]:
-        """
-        Build diagnosis-only input-bound timing sums over the common window.
-
-        These values are not rendered as public phase metrics. They let
-        INPUT_BOUND use explicit `gpu_ms` or `cpu_ms` clocks without changing
-        existing `duration_ms` consumers.
-        """
-        out: Dict[int, Dict[str, float]] = {}
-        expected = len(steps)
-        if expected <= 0:
-            return out
-
-        for rank, step_map in per_rank_steps.items():
-            input_wait_cpu_ms = 0.0
-            input_wait_gpu_ms = 0.0
-            step_time_cpu_ms = 0.0
-            step_time_gpu_ms = 0.0
-            cpu_count = 0
-            gpu_count = 0
-
-            for step in steps:
-                timing = input_bound_timing_from_events(
-                    step_map.get(int(step), {})
-                )
-                if timing is None:
-                    continue
-                if timing.has_cpu_pair:
-                    input_wait_cpu_ms += float(timing.input_wait_cpu_ms)
-                    step_time_cpu_ms += float(timing.step_time_cpu_ms)
-                    cpu_count += 1
-                if timing.has_gpu_pair:
-                    input_wait_gpu_ms += float(timing.input_wait_gpu_ms)
-                    step_time_gpu_ms += float(timing.step_time_gpu_ms)
-                    gpu_count += 1
-
-            fields: Dict[str, float] = {}
-            if cpu_count == expected:
-                fields[INPUT_WAIT_CPU_MS_KEY] = float(input_wait_cpu_ms)
-                fields[STEP_TIME_CPU_MS_KEY] = float(step_time_cpu_ms)
-            if gpu_count == expected:
-                fields[INPUT_WAIT_GPU_MS_KEY] = float(input_wait_gpu_ms)
-                fields[STEP_TIME_GPU_MS_KEY] = float(step_time_gpu_ms)
-
-            if not fields:
-                continue
-
-            out[int(rank)] = fields
 
         return out
 
