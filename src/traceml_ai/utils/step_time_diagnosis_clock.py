@@ -411,7 +411,7 @@ def build_diagnosis_metrics_from_timing(
 
     metrics: list[StepCombinedTimeMetric] = []
     for metric_key in (
-        "dataloader_fetch",
+        INPUT_WAIT_KEY,
         "h2d",
         "forward",
         "backward",

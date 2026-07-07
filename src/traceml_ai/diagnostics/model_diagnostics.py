@@ -375,6 +375,7 @@ def _dominant_step_component(
     Return the dominant non-total median split component for step time.
     """
     labels = {
+        "input_wait": "input wait",
         "dataloader_fetch": "dataloader",
         "forward": "forward",
         "backward": "backward",

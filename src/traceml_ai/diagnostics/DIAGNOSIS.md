@@ -76,9 +76,11 @@ Training-step timing.
 
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
-dataloader/input wait, and traced phase events present in the window. Otherwise
-it uses explicit `cpu_ms` timing. Public renderer and summary metrics continue
-to use their existing `duration_ms` semantics.
+input wait, and traced phase events present in the window. Otherwise it uses
+explicit `cpu_ms` timing. Public renderer and summary metrics continue to use
+their existing `duration_ms` semantics; `duration_ms` is not a diagnosis
+fallback. Legacy `dataloader_fetch` / `dataloader_ms` values remain display
+metrics and are not used for Step Time diagnosis decisions.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time:
@@ -88,7 +90,7 @@ compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
 residual_ms = traced_step_ms - known_step_ms
-total_step_ms = dataloader_ms + traced_step_ms
+total_step_ms = input_wait_ms + traced_step_ms
 ```
 
 Rank-local stragglers use clean-step evidence. TraceML first discounts backward
