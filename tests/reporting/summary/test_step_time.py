@@ -17,10 +17,7 @@ from traceml_ai.reporting.sections.step_time.model import (
     rank_summaries_from_window,
 )
 from traceml_ai.utils.step_time_window import (
-    INPUT_WAIT_CPU_MS_KEY,
-    STEP_TIME_CPU_MS_KEY,
     build_step_time_window_from_events,
-    build_step_time_window_from_step_metrics,
 )
 
 
@@ -213,7 +210,7 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
     assert data.training_steps == 3
     assert data.latest_step_observed == 2
     assert data.per_global_rank_summary[0].steps_analyzed == 2
-    assert data.aligned_window.coverage.steps_used == 2
+    assert data.step_time_window.coverage.steps_used == 2
     assert result.section == "step_time"
     assert result.payload["metadata"]["global_ranks_seen"] == 1
     assert result.payload["global"]["median"]["total_step_ms"]["value"] == 31.0
@@ -233,22 +230,33 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         build_step_time_payload,
     )
 
-    per_global_rank_step_metrics = {
+    def event_stats(cpu_ms: float) -> dict[str, dict[str, float | bool | int]]:
+        return {
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": cpu_ms,
+                "cpu_ms": cpu_ms,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
+        }
+
+    per_rank_steps = {
         rank: {
             step: {
-                INPUT_WAIT_CPU_MS_KEY: 1.0,
-                "h2d_cpu_ms": 0.0,
-                "forward_cpu_ms": 2.0,
-                "backward_cpu_ms": 3.0,
-                "optimizer_step_cpu_ms": 1.0,
-                STEP_TIME_CPU_MS_KEY: 8.0,
+                "_traceml_internal:dataloader_next": event_stats(1.0),
+                "_traceml_internal:h2d_time": event_stats(0.0),
+                "_traceml_internal:forward_time": event_stats(2.0),
+                "_traceml_internal:backward_time": event_stats(3.0),
+                "_traceml_internal:optimizer_step": event_stats(1.0),
+                "_traceml_internal:step_time": event_stats(8.0),
             }
             for step in range(1, 129)
         }
         for rank in range(4)
     }
-    window = build_step_time_window_from_step_metrics(
-        per_global_rank_step_metrics,
+    window = build_step_time_window_from_events(
+        per_rank_steps,
         max_rows=10000,
         expected_ranks=range(4),
     )
@@ -258,11 +266,7 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         training_steps=129,
         latest_step_observed=128,
         step_time_window=window,
-        aligned_summary=per_global_rank,
-        aligned_step_metrics=window.per_rank_step_timing,
-        aligned_window=window,
         per_global_rank_summary=per_global_rank,
-        per_global_rank_step_metrics=window.per_rank_step_timing,
         identities={},
         max_rows=10000,
     )

@@ -33,11 +33,7 @@ class StepTimeSectionData:
     training_steps: int
     latest_step_observed: Optional[int]
     step_time_window: StepTimeWindow
-    aligned_summary: Dict[int, RankStepSummary]
-    aligned_step_metrics: Dict[int, Dict[int, Dict[str, float]]]
-    aligned_window: StepTimeWindow
     per_global_rank_summary: Dict[int, RankStepSummary]
-    per_global_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]]
     identities: Dict[int, GlobalRankIdentity]
     max_rows: int
 
@@ -173,11 +169,7 @@ def load_step_time_section_data(
         training_steps=training_steps,
         latest_step_observed=latest_step_observed,
         step_time_window=step_time_window,
-        aligned_summary=selected_summary,
-        aligned_step_metrics=step_time_window.per_rank_step_timing,
-        aligned_window=step_time_window,
         per_global_rank_summary=selected_summary,
-        per_global_rank_step_metrics=step_time_window.per_rank_step_timing,
         identities=identities,
         max_rows=row_limit,
     )

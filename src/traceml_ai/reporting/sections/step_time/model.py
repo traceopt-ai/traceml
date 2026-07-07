@@ -79,9 +79,8 @@ class RankStepSummary:
     avg_forward_ms: float
     avg_backward_ms: float
     avg_optimizer_ms: float
-    avg_step_cpu_ms: float
     avg_traced_step_ms: float
-    avg_gpu_compute_ms: float
+    avg_compute_ms: float
     avg_total_step_ms: float
 
 
@@ -111,9 +110,8 @@ def rank_summary_from_timing(
         avg_forward_ms=finite_float(public["forward_ms"]),
         avg_backward_ms=finite_float(public["backward_ms"]),
         avg_optimizer_ms=finite_float(public["optimizer_ms"]),
-        avg_step_cpu_ms=finite_float(timing.get("step_time")),
         avg_traced_step_ms=finite_float(timing.get("step_time")),
-        avg_gpu_compute_ms=finite_float(public["compute_ms"]),
+        avg_compute_ms=finite_float(public["compute_ms"]),
         avg_total_step_ms=finite_float(public["total_step_ms"]),
     )
 
@@ -169,7 +167,7 @@ def _rank_metric_values(
             for rank, summary in per_global_rank_summary.items()
         },
         "compute_ms": {
-            int(rank): finite_float(summary.avg_gpu_compute_ms)
+            int(rank): finite_float(summary.avg_compute_ms)
             for rank, summary in per_global_rank_summary.items()
         },
         "residual_ms": {
@@ -197,7 +195,7 @@ def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
         "total_step_ms": finite_float(summary.avg_total_step_ms),
         "dataloader_ms": finite_float(summary.avg_dataloader_ms),
         "h2d_ms": finite_float(summary.avg_h2d_ms),
-        "compute_ms": finite_float(summary.avg_gpu_compute_ms),
+        "compute_ms": finite_float(summary.avg_compute_ms),
         "residual_ms": compute_residual_avg_ms(summary),
         "forward_ms": finite_float(summary.avg_forward_ms),
         "backward_ms": finite_float(summary.avg_backward_ms),
@@ -257,20 +255,20 @@ def build_global_rollup(
     per_global_rank_summary: Dict[int, RankStepSummary],
     median_global_rank: Optional[int],
     worst_global_rank: Optional[int],
-    analysis_window: Any,
+    analysis_window: StepTimeWindow,
 ) -> Dict[str, Any]:
     """Build the top-level step-time rollup for the run window."""
-    window_json = dict(analysis_window.to_json())
-    steps_analyzed = window_json.get("aligned_steps_analyzed", 0)
-    end_step = window_json.get("end_step")
+    steps = [int(step) for step in analysis_window.steps]
+    start_step = steps[0] if steps else None
+    end_step = steps[-1] if steps else None
     window = GlobalWindow(
         kind="step_window",
-        alignment=str(window_json.get("alignment") or "common_steps"),
-        steps_analyzed=int(steps_analyzed or 0),
-        start_step=window_json.get("start_step"),
+        alignment="common_steps",
+        steps_analyzed=int(analysis_window.coverage.steps_used),
+        start_step=start_step,
         end_step=end_step,
         completed_step=end_step,
-        window_size=window_json.get("window_size"),
+        window_size=int(analysis_window.coverage.expected_steps),
     ).to_json()
     if not per_global_rank_summary:
         return BaseGlobal(

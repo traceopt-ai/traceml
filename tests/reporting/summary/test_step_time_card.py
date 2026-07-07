@@ -21,11 +21,7 @@ from traceml_ai.reporting.sections.step_time.model import (
     rank_summaries_from_window,
 )
 from traceml_ai.utils.step_time_window import (
-    INPUT_WAIT_CPU_MS_KEY,
-    INPUT_WAIT_GPU_MS_KEY,
-    STEP_TIME_CPU_MS_KEY,
-    STEP_TIME_GPU_MS_KEY,
-    build_step_time_window_from_step_metrics,
+    build_step_time_window_from_events,
 )
 
 
@@ -51,30 +47,27 @@ def _rank(
         avg_forward_ms=forward,
         avg_backward_ms=backward,
         avg_optimizer_ms=optimizer,
-        avg_step_cpu_ms=effective_step,
         avg_traced_step_ms=effective_step,
-        avg_gpu_compute_ms=compute,
+        avg_compute_ms=compute,
         avg_total_step_ms=dataloader + effective_step,
     )
 
 
 def _summary(
     per_global_rank: dict[int, RankStepSummary],
-    per_rank_step_metrics: (
-        dict[int, dict[int, dict[str, float]]] | None
-    ) = None,
+    per_rank_steps: dict[int, dict[int, dict]] | None = None,
 ):
     window_size = 64
-    step_metrics = (
-        per_rank_step_metrics
-        if per_rank_step_metrics is not None
+    step_events = (
+        per_rank_steps
+        if per_rank_steps is not None
         else {
-            rank: _step_metrics_from_rank(summary)
+            rank: _step_events_from_rank(summary)
             for rank, summary in per_global_rank.items()
         }
     )
-    window = build_step_time_window_from_step_metrics(
-        step_metrics,
+    window = build_step_time_window_from_events(
+        step_events,
         max_rows=window_size,
         expected_ranks=sorted(per_global_rank),
     )
@@ -83,11 +76,7 @@ def _summary(
         training_steps=100,
         latest_step_observed=99,
         step_time_window=window,
-        aligned_summary=selected_summary,
-        aligned_step_metrics=window.per_rank_step_timing,
-        aligned_window=window,
         per_global_rank_summary=selected_summary,
-        per_global_rank_step_metrics=window.per_rank_step_timing,
         identities={},
         max_rows=window_size,
     )
@@ -99,17 +88,47 @@ def _summary(
     return build_step_time_payload(data, diagnosis)
 
 
-def _step_metrics_from_rank(
+def _event_stats(
+    *,
+    cpu_ms: float | None = None,
+    gpu_ms: float | None = None,
+) -> dict[str, dict[str, float | bool | int | None]]:
+    device = "cuda:0" if gpu_ms is not None else "cpu"
+    duration = gpu_ms if gpu_ms is not None else cpu_ms
+    return {
+        device: {
+            "is_gpu": gpu_ms is not None,
+            "duration_ms": duration,
+            "cpu_ms": cpu_ms,
+            "gpu_ms": gpu_ms,
+            "n_calls": 1,
+        }
+    }
+
+
+def _step_events_from_rank(
     summary: RankStepSummary,
-) -> dict[int, dict[str, float]]:
+) -> dict[int, dict]:
     return {
         step: {
-            INPUT_WAIT_CPU_MS_KEY: summary.avg_dataloader_ms,
-            "h2d_cpu_ms": summary.avg_h2d_ms,
-            "forward_cpu_ms": summary.avg_forward_ms,
-            "backward_cpu_ms": summary.avg_backward_ms,
-            "optimizer_step_cpu_ms": summary.avg_optimizer_ms,
-            STEP_TIME_CPU_MS_KEY: summary.avg_traced_step_ms,
+            "_traceml_internal:dataloader_next": _event_stats(
+                cpu_ms=summary.avg_dataloader_ms
+            ),
+            "_traceml_internal:h2d_time": _event_stats(
+                cpu_ms=summary.avg_h2d_ms
+            ),
+            "_traceml_internal:forward_time": _event_stats(
+                cpu_ms=summary.avg_forward_ms
+            ),
+            "_traceml_internal:backward_time": _event_stats(
+                cpu_ms=summary.avg_backward_ms
+            ),
+            "_traceml_internal:optimizer_step": _event_stats(
+                cpu_ms=summary.avg_optimizer_ms
+            ),
+            "_traceml_internal:step_time": _event_stats(
+                cpu_ms=summary.avg_traced_step_ms
+            ),
         }
         for step in range(int(summary.steps_analyzed))
     }
@@ -120,11 +139,13 @@ def _input_bound_step_metrics(
     input_wait_gpu: float,
     step_time_gpu: float,
     steps: int = 64,
-) -> dict[int, dict[str, float]]:
+) -> dict[int, dict]:
     return {
         step: {
-            INPUT_WAIT_GPU_MS_KEY: input_wait_gpu,
-            STEP_TIME_GPU_MS_KEY: step_time_gpu,
+            "_traceml_internal:dataloader_next": _event_stats(
+                gpu_ms=input_wait_gpu
+            ),
+            "_traceml_internal:step_time": _event_stats(gpu_ms=step_time_gpu),
         }
         for step in range(steps)
     }
@@ -228,7 +249,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
                 step_cpu=100.0,
             )
         },
-        per_rank_step_metrics={
+        per_rank_steps={
             0: _input_bound_step_metrics(
                 input_wait_gpu=40.0,
                 step_time_gpu=100.0,

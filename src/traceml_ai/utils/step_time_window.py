@@ -43,11 +43,6 @@ STEP_TIME_EVENT_NAME = "_traceml_internal:step_time"
 INPUT_WAIT_KEY = "input_wait"
 DIAGNOSIS_CLOCK_KEY = "diagnosis_clock"
 
-INPUT_WAIT_CPU_MS_KEY = "input_wait_cpu_ms"
-INPUT_WAIT_GPU_MS_KEY = "input_wait_gpu_ms"
-STEP_TIME_CPU_MS_KEY = "step_time_cpu_ms"
-STEP_TIME_GPU_MS_KEY = "step_time_gpu_ms"
-
 EVENT_ALIASES: Dict[str, str] = {
     INPUT_WAIT_KEY: DATALOADER_EVENT_NAME,
     "h2d": "_traceml_internal:h2d_time",
@@ -163,31 +158,6 @@ def _event_gpu_ms(events: Any, metric_key: str) -> Optional[float]:
     return _sum_clock(_event_payload(events, metric_key), "gpu_ms")
 
 
-def _metric_field(metric_key: str, clock: str) -> str:
-    if metric_key == INPUT_WAIT_KEY:
-        return f"input_wait_{clock}_ms"
-    if metric_key == "step_time":
-        return f"step_time_{clock}_ms"
-    return f"{metric_key}_{clock}_ms"
-
-
-def diagnosis_clock_fields_from_events(events: Any) -> Dict[str, float]:
-    """Return explicit CPU/GPU timing fields from one raw Step Time event map."""
-    if not isinstance(events, Mapping):
-        return {}
-
-    out: Dict[str, float] = {}
-    for metric_key in SELECTED_METRICS:
-        cpu_ms = _event_cpu_ms(events, metric_key)
-        gpu_ms = _event_gpu_ms(events, metric_key)
-        if cpu_ms is not None:
-            out[_metric_field(metric_key, "cpu")] = float(cpu_ms)
-        if gpu_ms is not None:
-            out[_metric_field(metric_key, "gpu")] = float(gpu_ms)
-
-    return out
-
-
 def _event_has_required_gpu(events: Any) -> bool:
     for metric_key in REQUIRED_GPU_METRICS:
         if _event_gpu_ms(events, metric_key) is None:
@@ -230,64 +200,6 @@ def _metric_from_events(
         else _event_cpu_ms(events, metric_key)
     )
     return float(value) if value is not None else 0.0
-
-
-def _metric_from_step_metrics(
-    metrics: Mapping[str, Any],
-    metric_key: str,
-    *,
-    clock: DiagnosisClock,
-) -> float:
-    value = _safe_non_negative_float(
-        metrics.get(_metric_field(metric_key, clock))
-    )
-    return float(value) if value is not None else 0.0
-
-
-def _step_metrics_has_required_gpu(metrics: Mapping[str, Any]) -> bool:
-    for metric_key in REQUIRED_GPU_METRICS:
-        if (
-            _safe_non_negative_float(
-                metrics.get(_metric_field(metric_key, "gpu"))
-            )
-            is None
-        ):
-            return False
-
-    for metric_key in SELECTED_METRICS:
-        if metric_key in REQUIRED_GPU_METRICS:
-            continue
-        cpu_present = (
-            _safe_non_negative_float(
-                metrics.get(_metric_field(metric_key, "cpu"))
-            )
-            is not None
-        )
-        gpu_present = (
-            _safe_non_negative_float(
-                metrics.get(_metric_field(metric_key, "gpu"))
-            )
-            is not None
-        )
-        if cpu_present and not gpu_present:
-            return False
-
-    return True
-
-
-def _select_clock_from_step_metrics(
-    per_rank_step_metrics: Mapping[int, Mapping[int, Mapping[str, float]]],
-    steps: Sequence[int],
-) -> DiagnosisClock:
-    if not per_rank_step_metrics or not steps:
-        return "cpu"
-
-    for step_map in per_rank_step_metrics.values():
-        for step in steps:
-            metrics = step_map.get(int(step), {})
-            if not _step_metrics_has_required_gpu(metrics):
-                return "cpu"
-    return "gpu"
 
 
 def _build_rank_timing(
@@ -352,35 +264,6 @@ def _selected_step_timing_from_events(
             selected = {
                 metric_key: _metric_from_events(
                     events, metric_key, clock=clock
-                )
-                for metric_key in SELECTED_METRICS
-            }
-            rank_timing[int(step)] = _build_rank_timing(
-                input_wait=selected.get(INPUT_WAIT_KEY, 0.0),
-                h2d=selected.get("h2d", 0.0),
-                forward=selected.get("forward", 0.0),
-                backward=selected.get("backward", 0.0),
-                optimizer=selected.get("optimizer_step", 0.0),
-                step_time=selected.get("step_time", 0.0),
-            )
-        out[int(rank)] = rank_timing
-    return out
-
-
-def _selected_step_timing_from_step_metrics(
-    per_rank_step_metrics: Mapping[int, Mapping[int, Mapping[str, float]]],
-    steps: Sequence[int],
-    *,
-    clock: DiagnosisClock,
-) -> Dict[int, Dict[int, Dict[str, float]]]:
-    out: Dict[int, Dict[int, Dict[str, float]]] = {}
-    for rank, step_map in per_rank_step_metrics.items():
-        rank_timing: Dict[int, Dict[str, float]] = {}
-        for step in steps:
-            metrics = step_map.get(int(step), {})
-            selected = {
-                metric_key: _metric_from_step_metrics(
-                    metrics, metric_key, clock=clock
                 )
                 for metric_key in SELECTED_METRICS
             }
@@ -610,70 +493,6 @@ def build_step_time_window_from_events(
     )
 
 
-def build_step_time_window_from_step_metrics(
-    per_rank_step_metrics: Mapping[int, Mapping[int, Mapping[str, float]]],
-    *,
-    max_rows: int,
-    expected_ranks: Optional[Sequence[int]] = None,
-) -> StepTimeWindow:
-    """Build one selected-clock window from explicit CPU/GPU step metrics."""
-    expected = [
-        int(rank) for rank in (expected_ranks or per_rank_step_metrics.keys())
-    ]
-    observed_steps = {
-        int(rank): {int(step): metrics for step, metrics in step_map.items()}
-        for rank, step_map in per_rank_step_metrics.items()
-        if step_map
-    }
-    latest_step = max(
-        (max(step_map) for step_map in observed_steps.values() if step_map),
-        default=0,
-    )
-    steps = common_suffix_steps(observed_steps, max_rows)
-    if not observed_steps or not steps:
-        return StepTimeWindow(
-            coverage=_empty_coverage(
-                max_rows=max_rows,
-                completed_step=latest_step,
-                world_size=len(expected),
-                ranks_present=len(observed_steps),
-            )
-        )
-
-    clock = _select_clock_from_step_metrics(observed_steps, steps)
-    per_rank_step_timing = _selected_step_timing_from_step_metrics(
-        observed_steps,
-        steps,
-        clock=clock,
-    )
-    per_rank_timing = _average_rank_timing(per_rank_step_timing, steps)
-    coverage = StepCombinedTimeCoverage(
-        expected_steps=max(1, int(max_rows)),
-        steps_used=len(steps),
-        completed_step=int(steps[-1]),
-        world_size=len(expected),
-        ranks_present=len(per_rank_step_timing),
-        incomplete=(len(per_rank_step_timing) < len(expected)),
-    )
-    worst_rank = _worst_rank_by_total_step(per_rank_timing)
-    metrics = build_step_time_metrics(
-        per_rank_timing,
-        coverage=coverage,
-        clock=clock,
-        series_steps=steps,
-        per_rank_step_timing=per_rank_step_timing,
-        worst_rank_override=worst_rank,
-    )
-    return StepTimeWindow(
-        clock=clock,
-        steps=[int(step) for step in steps],
-        coverage=coverage,
-        per_rank_step_timing=per_rank_step_timing,
-        per_rank_timing=per_rank_timing,
-        metrics=metrics,
-    )
-
-
 def diagnose_step_time_window(
     window: StepTimeWindow,
     *,
@@ -730,18 +549,12 @@ __all__ = [
     "DISPLAY_METRICS",
     "DiagnosisClock",
     "EVENT_ALIASES",
-    "INPUT_WAIT_CPU_MS_KEY",
-    "INPUT_WAIT_GPU_MS_KEY",
     "INPUT_WAIT_KEY",
     "SELECTED_METRICS",
-    "STEP_TIME_CPU_MS_KEY",
     "STEP_TIME_EVENT_NAME",
-    "STEP_TIME_GPU_MS_KEY",
     "StepTimeWindow",
     "build_step_time_metrics",
     "build_step_time_window_from_events",
-    "build_step_time_window_from_step_metrics",
     "diagnose_step_time_window",
-    "diagnosis_clock_fields_from_events",
     "public_step_time_metric_values",
 ]
