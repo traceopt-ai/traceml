@@ -313,7 +313,7 @@ class TraceMLCallback(_CallbackBase):
         self._traceml_step_ctx = timed_region(
             "_traceml_internal:step_time",
             scope="step",
-            record_gpu_events=False,
+            record_gpu_events=True,
         )
         self._traceml_step_ctx.__enter__()
 

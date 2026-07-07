@@ -93,7 +93,7 @@ class _WrappedDataLoaderIterator:
         with timed_region(
             name="_traceml_internal:dataloader_next",
             scope=TimeScope.STEP,
-            record_gpu_events=False,
+            record_gpu_events=True,
         ):
             return next(self._iterator)
 

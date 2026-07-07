@@ -13,7 +13,7 @@ def _traceml_dataloader_iter(self):
             with timed_region(
                 name="_traceml_internal:dataloader_next",
                 scope="step",
-                record_gpu_events=False,
+                record_gpu_events=True,
             ):
                 batch = next(it)
         except StopIteration:

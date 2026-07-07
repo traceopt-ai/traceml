@@ -157,7 +157,7 @@ def trace_step(model: nn.Module):
         with timed_region(
             "_traceml_internal:step_time",
             scope="step",
-            record_gpu_events=False,
+            record_gpu_events=True,
         ):
             with (
                 forward_auto_timer(model),
