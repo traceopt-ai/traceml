@@ -95,7 +95,6 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
 
 def build_model_diagnostics_payload(
     *,
-    step_time_metrics: Sequence[StepCombinedTimeMetric],
     step_time_diagnosis_metrics: Optional[
         Sequence[StepCombinedTimeMetric]
     ] = None,
@@ -115,10 +114,7 @@ def build_model_diagnostics_payload(
     """
     items: List[ModelDiagnosisItem] = []
     context = ModelDiagnosticContext(
-        step_time_metrics=step_time_metrics,
-        step_time_diagnosis_metrics=tuple(
-            step_time_diagnosis_metrics or step_time_metrics
-        ),
+        step_time_diagnosis_metrics=tuple(step_time_diagnosis_metrics or ()),
         step_time_per_rank_timing=dict(step_time_per_rank_timing or {}),
         step_time_diagnosis_clock=str(step_time_diagnosis_clock or "cpu"),
         step_memory_metrics=step_memory_metrics,
@@ -177,7 +173,9 @@ def _build_step_time_item(
         ),
         steps_used=getattr(step_time_diag, "steps_used", None),
         worst_rank=getattr(step_time_diag, "worst_rank", None),
-        evidence=_build_step_time_evidence(context.step_time_metrics),
+        evidence=_build_step_time_evidence(
+            context.step_time_diagnosis_metrics
+        ),
     )
 
 
@@ -376,7 +374,6 @@ def _dominant_step_component(
     """
     labels = {
         "input_wait": "input wait",
-        "dataloader_fetch": "dataloader",
         "forward": "forward",
         "backward": "backward",
         "optimizer_step": "optimizer",

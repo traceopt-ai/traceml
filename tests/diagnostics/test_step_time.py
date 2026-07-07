@@ -163,7 +163,6 @@ def _timing_row(
     local_step = known_step + residual if step_time is None else step_time
     row = {
         "input_wait": dataloader,
-        "dataloader_fetch": dataloader,
         "h2d": h2d,
         "forward": forward,
         "backward": backward,
@@ -440,6 +439,12 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(4.0)
     assert selected.per_rank_timing[0]["step_time"] == pytest.approx(20.0)
     assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(5.0)
+    assert selected.per_rank_step_timing[0][1]["input_wait"] == pytest.approx(
+        4.0
+    )
+    assert selected.per_rank_step_timing[0][1]["step_time"] == pytest.approx(
+        20.0
+    )
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
     selected = build_diagnosis_timing_from_events({0: {1: events}}, [1])
@@ -720,7 +725,6 @@ def _summary_step_metrics(
     out: dict[int, dict[str, float]] = {}
     for step in range(steps):
         metrics = {
-            "dataloader_fetch": 50.0,
             "h2d": 0.0,
             "forward": 20.0,
             "backward": 30.0,
@@ -749,3 +753,30 @@ def test_summary_input_bound_uses_explicit_input_clocks() -> None:
     assert high_wait.primary.kind == "INPUT_BOUND"
     assert high_wait.issues[0].evidence["diagnosis_clock"] == "gpu"
     assert high_wait.issues[0].evidence["input_wait_ms"] == pytest.approx(25.0)
+
+
+def test_summary_input_bound_trend_uses_selected_input_wait_series() -> None:
+    steps = 240
+    per_step: dict[int, dict[str, float]] = {}
+    for step in range(steps):
+        input_wait = 10.0 + step * (80.0 / float(steps - 1))
+        per_step[step] = {
+            "h2d": 0.0,
+            "forward": 20.0,
+            "backward": 30.0,
+            "optimizer_step": 10.0,
+            "step_time": 60.0,
+            "residual_proxy": 0.0,
+            INPUT_WAIT_GPU_MS_KEY: input_wait,
+            STEP_TIME_GPU_MS_KEY: 60.0,
+        }
+
+    result = build_summary_step_diagnosis_result(
+        {0: per_step},
+        max_rows=steps,
+    )
+
+    assert result.primary.kind == "INPUT_BOUND"
+    assert result.primary.note is not None
+    assert result.primary.note.startswith("Trend: input wait is ")
+    assert "dataloader" not in result.primary.note

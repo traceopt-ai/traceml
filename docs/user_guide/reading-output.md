@@ -128,7 +128,8 @@ The step-time diagnosis explains where training time is going.
 
 It is based on:
 
-- dataloader time
+- selected-clock input wait
+- H2D transfer time
 - forward time
 - backward time
 - optimizer time
@@ -160,7 +161,7 @@ What to do next:
 
 Meaning:
 
-- dataloader or input work is taking a large share of the typical step
+- input wait is taking a large share of the typical step
 
 Common causes:
 
@@ -171,7 +172,7 @@ Common causes:
 
 What to look at:
 
-- `Dataloader Fetch`
+- `Input Wait`
 - its share of the step
 - whether the issue is broad or rank-specific
 
@@ -229,7 +230,7 @@ TraceML uses this idea:
 - compute each rank's clean step after discounting backward time that can be
   explained by another rank's non-backward work
 - compare the worst clean step to the median clean step
-- blame dataloader when its worst-rank excess over peer median dominates the
+- blame input wait when its worst-rank excess over peer median dominates the
   other clean-step excesses by at least `1.25x`
 
 In simpler words:
@@ -245,7 +246,7 @@ Common causes:
 
 What to look at:
 
-- `Dataloader Fetch`
+- `Input Wait`
 - worst rank
 - skew (%)
 - diagnosis evidence
@@ -268,7 +269,7 @@ TraceML uses this idea:
 
 - compute clean compute as `forward + clean_backward + optimizer`
 - compare the worst rank's clean compute to peer median
-- blame compute when clean-compute excess dominates dataloader, H2D, and residual
+- blame compute when clean-compute excess dominates input wait, H2D, and residual
   excesses by at least `1.25x`
 
 In simpler words:
@@ -353,7 +354,7 @@ Meaning:
 In the current policy, this is used when:
 
 - the clean-step score is at least `0.10`
-- the largest worst-rank excess among dataloader, clean compute, H2D, and residual
+- the largest worst-rank excess among input wait, clean compute, H2D, and residual
   is less than `1.25x` the next-largest excess
 
 This is a mixed unevenness case.
@@ -366,7 +367,7 @@ Common causes:
 
 What to do next:
 
-- inspect dataloader, H2D, compute, and residual signals
+- inspect input wait, H2D, compute, and residual signals
 - inspect the worst rank and the largest uneven phases
 - reduce complexity by isolating one issue at a time
 
@@ -376,15 +377,16 @@ What to do next:
 
 Meaning:
 
-- a meaningful part of the typical step is not attributed to dataloader,
-  H2D, forward, backward, or optimizer work
+- a meaningful part of the traced step is not attributed to H2D, forward,
+  backward, or optimizer work
 
 In TraceML:
 
 - `compute = forward + backward + optimizer`
-- `residual = total_step - dataloader - h2d - compute`
+- `residual = step_time - h2d - compute`
+- `total_step = input_wait + step_time`
 
-This is residual unattributed time in the reported total step, not direct
+This is residual unattributed time inside the traced step, not direct
 collective, NCCL, or all-reduce timing.
 
 Common causes:
@@ -430,11 +432,12 @@ What to do next:
 
 In the CLI step summary, the important columns are:
 
-- `Input`
+- `IW` / `Input Wait`
+- `H2D`
 - `Forward`
 - `Backward`
 - `Optimizer`
-- `Total Step`
+- `STEP` / `Traced Step`
 - `Residual`
 
 Important rows:
@@ -457,8 +460,8 @@ Important rows:
 
 ### `Residual`
 
-- how much of the typical step is unattributed to dataloader, forward,
-  backward, or optimizer work
+- how much of the traced step is unattributed to H2D, forward, backward, or
+  optimizer work
 
 A good reading pattern is:
 

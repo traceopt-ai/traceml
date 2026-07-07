@@ -27,7 +27,6 @@ class ModelDiagnosticContext:
     not perform database I/O.
     """
 
-    step_time_metrics: Sequence[StepCombinedTimeMetric]
     step_memory_metrics: Sequence[StepMemoryCombinedMetric]
     step_time_diagnosis_metrics: Sequence[StepCombinedTimeMetric] = field(
         default_factory=tuple

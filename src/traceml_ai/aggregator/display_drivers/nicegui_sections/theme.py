@@ -37,7 +37,7 @@ BORDER = "rgba(17,24,39,0.10)"
 # the live dashboard and the viewer. H2D = #ff9800 (the viewer's value), which
 # reconciles the prior dashboard-only divergence (it used teal #00897b).
 PHASES: List[Tuple[str, str, str]] = [
-    ("DL", "dataloader_fetch", "#d32f2f"),
+    ("IW", "input_wait", "#d32f2f"),
     ("H2D", "h2d", "#ff9800"),
     ("FWD", "forward", "#1976d2"),
     ("BWD", "backward", "#512da8"),
