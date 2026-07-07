@@ -9,6 +9,7 @@ Behavior:
 - Else: show Median/Worst/Worst Rank/Skew rows
 """
 
+import math
 import shutil
 from typing import Optional
 
@@ -141,17 +142,24 @@ class StepCombinedRenderer(BaseRenderer):
             table.add_row(
                 f"Sum (Σ {K})",
                 *[
-                    fmt_time_run(m.summary.worst_total) for m in metrics
+                    _format_step_time_value(m.summary.worst_total)
+                    for m in metrics
                 ],  # worst_total==sum in single-rank mode
             )
         else:
             table.add_row(
                 f"Median (Σ {K})",
-                *[fmt_time_run(m.summary.median_total) for m in metrics],
+                *[
+                    _format_step_time_value(m.summary.median_total)
+                    for m in metrics
+                ],
             )
             table.add_row(
                 f"Worst (Σ {K})",
-                *[fmt_time_run(m.summary.worst_total) for m in metrics],
+                *[
+                    _format_step_time_value(m.summary.worst_total)
+                    for m in metrics
+                ],
             )
             table.add_row(
                 "Worst Rank",
@@ -257,3 +265,18 @@ def _metric_trend_label(metric, single_rank: bool) -> str:
         compute_trend_pct(series, config=DEFAULT_TREND_CONFIG),
         deadband_pct=DEFAULT_TREND_CONFIG.deadband_pct,
     )
+
+
+def _format_step_time_value(ms: float | None) -> str:
+    """Format selected Step Time values while keeping real zeros visible."""
+    if ms is None:
+        return "n/a"
+    try:
+        value = float(ms)
+    except Exception:
+        return "n/a"
+    if not math.isfinite(value):
+        return "n/a"
+    if value <= 0.0:
+        return "0.0 ms"
+    return fmt_time_run(value)

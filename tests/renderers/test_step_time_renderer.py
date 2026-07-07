@@ -92,6 +92,48 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
     assert "12.0 ms" not in text
 
 
+def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
+    diagnosis_metrics = [
+        _metric("input_wait", 0.0),
+        _metric("h2d", 0.0),
+        _metric("forward", 4.5),
+        _metric("backward", 8.7),
+        _metric("optimizer_step", 12.0),
+        _metric("step_time", 31.2),
+        _metric("residual_proxy", 6.0),
+    ]
+    payload = StepCombinedTimeResult(
+        per_rank_timing={0: {"input_wait": 0.0, "step_time": 31.2}},
+        diagnosis_clock="cpu",
+        diagnosis_metrics=diagnosis_metrics,
+    )
+
+    def fake_build_step_diagnosis(metrics, **kwargs):
+        return StepDiagnosis(
+            kind="RESIDUAL_HEAVY",
+            status="RESIDUAL-HEAVY",
+            severity="warn",
+            reason="Residual time is high.",
+            action="Inspect work outside traced phases.",
+            steps_used=1,
+        )
+
+    monkeypatch.setattr(
+        renderer_module,
+        "build_step_diagnosis",
+        fake_build_step_diagnosis,
+    )
+
+    renderer = StepCombinedRenderer(db_path=":memory:")
+    monkeypatch.setattr(renderer, "_payload", lambda: payload)
+    text = _render_text(renderer.get_panel_renderable())
+
+    assert "IW" in text
+    assert "H2D" in text
+    assert text.count("0.0 ms") >= 2
+    assert "4.5 ms" in text
+
+
 def test_step_time_cli_diagnosis_does_not_fallback_to_public_metrics(
     monkeypatch,
 ) -> None:
