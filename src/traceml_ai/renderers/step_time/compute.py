@@ -15,20 +15,16 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
+from traceml_ai.utils.step_time_diagnosis_clock import (
+    EVENT_ALIASES,
+    build_diagnosis_metrics_from_timing,
+    build_diagnosis_timing_from_events,
+)
 
 STEP_TIME_TABLE = "step_time_samples"
 
 RESIDUAL_METRIC_KEY = "residual_proxy"
 STEP_METRIC_KEY = "step_time"
-
-EVENT_ALIASES = {
-    "dataloader_fetch": "_traceml_internal:dataloader_next",
-    "h2d": "_traceml_internal:h2d_time",
-    "forward": "_traceml_internal:forward_time",
-    "backward": "_traceml_internal:backward_time",
-    "optimizer_step": "_traceml_internal:optimizer_step",
-    "step_time": "_traceml_internal:step_time",
-}
 
 DEFAULT_METRIC_KEYS: Tuple[str, ...] = (
     "dataloader_fetch",
@@ -181,6 +177,9 @@ class StepCombinedComputer:
         per_metric_rank_sums = self._build_metric_sums(
             per_rank_steps, steps, self.metric_keys
         )
+        diagnosis_timing = build_diagnosis_timing_from_events(
+            per_rank_steps, steps
+        )
 
         step_sums = per_metric_rank_sums.get("step_time", {})
         h2d_sums = per_metric_rank_sums.get("h2d", {})
@@ -204,23 +203,23 @@ class StepCombinedComputer:
         overall_rank_scores = self._overall_rank_scores(
             per_metric_rank_sums, ranks_present
         )
-        per_rank_timing = {
-            int(r): {
-                "dataloader_fetch": float(
-                    per_metric_rank_sums.get("dataloader_fetch", {}).get(
-                        r, 0.0
-                    )
-                ),
-                "h2d": float(h2d_sums.get(r, 0.0)),
-                "forward": float(fwd_sums.get(r, 0.0)),
-                "backward": float(bwd_sums.get(r, 0.0)),
-                "optimizer_step": float(opt_sums.get(r, 0.0)),
-                "step_time": float(step_sums.get(r, 0.0)),
-                "residual_proxy": float(residual_rank_sums.get(r, 0.0)),
-                "total_step": float(overall_rank_scores.get(r, 0.0)),
-            }
+        per_rank_timing = diagnosis_timing.per_rank_timing
+        diagnosis_rank_scores = {
+            int(r): float(
+                per_rank_timing.get(int(r), {}).get("total_step", 0.0)
+            )
             for r in ranks_present
         }
+        diagnosis_worst_rank = (
+            max(diagnosis_rank_scores, key=diagnosis_rank_scores.get)
+            if diagnosis_rank_scores
+            else None
+        )
+        diagnosis_metrics = build_diagnosis_metrics_from_timing(
+            per_rank_timing,
+            coverage=coverage,
+            worst_rank_override=diagnosis_worst_rank,
+        )
         overall_worst_rank = (
             max(overall_rank_scores, key=overall_rank_scores.get)
             if overall_rank_scores
@@ -329,6 +328,8 @@ class StepCombinedComputer:
             metrics=list(metrics.values()),
             status_message=status,
             per_rank_timing=per_rank_timing,
+            diagnosis_clock=diagnosis_timing.clock,
+            diagnosis_metrics=diagnosis_metrics,
             rank_heatmap=rank_heatmap,
         )
 
@@ -455,12 +456,16 @@ class StepCombinedComputer:
                     metrics=self._last_ok.metrics,
                     status_message=msg,
                     per_rank_timing=self._last_ok.per_rank_timing,
+                    diagnosis_clock=self._last_ok.diagnosis_clock,
+                    diagnosis_metrics=self._last_ok.diagnosis_metrics,
                     rank_heatmap=self._last_ok.rank_heatmap,
                 )
         return StepCombinedTimeResult(
             metrics=[],
             status_message="No fresh step-combined data",
             per_rank_timing={},
+            diagnosis_clock="cpu",
+            diagnosis_metrics=[],
             rank_heatmap=None,
         )
 

@@ -88,10 +88,16 @@ class StepTimeAnalysisContext:
     dataloader_share: float
     residual_share: float
     compute_share: float
+    input_bound_share: float
 
     dataloader_skew: float
+    input_bound_skew: float
     compute_skew: float
     dataloader_worst_rank: Optional[int]
+    input_bound_worst_rank: Optional[int]
+    diagnosis_clock: str
+    input_wait_total: float
+    input_bound_step_total: float
 
     largest_compute: Optional[ComputeSignal]
 
@@ -497,6 +503,7 @@ def build_step_time_context(
     metrics: Sequence[StepCombinedTimeMetric],
     thresholds: "DiagnosisThresholds",
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    diagnosis_clock: str = "cpu",
 ) -> StepTimeAnalysisContext:
     """
     Build one normalized context shared by all step-time diagnosis rules.
@@ -579,6 +586,35 @@ def build_step_time_context(
             },
         }
 
+    input_candidates = {
+        rank: values
+        for rank, values in local_per_rank_timing.items()
+        if "input_wait" in values and "step_time" in values
+    }
+
+    input_wait_rank_values = {
+        rank: non_negative_finite(values.get("input_wait", 0.0))
+        for rank, values in input_candidates.items()
+    }
+    input_step_rank_values = {
+        rank: non_negative_finite(values.get("step_time", 0.0))
+        for rank, values in input_candidates.items()
+    }
+    input_wait_median, input_wait_worst, input_wait_worst_rank, input_slack = (
+        _rank_stats(input_wait_rank_values)
+    )
+    input_step_median, input_step_worst, _, _ = _rank_stats(
+        input_step_rank_values
+    )
+    input_wait_total = input_wait_worst if single_rank else input_wait_median
+    input_bound_step_total = (
+        input_step_worst if single_rank else input_step_median
+    )
+    input_bound_skew = (
+        0.0
+        if single_rank or input_wait_median <= 0.0
+        else input_slack / input_wait_median
+    )
     clean_rank_values = _clean_rank_timings(local_per_rank_timing)
     clean_straggler = _clean_straggler_evidence(
         clean_rank_values=clean_rank_values,
@@ -610,11 +646,19 @@ def build_step_time_context(
         dataloader_share=share(dataloader_total, step_total),
         residual_share=share(residual_total, step_total),
         compute_share=share(compute_total_value, step_total),
+        input_bound_share=share(input_wait_total, input_bound_step_total),
         dataloader_skew=metric_skew(
             dataloader_metric, single_rank=single_rank
         ),
+        input_bound_skew=input_bound_skew,
         compute_skew=compute_skew_value,
         dataloader_worst_rank=metric_worst_rank(dataloader_metric),
+        input_bound_worst_rank=input_wait_worst_rank,
+        diagnosis_clock=(
+            "gpu" if str(diagnosis_clock).lower() == "gpu" else "cpu"
+        ),
+        input_wait_total=input_wait_total,
+        input_bound_step_total=input_bound_step_total,
         largest_compute=largest_compute,
         rank_values=rank_values,
         clean_rank_values=clean_rank_values,

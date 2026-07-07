@@ -11,10 +11,12 @@ from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 
-from traceml_ai.diagnostics.step_time.adapters import RankStepSignals
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.summaries.summary_formatting import safe_float
+from traceml_ai.utils.step_time_diagnosis_clock import (
+    diagnosis_clock_fields_from_events,
+)
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
@@ -144,26 +146,6 @@ class GlobalRankIdentity:
     world_size: Optional[int]
 
 
-def to_rank_signals(
-    per_global_rank_summary: Dict[int, RankStepSummary],
-) -> Dict[int, RankStepSignals]:
-    """
-    Convert global-rank summaries to diagnosis adapter input objects.
-    """
-    return {
-        int(rank): RankStepSignals(
-            steps_analyzed=int(s.steps_analyzed),
-            dataloader_ms=finite_float(s.avg_dataloader_ms),
-            h2d_ms=finite_float(s.avg_h2d_ms),
-            forward_ms=finite_float(s.avg_forward_ms),
-            backward_ms=finite_float(s.avg_backward_ms),
-            optimizer_ms=finite_float(s.avg_optimizer_ms),
-            step_cpu_ms=finite_float(s.avg_step_cpu_ms),
-        )
-        for rank, s in per_global_rank_summary.items()
-    }
-
-
 def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
     """
     Convert one step's event map into canonical timing buckets.
@@ -193,6 +175,8 @@ def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
         if bucket is None:
             continue
         metrics[bucket] += _event_total_ms(by_dev)
+
+    metrics.update(diagnosis_clock_fields_from_events(events))
 
     if (
         metrics["dataloader"] <= 0.0
@@ -254,7 +238,7 @@ def build_rank_summary(
         residual_proxy = max(0.0, traced_step - known_step_ms)
         total_step = dl + traced_step
 
-        per_step_metrics[int(step_id)] = {
+        per_step_metric = {
             "dataloader_fetch": dl,
             "h2d": h2d,
             "forward": fwd,
@@ -263,6 +247,10 @@ def build_rank_summary(
             "step_time": traced_step,
             "residual_proxy": residual_proxy,
         }
+        for key, value in metrics.items():
+            if key.endswith("_cpu_ms") or key.endswith("_gpu_ms"):
+                per_step_metric[key] = finite_float(value)
+        per_step_metrics[int(step_id)] = per_step_metric
 
         sum_dl += dl
         sum_h2d += h2d
@@ -521,5 +509,4 @@ __all__ = [
     "compute_residual_avg_ms",
     "finite_float",
     "summary_metric_values",
-    "to_rank_signals",
 ]

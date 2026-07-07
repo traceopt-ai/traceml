@@ -70,9 +70,15 @@ Training-step timing.
 - `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
 - `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
 - `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
-- `INPUT_BOUND`: dataloader time dominates the typical step.
+- `INPUT_BOUND`: selected-clock input wait dominates the typical step.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
+
+Step-time diagnosis uses one selected clock for the analyzed window. It uses
+GPU event timing when every rank/step has GPU timing for the step envelope,
+dataloader/input wait, and traced phase events present in the window. Otherwise
+it uses explicit `cpu_ms` timing. Public renderer and summary metrics continue
+to use their existing `duration_ms` semantics.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time:

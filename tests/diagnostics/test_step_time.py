@@ -14,7 +14,6 @@ from traceml_ai.diagnostics.step_time.api import (
 )
 from traceml_ai.diagnostics.step_time.adapters import (
     DEFAULT_SUMMARY_DIAG_CONFIG,
-    RankStepSignals,
     build_summary_step_diagnosis_result,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
@@ -33,6 +32,11 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
+)
+from traceml_ai.utils.step_time_diagnosis_clock import (
+    INPUT_WAIT_GPU_MS_KEY,
+    STEP_TIME_GPU_MS_KEY,
+    build_diagnosis_timing_from_events,
 )
 
 
@@ -78,11 +82,13 @@ def _time_metric(
 def _time_context(
     *metrics: StepCombinedTimeMetric,
     per_rank_timing: dict[int, dict[str, float]] | None = None,
+    diagnosis_clock: str = "cpu",
 ):
     return build_step_time_context(
         metrics=metrics,
         thresholds=DEFAULT_THRESHOLDS,
         per_rank_timing=per_rank_timing,
+        diagnosis_clock=diagnosis_clock,
     )
 
 
@@ -104,10 +110,14 @@ def _timing_row(
     residual: float = 0.0,
     step_time: float | None = None,
     total_step: float | None = None,
+    input_wait_cpu: float | None = None,
+    input_wait_gpu: float | None = None,
+    step_time_cpu: float | None = None,
+    step_time_gpu: float | None = None,
 ) -> dict[str, float]:
     known_step = h2d + forward + backward + optimizer
     local_step = known_step + residual if step_time is None else step_time
-    return {
+    row = {
         "dataloader_fetch": dataloader,
         "h2d": h2d,
         "forward": forward,
@@ -119,6 +129,15 @@ def _timing_row(
             dataloader + local_step if total_step is None else total_step
         ),
     }
+    if input_wait_cpu is not None and step_time_cpu is not None:
+        row["input_wait"] = input_wait_cpu
+        row["step_time"] = step_time_cpu
+        row["total_step"] = input_wait_cpu + step_time_cpu
+    if input_wait_gpu is not None and step_time_gpu is not None:
+        row["input_wait"] = input_wait_gpu
+        row["step_time"] = step_time_gpu
+        row["total_step"] = input_wait_gpu + step_time_gpu
+    return row
 
 
 def _metrics_from_per_rank_timing(
@@ -259,12 +278,38 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
             backward=30.0,
             optimizer=5.0,
             residual=10.0,
-        )
+        ),
+        per_rank_timing={
+            0: _timing_row(
+                dataloader=35.0,
+                forward=20.0,
+                backward=30.0,
+                optimizer=5.0,
+                residual=10.0,
+                input_wait_gpu=35.0,
+                step_time_gpu=100.0,
+            )
+        },
+        diagnosis_clock="gpu",
     )
-    assert InputBoundRule().evaluate(input_bound).kind == "INPUT_BOUND"
+    issue = InputBoundRule().evaluate(input_bound)
+    assert issue is not None
+    assert issue.kind == "INPUT_BOUND"
+    assert issue.metric == "input_wait"
+    assert issue.phase == "input"
+    assert issue.evidence["diagnosis_clock"] == "gpu"
     assert (
         InputBoundRule().evaluate(
-            _time_context(*_single_rank_step_metrics(dataloader=10.0))
+            _time_context(
+                *_single_rank_step_metrics(dataloader=50.0),
+                per_rank_timing={
+                    0: _timing_row(
+                        dataloader=50.0,
+                        input_wait_gpu=5.0,
+                        step_time_gpu=100.0,
+                    )
+                },
+            )
         )
         is None
     )
@@ -295,11 +340,139 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     assert (
         ComputeBoundRule().evaluate(
             _time_context(
-                *_single_rank_step_metrics(dataloader=35.0, residual=3.0)
+                *_single_rank_step_metrics(dataloader=5.0, residual=3.0),
+                per_rank_timing={
+                    0: _timing_row(
+                        dataloader=5.0,
+                        input_wait_cpu=35.0,
+                        step_time_cpu=100.0,
+                    )
+                },
             )
         )
         is None
     )
+
+
+def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
+    events = {
+        "_traceml_internal:dataloader_next": {
+            "cuda:0": {
+                "duration_ms": 12.0,
+                "cpu_ms": 12.0,
+                "gpu_ms": 4.0,
+            }
+        },
+        "_traceml_internal:step_time": {
+            "cuda:0": {
+                "duration_ms": 60.0,
+                "cpu_ms": 60.0,
+                "gpu_ms": 20.0,
+            }
+        },
+        "_traceml_internal:forward_time": {
+            "cuda:0": {
+                "duration_ms": 30.0,
+                "cpu_ms": 30.0,
+                "gpu_ms": 8.0,
+            }
+        },
+        "_traceml_internal:backward_time": {
+            "cuda:0": {
+                "duration_ms": 20.0,
+                "cpu_ms": 20.0,
+                "gpu_ms": 7.0,
+            }
+        },
+    }
+
+    selected = build_diagnosis_timing_from_events(
+        {0: {1: events}},
+        [1],
+    )
+
+    assert selected.clock == "gpu"
+    assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(4.0)
+    assert selected.per_rank_timing[0]["step_time"] == pytest.approx(20.0)
+    assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(5.0)
+
+    events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
+    selected = build_diagnosis_timing_from_events({0: {1: events}}, [1])
+
+    assert selected.clock == "cpu"
+    assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(12.0)
+    assert selected.per_rank_timing[0]["step_time"] == pytest.approx(60.0)
+    assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(10.0)
+
+    duration_only_events = {
+        "_traceml_internal:dataloader_next": {"cpu": {"duration_ms": 12.0}},
+        "_traceml_internal:step_time": {"cpu": {"duration_ms": 60.0}},
+        "_traceml_internal:h2d_time": {"cpu": {"duration_ms": 1.0}},
+        "_traceml_internal:forward_time": {"cpu": {"duration_ms": 20.0}},
+        "_traceml_internal:backward_time": {"cpu": {"duration_ms": 30.0}},
+        "_traceml_internal:optimizer_step": {"cpu": {"duration_ms": 5.0}},
+    }
+    selected = build_diagnosis_timing_from_events(
+        {0: {1: duration_only_events}},
+        [1],
+    )
+
+    assert selected.clock == "cpu"
+    assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(0.0)
+    assert selected.per_rank_timing[0]["step_time"] == pytest.approx(0.0)
+    assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(0.0)
+
+
+def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
+    ctx = _time_context(
+        *_single_rank_step_metrics(step=100.0, dataloader=5.0),
+        per_rank_timing={
+            0: _timing_row(
+                dataloader=5.0,
+                input_wait_cpu=35.0,
+                step_time_cpu=100.0,
+            )
+        },
+    )
+
+    issue = InputBoundRule().evaluate(ctx)
+
+    assert issue is not None
+    assert issue.kind == "INPUT_BOUND"
+    assert issue.metric == "input_wait"
+    assert issue.phase == "input"
+    assert issue.share_pct == pytest.approx(0.35)
+    assert issue.evidence["diagnosis_clock"] == "cpu"
+    assert issue.evidence["input_wait_ms"] == pytest.approx(35.0)
+    assert issue.evidence["step_time_ms"] == pytest.approx(100.0)
+
+
+def test_input_bound_rule_ignores_duration_without_explicit_clocks() -> None:
+    ctx = _time_context(
+        *_single_rank_step_metrics(step=100.0, dataloader=50.0)
+    )
+
+    assert InputBoundRule().evaluate(ctx) is None
+
+
+def test_input_bound_rule_uses_input_wait_skew() -> None:
+    ctx = _clean_context(
+        {
+            0: _timing_row(
+                dataloader=10.0,
+                input_wait_gpu=10.0,
+                step_time_gpu=100.0,
+            ),
+            1: _timing_row(
+                dataloader=10.0,
+                input_wait_gpu=60.0,
+                step_time_gpu=100.0,
+            ),
+        }
+    )
+
+    assert ctx.input_bound_share == pytest.approx(0.35)
+    assert InputBoundRule().evaluate(ctx) is None
 
 
 def test_clean_backward_discount_removes_telescoped_delay_from_peer() -> None:
@@ -427,19 +600,10 @@ def test_step_time_live_and_summary_policies_are_explicit() -> None:
 
 
 def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
-    rank_signals = {
-        0: RankStepSignals(
-            steps_analyzed=40,
-            dataloader_ms=1.0,
-            h2d_ms=0.0,
-            forward_ms=20.0,
-            backward_ms=60.0,
-            optimizer_ms=10.0,
-            step_cpu_ms=100.0,
-        )
-    }
-
-    warmup = build_summary_step_diagnosis_result(rank_signals, max_rows=100)
+    warmup = build_summary_step_diagnosis_result(
+        {0: _summary_step_metrics(input_wait_gpu=None, steps=40)},
+        max_rows=100,
+    )
     assert warmup is not None
     assert warmup.primary.kind == "WARMUP"
     assert (
@@ -447,20 +611,50 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
         == "Only 40 steps per rank available; summary diagnosis requires 50."
     )
 
-    rank_signals[0] = RankStepSignals(
-        steps_analyzed=60,
-        dataloader_ms=1.0,
-        h2d_ms=0.0,
-        forward_ms=20.0,
-        backward_ms=60.0,
-        optimizer_ms=10.0,
-        step_cpu_ms=100.0,
-    )
-
     result = build_summary_step_diagnosis_result(
-        rank_signals,
+        {0: _summary_step_metrics(input_wait_gpu=None, steps=60)},
         max_rows=100,
     )
 
     assert result is not None
     assert result.primary.steps_used == 60
+
+
+def _summary_step_metrics(
+    *,
+    input_wait_gpu: float | None,
+    step_time_gpu: float = 60.0,
+    steps: int = 60,
+) -> dict[int, dict[str, float]]:
+    out: dict[int, dict[str, float]] = {}
+    for step in range(steps):
+        metrics = {
+            "dataloader_fetch": 50.0,
+            "h2d": 0.0,
+            "forward": 20.0,
+            "backward": 30.0,
+            "optimizer_step": 10.0,
+            "step_time": 60.0,
+            "residual_proxy": 0.0,
+        }
+        if input_wait_gpu is not None:
+            metrics[INPUT_WAIT_GPU_MS_KEY] = input_wait_gpu
+            metrics[STEP_TIME_GPU_MS_KEY] = step_time_gpu
+        out[step] = metrics
+    return out
+
+
+def test_summary_input_bound_uses_explicit_input_clocks() -> None:
+    low_wait = build_summary_step_diagnosis_result(
+        {0: _summary_step_metrics(input_wait_gpu=5.0)},
+        max_rows=100,
+    )
+    high_wait = build_summary_step_diagnosis_result(
+        {0: _summary_step_metrics(input_wait_gpu=25.0)},
+        max_rows=100,
+    )
+
+    assert low_wait.primary.kind != "INPUT_BOUND"
+    assert high_wait.primary.kind == "INPUT_BOUND"
+    assert high_wait.issues[0].evidence["diagnosis_clock"] == "gpu"
+    assert high_wait.issues[0].evidence["input_wait_ms"] == pytest.approx(25.0)

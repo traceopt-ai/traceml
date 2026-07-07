@@ -160,7 +160,7 @@ class CleanStragglerRule(_BaseStepTimeRule):
 @dataclass(frozen=True)
 class InputBoundRule(_BaseStepTimeRule):
     """
-    Detect input-bound behavior when dataloader dominates and skew stays low.
+    Detect input-bound behavior from explicit input wait clocks.
     """
 
     name: str = "input_bound"
@@ -169,11 +169,11 @@ class InputBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.dataloader_share < context.thresholds.input_share_warn:
+        if context.input_bound_share < context.thresholds.input_share_warn:
             return None
 
         if not context.single_rank and (
-            context.dataloader_skew > context.thresholds.input_bound_max_skew
+            context.input_bound_skew > context.thresholds.input_bound_max_skew
         ):
             return None
 
@@ -181,19 +181,25 @@ class InputBoundRule(_BaseStepTimeRule):
             kind="INPUT_BOUND",
             status="INPUT-BOUND",
             severity=_severity(
-                context.dataloader_share,
+                context.input_bound_share,
                 context.thresholds.input_share_crit,
             ),
             summary=(
-                f"Dataloader is {_pct(context.dataloader_share)} of the "
-                "typical step."
+                f"Input wait is {_pct(context.input_bound_share)} of the "
+                f"typical {context.diagnosis_clock} step."
             ),
             action="Increase workers, prefetch, or storage throughput.",
-            metric="dataloader_fetch",
-            phase="dataloader",
-            share_pct=context.dataloader_share,
-            skew_pct=context.dataloader_skew,
-            ranks=(context.dataloader_worst_rank,),
+            metric="input_wait",
+            phase="input",
+            share_pct=context.input_bound_share,
+            skew_pct=context.input_bound_skew,
+            ranks=(context.input_bound_worst_rank,),
+            evidence={
+                "input_wait_ms": context.input_wait_total,
+                "step_time_ms": context.input_bound_step_total,
+                "input_bound_share": context.input_bound_share,
+                "diagnosis_clock": context.diagnosis_clock,
+            },
         )
 
 
@@ -250,7 +256,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
             return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
-        if context.dataloader_share >= context.thresholds.input_share_warn:
+        if context.input_bound_share >= context.thresholds.input_share_warn:
             return None
         if context.residual_share >= context.thresholds.residual_share_warn:
             return None
