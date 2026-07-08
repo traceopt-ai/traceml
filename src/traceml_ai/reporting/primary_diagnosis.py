@@ -96,7 +96,7 @@ LOW_GPU_UTIL_KINDS = {
 }
 
 PHASE_METRICS = (
-    "dataloader_ms",
+    "input_wait_ms",
     "h2d_ms",
     "compute_ms",
     "residual_ms",
@@ -228,11 +228,17 @@ def _phase_share_evidence(
     """Build evidence for diagnoses based on average step-time shares."""
     average = _global_average(step_time_summary)
     total_ms = _float_or_none(average.get("total_step_ms"))
+    step_time_ms = _float_or_none(average.get("step_time_ms"))
+    denominator_ms = step_time_ms or total_ms
+    window = _global_window(step_time_summary)
     evidence: JsonDict = {
         "type": "phase_share",
         "basis": "average",
         "steps_analyzed": _steps_analyzed(step_time_summary),
         "total_step_ms": _round(total_ms),
+        "step_time_ms": _round(step_time_ms),
+        "diagnosis_clock": window.get("diagnosis_clock"),
+        "dataloader_ms": _round(_float_or_none(average.get("dataloader_ms"))),
     }
 
     for metric in PHASE_METRICS:
@@ -243,8 +249,8 @@ def _phase_share_evidence(
         value = _float_or_none(average.get(metric))
         key = metric.replace("_ms", "_pct")
         shares[key] = (
-            _round(100.0 * value / total_ms)
-            if value is not None and total_ms and total_ms > 0.0
+            _round(100.0 * value / denominator_ms)
+            if value is not None and denominator_ms and denominator_ms > 0.0
             else None
         )
     evidence["shares"] = shares
@@ -256,7 +262,7 @@ def _metric_for_step_time_issue(issue: Mapping[str, Any]) -> Optional[str]:
     """Map one step-time issue to the public metric used for comparison."""
     kind = str(issue.get("kind") or "")
     if kind == "INPUT_STRAGGLER":
-        return "dataloader_ms"
+        return "input_wait_ms"
     if kind == "COMPUTE_STRAGGLER":
         phase = str(issue.get("phase") or "").lower()
         if phase in {"forward", "backward", "optimizer"}:
@@ -275,7 +281,7 @@ def _metric_for_primary_diagnosis(
     """Map a primary step-time diagnosis to the public comparison metric."""
     kind = str(diagnosis.get("kind") or "")
     if kind == "INPUT_STRAGGLER":
-        return "dataloader_ms"
+        return "input_wait_ms"
     if kind == "COMPUTE_STRAGGLER":
         phase = str(diagnosis.get("phase") or "").lower()
         if phase in {"forward", "backward", "optimizer"}:
@@ -395,7 +401,7 @@ def _straggler_comparisons(
     return [
         _comparison(
             step_time_summary=step_time_summary,
-            metric="dataloader_ms",
+            metric="input_wait_ms",
             phase="input",
         ),
         _comparison(
@@ -418,13 +424,16 @@ def _straggler_comparisons(
 
 def _phase_share_summary(kind: str, evidence: Mapping[str, Any]) -> str:
     """Return a concise primary summary for phase-share diagnoses."""
-    total = _float_or_none(evidence.get("total_step_ms"))
+    total = _float_or_none(evidence.get("step_time_ms")) or _float_or_none(
+        evidence.get("total_step_ms")
+    )
     if kind == "INPUT_BOUND":
-        value = _float_or_none(evidence.get("dataloader_ms"))
-        if value is not None and total is not None:
+        value = _float_or_none(evidence.get("input_wait_ms"))
+        step_time = _float_or_none(evidence.get("step_time_ms"))
+        if value is not None and step_time is not None:
             return (
                 f"Input wait took {value:.1f}ms of a "
-                f"{total:.1f}ms average step."
+                f"{step_time:.1f}ms average step."
             )
         return "Input wait took a large share of step time."
     if kind == "RESIDUAL_HEAVY":

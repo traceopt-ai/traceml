@@ -16,6 +16,8 @@ METRICS_BY_SECTION = {
     "step_time": (
         "total_step_ms",
         "dataloader_ms",
+        "input_wait_ms",
+        "step_time_ms",
         "h2d_ms",
         "compute_ms",
         "residual_ms",

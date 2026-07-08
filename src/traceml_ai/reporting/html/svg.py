@@ -13,9 +13,9 @@ from typing import Any, Dict, List, Tuple
 from .sections_helpers import sorted_rows
 from .textutils import esc, fmt_value
 
-# step_time phase breakdown, in stacking order: (metric, label, css var).
+# step_time selected-clock breakdown, in stacking order.
 _PHASES = (
-    ("dataloader_ms", "input wait", "var(--dl)"),
+    ("input_wait_ms", "input wait", "var(--dl)"),
     ("h2d_ms", "h2d", "var(--h2d)"),
     ("forward_ms", "forward", "var(--fwd)"),
     ("backward_ms", "backward", "var(--bwd)"),

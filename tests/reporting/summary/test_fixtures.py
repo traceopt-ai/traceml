@@ -59,6 +59,7 @@ GLOBAL_WINDOW_KEYS = {
     "completed_step",
     "window_size",
 }
+OPTIONAL_GLOBAL_WINDOW_KEYS = {"diagnosis_clock"}
 
 METADATA_KEYS = {
     "mode",
@@ -118,7 +119,9 @@ def _assert_section_shape(payload: dict, *, group_by: str) -> None:
     assert set(payload["global"]) == GLOBAL_KEYS
     assert payload["global"]["index_by"] in {"node_rank", "global_rank"}
     assert payload["global"]["index_by"] == group_by
-    assert set(payload["global"]["window"]) == GLOBAL_WINDOW_KEYS
+    window_keys = set(payload["global"]["window"])
+    assert GLOBAL_WINDOW_KEYS <= window_keys
+    assert window_keys <= GLOBAL_WINDOW_KEYS | OPTIONAL_GLOBAL_WINDOW_KEYS
     metric_names = payload["metadata"]["section_metric_names"]
     if metric_names is not None:
         expected_metrics = set(metric_names)
@@ -863,7 +866,7 @@ def test_final_summary_fixture_schema_contains_all_sections(
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.5
+    assert payload["schema_version"] == 1.6
     assert set(payload) == {
         "schema_version",
         "generated_at",

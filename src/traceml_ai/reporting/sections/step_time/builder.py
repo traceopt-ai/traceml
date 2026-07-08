@@ -147,7 +147,7 @@ def _build_card_stats(
         ),
         input=_metric_pair_from_rank_values(
             {
-                int(rank): finite_float(summary.avg_dataloader_ms)
+                int(rank): finite_float(summary.avg_input_wait_ms)
                 for rank, summary in per_global_rank_summary.items()
             }
         ),

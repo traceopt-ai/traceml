@@ -23,6 +23,8 @@ MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
     "total_step_ms",
     "dataloader_ms",
+    "input_wait_ms",
+    "step_time_ms",
     "h2d_ms",
     "compute_ms",
     "residual_ms",
@@ -71,10 +73,12 @@ def closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
 
 @dataclass
 class RankStepSummary:
-    """Compatibility-shaped per-rank selected-clock Step Time summary."""
+    """Per-rank Step Time summary with compatibility and diagnosis fields."""
 
     steps_analyzed: int
     avg_dataloader_ms: float
+    avg_input_wait_ms: float
+    avg_step_time_ms: float
     avg_h2d_ms: float
     avg_forward_ms: float
     avg_backward_ms: float
@@ -101,11 +105,13 @@ def rank_summary_from_timing(
     *,
     steps_analyzed: int,
 ) -> RankStepSummary:
-    """Build the public summary view from selected-clock rank timing."""
+    """Build the public summary view from one canonical rank timing row."""
     public = public_step_time_metric_values(timing)
     return RankStepSummary(
         steps_analyzed=max(0, int(steps_analyzed)),
         avg_dataloader_ms=finite_float(public["dataloader_ms"]),
+        avg_input_wait_ms=finite_float(public["input_wait_ms"]),
+        avg_step_time_ms=finite_float(public["step_time_ms"]),
         avg_h2d_ms=finite_float(public["h2d_ms"]),
         avg_forward_ms=finite_float(public["forward_ms"]),
         avg_backward_ms=finite_float(public["backward_ms"]),
@@ -134,8 +140,8 @@ def compute_residual_avg_ms(s: RankStepSummary) -> float:
     Return average residual proxy for one rank summary.
 
     known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
-    residual_ms = traced_step_ms - known_step_ms
-    total_step_ms = dataloader_ms + traced_step_ms
+    residual_ms = selected step_time_ms - known_step_ms
+    total_step_ms = CPU dataloader_ms + CPU step envelope
     """
     return max(
         0.0,
@@ -160,6 +166,14 @@ def _rank_metric_values(
         },
         "dataloader_ms": {
             int(rank): finite_float(summary.avg_dataloader_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "input_wait_ms": {
+            int(rank): finite_float(summary.avg_input_wait_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "step_time_ms": {
+            int(rank): finite_float(summary.avg_step_time_ms)
             for rank, summary in per_global_rank_summary.items()
         },
         "h2d_ms": {
@@ -194,6 +208,8 @@ def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
     return {
         "total_step_ms": finite_float(summary.avg_total_step_ms),
         "dataloader_ms": finite_float(summary.avg_dataloader_ms),
+        "input_wait_ms": finite_float(summary.avg_input_wait_ms),
+        "step_time_ms": finite_float(summary.avg_step_time_ms),
         "h2d_ms": finite_float(summary.avg_h2d_ms),
         "compute_ms": finite_float(summary.avg_compute_ms),
         "residual_ms": compute_residual_avg_ms(summary),
@@ -270,6 +286,7 @@ def build_global_rollup(
         completed_step=end_step,
         window_size=int(analysis_window.coverage.expected_steps),
     ).to_json()
+    window["diagnosis_clock"] = analysis_window.clock
     if not per_global_rank_summary:
         return BaseGlobal(
             index_by="global_rank",

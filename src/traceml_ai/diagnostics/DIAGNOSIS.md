@@ -7,7 +7,7 @@ also copies that same item to `diagnosis`.
 The final summary also includes a top-level `primary_diagnosis`. That field is
 a run-level performance finding promoted from existing section diagnoses. It is
 not a replacement for section diagnoses and it is not a health-warning rollup.
-In schema `1.5`, Step Time drives the top-level primary diagnosis; System GPU
+In schema `1.6`, Step Time drives the top-level primary diagnosis; System GPU
 utilization can appear as supporting evidence or as an unexplained-utilization
 fallback. System, Process, and Step Memory resource findings remain canonical
 inside their sections.
@@ -78,10 +78,11 @@ Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
 input wait, and traced phase events present in the window. Otherwise it uses
 explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
-summary use this same selected-clock window. Summary JSON keeps compatibility
-field names such as `dataloader_ms`, but that value maps to selected-clock
-input wait. `duration_ms` stays stored compatibility timing and is not used for
-Step Time display or diagnosis.
+summary use this same selected-clock window for diagnosis-facing timing.
+Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
+The compatibility `dataloader_ms` field remains CPU dataloader fetch time.
+`duration_ms` stays stored compatibility timing and is not used for Step Time
+display or diagnosis.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time:

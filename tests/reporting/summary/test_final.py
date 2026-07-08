@@ -116,7 +116,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.5
+    assert payload["schema_version"] == 1.6
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
@@ -184,10 +184,12 @@ def test_final_text_uses_single_process_average_layout():
         metadata={"global_ranks_used": 1},
         diagnosis=step_diag,
         global_summary={
-            "window": {"steps_analyzed": 60},
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "average": {
                 "total_step_ms": 139.1,
-                "dataloader_ms": 130.8,
+                "dataloader_ms": 120.0,
+                "input_wait_ms": 130.8,
+                "step_time_ms": 139.1,
                 "compute_ms": 6.9,
                 "residual_ms": 1.3,
                 "h2d_ms": 0.2,
@@ -229,6 +231,8 @@ def test_final_text_uses_single_process_average_layout():
     assert "Step Time Evidence" in text
     assert "Phase             Average           Share" in text
     assert "Input Wait        130.8ms           94.0%" in text
+    assert "Dataloader        120.0ms           86.3%" in text
+    assert "Step Time         139.1ms           100.0%" in text
     assert "Median" not in text
     assert "Worst" not in text
     assert "Skew" not in text
@@ -253,10 +257,12 @@ def test_final_text_uses_multi_process_comparison_layout():
         metadata={"global_ranks_used": 2},
         diagnosis=step_diag,
         global_summary={
-            "window": {"steps_analyzed": 60},
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "median": {
                 "total_step_ms": _point(303.7, 1),
                 "dataloader_ms": _point(3.8, 1),
+                "input_wait_ms": _point(13.8, 1),
+                "step_time_ms": _point(299.9, 1),
                 "compute_ms": _point(259.5, 1),
                 "residual_ms": _point(40.5, 1),
                 "h2d_ms": _point(0.2, 1),
@@ -264,6 +270,8 @@ def test_final_text_uses_multi_process_comparison_layout():
             "worst": {
                 "total_step_ms": _point(304.1, 0),
                 "dataloader_ms": _point(254.5, 0),
+                "input_wait_ms": _point(264.5, 0),
+                "step_time_ms": _point(49.6, 0),
                 "compute_ms": _point(261.0, 0),
                 "residual_ms": _point(42.1, 0),
                 "h2d_ms": _point(0.4, 0),
@@ -321,7 +329,9 @@ def test_final_text_uses_multi_process_comparison_layout():
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text
-    assert "Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms." in text
+    assert (
+        "Rank r0 input wait was 264.5ms vs median rank r1 at 13.8ms." in text
+    )
     assert (
         "Metric          Median        Worst         Skew        Scope" in text
     )
@@ -330,7 +340,7 @@ def test_final_text_uses_multi_process_comparison_layout():
     assert (
         "Phase           Median        Worst         Skew        Scope" in text
     )
-    assert "Input Wait      3.8ms         254.5ms       6597.4%" in text
+    assert "Input Wait      13.8ms        264.5ms       1816.7%" in text
     assert "rank=r0 node=n0" in text
     assert "Average" not in text
 

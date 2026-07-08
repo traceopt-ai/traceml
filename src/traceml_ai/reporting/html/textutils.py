@@ -39,7 +39,9 @@ def esc(value: Any) -> str:
 # Friendly display labels for known metric keys; unknown keys render raw.
 _METRIC_LABELS = {
     "total_step_ms": "Total step",
-    "dataloader_ms": "Input wait",
+    "dataloader_ms": "Dataloader",
+    "input_wait_ms": "Input wait",
+    "step_time_ms": "Step time",
     "h2d_ms": "H2D",
     "compute_ms": "Compute",
     "residual_ms": "Residual",

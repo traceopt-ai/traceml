@@ -43,6 +43,8 @@ def _rank(
     return RankStepSummary(
         steps_analyzed=steps,
         avg_dataloader_ms=dataloader,
+        avg_input_wait_ms=dataloader,
+        avg_step_time_ms=effective_step,
         avg_h2d_ms=h2d,
         avg_forward_ms=forward,
         avg_backward_ms=backward,
@@ -136,6 +138,8 @@ def _step_events_from_rank(
 
 def _input_bound_step_metrics(
     *,
+    dataloader_cpu: float = 12.0,
+    step_time_cpu: float = 90.0,
     input_wait_gpu: float,
     step_time_gpu: float,
     steps: int = 64,
@@ -143,9 +147,12 @@ def _input_bound_step_metrics(
     return {
         step: {
             "_traceml_internal:dataloader_next": _event_stats(
-                gpu_ms=input_wait_gpu
+                cpu_ms=dataloader_cpu, gpu_ms=input_wait_gpu
             ),
-            "_traceml_internal:step_time": _event_stats(gpu_ms=step_time_gpu),
+            "_traceml_internal:step_time": _event_stats(
+                cpu_ms=step_time_cpu,
+                gpu_ms=step_time_gpu,
+            ),
         }
         for step in range(steps)
     }
@@ -161,12 +168,14 @@ def _assert_compact_card(card: str) -> None:
 def _assert_public_step_metrics_keep_dataloader(payload) -> None:
     public_metric_keys = set(payload["global"]["median"])
     assert "dataloader_ms" in public_metric_keys
-    assert "input_wait_ms" not in public_metric_keys
+    assert "input_wait_ms" in public_metric_keys
+    assert "step_time_ms" in public_metric_keys
 
     for row in payload["groups"]["rows"].values():
         row_metric_keys = set(row["metrics"])
         assert "dataloader_ms" in row_metric_keys
-        assert "input_wait_ms" not in row_metric_keys
+        assert "input_wait_ms" in row_metric_keys
+        assert "step_time_ms" in row_metric_keys
 
 
 def test_step_time_no_data_card_is_compact() -> None:
@@ -264,6 +273,17 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     assert payload["diagnosis"]["evidence"]["input_wait_ms"] == 40.0
     assert payload["diagnosis"]["evidence"]["step_time_ms"] == 100.0
     assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
+    assert payload["global"]["window"]["diagnosis_clock"] == "gpu"
+    average = payload["global"]["average"]
+    assert average["dataloader_ms"] == 12.0
+    assert average["input_wait_ms"] == 40.0
+    assert average["step_time_ms"] == 100.0
+    assert average["total_step_ms"] == 102.0
+    row_metrics = payload["groups"]["rows"]["0"]["metrics"]
+    assert row_metrics["dataloader_ms"] == 12.0
+    assert row_metrics["input_wait_ms"] == 40.0
+    assert row_metrics["step_time_ms"] == 100.0
+    assert row_metrics["total_step_ms"] == 102.0
     _assert_public_step_metrics_keep_dataloader(payload)
     assert (
         "- Why: Input wait took 40.0ms of a 100.0ms gpu step."

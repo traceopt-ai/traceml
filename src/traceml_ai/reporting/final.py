@@ -52,7 +52,9 @@ _SYSTEM_EVIDENCE_METRICS = (
 )
 _STEP_TIME_EVIDENCE_METRICS = (
     ("Total", "total_step_ms"),
-    ("Input Wait", "dataloader_ms"),
+    ("Dataloader", "dataloader_ms"),
+    ("Input Wait", "input_wait_ms"),
+    ("Step Time", "step_time_ms"),
     ("Compute", "compute_ms"),
     ("Residual", "residual_ms"),
     ("H2D", "h2d_ms"),
@@ -821,7 +823,7 @@ class FinalReportGenerator:
         )
 
         return {
-            "schema_version": 1.5,
+            "schema_version": 1.6,
             "generated_at": utc_now_iso(),
             "duration_s": _summary_duration_s(
                 step_time_summary,

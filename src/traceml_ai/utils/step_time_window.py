@@ -42,6 +42,8 @@ STEP_TIME_EVENT_NAME = "_traceml_internal:step_time"
 
 INPUT_WAIT_KEY = "input_wait"
 DIAGNOSIS_CLOCK_KEY = "diagnosis_clock"
+DATALOADER_FETCH_KEY = "dataloader_fetch"
+STEP_TIME_CPU_KEY = "step_time_cpu"
 
 EVENT_ALIASES: Dict[str, str] = {
     INPUT_WAIT_KEY: DATALOADER_EVENT_NAME,
@@ -69,6 +71,11 @@ DISPLAY_METRICS: tuple[str, ...] = (
     "optimizer_step",
     "step_time",
     "residual_proxy",
+)
+
+WINDOW_AVERAGE_METRICS: tuple[str, ...] = DISPLAY_METRICS + (
+    DATALOADER_FETCH_KEY,
+    STEP_TIME_CPU_KEY,
 )
 
 REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
@@ -104,6 +111,7 @@ class StepTimeWindow:
             "start_step": self.steps[0] if self.steps else None,
             "end_step": self.steps[-1] if self.steps else None,
             "window_size": int(self.coverage.expected_steps),
+            DIAGNOSIS_CLOCK_KEY: self.clock,
         }
 
 
@@ -205,21 +213,25 @@ def _metric_from_events(
 def _build_rank_timing(
     *,
     input_wait: float,
+    dataloader_fetch: float,
     h2d: float,
     forward: float,
     backward: float,
     optimizer: float,
     step_time: float,
+    step_time_cpu: float,
 ) -> Dict[str, float]:
     residual = max(0.0, step_time - h2d - forward - backward - optimizer)
 
     return {
         INPUT_WAIT_KEY: float(input_wait),
+        DATALOADER_FETCH_KEY: float(dataloader_fetch),
         "h2d": float(h2d),
         "forward": float(forward),
         "backward": float(backward),
         "optimizer_step": float(optimizer),
         "step_time": float(step_time),
+        STEP_TIME_CPU_KEY: float(step_time_cpu),
         "residual_proxy": residual,
         "total_step": input_wait + step_time,
     }
@@ -232,10 +244,10 @@ def _average_rank_timing(
     out: Dict[int, Dict[str, float]] = {}
     divisor = float(len(steps)) if steps else 1.0
     for rank, step_map in per_rank_step_timing.items():
-        totals = {metric_key: 0.0 for metric_key in DISPLAY_METRICS}
+        totals = {metric_key: 0.0 for metric_key in WINDOW_AVERAGE_METRICS}
         for step in steps:
             metrics = step_map.get(int(step), {})
-            for metric_key in DISPLAY_METRICS:
+            for metric_key in WINDOW_AVERAGE_METRICS:
                 value = _safe_non_negative_float(metrics.get(metric_key))
                 totals[metric_key] += (
                     float(value) if value is not None else 0.0
@@ -269,11 +281,13 @@ def _selected_step_timing_from_events(
             }
             rank_timing[int(step)] = _build_rank_timing(
                 input_wait=selected.get(INPUT_WAIT_KEY, 0.0),
+                dataloader_fetch=_event_cpu_ms(events, INPUT_WAIT_KEY) or 0.0,
                 h2d=selected.get("h2d", 0.0),
                 forward=selected.get("forward", 0.0),
                 backward=selected.get("backward", 0.0),
                 optimizer=selected.get("optimizer_step", 0.0),
                 step_time=selected.get("step_time", 0.0),
+                step_time_cpu=_event_cpu_ms(events, "step_time") or 0.0,
             )
         out[int(rank)] = rank_timing
     return out
@@ -522,18 +536,26 @@ def diagnose_step_time_window(
 def public_step_time_metric_values(
     timing: Mapping[str, float]
 ) -> Dict[str, float]:
-    """Map selected-clock timing to stable final_summary metric names."""
+    """Map window timing to stable final_summary metric names.
+
+    Selected-clock fields expose diagnosis timing. Dataloader and total-step
+    compatibility fields use explicit CPU timings retained by the window.
+    """
     forward = float(timing.get("forward", 0.0))
     backward = float(timing.get("backward", 0.0))
     optimizer = float(timing.get("optimizer_step", 0.0))
     compute = forward + backward + optimizer
     input_wait = float(timing.get(INPUT_WAIT_KEY, 0.0))
     step_time = float(timing.get("step_time", 0.0))
+    dataloader_fetch = float(timing.get(DATALOADER_FETCH_KEY, 0.0))
+    step_time_cpu = float(timing.get(STEP_TIME_CPU_KEY, 0.0))
     h2d = float(timing.get("h2d", 0.0))
     residual = max(0.0, step_time - h2d - compute)
     return {
-        "total_step_ms": input_wait + step_time,
-        "dataloader_ms": input_wait,
+        "total_step_ms": dataloader_fetch + step_time_cpu,
+        "dataloader_ms": dataloader_fetch,
+        "input_wait_ms": input_wait,
+        "step_time_ms": step_time,
         "h2d_ms": h2d,
         "compute_ms": compute,
         "residual_ms": residual,
@@ -546,12 +568,14 @@ def public_step_time_metric_values(
 __all__ = [
     "DIAGNOSIS_CLOCK_KEY",
     "DATALOADER_EVENT_NAME",
+    "DATALOADER_FETCH_KEY",
     "DISPLAY_METRICS",
     "DiagnosisClock",
     "EVENT_ALIASES",
     "INPUT_WAIT_KEY",
     "SELECTED_METRICS",
     "STEP_TIME_EVENT_NAME",
+    "STEP_TIME_CPU_KEY",
     "StepTimeWindow",
     "build_step_time_metrics",
     "build_step_time_window_from_events",
