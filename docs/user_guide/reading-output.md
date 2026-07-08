@@ -128,7 +128,7 @@ The step-time diagnosis explains where training time is going.
 
 It is based on:
 
-- selected-clock input wait
+- input wait
 - H2D transfer time
 - forward time
 - backward time
@@ -227,11 +227,10 @@ Meaning:
 
 TraceML uses this idea:
 
-- compute each rank's clean step after discounting backward time that can be
-  explained by another rank's non-backward work
-- compare the worst clean step to the median clean step
+- account for backward time that can be explained by another rank arriving late
+- compare the slowest rank to the typical rank
 - blame input wait when its worst-rank excess over peer median dominates the
-  other clean-step excesses by at least `1.25x`
+  other timing differences by at least `1.25x`
 
 In simpler words:
 
@@ -267,10 +266,10 @@ Meaning:
 
 TraceML uses this idea:
 
-- compute clean compute as `forward + clean_backward + optimizer`
-- compare the worst rank's clean compute to peer median
-- blame compute when clean-compute excess dominates input wait, H2D, and residual
-  excesses by at least `1.25x`
+- account for backward time that can be explained by another rank arriving late
+- compare the worst rank's compute time to peer median
+- blame compute when compute-time excess dominates input wait, H2D, and
+  residual differences by at least `1.25x`
 
 In simpler words:
 
@@ -306,8 +305,8 @@ Meaning:
 - one rank spends meaningfully more time in host-to-device transfer than a
   typical rank
 
-TraceML uses the same clean-step comparison and reports this when H2D excess is
-the dominant worst-rank component.
+TraceML reports this when H2D is the largest timing difference on the slow
+rank.
 
 Common causes:
 
@@ -348,13 +347,12 @@ What to do next:
 
 Meaning:
 
-- one rank is slower after clean-step backward-delay discount, but no single
-  component clearly dominates
+- one rank is slower, but no single timing category clearly dominates
 
 In the current policy, this is used when:
 
-- the clean-step score is at least `0.10`
-- the largest worst-rank excess among input wait, clean compute, H2D, and residual
+- the rank difference is large enough to matter
+- the largest worst-rank excess among input wait, compute, H2D, and residual
   is less than `1.25x` the next-largest excess
 
 This is a mixed unevenness case.
@@ -759,13 +757,13 @@ Use these as context cards:
 
 | Diagnosis | Good next step |
 |---|---|
-| `INPUT-BOUND` | inspect dataloader workers, preprocessing, storage |
+| `INPUT-BOUND` | inspect input loading, preprocessing, and storage |
 | `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
 | `H2D STRAGGLER` | inspect host-to-device transfer on the worst rank |
 | `RESIDUAL STRAGGLER` | inspect rank-local host-side work on the worst rank |
-| `STRAGGLER` | inspect mixed clean-step unevenness |
+| `STRAGGLER` | inspect mixed rank unevenness |
 | `RESIDUAL-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY RISING` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |

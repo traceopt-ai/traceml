@@ -55,8 +55,7 @@ Start with `TraceML Verdict`, then check the `Step Time Evidence` table.
 
 For DataLoader problems, the most relevant diagnoses are:
 
-- `INPUT-BOUND`: dataloader or input work is taking a large share of the
-  typical step
+- `INPUT-BOUND`: input wait is taking a large share of the typical step
 - `INPUT STRAGGLER`: one rank has meaningfully more input-wait burden than a
   typical rank
 
@@ -100,8 +99,9 @@ Good first checks:
 
 For CUDA training, also check whether your existing input path uses
 `pin_memory=True` and non-blocking host-to-device transfer where appropriate.
-TraceML separates dataloader fetch, H2D, compute, and residual time. Use that split
-to avoid treating a transfer, compute, or residual issue as a DataLoader issue.
+TraceML separates input wait, CPU dataloader fetch, H2D, compute, and residual
+time. Use that split to avoid treating a transfer, compute, or residual issue
+as a DataLoader issue.
 
 ## Compare before and after
 

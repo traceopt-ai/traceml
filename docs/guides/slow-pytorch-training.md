@@ -41,16 +41,16 @@ diagnosis or symptom.
 
 ## Quick interpretation
 
-`INPUT-BOUND` means dataloader or input work is taking a large share of the
-typical step. Confirm the input path before tuning model compute.
+`INPUT-BOUND` means input wait is taking a large share of the typical step.
+Confirm the input path before tuning model compute.
 
 `LOW_GPU_UTILIZATION` and `MODERATE_GPU_UTILIZATION` are system-level symptoms.
 They say the GPU was not fully busy, not why it was not fully busy. Pair them
 with Step Time.
 
-`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `RESIDUAL STRAGGLER`, and
-`STRAGGLER` are distributed clean-step signals. Inspect the called-out worst
-rank and compare it with the median rank.
+`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`,
+`RESIDUAL STRAGGLER`, and `STRAGGLER` are distributed rank-skew signals.
+Inspect the called-out worst rank and compare it with the median rank.
 
 `MEMORY CREEP` and `MEMORY RISING` are step-memory trend signals. Inspect
 retained tensors, caches, and per-step state that may stay alive.
@@ -59,7 +59,7 @@ retained tensors, caches, and per-step state that may stay alive.
 observed step. Use TraceML to choose the hot phase, then use an operator-level
 profiler if you need kernel or operator detail.
 
-`RESIDUAL-HEAVY` is residual time not attributed to dataloader, H2D, forward,
+`RESIDUAL-HEAVY` is residual time not attributed to input wait, H2D, forward,
 backward, or optimizer work. Inspect logging, checkpointing, validation,
 CPU-side stalls, framework orchestration, or unobserved transfers.
 

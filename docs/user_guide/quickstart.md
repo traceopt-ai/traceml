@@ -80,7 +80,7 @@ For DDP, FSDP, and multi-node launches, see
 |                                                                            |
 |  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
 |  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
-|  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
+|  Next: Inspect input loading, collate_fn, preprocessing, and storage on    |
 |  slow rank.                                                                |
 |                                                                            |
 |  Section Status                                                            |

@@ -31,7 +31,7 @@ After confirming low or moderate GPU utilization, read the Step Time diagnosis.
 
 | Step Time diagnosis | What to do |
 |---|---|
-| `INPUT-BOUND` | Inspect the DataLoader and input path. |
+| `INPUT-BOUND` | Inspect input loading, preprocessing, collation, and storage. |
 | `INPUT STRAGGLER` | Inspect the slow input rank. |
 | `H2D STRAGGLER` | Inspect host-to-device transfer on the worst rank. |
 | `RESIDUAL STRAGGLER` | Inspect rank-local host-side work on the worst rank. |
@@ -41,8 +41,8 @@ After confirming low or moderate GPU utilization, read the Step Time diagnosis.
 | `BALANCED` | Compare against a known good run or use a heavier profiler for lower-level detail. |
 
 Low GPU utilization plus `INPUT-BOUND` is a strong signal to start with the
-[DataLoader bottleneck guide](pytorch-dataloader-bottleneck.md). Low GPU
-utilization by itself is not enough.
+[input pipeline guide](pytorch-dataloader-bottleneck.md). Low GPU utilization
+by itself is not enough.
 
 ## Checks that match TraceML evidence
 
