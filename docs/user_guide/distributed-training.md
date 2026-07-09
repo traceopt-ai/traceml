@@ -14,8 +14,8 @@ Use `--nproc-per-node` for a single machine with multiple local workers:
 traceml run train.py --nproc-per-node=4
 ```
 
-Live CLI and dashboard modes are intended for single-node runs. Summary mode is
-the default and works for both single-node and multi-node summary reports.
+Live CLI is the default for single-node runs, including single-node multi-GPU.
+When `--nnodes > 1`, TraceML defaults to summary mode.
 
 ## Multi-node DDP
 
