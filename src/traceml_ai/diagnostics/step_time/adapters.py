@@ -133,6 +133,9 @@ def build_summary_step_diagnosis_result(
     metrics = build_diagnosis_metrics_from_timing(
         diagnosis_timing.per_rank_timing,
         coverage=coverage,
+        include_series=True,
+        series_steps=common_steps,
+        per_rank_step_timing=diagnosis_timing.per_rank_step_timing,
         worst_rank_override=overall_worst_rank,
     )
 

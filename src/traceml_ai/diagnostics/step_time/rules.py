@@ -106,7 +106,7 @@ class CleanStragglerRule(_BaseStepTimeRule):
 
         rank = evidence.worst_rank
         component_label = {
-            "input": "dataloader",
+            "input": "input wait",
             "compute": "clean compute",
             "h2d": "H2D",
             "residual": "residual",

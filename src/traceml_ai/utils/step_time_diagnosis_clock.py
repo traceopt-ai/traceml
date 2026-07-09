@@ -1,8 +1,8 @@
 """Selected-clock Step Time metrics for diagnosis.
 
-This module is intentionally diagnosis-only. Public Step Time renderers and
-summary rollups continue to use their existing ``duration_ms`` semantics. The
-diagnosis path selects one clock for a whole analyzed window:
+This module is intentionally diagnosis-only. Summary rollups keep their
+existing ``duration_ms`` semantics. The diagnosis path selects one clock for a
+whole analyzed window:
 
 - GPU when every rank/step has GPU event timing for the step envelope,
   dataloader/input wait, and traced phase events present in the window.
@@ -42,7 +42,6 @@ STEP_TIME_GPU_MS_KEY = "step_time_gpu_ms"
 
 EVENT_ALIASES: Dict[str, str] = {
     INPUT_WAIT_KEY: DATALOADER_EVENT_NAME,
-    "dataloader_fetch": DATALOADER_EVENT_NAME,
     "h2d": "_traceml_internal:h2d_time",
     "forward": "_traceml_internal:forward_time",
     "backward": "_traceml_internal:backward_time",
@@ -64,10 +63,13 @@ _REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
 
 @dataclass(frozen=True)
 class DiagnosisTimingWindow:
-    """Selected-clock per-rank Step Time metrics for one analysis window."""
+    """Selected-clock Step Time metrics for one analysis window."""
 
     clock: DiagnosisClock = "cpu"
     per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
+    per_rank_step_timing: Dict[int, Dict[int, Dict[str, float]]] = field(
+        default_factory=dict
+    )
 
 
 def _safe_non_negative_float(value: Any) -> Optional[float]:
@@ -190,7 +192,6 @@ def _metric_from_events(
 def _build_rank_timing(
     *,
     input_wait: float,
-    dataloader_fetch: float,
     h2d: float,
     forward: float,
     backward: float,
@@ -201,7 +202,6 @@ def _build_rank_timing(
 
     return {
         INPUT_WAIT_KEY: float(input_wait),
-        "dataloader_fetch": float(dataloader_fetch),
         "h2d": float(h2d),
         "forward": float(forward),
         "backward": float(backward),
@@ -226,47 +226,53 @@ def build_diagnosis_timing_from_events(
     clock = _select_clock_from_events(per_rank_steps, selected_steps)
     divisor = float(len(selected_steps)) if aggregate == "average" else 1.0
     per_rank_timing: Dict[int, Dict[str, float]] = {}
+    per_rank_step_timing: Dict[int, Dict[int, Dict[str, float]]] = {}
 
     for rank, step_map in per_rank_steps.items():
         totals = {metric_key: 0.0 for metric_key in _SELECTED_METRICS}
-        dataloader_fetch = 0.0
+        step_timing: Dict[int, Dict[str, float]] = {}
         for step in selected_steps:
             events = step_map.get(int(step), {})
-            dataloader_fetch += _metric_from_events(
-                events,
-                "dataloader_fetch",
-                clock="cpu",
-            )
-            for metric_key in _SELECTED_METRICS:
-                totals[metric_key] += _metric_from_events(
-                    events,
-                    metric_key,
-                    clock=clock,
+            selected = {
+                metric_key: _metric_from_events(
+                    events, metric_key, clock=clock
                 )
+                for metric_key in _SELECTED_METRICS
+            }
+            step_timing[int(step)] = _build_rank_timing(
+                input_wait=selected.get(INPUT_WAIT_KEY, 0.0),
+                h2d=selected.get("h2d", 0.0),
+                forward=selected.get("forward", 0.0),
+                backward=selected.get("backward", 0.0),
+                optimizer=selected.get("optimizer_step", 0.0),
+                step_time=selected.get("step_time", 0.0),
+            )
+            for metric_key, value in selected.items():
+                totals[metric_key] += value
         if divisor > 1.0:
             totals = {
                 metric_key: value / divisor
                 for metric_key, value in totals.items()
             }
-            dataloader_fetch = dataloader_fetch / divisor
         per_rank_timing[int(rank)] = _build_rank_timing(
             input_wait=totals.get(INPUT_WAIT_KEY, 0.0),
-            dataloader_fetch=dataloader_fetch,
             h2d=totals.get("h2d", 0.0),
             forward=totals.get("forward", 0.0),
             backward=totals.get("backward", 0.0),
             optimizer=totals.get("optimizer_step", 0.0),
             step_time=totals.get("step_time", 0.0),
         )
+        per_rank_step_timing[int(rank)] = step_timing
 
     return DiagnosisTimingWindow(
         clock=clock,
         per_rank_timing=per_rank_timing,
+        per_rank_step_timing=per_rank_step_timing,
     )
 
 
 def _metric_field(metric_key: str, clock: str) -> str:
-    if metric_key in {INPUT_WAIT_KEY, "dataloader_fetch"}:
+    if metric_key == INPUT_WAIT_KEY:
         return f"input_wait_{clock}_ms"
     if metric_key == "step_time":
         return f"step_time_{clock}_ms"
@@ -354,42 +360,48 @@ def build_diagnosis_timing_from_step_metrics(
     )
     divisor = float(len(selected_steps)) if aggregate == "average" else 1.0
     per_rank_timing: Dict[int, Dict[str, float]] = {}
+    per_rank_step_timing: Dict[int, Dict[int, Dict[str, float]]] = {}
 
     for rank, step_map in per_rank_step_metrics.items():
         totals = {metric_key: 0.0 for metric_key in _SELECTED_METRICS}
-        dataloader_fetch = 0.0
+        step_timing: Dict[int, Dict[str, float]] = {}
         for step in selected_steps:
             metrics = step_map.get(int(step), {})
-            dataloader_fetch += _metric_from_step_metrics(
-                metrics,
-                "dataloader_fetch",
-                clock="cpu",
-            )
-            for metric_key in _SELECTED_METRICS:
-                totals[metric_key] += _metric_from_step_metrics(
-                    metrics,
-                    metric_key,
-                    clock=clock,
+            selected = {
+                metric_key: _metric_from_step_metrics(
+                    metrics, metric_key, clock=clock
                 )
+                for metric_key in _SELECTED_METRICS
+            }
+            step_timing[int(step)] = _build_rank_timing(
+                input_wait=selected.get(INPUT_WAIT_KEY, 0.0),
+                h2d=selected.get("h2d", 0.0),
+                forward=selected.get("forward", 0.0),
+                backward=selected.get("backward", 0.0),
+                optimizer=selected.get("optimizer_step", 0.0),
+                step_time=selected.get("step_time", 0.0),
+            )
+            for metric_key, value in selected.items():
+                totals[metric_key] += value
         if divisor > 1.0:
             totals = {
                 metric_key: value / divisor
                 for metric_key, value in totals.items()
             }
-            dataloader_fetch = dataloader_fetch / divisor
         per_rank_timing[int(rank)] = _build_rank_timing(
             input_wait=totals.get(INPUT_WAIT_KEY, 0.0),
-            dataloader_fetch=dataloader_fetch,
             h2d=totals.get("h2d", 0.0),
             forward=totals.get("forward", 0.0),
             backward=totals.get("backward", 0.0),
             optimizer=totals.get("optimizer_step", 0.0),
             step_time=totals.get("step_time", 0.0),
         )
+        per_rank_step_timing[int(rank)] = step_timing
 
     return DiagnosisTimingWindow(
         clock=clock,
         per_rank_timing=per_rank_timing,
+        per_rank_step_timing=per_rank_step_timing,
     )
 
 
@@ -411,7 +423,7 @@ def build_diagnosis_metrics_from_timing(
 
     metrics: list[StepCombinedTimeMetric] = []
     for metric_key in (
-        "dataloader_fetch",
+        INPUT_WAIT_KEY,
         "h2d",
         "forward",
         "backward",
@@ -453,6 +465,7 @@ def build_diagnosis_metrics_from_timing(
             if step_ids and per_rank_step_timing:
                 median_y: list[float] = []
                 worst_y: list[float] = []
+                sum_y: list[float] = []
                 for step in step_ids:
                     step_values = np.asarray(
                         [
@@ -474,11 +487,14 @@ def build_diagnosis_metrics_from_timing(
                     worst_y.append(
                         float(np.max(step_values)) if step_values.size else 0.0
                     )
+                    sum_y.append(
+                        float(np.sum(step_values)) if step_values.size else 0.0
+                    )
                 series = StepCombinedTimeSeries(
                     steps=step_ids,
                     median=median_y,
                     worst=worst_y,
-                    sum=[0.0] * len(step_ids),
+                    sum=sum_y,
                 )
 
         metrics.append(

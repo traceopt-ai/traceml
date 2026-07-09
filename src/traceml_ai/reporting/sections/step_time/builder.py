@@ -254,6 +254,29 @@ def _issue_by_kind(issues: tuple[Any, ...], kind: str) -> Optional[Any]:
     return None
 
 
+def _diagnosis_evidence(diagnosis: Any) -> Dict[str, Any]:
+    """Return diagnosis evidence as a plain mapping."""
+    evidence = getattr(diagnosis, "evidence", None)
+    return evidence if isinstance(evidence, dict) else {}
+
+
+def _input_bound_evidence_reason(diagnosis: Any) -> Optional[str]:
+    """Build a short input-bound reason from selected-clock evidence."""
+    evidence = _diagnosis_evidence(diagnosis)
+    input_wait_ms = evidence.get("input_wait_ms")
+    step_time_ms = evidence.get("step_time_ms")
+    diagnosis_clock = str(evidence.get("diagnosis_clock") or "").lower()
+    if input_wait_ms is None or step_time_ms is None:
+        return None
+    clock_text = (
+        f" {diagnosis_clock}" if diagnosis_clock in {"cpu", "gpu"} else ""
+    )
+    return (
+        f"Input wait took {format_ms(input_wait_ms)} of a "
+        f"{format_ms(step_time_ms)}{clock_text} step."
+    )
+
+
 def _compute_phase_pair_from_rank_values(
     phase: str,
     per_global_rank_summary: Dict[int, RankStepSummary],
@@ -346,11 +369,13 @@ def _step_time_card_reason(
     if kind == "STRAGGLER":
         return "Multiple clean-step components varied across ranks."
     if kind == "INPUT_BOUND":
-        evidence = (
-            f"{format_ms(stats.input.worst_ms)}/"
-            f"{format_ms(stats.total_step.worst_ms)}"
-        )
-        return f"Input loading took a large share ({evidence})."
+        issue = _issue_by_kind(issues, "INPUT_BOUND")
+        evidence_reason = _input_bound_evidence_reason(issue or diagnosis)
+        if evidence_reason:
+            return evidence_reason
+        return str(
+            getattr(diagnosis, "reason", "") or "Input wait was high."
+        ).strip()
     if kind == "RESIDUAL_HEAVY":
         evidence = (
             f"{format_ms(stats.residual.worst_ms)}/"

@@ -73,7 +73,7 @@ class StepTimeAnalysisContext:
     overall_worst_rank: Optional[int]
 
     step_metric: StepCombinedTimeMetric
-    dataloader_metric: Optional[StepCombinedTimeMetric]
+    input_wait_metric: Optional[StepCombinedTimeMetric]
     h2d_metric: Optional[StepCombinedTimeMetric]
     residual_metric: Optional[StepCombinedTimeMetric]
     forward_metric: Optional[StepCombinedTimeMetric]
@@ -81,19 +81,15 @@ class StepTimeAnalysisContext:
     optimizer_metric: Optional[StepCombinedTimeMetric]
 
     step_total: float
-    dataloader_total: float
     residual_total: float
     compute_total: float
 
-    dataloader_share: float
     residual_share: float
     compute_share: float
     input_bound_share: float
 
-    dataloader_skew: float
     input_bound_skew: float
     compute_skew: float
-    dataloader_worst_rank: Optional[int]
     input_bound_worst_rank: Optional[int]
     diagnosis_clock: str
     input_wait_total: float
@@ -257,10 +253,10 @@ def _clean_rank_timings(
     non-backward work in the same averaged/aligned window:
 
         residual_r = current residual_proxy_r
-        non_bwd_r = DL_r + H2D_r + FWD_r + OPT_r + RESIDUAL_r
+        non_bwd_r = INPUT_WAIT_r + H2D_r + FWD_r + OPT_r + RESIDUAL_r
         clean_bwd_r = max(0, BWD_r - max(0, max(non_bwd) - non_bwd_r))
         clean_compute_r = FWD_r + clean_bwd_r + OPT_r
-        clean_step_r = DL_r + H2D_r + clean_compute_r + RESIDUAL_r
+        clean_step_r = INPUT_WAIT_r + H2D_r + clean_compute_r + RESIDUAL_r
         score = (max(clean_step) - median(clean_step)) / median(actual_step)
     """
     if not per_rank_timing:
@@ -269,9 +265,7 @@ def _clean_rank_timings(
     ranks = sorted(int(rank) for rank in per_rank_timing)
     non_bwd = {
         rank: (
-            non_negative_finite(
-                per_rank_timing[rank].get("dataloader_fetch", 0.0)
-            )
+            non_negative_finite(per_rank_timing[rank].get("input_wait", 0.0))
             + non_negative_finite(per_rank_timing[rank].get("h2d", 0.0))
             + non_negative_finite(per_rank_timing[rank].get("forward", 0.0))
             + non_negative_finite(
@@ -286,7 +280,7 @@ def _clean_rank_timings(
     non_bwd_max = max(non_bwd.values()) if non_bwd else 0.0
 
     out = {
-        "dataloader_fetch": {},
+        "input_wait": {},
         "h2d": {},
         "forward": {},
         "backward": {},
@@ -300,29 +294,20 @@ def _clean_rank_timings(
     }
     for rank in ranks:
         values = per_rank_timing[rank]
-        dataloader = non_negative_finite(values.get("dataloader_fetch", 0.0))
+        input_wait = non_negative_finite(values.get("input_wait", 0.0))
         h2d = non_negative_finite(values.get("h2d", 0.0))
         forward = non_negative_finite(values.get("forward", 0.0))
         backward = non_negative_finite(values.get("backward", 0.0))
         optimizer = non_negative_finite(values.get("optimizer_step", 0.0))
         residual = non_negative_finite(values.get("residual_proxy", 0.0))
-        total_step = non_negative_finite(
-            values.get(
-                "total_step",
-                dataloader
-                + max(
-                    non_negative_finite(values.get("step_time", 0.0)),
-                    h2d + forward + backward + optimizer,
-                ),
-            )
-        )
+        total_step = non_negative_finite(values.get("total_step", 0.0))
 
         explained_bwd_delay = max(0.0, non_bwd_max - non_bwd[rank])
         clean_backward = max(0.0, backward - explained_bwd_delay)
         clean_compute = forward + clean_backward + optimizer
-        clean_step = dataloader + h2d + clean_compute + residual
+        clean_step = input_wait + h2d + clean_compute + residual
 
-        out["dataloader_fetch"][rank] = dataloader
+        out["input_wait"][rank] = input_wait
         out["h2d"][rank] = h2d
         out["forward"][rank] = forward
         out["backward"][rank] = backward
@@ -366,8 +351,8 @@ def _clean_straggler_evidence(
         "input": (
             "INPUT_STRAGGLER",
             "INPUT STRAGGLER",
-            "dataloader_fetch",
-            "dataloader",
+            "input_wait",
+            "input",
         ),
         "compute": (
             "COMPUTE_STRAGGLER",
@@ -384,7 +369,7 @@ def _clean_straggler_evidence(
         ),
     }
     source_by_component = {
-        "input": clean_rank_values.get("dataloader_fetch", {}),
+        "input": clean_rank_values.get("input_wait", {}),
         "compute": clean_rank_values.get("clean_compute", {}),
         "h2d": clean_rank_values.get("h2d", {}),
         "residual": clean_rank_values.get("residual_proxy", {}),
@@ -511,7 +496,7 @@ def build_step_time_context(
     by_key = {metric.metric: metric for metric in metrics}
 
     step_metric = by_key["step_time"]
-    dataloader_metric = by_key.get("dataloader_fetch")
+    input_wait_metric = by_key.get("input_wait")
     h2d_metric = by_key.get("h2d")
     residual_metric = by_key.get("residual_proxy")
     forward_metric = by_key.get("forward")
@@ -524,7 +509,6 @@ def build_step_time_context(
     overall_worst_rank = metric_worst_rank(step_metric)
 
     step_total = metric_total(step_metric, single_rank=single_rank)
-    dataloader_total = metric_total(dataloader_metric, single_rank=single_rank)
     residual_total = metric_total(residual_metric, single_rank=single_rank)
     compute_total_value = compute_total(
         forward=forward_metric,
@@ -541,7 +525,7 @@ def build_step_time_context(
     )
 
     rank_values = {
-        "dataloader_fetch": rank_values_from_metric(dataloader_metric),
+        "input_wait": rank_values_from_metric(input_wait_metric),
         "h2d": rank_values_from_metric(h2d_metric),
         "forward": rank_values_from_metric(forward_metric),
         "backward": rank_values_from_metric(backward_metric),
@@ -556,8 +540,8 @@ def build_step_time_context(
     }
     if local_per_rank_timing:
         rank_values = {
-            "dataloader_fetch": {
-                rank: non_negative_finite(values.get("dataloader_fetch", 0.0))
+            "input_wait": {
+                rank: non_negative_finite(values.get("input_wait", 0.0))
                 for rank, values in local_per_rank_timing.items()
             },
             "h2d": {
@@ -633,26 +617,20 @@ def build_step_time_context(
         steps_used=steps_used,
         overall_worst_rank=overall_worst_rank,
         step_metric=step_metric,
-        dataloader_metric=dataloader_metric,
+        input_wait_metric=input_wait_metric,
         h2d_metric=h2d_metric,
         residual_metric=residual_metric,
         forward_metric=forward_metric,
         backward_metric=backward_metric,
         optimizer_metric=optimizer_metric,
         step_total=step_total,
-        dataloader_total=dataloader_total,
         residual_total=residual_total,
         compute_total=compute_total_value,
-        dataloader_share=share(dataloader_total, step_total),
         residual_share=share(residual_total, step_total),
         compute_share=share(compute_total_value, step_total),
         input_bound_share=share(input_wait_total, input_bound_step_total),
-        dataloader_skew=metric_skew(
-            dataloader_metric, single_rank=single_rank
-        ),
         input_bound_skew=input_bound_skew,
         compute_skew=compute_skew_value,
-        dataloader_worst_rank=metric_worst_rank(dataloader_metric),
         input_bound_worst_rank=input_wait_worst_rank,
         diagnosis_clock=(
             "gpu" if str(diagnosis_clock).lower() == "gpu" else "cpu"

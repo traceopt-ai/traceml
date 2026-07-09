@@ -13,14 +13,9 @@ from traceml_ai.diagnostics.step_time.api import (
     build_step_diagnosis_result,
 )
 from traceml_ai.diagnostics.step_time.adapters import (
-    DEFAULT_SUMMARY_DIAG_CONFIG,
     build_summary_step_diagnosis_result,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
-from traceml_ai.diagnostics.step_time.policy import (
-    LIVE_STEP_TIME_POLICY,
-    SUMMARY_STEP_TIME_POLICY,
-)
 from traceml_ai.diagnostics.step_time.rules import (
     CleanStragglerRule,
     ComputeBoundRule,
@@ -118,7 +113,7 @@ def _timing_row(
     known_step = h2d + forward + backward + optimizer
     local_step = known_step + residual if step_time is None else step_time
     row = {
-        "dataloader_fetch": dataloader,
+        "input_wait": dataloader,
         "h2d": h2d,
         "forward": forward,
         "backward": backward,
@@ -148,7 +143,7 @@ def _metrics_from_per_rank_timing(
     metrics: list[StepCombinedTimeMetric] = []
     world_size = len(per_rank_timing)
     for key in (
-        "dataloader_fetch",
+        "input_wait",
         "h2d",
         "forward",
         "backward",
@@ -208,7 +203,7 @@ def _single_rank_step_metrics(
             world_size=1,
         ),
         _time_metric(
-            "dataloader_fetch",
+            "input_wait",
             median=dataloader,
             worst=dataloader,
             worst_rank=0,
@@ -395,6 +390,12 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(4.0)
     assert selected.per_rank_timing[0]["step_time"] == pytest.approx(20.0)
     assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(5.0)
+    assert selected.per_rank_step_timing[0][1]["input_wait"] == pytest.approx(
+        4.0
+    )
+    assert selected.per_rank_step_timing[0][1]["step_time"] == pytest.approx(
+        20.0
+    )
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
     selected = build_diagnosis_timing_from_events({0: {1: events}}, [1])
@@ -580,25 +581,6 @@ def test_step_time_primary_prefers_clean_straggler_over_residual_heavy() -> (
     }
 
 
-def test_step_time_live_and_summary_policies_are_explicit() -> None:
-    assert LIVE_STEP_TIME_POLICY.name == "live"
-    assert SUMMARY_STEP_TIME_POLICY.name == "summary"
-    assert DEFAULT_THRESHOLDS == LIVE_STEP_TIME_POLICY.thresholds
-    assert DEFAULT_SUMMARY_DIAG_CONFIG == SUMMARY_STEP_TIME_POLICY
-    assert (
-        SUMMARY_STEP_TIME_POLICY.thresholds.residual_share_warn
-        > LIVE_STEP_TIME_POLICY.thresholds.residual_share_warn
-    )
-    assert (
-        SUMMARY_STEP_TIME_POLICY.thresholds.straggler_dominance_tolerance
-        == pytest.approx(1.25)
-    )
-    assert (
-        SUMMARY_STEP_TIME_POLICY.min_steps_for_diag
-        > LIVE_STEP_TIME_POLICY.min_steps_for_diag
-    )
-
-
 def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
     warmup = build_summary_step_diagnosis_result(
         {0: _summary_step_metrics(input_wait_gpu=None, steps=40)},
@@ -629,7 +611,6 @@ def _summary_step_metrics(
     out: dict[int, dict[str, float]] = {}
     for step in range(steps):
         metrics = {
-            "dataloader_fetch": 50.0,
             "h2d": 0.0,
             "forward": 20.0,
             "backward": 30.0,
@@ -658,3 +639,30 @@ def test_summary_input_bound_uses_explicit_input_clocks() -> None:
     assert high_wait.primary.kind == "INPUT_BOUND"
     assert high_wait.issues[0].evidence["diagnosis_clock"] == "gpu"
     assert high_wait.issues[0].evidence["input_wait_ms"] == pytest.approx(25.0)
+
+
+def test_summary_input_bound_trend_uses_selected_input_wait_series() -> None:
+    steps = 240
+    per_step: dict[int, dict[str, float]] = {}
+    for step in range(steps):
+        input_wait = 10.0 + step * (80.0 / float(steps - 1))
+        per_step[step] = {
+            "h2d": 0.0,
+            "forward": 20.0,
+            "backward": 30.0,
+            "optimizer_step": 10.0,
+            "step_time": 60.0,
+            "residual_proxy": 0.0,
+            INPUT_WAIT_GPU_MS_KEY: input_wait,
+            STEP_TIME_GPU_MS_KEY: 60.0,
+        }
+
+    result = build_summary_step_diagnosis_result(
+        {0: per_step},
+        max_rows=steps,
+    )
+
+    assert result.primary.kind == "INPUT_BOUND"
+    assert result.primary.note is not None
+    assert result.primary.note.startswith("Trend: input wait is ")
+    assert "dataloader" not in result.primary.note

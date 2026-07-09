@@ -5,9 +5,9 @@ Signature element: a phase RIBBON (current-step phase proportions) plus a
 VERDICT, then a compact step-KPI strip. The ribbon recomposes (CSS width
 transition) as the bottleneck shifts.
 
-The ribbon and KPI strip are driven by StepCombinedTimeResult
-(``update_model_combined_section``). The VERDICT is NOT computed here: it is
-taken verbatim from the diagnosis engine's step-time ``status`` via
+The ribbon and KPI strip are driven by StepCombinedTimeResult diagnosis
+metrics (``update_model_combined_section``). The VERDICT is NOT computed here:
+it is taken verbatim from the diagnosis engine's step-time ``status`` via
 ``update_step_verdict`` (fed the model-diagnostics payload), so it is identical
 to the Diagnostics rail, the CLI, and final_summary, and tracks any future
 change to the diagnosis vocabulary automatically. The card never derives its
@@ -115,9 +115,9 @@ def _index(
 def update_model_combined_section(
     panel: Dict[str, Any], payload: Optional[StepCombinedTimeResult]
 ) -> None:
-    if not payload or not getattr(payload, "metrics", None):
+    if not payload or not getattr(payload, "diagnosis_metrics", None):
         return
-    m = _index(payload.metrics)
+    m = _index(payload.diagnosis_metrics)
     if not _REQUIRED.issubset(m):
         return
 
