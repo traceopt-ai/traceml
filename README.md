@@ -25,8 +25,7 @@
 <div align="center">
 
 ![TraceML live terminal view](docs/assets/cli_demo_v1.png)
-
-<sub>Live terminal view — TraceML calls the bottleneck (here: an input straggler on rank 0) while training runs.</sub>
+<sub>Live terminal view</sub>
 
 </div>
 
@@ -244,6 +243,14 @@ changing the final saved artifacts.
 | `--mode=summary` (default) | Silent execution | Single-node and multi-node multi-GPU |
 | `--mode=cli` | Live terminal display | Single-node, including multi-GPU |
 | `--mode=dashboard` | Live browser display | Single-node; requires `pip install "traceml-ai[dashboard]"` |
+
+<div align="center">
+
+![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
+
+<sub>`--mode=dashboard` — optional local browser view for single-node runs.</sub>
+
+</div>
 
 ---
 
