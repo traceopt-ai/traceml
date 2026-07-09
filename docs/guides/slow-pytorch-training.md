@@ -32,7 +32,7 @@ diagnosis or symptom.
 
 | What you see | Start here |
 |---|---|
-| Step Time says `INPUT-BOUND` | [Find DataLoader Bottlenecks](pytorch-dataloader-bottleneck.md) |
+| Step Time says `INPUT-BOUND` | [Find Input Pipeline Bottlenecks](pytorch-input-pipeline-bottleneck.md) |
 | System says `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION` | [Debug Low GPU Utilization](low-gpu-utilization-pytorch.md) |
 | Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `RESIDUAL STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
 | Step Memory says `MEMORY CREEP` or `MEMORY RISING` | [Find PyTorch Memory Creep](pytorch-memory-creep.md) |
@@ -65,7 +65,7 @@ CPU-side stalls, framework orchestration, or unobserved transfers.
 
 ## What not to assume
 
-- Low GPU utilization alone does not prove a DataLoader bottleneck.
+- Low GPU utilization alone does not prove an input pipeline bottleneck.
 - A DDP slowdown is not always NCCL. TraceML currently reports rank skew and
   residual residual, not explicit collective timing.
 - `BALANCED` means no clear bottleneck in the observed window. It does not

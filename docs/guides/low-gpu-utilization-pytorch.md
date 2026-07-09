@@ -41,7 +41,7 @@ After confirming low or moderate GPU utilization, read the Step Time diagnosis.
 | `BALANCED` | Compare against a known good run or use a heavier profiler for lower-level detail. |
 
 Low GPU utilization plus `INPUT-BOUND` is a strong signal to start with the
-[input pipeline guide](pytorch-dataloader-bottleneck.md). Low GPU utilization
+[input pipeline guide](pytorch-input-pipeline-bottleneck.md). Low GPU utilization
 by itself is not enough.
 
 ## Checks that match TraceML evidence
@@ -84,6 +84,6 @@ primary diagnosis changed.
 ## Related
 
 - [Find why PyTorch training is slow](slow-pytorch-training.md)
-- [Find DataLoader Bottlenecks](pytorch-dataloader-bottleneck.md)
+- [Find Input Pipeline Bottlenecks](pytorch-input-pipeline-bottleneck.md)
 - [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md)
 - [How to Read TraceML Output](../user_guide/reading-output.md)

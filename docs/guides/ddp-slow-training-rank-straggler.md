@@ -172,7 +172,7 @@ residual time, and diagnosis.
 ## Related
 
 - [Find why PyTorch training is slow](slow-pytorch-training.md)
-- [Find DataLoader Bottlenecks](pytorch-dataloader-bottleneck.md)
+- [Find Input Pipeline Bottlenecks](pytorch-input-pipeline-bottleneck.md)
 - [Distributed Training](../user_guide/distributed-training.md)
 - [Running on Slurm](../user_guide/slurm.md)
 - [How to Read TraceML Output](../user_guide/reading-output.md)

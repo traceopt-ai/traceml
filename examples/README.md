@@ -42,7 +42,7 @@ These examples are still user-facing, but they are more about showing specific T
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
-To contrast a normal input path with a synthetic DataLoader bottleneck:
+To contrast a normal input path with a synthetic input pipeline bottleneck:
 
 ```bash
 traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast

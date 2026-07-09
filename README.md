@@ -267,7 +267,7 @@ In our benchmark runs, TraceML adds:
 These guides cover the common bottlenecks TraceML is designed to identify:
 
 - [Find why PyTorch training is slow](docs/guides/slow-pytorch-training.md)
-- [Find DataLoader Bottlenecks](docs/guides/pytorch-dataloader-bottleneck.md)
+- [Find Input Pipeline Bottlenecks](docs/guides/pytorch-input-pipeline-bottleneck.md)
 - [Debug Low GPU Utilization](docs/guides/low-gpu-utilization-pytorch.md)
 - [Debug DDP Rank Stragglers](docs/guides/ddp-slow-training-rank-straggler.md)
 - [Find PyTorch Memory Creep](docs/guides/pytorch-memory-creep.md)
