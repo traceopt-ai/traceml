@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Low-overhead PyTorch training performance diagnostics. Every step, every run.**
+**Find hidden PyTorch training bottlenecks before they waste GPU hours.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -20,14 +20,26 @@
 
 </div>
 
-  TraceML runs alongside your training loop and writes a compact performance
-  report at the end of each run — with <2% overhead in current benchmarks,
-  across the full job, not just sampled steps. It helps answer:
+</div>
 
-  - Are my GPUs waiting on a slow dataloader?
-  - Is one distributed rank consistently slower than the others?
-  - Is memory usage silently creeping upward during the run?
-  - Did a recent code, data, or infrastructure change slow training down?
+<div align="center">
+
+![TraceML live terminal view](docs/assets/traceml-cli.gif)
+
+<sub>Live terminal view — TraceML calls the bottleneck (here: an input straggler on rank 0) while training runs.</sub>
+
+</div>
+
+
+TraceML is open-source performance observability for PyTorch training.
+It runs alongside your training loop and writes a compact performance summary at the end of every run — so teams can diagnose bottlenecks, compare runs, and catch regressions before reaching for a heavyweight profiler. Under 2% overhead in current benchmarks, across the full job, not just sampled steps.
+
+TraceML helps answer:
+
+Is the GPU doing work, or waiting on input?
+Is one distributed rank consistently slower than the others?
+Is memory silently creeping upward during the run?
+Did a code, data, or infrastructure change slow training down?
 
 ---
 
