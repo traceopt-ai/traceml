@@ -24,7 +24,7 @@
 
 <div align="center">
 
-![TraceML live terminal view](docs/assets/traceml-cli.gif)
+![TraceML live terminal view](docs/assets/cli_demo_v1.png)
 
 <sub>Live terminal view — TraceML calls the bottleneck (here: an input straggler on rank 0) while training runs.</sub>
 
