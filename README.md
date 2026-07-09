@@ -35,10 +35,10 @@ It runs alongside your training loop and writes a compact performance summary at
 
 TraceML helps answer:
 
-Is the GPU doing work, or waiting on input?
-Is one distributed rank consistently slower than the others?
-Is memory silently creeping upward during the run?
-Did a code, data, or infrastructure change slow training down?
+- Is the GPU doing work, or waiting on input?
+- Is one distributed rank consistently slower than the others?
+- Is memory silently creeping upward during the run?
+- Did a code, data, or infrastructure change slow training down?
 
 ---
 
