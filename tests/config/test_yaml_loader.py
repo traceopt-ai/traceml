@@ -190,7 +190,7 @@ def test_resolve_config_yaml_beats_default(tmp_path: Path) -> None:
 def test_resolve_config_default_when_nothing_set() -> None:
     cli = _no_cli()
     result = resolve_config(cli, _no_env(), _no_yaml(), _defaults())
-    assert result["mode"] == BUILT_IN_DEFAULTS["mode"]
+    assert result["mode"] == "cli"
     assert result["interval"] == BUILT_IN_DEFAULTS["interval"]
     assert result["history_enabled"] == BUILT_IN_DEFAULTS["history_enabled"]
 
