@@ -244,6 +244,9 @@ changing the final saved artifacts.
 | `--mode=cli` | Live terminal display | Single-node, including multi-GPU |
 | `--mode=dashboard` | Live browser display | Single-node; requires `pip install "traceml-ai[dashboard]"` |
 
+> **Headless / CI / capturing stdout?** Use `--mode=summary` to
+> suppress the live terminal display. The `final_summary.json` and `.txt` artifacts are still written.
+
 <div align="center">
 
 ![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
