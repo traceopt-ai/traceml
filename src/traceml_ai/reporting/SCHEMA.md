@@ -317,6 +317,10 @@ the window has complete GPU event timings; otherwise explicit CPU timing is
 used. `input_wait_ms` and `step_time_ms` expose this selected-clock timing.
 The public `dataloader_ms` key is kept for compatibility and represents CPU
 dataloader fetch wall time.
+The public `total_step_ms` key is also CPU-clocked for compatibility; it is
+not the denominator for selected-clock phase shares. The final text report
+uses selected-clock `step_time_ms` for phase shares and labels CPU
+compatibility rows separately.
 
 `residual_ms` is residual unattributed step time:
 
