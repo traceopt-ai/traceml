@@ -80,9 +80,12 @@ input wait, and traced phase events present in the window. Otherwise it uses
 explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
 summary use this same selected-clock window for diagnosis-facing timing.
 Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
-The compatibility `dataloader_ms` field remains CPU dataloader fetch time.
+The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
+`total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
+These compatibility fields are not selected-clock phase-share denominators.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
-display or diagnosis.
+display or diagnosis. In the final text report, selected-clock phase shares
+are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time:
@@ -92,7 +95,7 @@ compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = selected step envelope timing
 residual_ms = traced_step_ms - known_step_ms
-total_step_ms = input_wait_ms + traced_step_ms
+total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 
 Rank-local stragglers use clean-step evidence. TraceML first discounts backward

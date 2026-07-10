@@ -59,6 +59,7 @@ _STEP_TIME_EVIDENCE_METRICS = (
     ("Residual", "residual_ms"),
     ("H2D", "h2d_ms"),
 )
+_STEP_TIME_CPU_COMPAT_METRICS = frozenset(("total_step_ms", "dataloader_ms"))
 _SEVERITY_LABELS = {
     "crit": "CRITICAL",
     "critical": "CRITICAL",
@@ -371,7 +372,7 @@ def _format_value(metric: str, value: Optional[float]) -> str:
 
 
 def _format_share(value: Optional[float], total: Optional[float]) -> str:
-    """Format a share as a percent of total step time."""
+    """Format a share as a percent of a selected denominator."""
     if value is None or total is None or total <= 0.0:
         return "n/a"
     return f"{100.0 * value / total:.1f}%"
@@ -600,9 +601,9 @@ def _append_step_time_evidence_single(
     lines: List[str],
     step_time_summary: Dict[str, Any],
 ) -> None:
-    """Append average/share Step Time evidence for single-process runs."""
+    """Append selected-clock average/share Step Time evidence."""
     widths = (16, 16, 12)
-    total = _average_value(step_time_summary, "total_step_ms")
+    share_total = _average_value(step_time_summary, "step_time_ms")
     lines.append(row("Step Time Evidence", width=SUMMARY_WIDTH))
     lines.append(
         row(
@@ -613,11 +614,14 @@ def _append_step_time_evidence_single(
     lines.append(row(_table_rule(widths), width=SUMMARY_WIDTH))
     for label, metric in _STEP_TIME_EVIDENCE_METRICS:
         value = _average_value(step_time_summary, metric)
-        share = (
-            "100.0%"
-            if metric == "total_step_ms"
-            else _format_share(value, total)
-        )
+        if metric in _STEP_TIME_CPU_COMPAT_METRICS:
+            # These fields stay CPU-clocked for compatibility; selected-clock
+            # phase shares use step_time_ms as the denominator.
+            share = "compat"
+        elif metric == "step_time_ms":
+            share = "100.0%"
+        else:
+            share = _format_share(value, share_total)
         lines.append(
             row(
                 _table_line(
