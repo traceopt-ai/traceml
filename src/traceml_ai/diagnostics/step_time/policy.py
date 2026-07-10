@@ -12,6 +12,12 @@ class DiagnosisThresholds:
 
     Live and summary policies may choose different values, but they still run
     the same rules and produce the same diagnosis vocabulary.
+
+    INPUT_BOUND uses selected-clock ``input_wait_ms / step_time_ms``. This is
+    a pre-step wait compared with the traced step envelope, not an end-to-end
+    wall-time share, so values can exceed 1.0. Summary thresholds are slightly
+    more conservative than live thresholds because the final report should call
+    only durable bottlenecks across a larger window.
     """
 
     straggler_score_warn: float = 0.10

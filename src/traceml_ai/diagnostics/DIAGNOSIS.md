@@ -87,6 +87,12 @@ These compatibility fields are not selected-clock phase-share denominators.
 display or diagnosis. In the final text report, selected-clock phase shares
 are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
 
+`INPUT_BOUND` uses selected-clock `input_wait_ms / step_time_ms`. This compares
+pre-step input wait with the traced step envelope, not end-to-end wall time, so
+the ratio can exceed 100%. Live diagnosis warns at 25% and is critical at 35%.
+Summary diagnosis is more conservative because it covers a larger final window:
+it warns at 30% and is critical at 40%.
+
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:
 
