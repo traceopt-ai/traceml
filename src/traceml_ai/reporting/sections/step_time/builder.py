@@ -272,8 +272,8 @@ def _input_bound_evidence_reason(diagnosis: Any) -> Optional[str]:
         f" {diagnosis_clock}" if diagnosis_clock in {"cpu", "gpu"} else ""
     )
     return (
-        f"Input wait took {format_ms(input_wait_ms)} of a "
-        f"{format_ms(step_time_ms)}{clock_text} step."
+        f"Input wait was {format_ms(input_wait_ms)} before a "
+        f"{format_ms(step_time_ms)}{clock_text} traced step."
     )
 
 

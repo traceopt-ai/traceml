@@ -88,13 +88,13 @@ display or diagnosis. In the final text report, selected-clock phase shares
 are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
-unattributed step time:
+unattributed step time averaged from per-step clamped residuals:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = selected step envelope timing
-residual_ms = traced_step_ms - known_step_ms
+residual_ms = average(max(0, traced_step_ms - known_step_ms))
 total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 

@@ -550,7 +550,11 @@ def public_step_time_metric_values(
     dataloader_fetch = float(timing.get(DATALOADER_FETCH_KEY, 0.0))
     step_time_cpu = float(timing.get(STEP_TIME_CPU_KEY, 0.0))
     h2d = float(timing.get("h2d", 0.0))
-    residual = max(0.0, step_time - h2d - compute)
+    residual_value = timing.get("residual_proxy")
+    if residual_value is None:
+        residual = max(0.0, step_time - h2d - compute)
+    else:
+        residual = max(0.0, float(residual_value))
     return {
         "total_step_ms": dataloader_fetch + step_time_cpu,
         "dataloader_ms": dataloader_fetch,

@@ -85,6 +85,7 @@ class RankStepSummary:
     avg_optimizer_ms: float
     avg_traced_step_ms: float
     avg_compute_ms: float
+    avg_residual_ms: float
     avg_total_step_ms: float
 
 
@@ -118,6 +119,7 @@ def rank_summary_from_timing(
         avg_optimizer_ms=finite_float(public["optimizer_ms"]),
         avg_traced_step_ms=finite_float(timing.get("step_time")),
         avg_compute_ms=finite_float(public["compute_ms"]),
+        avg_residual_ms=finite_float(public["residual_ms"]),
         avg_total_step_ms=finite_float(public["total_step_ms"]),
     )
 
@@ -137,22 +139,13 @@ def rank_summaries_from_window(
 
 def compute_residual_avg_ms(s: RankStepSummary) -> float:
     """
-    Return average residual proxy for one rank summary.
+    Return canonical average residual for one rank summary.
 
-    known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
-    residual_ms = selected step_time_ms - known_step_ms
-    total_step_ms = CPU dataloader_ms + CPU step envelope
+    residual_ms is averaged from per-step clamped residuals:
+    max(0, step_time_ms - h2d_ms - compute_ms). This intentionally differs
+    from clamping the already-averaged phase totals.
     """
-    return max(
-        0.0,
-        finite_float(s.avg_traced_step_ms)
-        - (
-            finite_float(s.avg_h2d_ms)
-            + finite_float(s.avg_forward_ms)
-            + finite_float(s.avg_backward_ms)
-            + finite_float(s.avg_optimizer_ms)
-        ),
-    )
+    return finite_float(s.avg_residual_ms)
 
 
 def _rank_metric_values(
