@@ -10,6 +10,7 @@ from traceml_ai.diagnostics.step_time.adapters import (
     StepTimeDiagnosisInput,
     diagnose_step_time_summary,
 )
+from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.summaries.step_time import (
     RankStepSummary,
 )
@@ -40,6 +41,7 @@ def _rank(
     effective_step = max(
         step_cpu if step_cpu is not None else known_step, known_step
     )
+    residual = max(0.0, effective_step - known_step)
     return RankStepSummary(
         steps_analyzed=steps,
         avg_dataloader_ms=dataloader,
@@ -51,6 +53,7 @@ def _rank(
         avg_optimizer_ms=optimizer,
         avg_traced_step_ms=effective_step,
         avg_compute_ms=compute,
+        avg_residual_ms=residual,
         avg_total_step_ms=dataloader + effective_step,
     )
 
@@ -156,6 +159,21 @@ def _input_bound_step_metrics(
         }
         for step in range(steps)
     }
+
+
+def _alternating_residual_step_metrics(steps: int = 64) -> dict[int, dict]:
+    out: dict[int, dict] = {}
+    for step in range(steps):
+        compute_ms, step_time_ms = (
+            (50.0, 100.0) if step % 2 == 0 else (100.0, 50.0)
+        )
+        out[step] = {
+            "_traceml_internal:dataloader_next": _event_stats(cpu_ms=0.0),
+            "_traceml_internal:h2d_time": _event_stats(cpu_ms=0.0),
+            "_traceml_internal:forward_time": _event_stats(cpu_ms=compute_ms),
+            "_traceml_internal:step_time": _event_stats(cpu_ms=step_time_ms),
+        }
+    return out
 
 
 def _assert_compact_card(card: str) -> None:
@@ -286,7 +304,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     assert row_metrics["total_step_ms"] == 102.0
     _assert_public_step_metrics_keep_dataloader(payload)
     assert (
-        "- Why: Input wait took 40.0ms of a 100.0ms gpu step."
+        "- Why: Input wait was 40.0ms before a 100.0ms gpu traced step."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
@@ -312,6 +330,31 @@ def test_step_time_residual_heavy_card_uses_short_reason() -> None:
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
+
+
+def test_step_time_residual_uses_average_of_per_step_clamps() -> None:
+    payload = _summary(
+        {0: _rank(steps=64)},
+        per_rank_steps={0: _alternating_residual_step_metrics()},
+    )
+
+    average = payload["global"]["average"]
+    row_metrics = payload["groups"]["rows"]["0"]["metrics"]
+    assert average["step_time_ms"] == 75.0
+    assert average["compute_ms"] == 75.0
+    assert average["residual_ms"] == 25.0
+    assert row_metrics["residual_ms"] == 25.0
+    assert payload["diagnosis"]["status"] == "RESIDUAL-HEAVY"
+
+    primary = build_primary_diagnosis(
+        system_summary={"global": {"average": {"gpu_util_percent": 0.0}}},
+        process_summary={},
+        step_time_summary=payload,
+        step_memory_summary={},
+    )
+    assert primary["kind"] == "RESIDUAL_HEAVY"
+    assert primary["evidence"]["residual_ms"] == 25.0
+    assert primary["evidence"]["shares"]["residual_pct"] == 33.333
 
 
 def test_step_time_input_straggler_card_shows_rank_evidence() -> None:

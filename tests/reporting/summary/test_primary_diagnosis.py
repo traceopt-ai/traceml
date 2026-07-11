@@ -104,7 +104,7 @@ def test_input_bound_uses_phase_share_evidence() -> None:
     assert primary["section"] == "step_time"
     assert primary["scope"] == "performance"
     assert primary["summary"] == (
-        "Input wait took 80.0ms of a 160.0ms average step."
+        "Input wait was 80.0ms before a 160.0ms traced step."
     )
     assert primary["evidence"] == {
         "type": "phase_share",

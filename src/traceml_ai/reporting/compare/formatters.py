@@ -272,16 +272,21 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
         return "\n".join(lines)
 
     def _notes(self, payload: Dict[str, Any]) -> list[str]:
+        notes = [
+            str(warning)
+            for warning in payload.get("warnings", ())
+            if str(warning).strip()
+        ]
         verdict = payload.get("verdict", {})
         comparability = verdict.get("comparability", {})
         overall = comparability.get("overall", {})
         state = overall.get("state")
         if state in {"partial", "insufficient"}:
-            return [
+            notes.append(
                 overall.get("reason")
                 or "Some primary compare signals are missing."
-            ]
-        return []
+            )
+        return notes
 
 
 __all__ = ["CompareTextFormatter"]

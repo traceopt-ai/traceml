@@ -44,6 +44,30 @@ def _primary_diagnosis_status(payload: Dict[str, Any]) -> str | None:
     return text or None
 
 
+def _schema_version(payload: Dict[str, Any]) -> Any:
+    """Return the input summary schema version as stored in the payload."""
+    return payload.get("schema_version")
+
+
+def _schema_warnings(
+    lhs_payload: Dict[str, Any],
+    rhs_payload: Dict[str, Any],
+) -> list[str]:
+    """Return compare warnings for known schema-semantic mismatches."""
+    lhs_version = _schema_version(lhs_payload)
+    rhs_version = _schema_version(rhs_payload)
+    if lhs_version == rhs_version:
+        return []
+    return [
+        (
+            "Summary schema versions differ: A uses "
+            f"{lhs_version}, B uses {rhs_version}. Step Time fields changed "
+            "in schema 1.6, so Step Time deltas may not be directly "
+            "comparable."
+        )
+    ]
+
+
 def build_compare_payload(
     *,
     lhs_payload: Dict[str, Any],
@@ -70,6 +94,7 @@ def build_compare_payload(
             "label": lhs_label,
             "file_name": lhs_path.name,
             "parent_name": lhs_path.parent.name,
+            "schema_version": _schema_version(lhs_payload),
             "duration_s": _as_float(lhs_payload.get("duration_s")),
         },
         "rhs": {
@@ -77,8 +102,10 @@ def build_compare_payload(
             "label": rhs_label,
             "file_name": rhs_path.name,
             "parent_name": rhs_path.parent.name,
+            "schema_version": _schema_version(rhs_payload),
             "duration_s": _as_float(rhs_payload.get("duration_s")),
         },
+        "warnings": _schema_warnings(lhs_payload, rhs_payload),
         "sections": sections,
         "availability": {
             name: section.get("available", False)

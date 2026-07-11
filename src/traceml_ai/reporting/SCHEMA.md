@@ -96,19 +96,19 @@ Primary diagnosis evidence uses a small union:
   "type": "phase_share",
   "basis": "average",
   "steps_analyzed": 256,
-  "total_step_ms": 272.3,
-  "dataloader_ms": 120.0,
-  "input_wait_ms": 161.0,
-  "step_time_ms": 272.3,
+  "total_step_ms": 200.0,
+  "dataloader_ms": 40.0,
+  "input_wait_ms": 80.0,
+  "step_time_ms": 160.0,
   "diagnosis_clock": "gpu",
-  "h2d_ms": 0.1,
-  "compute_ms": 109.6,
-  "residual_ms": 1.6,
+  "h2d_ms": 0.4,
+  "compute_ms": 120.0,
+  "residual_ms": 39.6,
   "shares": {
-    "input_wait_pct": 59.1,
-    "h2d_pct": 0.0,
-    "compute_pct": 40.3,
-    "residual_pct": 0.6
+    "input_wait_pct": 50.0,
+    "h2d_pct": 0.3,
+    "compute_pct": 75.0,
+    "residual_pct": 24.8
   },
   "gpu_util_avg_percent": 37.8
 }
@@ -322,13 +322,14 @@ not the denominator for selected-clock phase shares. The final text report
 uses selected-clock `step_time_ms` for phase shares and labels CPU
 compatibility rows separately.
 
-`residual_ms` is residual unattributed step time:
+`residual_ms` is residual unattributed step time. It is averaged from
+per-step clamped residuals, not recomputed from already-averaged phase totals:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = selected step envelope timing
-residual_ms = traced_step_ms - known_step_ms
+residual_ms = average(max(0, traced_step_ms - known_step_ms))
 total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 

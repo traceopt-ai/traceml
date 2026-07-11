@@ -2,7 +2,7 @@
 
 # TraceML
 
-**Low-overhead PyTorch training performance diagnostics. Every step, every run.**
+**Find hidden PyTorch training bottlenecks before they waste GPU hours.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -20,14 +20,25 @@
 
 </div>
 
-  TraceML runs alongside your training loop and writes a compact performance
-  report at the end of each run — with <2% overhead in current benchmarks,
-  across the full job, not just sampled steps. It helps answer:
+</div>
 
-  - Are my GPUs waiting on a slow dataloader?
-  - Is one distributed rank consistently slower than the others?
-  - Is memory usage silently creeping upward during the run?
-  - Did a recent code, data, or infrastructure change slow training down?
+<div align="center">
+
+![TraceML live terminal view](docs/assets/cli_demo_v1.png)
+<sub>Live terminal view</sub>
+
+</div>
+
+
+TraceML is open-source performance observability for PyTorch training.
+It runs alongside your training loop and writes a compact performance summary at the end of every run — so teams can diagnose bottlenecks, compare runs, and catch regressions before reaching for a heavyweight profiler. Under 2% overhead in current benchmarks, across the full job, not just sampled steps.
+
+TraceML helps answer:
+
+- Is the GPU doing work, or waiting on input?
+- Is one distributed rank consistently slower than the others?
+- Is memory silently creeping upward during the run?
+- Did a code, data, or infrastructure change slow training down?
 
 ---
 
@@ -138,7 +149,7 @@ Example TraceML output:
 |                                                                            |
 |  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
 |  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
-|  Next: Inspect input loading, collate_fn, preprocessing, and storage on    |
+|  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
 |  slow rank.                                                                |
 |                                                                            |
 |  Section Status                                                            |
@@ -232,6 +243,17 @@ changing the final saved artifacts.
 | `--mode=summary` (default) | Silent execution | Single-node and multi-node multi-GPU |
 | `--mode=cli` | Live terminal display | Single-node, including multi-GPU |
 | `--mode=dashboard` | Live browser display | Single-node; requires `pip install "traceml-ai[dashboard]"` |
+
+> **Headless / CI / capturing stdout?** Use `--mode=summary` to
+> suppress the live terminal display. The `final_summary.json` and `.txt` artifacts are still written.
+
+<div align="center">
+
+![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
+
+<sub>`--mode=dashboard` — optional local browser view for single-node runs.</sub>
+
+</div>
 
 ---
 
