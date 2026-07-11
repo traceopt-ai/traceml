@@ -438,8 +438,7 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.overall_worst_rank
             ),
             note=(
-                "residual_ms = total_step_ms - input_wait_ms - h2d_ms - "
-                "compute_ms."
+                "residual_ms = selected step_time_ms - h2d_ms - compute_ms."
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "COMPUTE_BOUND":

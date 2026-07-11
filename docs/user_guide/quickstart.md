@@ -79,7 +79,7 @@ For DDP, FSDP, and multi-node launches, see
 +----------------------------------------------------------------------------+
 |                                                                            |
 |  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
-|  Why: Rank r0 dataloader was 254.5ms vs median rank r1 at 3.8ms.           |
+|  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
 |  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
 |  slow rank.                                                                |
 |                                                                            |
@@ -103,7 +103,7 @@ For DDP, FSDP, and multi-node launches, see
 |  Phase           Median        Worst         Skew        Scope             |
 |  --------------------------------------------------------------------------|
 |  Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
-|  Dataloader      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
+|  Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
 |  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
 +----------------------------------------------------------------------------+
 ```

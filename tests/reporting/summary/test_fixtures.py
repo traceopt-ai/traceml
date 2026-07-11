@@ -59,6 +59,7 @@ GLOBAL_WINDOW_KEYS = {
     "completed_step",
     "window_size",
 }
+OPTIONAL_GLOBAL_WINDOW_KEYS = {"diagnosis_clock"}
 
 METADATA_KEYS = {
     "mode",
@@ -118,7 +119,9 @@ def _assert_section_shape(payload: dict, *, group_by: str) -> None:
     assert set(payload["global"]) == GLOBAL_KEYS
     assert payload["global"]["index_by"] in {"node_rank", "global_rank"}
     assert payload["global"]["index_by"] == group_by
-    assert set(payload["global"]["window"]) == GLOBAL_WINDOW_KEYS
+    window_keys = set(payload["global"]["window"])
+    assert GLOBAL_WINDOW_KEYS <= window_keys
+    assert window_keys <= GLOBAL_WINDOW_KEYS | OPTIONAL_GLOBAL_WINDOW_KEYS
     metric_names = payload["metadata"]["section_metric_names"]
     if metric_names is not None:
         expected_metrics = set(metric_names)
@@ -419,19 +422,49 @@ def _step_time_events(
 ) -> str:
     events = {
         "_traceml_internal:dataloader_next": {
-            "cpu": {"is_gpu": False, "duration_ms": dataloader, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": dataloader,
+                "cpu_ms": dataloader,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:forward_time": {
-            "cpu": {"is_gpu": False, "duration_ms": forward, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": forward,
+                "cpu_ms": forward,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:backward_time": {
-            "cpu": {"is_gpu": False, "duration_ms": backward, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": backward,
+                "cpu_ms": backward,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:optimizer_step": {
-            "cpu": {"is_gpu": False, "duration_ms": optimizer, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": optimizer,
+                "cpu_ms": optimizer,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
         "_traceml_internal:step_time": {
-            "cpu": {"is_gpu": False, "duration_ms": step_time, "n_calls": 1}
+            "cpu": {
+                "is_gpu": False,
+                "duration_ms": step_time,
+                "cpu_ms": step_time,
+                "gpu_ms": None,
+                "n_calls": 1,
+            }
         },
     }
     return json.dumps(events)
@@ -833,7 +866,7 @@ def test_final_summary_fixture_schema_contains_all_sections(
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.5
+    assert payload["schema_version"] == 1.6
     assert set(payload) == {
         "schema_version",
         "generated_at",

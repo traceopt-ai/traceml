@@ -135,7 +135,7 @@ def _build_card_stats(
         ),
         compute=_metric_pair_from_rank_values(
             {
-                int(rank): finite_float(summary.avg_gpu_compute_ms)
+                int(rank): finite_float(summary.avg_compute_ms)
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
@@ -147,7 +147,7 @@ def _build_card_stats(
         ),
         input=_metric_pair_from_rank_values(
             {
-                int(rank): finite_float(summary.avg_dataloader_ms)
+                int(rank): finite_float(summary.avg_input_wait_ms)
                 for rank, summary in per_global_rank_summary.items()
             }
         ),
@@ -272,8 +272,8 @@ def _input_bound_evidence_reason(diagnosis: Any) -> Optional[str]:
         f" {diagnosis_clock}" if diagnosis_clock in {"cpu", "gpu"} else ""
     )
     return (
-        f"Input wait took {format_ms(input_wait_ms)} of a "
-        f"{format_ms(step_time_ms)}{clock_text} step."
+        f"Input wait was {format_ms(input_wait_ms)} before a "
+        f"{format_ms(step_time_ms)}{clock_text} traced step."
     )
 
 
@@ -427,26 +427,24 @@ def build_step_time_payload(
     Loading and diagnosis are handled by the section lifecycle. This builder
     only formats the aligned summaries, global comparisons, issues, and card.
     """
-    aligned_summary = data.aligned_summary
-    all_rank_summary = data.per_global_rank_summary or aligned_summary
-    row_rank_summary = aligned_summary
-    aligned_window = data.aligned_window
+    rank_summary = data.per_global_rank_summary
+    step_time_window = data.step_time_window
     identities = data.identities
 
-    global_ranks_present = sorted(aligned_summary.keys())
-    all_global_ranks = sorted(all_rank_summary.keys())
+    global_ranks_used = sorted(rank_summary.keys())
+    global_ranks_seen = sorted(set(identities.keys()) | set(global_ranks_used))
     # Step Time rows are limited to ranks with data in the common step window.
-    overview = build_overview(per_global_rank_summary=aligned_summary)
+    overview = build_overview(per_global_rank_summary=rank_summary)
 
     median_global_rank = overview["median_global_rank"]
     worst_global_rank = overview["worst_global_rank"]
     median_summary = (
-        aligned_summary.get(median_global_rank)
+        rank_summary.get(median_global_rank)
         if median_global_rank is not None
         else None
     )
     worst_summary = (
-        aligned_summary.get(worst_global_rank)
+        rank_summary.get(worst_global_rank)
         if worst_global_rank is not None
         else None
     )
@@ -457,28 +455,32 @@ def build_step_time_payload(
     diagnosis_json, issues_json = diagnostic_result_to_json(diagnosis_result)
 
     global_rollup = build_global_rollup(
-        per_global_rank_summary=aligned_summary,
+        per_global_rank_summary=rank_summary,
         median_global_rank=median_global_rank,
         worst_global_rank=worst_global_rank,
-        analysis_window=aligned_window,
+        analysis_window=step_time_window,
     )
-    card_stats = _build_card_stats(aligned_summary)
+    card_stats = _build_card_stats(rank_summary)
 
     title = (
         f"TraceML Step Timing Summary | steps {data.training_steps} | "
-        f"global ranks {len(all_global_ranks)}"
+        f"global ranks {len(global_ranks_seen)}"
     )
     lines = [title, "Step Time"]
     diagnosis_status = summary_diag.status
     diagnosis_why = _step_time_card_reason(
         summary_diag,
         stats=card_stats,
-        per_global_rank_summary=row_rank_summary,
+        per_global_rank_summary=rank_summary,
         issues=tuple(issues),
     )
 
-    if not aligned_summary:
-        latest_step_text = data.latest_step_observed or "n/a"
+    if not rank_summary:
+        latest_step_text = (
+            data.latest_step_observed
+            if data.latest_step_observed is not None
+            else "n/a"
+        )
         lines.extend(
             [
                 f"- Diagnosis: {diagnosis_status}",
@@ -487,8 +489,8 @@ def build_step_time_payload(
                 f"- Why: {diagnosis_why}",
             ]
         )
-    elif len(global_ranks_present) == 1 and primary_summary is not None:
-        only_rank = global_ranks_present[0]
+    elif len(global_ranks_used) == 1 and primary_summary is not None:
+        only_rank = global_ranks_used[0]
         lines.extend(
             [
                 f"- Diagnosis: {diagnosis_status}",
@@ -505,8 +507,8 @@ def build_step_time_payload(
         lines.append(f"- Diagnosis: {diagnosis_status}")
         lines.append(
             "- Scope: compared over "
-            f"last {aligned_window.steps_analyzed} aligned steps "
-            f"across {aligned_window.global_ranks_used} global ranks"
+            f"last {step_time_window.coverage.steps_used} aligned steps "
+            f"across {step_time_window.coverage.ranks_present} global ranks"
         )
         if card_stats is not None:
             lines.append(_format_card_stats(card_stats))
@@ -522,16 +524,16 @@ def build_step_time_payload(
             s,
             identities.get(rank),
         )
-        for rank, s in sorted(row_rank_summary.items())
+        for rank, s in sorted(rank_summary.items())
     }
 
     metadata = StepMetadata(
         mode=topology_mode_from_identities(
-            (identities.get(rank) for rank in global_ranks_present),
-            has_data=bool(global_ranks_present),
+            (identities.get(rank) for rank in global_ranks_used),
+            has_data=bool(global_ranks_used),
         ),
-        global_ranks_seen=len(all_global_ranks),
-        global_ranks_used=len(global_ranks_present),
+        global_ranks_seen=len(global_ranks_seen),
+        global_ranks_used=len(global_ranks_used),
         training_total_steps=data.training_steps,
         training_latest_step=data.latest_step_observed,
         section_metric_names=STEP_TIME_METRIC_NAMES,

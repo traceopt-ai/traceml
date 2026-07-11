@@ -55,16 +55,19 @@ def _step_time(
         "diagnosis": diagnosis,
         "issues": issues,
         "global": {
-            "window": {"steps_analyzed": 256},
+            "window": {"steps_analyzed": 256, "diagnosis_clock": "gpu"},
             "average": {
                 "total_step_ms": 200.0,
                 "dataloader_ms": 50.0,
+                "input_wait_ms": 80.0,
+                "step_time_ms": 160.0,
                 "h2d_ms": 10.0,
                 "compute_ms": 120.0,
                 "residual_ms": 20.0,
             },
             "median": {
                 "dataloader_ms": {"value": 5.0, "idx": "0"},
+                "input_wait_ms": {"value": 8.0, "idx": "0"},
                 "h2d_ms": {"value": 10.0, "idx": "1"},
                 "compute_ms": {"value": 100.0, "idx": "1"},
                 "optimizer_ms": {"value": 10.0, "idx": "3"},
@@ -72,6 +75,7 @@ def _step_time(
             },
             "worst": {
                 "dataloader_ms": {"value": 80.0, "idx": "2"},
+                "input_wait_ms": {"value": 120.0, "idx": "2"},
                 "h2d_ms": {"value": 40.0, "idx": "2"},
                 "compute_ms": {"value": 180.0, "idx": "2"},
                 "optimizer_ms": {"value": 90.0, "idx": "2"},
@@ -100,22 +104,25 @@ def test_input_bound_uses_phase_share_evidence() -> None:
     assert primary["section"] == "step_time"
     assert primary["scope"] == "performance"
     assert primary["summary"] == (
-        "Input loading took 50.0ms of a 200.0ms average step."
+        "Input wait was 80.0ms before a 160.0ms traced step."
     )
     assert primary["evidence"] == {
         "type": "phase_share",
         "basis": "average",
         "steps_analyzed": 256,
         "total_step_ms": 200.0,
+        "step_time_ms": 160.0,
+        "diagnosis_clock": "gpu",
         "dataloader_ms": 50.0,
+        "input_wait_ms": 80.0,
         "h2d_ms": 10.0,
         "compute_ms": 120.0,
         "residual_ms": 20.0,
         "shares": {
-            "dataloader_pct": 25.0,
-            "h2d_pct": 5.0,
-            "compute_pct": 60.0,
-            "residual_pct": 10.0,
+            "input_wait_pct": 50.0,
+            "h2d_pct": 6.25,
+            "compute_pct": 75.0,
+            "residual_pct": 12.5,
         },
         "gpu_util_avg_percent": 38.0,
     }
@@ -126,10 +133,10 @@ def test_residual_heavy_uses_residual_phase_share() -> None:
 
     assert primary["kind"] == "RESIDUAL_HEAVY"
     assert primary["summary"] == (
-        "Residual time took 20.0ms of a 200.0ms average step."
+        "Residual time took 20.0ms of a 160.0ms average step."
     )
     assert primary["evidence"]["type"] == "phase_share"
-    assert primary["evidence"]["shares"]["residual_pct"] == 10.0
+    assert primary["evidence"]["shares"]["residual_pct"] == 12.5
 
 
 def test_compute_bound_uses_neutral_compute_phase_share() -> None:
@@ -137,9 +144,9 @@ def test_compute_bound_uses_neutral_compute_phase_share() -> None:
 
     assert primary["kind"] == "COMPUTE_BOUND"
     assert primary["summary"] == (
-        "Model compute took 120.0ms of a 200.0ms average step."
+        "Model compute took 120.0ms of a 160.0ms average step."
     )
-    assert primary["evidence"]["shares"]["compute_pct"] == 60.0
+    assert primary["evidence"]["shares"]["compute_pct"] == 75.0
 
 
 def test_input_straggler_uses_rank_comparison_evidence() -> None:
@@ -153,18 +160,18 @@ def test_input_straggler_uses_rank_comparison_evidence() -> None:
 
     assert primary["kind"] == "INPUT_STRAGGLER"
     assert primary["summary"] == (
-        "Rank r2 dataloader was 80.0ms vs median rank r0 at 5.0ms."
+        "Rank r2 input wait was 120.0ms vs median rank r0 at 8.0ms."
     )
     assert primary["evidence"] == {
         "type": "rank_comparison",
         "steps_analyzed": 256,
         "gpu_util_avg_percent": 87.0,
-        "metric": "dataloader_ms",
+        "metric": "input_wait_ms",
         "phase": "dataloader",
-        "median": {"rank": 0, "value_ms": 5.0},
-        "worst": {"rank": 2, "value_ms": 80.0},
-        "delta_ms": 75.0,
-        "ratio": 16.0,
+        "median": {"rank": 0, "value_ms": 8.0},
+        "worst": {"rank": 2, "value_ms": 120.0},
+        "delta_ms": 112.0,
+        "ratio": 15.0,
     }
 
 
@@ -244,7 +251,7 @@ def test_straggler_includes_input_and_compute_comparisons() -> None:
     assert primary["evidence"]["type"] == "rank_comparison"
     comparisons = primary["evidence"]["comparisons"]
     assert [item["metric"] for item in comparisons] == [
-        "dataloader_ms",
+        "input_wait_ms",
         "compute_ms",
     ]
 

@@ -57,10 +57,9 @@ class StepTimeSummarySection(
         self,
         data: StepTimeSectionData,
     ) -> StepTimeDiagnosisInput:
-        """Adapt aligned Step Time summaries to the diagnosis contract."""
+        """Adapt the canonical Step Time window to diagnosis."""
         return StepTimeDiagnosisInput(
-            per_rank_step_metrics=data.aligned_step_metrics,
-            max_rows=data.max_rows,
+            window=data.step_time_window,
         )
 
     def diagnose(

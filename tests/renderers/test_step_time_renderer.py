@@ -88,6 +88,8 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
     assert seen["diagnosis_clock"] == "gpu"
     assert "IW" in text
     assert "DL" not in text
+    assert "Average (1 steps)" in text
+    assert "Sum (" not in text
     assert "40.0 ms" in text
     assert "12.0 ms" not in text
 

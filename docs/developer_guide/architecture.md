@@ -108,6 +108,6 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | RESIDUAL_HEAVY | A large window-wide share of step time is unattributed residual time. |
 | HIGH_PRESSURE / IMBALANCE | GPU memory is near capacity, or uneven across ranks. |
 | CREEP_EARLY / CREEP_CONFIRMED | Direction-confirmed GPU-memory growth across the run, early or confirmed. |
-| final_summary | The end-of-run `final_summary.{json,txt}`; the JSON carries `schema_version` (currently 1.4). |
+| final_summary | The end-of-run `final_summary.{json,txt}`; the JSON carries `schema_version` (currently 1.6). |
 | Wire envelope | The per-batch message, `{meta, body: {tables}}`, sent as a msgpack frame behind a 4-byte length prefix. |
 | NoOpRuntime | The inert runtime the system falls back to if instrumentation boot fails (fail-open). |

@@ -43,6 +43,7 @@ def _step_time_section(
     reason: str = "No clear timing issue.",
     action: str = "Keep monitoring.",
     total_step_ms: float = 300.0,
+    input_wait_ms: Optional[float] = None,
     h2d_ms: Optional[float] = None,
     residual_ms: Optional[float] = None,
     split_ms: Optional[dict] = None,
@@ -74,6 +75,8 @@ def _step_time_section(
         "backward_ms": splits["backward"],
         "optimizer_ms": splits["optimizer"],
     }
+    if input_wait_ms is not None:
+        average["input_wait_ms"] = input_wait_ms
     if h2d_ms is not None:
         average["h2d_ms"] = h2d_ms
     return {
@@ -480,6 +483,62 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert "+114.1 ms (+18.4%)" in text
     assert "Peak reserved" in text
     assert "+2.70 GB (+43.5%)" in text
+
+
+def test_compare_warns_when_summary_schema_versions_differ() -> None:
+    lhs = _payload_with_sections()
+    rhs = _payload_with_sections()
+    lhs["schema_version"] = 1.5
+    rhs["schema_version"] = 1.6
+
+    compare_payload = _build_compare(lhs, rhs)
+    text = build_compare_text(compare_payload)
+
+    assert compare_payload["lhs"]["schema_version"] == 1.5
+    assert compare_payload["rhs"]["schema_version"] == 1.6
+    assert compare_payload["warnings"] == [
+        (
+            "Summary schema versions differ: A uses 1.5, B uses 1.6. "
+            "Step Time fields changed in schema 1.6, so Step Time deltas "
+            "may not be directly comparable."
+        )
+    ]
+    assert "Notes" in text
+    assert "Summary schema versions differ: A uses 1.5, B uses 1.6." in text
+
+
+def test_compare_step_time_input_prefers_selected_input_wait() -> None:
+    lhs = _payload_with_sections(
+        step_time=_step_time_section(
+            total_step_ms=120.0,
+            input_wait_ms=5.0,
+            split_ms={
+                "dataloader": 100.0,
+                "forward": 10.0,
+                "backward": 1.0,
+                "optimizer": 1.0,
+            },
+        )
+    )
+    rhs = _payload_with_sections(
+        step_time=_step_time_section(
+            total_step_ms=120.0,
+            input_wait_ms=7.0,
+            split_ms={
+                "dataloader": 100.0,
+                "forward": 10.0,
+                "backward": 1.0,
+                "optimizer": 1.0,
+            },
+        )
+    )
+
+    step_time = _build_compare(lhs, rhs)["sections"]["step_time"]
+
+    assert step_time["metrics"]["input_ms"]["lhs"] == 5.0
+    assert step_time["metrics"]["input_ms"]["rhs"] == 7.0
+    assert step_time["metrics"]["dominant_phase"]["lhs"] == "forward"
+    assert step_time["metrics"]["dominant_phase"]["rhs"] == "forward"
 
 
 def test_compare_includes_top_level_primary_diagnosis_change() -> None:

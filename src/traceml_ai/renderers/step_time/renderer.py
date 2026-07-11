@@ -1,11 +1,11 @@
 """
 Step Combined Renderer
 
-CLI renderer for window-summed, rank-agnostic step-time metrics.
+CLI renderer for rank-combined step-time averages.
 
 Behavior:
 - show selected-clock diagnosis metrics, not public duration metrics
-- If world_size == 1 (single-rank run): show only SUM rows (no skew/worst)
+- If world_size == 1 (single-rank run): show only average rows
 - Else: show Median/Worst/Worst Rank/Skew rows
 """
 
@@ -133,29 +133,29 @@ class StepCombinedRenderer(BaseRenderer):
             table.add_column(title, justify="right")
 
         subtitle = (
-            f"Summed over last {K} fully completed steps"
+            f"Averaged over last {K} fully completed steps"
             if K > 0
             else "Waiting for first fully completed step"
         )
 
         if single_rank:
             table.add_row(
-                f"Sum (Σ {K})",
+                f"Average ({K} steps)",
                 *[
                     _format_step_time_value(m.summary.worst_total)
                     for m in metrics
-                ],  # worst_total==sum in single-rank mode
+                ],
             )
         else:
             table.add_row(
-                f"Median (Σ {K})",
+                f"Median avg ({K} steps)",
                 *[
                     _format_step_time_value(m.summary.median_total)
                     for m in metrics
                 ],
             )
             table.add_row(
-                f"Worst (Σ {K})",
+                f"Worst avg ({K} steps)",
                 *[
                     _format_step_time_value(m.summary.worst_total)
                     for m in metrics

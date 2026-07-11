@@ -7,7 +7,7 @@ also copies that same item to `diagnosis`.
 The final summary also includes a top-level `primary_diagnosis`. That field is
 a run-level performance finding promoted from existing section diagnoses. It is
 not a replacement for section diagnoses and it is not a health-warning rollup.
-In schema `1.5`, Step Time drives the top-level primary diagnosis; System GPU
+In schema `1.6`, Step Time drives the top-level primary diagnosis; System GPU
 utilization can appear as supporting evidence or as an unexplained-utilization
 fallback. System, Process, and Step Memory resource findings remain canonical
 inside their sections.
@@ -77,21 +77,31 @@ Training-step timing.
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
 input wait, and traced phase events present in the window. Otherwise it uses
-explicit `cpu_ms` timing. The live CLI Step Time table shows the same selected
-diagnosis metrics. Summary/public JSON metrics keep their existing
-`duration_ms` semantics; `duration_ms` is not a diagnosis fallback. Legacy
-`dataloader_fetch` / `dataloader_ms` values remain summary/public metrics and
-are not used for Step Time diagnosis decisions.
+explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
+summary use this same selected-clock window for diagnosis-facing timing.
+Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
+The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
+`total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
+These compatibility fields are not selected-clock phase-share denominators.
+`duration_ms` stays stored compatibility timing and is not used for Step Time
+display or diagnosis. In the final text report, selected-clock phase shares
+are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
+
+`INPUT_BOUND` uses selected-clock `input_wait_ms / step_time_ms`. This compares
+pre-step input wait with the traced step envelope, not end-to-end wall time, so
+the ratio can exceed 100%. Live diagnosis warns at 25% and is critical at 35%.
+Summary diagnosis is more conservative because it covers a larger final window:
+it warns at 30% and is critical at 40%.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
-unattributed step time:
+unattributed step time averaged from per-step clamped residuals:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
-residual_ms = traced_step_ms - known_step_ms
-total_step_ms = input_wait_ms + traced_step_ms
+traced_step_ms = selected step envelope timing
+residual_ms = average(max(0, traced_step_ms - known_step_ms))
+total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 
 Rank-local stragglers use clean-step evidence. TraceML first discounts backward

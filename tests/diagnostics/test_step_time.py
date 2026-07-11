@@ -12,10 +12,8 @@ from traceml_ai.diagnostics.step_time.api import (
     DEFAULT_THRESHOLDS,
     build_step_diagnosis_result,
 )
-from traceml_ai.diagnostics.step_time.adapters import (
-    build_summary_step_diagnosis_result,
-)
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
+from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.rules import (
     CleanStragglerRule,
     ComputeBoundRule,
@@ -28,10 +26,9 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
-from traceml_ai.utils.step_time_diagnosis_clock import (
-    INPUT_WAIT_GPU_MS_KEY,
-    STEP_TIME_GPU_MS_KEY,
-    build_diagnosis_timing_from_events,
+from traceml_ai.utils.step_time_window import (
+    build_step_time_window_from_events,
+    diagnose_step_time_window,
 )
 
 
@@ -183,6 +180,18 @@ def _clean_context(
         *_metrics_from_per_rank_timing(per_rank_timing),
         per_rank_timing=per_rank_timing,
     )
+
+
+def _diagnose_summary_events(
+    per_rank_steps: dict[int, dict[int, dict]],
+    *,
+    max_rows: int,
+):
+    window = build_step_time_window_from_events(
+        per_rank_steps,
+        max_rows=max_rows,
+    )
+    return diagnose_step_time_window(window, policy=SUMMARY_STEP_TIME_POLICY)
 
 
 def _single_rank_step_metrics(
@@ -381,9 +390,10 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
         },
     }
 
-    selected = build_diagnosis_timing_from_events(
+    selected = build_step_time_window_from_events(
         {0: {1: events}},
-        [1],
+        max_rows=1,
+        expected_ranks=[0],
     )
 
     assert selected.clock == "gpu"
@@ -398,7 +408,11 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     )
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
-    selected = build_diagnosis_timing_from_events({0: {1: events}}, [1])
+    selected = build_step_time_window_from_events(
+        {0: {1: events}},
+        max_rows=1,
+        expected_ranks=[0],
+    )
 
     assert selected.clock == "cpu"
     assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(12.0)
@@ -413,9 +427,10 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
         "_traceml_internal:backward_time": {"cpu": {"duration_ms": 30.0}},
         "_traceml_internal:optimizer_step": {"cpu": {"duration_ms": 5.0}},
     }
-    selected = build_diagnosis_timing_from_events(
+    selected = build_step_time_window_from_events(
         {0: {1: duration_only_events}},
-        [1],
+        max_rows=1,
+        expected_ranks=[0],
     )
 
     assert selected.clock == "cpu"
@@ -581,9 +596,9 @@ def test_step_time_primary_prefers_clean_straggler_over_residual_heavy() -> (
     }
 
 
-def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
-    warmup = build_summary_step_diagnosis_result(
-        {0: _summary_step_metrics(input_wait_gpu=None, steps=40)},
+def test_summary_step_time_window_uses_summary_policy_by_default() -> None:
+    warmup = _diagnose_summary_events(
+        {0: _summary_step_events(input_wait_gpu=None, steps=40)},
         max_rows=100,
     )
     assert warmup is not None
@@ -593,8 +608,8 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
         == "Only 40 steps per rank available; summary diagnosis requires 50."
     )
 
-    result = build_summary_step_diagnosis_result(
-        {0: _summary_step_metrics(input_wait_gpu=None, steps=60)},
+    result = _diagnose_summary_events(
+        {0: _summary_step_events(input_wait_gpu=None, steps=60)},
         max_rows=100,
     )
 
@@ -602,36 +617,64 @@ def test_summary_step_time_adapter_uses_summary_policy_by_default() -> None:
     assert result.primary.steps_used == 60
 
 
-def _summary_step_metrics(
+def _event_stats(
+    *,
+    cpu_ms: float | None = None,
+    gpu_ms: float | None = None,
+) -> dict[str, dict[str, float | bool | int | None]]:
+    device = "cuda:0" if gpu_ms is not None else "cpu"
+    duration = gpu_ms if gpu_ms is not None else cpu_ms
+    return {
+        device: {
+            "is_gpu": gpu_ms is not None,
+            "duration_ms": duration,
+            "cpu_ms": cpu_ms,
+            "gpu_ms": gpu_ms,
+            "n_calls": 1,
+        }
+    }
+
+
+def _summary_step_events(
     *,
     input_wait_gpu: float | None,
     step_time_gpu: float = 60.0,
     steps: int = 60,
-) -> dict[int, dict[str, float]]:
-    out: dict[int, dict[str, float]] = {}
+) -> dict[int, dict]:
+    out: dict[int, dict] = {}
     for step in range(steps):
-        metrics = {
-            "h2d": 0.0,
-            "forward": 20.0,
-            "backward": 30.0,
-            "optimizer_step": 10.0,
-            "step_time": 60.0,
-            "residual_proxy": 0.0,
+        events = {
+            "_traceml_internal:dataloader_next": _event_stats(cpu_ms=5.0),
+            "_traceml_internal:h2d_time": _event_stats(cpu_ms=0.0),
+            "_traceml_internal:forward_time": _event_stats(cpu_ms=20.0),
+            "_traceml_internal:backward_time": _event_stats(cpu_ms=30.0),
+            "_traceml_internal:optimizer_step": _event_stats(cpu_ms=10.0),
+            "_traceml_internal:step_time": _event_stats(cpu_ms=60.0),
         }
         if input_wait_gpu is not None:
-            metrics[INPUT_WAIT_GPU_MS_KEY] = input_wait_gpu
-            metrics[STEP_TIME_GPU_MS_KEY] = step_time_gpu
-        out[step] = metrics
+            events = {
+                "_traceml_internal:dataloader_next": _event_stats(
+                    gpu_ms=input_wait_gpu
+                ),
+                "_traceml_internal:h2d_time": _event_stats(gpu_ms=0.0),
+                "_traceml_internal:forward_time": _event_stats(gpu_ms=20.0),
+                "_traceml_internal:backward_time": _event_stats(gpu_ms=30.0),
+                "_traceml_internal:optimizer_step": _event_stats(gpu_ms=10.0),
+                "_traceml_internal:step_time": _event_stats(
+                    gpu_ms=step_time_gpu
+                ),
+            }
+        out[step] = events
     return out
 
 
 def test_summary_input_bound_uses_explicit_input_clocks() -> None:
-    low_wait = build_summary_step_diagnosis_result(
-        {0: _summary_step_metrics(input_wait_gpu=5.0)},
+    low_wait = _diagnose_summary_events(
+        {0: _summary_step_events(input_wait_gpu=5.0)},
         max_rows=100,
     )
-    high_wait = build_summary_step_diagnosis_result(
-        {0: _summary_step_metrics(input_wait_gpu=25.0)},
+    high_wait = _diagnose_summary_events(
+        {0: _summary_step_events(input_wait_gpu=25.0)},
         max_rows=100,
     )
 
@@ -643,21 +686,21 @@ def test_summary_input_bound_uses_explicit_input_clocks() -> None:
 
 def test_summary_input_bound_trend_uses_selected_input_wait_series() -> None:
     steps = 240
-    per_step: dict[int, dict[str, float]] = {}
+    per_step: dict[int, dict] = {}
     for step in range(steps):
         input_wait = 10.0 + step * (80.0 / float(steps - 1))
         per_step[step] = {
-            "h2d": 0.0,
-            "forward": 20.0,
-            "backward": 30.0,
-            "optimizer_step": 10.0,
-            "step_time": 60.0,
-            "residual_proxy": 0.0,
-            INPUT_WAIT_GPU_MS_KEY: input_wait,
-            STEP_TIME_GPU_MS_KEY: 60.0,
+            "_traceml_internal:dataloader_next": _event_stats(
+                gpu_ms=input_wait
+            ),
+            "_traceml_internal:h2d_time": _event_stats(gpu_ms=0.0),
+            "_traceml_internal:forward_time": _event_stats(gpu_ms=20.0),
+            "_traceml_internal:backward_time": _event_stats(gpu_ms=30.0),
+            "_traceml_internal:optimizer_step": _event_stats(gpu_ms=10.0),
+            "_traceml_internal:step_time": _event_stats(gpu_ms=60.0),
         }
 
-    result = build_summary_step_diagnosis_result(
+    result = _diagnose_summary_events(
         {0: per_step},
         max_rows=steps,
     )
