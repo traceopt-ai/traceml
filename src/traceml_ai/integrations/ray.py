@@ -323,7 +323,6 @@ class TraceMLTorchTrainer:
             )
             return trainer.fit()
 
-
         config = _normalize_config(self._traceml_config)
 
         Actor = ray.remote(num_cpus=1)(_TraceMLAggregatorActor)
