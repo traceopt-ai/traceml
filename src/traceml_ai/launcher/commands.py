@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from traceml_ai.launcher.launch_config import (
     DistributedLaunchConfig,
@@ -48,6 +48,17 @@ DASHBOARD_EXTRA_INSTALL_HINT = (
     "Dashboard mode requires optional dependencies. Install them with "
     "`pip install 'traceml-ai[dashboard]'`."
 )
+
+
+def _launch_defaults_for_topology(
+    defaults: Mapping[str, Any],
+    *,
+    nnodes: int,
+) -> dict[str, Any]:
+    """Return built-in launch defaults adjusted for the requested topology."""
+    resolved = dict(defaults)
+    resolved["mode"] = "summary" if int(nnodes) > 1 else "cli"
+    return resolved
 
 
 def _log_launcher_exception(message: str, exc: Exception) -> None:
@@ -152,6 +163,14 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             "TRACEML_UI_MODE": os.environ["TRACEML_MODE"],
         }
 
+    launch_cfg = DistributedLaunchConfig.from_args(args)
+    torchrun_cfg = launch_cfg.torchrun
+    aggregator_cfg = launch_cfg.aggregator
+    launch_defaults = _launch_defaults_for_topology(
+        BUILT_IN_DEFAULTS,
+        nnodes=torchrun_cfg.nnodes,
+    )
+
     # None = flag not supplied; resolver falls through to env/yaml/default.
     # --no-history inverts history_enabled: True flag → False override, absent → None.
     # Distributed/identity settings (nproc, nnodes, master/aggregator address,
@@ -173,7 +192,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         cli_overrides=cli_overrides,
         parent_env=launcher_env,
         yaml_config=yaml_cfg,
-        defaults=BUILT_IN_DEFAULTS,
+        defaults=launch_defaults,
     )
     cfg["finalize_timeout_sec"] = float(
         cfg.get("finalize_timeout_sec") or DEFAULT_FINALIZE_TIMEOUT_SEC
@@ -194,9 +213,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             f"Valid modes: {sorted(supported_modes)}"
         )
 
-    launch_cfg = DistributedLaunchConfig.from_args(args)
-    torchrun_cfg = launch_cfg.torchrun
-    aggregator_cfg = launch_cfg.aggregator
     owns_aggregator = aggregator_cfg.is_owner(node_rank=torchrun_cfg.node_rank)
 
     env = os.environ.copy()

@@ -39,7 +39,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
             "'cli' and 'dashboard': live views, intended for single-node "
             "runs, including single-node multi-GPU. "
             "'dashboard' requires the dashboard extra: "
-            "pip install 'traceml-ai[dashboard]'. Default: summary."
+            "pip install 'traceml-ai[dashboard]'. Default: cli on "
+            "single-node runs, summary on multi-node runs."
         ),
     )
     parser.add_argument(

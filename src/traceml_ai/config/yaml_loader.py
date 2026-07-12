@@ -43,8 +43,9 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
 }
 
 # Fallback values used when no CLI flag, env var, or yaml entry is present.
+# The launcher promotes mode to "summary" for multi-node runs.
 BUILT_IN_DEFAULTS: dict[str, Any] = {
-    "mode": "summary",
+    "mode": "cli",
     "interval": 2.0,
     "enable_logging": False,
     "logs_dir": "./logs",

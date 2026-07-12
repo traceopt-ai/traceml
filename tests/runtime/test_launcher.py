@@ -14,6 +14,7 @@ import pytest
 
 from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
+    _launch_defaults_for_topology,
     _resolve_serve_settings,
     resolve_existing_script_path,
     run_view,
@@ -196,9 +197,24 @@ def test_build_parser_preserves_launch_commands() -> None:
 
     # The launcher defers UI/telemetry defaults to the traceml.yaml config
     # resolver, so the argparse default is None ("flag not supplied"). The
-    # effective default ("summary") is applied by resolve_config / BUILT_IN_DEFAULTS.
+    # effective mode default is selected from the launch topology.
     default_args = parser.parse_args(["watch", "train.py"])
     assert default_args.mode is None
+
+
+def test_launch_defaults_use_cli_for_single_node_topologies() -> None:
+    defaults = {"mode": "summary", "interval": 2.0}
+
+    assert _launch_defaults_for_topology(defaults, nnodes=1)["mode"] == "cli"
+
+
+def test_launch_defaults_use_summary_for_multinode_topologies() -> None:
+    defaults = {"mode": "cli", "interval": 2.0}
+
+    result = _launch_defaults_for_topology(defaults, nnodes=2)
+
+    assert result["mode"] == "summary"
+    assert result["interval"] == 2.0
 
 
 def test_build_parser_accepts_view_command() -> None:

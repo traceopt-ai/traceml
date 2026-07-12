@@ -314,6 +314,15 @@ class TraceMLTorchTrainer:
     def fit(self) -> Any:
         """Run Ray Train with TraceML telemetry enabled."""
         ray, TorchTrainer = _require_ray()
+
+        if os.environ.get("TRACEML_DISABLED") == "1":
+            trainer = TorchTrainer(
+                self._train_loop_per_worker,
+                train_loop_config=dict(self._train_loop_config),
+                **self._torch_trainer_kwargs,
+            )
+            return trainer.fit()
+
         config = _normalize_config(self._traceml_config)
 
         Actor = ray.remote(num_cpus=1)(_TraceMLAggregatorActor)
