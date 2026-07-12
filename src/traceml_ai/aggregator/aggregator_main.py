@@ -176,16 +176,23 @@ def run_aggregator(
 
     Returns a process exit code (0 on clean shutdown, 1 on fatal error).
     """
-    if logger is None:
-        setup_error_logger(is_aggregator=True)
-        logger = get_error_logger("TraceMLAggregatorMain")
-
     session_id = str(settings.session_id or "default")
     session_root = Path(str(settings.logs_dir)).resolve() / session_id
     session_dir = session_root / "aggregator"
     session_dir.mkdir(parents=True, exist_ok=True)
     db_path = session_dir / "telemetry"
     settings = replace(settings, session_id=session_id, db_path=str(db_path))
+
+    # The shared error logger resolves its directory from TRACEML_LOGS_DIR and
+    # TRACEML_SESSION_ID. The `traceml run` launcher sets these before spawning
+    # the aggregator subprocess; the `traceml serve` path runs in-process and
+    # does not, so mirror them from the resolved settings before logging setup.
+    os.environ["TRACEML_LOGS_DIR"] = str(settings.logs_dir)
+    os.environ["TRACEML_SESSION_ID"] = session_id
+
+    if logger is None:
+        setup_error_logger(is_aggregator=True)
+        logger = get_error_logger("TraceMLAggregatorMain")
 
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)

@@ -6,6 +6,7 @@
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -97,6 +98,69 @@ def test_serve_maps_flags_into_aggregator_settings(monkeypatch) -> None:
     assert settings.aggregator.connect_host == "10.0.0.9"
     assert settings.aggregator.bind_host == "0.0.0.0"
     assert settings.aggregator.port == 40000
+
+
+def test_serve_configures_logging_without_preset_env(
+    monkeypatch, tmp_path
+) -> None:
+    import logging
+
+    import traceml_ai.aggregator.aggregator_main as agg_main
+    from traceml_ai.runtime.settings import (
+        AggregatorTransportSettings,
+        TraceMLSettings,
+    )
+
+    saved_env = {
+        key: os.environ.get(key)
+        for key in ("TRACEML_LOGS_DIR", "TRACEML_SESSION_ID")
+    }
+    os.environ.pop("TRACEML_LOGS_DIR", None)
+    os.environ.pop("TRACEML_SESSION_ID", None)
+
+    traceml_logger = logging.getLogger("traceml")
+    saved_handlers = traceml_logger.handlers[:]
+    traceml_logger.handlers.clear()
+
+    # Do not clobber the process signal handlers, and stop before the blocking
+    # wait by making aggregator startup raise a controlled error.
+    monkeypatch.setattr(agg_main, "_install_signal_handlers", lambda ev: None)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("stop before blocking")
+
+    monkeypatch.setattr(agg_main, "start_aggregator", _boom)
+
+    settings = TraceMLSettings(
+        mode="summary",
+        logs_dir=str(tmp_path),
+        session_id="serve-test",
+        aggregator=AggregatorTransportSettings(
+            connect_host="127.0.0.1", bind_host="127.0.0.1", port=0
+        ),
+    )
+
+    try:
+        rc = agg_main.run_aggregator(settings)
+
+        # Clean fatal exit (return 1), not a TypeError in logging setup.
+        assert rc == 1
+        assert os.environ["TRACEML_LOGS_DIR"] == str(tmp_path)
+        assert os.environ["TRACEML_SESSION_ID"] == "serve-test"
+    finally:
+        for handler in traceml_logger.handlers[:]:
+            traceml_logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
+        for handler in saved_handlers:
+            traceml_logger.addHandler(handler)
+        for key, value in saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_build_parser_preserves_launch_commands() -> None:
