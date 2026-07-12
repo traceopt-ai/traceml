@@ -21,7 +21,7 @@ TraceML output has two layers:
 1. **Primary Diagnosis**
    - the first answer in the end-of-run summary
    - focused on why training was slow
-   - example: `INPUT-BOUND`, `COMPUTE STRAGGLER`, `WAIT-HEAVY`
+   - example: `INPUT-BOUND`, `COMPUTE STRAGGLER`, `RESIDUAL-HEAVY`
 
 2. **Section Diagnoses**
    - detailed findings for System, Process, Step Time, and Step Memory
@@ -30,7 +30,7 @@ TraceML output has two layers:
 
 3. **Evidence**
    - the numbers and trends that support the diagnosis
-   - example: step breakdown, skew, wait time, memory peaks
+   - example: step breakdown, skew, residual time, memory peaks
 
 The top-level primary diagnosis is the best place to start when asking why a
 run was slow. Section diagnoses explain the details and keep health warnings
@@ -52,6 +52,19 @@ unexplained-utilization fallback, not as root-cause proof by itself.
 
 By default, `traceml run train.py` prints a compact final summary and writes
 `final_summary.json` plus `final_summary.txt`.
+
+The text summary is intentionally verdict-first:
+
+- `TraceML Verdict`: the promoted performance diagnosis and severity
+- `Why`: the short evidence-backed reason
+- `Next`: the first action to try or inspect
+- `Section Status`: compact health/status across System, Process, Step Time,
+  and Step Memory
+- `System Evidence` and `Step Time Evidence`: the core numbers behind the
+  verdict
+
+Detailed section prose remains in the `system.card`, `process.card`,
+`step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
 
 ### Shareable HTML report
 
@@ -120,7 +133,7 @@ It is based on:
 - backward time
 - optimizer time
 - step time
-- wait / overhead
+- residual / overhead
 - worst-rank vs median-rank differences in distributed runs
 
 ### `BALANCED`
@@ -134,7 +147,7 @@ This usually means:
 - no strong input bottleneck
 - no strong compute bottleneck
 - no clear straggler
-- no large wait-heavy pattern
+- no large residual-heavy pattern
 
 What to do next:
 
@@ -213,16 +226,15 @@ Meaning:
 
 TraceML uses this idea:
 
-- compare the worst rank to the median rank
-- measure how much extra dataloader work the worst rank is carrying
-- normalize that by a typical local step burden
+- compute each rank's clean step after discounting backward time that can be
+  explained by another rank's non-backward work
+- compare the worst clean step to the median clean step
+- blame dataloader when its worst-rank excess over peer median dominates the
+  other clean-step excesses by at least `1.25x`
 
 In simpler words:
 
 - one rank is slower in the input path, enough to matter to the overall run
-- this can remain the primary diagnosis even when compute or backward skew is
-  also visible, if the input excess is large enough to plausibly explain
-  downstream synchronization effects
 
 Common causes:
 
@@ -236,7 +248,7 @@ What to look at:
 - `Dataloader Fetch`
 - worst rank
 - skew (%)
-- diagnosis note
+- diagnosis evidence
 
 What to do next:
 
@@ -254,10 +266,10 @@ Meaning:
 
 TraceML uses this idea:
 
-- compare worst compute vs median compute
-- normalize the excess by a typical local step burden
-- for DDP, check nearby forward and optimizer evidence before blaming backward
-  directly
+- compute clean compute as `forward + clean_backward + optimizer`
+- compare the worst rank's clean compute to peer median
+- blame compute when clean-compute excess dominates dataloader, H2D, and residual
+  excesses by at least `1.25x`
 
 In simpler words:
 
@@ -286,39 +298,81 @@ What to do next:
 
 ---
 
+### `H2D STRAGGLER`
+
+Meaning:
+
+- one rank spends meaningfully more time in host-to-device transfer than a
+  typical rank
+
+TraceML uses the same clean-step comparison and reports this when H2D excess is
+the dominant worst-rank component.
+
+Common causes:
+
+- uneven CPU tensor sizes
+- rank-local transfer path differences
+- pinned-memory or device-transfer jitter on one rank
+
+What to do next:
+
+- inspect batch shapes and transfer placement on the worst rank
+- compare CPU-to-GPU copy timing across ranks
+
+---
+
+### `RESIDUAL STRAGGLER`
+
+Meaning:
+
+- one rank has meaningfully more rank-local residual `residual_proxy` than a
+  typical rank
+
+This is rank-local residual excess. It differs from `RESIDUAL-HEAVY`, which
+describes a window-wide residual time share.
+
+Common causes:
+
+- rank-local logging, checkpointing, validation, callbacks, CPU stalls, or
+  unobserved transfer work inside the timed step
+
+What to do next:
+
+- inspect host-side work on the worst rank
+- compare callbacks and per-rank side effects
+
+---
+
 ### `STRAGGLER`
 
 Meaning:
 
-- both input and compute are materially uneven in the same window
+- one rank is slower after clean-step backward-delay discount, but no single
+  component clearly dominates
 
 In the current policy, this is used when:
 
-- input straggler score is high
-- compute straggler score is high
+- the clean-step score is at least `0.10`
+- the largest worst-rank excess among dataloader, clean compute, H2D, and residual
+  is less than `1.25x` the next-largest excess
 
 This is a mixed unevenness case.
-
-TraceML keeps this diagnosis when the mixed signal is not clearly explained by
-input skew alone. If input excess is within the configured tolerance of compute
-excess, TraceML reports `INPUT STRAGGLER` instead and keeps the compute signal
-as secondary evidence.
 
 Common causes:
 
 - one bad rank with multiple problems
-- one phase uneven in input and another uneven in compute
+- one phase uneven in input and another uneven in compute, H2D, or residual
 - more than one imbalance pattern at the same time
 
 What to do next:
 
-- inspect both dataloader and compute signals
+- inspect dataloader, H2D, compute, and residual signals
 - inspect the worst rank and the largest uneven phases
 - reduce complexity by isolating one issue at a time
 
 ---
 
-### `WAIT-HEAVY`
+### `RESIDUAL-HEAVY`
 
 Meaning:
 
@@ -328,7 +382,7 @@ Meaning:
 In TraceML:
 
 - `compute = forward + backward + optimizer`
-- `wait = total_step - dataloader - h2d - compute`
+- `residual = total_step - dataloader - h2d - compute`
 
 This is residual unattributed time in the reported total step, not direct
 collective, NCCL, or all-reduce timing.
@@ -343,7 +397,7 @@ Common causes:
 
 What to look at:
 
-- `Wait`
+- `Residual`
 - whether the run is also showing straggler behavior
 
 What to do next:
@@ -381,7 +435,7 @@ In the CLI step summary, the important columns are:
 - `Backward`
 - `Optimizer`
 - `Total Step`
-- `Wait`
+- `Residual`
 
 Important rows:
 
@@ -401,7 +455,7 @@ Important rows:
 
 - how much larger the worst value is than the median
 
-### `Wait`
+### `Residual`
 
 - how much of the typical step is unattributed to dataloader, forward,
   backward, or optimizer work
@@ -413,7 +467,7 @@ A good reading pattern is:
 3. compare worst vs median
 4. inspect `Worst Rank`
 5. inspect `Skew (%)`
-6. inspect `Wait`
+6. inspect `Residual`
 
 ---
 
@@ -673,7 +727,7 @@ This card shows:
 - median vs worst step breakdown
 - gap
 - worst rank
-- wait time
+- residual time
 - dominant split
 
 Use it to validate the step-time diagnosis.
@@ -706,8 +760,10 @@ Use these as context cards:
 | `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
 | `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
-| `STRAGGLER` | inspect both input and compute unevenness |
-| `WAIT-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
+| `H2D STRAGGLER` | inspect host-to-device transfer on the worst rank |
+| `RESIDUAL STRAGGLER` | inspect rank-local host-side work on the worst rank |
+| `STRAGGLER` | inspect mixed clean-step unevenness |
+| `RESIDUAL-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY RISING` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
 | `HIGH PRESSURE` | reduce memory load |
@@ -717,15 +773,15 @@ Use these as context cards:
 
 ## Common pitfalls
 
-### High wait skew alone does not automatically mean a real wait bottleneck
+### High residual skew alone does not automatically mean a material bottleneck
 
 Look at:
 
-- `Wait`
+- `Residual`
 - the diagnosis
 - the rest of the step breakdown
 
-A tiny wait value with large percentage skew can still be minor in practice.
+A tiny residual value with large percentage skew can still be minor in practice.
 
 ### A high compute share does not mean every compute phase is equally important
 
@@ -764,7 +820,7 @@ If you are in a hurry:
 1. read the diagnosis
 2. identify the worst rank if shown
 3. compare worst vs median
-4. look at wait time or memory trend
+4. look at residual time or memory trend
 5. take the suggested next action
 
 That is usually enough to decide where to investigate next.

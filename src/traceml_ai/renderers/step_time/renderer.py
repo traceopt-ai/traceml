@@ -39,7 +39,7 @@ METRIC_LABELS = {
     "backward": "BWD",
     "optimizer_step": "OPT",
     "step_time": "STEP",
-    "wait_proxy": "WAIT",
+    "residual_proxy": "RESIDUAL",
 }
 
 
@@ -79,18 +79,19 @@ class StepCombinedRenderer(BaseRenderer):
         diag = build_step_diagnosis(
             metrics,
             thresholds=LIVE_STEP_TIME_POLICY.thresholds,
+            per_rank_timing=payload.per_rank_timing,
         )
         diag_text = format_cli_diagnosis(diag)
 
         step_metric = next(
             (m for m in metrics if m.metric == "step_time"), None
         )
-        wait_metric = next(
-            (m for m in metrics if m.metric == "wait_proxy"), None
+        residual_metric = next(
+            (m for m in metrics if m.metric == "residual_proxy"), None
         )
 
-        # Put wait_proxy last
-        metrics = sorted(metrics, key=lambda m: (m.metric == "wait_proxy"))
+        # Put residual_proxy last
+        metrics = sorted(metrics, key=lambda m: (m.metric == "residual_proxy"))
 
         # All metrics share the same window size by construction
         K = metrics[0].summary.steps_used
@@ -156,23 +157,29 @@ class StepCombinedRenderer(BaseRenderer):
             )
             table.add_row("")
 
-        # Optional WAIT share line (still meaningful in both modes)
-        if step_metric and wait_metric and step_metric.summary.worst_total > 0:
+        # Optional residual share line (still meaningful in both modes)
+        if (
+            step_metric
+            and residual_metric
+            and step_metric.summary.worst_total > 0
+        ):
             denom = (
                 step_metric.summary.median_total
                 if not single_rank
                 else step_metric.summary.worst_total
             )
-            wait_share = (
-                wait_metric.summary.median_total / denom if denom > 0 else 0.0
+            residual_share = (
+                residual_metric.summary.median_total / denom
+                if denom > 0
+                else 0.0
             )
 
             table.add_row(
-                "WAIT Share (%)",
+                "Residual Share (%)",
                 *[
                     (
-                        f"[red]{wait_share * 100:.1f}%[/red]"
-                        if m.metric == "wait_proxy"
+                        f"[red]{residual_share * 100:.1f}%[/red]"
+                        if m.metric == "residual_proxy"
                         else ""
                     )
                     for m in metrics
@@ -186,7 +193,7 @@ class StepCombinedRenderer(BaseRenderer):
             "\n\n[dim]"
             "DL=dataloader fetch | H2D=host-to-device | FWD=forward | "
             "BWD=backward | OPT=optimizer | STEP=traced step | "
-            "WAIT=STEP−H2D−FWD−BWD−OPT"
+            "RESIDUAL=STEP−H2D−FWD−BWD−OPT"
             "[/dim]"
         )
         return Panel(

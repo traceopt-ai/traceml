@@ -20,6 +20,8 @@ import warnings
 from pathlib import Path
 from typing import Any, Mapping
 
+from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+
 _log = logging.getLogger(__name__)
 
 CONFIG_FILENAME = "traceml.yaml"
@@ -34,9 +36,10 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "interval": ("TRACEML_INTERVAL", float),
     "enable_logging": ("TRACEML_ENABLE_LOGGING", bool),
     "logs_dir": ("TRACEML_LOGS_DIR", str),
-    "num_display_layers": ("TRACEML_NUM_DISPLAY_LAYERS", int),
-    "remote_max_rows": ("TRACEML_REMOTE_MAX_ROWS", int),
     "history_enabled": ("TRACEML_HISTORY_ENABLED", bool),
+    "finalize_timeout_sec": ("TRACEML_FINALIZE_TIMEOUT_SEC", float),
+    "dashboard_port": ("TRACEML_DASHBOARD_PORT", int),
+    "dashboard_auto_open": ("TRACEML_DASHBOARD_AUTO_OPEN", bool),
 }
 
 # Fallback values used when no CLI flag, env var, or yaml entry is present.
@@ -45,9 +48,10 @@ BUILT_IN_DEFAULTS: dict[str, Any] = {
     "interval": 2.0,
     "enable_logging": False,
     "logs_dir": "./logs",
-    "num_display_layers": 5,
-    "remote_max_rows": 200,
     "history_enabled": True,
+    "finalize_timeout_sec": DEFAULT_FINALIZE_TIMEOUT_SEC,
+    "dashboard_port": 8765,
+    "dashboard_auto_open": True,
 }
 
 # Env var strings treated as True for bool fields.

@@ -18,7 +18,7 @@ METRICS_BY_SECTION = {
         "dataloader_ms",
         "h2d_ms",
         "compute_ms",
-        "wait_ms",
+        "residual_ms",
         "forward_ms",
         "backward_ms",
         "optimizer_ms",

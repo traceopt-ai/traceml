@@ -10,12 +10,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.3.1"
+__version__ = "0.3.3"
 
 __all__ = [
     "__version__",
     "trace_step",
-    "trace_model_instance",
     "summary",
     "final_summary",
     "start",
@@ -34,7 +33,6 @@ if TYPE_CHECKING:
         init,
         start,
         summary,
-        trace_model_instance,
         trace_step,
         wrap_backward,
         wrap_dataloader_fetch,

@@ -18,8 +18,8 @@ from traceml_ai.renderers.step_time.schema import (
 
 STEP_TIME_TABLE = "step_time_samples"
 
-WAIT_METRIC_KEY = "wait_proxy"
-WAIT_STEP_KEY = "step_time"
+RESIDUAL_METRIC_KEY = "residual_proxy"
+STEP_METRIC_KEY = "step_time"
 
 EVENT_ALIASES = {
     "dataloader_fetch": "_traceml_internal:dataloader_next",
@@ -45,7 +45,7 @@ DEFAULT_HEATMAP_KEYS: Tuple[str, ...] = (
     "forward",
     "backward",
     "optimizer_step",
-    "wait_proxy",
+    "residual_proxy",
     "step_time",
 )
 
@@ -188,7 +188,7 @@ class StepCombinedComputer:
         bwd_sums = per_metric_rank_sums.get("backward", {})
         opt_sums = per_metric_rank_sums.get("optimizer_step", {})
 
-        wait_rank_sums = {
+        residual_rank_sums = {
             r: max(
                 0.0,
                 step_sums.get(r, 0.0)
@@ -199,11 +199,28 @@ class StepCombinedComputer:
             )
             for r in ranks_present
         }
-        per_metric_rank_sums[WAIT_METRIC_KEY] = wait_rank_sums
+        per_metric_rank_sums[RESIDUAL_METRIC_KEY] = residual_rank_sums
 
         overall_rank_scores = self._overall_rank_scores(
             per_metric_rank_sums, ranks_present
         )
+        per_rank_timing = {
+            int(r): {
+                "dataloader_fetch": float(
+                    per_metric_rank_sums.get("dataloader_fetch", {}).get(
+                        r, 0.0
+                    )
+                ),
+                "h2d": float(h2d_sums.get(r, 0.0)),
+                "forward": float(fwd_sums.get(r, 0.0)),
+                "backward": float(bwd_sums.get(r, 0.0)),
+                "optimizer_step": float(opt_sums.get(r, 0.0)),
+                "step_time": float(step_sums.get(r, 0.0)),
+                "residual_proxy": float(residual_rank_sums.get(r, 0.0)),
+                "total_step": float(overall_rank_scores.get(r, 0.0)),
+            }
+            for r in ranks_present
+        }
         overall_worst_rank = (
             max(overall_rank_scores, key=overall_rank_scores.get)
             if overall_rank_scores
@@ -229,7 +246,7 @@ class StepCombinedComputer:
             )
             if metric is not None:
                 if (
-                    metric_key == WAIT_STEP_KEY
+                    metric_key == STEP_METRIC_KEY
                     and overall_worst_rank is not None
                 ):
                     metric = StepCombinedTimeMetric(
@@ -249,17 +266,17 @@ class StepCombinedComputer:
                     )
                 metrics[metric_key] = metric
 
-        wait_metric = self._make_metric(
-            metric_key=WAIT_METRIC_KEY,
-            rank_sums=wait_rank_sums,
+        residual_metric = self._make_metric(
+            metric_key=RESIDUAL_METRIC_KEY,
+            rank_sums=residual_rank_sums,
             ranks=ranks_present,
             coverage=coverage,
             include_series=False,
             per_rank_steps=per_rank_steps,
             steps=steps,
         )
-        if wait_metric is not None:
-            metrics[WAIT_METRIC_KEY] = wait_metric
+        if residual_metric is not None:
+            metrics[RESIDUAL_METRIC_KEY] = residual_metric
 
         rank_heatmap = None
         if include_rank_heatmap and metrics:
@@ -311,6 +328,7 @@ class StepCombinedComputer:
         return StepCombinedTimeResult(
             metrics=list(metrics.values()),
             status_message=status,
+            per_rank_timing=per_rank_timing,
             rank_heatmap=rank_heatmap,
         )
 
@@ -436,11 +454,13 @@ class StepCombinedComputer:
                 return StepCombinedTimeResult(
                     metrics=self._last_ok.metrics,
                     status_message=msg,
+                    per_rank_timing=self._last_ok.per_rank_timing,
                     rank_heatmap=self._last_ok.rank_heatmap,
                 )
         return StepCombinedTimeResult(
             metrics=[],
             status_message="No fresh step-combined data",
+            per_rank_timing={},
             rank_heatmap=None,
         )
 
@@ -572,7 +592,7 @@ class StepCombinedComputer:
             skew_pct = 0.0
 
         series = None
-        if include_series and metric_key != WAIT_METRIC_KEY:
+        if include_series and metric_key != RESIDUAL_METRIC_KEY:
             median_y, worst_y, sum_y = [], [], []
 
             for step in steps:

@@ -45,22 +45,22 @@ from __future__ import annotations
 import threading
 import time
 import traceback
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from nicegui import ui
+from nicegui import app, ui
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.nicegui_sections.pages import (
     define_pages,
 )
-from traceml_ai.database.remote_database_store import RemoteDBStore
+from traceml_ai.aggregator.display_drivers.server_readiness import (
+    ServerReadiness,
+    socket_is_listening,
+    wait_for_server_ready,
+)
+from traceml_ai.aggregator.display_drivers.staleness import format_staleness
 from traceml_ai.renderers.base_renderer import DashboardRenderer
-from traceml_ai.renderers.layer_combined_memory.renderer import (
-    LayerCombinedMemoryRenderer,
-)
-from traceml_ai.renderers.layer_combined_time.renderer import (
-    LayerCombinedTimeRenderer,
-)
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
@@ -69,6 +69,25 @@ from traceml_ai.renderers.step_memory.renderer import StepMemoryRenderer
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.renderers.system.renderer import SystemRenderer
 from traceml_ai.runtime.settings import TraceMLSettings
+
+# Max seconds start() waits to confirm the dashboard server is listening before
+# returning anyway. Training must never block on the dashboard (TRA-68).
+_SERVER_STARTUP_TIMEOUT_SEC = 10.0
+
+
+@dataclass
+class LayoutError:
+    """A section compute error captured as a payload so the UI can show it."""
+
+    message: str
+
+
+def render_error(cards: Dict[str, Any], message: str) -> None:
+    """Write a short error message into every text-bearing card widget."""
+    text = f"⚠️ {message}"
+    for widget in cards.values():
+        if hasattr(widget, "text"):
+            widget.text = text
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -96,19 +115,24 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
     - pages define "how to display" per layout via subscribe_layout(...)
     """
 
-    def __init__(
-        self, logger: Any, store: RemoteDBStore, settings: TraceMLSettings
-    ) -> None:
-        self._logger = logger
-        self._store = store
-        self._settings = settings
-        self._deep_profile = (
-            getattr(self._settings, "profile", "run") == "deep"
-        )
+    def __init__(self, logger: Any, settings: TraceMLSettings) -> None:
+        super().__init__(logger=logger, settings=settings)
 
         # ---- UI lifecycle ----
         self._ui_started: bool = False
-        self._ui_ready: bool = False
+        self._ui_ready: bool = False  # a browser has rendered a page
+
+        # ---- Server readiness (TRA-68): start() waits for the socket, never
+        # for a browser, and always returns within the timeout. ----
+        self._lifespan_started = threading.Event()
+        self._server_thread: Optional[threading.Thread] = None
+        self._startup_timeout_sec: float = _SERVER_STARTUP_TIMEOUT_SEC
+
+        # ---- Staleness (TRA-68): seconds since payloads last refreshed,
+        # computed UI-side so a wedged display loop stops looking fresh. ----
+        self._last_data_monotonic: Optional[float] = None
+        self._staleness_threshold_sec: float = 5.0
+        self._staleness_labels: Dict[Optional[str], Any] = {}
 
         # ---- Compute callbacks (one per layout) ----
         self._layout_content_fns: Dict[str, Callable[[], Any]] = {}
@@ -135,21 +159,9 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             ModelDiagnosticsRenderer(db_path=self._settings.db_path),
         ]
 
-        if self._deep_profile:
-            self._renderers += [
-                LayerCombinedMemoryRenderer(
-                    remote_store=store,
-                    top_n_layers=settings.num_display_layers,
-                ),
-                LayerCombinedTimeRenderer(
-                    remote_store=store,
-                    top_n_layers=settings.num_display_layers,
-                ),
-            ]
-
-        # ---- UI server config ----
-        self._port: int = 8765
-        self._show: bool = True
+        # ---- UI server config (resolved via traceml.yaml/env/CLI) ----
+        self._port: int = settings.dashboard_port
+        self._show: bool = settings.dashboard_auto_open
 
     # ---------------------------------------------------------------------
     # Aggregator contract
@@ -157,18 +169,55 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
 
     def start(self) -> None:
         """
-        Start the NiceGUI server in a background thread (best effort).
+        Start the NiceGUI server in a background daemon thread (best effort).
 
-        This blocks until define_pages(...) sets self._ui_ready = True.
+        Waits for the server socket to start listening (NOT for a browser to
+        connect) and always returns within _startup_timeout_sec, so a headless
+        or remote training run is never blocked (TRA-68). _ui_ready stays a
+        pure compute gate: tick() computes only once a browser has rendered.
         """
         if self._ui_started:
             return
 
         self._ui_started = True
-        threading.Thread(target=self._start_ui_server, daemon=True).start()
 
-        while not self._ui_ready:
-            time.sleep(0.05)
+        # Deterministic pre-check: if the port is already held, our bind is
+        # doomed -- report it clearly instead of starting a server that will
+        # die, and avoid mistaking the foreign listener for our own.
+        if socket_is_listening("127.0.0.1", self._port):
+            self._log_startup_result(ServerReadiness.FAILED)
+            return
+
+        self._lifespan_started.clear()
+        self._server_thread = threading.Thread(
+            target=self._start_ui_server, daemon=True
+        )
+        self._server_thread.start()
+
+        result = wait_for_server_ready(
+            is_listening=lambda: socket_is_listening("127.0.0.1", self._port),
+            is_alive=self._server_thread.is_alive,
+            lifespan_started=self._lifespan_started.is_set,
+            timeout=self._startup_timeout_sec,
+        )
+        self._log_startup_result(result)
+
+    def _log_startup_result(self, result: ServerReadiness) -> None:
+        url = f"http://localhost:{self._port}"
+        if result is ServerReadiness.READY:
+            self._logger.info(f"[TraceML] Dashboard ready at {url}")
+        elif result is ServerReadiness.FAILED:
+            self._logger.error(
+                f"[TraceML] Dashboard server failed to start on port "
+                f"{self._port} (is the port already in use?). Training "
+                f"continues without the dashboard."
+            )
+        else:  # TIMEOUT
+            self._logger.warning(
+                f"[TraceML] Dashboard not confirmed within "
+                f"{self._startup_timeout_sec:.0f}s; continuing. It may still "
+                f"come up at {url}."
+            )
 
     def tick(self) -> None:
         """
@@ -204,13 +253,21 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         """
         try:
             define_pages(self)
+            # Fires when our ASGI lifespan starts (just before the socket is
+            # bound); gates the readiness probe in start().
+            app.on_startup(self._lifespan_started.set)
+            # Reclaim a client's subscribers + timer when its browser leaves,
+            # so reconnects don't leak (TRA-68).
+            app.on_disconnect(self._handle_disconnect)
             ui.run(
                 port=self._port,
                 reload=False,
                 show=self._show,
                 title="TraceML Dashboard",
             )
-        except Exception as e:
+        except BaseException as e:  # uvicorn calls sys.exit() on bind failure
+            # SystemExit is not an Exception; catching it here turns a port
+            # conflict into a logged failure instead of a wedged daemon thread.
             self._logger.error(f"[TraceML] NiceGUI server failed: {e}")
             self._logger.error(traceback.format_exc())
             self._ui_ready = False
@@ -261,13 +318,21 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
                 for _client_id, cards, update_fn in subs_snapshot.get(
                     layout, []
                 ):
+                    if isinstance(data, LayoutError):
+                        render_error(cards, data.message)
+                        continue
                     try:
                         update_fn(cards, data)
                     except Exception:
-                        # Best-effort: do not crash UI updates if one section fails.
-                        for w in cards.values():
-                            if hasattr(w, "text"):
-                                w.text = "⚠️ Could not update"
+                        # Best-effort: keep the UI alive if a section fails.
+                        render_error(cards, "could not update")
+
+            # Refresh the staleness indicator(s) on every UI tick so a wedged
+            # display loop stops looking fresh (computed UI-side, not at swap).
+            staleness = self.staleness_text()
+            for label in list(self._staleness_labels.values()):
+                if hasattr(label, "text"):
+                    label.text = staleness
 
         except Exception as e:
             self._logger.error(f"[TraceML] UI update loop failed: {e}")
@@ -322,6 +387,39 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
 
         subs.append((client_id, cards, update_fn))
 
+    def _handle_disconnect(self, client: Any) -> None:
+        """app.on_disconnect handler: prune the disconnected client's state."""
+        client_id = getattr(client, "id", None)
+        if client_id is not None:
+            self._prune_client(client_id)
+
+    def _prune_client(self, client_id: str) -> None:
+        """
+        Remove a disconnected client's subscribers and timer registration.
+
+        Without this, every browser session leaks subscribers and a ui.timer
+        that are never reclaimed, so per-tick work grows without bound across
+        reconnects (TRA-68).
+        """
+        for layout in list(self._layout_subscribers):
+            remaining = [
+                sub
+                for sub in self._layout_subscribers[layout]
+                if sub[0] != client_id
+            ]
+            if remaining:
+                self._layout_subscribers[layout] = remaining
+            else:
+                del self._layout_subscribers[layout]
+        self._timer_clients.discard(client_id)
+        self._staleness_labels.pop(client_id, None)
+
+    def register_staleness_label(self, label: Any) -> None:
+        """Register a per-client widget that shows the staleness indicator."""
+        client = getattr(ui.context, "client", None)
+        client_id = getattr(client, "id", None)
+        self._staleness_labels[client_id] = label
+
     # ---------------------------------------------------------------------
     # Aggregator thread: compute & store latest payloads
     # ---------------------------------------------------------------------
@@ -342,10 +440,26 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             try:
                 new_data[layout] = fn()
             except Exception as e:
-                new_data[layout] = f"[Error] {e}"
+                new_data[layout] = LayoutError(str(e))
 
         with self._latest_data_lock:
             self.latest_data = new_data
+
+        # Mark "fresh" only when real data flowed; all-error ticks leave the
+        # timestamp untouched so the staleness indicator advances.
+        if any(
+            not isinstance(payload, LayoutError)
+            for payload in new_data.values()
+        ):
+            self._last_data_monotonic = time.monotonic()
+
+    def staleness_text(self, now: Optional[float] = None) -> str:
+        """Short 'stale Ns' label for the UI, or '' when data is fresh."""
+        if self._last_data_monotonic is None:
+            return ""
+        current = time.monotonic() if now is None else now
+        age = current - self._last_data_monotonic
+        return format_staleness(age, self._staleness_threshold_sec)
 
     def release_display(self) -> None:
         """Clear internal state; safe to call multiple times."""
@@ -361,6 +475,8 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._layout_content_fns.clear()
         self._layout_subscribers.clear()
         self._timer_clients.clear()
+        self._staleness_labels.clear()
+        self._last_data_monotonic = None
         self._registered = False
 
     def _register_once(self) -> None:

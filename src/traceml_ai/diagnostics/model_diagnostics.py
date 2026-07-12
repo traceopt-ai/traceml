@@ -96,6 +96,7 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
 def build_model_diagnostics_payload(
     *,
     step_time_metrics: Sequence[StepCombinedTimeMetric],
+    step_time_per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
@@ -111,6 +112,7 @@ def build_model_diagnostics_payload(
     items: List[ModelDiagnosisItem] = []
     context = ModelDiagnosticContext(
         step_time_metrics=step_time_metrics,
+        step_time_per_rank_timing=dict(step_time_per_rank_timing or {}),
         step_memory_metrics=step_memory_metrics,
         step_memory_status_message=step_memory_status_message,
         gpu_total_bytes=gpu_total_bytes,
@@ -147,7 +149,10 @@ def _build_step_time_item(
     context: ModelDiagnosticContext,
 ) -> ModelDiagnosisItem:
     """Build the registered step-time model diagnostic item."""
-    step_time_diag = build_step_diagnosis(context.step_time_metrics)
+    step_time_diag = build_step_diagnosis(
+        context.step_time_metrics,
+        per_rank_timing=context.step_time_per_rank_timing,
+    )
     return ModelDiagnosisItem(
         source="step_time",
         title="Step Time",
@@ -258,7 +263,7 @@ def _build_step_time_evidence(
     """
     by_key = {metric.metric: metric for metric in metrics}
     step = by_key.get("step_time")
-    wait = by_key.get("wait_proxy")
+    residual = by_key.get("residual_proxy")
 
     if step is None:
         return {}
@@ -283,13 +288,15 @@ def _build_step_time_evidence(
 
     try:
         median_total = float(step.summary.median_total or 0.0)
-        wait_total = (
-            float(wait.summary.median_total or 0.0)
-            if wait is not None
+        residual_total = (
+            float(residual.summary.median_total or 0.0)
+            if residual is not None
             else 0.0
         )
         if median_total > 0.0:
-            evidence["wait"] = f"{(wait_total / median_total) * 100.0:.1f}%"
+            evidence["residual"] = (
+                f"{(residual_total / median_total) * 100.0:.1f}%"
+            )
     except Exception:
         pass
 
@@ -363,7 +370,7 @@ def _dominant_step_component(
         "forward": "forward",
         "backward": "backward",
         "optimizer_step": "optimizer",
-        "wait_proxy": "wait",
+        "residual_proxy": "residual",
     }
 
     best_label: Optional[str] = None

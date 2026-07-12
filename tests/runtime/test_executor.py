@@ -35,7 +35,9 @@ from traceml_ai.runtime.executor import (
     extract_script_args,
     read_traceml_env,
     run_user_script,
+    write_user_error_log,
 )
+from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
 
 
 def test_extract_script_args_uses_separator_when_present(monkeypatch):
@@ -131,10 +133,14 @@ def test_run_user_script_restores_sys_argv_and_sys_path(tmp_path, monkeypatch):
 def test_read_traceml_env_parses_trace_max_steps(monkeypatch):
     monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
     monkeypatch.setenv("TRACEML_TRACE_MAX_STEPS", "123")
+    monkeypatch.setenv("TRACEML_FINALIZE_TIMEOUT_SEC", "42.5")
+    monkeypatch.setenv("TRACEML_EXPECTED_WORLD_SIZE", "8")
 
     cfg = read_traceml_env()
 
     assert cfg["trace_max_steps"] == 123
+    assert cfg["finalize_timeout_sec"] == 42.5
+    assert cfg["expected_world_size"] == 8
 
 
 def test_build_runtime_settings_carries_trace_max_steps():
@@ -155,3 +161,18 @@ def test_build_runtime_settings_carries_trace_max_steps():
     )
 
     assert settings.trace_max_steps == 5
+    assert settings.finalize_timeout_sec == DEFAULT_FINALIZE_TIMEOUT_SEC
+    assert settings.expected_world_size == 1
+
+
+def test_write_user_error_log_records_error(tmp_path):
+    cfg = {"logs_dir": str(tmp_path), "session_id": "session-a"}
+    error = RuntimeError("boom")
+
+    write_user_error_log(cfg, "User script failed", error)
+
+    log_text = (tmp_path / "session-a" / "torchrun_error.log").read_text(
+        encoding="utf-8"
+    )
+    assert "User script failed" in log_text
+    assert "RuntimeError: boom" in log_text

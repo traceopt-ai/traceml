@@ -311,8 +311,6 @@ def _resolve_runtime_settings(
         sampler_interval_sec=float(cfg["interval"]),
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
-        num_display_layers=int(cfg["num_display_layers"]),
-        remote_max_rows=int(cfg["remote_max_rows"]),
         history_enabled=bool(cfg["history_enabled"]),
         session_id=resolved_session,
         summary_window_rows=int(

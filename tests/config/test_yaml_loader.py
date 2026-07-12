@@ -72,20 +72,18 @@ def test_load_yaml_config_valid(tmp_path: Path) -> None:
         mode: summary
         interval: 3.0
         logs_dir: ./runs
-        num_display_layers: 8
         history_enabled: true
+        finalize_timeout_sec: 120
         enable_logging: false
-        remote_max_rows: 100
         """,
     )
     result = load_yaml_config(p)
     assert result["mode"] == "summary"
     assert result["interval"] == 3.0
     assert result["logs_dir"] == "./runs"
-    assert result["num_display_layers"] == 8
     assert result["history_enabled"] is True
+    assert result["finalize_timeout_sec"] == 120.0
     assert result["enable_logging"] is False
-    assert result["remote_max_rows"] == 100
 
 
 def test_load_yaml_config_unknown_key_warns(tmp_path: Path) -> None:
@@ -100,12 +98,6 @@ def test_load_yaml_config_unknown_key_warns(tmp_path: Path) -> None:
 def test_load_yaml_config_type_error_bool_field(tmp_path: Path) -> None:
     p = _write(tmp_path, "enable_logging: not_a_bool\n")
     with pytest.raises(ValueError, match="enable_logging"):
-        load_yaml_config(p)
-
-
-def test_load_yaml_config_type_error_int_field(tmp_path: Path) -> None:
-    p = _write(tmp_path, "num_display_layers: abc\n")
-    with pytest.raises(ValueError, match="num_display_layers"):
         load_yaml_config(p)
 
 
@@ -200,7 +192,6 @@ def test_resolve_config_default_when_nothing_set() -> None:
     result = resolve_config(cli, _no_env(), _no_yaml(), _defaults())
     assert result["mode"] == BUILT_IN_DEFAULTS["mode"]
     assert result["interval"] == BUILT_IN_DEFAULTS["interval"]
-    assert result["remote_max_rows"] == BUILT_IN_DEFAULTS["remote_max_rows"]
     assert result["history_enabled"] == BUILT_IN_DEFAULTS["history_enabled"]
 
 
@@ -220,22 +211,15 @@ def test_resolve_config_env_bool_coercion() -> None:
     assert result["history_enabled"] is False
 
 
-def test_resolve_config_env_int_coercion() -> None:
-    cli = _no_cli()
-    env = {
-        "TRACEML_REMOTE_MAX_ROWS": "12345",
-        "TRACEML_NUM_DISPLAY_LAYERS": "15",
-    }
-    result = resolve_config(cli, env, _no_yaml(), _defaults())
-    assert result["remote_max_rows"] == 12345
-    assert result["num_display_layers"] == 15
-
-
 def test_resolve_config_env_float_coercion() -> None:
     cli = _no_cli()
-    env = {"TRACEML_INTERVAL": "0.5"}
+    env = {
+        "TRACEML_INTERVAL": "0.5",
+        "TRACEML_FINALIZE_TIMEOUT_SEC": "42.5",
+    }
     result = resolve_config(cli, env, _no_yaml(), _defaults())
     assert result["interval"] == 0.5
+    assert result["finalize_timeout_sec"] == 42.5
 
 
 def test_resolve_config_history_disabled_via_cli() -> None:
@@ -250,7 +234,6 @@ def test_resolve_config_history_disabled_via_cli() -> None:
 
 def test_load_yaml_config_unreadable_file(tmp_path: Path) -> None:
     """A file that exists but cannot be read raises OSError with a clear message."""
-    import os
     import sys
 
     if sys.platform == "win32":
@@ -263,14 +246,6 @@ def test_load_yaml_config_unreadable_file(tmp_path: Path) -> None:
             load_yaml_config(p)
     finally:
         p.chmod(0o644)
-
-
-def test_coerce_env_malformed_int_raises_value_error() -> None:
-    """A malformed TRACEML_* int env var gives a clear error, not a raw Python one."""
-    from traceml_ai.config.yaml_loader import _coerce_env
-
-    with pytest.raises(ValueError, match="TRACEML_REMOTE_MAX_ROWS"):
-        _coerce_env("remote_max_rows", "not_a_number")
 
 
 def test_coerce_env_malformed_float_raises_value_error() -> None:
@@ -319,3 +294,49 @@ def test_resolve_config_ui_mode_takes_priority_over_deprecated_mode() -> None:
         normalised_env = raw_env
     result = resolve_config(cli, normalised_env, _no_yaml(), _defaults())
     assert result["mode"] == "dashboard"
+
+
+# dashboard_port / dashboard_auto_open  (TRA-68 config keys)
+
+
+def test_load_yaml_config_dashboard_keys(tmp_path: Path) -> None:
+    p = _write(
+        tmp_path,
+        """\
+        dashboard_port: 9000
+        dashboard_auto_open: false
+        """,
+    )
+    result = load_yaml_config(p)
+    assert result["dashboard_port"] == 9000
+    assert result["dashboard_auto_open"] is False
+
+
+def test_load_yaml_config_dashboard_port_type_error(tmp_path: Path) -> None:
+    p = _write(tmp_path, "dashboard_port: not_a_port\n")
+    with pytest.raises(ValueError, match="dashboard_port"):
+        load_yaml_config(p)
+
+
+def test_resolve_config_dashboard_defaults() -> None:
+    result = resolve_config(_no_cli(), _no_env(), _no_yaml(), _defaults())
+    assert result["dashboard_port"] == 8765
+    assert result["dashboard_auto_open"] is True
+
+
+def test_resolve_config_dashboard_env_coercion() -> None:
+    env = {
+        "TRACEML_DASHBOARD_PORT": "9000",
+        "TRACEML_DASHBOARD_AUTO_OPEN": "0",
+    }
+    result = resolve_config(_no_cli(), env, _no_yaml(), _defaults())
+    assert result["dashboard_port"] == 9000
+    assert result["dashboard_auto_open"] is False
+
+
+def test_resolve_config_dashboard_cli_beats_env_and_yaml() -> None:
+    cli = {**_no_cli(), "dashboard_port": 7000}
+    env = {"TRACEML_DASHBOARD_PORT": "9000"}
+    yaml = {"dashboard_port": 8000}
+    result = resolve_config(cli, env, yaml, _defaults())
+    assert result["dashboard_port"] == 7000

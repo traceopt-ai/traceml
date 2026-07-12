@@ -6,10 +6,11 @@
 
 """Out-of-process telemetry server and display driver host."""
 
+import logging
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
 from traceml_ai.aggregator.display_drivers.cli import CLIDisplayDriver
@@ -19,17 +20,26 @@ from traceml_ai.aggregator.sqlite_writer import (
     SQLiteWriterSimple,
 )
 from traceml_ai.aggregator.summary_service import FinalSummaryService
-from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.reporting.final import generate_summary
 from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
-from traceml_ai.sdk.protocol import get_final_summary_json_path
-from traceml_ai.telemetry.envelope import normalize_telemetry_envelope
+from traceml_ai.sdk.protocol import get_final_summary_json_path, utc_now_iso
+from traceml_ai.telemetry.control import (
+    RankFinishedControl,
+    parse_rank_finished,
+)
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
+from traceml_ai.utils.atomic_io import write_json_atomic
 
 DASHBOARD_EXTRA_INSTALL_HINT = (
     "Dashboard mode requires optional dependencies. Install them with "
     "`pip install 'traceml-ai[dashboard]'`."
 )
+_SQLITE_FINALIZE_BUDGET_FRACTION = 0.25
+_SQLITE_FINALIZE_BUDGET_MIN_SEC = 5.0
+_SQLITE_FINALIZE_BUDGET_MAX_SEC = 60.0
+_SQLITE_FINALIZE_TINY_FLOOR_SEC = 0.001
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -39,6 +49,10 @@ def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
     except Exception:
         logger.exception(f"[TraceML] {label}")
         return None
+
+
+class TraceMLFinalizationError(RuntimeError):
+    """Raised when summary-mode end-of-run finalization cannot complete."""
 
 
 _DISPLAY_DRIVERS: Dict[str, Type[BaseDisplayDriver]] = {
@@ -74,16 +88,6 @@ def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
 class TraceMLAggregator:
     """Telemetry aggregator process."""
 
-    _REMOTE_STORE_SAMPLERS = frozenset(
-        {
-            "LayerMemorySampler",
-            "LayerForwardMemorySampler",
-            "LayerBackwardMemorySampler",
-            "LayerForwardTimeSampler",
-            "LayerBackwardTimeSampler",
-        }
-    )
-
     def __init__(
         self,
         logger: Any,
@@ -93,10 +97,12 @@ class TraceMLAggregator:
         self._logger = logger
         self._stop_event = stop_event
         self._settings = settings
-
-        # Transitional live store for the remaining renderer paths that have
-        # not yet moved to SQLite-backed history.
-        self._store = RemoteDBStore(max_rows=int(settings.remote_max_rows))
+        self._expected_world_size = max(
+            1, int(getattr(settings, "expected_world_size", 1) or 1)
+        )
+        self._finished_ranks: dict[int, RankFinishedControl] = {}
+        self._started = False
+        self._drain_lock = threading.Lock()
 
         # TCP server: aggregator listens for rank-local agents.
         self._tcp_server = TCPServer(
@@ -130,7 +136,7 @@ class TraceMLAggregator:
             logger=self._logger,
             session_root=session_root,
             db_path=str(db_path),
-            flush_history=self._sqlite_writer.flush_now,
+            flush_history=self._sqlite_writer.force_flush,
             settle_telemetry=self._settle_telemetry,
             summary_window_rows=int(settings.summary_window_rows),
             write_html=bool(settings.html_report),
@@ -141,7 +147,6 @@ class TraceMLAggregator:
 
         self._display_driver = driver_cls(
             logger=self._logger,
-            store=self._store,
             settings=self._settings,
         )
 
@@ -150,11 +155,6 @@ class TraceMLAggregator:
             name="TraceMLAggregator",
             daemon=True,
         )
-
-    @property
-    def store(self) -> RemoteDBStore:
-        """Expose the store for tests and read-only inspection."""
-        return self._store
 
     def start(self) -> None:
         """
@@ -175,6 +175,7 @@ class TraceMLAggregator:
 
         try:
             self._thread.start()
+            self._started = True
         except Exception:
             self._logger.exception("[TraceML] Aggregator thread start failed")
             raise
@@ -190,17 +191,28 @@ class TraceMLAggregator:
 
     def stop(self, timeout_sec: float) -> None:
         """
-        Stop the aggregator loop and release resources.
+        Stop the aggregator and deterministically finalize end-of-run artifacts.
 
         Notes
         -----
-        - The loop exits when ``stop_event`` is set by the process entrypoint.
-        - Cleanup is best-effort once shutdown begins.
-        - Final summary generation runs only when history is enabled and a
-          database path is configured.
+        End-of-run finalization keeps the TCP server open briefly so late
+        multi-node telemetry can arrive, closes SQLite before summary generation,
+        and treats a missing summary as an error in summary mode.
         """
+        deadline = time.monotonic() + max(0.0, float(timeout_sec))
+        session_root = Path(str(self._settings.logs_dir)).resolve() / str(
+            self._settings.session_id or "default"
+        )
+
+        def remaining() -> float:
+            return max(0.0, deadline - time.monotonic())
+
+        warning_payload: Optional[dict[str, Any]] = None
+        finalize_payload: Optional[dict[str, Any]] = None
+
+        self._stop_event.set()
         if self._thread.is_alive():
-            self._thread.join(timeout=float(timeout_sec))
+            self._thread.join(timeout=min(5.0, remaining()))
 
         if self._thread.is_alive():
             self._logger.error(
@@ -212,67 +224,295 @@ class TraceMLAggregator:
             "Display driver stop failed",
             self._display_driver.stop,
         )
-        _safe(
-            self._logger,
-            "TCPServer.stop failed",
-            self._tcp_server.stop,
-        )
-        _safe(
-            self._logger,
-            "SQLiteWriter.stop failed",
-            self._sqlite_writer.stop,
-        )
 
-        session_root = Path(str(self._settings.logs_dir)).resolve() / str(
-            self._settings.session_id or "default"
-        )
-        if (
-            self._settings.history_enabled
-            and self._settings.db_path
-            and not get_final_summary_json_path(session_root).is_file()
-        ):
+        try:
+            sqlite_finalize_budget = self._sqlite_finalize_budget(remaining())
+            settle_budget = max(0.0, remaining() - sqlite_finalize_budget)
+            if self._settings.history_enabled:
+                warning_payload = self._settle_end_of_run_telemetry(
+                    settle_budget
+                )
             _safe(
                 self._logger,
-                "Final summary failed",
-                lambda: generate_summary(
-                    str(self._settings.db_path),
-                    session_root=str(session_root),
-                    print_to_stdout=True,
-                    summary_window_rows=int(
-                        self._settings.summary_window_rows
-                    ),
-                    write_html=bool(self._settings.html_report),
-                ),
+                "TCPServer.stop failed",
+                self._tcp_server.stop,
             )
+            finalize_result = self._sqlite_writer.finalize(
+                max(sqlite_finalize_budget, remaining())
+            )
+            finalize_payload = finalize_result.to_dict()
+            if not finalize_result.ok:
+                raise TraceMLFinalizationError(
+                    "SQLite history did not finalize cleanly: "
+                    f"{finalize_result.error or 'unknown error'}"
+                )
+            warning_payload = self._add_sqlite_finalize_warning(
+                warning_payload,
+                finalize_payload,
+            )
+
+            if (
+                self._started
+                and self._settings.history_enabled
+                and self._settings.db_path
+                and not get_final_summary_json_path(session_root).is_file()
+            ):
+                try:
+                    generate_summary(
+                        str(self._settings.db_path),
+                        session_root=str(session_root),
+                        print_to_stdout=True,
+                        summary_window_rows=int(
+                            self._settings.summary_window_rows
+                        ),
+                        write_html=bool(self._settings.html_report),
+                    )
+                except Exception as summary_exc:
+                    # A summary-generation error is only fatal if it left no
+                    # artifact: the missing-file gate below makes that call.
+                    # A post-write render/print error (final_summary.json is
+                    # already on disk) is downgraded to a warning so it does
+                    # not fail an otherwise-successful run.
+                    self._logger.exception("[TraceML] generate_summary raised")
+                    warning_payload = self._add_generate_summary_warning(
+                        warning_payload, summary_exc
+                    )
+
+            if (
+                self._started
+                and self._settings.mode == "summary"
+                and self._settings.history_enabled
+                and not get_final_summary_json_path(session_root).is_file()
+            ):
+                raise TraceMLFinalizationError(
+                    "Summary mode finished without final_summary.json."
+                )
+
+            if warning_payload is not None:
+                self._write_finalization_artifact(
+                    session_root,
+                    "finalization_warning.json",
+                    warning_payload,
+                )
+
+        except Exception as exc:
+            self._write_finalization_artifact(
+                session_root,
+                "finalization_error.json",
+                {
+                    "status": "error",
+                    "completed_at": utc_now_iso(),
+                    "error": str(exc),
+                    "finished_ranks": self._finished_ranks_snapshot(),
+                    "expected_world_size": self._expected_world_size,
+                    "sqlite_finalize": finalize_payload,
+                    "writer": self._sqlite_writer.stats(),
+                },
+            )
+            if self._settings.mode == "summary":
+                raise
+            self._logger.exception("[TraceML] Finalization failed")
 
     def _drain_tcp(self) -> None:
         """
-        Drain pending TCP messages and ingest them into the store and history.
+        Drain pending TCP messages and ingest them into SQLite history.
 
         Each message is expected to be a telemetry row or batch compatible with
-        ``SQLiteWriterSimple.ingest()``. A legacy subset is also mirrored into
-        ``RemoteDBStore`` for renderers that still depend on the in-memory path.
-
-        Design note
-        -----------
-        Errors in each sink are isolated: a failure in one does not prevent the
-        other from receiving the message.  Direct try/except is used instead of
-        ``_safe(lambda ...)`` to avoid allocating two closure objects per message
-        in the hot path.
+        ``SQLiteWriterSimple.ingest()``.
         """
-        for msg in self._tcp_server.poll():
-            remote_msg = self._filter_remote_store_message(msg)
-            if remote_msg is not None:
-                try:
-                    self._store.ingest(remote_msg)
-                except Exception:
-                    self._logger.exception(
-                        "[TraceML] RemoteDBStore.ingest failed"
-                    )
-            try:
-                self._sqlite_writer.ingest(msg)
-            except Exception:
-                self._logger.exception("[TraceML] SQLiteWriter.ingest failed")
+        with self._drain_lock:
+            for msg in self._tcp_server.poll():
+                for payload in self._split_telemetry_payloads(msg):
+                    try:
+                        self._sqlite_writer.ingest(payload)
+                    except Exception:
+                        self._logger.exception(
+                            "[TraceML] SQLiteWriter.ingest failed"
+                        )
+
+    @staticmethod
+    def _sqlite_finalize_budget(timeout_sec: float) -> float:
+        """
+        Reserve part of the end-of-run timeout for SQLite close/checkpoint.
+
+        Large runs need most of the timeout for late rank telemetry, but SQLite
+        still needs a guaranteed slice so a missing rank marker cannot consume
+        the whole deadline and turn a clean writer close into a false timeout.
+        """
+        total = max(0.0, float(timeout_sec))
+        if total <= 0.0:
+            return 0.0
+        if total < _SQLITE_FINALIZE_BUDGET_MIN_SEC:
+            return max(
+                total * _SQLITE_FINALIZE_BUDGET_FRACTION,
+                min(_SQLITE_FINALIZE_TINY_FLOOR_SEC, total),
+            )
+        return min(
+            _SQLITE_FINALIZE_BUDGET_MAX_SEC,
+            max(
+                _SQLITE_FINALIZE_BUDGET_MIN_SEC,
+                total * _SQLITE_FINALIZE_BUDGET_FRACTION,
+            ),
+        )
+
+    @staticmethod
+    def _add_sqlite_finalize_warning(
+        warning_payload: Optional[dict[str, Any]],
+        finalize_payload: Optional[dict[str, Any]],
+    ) -> Optional[dict[str, Any]]:
+        """Attach nonfatal SQLite finalize warnings to the warning artifact."""
+        if not finalize_payload or finalize_payload.get("prune_ok", True):
+            return warning_payload
+
+        if warning_payload is None:
+            warning_payload = {
+                "status": "warning",
+                "completed_at": utc_now_iso(),
+                "message": (
+                    "SQLite final retention prune failed; summary generation "
+                    "continued because queued telemetry was written and "
+                    "SQLite checkpoint/close succeeded."
+                ),
+            }
+        warning_payload["sqlite_finalize"] = finalize_payload
+        return warning_payload
+
+    @staticmethod
+    def _add_generate_summary_warning(
+        warning_payload: Optional[dict[str, Any]],
+        exc: Exception,
+    ) -> Optional[dict[str, Any]]:
+        """Record a nonfatal post-write summary-generation error.
+
+        Reached only when ``final_summary.json`` already exists (the
+        missing-file gate handles the fatal, no-artifact case), so a
+        render/print error after the write did not cost the artifact and must
+        not fail the run.
+        """
+        if warning_payload is None:
+            warning_payload = {
+                "status": "warning",
+                "completed_at": utc_now_iso(),
+                "message": (
+                    "Summary artifact was written, but summary generation "
+                    "raised after the write; continuing without failing the "
+                    "run."
+                ),
+            }
+        warning_payload["generate_summary_error"] = str(exc)
+        return warning_payload
+
+    def _finished_ranks_snapshot(self) -> List[int]:
+        """Return a sorted snapshot of finished global ranks (lock-safe).
+
+        ``_finished_ranks`` is mutated under ``_drain_lock`` by the drain
+        path; snapshotting under the same lock avoids a ``RuntimeError`` if a
+        late/zombie drain mutates the dict mid-iteration.
+        """
+        with self._drain_lock:
+            return sorted(self._finished_ranks)
+
+    def _split_telemetry_payloads(self, msg: Any) -> List[Any]:
+        """
+        Consume control messages and return sampler telemetry payloads.
+
+        Rank-finished markers share the TCP transport with telemetry so workers
+        do not need a second control channel. They are consumed here and never
+        enter SQLite projection storage.
+        """
+        if isinstance(msg, list):
+            telemetry: List[Any] = []
+            for item in msg:
+                control = parse_rank_finished(item)
+                if control is not None:
+                    self._finished_ranks[control.global_rank] = control
+                else:
+                    telemetry.append(item)
+            return [telemetry] if telemetry else []
+
+        control = parse_rank_finished(msg)
+        if control is not None:
+            self._finished_ranks[control.global_rank] = control
+            return []
+        return [msg]
+
+    def _settle_end_of_run_telemetry(
+        self, timeout_sec: float
+    ) -> Optional[dict[str, Any]]:
+        """
+        Drain late telemetry before final SQLite close.
+
+        The aggregator keeps TCP open during this phase because worker ranks can
+        finish at slightly different times on multi-node jobs. Finalization
+        proceeds once all expected ranks sent a rank-finished marker or the
+        caller's deadline expires.
+        """
+        deadline = time.monotonic() + max(0.0, float(timeout_sec))
+        quiet_sec = 0.5
+        # Back-compat: workers from older releases do not send a rank_finished
+        # marker, so _finished_ranks never reaches expected_world_size and this
+        # loop waits the full settle budget, then emits a nonfatal "missing
+        # ranks" warning. New workers short-circuit once all ranks report.
+        while time.monotonic() < deadline:
+            self._drain_tcp()
+            if len(self._finished_ranks) >= self._expected_world_size:
+                remaining = max(0.0, deadline - time.monotonic())
+                if not self._tcp_server.wait_for_data(
+                    timeout=min(quiet_sec, remaining)
+                ):
+                    self._drain_tcp()
+                    return None
+                continue
+
+            remaining = max(0.0, deadline - time.monotonic())
+            if remaining <= 0.0:
+                break
+            self._tcp_server.wait_for_data(timeout=min(quiet_sec, remaining))
+
+        self._drain_tcp()
+        if len(self._finished_ranks) >= self._expected_world_size:
+            return None
+
+        missing = [
+            rank
+            for rank in range(self._expected_world_size)
+            if rank not in self._finished_ranks
+        ]
+        warning = {
+            "status": "warning",
+            "completed_at": utc_now_iso(),
+            "message": (
+                "Timed out waiting for all ranks to report finished before "
+                "end-of-run finalization."
+            ),
+            "expected_world_size": self._expected_world_size,
+            "finished_ranks": self._finished_ranks_snapshot(),
+            "missing_ranks": missing,
+        }
+        try:
+            self._logger.warning("[TraceML] %s", warning["message"])
+        except Exception:
+            # Best-effort warning emission: logging failures must not interrupt
+            # finalization or alter the warning payload returned to callers.
+            pass
+        return warning
+
+    @staticmethod
+    def _write_finalization_artifact(
+        session_root: Path,
+        filename: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Write a finalization diagnostic artifact under ``aggregator/``."""
+        try:
+            path = Path(session_root).resolve() / "aggregator" / filename
+            write_json_atomic(path, payload)
+        except Exception as exc:
+            _LOGGER.warning(
+                "[TraceML] Failed to write finalization artifact '%s': %s",
+                filename,
+                exc,
+            )
 
     def _settle_telemetry(self, timeout_sec: float) -> bool:
         """
@@ -291,50 +531,10 @@ class TraceMLAggregator:
                 timeout=min(quiet_sec, remaining)
             ):
                 self._drain_tcp()
-                return bool(self._sqlite_writer.flush_now(remaining))
+                return bool(self._sqlite_writer.force_flush(remaining))
 
         self._drain_tcp()
-        return bool(self._sqlite_writer.flush_now(0.0))
-
-    def _message_sampler_name(self, msg: Any) -> Optional[str]:
-        """
-        Return the sampler name carried by one logical telemetry payload.
-
-        Returns ``None`` when the payload is malformed or does not follow the
-        expected envelope shape.
-        """
-        envelope = normalize_telemetry_envelope(msg)
-        if envelope is None:
-            return None
-
-        return envelope.meta.sampler
-
-    def _filter_remote_store_message(self, msg: Any) -> Any:
-        """
-        Return the subset of a telemetry message still needed by RemoteDBStore.
-
-        Notes
-        -----
-        - SQLite remains the full history sink for every payload.
-        - RemoteDBStore is now treated as a transitional cache for the few
-          legacy renderers that still depend on it.
-        - Batch envelopes preserve their original list shape so
-          `RemoteDBStore.ingest()` can continue to process them normally.
-        """
-        if isinstance(msg, list):
-            filtered = [
-                item
-                for item in msg
-                if self._message_sampler_name(item)
-                in self._REMOTE_STORE_SAMPLERS
-            ]
-            return filtered if filtered else None
-
-        sampler_name = self._message_sampler_name(msg)
-        if sampler_name in self._REMOTE_STORE_SAMPLERS:
-            return msg
-
-        return None
+        return bool(self._sqlite_writer.force_flush(0.0))
 
     def _loop(self) -> None:
         """

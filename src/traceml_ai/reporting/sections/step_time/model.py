@@ -22,7 +22,7 @@ STEP_TIME_METRIC_NAMES = [
     "dataloader_ms",
     "h2d_ms",
     "compute_ms",
-    "wait_ms",
+    "residual_ms",
     "forward_ms",
     "backward_ms",
     "optimizer_ms",
@@ -214,7 +214,7 @@ def build_rank_summary(
 
     For each step:
         known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
-        wait_ms = traced_step_ms - known_step_ms
+        residual_ms = traced_step_ms - known_step_ms
         total_step_ms = dataloader_ms + traced_step_ms
     """
     if not step_rows:
@@ -248,10 +248,10 @@ def build_rank_summary(
         compute_ms = fwd + bwd + opt
         known_step_ms = h2d + compute_ms
         # raw step = the direct trace_step wall timer.
-        # traced step = max(raw step, known_step_ms) to avoid impossible negative wait
+        # traced step = max(raw step, known_step_ms) to avoid impossible negative residual
         # when CPU wall timing and CUDA event timing differ slightly.
         traced_step = max(step_cpu, known_step_ms)
-        wait_proxy = max(0.0, traced_step - known_step_ms)
+        residual_proxy = max(0.0, traced_step - known_step_ms)
         total_step = dl + traced_step
 
         per_step_metrics[int(step_id)] = {
@@ -261,7 +261,7 @@ def build_rank_summary(
             "backward": bwd,
             "optimizer_step": opt,
             "step_time": traced_step,
-            "wait_proxy": wait_proxy,
+            "residual_proxy": residual_proxy,
         }
 
         sum_dl += dl
@@ -292,12 +292,12 @@ def build_rank_summary(
     return RankStepAnalysis(summary=summary, per_step_metrics=per_step_metrics)
 
 
-def compute_wait_avg_ms(s: RankStepSummary) -> float:
+def compute_residual_avg_ms(s: RankStepSummary) -> float:
     """
-    Return average wait proxy for one rank summary.
+    Return average residual proxy for one rank summary.
 
     known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
-    wait_ms = traced_step_ms - known_step_ms
+    residual_ms = traced_step_ms - known_step_ms
     total_step_ms = dataloader_ms + traced_step_ms
     """
     return max(
@@ -333,8 +333,8 @@ def _rank_metric_values(
             int(rank): finite_float(summary.avg_gpu_compute_ms)
             for rank, summary in per_global_rank_summary.items()
         },
-        "wait_ms": {
-            int(rank): compute_wait_avg_ms(summary)
+        "residual_ms": {
+            int(rank): compute_residual_avg_ms(summary)
             for rank, summary in per_global_rank_summary.items()
         },
         "forward_ms": {
@@ -359,7 +359,7 @@ def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
         "dataloader_ms": finite_float(summary.avg_dataloader_ms),
         "h2d_ms": finite_float(summary.avg_h2d_ms),
         "compute_ms": finite_float(summary.avg_gpu_compute_ms),
-        "wait_ms": compute_wait_avg_ms(summary),
+        "residual_ms": compute_residual_avg_ms(summary),
         "forward_ms": finite_float(summary.avg_forward_ms),
         "backward_ms": finite_float(summary.avg_backward_ms),
         "optimizer_ms": finite_float(summary.avg_optimizer_ms),
@@ -518,7 +518,7 @@ __all__ = [
     "build_overview",
     "build_rank_summary",
     "closest_rank_to_median",
-    "compute_wait_avg_ms",
+    "compute_residual_avg_ms",
     "finite_float",
     "summary_metric_values",
     "to_rank_signals",

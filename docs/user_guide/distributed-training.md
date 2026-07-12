@@ -55,6 +55,12 @@ Override that only when needed with `--aggregator-bind-host=<bind-host>`.
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
 
+At the end of a summary run, node 0 waits for rank-finished markers, drains
+late telemetry, checkpoints SQLite, and then writes `final_summary.*`. The
+default finalization budget is 300 seconds. On slow shared filesystems or
+congested networks, increase it with `--finalize-timeout-sec <seconds>` on each
+node, or set `TRACEML_FINALIZE_TIMEOUT_SEC`.
+
 ## Running on Slurm
 
 On a Slurm-managed cluster, derive these flags from the job environment instead

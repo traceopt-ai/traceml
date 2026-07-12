@@ -16,15 +16,6 @@ def trace_step(*args: Any, **kwargs: Any) -> Any:
     return _trace_step(*args, **kwargs)
 
 
-def trace_model_instance(*args: Any, **kwargs: Any) -> Any:
-    """Attach TraceML model hooks."""
-    from traceml_ai.sdk.instrumentation import (
-        trace_model_instance as _trace_model_instance,
-    )
-
-    return _trace_model_instance(*args, **kwargs)
-
-
 def final_summary(
     *,
     timeout_sec: float = 30.0,
@@ -182,7 +173,6 @@ def start(
 
 __all__ = [
     "trace_step",
-    "trace_model_instance",
     "summary",
     "final_summary",
     "start",

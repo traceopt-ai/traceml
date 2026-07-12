@@ -3,10 +3,19 @@
 Use TraceML with PyTorch Lightning to find training bottlenecks without changing your training loop.
 
 `TraceMLCallback` adds step-aware diagnosis so you can quickly see whether a
-run is input-bound, compute-bound, straggler-heavy, wait-heavy, or showing
+run is input-bound, compute-bound, straggler-heavy, residual-heavy, or showing
 memory drift.
 
 ## 1. Install
+
+If your environment already has either `lightning` or `pytorch-lightning`,
+installing TraceML is enough:
+
+```bash
+pip install traceml-ai
+```
+
+If you want TraceML to install the modern Lightning package for you:
 
 ```bash
 pip install "traceml-ai[lightning]"
@@ -15,6 +24,10 @@ pip install "traceml-ai[lightning]"
 ## 2. Add `TraceMLCallback`
 
 Initialize the Lightning integration once, then add `TraceMLCallback` to your Lightning `Trainer`. Everything else stays the same.
+
+Use one Lightning namespace consistently in your script. TraceML supports both
+`lightning.pytorch` and legacy `pytorch_lightning`, but your `Trainer` and
+`LightningModule` should come from the same namespace.
 
 ```python
 import lightning as L
@@ -33,6 +46,19 @@ trainer = L.Trainer(
 )
 
 trainer.fit(model, train_dataloaders=loader)
+```
+
+Legacy `pytorch_lightning` projects can keep their existing imports:
+
+```python
+import pytorch_lightning as pl
+from traceml_ai.integrations import lightning as traceml_lightning
+
+traceml_lightning.init()
+
+trainer = pl.Trainer(
+    callbacks=[traceml_lightning.TraceMLCallback()],
+)
 ```
 
 You do not need to add `traceml.trace_step(...)` manually. Lightning still owns
@@ -67,7 +93,7 @@ In Lightning runs, TraceML helps you spot:
 
 - input-bound training
 - compute-bound steps
-- wait-heavy behavior
+- residual-heavy behavior
 - rank imbalance and stragglers
 - memory creep over time
 
@@ -244,7 +270,7 @@ Run with:
 traceml run train_lightning.py
 ```
 
-The checked-in `examples/lightning_minimal.py` also accepts small demo flags:
+The checked-in `examples/integrations/lightning_minimal.py` also accepts small demo flags:
 `--devices`, `--num-nodes`, `--max-steps`, `--delay-rank`, and `--delay-ms`.
 Use the delay flags only when you want to create a deliberate straggler.
 

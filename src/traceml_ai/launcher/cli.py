@@ -19,6 +19,7 @@ from traceml_ai.launcher.commands import (
     validate_launch_args,
 )
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
 
 
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
@@ -61,12 +62,6 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="Directory for TraceML session logs.",
     )
     parser.add_argument(
-        "--num-display-layers",
-        type=int,
-        default=None,
-        help="Maximum number of model layers to display in the live UI.",
-    )
-    parser.add_argument(
         "--run-name",
         type=str,
         default="",
@@ -92,10 +87,20 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         help="TraceML aggregator port.",
     )
     parser.add_argument(
-        "--remote-max-rows",
+        "--dashboard-port",
         type=int,
         default=None,
-        help="Maximum number of rows returned by remote telemetry queries.",
+        help="Port for the dashboard web UI (mode=dashboard). Default: 8765.",
+    )
+    parser.add_argument(
+        "--no-dashboard-auto-open",
+        action="store_const",
+        const=True,
+        default=None,
+        help=(
+            "Do not auto-open a browser for the dashboard UI. Use on "
+            "headless or remote machines."
+        ),
     )
     parser.add_argument(
         "--summary-window-rows",
@@ -105,6 +110,16 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
             "Rows used per node/rank for final summaries. SQLite retains "
             "1.5x this value for alignment. Default: "
             f"{DEFAULT_SUMMARY_WINDOW_ROWS}."
+        ),
+    )
+    parser.add_argument(
+        "--finalize-timeout-sec",
+        type=float,
+        default=None,
+        help=(
+            "Maximum seconds TraceML waits at end of run to settle telemetry, "
+            "flush SQLite, checkpoint WAL, and write final summary artifacts. "
+            f"Default: {DEFAULT_FINALIZE_TIMEOUT_SEC:g}."
         ),
     )
     parser.add_argument(

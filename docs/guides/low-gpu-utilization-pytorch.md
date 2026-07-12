@@ -4,7 +4,7 @@ Use this guide when PyTorch training is slow and GPU utilization is low,
 moderate, uneven, or bursty.
 
 Low GPU utilization is a symptom. TraceML helps decide whether the likely cause
-is input loading, host-to-device transfer, wait time, rank skew, memory
+is input loading, host-to-device transfer, residual time, rank skew, memory
 pressure, or model-side compute behavior.
 
 ## Confirm the symptom
@@ -33,7 +33,9 @@ After confirming low or moderate GPU utilization, read the Step Time diagnosis.
 |---|---|
 | `INPUT-BOUND` | Inspect the DataLoader and input path. |
 | `INPUT STRAGGLER` | Inspect the slow input rank. |
-| `WAIT-HEAVY` | Inspect work outside traced phases, such as logging, checkpointing, validation, CPU stalls, framework orchestration, or unobserved transfers. |
+| `H2D STRAGGLER` | Inspect host-to-device transfer on the worst rank. |
+| `RESIDUAL STRAGGLER` | Inspect rank-local host-side work on the worst rank. |
+| `RESIDUAL-HEAVY` | Inspect work outside traced phases, such as logging, checkpointing, validation, CPU stalls, framework orchestration, or unobserved transfers. |
 | `COMPUTE-BOUND` | Inspect forward, backward, and optimizer time before changing the DataLoader. |
 | `COMPUTE STRAGGLER` or `STRAGGLER` | Inspect rank skew and the called-out worst rank. |
 | `BALANCED` | Compare against a known good run or use a heavier profiler for lower-level detail. |
@@ -57,7 +59,7 @@ If H2D time is high:
 - for CUDA training, check whether the input path uses `pin_memory=True` and
   non-blocking transfer where appropriate
 
-If wait time is high:
+If residual time is high:
 
 - inspect logging, checkpointing, validation, and framework work around the
   traced training step
@@ -76,7 +78,7 @@ After changing the suspected cause, compare the before and after summaries:
 traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
-Check whether GPU utilization, total step time, input time, wait time, or the
+Check whether GPU utilization, total step time, input time, residual time, or the
 primary diagnosis changed.
 
 ## Related

@@ -23,11 +23,10 @@ from traceml_ai.diagnostics.step_time.policy import (
     SUMMARY_STEP_TIME_POLICY,
 )
 from traceml_ai.diagnostics.step_time.rules import (
+    CleanStragglerRule,
     ComputeBoundRule,
-    ComputeStragglerRule,
     InputBoundRule,
-    InputStragglerRule,
-    WaitHeavyRule,
+    ResidualHeavyRule,
 )
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
@@ -76,10 +75,99 @@ def _time_metric(
     )
 
 
-def _time_context(*metrics: StepCombinedTimeMetric):
+def _time_context(
+    *metrics: StepCombinedTimeMetric,
+    per_rank_timing: dict[int, dict[str, float]] | None = None,
+):
     return build_step_time_context(
         metrics=metrics,
         thresholds=DEFAULT_THRESHOLDS,
+        per_rank_timing=per_rank_timing,
+    )
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(float(value) for value in values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _timing_row(
+    *,
+    dataloader: float = 10.0,
+    h2d: float = 0.0,
+    forward: float = 20.0,
+    backward: float = 30.0,
+    optimizer: float = 10.0,
+    residual: float = 0.0,
+    step_time: float | None = None,
+    total_step: float | None = None,
+) -> dict[str, float]:
+    known_step = h2d + forward + backward + optimizer
+    local_step = known_step + residual if step_time is None else step_time
+    return {
+        "dataloader_fetch": dataloader,
+        "h2d": h2d,
+        "forward": forward,
+        "backward": backward,
+        "optimizer_step": optimizer,
+        "step_time": local_step,
+        "residual_proxy": residual,
+        "total_step": (
+            dataloader + local_step if total_step is None else total_step
+        ),
+    }
+
+
+def _metrics_from_per_rank_timing(
+    per_rank_timing: dict[int, dict[str, float]],
+    *,
+    steps: int = 64,
+) -> tuple[StepCombinedTimeMetric, ...]:
+    metrics: list[StepCombinedTimeMetric] = []
+    world_size = len(per_rank_timing)
+    for key in (
+        "dataloader_fetch",
+        "h2d",
+        "forward",
+        "backward",
+        "optimizer_step",
+        "step_time",
+        "residual_proxy",
+    ):
+        values_by_rank = {
+            int(rank): float(values.get(key, 0.0))
+            for rank, values in per_rank_timing.items()
+        }
+        median = _median(list(values_by_rank.values()))
+        worst_rank = max(
+            values_by_rank,
+            key=lambda rank: (values_by_rank[rank], -rank),
+        )
+        worst = values_by_rank[worst_rank]
+        skew = ((worst - median) / median) if median > 0.0 else 0.0
+        metrics.append(
+            _time_metric(
+                key,
+                median=median,
+                worst=worst,
+                worst_rank=worst_rank,
+                skew=skew,
+                world_size=world_size,
+                steps=steps,
+            )
+        )
+    return tuple(metrics)
+
+
+def _clean_context(
+    per_rank_timing: dict[int, dict[str, float]],
+):
+    return _time_context(
+        *_metrics_from_per_rank_timing(per_rank_timing),
+        per_rank_timing=per_rank_timing,
     )
 
 
@@ -90,7 +178,7 @@ def _single_rank_step_metrics(
     forward: float = 30.0,
     backward: float = 50.0,
     optimizer: float = 10.0,
-    wait: float = 5.0,
+    residual: float = 5.0,
 ) -> tuple[StepCombinedTimeMetric, ...]:
     return (
         _time_metric(
@@ -129,9 +217,9 @@ def _single_rank_step_metrics(
             world_size=1,
         ),
         _time_metric(
-            "wait_proxy",
-            median=wait,
-            worst=wait,
+            "residual_proxy",
+            median=residual,
+            worst=residual,
             worst_rank=0,
             world_size=1,
         ),
@@ -139,39 +227,28 @@ def _single_rank_step_metrics(
 
 
 def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
-    input_ctx = _time_context(
-        _time_metric("step_time", median=220.0, worst=250.0),
-        _time_metric("dataloader_fetch", median=10.0, worst=45.0, skew=0.2),
-        _time_metric("forward", median=40.0, worst=40.0),
-        _time_metric("backward", median=130.0, worst=130.0),
-        _time_metric("optimizer_step", median=20.0, worst=20.0),
-        _time_metric("wait_proxy", median=20.0, worst=20.0),
+    input_ctx = _clean_context(
+        {
+            0: _timing_row(dataloader=10.0),
+            1: _timing_row(dataloader=90.0),
+        }
     )
-    assert InputStragglerRule().evaluate(input_ctx).kind == "INPUT_STRAGGLER"
+    assert CleanStragglerRule().evaluate(input_ctx).kind == "INPUT_STRAGGLER"
     assert (
-        InputStragglerRule().evaluate(
+        CleanStragglerRule().evaluate(
             _time_context(*_single_rank_step_metrics())
         )
         is None
     )
 
-    compute_ctx = _time_context(
-        _time_metric("step_time", median=240.0, worst=310.0),
-        _time_metric("dataloader_fetch", median=10.0, worst=10.0),
-        _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
-        _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
-        _time_metric("optimizer_step", median=20.0, worst=20.0),
-        _time_metric("wait_proxy", median=40.0, worst=40.0),
+    compute_ctx = _clean_context(
+        {
+            0: _timing_row(forward=20.0, backward=30.0),
+            1: _timing_row(forward=90.0, backward=30.0),
+        }
     )
-    assert (
-        ComputeStragglerRule().evaluate(compute_ctx).kind
-        == "COMPUTE_STRAGGLER"
-    )
-    assert (
-        ComputeStragglerRule().evaluate(
-            _time_context(*_single_rank_step_metrics())
-        )
-        is None
+    assert CleanStragglerRule().evaluate(compute_ctx).kind == (
+        "COMPUTE_STRAGGLER"
     )
 
     input_bound = _time_context(
@@ -181,7 +258,7 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
             forward=20.0,
             backward=30.0,
             optimizer=5.0,
-            wait=10.0,
+            residual=10.0,
         )
     )
     assert InputBoundRule().evaluate(input_bound).kind == "INPUT_BOUND"
@@ -193,14 +270,14 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     )
 
     assert (
-        WaitHeavyRule()
-        .evaluate(_time_context(*_single_rank_step_metrics(wait=20.0)))
+        ResidualHeavyRule()
+        .evaluate(_time_context(*_single_rank_step_metrics(residual=20.0)))
         .kind
-        == "WAIT_HEAVY"
+        == "RESIDUAL_HEAVY"
     )
     assert (
-        WaitHeavyRule().evaluate(
-            _time_context(*_single_rank_step_metrics(wait=5.0))
+        ResidualHeavyRule().evaluate(
+            _time_context(*_single_rank_step_metrics(residual=5.0))
         )
         is None
     )
@@ -208,7 +285,9 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     assert (
         ComputeBoundRule()
         .evaluate(
-            _time_context(*_single_rank_step_metrics(dataloader=2.0, wait=3.0))
+            _time_context(
+                *_single_rank_step_metrics(dataloader=2.0, residual=3.0)
+            )
         )
         .kind
         == "COMPUTE_BOUND"
@@ -216,183 +295,115 @@ def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
     assert (
         ComputeBoundRule().evaluate(
             _time_context(
-                *_single_rank_step_metrics(dataloader=35.0, wait=3.0)
+                *_single_rank_step_metrics(dataloader=35.0, residual=3.0)
             )
         )
         is None
     )
 
 
-def test_compute_straggler_uses_typical_step_and_phase_blame() -> None:
-    ctx = _time_context(
-        _time_metric("step_time", median=166.6, worst=166.7, world_size=4),
-        _time_metric(
-            "dataloader_fetch",
-            median=0.7,
-            worst=0.7,
-            worst_rank=2,
-            world_size=4,
+def test_clean_backward_discount_removes_telescoped_delay_from_peer() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=100.0,
+            forward=20.0,
+            backward=20.0,
+            optimizer=0.0,
+            total_step=140.0,
         ),
-        _time_metric("h2d", median=0.1, worst=0.1, world_size=4),
-        _time_metric(
-            "forward",
-            median=1.6,
-            worst=25.2,
-            worst_rank=2,
-            skew=14.75,
-            world_size=4,
+        1: _timing_row(
+            dataloader=0.0,
+            forward=20.0,
+            backward=120.0,
+            optimizer=0.0,
+            total_step=140.0,
         ),
-        _time_metric(
-            "backward",
-            median=120.6,
-            worst=121.0,
-            worst_rank=0,
-            skew=0.003,
-            world_size=4,
-        ),
-        _time_metric(
-            "optimizer_step",
-            median=10.1,
-            worst=10.1,
-            worst_rank=3,
-            world_size=4,
-        ),
-        _time_metric(
-            "wait_proxy",
-            median=34.2,
-            worst=34.3,
-            worst_rank=3,
-            world_size=4,
-        ),
-    )
+    }
+    ctx = _clean_context(per_rank)
+    issue = CleanStragglerRule().evaluate(ctx)
 
-    issue = ComputeStragglerRule().evaluate(ctx)
-
+    assert ctx.clean_rank_values["clean_backward"][1] == pytest.approx(20.0)
+    assert ctx.clean_rank_values["clean_compute"][0] == pytest.approx(40.0)
+    assert ctx.clean_rank_values["clean_compute"][1] == pytest.approx(40.0)
+    assert ctx.clean_rank_values["clean_step"][0] == pytest.approx(140.0)
     assert issue is not None
-    assert issue.kind == "COMPUTE_STRAGGLER"
-    assert issue.phase == "forward"
-    assert issue.ranks == (2,)
-    assert ctx.typical_step_total == pytest.approx(167.3)
-    assert ctx.compute_phase_excess_total == pytest.approx(24.0)
-    assert ctx.compute_excess_ms == pytest.approx(24.0)
-    assert ctx.dataloader_excess_ms == pytest.approx(0.0)
-    assert issue.score == pytest.approx(24.0 / 167.3)
-
-
-def test_compute_straggler_prefers_close_optimizer_over_backward() -> None:
-    ctx = _time_context(
-        _time_metric("step_time", median=144.2, worst=144.3),
-        _time_metric("dataloader_fetch", median=1.3, worst=1.3),
-        _time_metric("h2d", median=0.1, worst=0.2),
-        _time_metric("forward", median=2.0, worst=2.1, worst_rank=0),
-        _time_metric(
-            "backward",
-            median=107.1,
-            worst=125.7,
-            worst_rank=1,
-            skew=0.17,
-        ),
-        _time_metric(
-            "optimizer_step",
-            median=14.5,
-            worst=33.1,
-            worst_rank=0,
-            skew=1.28,
-        ),
-        _time_metric("wait_proxy", median=0.5, worst=0.6),
-    )
-
-    issue = ComputeStragglerRule().evaluate(ctx)
-
-    assert issue is not None
-    assert issue.kind == "COMPUTE_STRAGGLER"
-    assert issue.phase == "optimizer"
+    assert issue.kind == "INPUT_STRAGGLER"
     assert issue.ranks == (0,)
-    assert ctx.dominant_compute is not None
-    assert ctx.dominant_compute.label == "Optimizer"
-    assert ctx.compute_worst_rank == 0
+    assert issue.evidence["component_excesses_ms"]["input"] == pytest.approx(
+        50.0
+    )
 
 
-def test_compute_straggler_keeps_backward_when_no_close_compute_phase() -> (
+@pytest.mark.parametrize(
+    ("per_rank", "expected_kind", "expected_phase"),
+    [
+        (
+            {
+                0: _timing_row(forward=20.0),
+                1: _timing_row(forward=100.0),
+            },
+            "COMPUTE_STRAGGLER",
+            "compute",
+        ),
+        (
+            {
+                0: _timing_row(h2d=0.0),
+                1: _timing_row(h2d=80.0),
+            },
+            "H2D_STRAGGLER",
+            "h2d",
+        ),
+        (
+            {
+                0: _timing_row(residual=0.0),
+                1: _timing_row(residual=80.0),
+            },
+            "RESIDUAL_STRAGGLER",
+            "residual",
+        ),
+        (
+            {
+                0: _timing_row(dataloader=10.0, forward=20.0),
+                1: _timing_row(dataloader=60.0, forward=40.0),
+            },
+            "STRAGGLER",
+            "mixed",
+        ),
+    ],
+)
+def test_clean_straggler_classifies_component_excess(
+    per_rank: dict[int, dict[str, float]],
+    expected_kind: str,
+    expected_phase: str,
+) -> None:
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+    )
+
+    assert result.primary.kind == expected_kind
+    assert result.primary.worst_rank == 1
+    assert result.issues[0].phase == expected_phase
+    assert result.issues[0].evidence["clean_step_slack_ms"] > 0.0
+
+
+def test_step_time_primary_prefers_clean_straggler_over_residual_heavy() -> (
     None
 ):
-    ctx = _time_context(
-        _time_metric("step_time", median=144.2, worst=144.3),
-        _time_metric("dataloader_fetch", median=1.3, worst=1.3),
-        _time_metric("h2d", median=0.1, worst=0.2),
-        _time_metric("forward", median=2.0, worst=2.1, worst_rank=0),
-        _time_metric(
-            "backward",
-            median=90.0,
-            worst=130.0,
-            worst_rank=1,
-            skew=0.44,
-        ),
-        _time_metric(
-            "optimizer_step",
-            median=14.5,
-            worst=33.1,
-            worst_rank=0,
-            skew=1.28,
-        ),
-        _time_metric("wait_proxy", median=0.5, worst=0.6),
-    )
+    per_rank = {
+        0: _timing_row(dataloader=10.0, residual=80.0),
+        1: _timing_row(dataloader=110.0, residual=80.0),
+    }
 
-    issue = ComputeStragglerRule().evaluate(ctx)
-
-    assert issue is not None
-    assert issue.kind == "COMPUTE_STRAGGLER"
-    assert issue.phase == "backward"
-    assert issue.ranks == (1,)
-    assert ctx.dominant_compute is not None
-    assert ctx.dominant_compute.label == "Backward"
-    assert ctx.compute_worst_rank == 1
-
-
-def test_step_time_primary_selection_input_explains_mixed_straggler() -> None:
     result = build_step_diagnosis_result(
-        [
-            _time_metric("step_time", median=240.0, worst=330.0),
-            _time_metric(
-                "dataloader_fetch", median=10.0, worst=110.0, skew=0.2
-            ),
-            _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
-            _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
-            _time_metric("optimizer_step", median=20.0, worst=20.0),
-            _time_metric("wait_proxy", median=40.0, worst=40.0),
-        ]
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
     )
 
     assert result.primary.kind == "INPUT_STRAGGLER"
-    assert result.primary.worst_rank == 1
-    assert result.primary.note is not None
-    assert "downstream synchronization" in result.primary.note
     assert {issue.kind for issue in result.issues} >= {
         "INPUT_STRAGGLER",
-        "COMPUTE_STRAGGLER",
-        "STRAGGLER",
-    }
-
-
-def test_step_time_primary_selection_keeps_unexplained_mixed() -> None:
-    result = build_step_diagnosis_result(
-        [
-            _time_metric("step_time", median=240.0, worst=330.0),
-            _time_metric(
-                "dataloader_fetch", median=10.0, worst=45.0, skew=0.2
-            ),
-            _time_metric("forward", median=40.0, worst=90.0, skew=0.2),
-            _time_metric("backward", median=130.0, worst=160.0, skew=0.15),
-            _time_metric("optimizer_step", median=20.0, worst=20.0),
-            _time_metric("wait_proxy", median=40.0, worst=40.0),
-        ]
-    )
-
-    assert result.primary.kind == "STRAGGLER"
-    assert {issue.kind for issue in result.issues} >= {
-        "INPUT_STRAGGLER",
-        "COMPUTE_STRAGGLER",
-        "STRAGGLER",
+        "RESIDUAL_HEAVY",
     }
 
 
@@ -402,11 +413,11 @@ def test_step_time_live_and_summary_policies_are_explicit() -> None:
     assert DEFAULT_THRESHOLDS == LIVE_STEP_TIME_POLICY.thresholds
     assert DEFAULT_SUMMARY_DIAG_CONFIG == SUMMARY_STEP_TIME_POLICY
     assert (
-        SUMMARY_STEP_TIME_POLICY.thresholds.wait_share_warn
-        > LIVE_STEP_TIME_POLICY.thresholds.wait_share_warn
+        SUMMARY_STEP_TIME_POLICY.thresholds.residual_share_warn
+        > LIVE_STEP_TIME_POLICY.thresholds.residual_share_warn
     )
     assert (
-        SUMMARY_STEP_TIME_POLICY.thresholds.input_straggler_compute_excess_tolerance
+        SUMMARY_STEP_TIME_POLICY.thresholds.straggler_dominance_tolerance
         == pytest.approx(1.25)
     )
     assert (

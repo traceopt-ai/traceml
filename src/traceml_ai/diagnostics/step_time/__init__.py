@@ -13,7 +13,6 @@ while organizing the implementation into smaller modules:
 """
 
 from .api import (
-    ComputeSignal,
     DiagnosisKind,
     Severity,
     StepDiagnosis,
@@ -38,7 +37,6 @@ __all__ = [
     "SUMMARY_STEP_TIME_POLICY",
     "StepTimeDiagnosisPolicy",
     "StepDiagnosis",
-    "ComputeSignal",
     "build_step_diagnosis",
     "build_step_diagnosis_result",
     "format_cli_diagnosis",

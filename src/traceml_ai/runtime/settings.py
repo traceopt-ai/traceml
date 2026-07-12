@@ -20,6 +20,8 @@ from typing import Optional
 
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
+DEFAULT_FINALIZE_TIMEOUT_SEC = 300.0
+
 
 @dataclass(frozen=True)
 class AggregatorEndpoint:
@@ -61,14 +63,14 @@ class TraceMLSettings:
       loopback on local runs.
     """
 
-    profile: str = "run"  # "deep"
+    profile: str = "run"
     mode: str = "cli"
     sampler_interval_sec: float = 1.0
     render_interval_sec: float = 1.0
-    num_display_layers: int = 20
     logs_dir: str = "./logs"
     enable_logging: bool = False
-    remote_max_rows: int = 200
+    dashboard_port: int = 8765
+    dashboard_auto_open: bool = True
     aggregator: AggregatorTransportSettings = AggregatorTransportSettings()
     session_id: str = ""
     history_enabled: bool = True
@@ -76,3 +78,5 @@ class TraceMLSettings:
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
     trace_max_steps: Optional[int] = None
     html_report: bool = False
+    finalize_timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC
+    expected_world_size: int = 1

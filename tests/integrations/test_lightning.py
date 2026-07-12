@@ -15,6 +15,34 @@ def _enable_callback_without_lightning(monkeypatch):
     )
 
 
+def test_lightning_callback_base_combines_distinct_namespaces() -> None:
+    class NewNamespaceCallback:
+        pass
+
+    class LegacyNamespaceCallback:
+        pass
+
+    resolved = lightning_integration._build_callback_base(
+        (NewNamespaceCallback, LegacyNamespaceCallback)
+    )
+
+    assert resolved.available is True
+    assert issubclass(resolved.base, NewNamespaceCallback)
+    assert issubclass(resolved.base, LegacyNamespaceCallback)
+
+
+def test_lightning_callback_base_dedupes_matching_namespaces() -> None:
+    class SharedCallback:
+        pass
+
+    resolved = lightning_integration._build_callback_base(
+        (SharedCallback, SharedCallback)
+    )
+
+    assert resolved.available is True
+    assert resolved.base is SharedCallback
+
+
 def test_lightning_forward_wrapper_times_only_forward(monkeypatch):
     _enable_callback_without_lightning(monkeypatch)
     calls = []

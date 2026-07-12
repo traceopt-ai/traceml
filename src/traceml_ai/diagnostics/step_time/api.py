@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Literal, Optional, Sequence
+from typing import Any, Dict, Literal, Optional, Sequence, cast
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
 
@@ -22,10 +22,7 @@ from ..common import (
     validate_confidence,
 )
 from .context import (
-    ComputeSignal,
     build_step_time_context,
-    compute_median_total,
-    compute_worst_total,
     metric_median_total,
     metric_skew,
     metric_total,
@@ -45,9 +42,11 @@ DiagnosisKind = Literal[
     "STRAGGLER",
     "INPUT_STRAGGLER",
     "COMPUTE_STRAGGLER",
+    "H2D_STRAGGLER",
+    "RESIDUAL_STRAGGLER",
     "INPUT_BOUND",
     "COMPUTE_BOUND",
-    "WAIT_HEAVY",
+    "RESIDUAL_HEAVY",
 ]
 
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
@@ -57,17 +56,21 @@ _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "STRAGGLER": "STRAGGLER",
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
     "COMPUTE_STRAGGLER": "COMPUTE STRAGGLER",
+    "H2D_STRAGGLER": "H2D STRAGGLER",
+    "RESIDUAL_STRAGGLER": "RESIDUAL STRAGGLER",
     "INPUT_BOUND": "INPUT-BOUND",
     "COMPUTE_BOUND": "COMPUTE-BOUND",
-    "WAIT_HEAVY": "WAIT-HEAVY",
+    "RESIDUAL_HEAVY": "RESIDUAL-HEAVY",
 }
 
 _PRIMARY_KIND_PRIORITY: dict[str, int] = {
     "STRAGGLER": 50,
     "INPUT_STRAGGLER": 40,
-    "COMPUTE_STRAGGLER": 39,
+    "COMPUTE_STRAGGLER": 40,
+    "H2D_STRAGGLER": 40,
+    "RESIDUAL_STRAGGLER": 40,
     "INPUT_BOUND": 30,
-    "WAIT_HEAVY": 20,
+    "RESIDUAL_HEAVY": 20,
     "COMPUTE_BOUND": 10,
 }
 
@@ -156,13 +159,6 @@ def _pct(value: float) -> str:
     return f"{non_negative_finite(value) * 100.0:.1f}%"
 
 
-def _ms(value: float) -> str:
-    """
-    Format a millisecond value for compact diagnosis notes.
-    """
-    return f"{non_negative_finite(value):.1f}ms"
-
-
 def _rank_str(rank: Optional[int]) -> str:
     """
     Format a rank identifier for UI text.
@@ -182,66 +178,6 @@ def _primary_issue_rank(issue: DiagnosticIssue) -> int:
     Rank contributor issues for primary-diagnosis selection.
     """
     return _PRIMARY_KIND_PRIORITY.get(issue.kind, 0)
-
-
-def _issue_by_kind(
-    issues: Sequence[DiagnosticIssue],
-    kind: str,
-) -> Optional[DiagnosticIssue]:
-    """
-    Return the first issue matching one issue kind.
-    """
-    for issue in issues:
-        if issue.kind == kind:
-            return issue
-    return None
-
-
-def _input_explains_compute_skew(
-    *,
-    dataloader_excess_ms: float,
-    compute_excess_ms: float,
-    thresholds: DiagnosisThresholds,
-) -> bool:
-    """
-    Return whether input excess can plausibly explain compute skew.
-
-    In distributed training, a slow input rank can surface as extra
-    backward/compute time on peer ranks because synchronization shifts where
-    waiting is observed. Treat input as primary when its absolute excess is
-    close enough to the compute excess, using a policy-controlled tolerance.
-    """
-    tolerance = max(
-        1.0,
-        non_negative_finite(
-            thresholds.input_straggler_compute_excess_tolerance
-        ),
-    )
-    compute_excess = non_negative_finite(compute_excess_ms)
-    if compute_excess <= 0.0:
-        return non_negative_finite(dataloader_excess_ms) > 0.0
-    return non_negative_finite(dataloader_excess_ms) >= (
-        compute_excess / tolerance
-    )
-
-
-def _input_explained_compute_note(
-    *,
-    dataloader_excess_ms: float,
-    compute_excess_ms: float,
-    thresholds: DiagnosisThresholds,
-) -> str:
-    tolerance = max(
-        1.0,
-        non_negative_finite(
-            thresholds.input_straggler_compute_excess_tolerance
-        ),
-    )
-    return (
-        f"Input excess {_ms(dataloader_excess_ms)} can explain compute excess "
-        f"{_ms(compute_excess_ms)} within {tolerance:.1f}x tolerance; "
-        "compute skew may be downstream synchronization."
-    )
 
 
 def _top_rank_entries(
@@ -282,6 +218,30 @@ def _top_rank_entries(
             }
         )
     return out
+
+
+def _rank_summary_values(
+    rank_values: Dict[int, float],
+) -> tuple[float, float, Optional[int], float]:
+    """
+    Return median, worst value, worst rank, and skew for rank values.
+    """
+    if not rank_values:
+        return 0.0, 0.0, None, 0.0
+    clean = {
+        int(rank): non_negative_finite(value)
+        for rank, value in rank_values.items()
+    }
+    ordered = sorted(clean.values())
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        median = float(ordered[mid])
+    else:
+        median = float((ordered[mid - 1] + ordered[mid]) / 2.0)
+    worst_rank = max(clean, key=lambda rank: (clean[rank], -int(rank)))
+    worst = clean[worst_rank]
+    skew = ((worst - median) / median) if median > 0.0 else 0.0
+    return median, worst, int(worst_rank), max(0.0, skew)
 
 
 def _metric_attribution_entry(
@@ -333,10 +293,10 @@ def _apply_trend_note(
     diagnosis: StepDiagnosis,
     *,
     step_metric: Optional[StepCombinedTimeMetric],
-    wait_metric: Optional[StepCombinedTimeMetric],
+    residual_metric: Optional[StepCombinedTimeMetric],
     dataloader_metric: Optional[StepCombinedTimeMetric],
     single_rank: bool,
-    wait_share: float,
+    residual_share: float,
     dataloader_share: float,
     thresholds: DiagnosisThresholds,
 ) -> StepDiagnosis:
@@ -349,11 +309,11 @@ def _apply_trend_note(
             steps_used=diagnosis.steps_used,
             single_rank=single_rank,
             step_metric=step_metric,
-            wait_metric=wait_metric,
+            residual_metric=residual_metric,
             dataloader_metric=dataloader_metric,
-            wait_share=wait_share,
+            residual_share=residual_share,
             dataloader_share=dataloader_share,
-            wait_warn_threshold=thresholds.wait_share_warn,
+            residual_warn_threshold=thresholds.residual_share_warn,
             input_warn_threshold=thresholds.input_share_warn,
             cfg=DEFAULT_STEP_TREND_HEURISTICS,
         )
@@ -435,161 +395,24 @@ def build_step_diagnosis_result(
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
 
-    input_issue = _issue_by_kind(issue_list, "INPUT_STRAGGLER")
-    compute_issue = _issue_by_kind(issue_list, "COMPUTE_STRAGGLER")
-    input_explains_compute = False
-    input_explained_note: Optional[str] = None
-
-    if input_issue is not None and compute_issue is not None:
-        input_explains_compute = _input_explains_compute_skew(
-            dataloader_excess_ms=context.dataloader_excess_ms,
-            compute_excess_ms=context.compute_excess_ms,
-            thresholds=thresholds,
-        )
-        if input_explains_compute:
-            input_explained_note = _input_explained_compute_note(
-                dataloader_excess_ms=context.dataloader_excess_ms,
-                compute_excess_ms=context.compute_excess_ms,
-                thresholds=thresholds,
-            )
-        combined_rank = (
-            context.dataloader_worst_rank
-            if context.input_straggler_score >= context.compute_straggler_score
-            else context.compute_worst_rank
-        )
-        combined_ranks = tuple(
-            sorted(
-                {
-                    rank
-                    for rank in (
-                        context.dataloader_worst_rank,
-                        context.compute_worst_rank,
-                    )
-                    if rank is not None
-                }
-            )
-        )
-        issue_list.append(
-            DiagnosticIssue(
-                kind="STRAGGLER",
-                status="STRAGGLER",
-                severity=_severity(
-                    max(
-                        context.input_straggler_score,
-                        context.compute_straggler_score,
-                    ),
-                    max(
-                        thresholds.input_straggler_score_crit,
-                        thresholds.compute_straggler_score_crit,
-                    ),
-                ),
-                summary="Both input and compute are uneven across ranks.",
-                action="Inspect the slowest rank and both dominant phases.",
-                metric="step_time",
-                phase="combined",
-                score=max(
-                    context.input_straggler_score,
-                    context.compute_straggler_score,
-                ),
-                ranks=combined_ranks
-                or ((combined_rank,) if combined_rank is not None else ()),
-                evidence={
-                    "input_score": context.input_straggler_score,
-                    "compute_score": context.compute_straggler_score,
-                    "dataloader_excess_ms": context.dataloader_excess_ms,
-                    "compute_excess_ms": context.compute_excess_ms,
-                    "input_straggler_compute_excess_tolerance": (
-                        thresholds.input_straggler_compute_excess_tolerance
-                    ),
-                },
-            )
-        )
-        if input_explains_compute:
-            issue_list = [
-                (
-                    replace(
-                        issue,
-                        evidence={
-                            **issue.evidence,
-                            "dataloader_excess_ms": context.dataloader_excess_ms,
-                            "compute_excess_ms": context.compute_excess_ms,
-                            "input_straggler_compute_excess_tolerance": (
-                                thresholds.input_straggler_compute_excess_tolerance
-                            ),
-                            "downstream_synchronization_note": (
-                                input_explained_note
-                            ),
-                        },
-                    )
-                    if issue is input_issue
-                    else issue
-                )
-                for issue in issue_list
-            ]
-            input_issue = _issue_by_kind(issue_list, "INPUT_STRAGGLER")
-
     issues = sort_issues(issue_list)
     primary_issue = _select_primary_issue(issues)
 
-    if input_issue is not None and compute_issue is not None:
-        mixed_severity = _severity(
-            max(
-                context.input_straggler_score,
-                context.compute_straggler_score,
-            ),
-            max(
-                thresholds.input_straggler_score_crit,
-                thresholds.compute_straggler_score_crit,
-            ),
-        )
-        if input_explains_compute:
-            primary = _mk_diag(
-                kind="INPUT_STRAGGLER",
-                severity=mixed_severity,
-                reason=input_issue.summary,
-                action=input_issue.action,
-                steps_used=context.steps_used,
-                worst_rank=context.dataloader_worst_rank,
-                note=input_explained_note,
-            )
-        else:
-            dominant_rank = (
-                context.dataloader_worst_rank
-                if context.input_straggler_score
-                >= context.compute_straggler_score
-                else context.compute_worst_rank
-            )
-            primary = _mk_diag(
-                kind="STRAGGLER",
-                severity=mixed_severity,
-                reason="Both input and compute are uneven across ranks.",
-                action="Inspect the slowest rank and both dominant phases.",
-                steps_used=context.steps_used,
-                worst_rank=dominant_rank,
-                note=(
-                    f"Input score {_pct(context.input_straggler_score)}, "
-                    f"compute score {_pct(context.compute_straggler_score)}."
-                ),
-            )
-    elif input_issue is not None:
+    if primary_issue is not None and primary_issue.kind in {
+        "STRAGGLER",
+        "INPUT_STRAGGLER",
+        "COMPUTE_STRAGGLER",
+        "H2D_STRAGGLER",
+        "RESIDUAL_STRAGGLER",
+    }:
+        worst_rank = primary_issue.ranks[0] if primary_issue.ranks else None
         primary = _mk_diag(
-            kind="INPUT_STRAGGLER",
-            severity=input_issue.severity,
-            reason=input_issue.summary,
-            action=input_issue.action,
+            kind=cast(DiagnosisKind, primary_issue.kind),
+            severity=primary_issue.severity,
+            reason=primary_issue.summary,
+            action=primary_issue.action,
             steps_used=context.steps_used,
-            worst_rank=context.dataloader_worst_rank,
-            note=f"Dataloader share is {_pct(context.dataloader_share)}.",
-        )
-    elif compute_issue is not None:
-        primary = _mk_diag(
-            kind="COMPUTE_STRAGGLER",
-            severity=compute_issue.severity,
-            reason=compute_issue.summary,
-            action=compute_issue.action,
-            steps_used=context.steps_used,
-            worst_rank=context.compute_worst_rank,
-            note=f"Compute share is {_pct(context.compute_share)}.",
+            worst_rank=worst_rank,
         )
     elif primary_issue is not None and primary_issue.kind == "INPUT_BOUND":
         primary = _mk_diag(
@@ -602,9 +425,9 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.dataloader_worst_rank
             ),
         )
-    elif primary_issue is not None and primary_issue.kind == "WAIT_HEAVY":
+    elif primary_issue is not None and primary_issue.kind == "RESIDUAL_HEAVY":
         primary = _mk_diag(
-            kind="WAIT_HEAVY",
+            kind="RESIDUAL_HEAVY",
             severity=primary_issue.severity,
             reason=primary_issue.summary,
             action=primary_issue.action,
@@ -613,7 +436,7 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.overall_worst_rank
             ),
             note=(
-                "wait_ms = total_step_ms - dataloader_ms - h2d_ms - "
+                "residual_ms = total_step_ms - dataloader_ms - h2d_ms - "
                 "compute_ms."
             ),
         )
@@ -643,10 +466,10 @@ def build_step_diagnosis_result(
     primary = _apply_trend_note(
         primary,
         step_metric=context.step_metric,
-        wait_metric=context.wait_metric,
+        residual_metric=context.residual_metric,
         dataloader_metric=context.dataloader_metric,
         single_rank=context.single_rank,
-        wait_share=context.wait_share,
+        residual_share=context.residual_share,
         dataloader_share=context.dataloader_share,
         thresholds=thresholds,
     )
@@ -670,15 +493,23 @@ def build_step_diagnosis_result(
     fwd_rank_values = context.rank_values.get("forward", {})
     bwd_rank_values = context.rank_values.get("backward", {})
     opt_rank_values = context.rank_values.get("optimizer_step", {})
-    compute_rank_values: Dict[int, float] = {}
-    for rank in sorted(
-        set(fwd_rank_values) | set(bwd_rank_values) | set(opt_rank_values)
-    ):
-        compute_rank_values[int(rank)] = (
-            non_negative_finite(fwd_rank_values.get(rank, 0.0))
-            + non_negative_finite(bwd_rank_values.get(rank, 0.0))
-            + non_negative_finite(opt_rank_values.get(rank, 0.0))
-        )
+    compute_rank_values = context.clean_rank_values.get("clean_compute", {})
+    if not compute_rank_values:
+        compute_rank_values = {}
+        for rank in sorted(
+            set(fwd_rank_values) | set(bwd_rank_values) | set(opt_rank_values)
+        ):
+            compute_rank_values[int(rank)] = (
+                non_negative_finite(fwd_rank_values.get(rank, 0.0))
+                + non_negative_finite(bwd_rank_values.get(rank, 0.0))
+                + non_negative_finite(opt_rank_values.get(rank, 0.0))
+            )
+    (
+        compute_median_ms,
+        compute_worst_ms,
+        compute_worst_rank,
+        compute_skew,
+    ) = _rank_summary_values(compute_rank_values)
 
     metric_attribution = {
         "dataloader_fetch": _metric_attribution_entry(
@@ -688,6 +519,14 @@ def build_step_diagnosis_result(
             step_total=context.step_total,
             single_rank=context.single_rank,
             phase="dataloader",
+        ),
+        "h2d": _metric_attribution_entry(
+            metric=context.h2d_metric,
+            metric_key="h2d",
+            rank_values=context.rank_values.get("h2d", {}),
+            step_total=context.step_total,
+            single_rank=context.single_rank,
+            phase="h2d",
         ),
         "forward": _metric_attribution_entry(
             metric=context.forward_metric,
@@ -713,13 +552,13 @@ def build_step_diagnosis_result(
             single_rank=context.single_rank,
             phase="optimizer",
         ),
-        "wait_proxy": _metric_attribution_entry(
-            metric=context.wait_metric,
-            metric_key="wait_proxy",
-            rank_values=context.rank_values.get("wait_proxy", {}),
+        "residual_proxy": _metric_attribution_entry(
+            metric=context.residual_metric,
+            metric_key="residual_proxy",
+            rank_values=context.rank_values.get("residual_proxy", {}),
             step_total=context.step_total,
             single_rank=context.single_rank,
-            phase="wait",
+            phase="residual",
         ),
         "step_time": _metric_attribution_entry(
             metric=context.step_metric,
@@ -731,24 +570,12 @@ def build_step_diagnosis_result(
         ),
         "compute": {
             "metric": "compute",
-            "phase": (
-                context.dominant_compute.label.lower()
-                if context.dominant_compute is not None
-                else "compute"
-            ),
-            "median_total_ms": compute_median_total(
-                forward=context.forward_metric,
-                backward=context.backward_metric,
-                optimizer=context.optimizer_metric,
-            ),
-            "worst_total_ms": compute_worst_total(
-                forward=context.forward_metric,
-                backward=context.backward_metric,
-                optimizer=context.optimizer_metric,
-            ),
-            "worst_rank": context.compute_worst_rank,
-            "skew_pct": context.compute_skew,
-            "share_pct": context.compute_share,
+            "phase": "clean_compute",
+            "median_total_ms": compute_median_ms,
+            "worst_total_ms": compute_worst_ms,
+            "worst_rank": compute_worst_rank,
+            "skew_pct": compute_skew,
+            "share_pct": share(compute_median_ms, context.step_total),
             "top_ranks": _top_rank_entries(compute_rank_values),
         },
     }
@@ -763,6 +590,8 @@ def build_step_diagnosis_result(
 def build_step_diagnosis(
     metrics: Sequence[StepCombinedTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
+    *,
+    per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
 ) -> StepDiagnosis:
     """
     Build one primary diagnosis from step-combined metrics.
@@ -773,6 +602,7 @@ def build_step_diagnosis(
     primary = build_step_diagnosis_result(
         metrics,
         thresholds=thresholds,
+        per_rank_timing=per_rank_timing,
     ).primary
     if not isinstance(primary, StepDiagnosis):
         raise TypeError(
@@ -787,7 +617,6 @@ __all__ = [
     "DiagnosisThresholds",
     "DEFAULT_THRESHOLDS",
     "StepDiagnosis",
-    "ComputeSignal",
     "build_step_warmup_diagnosis",
     "build_step_diagnosis",
     "build_step_diagnosis_result",

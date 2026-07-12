@@ -38,13 +38,35 @@ class ComputeSignal:
 
 
 @dataclass(frozen=True)
+class _CleanStragglerEvidence:
+    """
+    Rank-local straggler evidence after discounting backward delay that can be
+    explained by non-backward rank skew.
+    """
+
+    kind: str
+    status: str
+    component: str
+    metric: str
+    phase: str
+    score: float
+    worst_rank: Optional[int]
+    clean_step_median_ms: float
+    clean_step_worst_ms: float
+    clean_step_slack_ms: float
+    typical_step_ms: float
+    top_excess_ms: float
+    second_excess_ms: float
+    component_excesses_ms: Dict[str, float]
+
+
+@dataclass(frozen=True)
 class StepTimeAnalysisContext:
     """
     Normalized step-time analysis state shared by all step-time diagnosis
     rules.
     """
 
-    metrics: Sequence[StepCombinedTimeMetric]
     thresholds: "DiagnosisThresholds"
     single_rank: bool
     steps_used: int
@@ -53,38 +75,29 @@ class StepTimeAnalysisContext:
     step_metric: StepCombinedTimeMetric
     dataloader_metric: Optional[StepCombinedTimeMetric]
     h2d_metric: Optional[StepCombinedTimeMetric]
-    wait_metric: Optional[StepCombinedTimeMetric]
+    residual_metric: Optional[StepCombinedTimeMetric]
     forward_metric: Optional[StepCombinedTimeMetric]
     backward_metric: Optional[StepCombinedTimeMetric]
     optimizer_metric: Optional[StepCombinedTimeMetric]
 
     step_total: float
     dataloader_total: float
-    h2d_total: float
-    wait_total: float
+    residual_total: float
     compute_total: float
-    typical_step_total: float
-    dataloader_excess_ms: float
-    compute_excess_ms: float
-    compute_phase_excess_total: float
 
     dataloader_share: float
-    wait_share: float
+    residual_share: float
     compute_share: float
 
     dataloader_skew: float
     compute_skew: float
     dataloader_worst_rank: Optional[int]
-    compute_worst_rank: Optional[int]
 
-    dominant_compute: Optional[ComputeSignal]
     largest_compute: Optional[ComputeSignal]
 
-    input_straggler_score: float
-    compute_straggler_score: float
-
     rank_values: Dict[str, Dict[int, float]]
-    per_rank_timing: Dict[int, Dict[str, float]]
+    clean_rank_values: Dict[str, Dict[int, float]]
+    clean_straggler: Optional[_CleanStragglerEvidence]
 
 
 def non_negative_finite(value: float) -> float:
@@ -108,6 +121,34 @@ def share(value: float, total: float) -> float:
     if total_safe <= 0.0:
         return 0.0
     return max(0.0, non_negative_finite(value) / total_safe)
+
+
+def _median(values: Sequence[float]) -> float:
+    """Return the median of safe non-negative finite values."""
+    clean = sorted(non_negative_finite(value) for value in values)
+    n = len(clean)
+    if n == 0:
+        return 0.0
+    mid = n // 2
+    if n % 2:
+        return float(clean[mid])
+    return float((clean[mid - 1] + clean[mid]) / 2.0)
+
+
+def _rank_stats(
+    rank_values: Dict[int, float],
+) -> tuple[float, float, Optional[int], float]:
+    """Return median, worst value, worst rank, and worst-minus-median."""
+    if not rank_values:
+        return 0.0, 0.0, None, 0.0
+    clean = {
+        int(rank): non_negative_finite(value)
+        for rank, value in rank_values.items()
+    }
+    median = _median(tuple(clean.values()))
+    worst_rank = max(clean, key=lambda rank: (clean[rank], -int(rank)))
+    worst = clean[worst_rank]
+    return median, worst, int(worst_rank), max(0.0, worst - median)
 
 
 def metric_median_total(metric: Optional[StepCombinedTimeMetric]) -> float:
@@ -176,42 +217,6 @@ def metric_worst_rank(
         return None
 
 
-def compute_median_total(
-    *,
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-) -> float:
-    """
-    Return median-rank compute total.
-    """
-    return (
-        metric_median_total(forward)
-        + metric_median_total(backward)
-        + metric_median_total(optimizer)
-    )
-
-
-def compute_worst_total(
-    *,
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-) -> float:
-    """
-    Return the sum of per-phase worst totals for compute phases.
-
-    This is an excess detector input, not a real rank-local compute total:
-    worst forward, worst backward, and worst optimizer may come from different
-    ranks in distributed training.
-    """
-    return (
-        metric_worst_total(forward)
-        + metric_worst_total(backward)
-        + metric_worst_total(optimizer)
-    )
-
-
 def compute_total(
     *,
     forward: Optional[StepCombinedTimeMetric],
@@ -229,38 +234,6 @@ def compute_total(
     )
 
 
-def typical_step_total(
-    *,
-    dataloader: Optional[StepCombinedTimeMetric],
-    h2d: Optional[StepCombinedTimeMetric],
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-    wait: Optional[StepCombinedTimeMetric],
-) -> float:
-    """
-    Return the typical observed step used to normalize straggler scores.
-
-    Definition:
-        median dataloader + median H2D + median forward + median backward
-        + median optimizer + median residual wait
-
-    This keeps straggler scores user-facing: "extra phase time as a share of a
-    normal observed iteration", including residual overhead that is part of the
-    step seen by users.
-    """
-    return (
-        metric_median_total(dataloader)
-        + metric_median_total(h2d)
-        + compute_median_total(
-            forward=forward,
-            backward=backward,
-            optimizer=optimizer,
-        )
-        + metric_median_total(wait)
-    )
-
-
 def metric_excess(metric: Optional[StepCombinedTimeMetric]) -> float:
     """
     Return worst-vs-median excess for one timing metric.
@@ -268,170 +241,193 @@ def metric_excess(metric: Optional[StepCombinedTimeMetric]) -> float:
     return max(0.0, metric_worst_total(metric) - metric_median_total(metric))
 
 
-def compute_phase_excess_total(
-    *,
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-) -> float:
+def _clean_rank_timings(
+    per_rank_timing: Dict[int, Dict[str, float]],
+) -> Dict[str, Dict[int, float]]:
     """
-    Return total excess across compute phases.
+    Return clean rank-local timings used for straggler diagnosis.
 
-    Detection keeps the existing spirit:
-        (worst forward + worst backward + worst optimizer)
-        - (median forward + median backward + median optimizer)
+    The policy discounts backward time that can be explained by another rank's
+    non-backward work in the same averaged/aligned window:
 
-    Attribution is handled separately by selecting the phase with the largest
-    individual excess.
+        residual_r = current residual_proxy_r
+        non_bwd_r = DL_r + H2D_r + FWD_r + OPT_r + RESIDUAL_r
+        clean_bwd_r = max(0, BWD_r - max(0, max(non_bwd) - non_bwd_r))
+        clean_compute_r = FWD_r + clean_bwd_r + OPT_r
+        clean_step_r = DL_r + H2D_r + clean_compute_r + RESIDUAL_r
+        score = (max(clean_step) - median(clean_step)) / median(actual_step)
     """
-    return max(
-        0.0,
-        compute_worst_total(
-            forward=forward,
-            backward=backward,
-            optimizer=optimizer,
+    if not per_rank_timing:
+        return {}
+
+    ranks = sorted(int(rank) for rank in per_rank_timing)
+    non_bwd = {
+        rank: (
+            non_negative_finite(
+                per_rank_timing[rank].get("dataloader_fetch", 0.0)
+            )
+            + non_negative_finite(per_rank_timing[rank].get("h2d", 0.0))
+            + non_negative_finite(per_rank_timing[rank].get("forward", 0.0))
+            + non_negative_finite(
+                per_rank_timing[rank].get("optimizer_step", 0.0)
+            )
+            + non_negative_finite(
+                per_rank_timing[rank].get("residual_proxy", 0.0)
+            )
         )
-        - compute_median_total(
-            forward=forward,
-            backward=backward,
-            optimizer=optimizer,
-        ),
-    )
+        for rank in ranks
+    }
+    non_bwd_max = max(non_bwd.values()) if non_bwd else 0.0
 
-
-def input_straggler_score(
-    *,
-    dataloader: Optional[StepCombinedTimeMetric],
-    h2d: Optional[StepCombinedTimeMetric],
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-    wait: Optional[StepCombinedTimeMetric],
-) -> float:
-    """
-    Return the normalized input straggler score.
-    """
-    typical = typical_step_total(
-        dataloader=dataloader,
-        h2d=h2d,
-        forward=forward,
-        backward=backward,
-        optimizer=optimizer,
-        wait=wait,
-    )
-    if typical <= 0.0:
-        return 0.0
-
-    excess = metric_excess(dataloader)
-    return excess / typical
-
-
-def compute_straggler_score(
-    *,
-    dataloader: Optional[StepCombinedTimeMetric],
-    h2d: Optional[StepCombinedTimeMetric],
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-    wait: Optional[StepCombinedTimeMetric],
-) -> float:
-    """
-    Return the normalized compute straggler score.
-
-    Compute straggler detection asks whether compute-phase excess is material
-    relative to a normal observed step. It does not claim that the summed
-    worst phases all came from one rank.
-    """
-    typical = typical_step_total(
-        dataloader=dataloader,
-        h2d=h2d,
-        forward=forward,
-        backward=backward,
-        optimizer=optimizer,
-        wait=wait,
-    )
-    if typical <= 0.0:
-        return 0.0
-
-    excess = compute_phase_excess_total(
-        forward=forward,
-        backward=backward,
-        optimizer=optimizer,
-    )
-    return excess / typical
-
-
-def dominant_compute_signal(
-    *,
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
-    step_total: float,
-    single_rank: bool,
-    backward_attribution_tolerance: float,
-) -> Optional[ComputeSignal]:
-    """
-    Pick the compute phase that best explains a straggler.
-
-    Blame rank selection follows the largest absolute phase excess:
-        worst_phase - median_phase
-
-    DDP-aware rank attribution: backward can be where a peer rank observes a
-    delay from nearby rank-local compute work. If backward only narrowly wins,
-    prefer forward or optimizer when its excess is within the shared tolerance.
-
-    Relative skew is still carried for presentation and secondary thresholds.
-    """
-    candidates: list[ComputeSignal] = []
-
-    for label, metric in (
-        ("Forward", forward),
-        ("Backward", backward),
-        ("Optimizer", optimizer),
-    ):
-        if metric is None:
-            continue
-
-        median = metric_median_total(metric)
-        worst = metric_worst_total(metric)
-        excess = metric_excess(metric)
-        total = metric_total(metric, single_rank=single_rank)
-        if total <= 0.0 and worst <= 0.0:
-            continue
-
-        candidates.append(
-            ComputeSignal(
-                label=label,
-                share=share(total, step_total),
-                skew=metric_skew(metric, single_rank=single_rank),
-                median_ms=median,
-                worst_ms=worst,
-                excess_ms=excess,
-                worst_rank=metric_worst_rank(metric),
+    out = {
+        "dataloader_fetch": {},
+        "h2d": {},
+        "forward": {},
+        "backward": {},
+        "optimizer_step": {},
+        "residual_proxy": {},
+        "total_step": {},
+        "non_backward": {},
+        "clean_backward": {},
+        "clean_compute": {},
+        "clean_step": {},
+    }
+    for rank in ranks:
+        values = per_rank_timing[rank]
+        dataloader = non_negative_finite(values.get("dataloader_fetch", 0.0))
+        h2d = non_negative_finite(values.get("h2d", 0.0))
+        forward = non_negative_finite(values.get("forward", 0.0))
+        backward = non_negative_finite(values.get("backward", 0.0))
+        optimizer = non_negative_finite(values.get("optimizer_step", 0.0))
+        residual = non_negative_finite(values.get("residual_proxy", 0.0))
+        total_step = non_negative_finite(
+            values.get(
+                "total_step",
+                dataloader
+                + max(
+                    non_negative_finite(values.get("step_time", 0.0)),
+                    h2d + forward + backward + optimizer,
+                ),
             )
         )
 
-    if not candidates:
+        explained_bwd_delay = max(0.0, non_bwd_max - non_bwd[rank])
+        clean_backward = max(0.0, backward - explained_bwd_delay)
+        clean_compute = forward + clean_backward + optimizer
+        clean_step = dataloader + h2d + clean_compute + residual
+
+        out["dataloader_fetch"][rank] = dataloader
+        out["h2d"][rank] = h2d
+        out["forward"][rank] = forward
+        out["backward"][rank] = backward
+        out["optimizer_step"][rank] = optimizer
+        out["residual_proxy"][rank] = residual
+        out["total_step"][rank] = total_step
+        out["non_backward"][rank] = non_bwd[rank]
+        out["clean_backward"][rank] = clean_backward
+        out["clean_compute"][rank] = clean_compute
+        out["clean_step"][rank] = clean_step
+
+    return out
+
+
+def _clean_straggler_evidence(
+    *,
+    clean_rank_values: Dict[str, Dict[int, float]],
+    score_threshold: float,
+    dominance_tolerance: float,
+) -> Optional[_CleanStragglerEvidence]:
+    """Return rank-local clean-step straggler evidence, if material."""
+    clean_steps = clean_rank_values.get("clean_step", {})
+    actual_steps = clean_rank_values.get("total_step", {})
+    if len(clean_steps) <= 1 or not actual_steps:
         return None
 
-    winner = max(candidates, key=lambda item: (item.excess_ms, item.share))
-    if winner.label != "Backward":
-        return winner
-
-    tolerance = max(1.0, non_negative_finite(backward_attribution_tolerance))
-    min_excess = (
-        winner.excess_ms / tolerance if winner.excess_ms > 0.0 else 0.0
+    median_clean, worst_clean, worst_rank, clean_slack = _rank_stats(
+        clean_steps
     )
-    alternatives = [
-        item
-        for item in candidates
-        if item.label in {"Forward", "Optimizer"}
-        and item.excess_ms > 0.0
-        and item.excess_ms >= min_excess
-    ]
-    if not alternatives:
-        return winner
-    return max(alternatives, key=lambda item: (item.excess_ms, item.share))
+    typical_step = _median(tuple(actual_steps.values()))
+    if typical_step <= 0.0:
+        return None
+
+    score = clean_slack / typical_step
+    if score < non_negative_finite(score_threshold):
+        return None
+    if worst_rank is None:
+        return None
+
+    components = {
+        "input": (
+            "INPUT_STRAGGLER",
+            "INPUT STRAGGLER",
+            "dataloader_fetch",
+            "dataloader",
+        ),
+        "compute": (
+            "COMPUTE_STRAGGLER",
+            "COMPUTE STRAGGLER",
+            "compute",
+            "compute",
+        ),
+        "h2d": ("H2D_STRAGGLER", "H2D STRAGGLER", "h2d", "h2d"),
+        "residual": (
+            "RESIDUAL_STRAGGLER",
+            "RESIDUAL STRAGGLER",
+            "residual_proxy",
+            "residual",
+        ),
+    }
+    source_by_component = {
+        "input": clean_rank_values.get("dataloader_fetch", {}),
+        "compute": clean_rank_values.get("clean_compute", {}),
+        "h2d": clean_rank_values.get("h2d", {}),
+        "residual": clean_rank_values.get("residual_proxy", {}),
+    }
+    component_excesses = {
+        name: max(
+            0.0,
+            non_negative_finite(values.get(worst_rank, 0.0))
+            - _median(tuple(values.values())),
+        )
+        for name, values in source_by_component.items()
+    }
+    ordered = sorted(
+        component_excesses.items(),
+        key=lambda item: (item[1], item[0]),
+        reverse=True,
+    )
+    top_component, top_excess = ordered[0]
+    second_excess = ordered[1][1] if len(ordered) > 1 else 0.0
+
+    tolerance = max(1.0, non_negative_finite(dominance_tolerance))
+    if top_excess <= 0.0 or top_excess < tolerance * second_excess:
+        kind, status, metric, phase = (
+            "STRAGGLER",
+            "STRAGGLER",
+            "step_time",
+            "mixed",
+        )
+        component = "mixed"
+    else:
+        kind, status, metric, phase = components[top_component]
+        component = top_component
+
+    return _CleanStragglerEvidence(
+        kind=kind,
+        status=status,
+        component=component,
+        metric=metric,
+        phase=phase,
+        score=score,
+        worst_rank=worst_rank,
+        clean_step_median_ms=median_clean,
+        clean_step_worst_ms=worst_clean,
+        clean_step_slack_ms=clean_slack,
+        typical_step_ms=typical_step,
+        top_excess_ms=top_excess,
+        second_excess_ms=second_excess,
+        component_excesses_ms=component_excesses,
+    )
 
 
 def largest_compute_phase(
@@ -510,7 +506,7 @@ def build_step_time_context(
     step_metric = by_key["step_time"]
     dataloader_metric = by_key.get("dataloader_fetch")
     h2d_metric = by_key.get("h2d")
-    wait_metric = by_key.get("wait_proxy")
+    residual_metric = by_key.get("residual_proxy")
     forward_metric = by_key.get("forward")
     backward_metric = by_key.get("backward")
     optimizer_metric = by_key.get("optimizer_step")
@@ -522,38 +518,12 @@ def build_step_time_context(
 
     step_total = metric_total(step_metric, single_rank=single_rank)
     dataloader_total = metric_total(dataloader_metric, single_rank=single_rank)
-    h2d_total = metric_total(h2d_metric, single_rank=single_rank)
-    wait_total = metric_total(wait_metric, single_rank=single_rank)
+    residual_total = metric_total(residual_metric, single_rank=single_rank)
     compute_total_value = compute_total(
         forward=forward_metric,
         backward=backward_metric,
         optimizer=optimizer_metric,
         single_rank=single_rank,
-    )
-    typical_step_value = typical_step_total(
-        dataloader=dataloader_metric,
-        h2d=h2d_metric,
-        forward=forward_metric,
-        backward=backward_metric,
-        optimizer=optimizer_metric,
-        wait=wait_metric,
-    )
-    dataloader_excess_value = metric_excess(dataloader_metric)
-    compute_excess_value = compute_phase_excess_total(
-        forward=forward_metric,
-        backward=backward_metric,
-        optimizer=optimizer_metric,
-    )
-
-    dominant_compute = dominant_compute_signal(
-        forward=forward_metric,
-        backward=backward_metric,
-        optimizer=optimizer_metric,
-        step_total=step_total,
-        single_rank=single_rank,
-        backward_attribution_tolerance=(
-            thresholds.input_straggler_compute_excess_tolerance
-        ),
     )
     largest_compute = largest_compute_phase(
         forward=forward_metric,
@@ -563,15 +533,6 @@ def build_step_time_context(
         single_rank=single_rank,
     )
 
-    compute_skew_value = (
-        dominant_compute.skew if dominant_compute is not None else 0.0
-    )
-    compute_rank = (
-        dominant_compute.worst_rank
-        if dominant_compute is not None
-        else overall_worst_rank
-    )
-
     rank_values = {
         "dataloader_fetch": rank_values_from_metric(dataloader_metric),
         "h2d": rank_values_from_metric(h2d_metric),
@@ -579,7 +540,7 @@ def build_step_time_context(
         "backward": rank_values_from_metric(backward_metric),
         "optimizer_step": rank_values_from_metric(optimizer_metric),
         "step_time": rank_values_from_metric(step_metric),
-        "wait_proxy": rank_values_from_metric(wait_metric),
+        "residual_proxy": rank_values_from_metric(residual_metric),
     }
 
     local_per_rank_timing = {
@@ -612,14 +573,25 @@ def build_step_time_context(
                 rank: non_negative_finite(values.get("step_time", 0.0))
                 for rank, values in local_per_rank_timing.items()
             },
-            "wait_proxy": {
-                rank: non_negative_finite(values.get("wait_proxy", 0.0))
+            "residual_proxy": {
+                rank: non_negative_finite(values.get("residual_proxy", 0.0))
                 for rank, values in local_per_rank_timing.items()
             },
         }
 
+    clean_rank_values = _clean_rank_timings(local_per_rank_timing)
+    clean_straggler = _clean_straggler_evidence(
+        clean_rank_values=clean_rank_values,
+        score_threshold=thresholds.straggler_score_warn,
+        dominance_tolerance=thresholds.straggler_dominance_tolerance,
+    )
+    clean_compute_values = clean_rank_values.get("clean_compute", {})
+    _compute_median, _, _, _compute_slack = _rank_stats(clean_compute_values)
+    compute_skew_value = (
+        (_compute_slack / _compute_median) if _compute_median > 0.0 else 0.0
+    )
+
     return StepTimeAnalysisContext(
-        metrics=metrics,
         thresholds=thresholds,
         single_rank=single_rank,
         steps_used=steps_used,
@@ -627,48 +599,26 @@ def build_step_time_context(
         step_metric=step_metric,
         dataloader_metric=dataloader_metric,
         h2d_metric=h2d_metric,
-        wait_metric=wait_metric,
+        residual_metric=residual_metric,
         forward_metric=forward_metric,
         backward_metric=backward_metric,
         optimizer_metric=optimizer_metric,
         step_total=step_total,
         dataloader_total=dataloader_total,
-        h2d_total=h2d_total,
-        wait_total=wait_total,
+        residual_total=residual_total,
         compute_total=compute_total_value,
-        typical_step_total=typical_step_value,
-        dataloader_excess_ms=dataloader_excess_value,
-        compute_excess_ms=compute_excess_value,
-        compute_phase_excess_total=compute_excess_value,
         dataloader_share=share(dataloader_total, step_total),
-        wait_share=share(wait_total, step_total),
+        residual_share=share(residual_total, step_total),
         compute_share=share(compute_total_value, step_total),
         dataloader_skew=metric_skew(
             dataloader_metric, single_rank=single_rank
         ),
         compute_skew=compute_skew_value,
         dataloader_worst_rank=metric_worst_rank(dataloader_metric),
-        compute_worst_rank=compute_rank,
-        dominant_compute=dominant_compute,
         largest_compute=largest_compute,
-        input_straggler_score=input_straggler_score(
-            dataloader=dataloader_metric,
-            h2d=h2d_metric,
-            forward=forward_metric,
-            backward=backward_metric,
-            optimizer=optimizer_metric,
-            wait=wait_metric,
-        ),
-        compute_straggler_score=compute_straggler_score(
-            dataloader=dataloader_metric,
-            h2d=h2d_metric,
-            forward=forward_metric,
-            backward=backward_metric,
-            optimizer=optimizer_metric,
-            wait=wait_metric,
-        ),
         rank_values=rank_values,
-        per_rank_timing=local_per_rank_timing,
+        clean_rank_values=clean_rank_values,
+        clean_straggler=clean_straggler,
     )
 
 
@@ -676,11 +626,7 @@ __all__ = [
     "ComputeSignal",
     "StepTimeAnalysisContext",
     "build_step_time_context",
-    "compute_phase_excess_total",
-    "compute_median_total",
     "compute_total",
-    "compute_worst_total",
-    "dominant_compute_signal",
     "largest_compute_phase",
     "metric_median_total",
     "metric_excess",
@@ -691,5 +637,4 @@ __all__ = [
     "non_negative_finite",
     "rank_values_from_metric",
     "share",
-    "typical_step_total",
 ]

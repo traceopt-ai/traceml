@@ -23,10 +23,10 @@ from traceml_ai.runtime.lifecycle import NoOpRuntime
 from traceml_ai.runtime.lifecycle import start_runtime as start_runtime_handle
 from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
-from traceml_ai.utils.shared_utils import EXECUTION_LAYER
 
 INTERRUPTED_EXIT_CODE = 130
 DEFAULT_LOGS_DIR = "./logs"
@@ -36,8 +36,6 @@ DEFAULT_AGGREGATOR_PORT = 29765
 DEFAULT_PROFILE = "run"
 DEFAULT_UI_MODE = "cli"
 DEFAULT_INTERVAL_SEC = 1.0
-DEFAULT_NUM_DISPLAY_LAYERS = 20
-DEFAULT_REMOTE_MAX_ROWS = 200
 USER_ERROR_LOG_NAME = "torchrun_error.log"
 RUNTIME_ERROR_LOG_NAME = "runtime_error.log"
 
@@ -69,7 +67,6 @@ def _append_error_log(
     filename: str,
     header: str,
     error: Optional[BaseException] = None,
-    include_execution_layer: bool = False,
 ) -> None:
     """
     Append an error report to a session log file.
@@ -84,8 +81,6 @@ def _append_error_log(
         Short human-readable header describing the failure.
     error:
         Optional exception to serialize as a traceback.
-    include_execution_layer:
-        Whether to include the last known execution layer in the report.
 
     Notes
     -----
@@ -100,16 +95,6 @@ def _append_error_log(
         with open(path, "a", encoding="utf-8", errors="replace") as f:
             f.write("\n" + "=" * 80 + "\n")
             f.write(f"{_utc_now_iso()}  {header}\n")
-
-            if include_execution_layer:
-                current_execution_layer = getattr(
-                    EXECUTION_LAYER, "current", None
-                )
-                if current_execution_layer is not None:
-                    f.write(
-                        "[TraceML] Last execution point: "
-                        f"{current_execution_layer}\n"
-                    )
 
             if error is not None:
                 traceback.print_exception(
@@ -142,7 +127,6 @@ def write_user_error_log(
         filename=USER_ERROR_LOG_NAME,
         header=header,
         error=error,
-        include_execution_layer=True,
     )
 
 
@@ -163,7 +147,6 @@ def write_runtime_error_log(
         filename=RUNTIME_ERROR_LOG_NAME,
         header=header,
         error=error,
-        include_execution_layer=False,
     )
 
 
@@ -201,12 +184,6 @@ def read_traceml_env() -> Dict[str, Any]:
             os.environ.get("TRACEML_ENABLE_LOGGING", "0") == "1"
         ),
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", DEFAULT_LOGS_DIR),
-        "num_display_layers": int(
-            os.environ.get(
-                "TRACEML_NUM_DISPLAY_LAYERS",
-                str(DEFAULT_NUM_DISPLAY_LAYERS),
-            )
-        ),
         "aggregator_host": os.environ.get(
             "TRACEML_AGGREGATOR_HOST",
             DEFAULT_AGGREGATOR_HOST,
@@ -221,18 +198,21 @@ def read_traceml_env() -> Dict[str, Any]:
                 str(DEFAULT_AGGREGATOR_PORT),
             )
         ),
-        "remote_max_rows": int(
-            os.environ.get(
-                "TRACEML_REMOTE_MAX_ROWS",
-                str(DEFAULT_REMOTE_MAX_ROWS),
-            )
-        ),
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
         "summary_window_rows": int(
             os.environ.get(
                 "TRACEML_SUMMARY_WINDOW_ROWS",
                 str(DEFAULT_SUMMARY_WINDOW_ROWS),
             )
+        ),
+        "finalize_timeout_sec": float(
+            os.environ.get(
+                "TRACEML_FINALIZE_TIMEOUT_SEC",
+                str(DEFAULT_FINALIZE_TIMEOUT_SEC),
+            )
+        ),
+        "expected_world_size": int(
+            os.environ.get("TRACEML_EXPECTED_WORLD_SIZE", "1")
         ),
         "trace_max_steps": _parse_optional_positive_int(
             os.environ.get("TRACEML_TRACE_MAX_STEPS")
@@ -274,6 +254,10 @@ def build_runtime_settings(cfg: Dict[str, Any]) -> TraceMLSettings:
         logs_dir=str(cfg["logs_dir"]),
         session_id=str(cfg["session_id"]),
         summary_window_rows=int(cfg["summary_window_rows"]),
+        finalize_timeout_sec=float(
+            cfg.get("finalize_timeout_sec", DEFAULT_FINALIZE_TIMEOUT_SEC)
+        ),
+        expected_world_size=int(cfg.get("expected_world_size", 1)),
         trace_max_steps=cfg.get("trace_max_steps"),
         aggregator=AggregatorTransportSettings(
             connect_host=str(cfg["aggregator_host"]),
@@ -366,8 +350,7 @@ def report_crash(cfg: Dict[str, Any], error: BaseException) -> None:
     """
     Persist an enriched user-script crash report.
 
-    The crash report is written to torchrun_error.log and includes the last
-    known execution layer when available.
+    The crash report is written to torchrun_error.log.
 
     This function intentionally does not print large tracebacks to the terminal,
     because the aggregator may own the terminal UI and overwrite them.

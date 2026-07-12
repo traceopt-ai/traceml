@@ -2,7 +2,7 @@
 
 # TraceML
 
-**A lightweight runtime health check for PyTorch training runs.**
+**Low-overhead PyTorch training performance diagnostics. Every step, every run.**
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -20,27 +20,32 @@
 
 </div>
 
-### Is your GPU training, waiting on data, or blocked by one slow rank?
+  TraceML runs alongside your training loop and writes a compact performance
+  report at the end of each run — with <2% overhead in current benchmarks,
+  across the full job, not just sampled steps. It helps answer:
 
-PyTorch training can look normal while step time is lost to a slow input
-pipeline, low GPU utilization, memory growth, distributed rank skew, or a
-run-to-run regression.
-
-TraceML runs alongside your PyTorch training loop and writes a compact
-runtime performance report at the end of each run. With low overhead
-(<2% in our current benchmark runs), it helps you see where step time and
-memory went before opening heavier tools like `torch.profiler` or Nsight.
-It helps answer:
-
-- Are my GPUs waiting on a slow dataloader?
-- Is one distributed rank consistently slower than the others?
-- Is memory usage silently creeping upward during the run?
-- Did a recent code, data, or infrastructure change slow training down?
-
-Here, **health** means runtime performance health: step time, input/compute/wait
-balance, memory behavior, distributed rank skew, and run-to-run change.
+  - Are my GPUs waiting on a slow dataloader?
+  - Is one distributed rank consistently slower than the others?
+  - Is memory usage silently creeping upward during the run?
+  - Did a recent code, data, or infrastructure change slow training down?
 
 ---
+
+## Where TraceML Fits
+
+| Tool | Use it for | Not for |
+|---|---|---|
+| TraceML | Full-run bottlenecks and rank skew | Kernel/operator timelines |
+| `torch.profiler` / Kineto | Op/CUDA traces for selected steps | Always-on summaries |
+| Nsight Systems | GPU/kernel timeline debugging | Everyday training triage |
+| Holistic Trace Analysis | Analyzing profiler traces | Live/full-run collection |
+| W&B / MLflow | Experiment tracking and run history | Runtime bottleneck diagnosis |
+
+Start with TraceML to find the bottleneck category; open deeper profilers when
+you need operator- or kernel-level detail.
+
+---
+
 
 ## 3-Minute Quickstart
 
@@ -77,6 +82,12 @@ for batch in dataloader:
 
 ```bash
 traceml run train.py
+```
+
+Or try the self-contained example first:
+
+```bash
+traceml run examples/quickstart.py --mode=summary
 ```
 
 For DDP, FSDP, and multi-node runs, see
@@ -131,7 +142,7 @@ traceml view logs/<run_name>/final_summary.json
 ```
 
 Want a shareable report? Add `--html-report` to also write a self-contained
-`final_summary.html` (inline styling, no network, opens in any browser), or
+`final_summary.html`, or
 render one from a saved run after the fact:
 
 ```bash
@@ -139,23 +150,59 @@ traceml run train.py --html-report
 traceml view logs/<run_name>/final_summary.json --html   # writes <...>.html
 ```
 
-Instead of guessing why training feels slow, you get a compact diagnosis of
-where step time and memory went.
+For very large or slow multi-node jobs, TraceML waits at shutdown for late
+telemetry, SQLite checkpointing, and final summary writing. Tune that single
+end-of-run budget with `--finalize-timeout-sec` or
+`TRACEML_FINALIZE_TIMEOUT_SEC` when running on slow filesystems or congested
+networks.
+
+Instead of guessing where training time went, you get an end-of-run verdict:
+what slowed the run down, which rank or phase is suspicious, and where to look
+next.
 
 Example TraceML output:
 
 ```text
 +----------------------------------------------------------------------------+
-|  Step Time                                                                 |
-|  - Diagnosis: INPUT STRAGGLER                                              |
-|  - Scope: compared over last 460 aligned steps across 4 global ranks       |
-|  - Stats: total 303.7ms | input 254.5ms | compute 259.5ms | wait 40.5ms    |
-|  - Why: r0 input was slower than median global rank (254.5/3.8ms).         |
+|  TraceML Run Summary | duration 40.1s                                      |
++----------------------------------------------------------------------------+
+|                                                                            |
+|  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
+|  Why: Rank r0 dataloader was 254.5ms vs median rank r1 at 3.8ms.           |
+|  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
+|  slow rank.                                                                |
+|                                                                            |
+|  Section Status                                                            |
+|  Section       Status                  Severity                            |
+|  ------------------------------------------------                          |
+|  Step Time     INPUT STRAGGLER         CRITICAL                            |
+|  System        LOW GPU UTIL            INFO                                |
+|  Process       NORMAL                  INFO                                |
+|  Step Memory   BALANCED                INFO                                |
+|                                                                            |
+|  System Evidence                                                           |
+|  Metric          Median        Worst         Skew        Scope             |
+|  --------------------------------------------------------------------------|
+|  CPU Util        18.4%         71.2%         52.8pp      node=n1           |
+|  GPU Util        14.0%         0.0%          14.0pp      node=n0           |
+|  GPU Memory      6.20GB        8.90GB        43.5%       node=n1           |
+|  GPU Temp        42C           58C           16C         node=n1           |
+|                                                                            |
+|  Step Time Evidence                                                        |
+|  Phase           Median        Worst         Skew        Scope             |
+|  --------------------------------------------------------------------------|
+|  Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
+|  Dataloader      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
+|  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
 +----------------------------------------------------------------------------+
 ```
 
 In this example, rank 0 is the slow input rank, which can hold back the aligned
 distributed step.
+
+Want to try a specific bottleneck? See [examples/](examples/) for
+self-contained demos covering dataloader bottlenecks, H2D timing, DDP rank
+stragglers, Lightning, Hugging Face, Ray, and tracker-friendly summary logging.
 
 For experiment trackers, call `traceml.summary()` near the end of your script
 to get a flat dict of diagnosis statuses and average metrics. Keep
@@ -166,14 +213,13 @@ to get a flat dict of diagnosis statuses and average metrics. Keep
 
 ## What TraceML Helps You Triage
 
-TraceML is meant to be the first check when a training run is slower than
-expected. It points you to the likely area before you decide whether to open a
-heavier profiler.
+Use TraceML as the first check before opening a heavier profiler — it surfaces
+the likely bottleneck area so you know where to look next.
 
 | Area | What TraceML surfaces | What to inspect next |
 |---|---|---|
 | Input pipeline | High input time or slow input rank | `num_workers`, `pin_memory`, transforms, tokenization, `collate_fn`, dataset/storage latency |
-| GPU utilization / wait | Step time split across input, compute, and wait | input pipeline, CPU/GPU handoff, synchronization, distributed coordination |
+| GPU utilization / residual | Step time split across input, compute, and residual | input pipeline, CPU/GPU handoff, synchronization, distributed coordination |
 | Distributed skew | One DDP/FSDP rank slower than the others | rank-local dataloading, data imbalance, node variance, storage/network differences |
 | Memory creep | Memory usage growing during the run | retained tensors, logging references, loss accumulation, cached activations |
 | Run regression | Changed metrics versus a known-good run | code changes, data changes, batch size, container, driver, hardware, infrastructure |
@@ -235,21 +281,6 @@ changing the final saved artifacts.
 
 - Multi-node live CLI / browser dashboard
 - Explicit collective / NCCL timing
-
----
-
-## Where TraceML Fits in the Stack
-
-TraceML does not replace `torch.profiler`. It is the low-overhead first pass that
-helps you decide where to aim heavier profiling tools.
-
-| Tool | Best used for | Output | Cost / overhead |
-|---|---|---|---|
-| TraceML | Classifying high-level bottlenecks: input, compute, wait, memory, rank skew | JSON fingerprint, text summary, live views | <2% in current benchmark runs; small code wrapper |
-| `torch.profiler` | Inspecting expensive ops, kernels, and CUDA activity | Profiler trace | Higher overhead; requires profiler context |
-| Nsight Systems | Debugging low-level CUDA and kernel behavior | GPU timeline | Separate profiler run |
-| W&B / MLflow | Tracking training metrics and experiment history | Metrics dashboard / run history | Logging integration |
-| `nvidia-smi` | Checking machine-level GPU health and utilization | Terminal metrics | No code changes |
 
 ---
 

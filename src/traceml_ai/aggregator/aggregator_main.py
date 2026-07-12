@@ -39,6 +39,7 @@ from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.lifecycle import start_aggregator
 from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -112,9 +113,6 @@ def read_traceml_env() -> dict[str, Any]:
         "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "0") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
-        "num_display_layers": int(
-            os.environ.get("TRACEML_NUM_DISPLAY_LAYERS", "20")
-        ),
         "aggregator_host": os.environ.get(
             "TRACEML_AGGREGATOR_HOST",
             "127.0.0.1",
@@ -126,12 +124,25 @@ def read_traceml_env() -> dict[str, Any]:
         "aggregator_port": int(
             os.environ.get("TRACEML_AGGREGATOR_PORT", "29765")
         ),
-        "remote_max_rows": int(
-            os.environ.get("TRACEML_REMOTE_MAX_ROWS", "200")
+        "dashboard_port": int(
+            os.environ.get("TRACEML_DASHBOARD_PORT", "8765")
         ),
+        "dashboard_auto_open": os.environ.get(
+            "TRACEML_DASHBOARD_AUTO_OPEN", "1"
+        )
+        == "1",
         "session_id": os.environ.get("TRACEML_SESSION_ID", ""),
         "history_enabled": os.environ.get("TRACEML_HISTORY_ENABLED", "1")
         == "1",
+        "finalize_timeout_sec": float(
+            os.environ.get(
+                "TRACEML_FINALIZE_TIMEOUT_SEC",
+                str(DEFAULT_FINALIZE_TIMEOUT_SEC),
+            )
+        ),
+        "expected_world_size": int(
+            os.environ.get("TRACEML_EXPECTED_WORLD_SIZE", "1")
+        ),
         "summary_window_rows": int(
             os.environ.get(
                 "TRACEML_SUMMARY_WINDOW_ROWS",
@@ -228,9 +239,10 @@ def run_aggregator(
         if handle is not None:
             try:
                 logger.info("[TraceML] Stopping aggregator")
-                handle.stop(timeout_sec=5.0)
-            except Exception:
-                pass
+                handle.stop(timeout_sec=float(settings.finalize_timeout_sec))
+            except Exception as stop_exc:
+                if err is None:
+                    err = stop_exc
 
         print(
             f"[TraceML] Logs saved under: {session_root}",
@@ -286,14 +298,16 @@ def main() -> None:
         mode=str(cfg["mode"]),
         profile=str(cfg["profile"]),
         render_interval_sec=float(cfg["interval"]),
-        num_display_layers=int(cfg["num_display_layers"]),
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),
-        remote_max_rows=int(cfg["remote_max_rows"]),
+        dashboard_port=int(cfg["dashboard_port"]),
+        dashboard_auto_open=bool(cfg["dashboard_auto_open"]),
         session_id=str(cfg["session_id"] or "default"),
         history_enabled=bool(cfg["history_enabled"]),
         summary_window_rows=int(cfg["summary_window_rows"]),
         html_report=bool(cfg["html_report"]),
+        finalize_timeout_sec=float(cfg["finalize_timeout_sec"]),
+        expected_world_size=int(cfg["expected_world_size"]),
         aggregator=AggregatorTransportSettings(
             connect_host=str(cfg["aggregator_host"]),
             bind_host=str(cfg["aggregator_bind_host"]),

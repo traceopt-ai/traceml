@@ -22,6 +22,7 @@ from traceml_ai.runtime.state import (
 )
 from traceml_ai.runtime.stdout_stderr_capture import StreamCapture
 from traceml_ai.samplers.base_sampler import BaseSampler
+from traceml_ai.telemetry.control import build_rank_finished_payload
 from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig
 
 from .settings import TraceMLSettings
@@ -209,6 +210,7 @@ class TraceMLRuntime:
 
         - Signals the sampler thread to stop
         - Joins the sampler thread
+        - Sends a rank-finished control message for aggregator finalization
         - Closes TCP client
         - Restores stdout/stderr (CLI mode only)
         """
@@ -223,6 +225,16 @@ class TraceMLRuntime:
             self._logger.error(
                 "[TraceML] WARNING: sampler thread did not terminate"
             )
+
+        self._publisher.publish(self._samplers)
+        self._publisher.send_control(
+            build_rank_finished_payload(
+                global_rank=self.identity.global_rank,
+                world_size=self.identity.world_size,
+                node_rank=self.identity.node_rank,
+                hostname=self.identity.hostname,
+            )
+        )
 
         # close client last
         self._publisher.close()

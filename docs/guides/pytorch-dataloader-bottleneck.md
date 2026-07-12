@@ -5,7 +5,7 @@ distributed workers spend time waiting for an input rank to catch up.
 
 A DataLoader bottleneck means the input path is taking enough time to affect
 training throughput. In TraceML, start by checking whether step time is going
-to dataloader fetch, host-to-device transfer, compute, wait time, or rank skew.
+to dataloader fetch, host-to-device transfer, compute, residual time, or rank skew.
 
 For whole-run triage, start with
 [Find why PyTorch training is slow](slow-pytorch-training.md). This page stays
@@ -51,7 +51,7 @@ traceml view logs/<run_name>/final_summary.json
 
 ## What to look for
 
-Start with the `Step Time` section.
+Start with `TraceML Verdict`, then check the `Step Time Evidence` table.
 
 For DataLoader problems, the most relevant diagnoses are:
 
@@ -60,13 +60,19 @@ For DataLoader problems, the most relevant diagnoses are:
 - `INPUT STRAGGLER`: one rank has meaningfully more dataloader burden than a
   typical rank
 
-Example:
+Example excerpt:
 
 ```text
-Step Time
-- Diagnosis: INPUT STRAGGLER
-- Stats: total 303.7ms | input 254.5ms | compute 259.5ms | wait 40.5ms
-- Why: r0 input was slower than median global rank (254.5/3.8ms).
+TraceML Verdict: INPUT STRAGGLER / CRITICAL
+Why: Rank r0 dataloader was 254.5ms vs median rank r1 at 3.8ms.
+Next: Inspect dataloader, collate_fn, preprocessing, and storage on the slow rank.
+
+Step Time Evidence
+Phase           Median        Worst         Skew        Scope
+--------------------------------------------------------------------------
+Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0
+Dataloader      3.8ms         254.5ms       6597.4%     rank=r0 node=n0
+Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1
 ```
 
 Read this as:
@@ -94,8 +100,8 @@ Good first checks:
 
 For CUDA training, also check whether your existing input path uses
 `pin_memory=True` and non-blocking host-to-device transfer where appropriate.
-TraceML separates dataloader fetch, H2D, compute, and wait time. Use that split
-to avoid treating a transfer, compute, or wait issue as a DataLoader issue.
+TraceML separates dataloader fetch, H2D, compute, and residual time. Use that split
+to avoid treating a transfer, compute, or residual issue as a DataLoader issue.
 
 ## Compare before and after
 
@@ -105,7 +111,7 @@ After changing the input path, compare the old and new final summaries:
 traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
-Use the compare output to check whether total step time, input time, wait time,
+Use the compare output to check whether total step time, input time, residual time,
 or the diagnosis changed.
 
 ## When this is not the right guide

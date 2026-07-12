@@ -1,11 +1,7 @@
-import logging
 import os
 import sys
-from typing import Any, Dict, Optional
 
-from traceml_ai.sdk.instrumentation import trace_model_instance, trace_step
-
-logger = logging.getLogger(__name__)
+from traceml_ai.sdk.instrumentation import trace_step
 
 
 def _traceml_disabled() -> bool:
@@ -13,8 +9,7 @@ def _traceml_disabled() -> bool:
     Read the TRACEML_DISABLED kill switch dynamically.
 
     Read per-call rather than captured at import so toggling the env var
-    after import (notebooks, tests) is honored, matching how trace_step and
-    trace_model_instance already check it.
+    after import (notebooks, tests) is honored, matching ``trace_step``.
     """
     return os.environ.get("TRACEML_DISABLED") == "1"
 
@@ -91,19 +86,15 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
     integration docs for the full list of limitations vs. ``TraceMLTrainer``.
     """
 
-    def __init__(
-        self, traceml_kwargs: Optional[Dict[str, Any]] = None
-    ) -> None:
+    def __init__(self) -> None:
         if not HAS_TRANSFORMERS:
             raise ImportError(
-                "TraceMLTrainerCallback requires 'transformers' to be "
-                "installed. Please run `pip install transformers`."
+                "TraceMLTrainerCallback requires the Hugging Face "
+                "integration. Install it with "
+                "`pip install 'traceml-ai[hf]'`."
             )
         super().__init__()
-        self._traceml_kwargs = traceml_kwargs
         self._step_cm = None
-        self._hooks_attached = False
-        self._attached_model_id: Optional[int] = None
 
     def _close_step_cm_safely(self) -> None:
         """Defensively exit any open trace_step context."""
@@ -116,21 +107,6 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         except Exception as exc:
             _log_hf_error("trace_step exit failed", exc)
 
-    def _maybe_attach_model_hooks(self, model) -> None:
-        if self._traceml_kwargs is None or model is None:
-            return
-        if self._hooks_attached and id(model) == self._attached_model_id:
-            return
-        try:
-            trace_model_instance(model, **self._traceml_kwargs)
-            self._attached_model_id = id(model)
-            self._hooks_attached = True
-            logger.info(
-                "[TraceML] Optional model tracing initialized (callback)."
-            )
-        except Exception as exc:
-            _log_hf_error("Failed to initialize model tracing", exc)
-
     def on_train_begin(self, args, state, control, **kwargs):
         if _traceml_disabled():
             return
@@ -142,8 +118,6 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
         # on_step_begin, so those eval forward passes would otherwise be timed
         # into the orphaned step. Closing here covers that window.
         self._close_step_cm_safely()
-
-        self._maybe_attach_model_hooks(kwargs.get("model"))
 
     def on_step_begin(self, args, state, control, **kwargs):
         if _traceml_disabled():
@@ -160,9 +134,6 @@ class TraceMLTrainerCallback(TrainerCallback if HAS_TRANSFORMERS else object):
             # would raise inside StepMemoryTracker, costing a lost step and
             # log noise. Skip bracketing this step instead.
             return
-
-        # Late attachment fallback when on_train_begin missed the model.
-        self._maybe_attach_model_hooks(model)
 
         try:
             self._step_cm = trace_step(model)
@@ -195,18 +166,16 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         self,
         *args,
         traceml_enabled: bool = True,
-        traceml_kwargs: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         if not HAS_TRANSFORMERS:
             raise ImportError(
-                "TraceMLTrainer requires 'transformers' to be installed. "
-                "Please run `pip install transformers`."
+                "TraceMLTrainer requires the Hugging Face integration. "
+                "Install it with `pip install 'traceml-ai[hf]'`."
             )
 
         super().__init__(*args, **kwargs)
         self.traceml_enabled = traceml_enabled
-        self.traceml_kwargs = traceml_kwargs
 
         if not traceml_enabled or _traceml_disabled():
             return
@@ -217,9 +186,7 @@ class TraceMLTrainer(Trainer if HAS_TRANSFORMERS else object):
         if any(isinstance(cb, TraceMLTrainerCallback) for cb in existing):
             return
 
-        self.add_callback(
-            TraceMLTrainerCallback(traceml_kwargs=traceml_kwargs)
-        )
+        self.add_callback(TraceMLTrainerCallback())
 
 
 __all__ = ["TraceMLTrainerCallback", "TraceMLTrainer", "init"]
