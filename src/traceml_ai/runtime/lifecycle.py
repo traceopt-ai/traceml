@@ -252,7 +252,12 @@ def start_runtime(
             on_error(exc)
         if not fail_open:
             raise
-        return RuntimeHandle(NoOpRuntime())
+        # Fail-open: the runtime lifecycle for this process has still been
+        # decided here, so register the no-op handle. A later traceml.init()
+        # sees an active handle and does not try to start the runtime again.
+        handle = RuntimeHandle(NoOpRuntime())
+        _register_active_runtime_handle(handle)
+        return handle
 
 
 __all__ = [

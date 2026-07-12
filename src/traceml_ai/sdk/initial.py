@@ -233,18 +233,33 @@ def _env_str(name: str, default: str) -> str:
 
 def _resolve_runtime_settings(
     *,
+    ui_mode: Optional[str],
+    interval: Optional[float],
+    logs_dir: Optional[str],
+    enable_logging: Optional[bool],
+    session_id: Optional[str],
     aggregator_host: Optional[str],
     aggregator_port: Optional[int],
 ) -> Any:
     """
-    Build TraceMLSettings for a user-code runtime.
+    Build TraceMLSettings for a user-code runtime (direct ``python``/``torchrun``).
 
-    Values come from explicit init args first, then TRACEML_* env vars (set by
-    the CLI launcher when present), then conservative defaults for direct
-    ``python``/``torchrun`` launches.
+    Runtime/telemetry settings (mode, interval, logs_dir, enable_logging, ...)
+    route through the shared config resolver with the same precedence the CLI
+    launcher uses: explicit ``traceml.init(...)`` arg > ``TRACEML_*`` env var >
+    ``traceml.yaml`` > built-in default. Aggregator host/port come from explicit
+    init args, then env, then defaults. Run identity and the aggregator endpoint
+    are launch-owned and are not read from ``traceml.yaml``.
     """
     import os
+    from pathlib import Path
 
+    from traceml_ai.config.yaml_loader import (
+        BUILT_IN_DEFAULTS,
+        find_config_file,
+        load_yaml_config,
+        resolve_config,
+    )
     from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
     from traceml_ai.runtime.session import get_session_id
     from traceml_ai.runtime.settings import (
@@ -252,6 +267,31 @@ def _resolve_runtime_settings(
         TraceMLSettings,
     )
 
+    try:
+        config_path = find_config_file(Path.cwd())
+        yaml_cfg = (
+            load_yaml_config(config_path) if config_path is not None else {}
+        )
+    except (ValueError, OSError):
+        # A broken traceml.yaml must not crash init(); fall back to env/defaults.
+        yaml_cfg = {}
+
+    cli_overrides = {
+        "mode": ui_mode,
+        "interval": interval,
+        "enable_logging": enable_logging,
+        "logs_dir": logs_dir,
+    }
+    cfg = resolve_config(
+        cli_overrides=cli_overrides,
+        parent_env=os.environ,
+        yaml_config=yaml_cfg,
+        defaults=BUILT_IN_DEFAULTS,
+    )
+
+    resolved_session = str(
+        session_id or _env_str("TRACEML_SESSION_ID", "") or get_session_id()
+    )
     host = str(
         aggregator_host
         if aggregator_host is not None
@@ -262,18 +302,19 @@ def _resolve_runtime_settings(
         if aggregator_port is not None
         else int(_env_str("TRACEML_AGGREGATOR_PORT", "29765"))
     )
-    ui_mode = _env_str("TRACEML_UI_MODE", _env_str("TRACEML_MODE", "summary"))
-    session_id = _env_str("TRACEML_SESSION_ID", "") or get_session_id()
     raw_max_steps = os.environ.get("TRACEML_TRACE_MAX_STEPS", "")
     trace_max_steps = int(raw_max_steps) if raw_max_steps.strip() else None
 
     return TraceMLSettings(
-        mode=ui_mode,
+        mode=str(cfg["mode"]),
         profile=_env_str("TRACEML_PROFILE", "run"),
-        sampler_interval_sec=float(_env_str("TRACEML_INTERVAL", "1.0")),
-        enable_logging=_env_str("TRACEML_ENABLE_LOGGING", "0") == "1",
-        logs_dir=_env_str("TRACEML_LOGS_DIR", "./logs"),
-        session_id=session_id,
+        sampler_interval_sec=float(cfg["interval"]),
+        enable_logging=bool(cfg["enable_logging"]),
+        logs_dir=str(cfg["logs_dir"]),
+        num_display_layers=int(cfg["num_display_layers"]),
+        remote_max_rows=int(cfg["remote_max_rows"]),
+        history_enabled=bool(cfg["history_enabled"]),
+        session_id=resolved_session,
         summary_window_rows=int(
             _env_str(
                 "TRACEML_SUMMARY_WINDOW_ROWS",
@@ -289,6 +330,11 @@ def _resolve_runtime_settings(
 
 def _start_runtime_for_init(
     *,
+    ui_mode: Optional[str],
+    interval: Optional[float],
+    logs_dir: Optional[str],
+    enable_logging: Optional[bool],
+    session_id: Optional[str],
     aggregator_host: Optional[str],
     aggregator_port: Optional[int],
     connect_timeout_sec: float,
@@ -312,6 +358,11 @@ def _start_runtime_for_init(
         return  # executor/ray already started the runtime in this process
 
     settings = _resolve_runtime_settings(
+        ui_mode=ui_mode,
+        interval=interval,
+        logs_dir=logs_dir,
+        enable_logging=enable_logging,
+        session_id=session_id,
         aggregator_host=aggregator_host,
         aggregator_port=aggregator_port,
     )
@@ -358,6 +409,11 @@ def init(
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
     disabled: Optional[bool] = None,
+    ui_mode: Optional[str] = None,
+    interval: Optional[float] = None,
+    logs_dir: Optional[str] = None,
+    enable_logging: Optional[bool] = None,
+    session_id: Optional[str] = None,
     aggregator_host: Optional[str] = None,
     aggregator_port: Optional[int] = None,
     connect_timeout_sec: float = 10.0,
@@ -372,6 +428,10 @@ def init(
     aggregator is reachable over TCP. When TraceML is already running in this
     process (for example under ``traceml run``), runtime startup is skipped and
     only the instrumentation policy is applied.
+
+    Configuration precedence for the runtime settings below is: explicit
+    argument here > ``TRACEML_*`` env var > ``traceml.yaml`` > built-in default,
+    the same resolver the CLI launcher uses.
 
     Parameters
     ----------
@@ -391,6 +451,19 @@ def init(
         When True, TraceML is a complete no-op: no patches are installed and no
         runtime is started. Defaults to the ``TRACEML_DISABLED`` environment
         variable when not set explicitly.
+    ui_mode:
+        Display/telemetry mode for this run ('cli', 'dashboard', or 'summary').
+        Resolved via the shared config resolver.
+    interval:
+        Sampler interval in seconds. Resolved via the shared config resolver.
+    logs_dir:
+        Directory for TraceML session logs. Resolved via the shared config
+        resolver.
+    enable_logging:
+        Enable TraceML logging output. Resolved via the shared config resolver.
+    session_id:
+        Explicit TraceML run/session id. Defaults to ``TRACEML_SESSION_ID`` or a
+        generated id. Must match the aggregator's session for shared artifacts.
     aggregator_host:
         Host the runtime connects to for telemetry. Defaults to
         ``TRACEML_AGGREGATOR_HOST`` or ``127.0.0.1``.
@@ -475,6 +548,11 @@ def init(
         # when the aggregator is missing, and matches the runtime-then-patches
         # order used by the in-process framework integrations.
         _start_runtime_for_init(
+            ui_mode=ui_mode,
+            interval=interval,
+            logs_dir=logs_dir,
+            enable_logging=enable_logging,
+            session_id=session_id,
             aggregator_host=aggregator_host,
             aggregator_port=aggregator_port,
             connect_timeout_sec=connect_timeout_sec,
@@ -493,6 +571,11 @@ def start(
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
     disabled: Optional[bool] = None,
+    ui_mode: Optional[str] = None,
+    interval: Optional[float] = None,
+    logs_dir: Optional[str] = None,
+    enable_logging: Optional[bool] = None,
+    session_id: Optional[str] = None,
     aggregator_host: Optional[str] = None,
     aggregator_port: Optional[int] = None,
     connect_timeout_sec: float = 10.0,
@@ -511,6 +594,11 @@ def start(
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
         disabled=disabled,
+        ui_mode=ui_mode,
+        interval=interval,
+        logs_dir=logs_dir,
+        enable_logging=enable_logging,
+        session_id=session_id,
         aggregator_host=aggregator_host,
         aggregator_port=aggregator_port,
         connect_timeout_sec=connect_timeout_sec,

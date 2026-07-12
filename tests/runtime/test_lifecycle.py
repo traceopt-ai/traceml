@@ -122,3 +122,34 @@ def test_start_runtime_registers_active_handle(monkeypatch, tmp_path) -> None:
         assert handle.runtime.started is True
     finally:
         lifecycle._ACTIVE_RUNTIME_HANDLE = None
+
+
+class _BoomRuntime:
+    """TraceMLRuntime stand-in whose start() fails, to test fail_open."""
+
+    def __init__(self, settings: TraceMLSettings | None = None) -> None:
+        pass
+
+    def start(self) -> None:
+        raise RuntimeError("boom")
+
+    def stop(self) -> None:
+        pass
+
+
+def test_start_runtime_fail_open_registers_noop_handle(
+    monkeypatch, tmp_path
+) -> None:
+    # A failed start with fail_open=True must still register a no-op active
+    # handle so a later traceml.init() does not try to start the runtime again.
+    monkeypatch.setattr(lifecycle, "TraceMLRuntime", _BoomRuntime)
+    lifecycle._ACTIVE_RUNTIME_HANDLE = None
+    try:
+        handle = lifecycle.start_runtime(
+            TraceMLSettings(logs_dir=str(tmp_path), session_id="fail-open"),
+            fail_open=True,
+        )
+        assert lifecycle.get_active_runtime_handle() is handle
+        assert isinstance(handle.runtime, lifecycle.NoOpRuntime)
+    finally:
+        lifecycle._ACTIVE_RUNTIME_HANDLE = None

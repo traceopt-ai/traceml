@@ -425,6 +425,103 @@ def run_with_tracing(args: argparse.Namespace, profile: str) -> None:
     launch_process(script_path=script_path, args=args)
 
 
+def _resolve_serve_settings(args: argparse.Namespace):
+    """Resolve aggregator settings for ``traceml serve``.
+
+    UI/telemetry settings route through the shared config resolver
+    (CLI > env > traceml.yaml > default), the same resolver the launcher uses.
+    Aggregator host/bind-host/port come from serve's own flags, and run
+    identity reuses the launcher's ``RunIdentity``.
+    """
+    from traceml_ai.config.yaml_loader import (
+        BUILT_IN_DEFAULTS,
+        find_config_file,
+        load_yaml_config,
+        resolve_config,
+    )
+    from traceml_ai.runtime.settings import (
+        AggregatorTransportSettings,
+        TraceMLSettings,
+    )
+
+    config_path = find_config_file(Path.cwd())
+    try:
+        yaml_cfg = (
+            load_yaml_config(config_path) if config_path is not None else {}
+        )
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"[TraceML] ERROR: {exc}")
+
+    cli_overrides = {
+        "mode": args.mode,
+        "interval": args.interval,
+        "enable_logging": args.enable_logging,
+        "logs_dir": args.logs_dir,
+    }
+    cfg = resolve_config(
+        cli_overrides=cli_overrides,
+        parent_env=os.environ,
+        yaml_config=yaml_cfg,
+        defaults=BUILT_IN_DEFAULTS,
+    )
+
+    run_identity = RunIdentity.from_args(
+        args,
+        generated_session_id=get_session_id(),
+        require_explicit=False,
+    )
+
+    connect_host = str(getattr(args, "aggregator_host", None) or "127.0.0.1")
+    bind_host = str(getattr(args, "aggregator_bind_host", None) or "127.0.0.1")
+    port = int(getattr(args, "aggregator_port", 29765))
+
+    return TraceMLSettings(
+        mode=str(cfg["mode"]),
+        render_interval_sec=float(cfg["interval"]),
+        num_display_layers=int(cfg["num_display_layers"]),
+        enable_logging=bool(cfg["enable_logging"]),
+        logs_dir=str(cfg["logs_dir"]),
+        remote_max_rows=int(cfg["remote_max_rows"]),
+        history_enabled=bool(cfg["history_enabled"]),
+        session_id=run_identity.session_id,
+        aggregator=AggregatorTransportSettings(
+            connect_host=connect_host,
+            bind_host=bind_host,
+            port=port,
+        ),
+    )
+
+
+def run_serve(args: argparse.Namespace) -> None:
+    """Run the TraceML aggregator standalone in the foreground.
+
+    Starts only the aggregator; it never launches or wraps a user training
+    script. Reuses ``aggregator_main.run_aggregator`` so it binds host/port,
+    prints the reachable endpoint, blocks until SIGINT/SIGTERM, shuts down
+    cleanly, and preserves final-summary behavior.
+    """
+    if getattr(args, "mode", None) == "dashboard":
+        missing = [
+            package
+            for package in ("nicegui", "plotly")
+            if importlib.util.find_spec(package) is None
+        ]
+        if missing:
+            raise SystemExit(
+                "[TraceML] ERROR: "
+                f"{DASHBOARD_EXTRA_INSTALL_HINT} Missing: {', '.join(missing)}."
+            )
+
+    try:
+        settings = _resolve_serve_settings(args)
+    except ValueError as exc:
+        raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+
+    from traceml_ai.aggregator.aggregator_main import run_aggregator
+
+    raise SystemExit(run_aggregator(settings))
+
+
 def run_inspect(args: argparse.Namespace) -> None:
     """Decode and print binary msgpack logs for debugging."""
     path = Path(args.file)

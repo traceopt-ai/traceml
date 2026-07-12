@@ -30,6 +30,7 @@ import signal
 import sys
 import threading
 import traceback
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -155,29 +156,36 @@ def _install_signal_handlers(stop_event: threading.Event) -> None:
     signal.signal(signal.SIGTERM, _handler)
 
 
-def main() -> None:
+def run_aggregator(
+    settings: TraceMLSettings,
+    *,
+    logger: Optional[Any] = None,
+) -> int:
     """
-    Aggregator process entrypoint.
+    Own one aggregator lifecycle until a shutdown signal, then exit cleanly.
 
-    Execution flow
-    --------------
-    1. Initialize logging
-    2. Read configuration from environment variables
-    3. Create the session directory and settings
-    4. Start the aggregator
-    5. Wait for a shutdown request
-    6. Stop the aggregator and report any fatal errors
+    This is the single aggregator-owning entry point shared by the standalone
+    aggregator process (started by ``traceml run``) and the ``traceml serve``
+    command. It:
+
+    - starts only the aggregator (never a user training script)
+    - prints the reachable endpoint
+    - blocks until SIGINT/SIGTERM
+    - shuts down cleanly, preserving final-summary behavior
+    - logs fatal aggregator errors to ``aggregator_error.log``
+
+    Returns a process exit code (0 on clean shutdown, 1 on fatal error).
     """
-    setup_error_logger(is_aggregator=True)
-    logger = get_error_logger("TraceMLAggregatorMain")
+    if logger is None:
+        setup_error_logger(is_aggregator=True)
+        logger = get_error_logger("TraceMLAggregatorMain")
 
-    cfg = read_traceml_env()
-
-    session_id = str(cfg["session_id"] or "default")
-    session_root = Path(str(cfg["logs_dir"])).resolve() / session_id
+    session_id = str(settings.session_id or "default")
+    session_root = Path(str(settings.logs_dir)).resolve() / session_id
     session_dir = session_root / "aggregator"
     session_dir.mkdir(parents=True, exist_ok=True)
     db_path = session_dir / "telemetry"
+    settings = replace(settings, session_id=session_id, db_path=str(db_path))
 
     stop_event = threading.Event()
     _install_signal_handlers(stop_event)
@@ -186,32 +194,24 @@ def main() -> None:
     err: Optional[BaseException] = None
 
     try:
-        settings = TraceMLSettings(
-            mode=str(cfg["mode"]),
-            profile=str(cfg["profile"]),
-            render_interval_sec=float(cfg["interval"]),
-            num_display_layers=int(cfg["num_display_layers"]),
-            enable_logging=bool(cfg["enable_logging"]),
-            logs_dir=str(cfg["logs_dir"]),
-            remote_max_rows=int(cfg["remote_max_rows"]),
-            session_id=session_id,
-            history_enabled=bool(cfg["history_enabled"]),
-            summary_window_rows=int(cfg["summary_window_rows"]),
-            html_report=bool(cfg["html_report"]),
-            aggregator=AggregatorTransportSettings(
-                connect_host=str(cfg["aggregator_host"]),
-                bind_host=str(cfg["aggregator_bind_host"]),
-                port=int(cfg["aggregator_port"]),
-            ),
-            db_path=str(db_path),
-        )
-
         logger.info("[TraceML] Starting aggregator")
         handle = start_aggregator(
             settings,
             logger=logger,
             stop_event=stop_event,
         )
+
+        endpoint = handle.endpoint
+        print(
+            "[TraceML] Aggregator ready on "
+            f"{settings.aggregator.bind_host}:{endpoint.port} "
+            f"(workers connect to {endpoint.host}:{endpoint.port}, "
+            f"session={endpoint.session_id}, ui={settings.mode}). "
+            "Press Ctrl+C to stop.",
+            file=sys.stderr,
+            flush=True,
+        )
+
         stop_event.wait()
 
     except BaseException as exc:
@@ -256,10 +256,45 @@ def main() -> None:
                 file=sys.stderr,
             )
             sys.stderr.flush()
-            raise SystemExit(1)
+            return 1
 
     print("\n[TraceML] Aggregator stopped.", file=sys.stderr, flush=True)
-    raise SystemExit(0)
+    return 0
+
+
+def main() -> None:
+    """
+    Standalone aggregator process entrypoint.
+
+    Reads configuration from the ``TRACEML_*`` environment variables set by the
+    ``traceml run`` launcher, builds settings, and delegates the lifecycle to
+    :func:`run_aggregator`.
+    """
+    setup_error_logger(is_aggregator=True)
+    logger = get_error_logger("TraceMLAggregatorMain")
+
+    cfg = read_traceml_env()
+
+    settings = TraceMLSettings(
+        mode=str(cfg["mode"]),
+        profile=str(cfg["profile"]),
+        render_interval_sec=float(cfg["interval"]),
+        num_display_layers=int(cfg["num_display_layers"]),
+        enable_logging=bool(cfg["enable_logging"]),
+        logs_dir=str(cfg["logs_dir"]),
+        remote_max_rows=int(cfg["remote_max_rows"]),
+        session_id=str(cfg["session_id"] or "default"),
+        history_enabled=bool(cfg["history_enabled"]),
+        summary_window_rows=int(cfg["summary_window_rows"]),
+        html_report=bool(cfg["html_report"]),
+        aggregator=AggregatorTransportSettings(
+            connect_host=str(cfg["aggregator_host"]),
+            bind_host=str(cfg["aggregator_bind_host"]),
+            port=int(cfg["aggregator_port"]),
+        ),
+    )
+
+    raise SystemExit(run_aggregator(settings, logger=logger))
 
 
 if __name__ == "__main__":

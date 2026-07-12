@@ -13,9 +13,14 @@ import pytest
 
 from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
+    _resolve_serve_settings,
     resolve_existing_script_path,
     run_view,
     validate_launch_args,
+)
+from traceml_ai.launcher.launch_config import (
+    DistributedLaunchConfig,
+    RunIdentity,
 )
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
@@ -23,11 +28,75 @@ from traceml_ai.launcher.manifest import (
     update_run_manifest,
     write_run_manifest,
 )
-from traceml_ai.launcher.launch_config import (
-    DistributedLaunchConfig,
-    RunIdentity,
-)
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
+
+
+def test_serve_is_a_public_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(
+        [
+            "serve",
+            "--mode",
+            "cli",
+            "--logs-dir",
+            "mylogs",
+            "--run-name",
+            "demo",
+            "--aggregator-host",
+            "10.0.0.9",
+            "--aggregator-bind-host",
+            "0.0.0.0",
+            "--aggregator-port",
+            "40000",
+        ]
+    )
+
+    assert args.command == "serve"
+    assert args.mode == "cli"
+    assert args.aggregator_host == "10.0.0.9"
+    assert args.aggregator_bind_host == "0.0.0.0"
+    assert args.aggregator_port == 40000
+
+
+def test_serve_maps_flags_into_aggregator_settings(monkeypatch) -> None:
+    # Isolate from any TRACEML_* env so the CLI flags drive the result.
+    for var in (
+        "TRACEML_UI_MODE",
+        "TRACEML_MODE",
+        "TRACEML_LOGS_DIR",
+        "TRACEML_INTERVAL",
+        "TRACEML_ENABLE_LOGGING",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "serve",
+            "--mode",
+            "cli",
+            "--logs-dir",
+            "mylogs",
+            "--run-name",
+            "demo",
+            "--aggregator-host",
+            "10.0.0.9",
+            "--aggregator-bind-host",
+            "0.0.0.0",
+            "--aggregator-port",
+            "40000",
+        ]
+    )
+
+    settings = _resolve_serve_settings(args)
+
+    assert settings.mode == "cli"
+    assert settings.logs_dir == "mylogs"
+    assert settings.session_id == "demo"
+    assert settings.aggregator.connect_host == "10.0.0.9"
+    assert settings.aggregator.bind_host == "0.0.0.0"
+    assert settings.aggregator.port == 40000
 
 
 def test_build_parser_preserves_launch_commands() -> None:
