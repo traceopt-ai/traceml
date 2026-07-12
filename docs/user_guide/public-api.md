@@ -143,6 +143,25 @@ setting, not read from `traceml.yaml`. If the aggregator is not reachable,
 error. Use `traceml.init(disabled=True)` (or `TRACEML_DISABLED=1`) to run with
 tracing fully disabled as a no-op.
 
+### Matching display modes across processes
+
+`traceml run` configures one display mode for the whole run. In the direct-launch
+path the aggregator and the worker are launched separately, so their display
+modes are set independently: `traceml serve --mode` for the aggregator, and
+`ui_mode` (via `traceml.init(ui_mode=...)` or `TRACEML_UI_MODE`) for the worker.
+
+For the live `cli` STDOUT/STDERR panel to show your script's output, set both to
+`cli` so the worker mirrors its stdout to the aggregator:
+
+```bash
+traceml serve --mode cli --run-name demo --aggregator-port 29765
+TRACEML_UI_MODE=cli TRACEML_SESSION_ID=demo python train.py
+```
+
+If the modes differ (for example a `cli` aggregator with a worker left on the
+default `summary`), telemetry, diagnosis, and the final summary are unaffected;
+only worker stdout mirroring into the live panel is skipped.
+
 ## Summary APIs
 
 ### `traceml.summary()`
