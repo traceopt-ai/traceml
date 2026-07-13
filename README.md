@@ -79,23 +79,41 @@ for batch in dataloader:
 
 ### 3. Run your training
 
-On your laptop or workstation, start the live browser dashboard:
+Start your training with the live browser dashboard:
 
 ```bash
 traceml run train.py
 ```
 
 TraceML prints the dashboard URL, usually `http://127.0.0.1:8765`.
+Open it to see live bottleneck diagnostics while the job runs.
 
-If training runs on a remote server, SSH into the server and run the same
-command there. TraceML will print a tunnel command like this:
+Or try the self-contained example first:
+
+```bash
+traceml run examples/quickstart.py
+```
+
+<details>
+<summary>Running on a remote server?</summary>
+
+SSH into the server and start TraceML there:
+
+```bash
+traceml run train.py
+```
+
+TraceML prints a tunnel command like this:
 
 ```bash
 ssh -L 8765:127.0.0.1:8765 user@remote-host
 ```
 
-Copy that tunnel command into a terminal on your laptop, leave the training
-command running on the server, then open `http://127.0.0.1:8765` locally.
+Copy that tunnel command into a local terminal on your laptop. Leave the
+training command running on the server, then open `http://127.0.0.1:8765`
+locally.
+
+</details>
 
 If you want a live view without a browser or SSH tunnel, use terminal mode:
 
@@ -108,12 +126,6 @@ DDP, FSDP, Slurm, or multi-node runs:
 
 ```bash
 traceml run train.py --mode=summary
-```
-
-Or try the self-contained example first:
-
-```bash
-traceml run examples/quickstart.py
 ```
 
 For DDP, FSDP, Slurm, and multi-node runs, see

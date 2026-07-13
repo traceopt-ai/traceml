@@ -41,18 +41,30 @@ Wrap the work from `zero_grad(...)` through `optimizer.step()`.
 traceml run train.py
 ```
 
-On your laptop or workstation, this starts the live browser dashboard and
-prints the local URL, usually `http://127.0.0.1:8765`.
+This starts the live browser dashboard and prints the local URL, usually
+`http://127.0.0.1:8765`. Open it to see live bottleneck diagnostics while the
+job runs.
 
-If training runs on a remote server, SSH into the server and run the same
-command there. TraceML will print a tunnel command like this:
+<details>
+<summary>Running on a remote server?</summary>
+
+SSH into the server and start TraceML there:
+
+```bash
+traceml run train.py
+```
+
+TraceML prints a tunnel command like this:
 
 ```bash
 ssh -L 8765:127.0.0.1:8765 user@remote-host
 ```
 
-Copy that tunnel command into a terminal on your laptop, leave the training
-command running on the server, then open `http://127.0.0.1:8765` locally.
+Copy that tunnel command into a local terminal on your laptop. Leave the
+training command running on the server, then open `http://127.0.0.1:8765`
+locally.
+
+</details>
 
 If you want a live view without a browser or SSH tunnel, use
 `traceml run train.py --mode=cli`. Use `traceml run train.py --mode=summary`

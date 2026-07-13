@@ -237,15 +237,20 @@ The local UI runs at:
 http://127.0.0.1:8765
 ```
 
-On a remote machine, SSH into the server and start the dashboard there. TraceML
-prints a tunnel command like this:
+<details>
+<summary>Running on a remote server?</summary>
+
+SSH into the server and start the dashboard there. TraceML prints a tunnel
+command like this:
 
 ```bash
 ssh -L 8765:127.0.0.1:8765 user@remote-host
 ```
 
-Copy that command into a terminal on your laptop, leave the training command
-running on the server, then open `http://127.0.0.1:8765` locally.
+Copy that command into a local terminal on your laptop. Leave the training
+command running on the server, then open `http://127.0.0.1:8765` locally.
+
+</details>
 
 ---
 
