@@ -42,7 +42,7 @@ These examples are still user-facing, but they are more about showing specific T
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
-To contrast a normal input path with a synthetic DataLoader bottleneck:
+To contrast a normal input path with a synthetic input pipeline bottleneck:
 
 ```bash
 traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast
@@ -129,7 +129,7 @@ Starter examples now prefer the top-level public API:
 
 Lightning examples use `traceml_ai.integrations.lightning.init()` with
 `TraceMLCallback()` so Lightning can keep owning the training loop while
-TraceML records DataLoader, transfer, step, phase, and memory timing.
+TraceML records input fetch, transfer, step, phase, and memory timing.
 
 Ray Data examples wrap `iter_torch_batches(...)` with
 `traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch

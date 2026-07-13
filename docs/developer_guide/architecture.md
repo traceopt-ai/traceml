@@ -100,11 +100,11 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | Renderer | Transforms stored rows into CLI (Rich) or web (NiceGUI / Plotly) output and feeds the diagnosis engine. |
 | Hook / patch / decorator | The mechanisms that capture phase boundaries: monkeypatches on torch internals plus the user-facing `trace_step`. |
 | H2D | Host-to-device copy (CPU to GPU), timed by patching `Tensor.to`. |
-| Phase | A timed region within a step: dataloader, h2d, forward, backward, or optimizer. |
+| Phase | A timed part of a step: input wait, H2D, forward, backward, or optimizer. |
 | Step / trace_step | A training iteration; `with trace_step(model)` marks the boundary that phase timing is computed against. |
 | Residual (residual_proxy) | Residual step time, `max(0, step - h2d - forward - backward - optimizer)`. |
-| INPUT_BOUND / COMPUTE_BOUND | The step is dominated by dataloading versus compute. |
-| INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / RESIDUAL_STRAGGLER / STRAGGLER | One rank is slower than typical after clean-step backward-delay discount; the label names the dominant excess, or `STRAGGLER` when mixed. |
+| INPUT_BOUND / COMPUTE_BOUND | The step is dominated by input wait or compute. |
+| INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / RESIDUAL_STRAGGLER / STRAGGLER | One rank is slower than typical after accounting for backward waiting; the label names the dominant timing difference, or `STRAGGLER` when mixed. |
 | RESIDUAL_HEAVY | A large window-wide share of step time is unattributed residual time. |
 | HIGH_PRESSURE / IMBALANCE | GPU memory is near capacity, or uneven across ranks. |
 | CREEP_EARLY / CREEP_CONFIRMED | Direction-confirmed GPU-memory growth across the run, early or confirmed. |

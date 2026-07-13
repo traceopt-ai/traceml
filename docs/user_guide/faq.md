@@ -336,10 +336,9 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
-In distributed runs, TraceML first discounts backward time that can be explained
-by another rank's non-backward work. `INPUT STRAGGLER` means dataloader excess
-on the worst clean-step rank dominates compute, H2D, and residual excess by at
-least `1.25x`.
+In distributed runs, TraceML accounts for time another rank may spend waiting
+during backward. `INPUT STRAGGLER` means input-wait excess on the slowest rank
+dominates compute, H2D, and residual differences by at least `1.25x`.
 
 Common causes:
 
@@ -355,13 +354,12 @@ See:
 
 ## What does `COMPUTE STRAGGLER` mean?
 
-It means one rank is slower in clean compute than the typical rank.
+It means one rank spends more time in model compute than the typical rank.
 
-Clean compute is forward plus optimizer plus backward after discounting
-backward time that can be explained by another rank's non-backward work. TraceML
-uses `COMPUTE STRAGGLER` when clean-compute excess dominates dataloader, H2D,
-and residual excess by at least `1.25x`; otherwise the mixed case remains
-`STRAGGLER`.
+TraceML accounts for backward time that can be explained by another rank
+arriving late. It uses `COMPUTE STRAGGLER` when compute-time excess dominates
+input wait, H2D, and residual differences by at least `1.25x`; otherwise the
+mixed case remains `STRAGGLER`.
 
 Common causes:
 

@@ -74,7 +74,7 @@ markdown_extensions:
 nav:
   - Guides:
       - Slow PyTorch Training: guides/slow-pytorch-training.md
-      - Find DataLoader Bottlenecks: guides/pytorch-dataloader-bottleneck.md
+      - Find Input Pipeline Bottlenecks: guides/pytorch-input-pipeline-bottleneck.md
       - Low GPU Utilization: guides/low-gpu-utilization-pytorch.md
       - DDP Rank Stragglers: guides/ddp-slow-training-rank-straggler.md
       - Memory Creep: guides/pytorch-memory-creep.md
