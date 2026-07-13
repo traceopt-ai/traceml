@@ -53,13 +53,7 @@ single-GPU benchmarks and under 1% in current single-node multi-GPU benchmarks.
 For the live browser dashboard:
 
 ```bash
-pip install "traceml-ai[dashboard]"
-```
-
-For summary-only, CLI, CI, or multi-node use:
-
-```bash
-pip install traceml-ai
+pip install traceml-ai"
 ```
 
 Using Hugging Face Trainer, PyTorch Lightning, Ray Train, W&B, or MLflow?
@@ -90,7 +84,7 @@ for batch in dataloader:
 Launch the live browser dashboard:
 
 ```bash
-traceml run train.py --mode=dashboard
+traceml run train.py
 ```
 
 Use summary mode for headless, CI, DDP, FSDP, or multi-node runs:
@@ -102,7 +96,7 @@ traceml run train.py --mode=summary
 Or try the self-contained example first:
 
 ```bash
-traceml run examples/quickstart.py --mode=summary
+traceml run examples/quickstart.py
 ```
 
 For DDP, FSDP, Slurm, and multi-node runs, see
