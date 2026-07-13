@@ -242,9 +242,10 @@ http://localhost:8765
 
 ## What is the default run mode?
 
-`traceml run train.py` uses summary mode by default.
+`traceml run train.py` uses live CLI mode on single-node runs. When launched
+with `--nnodes > 1`, it uses summary mode by default.
 
-You can also make that explicit:
+You can make summary mode explicit:
 
 ```bash
 traceml run train.py --mode=summary

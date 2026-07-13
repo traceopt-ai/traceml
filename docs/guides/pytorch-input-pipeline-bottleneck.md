@@ -31,10 +31,10 @@ where step time goes before changing the input pipeline.
 If your script is not instrumented yet, start with the
 [Quickstart](../user_guide/quickstart.md).
 
-Run your training script in the default summary mode:
+Run your training script in summary mode:
 
 ```bash
-traceml run train.py
+traceml run train.py --mode=summary
 ```
 
 TraceML writes:

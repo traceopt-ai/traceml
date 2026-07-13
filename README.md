@@ -240,7 +240,8 @@ changing the final saved artifacts.
 
 | Mode flag | Experience during training | Supported topology |
 |---|---|---|
-| `--mode=summary` (default) | Silent execution | Single-node and multi-node multi-GPU |
+| no `--mode` | Live CLI on single-node; summary-only on multi-node | Single-node and multi-node multi-GPU |
+| `--mode=summary` | Silent execution | Single-node and multi-node multi-GPU |
 | `--mode=cli` | Live terminal display | Single-node, including multi-GPU |
 | `--mode=dashboard` | Live browser display | Single-node; requires `pip install "traceml-ai[dashboard]"` |
 
