@@ -85,7 +85,6 @@ class RankStepSummary:
     avg_optimizer_ms: float
     avg_traced_step_ms: float
     avg_compute_ms: float
-    avg_compute_ms: float
     avg_residual_ms: float
     avg_total_step_ms: float
 
