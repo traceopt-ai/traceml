@@ -32,12 +32,12 @@ from torch.utils.data import DataLoader, DistributedSampler, TensorDataset
 import traceml_ai as traceml
 
 SEED = 42
-INPUT_DIM = 128
-HIDDEN_DIM = 256
+INPUT_DIM = 1024
+HIDDEN_DIM = 2048
 NUM_CLASSES = 10
-NUM_SAMPLES = 8192
-BATCH_SIZE = 64
-EPOCHS = 4
+NUM_SAMPLES = 100000
+BATCH_SIZE = 256
+EPOCHS = 2
 
 CONFIG_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -50,7 +50,9 @@ class TinyMLP(nn.Module):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(INPUT_DIM, HIDDEN_DIM),
-            nn.ReLU(),
+            nn.GELU(),
+            nn.Linear(HIDDEN_DIM, HIDDEN_DIM),
+            nn.GELU(),
             nn.Linear(HIDDEN_DIM, NUM_CLASSES),
         )
 
@@ -159,10 +161,10 @@ def main() -> None:
                 running_loss += float(loss.detach())
                 global_step += 1
 
-                if rank == 0 and global_step % 25 == 0:
+                if rank == 0 and global_step % 50 == 0:
                     print(
                         f"Epoch {epoch + 1} | Step {global_step} | "
-                        f"loss: {running_loss / 25:.4f}"
+                        f"loss: {running_loss / 50:.4f}"
                     )
                     running_loss = 0.0
 
