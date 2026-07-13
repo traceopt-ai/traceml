@@ -72,6 +72,23 @@ GPUs such as T4 or L4.
 
 ---
 
+## Advanced workloads
+
+These are real or heavier workloads intended for focused investigations, not
+first-run examples.
+
+| Example | What it demonstrates | Works on | Notes |
+|---|---|---|---|
+| `advanced/bert_single_gpu_compare.py` | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
+
+Example hardware comparison run:
+
+```bash
+traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --run-name bert_l4_bs16_seq128 --args --batch-size 16 --max-length 128 --max-steps 200
+```
+
+---
+
 ## How to run examples
 
 Standard run:
