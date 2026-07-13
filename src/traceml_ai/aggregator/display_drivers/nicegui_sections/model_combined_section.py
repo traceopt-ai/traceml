@@ -93,7 +93,7 @@ def build_model_combined_section() -> Dict[str, Any]:
             ]:
                 with ui.element("div").classes("kpi").style(f"--acc:{acc};"):
                     ui.label(lab).classes("klab")
-                    kpis[key] = ui.html("—").classes("kval")
+                    kpis[key] = ui.html("—", sanitize=False).classes("kval")
 
     return {
         "seg_divs": seg_divs,

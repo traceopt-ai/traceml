@@ -41,10 +41,22 @@ Wrap the work from `zero_grad(...)` through `optimizer.step()`.
 traceml run train.py
 ```
 
+Single-node runs start the dashboard by default at
+`http://127.0.0.1:8765`. On a remote machine, forward that port before opening
+your local browser:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+The launcher prints the dashboard URL and SSH tunnel command in a boxed message
+after launch. If you do not want the browser dependency, use `--mode=cli` or
+`--mode=summary`.
+
 To try the same flow with a checked-in example first:
 
 ```bash
-traceml run examples/quickstart.py --mode=summary
+traceml run examples/quickstart.py
 ```
 
 TraceML writes:
@@ -119,10 +131,9 @@ Live terminal view:
 traceml run train.py --mode=cli
 ```
 
-Browser view:
+Browser view, explicit:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 

@@ -24,10 +24,12 @@ These are the main user-facing examples.
 If you only try one example first, use:
 
 ```bash
-traceml run examples/quickstart.py --mode=summary
+traceml run examples/quickstart.py
 ```
 
-Then keep the TraceML final summary JSON if you want to compare runs later with `traceml compare`.
+Single-node runs open the dashboard by default at
+`http://127.0.0.1:8765`. Keep the TraceML final summary JSON if you want to
+compare runs later with `traceml compare`.
 
 ---
 
@@ -91,16 +93,34 @@ traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --summar
 
 ## How to run examples
 
-Standard run:
+Standard run with the dashboard:
 
 ```bash
 traceml run examples/quickstart.py
 ```
 
-Local UI:
+The dashboard listens on `http://127.0.0.1:8765` by default. Choose another
+local browser port with `--dashboard-port`:
 
 ```bash
-traceml run examples/quickstart.py --mode=dashboard
+traceml run examples/quickstart.py --dashboard-port=9000
+```
+
+On a remote machine, forward that dashboard port before opening the browser on
+your laptop:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Then open `http://127.0.0.1:8765` locally. The launcher also prints this URL
+and SSH tunnel command in a boxed message after the aggregator and training
+process have launched.
+
+Terminal UI:
+
+```bash
+traceml run examples/quickstart.py --mode=cli
 ```
 
 Summary mode:

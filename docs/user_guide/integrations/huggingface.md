@@ -155,7 +155,6 @@ Set `disable_tqdm=True` in `TrainingArguments`.
 If output is still noisy, use browser dashboard mode on single-node runs:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run fine_tune.py --mode=dashboard
 ```
 

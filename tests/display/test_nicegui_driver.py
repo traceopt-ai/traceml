@@ -130,3 +130,31 @@ def test_define_pages_registers_without_error() -> None:
     # Smoke: page/route registration (incl. the staleness-label wiring path)
     # must import and run without raising.
     define_pages(_driver())
+
+
+def test_dashboard_sections_build_without_error() -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_section import (
+        build_model_combined_section,
+    )
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.model_diagnostics_section import (
+        build_model_diagnostics_section,
+    )
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.process_section import (
+        build_process_section,
+    )
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.step_memory_section import (
+        build_step_memory_section,
+    )
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (
+        build_gpu_gauge_section,
+        build_system_section,
+    )
+
+    # Smoke the actual section construction performed when a browser renders
+    # the dashboard route. This catches NiceGUI element signature changes.
+    build_model_combined_section()
+    build_gpu_gauge_section()
+    build_system_section()
+    build_process_section()
+    build_step_memory_section()
+    build_model_diagnostics_section()

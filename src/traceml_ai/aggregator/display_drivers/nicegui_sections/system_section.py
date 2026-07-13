@@ -62,10 +62,11 @@ def build_system_section() -> Dict[str, Any]:
                     .classes("kpi")
                     .style(f"--acc:{acc}; min-width:104px;")
                 ):
-                    ui.html(f"{lab} <span class='kq'>{qual}</span>").classes(
-                        "klab"
-                    )
-                    kpis[key] = ui.html("—").classes("kval")
+                    ui.html(
+                        f"{lab} <span class='kq'>{qual}</span>",
+                        sanitize=False,
+                    ).classes("klab")
+                    kpis[key] = ui.html("—", sanitize=False).classes("kval")
     return {"chart": chart, "win": win, "kpis": kpis}
 
 
@@ -120,9 +121,10 @@ def build_gpu_gauge_section() -> Dict[str, Any]:
         "display:flex; flex-direction:column; overflow:hidden;"
     )
     with card:
-        ui.html("GPU utilization <span class='kq'>avg · now</span>").classes(
-            "ctitle"
-        )
+        ui.html(
+            "GPU utilization <span class='kq'>avg · now</span>",
+            sanitize=False,
+        ).classes("ctitle")
         chart = ui.echart(theme.gauge_options()).style(
             "height:180px; width:100%; flex:1; min-height:150px;"
         )

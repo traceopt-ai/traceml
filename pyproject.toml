@@ -43,6 +43,8 @@ dependencies = [
     "numpy<2",
     "msgspec",
     "pyyaml>=6.0",
+    "nicegui",
+    "plotly",
 ]
 
 [project.optional-dependencies]

@@ -24,8 +24,8 @@
 
 <div align="center">
 
-![TraceML live terminal view](docs/assets/cli_demo.gif)
-<sub>`--mode=cli` · live terminal view with instant bottleneck diagnosis.</sub>
+![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
+<sub>Default single-node dashboard at `http://127.0.0.1:8765` with live bottleneck diagnosis.</sub>
 
 </div>
 
@@ -95,10 +95,21 @@ for batch in dataloader:
 traceml run train.py
 ```
 
+By default, single-node runs start the dashboard at
+`http://127.0.0.1:8765`. On a remote machine, forward the dashboard port first:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Then open `http://127.0.0.1:8765` in your local browser. Prefer no browser
+dependency? Use `--mode=cli` for the live terminal view or `--mode=summary`
+for end-of-run files only.
+
 Or try the self-contained example first:
 
 ```bash
-traceml run examples/quickstart.py --mode=summary
+traceml run examples/quickstart.py
 ```
 
 For DDP, FSDP, and multi-node runs, see
@@ -240,19 +251,19 @@ changing the final saved artifacts.
 
 | Mode flag | Experience during training | Supported topology |
 |---|---|---|
-| no `--mode` | Live CLI on single-node; summary-only on multi-node | Single-node and multi-node multi-GPU |
+| no `--mode` | Live dashboard on single-node; summary-only on multi-node | Single-node and multi-node multi-GPU |
 | `--mode=summary` | Silent execution | Single-node and multi-node multi-GPU |
 | `--mode=cli` | Live terminal display | Single-node, including multi-GPU |
-| `--mode=dashboard` | Live browser display | Single-node; requires `pip install "traceml-ai[dashboard]"` |
+| `--mode=dashboard` | Live browser display | Single-node, including multi-GPU |
 
 > **Headless / CI / capturing stdout?** Use `--mode=summary` to
 > suppress the live terminal display. The `final_summary.json` and `.txt` artifacts are still written.
 
 <div align="center">
 
-![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
+![TraceML live terminal view](docs/assets/cli_demo.gif)
 
-<sub>`--mode=dashboard` — optional local browser view for single-node runs.</sub>
+<sub>`--mode=cli` — explicit live terminal view for single-node runs.</sub>
 
 </div>
 

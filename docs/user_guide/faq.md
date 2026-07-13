@@ -225,8 +225,7 @@ Yes.
 Run:
 
 ```bash
-pip install "traceml-ai[dashboard]"
-traceml run train.py --mode=dashboard
+traceml run train.py
 ```
 
 The local UI is intended for single-node runs, including single-node
@@ -235,15 +234,22 @@ multi-GPU. For multi-node runs, use summary mode.
 The local UI runs at:
 
 ```text
-http://localhost:8765
+http://127.0.0.1:8765
+```
+
+On a remote machine, forward the port before opening your local browser:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
 ```
 
 ---
 
 ## What is the default run mode?
 
-`traceml run train.py` uses live CLI mode on single-node runs. When launched
-with `--nnodes > 1`, it uses summary mode by default.
+`traceml run train.py` uses live dashboard mode on single-node runs. The
+dashboard listens on `http://127.0.0.1:8765` by default. When launched with
+`--nnodes > 1`, TraceML uses summary mode by default.
 
 You can make summary mode explicit:
 
