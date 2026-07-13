@@ -432,10 +432,10 @@ def _phase_share_summary(kind: str, evidence: Mapping[str, Any]) -> str:
         step_time = _float_or_none(evidence.get("step_time_ms"))
         if value is not None and step_time is not None:
             return (
-                f"Input wait took {value:.1f}ms of a "
-                f"{step_time:.1f}ms average step."
+                f"Input wait was {value:.1f}ms before a "
+                f"{step_time:.1f}ms traced step."
             )
-        return "Input wait took a large share of step time."
+        return "Input wait was a large pre-step delay."
     if kind == "RESIDUAL_HEAVY":
         value = _float_or_none(evidence.get("residual_ms"))
         if value is not None and total is not None:

@@ -224,7 +224,7 @@ def test_final_text_uses_single_process_average_layout():
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
-    assert "Why: Input wait took 130.8ms of a 139.1ms average step." in text
+    assert "Why: Input wait was 130.8ms before a 139.1ms traced step." in text
     assert "Next: Increase workers, prefetch, or storage throughput." in text
     assert "System Evidence" in text
     assert "Metric            Average" in text
