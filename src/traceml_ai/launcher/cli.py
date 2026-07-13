@@ -209,6 +209,14 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
             "JSON/TXT artifacts at end of run."
         ),
     )
+    parser.add_argument(
+        "--capture-stderr",
+        action="store_true",
+        help=(
+            "Tee child stderr to the console and retain its last 64 KiB in "
+            "logs/<run-name>/crash_stderr.log. Default: disabled."
+        ),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

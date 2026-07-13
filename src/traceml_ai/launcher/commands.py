@@ -32,8 +32,10 @@ from traceml_ai.launcher.manifest import (
 from traceml_ai.launcher.process import (
     DEFAULT_SHUTDOWN_TIMEOUT_SEC,
     DEFAULT_TCP_READY_TIMEOUT_SEC,
+    StderrTailCapture,
     install_shutdown_handlers,
     start_aggregator_process,
+    start_stderr_tail_capture,
     start_training_process,
     terminate_process_group,
     wait_for_tcp_listen,
@@ -69,6 +71,24 @@ def _log_launcher_exception(message: str, exc: Exception) -> None:
         get_error_logger("TraceMLLauncher").exception("[TraceML] %s", message)
     except Exception:
         pass
+
+
+def _stderr_capture_enabled(
+    args: argparse.Namespace, environ: Mapping[str, str]
+) -> bool:
+    """Resolve the opt-in stderr capture flag and environment variable."""
+    return bool(getattr(args, "capture_stderr", False)) or (
+        environ.get("TRACEML_CAPTURE_STDERR") == "1"
+    )
+
+
+def _finish_stderr_capture(
+    capture: Optional[StderrTailCapture], session_root: Path
+) -> None:
+    """Persist an optional stderr tail without affecting the training result."""
+    if capture is None:
+        return
+    capture.finish(session_root / "crash_stderr.log")
 
 
 def resolve_existing_script_path(script_path: str) -> str:
@@ -221,6 +241,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env["TRACEML_DISABLED"] = (
         "1" if getattr(args, "disable_traceml", False) else "0"
     )
+    capture_stderr = _stderr_capture_enabled(args, launcher_env)
+    env["TRACEML_CAPTURE_STDERR"] = "1" if capture_stderr else "0"
     env["TRACEML_PROFILE"] = getattr(args, "profile", "watch")
     env["TRACEML_SCRIPT_PATH"] = script_path
     env["TRACEML_UI_MODE"] = cfg["mode"]
@@ -329,13 +351,24 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             train_cmd=train_cmd,
             env=env,
             cwd=execution_cwd,
+            capture_stderr=capture_stderr,
+        )
+        stderr_capture = (
+            start_stderr_tail_capture(train_proc) if capture_stderr else None
         )
         install_shutdown_handlers(
             lambda: (train_proc, None), manifest_path=manifest_path
         )
         train_proc.wait()
+        _finish_stderr_capture(stderr_capture, session_root)
         final_status = "completed" if train_proc.returncode == 0 else "failed"
-        update_run_manifest(manifest_path, status=final_status)
+        update_run_manifest(
+            manifest_path,
+            status=final_status,
+            artifacts=collect_existing_artifacts(
+                db_path, session_root=session_root
+            ),
+        )
         raise SystemExit(train_proc.returncode)
 
     train_cmd = [
@@ -407,11 +440,16 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
         train_cmd=train_cmd,
         env=env,
         cwd=execution_cwd,
+        capture_stderr=capture_stderr,
+    )
+    stderr_capture = (
+        start_stderr_tail_capture(train_proc) if capture_stderr else None
     )
 
     while True:
         train_rc = train_proc.poll()
         if train_rc is not None:
+            _finish_stderr_capture(stderr_capture, session_root)
             if agg_proc is not None:
                 print(
                     "[TraceML] Training finished; stopping aggregator...",
