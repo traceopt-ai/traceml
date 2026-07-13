@@ -24,8 +24,8 @@
 
 <div align="center">
 
-![TraceML live terminal view](docs/assets/cli_demo_v1.png)
-<sub>Live terminal view</sub>
+![TraceML live terminal view](docs/assets/cli_demo.gif)
+<sub>`--mode=cli` · live terminal view with instant bottleneck diagnosis.</sub>
 
 </div>
 
