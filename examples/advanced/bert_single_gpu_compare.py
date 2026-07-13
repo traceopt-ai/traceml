@@ -10,8 +10,9 @@ Example:
 
     traceml run examples/advanced/bert_single_gpu_compare.py \\
         --mode=summary \\
-        --run-name bert_l4_bs16_seq128 \\
-        --args --batch-size 16 --max-length 128 --max-steps 200
+        --run-name bert_l40s_bs32_seq256 \\
+        --args --model-name bert-large-uncased --batch-size 32 \\
+            --max-length 256 --max-steps 350 --warmup-steps 50
 
 Then compare two saved runs:
 
