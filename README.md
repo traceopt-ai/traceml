@@ -4,7 +4,6 @@
 
 **Find out why your PyTorch training is slow—before it wastes GPU hours.**
 
-Low-overhead, full-run performance diagnostics for PyTorch training.
 
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
@@ -29,8 +28,8 @@ Low-overhead, full-run performance diagnostics for PyTorch training.
 <sub>Live performance diagnostics for single-node PyTorch training. Multi-node jobs are supported through summary mode.</sub>
 
 </div>
-
-TraceML runs alongside your training loop and identifies where training time is
+TraceML is open-source performance observability for PyTorch training.
+It runs alongside your training loop and identifies where training time is
 going across the full job—not just a small window of profiled steps.
 
 It helps you answer:
@@ -41,8 +40,7 @@ It helps you answer:
 - Is memory usage silently growing?
 - Did a code, data, or infrastructure change make the run slower?
 
-TraceML produces actionable diagnostics with under 2% overhead in current
-single-GPU benchmarks and under 1% in current single-node multi-GPU benchmarks.
+TraceML produces actionable diagnostics with under 1% overhead in current benchmarks.
 
 ---
 
@@ -53,7 +51,7 @@ single-GPU benchmarks and under 1% in current single-node multi-GPU benchmarks.
 For the live browser dashboard:
 
 ```bash
-pip install traceml-ai"
+pip install traceml-ai
 ```
 
 Using Hugging Face Trainer, PyTorch Lightning, Ray Train, W&B, or MLflow?
@@ -81,13 +79,32 @@ for batch in dataloader:
 
 ### 3. Run your training
 
-Launch the live browser dashboard:
+On your laptop or workstation, start the live browser dashboard:
 
 ```bash
 traceml run train.py
 ```
 
-Use summary mode for headless, CI, DDP, FSDP, or multi-node runs:
+TraceML prints the dashboard URL, usually `http://127.0.0.1:8765`.
+
+If training runs on a remote server, SSH into the server and run the same
+command there. TraceML will print a tunnel command like this:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Copy that tunnel command into a terminal on your laptop, leave the training
+command running on the server, then open `http://127.0.0.1:8765` locally.
+
+If you want a live view without a browser or SSH tunnel, use terminal mode:
+
+```bash
+traceml run train.py --mode=cli
+```
+
+Use summary mode when no live display is needed, such as headless jobs, CI,
+DDP, FSDP, Slurm, or multi-node runs:
 
 ```bash
 traceml run train.py --mode=summary
@@ -315,17 +332,6 @@ when you need operator- or kernel-level detail.
 
 ---
 
-## Overhead
-
-In current benchmark runs, TraceML adds:
-
-- Under 2% overhead on single GPU at default settings
-- Under 1% overhead on single-node multi-GPU at default settings
-
-TraceML is designed to remain enabled across the full job, rather than only
-during a small sampled profiling window.
-
----
 
 ## Troubleshooting Guides
 
