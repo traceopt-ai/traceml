@@ -86,12 +86,6 @@ def _reset_traceml_state() -> None:
 
 
 def _install_auto_instrumentation() -> None:
-    """Install the auto patches + optimizer hooks directly.
-
-    This mirrors what ``traceml.init(mode="auto")`` enables, but installs the
-    pieces directly so the test does not depend on the process-global init
-    config (another integration test may have locked a different one first).
-    """
     from traceml_ai.instrumentation.hooks.optimizer_hooks import (
         ensure_optimizer_timing_installed,
     )
@@ -112,12 +106,6 @@ def _install_auto_instrumentation() -> None:
 
 
 def test_deepspeed_recipe_brackets_step():
-    """The documented DeepSpeed recipe must advance the TraceML step counter
-    and record forward, backward, and optimizer phase events per step.
-
-    A DeepSpeed-shaped fake engine stands in for the real ``model_engine`` so
-    this runs in CI without DeepSpeed or CUDA.
-    """
     from traceml_ai.runtime.state import get_trace_session_state
 
     _reset_traceml_state()
