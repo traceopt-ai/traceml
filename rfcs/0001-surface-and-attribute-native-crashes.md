@@ -16,17 +16,18 @@
 ## 1. Summary
 
 When a training process dies from a native fault (a segmentation fault, a host or
-container OOM-kill, or any signal death), TraceML records nothing useful about the
-failure and actively misleads.
-The run appears to hang for several minutes, then TraceML writes an artifact that
-frames the failure as a TraceML rank-timeout rather than as the crash.
+container OOM-kill, or any signal death), TraceML does not currently capture the
+crash.
+The run waits out its finalization timeout (up to ~5 minutes), then writes a summary
+that attributes the stall to a TraceML rank-timeout rather than to the crash, which
+points the user at TraceML instead of at the fault they need to debug.
 We reproduced this end-to-end (a forced native crash under `traceml run --mode
 summary`) on both CPU and a single-GPU CUDA run.
 
 This RFC proposes: install `faulthandler` in the training process; write a
 structured `crash.json` on signal death; make finalization *crash-aware* so a dead
-worker no longer hangs the run or gets blamed; and optionally capture the child's
-stderr tail. Attribution is by cause, verified against an authoritative liveness
+worker no longer hangs the run or is mislabeled a TraceML timeout; and optionally
+capture the child's stderr tail. Attribution is by cause, verified against an authoritative liveness
 oracle, and never claims more than the evidence supports.
 
 ## 2. Motivation
@@ -66,21 +67,19 @@ Walk a `traceml run` in summary mode where the training process dies on `SIGSEGV
   manifest `failed`, `commands.py:428`), but from the artifacts a user cannot tell a
   segfault from an OOM-kill from a TraceML bug.
 
-**Net: this is worse than a missing log.**
-A missing log is a gap a user can work around.
-Here TraceML actively (1) hangs the run for minutes waiting for a shutdown marker a
-dead process can never send, and (2) writes the only failure artifact framing the
-cause as a TraceML rank-timeout.
-The user is pointed at TraceML instead of at their own crash, and is left worse off
-than if TraceML had produced nothing at all.
-This directly violates the standing contract that a report is never silently
-incomplete: on a crash it should record the gap and its cause, not mask it.
+**Net: two problems compound.**
+(1) The run waits out the full finalize timeout for a shutdown marker a dead process
+can never send, so it appears to hang for minutes.
+(2) The only failure artifact on disk attributes the cause to a TraceML rank-timeout,
+so it points the user at TraceML rather than at the crash they need to debug.
+This is the gap the RFC closes: on a crash, TraceML should record the gap and its
+cause, in line with the standing contract that a report is never silently incomplete.
 
 **Reproduced.** A forced `SIGSEGV` under `traceml run --mode summary` (CPU, and a
 single-GPU CUDA run) produced exactly this: no `torchrun_error.log`; the
 `traceml_errors.log` files 0 bytes; the SIGSEGV visible only in torchrun's transient
 stderr (`exitcode: -11`, `error_file: <N/A>`); a ~300s hang; a degraded all-`n/a`
-summary; and a `finalization_warning.json` blaming a rank timeout. The only correct
+summary; and a `finalization_warning.json` attributing the stall to a rank timeout. The only correct
 signal was `manifest.json -> "status":"failed"`, which users do not read.
 
 **Contrast cases that already work** (so we do not over-fix): an ordinary Python
@@ -226,12 +225,12 @@ that the noisy TCP stream can never be.
    fallback: if the drain hangs, still close the DB and emit `final_summary` from what
    committed, then exit.
 7. **Attribution.** When finalizing a crashed run, write a crash-attributed artifact
-   (`run_crashed.json`, or set `cause:"training_crash"`) instead of the misleading
-   `finalization_warning.json` / `finalization_error.json` (`trace_aggregator.py:
-   287-307`).
+   (`run_crashed.json`, or set `cause:"training_crash"`) instead of the
+   `finalization_warning.json` / `finalization_error.json` that today reads as a rank
+   timeout (`trace_aggregator.py:287-307`).
 
-Net: no multi-minute hang, no self-blame, and no false death from a transient
-reconnect. The launcher is the authoritative parent; the aggregator is the remote
+Net: no multi-minute hang, no misattributed timeout, and no false death from a
+transient reconnect. The launcher is the authoritative parent; the aggregator is the remote
 observer that verifies through it rather than guessing from the socket.
 
 ### 4.3 stderr-tail capture (G3)
