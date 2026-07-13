@@ -20,6 +20,7 @@ These are the main user-facing examples.
 | `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data, `TraceMLCallback`, and optional input/H2D demo knobs |
 | `integrations/huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainer` example | CPU / CUDA | No model download required |
 | `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
+| `integrations/deepspeed_minimal.py` | Minimal DeepSpeed loop wrapped with `traceml.trace_step(...)` | CUDA | Requires `deepspeed`; exits cleanly without it |
 
 If you only try one example first, use:
 
@@ -98,6 +99,13 @@ Single-node DDP:
 traceml run examples/distributed/ddp_minimal.py --nproc-per-node=4
 ```
 
+DeepSpeed (single or multi-GPU; requires `deepspeed` + a CUDA GPU):
+
+```bash
+traceml run examples/integrations/deepspeed_minimal.py --mode=summary
+traceml run examples/integrations/deepspeed_minimal.py --nproc-per-node=2 --mode=summary
+```
+
 Multi-node on Slurm:
 
 ```bash
@@ -164,6 +172,7 @@ Use:
 - `integrations/huggingface_trainer_minimal.py` if you use Hugging Face `Trainer`
 - `integrations/lightning_minimal.py` if you use PyTorch Lightning
 - `ray/torchtrainer_minimal.py` if you use Ray Train
+- `integrations/deepspeed_minimal.py` if you use DeepSpeed
 
 Use the diagnosis demos when you want to see:
 
