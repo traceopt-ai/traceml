@@ -1,27 +1,3 @@
-"""Minimal TraceML + DeepSpeed example.
-
-TraceML does not own the DeepSpeed training loop. You keep the standard
-DeepSpeed loop (forward, ``model_engine.backward(loss)``,
-``model_engine.step()``) and wrap each step with ``traceml.trace_step(...)``,
-exactly like the plain PyTorch, DDP, and FSDP examples.
-
-Run (single GPU, end-of-run summary):
-
-    traceml run examples/integrations/deepspeed_minimal.py --mode=summary
-
-Single-node multi-GPU (e.g. 2 GPUs):
-
-    traceml run examples/integrations/deepspeed_minimal.py \\
-        --nproc-per-node=2 --mode=summary
-
-DeepSpeed is optional and is not a TraceML dependency. Install it with:
-
-    pip install "traceml-ai[deepspeed]"
-
-or follow https://www.deepspeed.ai/getting-started/. DeepSpeed requires a
-CUDA GPU; this example exits cleanly when DeepSpeed or a GPU is unavailable.
-"""
-
 import os
 import sys
 
