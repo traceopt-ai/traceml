@@ -14,8 +14,8 @@
 
 [**Quickstart**](#quickstart) •
 [**Integrations**](docs/user_guide/integrations.md) •
-[**Distributed Training**](docs/user_guide/distributed-training.md) •
 [**Compare Runs**](docs/user_guide/compare.md) •
+[**Distributed Training**](docs/user_guide/distributed-training.md) •
 [**Documentation**](docs/user_guide/quickstart.md) •
 [**Discord**](https://discord.gg/rY3EQguZAN)
 
