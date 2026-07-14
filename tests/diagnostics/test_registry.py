@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
 from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
@@ -125,8 +126,6 @@ def test_model_diagnostics_payload_uses_registered_domains():
 
 
 def test_model_step_time_diagnostics_receive_per_rank_timing(monkeypatch):
-    import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
-
     per_rank_timing = {
         0: {"input_wait": 1.0, "total_step": 10.0},
         1: {"input_wait": 2.0, "total_step": 11.0},
@@ -165,8 +164,6 @@ def test_model_step_time_diagnostics_receive_per_rank_timing(monkeypatch):
 
 
 def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
-    import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
-
     diagnosis_metrics = (
         _step_time_metric("input_wait", 40.0),
         _step_time_metric("step_time", 100.0),
