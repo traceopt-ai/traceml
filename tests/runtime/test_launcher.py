@@ -61,6 +61,7 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert args.summary_window_rows == DEFAULT_SUMMARY_WINDOW_ROWS
     assert args.finalize_timeout_sec is None
     assert args.trace_max_steps is None
+    assert not args.capture_stderr
     assert args.args == ["--epochs", "1"]
 
     # The launcher defers UI/telemetry defaults to the traceml.yaml config
@@ -410,6 +411,19 @@ def test_collect_existing_artifacts_only_returns_existing_files(
         "db": str(db_path),
         "summary_card_txt": str(summary_path),
     }
+
+
+def test_collect_existing_artifacts_includes_stderr_tail(tmp_path) -> None:
+    db_path = tmp_path / "aggregator" / "telemetry"
+    stderr_path = tmp_path / "crash_stderr.log"
+    stderr_path.write_bytes(b"native crash details\n")
+
+    artifacts = collect_existing_artifacts(
+        db_path,
+        session_root=tmp_path,
+    )
+
+    assert artifacts["crash_stderr_log"] == str(stderr_path)
 
 
 def test_run_view_reports_user_facing_errors(tmp_path, capsys) -> None:
