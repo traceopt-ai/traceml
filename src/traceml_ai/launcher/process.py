@@ -106,7 +106,7 @@ class StderrTailCapture:
                     self._error = exc
             self._remember(chunk)
 
-    def finish(
+        def finish(
         self,
         output_path: Path,
         *,
@@ -120,6 +120,10 @@ class StderrTailCapture:
             except Exception:
                 pass
             self._thread.join(timeout=0.5)
+        # If the thread is still alive after the second join, raise an exception
+        if self._thread.is_alive():
+            raise RuntimeError('Failed to join thread after closing stream')
+
 
         with self._lock:
             tail = b"".join(self._chunks)
