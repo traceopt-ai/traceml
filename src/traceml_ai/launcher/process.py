@@ -117,8 +117,11 @@ class StderrTailCapture:
         if self._thread.is_alive():
             try:
                 self._stream.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(
+                    f"[TraceML] WARNING: failed to close stderr capture stream: {exc}",
+                    file=sys.stderr,
+                )
             self._thread.join(timeout=0.5)
 
         with self._lock:
