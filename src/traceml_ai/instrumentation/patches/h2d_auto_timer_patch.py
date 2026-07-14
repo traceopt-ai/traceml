@@ -72,7 +72,7 @@ def _traceml_tensor_to(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
     with timed_region(
         "_traceml_internal:h2d_time",
         scope="step",
-        use_gpu=True,
+        record_gpu_events=True,
     ):
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
 

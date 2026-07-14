@@ -224,7 +224,7 @@ def build_step_memory_section() -> Dict[str, Any]:
                     .style(f"--acc:{theme.ORANGE}; min-width:100px;")
                 ):
                     ui.label(lab).classes("klab")
-                    kpis[key] = ui.html("—").classes("kval")
+                    kpis[key] = ui.html("—", sanitize=False).classes("kval")
     return {
         "chart": chart,
         "win": win,

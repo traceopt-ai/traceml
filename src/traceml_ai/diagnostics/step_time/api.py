@@ -294,10 +294,10 @@ def _apply_trend_note(
     *,
     step_metric: Optional[StepCombinedTimeMetric],
     residual_metric: Optional[StepCombinedTimeMetric],
-    dataloader_metric: Optional[StepCombinedTimeMetric],
+    input_wait_metric: Optional[StepCombinedTimeMetric],
     single_rank: bool,
     residual_share: float,
-    dataloader_share: float,
+    input_bound_share: float,
     thresholds: DiagnosisThresholds,
 ) -> StepDiagnosis:
     """
@@ -310,9 +310,9 @@ def _apply_trend_note(
             single_rank=single_rank,
             step_metric=step_metric,
             residual_metric=residual_metric,
-            dataloader_metric=dataloader_metric,
+            input_wait_metric=input_wait_metric,
             residual_share=residual_share,
-            dataloader_share=dataloader_share,
+            input_bound_share=input_bound_share,
             residual_warn_threshold=thresholds.residual_share_warn,
             input_warn_threshold=thresholds.input_share_warn,
             cfg=DEFAULT_STEP_TREND_HEURISTICS,
@@ -329,6 +329,7 @@ def build_step_diagnosis_result(
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    diagnosis_clock: str = "cpu",
 ) -> DiagnosticResult[StepDiagnosis]:
     """
     Build a rich step-time diagnosis result from one analyzed window.
@@ -391,6 +392,7 @@ def build_step_diagnosis_result(
         metrics=metrics,
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
+        diagnosis_clock=diagnosis_clock,
     )
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
@@ -422,7 +424,7 @@ def build_step_diagnosis_result(
             action=primary_issue.action,
             steps_used=context.steps_used,
             worst_rank=(
-                None if context.single_rank else context.dataloader_worst_rank
+                None if context.single_rank else context.input_bound_worst_rank
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "RESIDUAL_HEAVY":
@@ -436,8 +438,7 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.overall_worst_rank
             ),
             note=(
-                "residual_ms = total_step_ms - dataloader_ms - h2d_ms - "
-                "compute_ms."
+                "residual_ms = selected step_time_ms - h2d_ms - compute_ms."
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "COMPUTE_BOUND":
@@ -467,10 +468,10 @@ def build_step_diagnosis_result(
         primary,
         step_metric=context.step_metric,
         residual_metric=context.residual_metric,
-        dataloader_metric=context.dataloader_metric,
+        input_wait_metric=context.input_wait_metric,
         single_rank=context.single_rank,
         residual_share=context.residual_share,
-        dataloader_share=context.dataloader_share,
+        input_bound_share=context.input_bound_share,
         thresholds=thresholds,
     )
 
@@ -512,13 +513,13 @@ def build_step_diagnosis_result(
     ) = _rank_summary_values(compute_rank_values)
 
     metric_attribution = {
-        "dataloader_fetch": _metric_attribution_entry(
-            metric=context.dataloader_metric,
-            metric_key="dataloader_fetch",
-            rank_values=context.rank_values.get("dataloader_fetch", {}),
+        "input_wait": _metric_attribution_entry(
+            metric=context.input_wait_metric,
+            metric_key="input_wait",
+            rank_values=context.rank_values.get("input_wait", {}),
             step_total=context.step_total,
             single_rank=context.single_rank,
-            phase="dataloader",
+            phase="input",
         ),
         "h2d": _metric_attribution_entry(
             metric=context.h2d_metric,
@@ -592,6 +593,7 @@ def build_step_diagnosis(
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    diagnosis_clock: str = "cpu",
 ) -> StepDiagnosis:
     """
     Build one primary diagnosis from step-combined metrics.
@@ -603,6 +605,7 @@ def build_step_diagnosis(
         metrics,
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
+        diagnosis_clock=diagnosis_clock,
     ).primary
     if not isinstance(primary, StepDiagnosis):
         raise TypeError(

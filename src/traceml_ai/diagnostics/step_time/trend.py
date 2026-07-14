@@ -71,9 +71,9 @@ def build_step_trend_note(
     single_rank: bool,
     step_metric: Optional[StepCombinedTimeMetric],
     residual_metric: Optional[StepCombinedTimeMetric],
-    dataloader_metric: Optional[StepCombinedTimeMetric],
+    input_wait_metric: Optional[StepCombinedTimeMetric],
     residual_share: float,
-    dataloader_share: float,
+    input_bound_share: float,
     residual_warn_threshold: float,
     input_warn_threshold: float,
     cfg: StepTrendHeuristicConfig = DEFAULT_STEP_TREND_HEURISTICS,
@@ -91,18 +91,22 @@ def build_step_trend_note(
         residual_tr = _safe_metric_trend_pct(
             residual_metric, single_rank=single_rank, cfg=cfg
         )
-        dl_tr = _safe_metric_trend_pct(
-            dataloader_metric, single_rank=single_rank, cfg=cfg
+        input_wait_tr = _safe_metric_trend_pct(
+            input_wait_metric, single_rank=single_rank, cfg=cfg
         )
 
         step_state = _trend_state(step_tr, cfg=cfg)
         residual_state = _trend_state(residual_tr, cfg=cfg)
-        dl_state = _trend_state(dl_tr, cfg=cfg)
+        input_wait_state = _trend_state(input_wait_tr, cfg=cfg)
 
-        if diagnosis_kind in {"INPUT_BOUND", "INPUT_STRAGGLER"} and dl_state:
+        if (
+            diagnosis_kind in {"INPUT_BOUND", "INPUT_STRAGGLER"}
+            and input_wait_state
+        ):
             return (
-                "Trend: dataloader is "
-                f"{dl_state} ({format_trend_pct(dl_tr, deadband_pct=cfg.deadband_pct)})."
+                "Trend: input wait is "
+                f"{input_wait_state} "
+                f"({format_trend_pct(input_wait_tr, deadband_pct=cfg.deadband_pct)})."
             )
 
         if (
@@ -132,7 +136,7 @@ def build_step_trend_note(
         near_residual_warn = residual_share >= (
             residual_warn_threshold * cfg.near_warn_fraction
         )
-        near_input_warn = dataloader_share >= (
+        near_input_warn = input_bound_share >= (
             input_warn_threshold * cfg.near_warn_fraction
         )
 

@@ -30,14 +30,16 @@ sys.modules.setdefault(
     ),
 )
 
-from traceml_ai.runtime.executor import (
+from traceml_ai.runtime.executor import (  # noqa: E402
     build_runtime_settings,
     extract_script_args,
     read_traceml_env,
     run_user_script,
     write_user_error_log,
 )
-from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
+)  # noqa: E402
 
 
 def test_extract_script_args_uses_separator_when_present(monkeypatch):
@@ -79,7 +81,7 @@ def test_run_user_script_adds_script_dir_to_sys_path(tmp_path, monkeypatch):
                 "import json",
                 "import sys",
                 "from helper_module import VALUE",
-                f"Path = __import__('pathlib').Path",
+                "Path = __import__('pathlib').Path",
                 f"Path({str(output_path)!r}).write_text(",
                 "    json.dumps({'value': VALUE, 'path0': sys.path[0]}),",
                 "    encoding='utf-8',",
@@ -111,7 +113,7 @@ def test_run_user_script_restores_sys_argv_and_sys_path(tmp_path, monkeypatch):
         "\n".join(
             [
                 "import sys",
-                f"Path = __import__('pathlib').Path",
+                "Path = __import__('pathlib').Path",
                 f"Path({str(output_path)!r}).write_text('|'.join(sys.argv), encoding='utf-8')",
             ]
         )

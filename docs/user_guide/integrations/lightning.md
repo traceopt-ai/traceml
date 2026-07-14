@@ -143,7 +143,6 @@ You do not need to replace your existing logger stack to use TraceML.
 If you want a richer browser-based view, run:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
@@ -303,7 +302,6 @@ That is fine. TraceML is designed to work alongside them.
 If terminal output gets noisy, use:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 

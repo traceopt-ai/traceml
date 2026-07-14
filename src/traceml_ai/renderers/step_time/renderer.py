@@ -1,13 +1,15 @@
 """
 Step Combined Renderer
 
-CLI renderer for window-summed, rank-agnostic step-time metrics.
+CLI renderer for rank-combined step-time averages.
 
 Behavior:
-- If world_size == 1 (single-rank run): show only SUM rows (no skew/worst)
+- show selected-clock diagnosis metrics, not public duration metrics
+- If world_size == 1 (single-rank run): show only average rows
 - Else: show Median/Worst/Worst Rank/Skew rows
 """
 
+import math
 import shutil
 from typing import Optional
 
@@ -30,10 +32,10 @@ from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.utils import fmt_time_run
 
 from .compute import StepCombinedComputer
-from .schema import StepCombinedTimeResult
+from .schema import StepCombinedTimeMetric, StepCombinedTimeResult
 
 METRIC_LABELS = {
-    "dataloader_fetch": "DL",
+    "input_wait": "IW",
     "h2d": "H2D",
     "forward": "FWD",
     "backward": "BWD",
@@ -42,10 +44,20 @@ METRIC_LABELS = {
     "residual_proxy": "RESIDUAL",
 }
 
+TABLE_METRIC_ORDER = (
+    "input_wait",
+    "h2d",
+    "forward",
+    "backward",
+    "optimizer_step",
+    "step_time",
+    "residual_proxy",
+)
+
 
 class StepCombinedRenderer(BaseRenderer):
     """
-    CLI renderer for step combined time summary.
+    CLI renderer for the selected-clock step-time diagnosis summary.
     """
 
     def __init__(self, db_path):
@@ -62,26 +74,38 @@ class StepCombinedRenderer(BaseRenderer):
         Cache to avoid flicker on transient incompleteness.
         """
         payload = self._computer.compute_cli()
-        if payload and payload.metrics:
+        if payload and payload.diagnosis_metrics:
             self._cached = payload
         return self._cached
 
     def get_panel_renderable(self) -> Panel:
         payload = self._payload()
 
-        if payload is None or not payload.metrics:
+        if payload is None:
             return Panel(
                 "Waiting for first fully completed step across all ranks…",
                 title="Model Step Summary",
             )
 
-        metrics = payload.metrics
         diag = build_step_diagnosis(
-            metrics,
+            payload.diagnosis_metrics,
             thresholds=LIVE_STEP_TIME_POLICY.thresholds,
             per_rank_timing=payload.per_rank_timing,
+            diagnosis_clock=payload.diagnosis_clock,
         )
         diag_text = format_cli_diagnosis(diag)
+        metrics = _table_metrics(payload.diagnosis_metrics)
+
+        if not metrics:
+            return Panel(
+                Group(
+                    diag_text,
+                    "",
+                    "Waiting for selected step-time diagnosis metrics…",
+                ),
+                title="Model Step Summary",
+                border_style="cyan",
+            )
 
         step_metric = next(
             (m for m in metrics if m.metric == "step_time"), None
@@ -89,9 +113,6 @@ class StepCombinedRenderer(BaseRenderer):
         residual_metric = next(
             (m for m in metrics if m.metric == "residual_proxy"), None
         )
-
-        # Put residual_proxy last
-        metrics = sorted(metrics, key=lambda m: (m.metric == "residual_proxy"))
 
         # All metrics share the same window size by construction
         K = metrics[0].summary.steps_used
@@ -112,26 +133,33 @@ class StepCombinedRenderer(BaseRenderer):
             table.add_column(title, justify="right")
 
         subtitle = (
-            f"Summed over last {K} fully completed steps"
+            f"Averaged over last {K} fully completed steps"
             if K > 0
             else "Waiting for first fully completed step"
         )
 
         if single_rank:
             table.add_row(
-                f"Sum (Σ {K})",
+                f"Average ({K} steps)",
                 *[
-                    fmt_time_run(m.summary.worst_total) for m in metrics
-                ],  # worst_total==sum in single-rank mode
+                    _format_step_time_value(m.summary.worst_total)
+                    for m in metrics
+                ],
             )
         else:
             table.add_row(
-                f"Median (Σ {K})",
-                *[fmt_time_run(m.summary.median_total) for m in metrics],
+                f"Median avg ({K} steps)",
+                *[
+                    _format_step_time_value(m.summary.median_total)
+                    for m in metrics
+                ],
             )
             table.add_row(
-                f"Worst (Σ {K})",
-                *[fmt_time_run(m.summary.worst_total) for m in metrics],
+                f"Worst avg ({K} steps)",
+                *[
+                    _format_step_time_value(m.summary.worst_total)
+                    for m in metrics
+                ],
             )
             table.add_row(
                 "Worst Rank",
@@ -150,7 +178,9 @@ class StepCombinedRenderer(BaseRenderer):
             )
 
         table.add_row("")
-        if K >= DEFAULT_TREND_CONFIG.min_points:
+        if K >= DEFAULT_TREND_CONFIG.min_points and any(
+            m.series is not None for m in metrics
+        ):
             table.add_row(
                 "Trend",
                 *[_metric_trend_label(m, single_rank) for m in metrics],
@@ -191,7 +221,8 @@ class StepCombinedRenderer(BaseRenderer):
 
         footer = (
             "\n\n[dim]"
-            "DL=dataloader fetch | H2D=host-to-device | FWD=forward | "
+            f"Clock={payload.diagnosis_clock.upper()} | "
+            "IW=input wait | H2D=host-to-device | FWD=forward | "
             "BWD=backward | OPT=optimizer | STEP=traced step | "
             "RESIDUAL=STEP−H2D−FWD−BWD−OPT"
             "[/dim]"
@@ -205,9 +236,25 @@ class StepCombinedRenderer(BaseRenderer):
 
     def get_dashboard_renderable(self) -> StepCombinedTimeResult:
         """
-        Dashboard gets a richer payload (cheap summaries + rank heatmap).
+        Dashboard uses the same selected-clock Step Time payload as the CLI.
         """
         return self._computer.compute_dashboard()
+
+
+def _table_metrics(
+    metrics: list[StepCombinedTimeMetric],
+) -> list[StepCombinedTimeMetric]:
+    """
+    Return selected-clock metrics in the CLI column order.
+
+    The live table intentionally uses diagnosis metrics.
+    """
+    by_key = {metric.metric: metric for metric in metrics}
+    ordered = [by_key[key] for key in TABLE_METRIC_ORDER if key in by_key]
+    extras = [
+        metric for metric in metrics if metric.metric not in TABLE_METRIC_ORDER
+    ]
+    return ordered + extras
 
 
 def _metric_trend_label(metric, single_rank: bool) -> str:
@@ -218,3 +265,18 @@ def _metric_trend_label(metric, single_rank: bool) -> str:
         compute_trend_pct(series, config=DEFAULT_TREND_CONFIG),
         deadband_pct=DEFAULT_TREND_CONFIG.deadband_pct,
     )
+
+
+def _format_step_time_value(ms: float | None) -> str:
+    """Format selected Step Time values while keeping real zeros visible."""
+    if ms is None:
+        return "n/a"
+    try:
+        value = float(ms)
+    except Exception:
+        return "n/a"
+    if not math.isfinite(value):
+        return "n/a"
+    if value <= 0.0:
+        return "0.0 ms"
+    return fmt_time_run(value)

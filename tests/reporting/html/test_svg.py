@@ -12,11 +12,13 @@ def test_phase_bar_emits_svg_rects_for_present_phases(make_section) -> None:
         metric_names=[
             "total_step_ms",
             "dataloader_ms",
+            "input_wait_ms",
             "forward_ms",
             "backward_ms",
         ],
         average={
             "dataloader_ms": 20.0,
+            "input_wait_ms": 20.0,
             "forward_ms": 30.0,
             "backward_ms": 50.0,
             "total_step_ms": 100.0,
@@ -24,7 +26,25 @@ def test_phase_bar_emits_svg_rects_for_present_phases(make_section) -> None:
     )
     out = phase_bar(section)
     assert "<svg" in out
-    assert out.count("<rect") == 3  # dataloader + forward + backward
+    assert out.count("<rect") == 3  # input wait + forward + backward
+
+
+def test_phase_bar_falls_back_to_dataloader_ms_for_pre_1_6(
+    make_section,
+) -> None:
+    # Schema < 1.6 reports carry dataloader_ms but no input_wait_ms; the
+    # input phase must still render rather than silently dropping out.
+    section = make_section(
+        metric_names=["total_step_ms", "dataloader_ms", "forward_ms"],
+        average={
+            "dataloader_ms": 60.0,
+            "forward_ms": 40.0,
+            "total_step_ms": 100.0,
+        },
+    )
+    out = phase_bar(section)
+    assert "input wait" in out
+    assert out.count("<rect") == 2  # input (via dataloader_ms) + forward
 
 
 def test_phase_bar_empty_when_no_timing(make_section) -> None:

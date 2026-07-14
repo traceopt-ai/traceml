@@ -325,6 +325,58 @@ def test_trace_step_without_init_does_not_auto_install_optimizer_timing(
     assert calls == []
 
 
+def test_trace_step_records_gpu_events_for_step_envelope(monkeypatch):
+    _reload_initialization_module()
+    instrumentation = _reload_instrumentation_module()
+    calls = []
+
+    @contextmanager
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
+        yield
+
+    monkeypatch.setattr(
+        instrumentation,
+        "timed_region",
+        fake_timed_region,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "forward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "backward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "h2d_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "StepMemoryTracker",
+        _NoopStepMemoryTracker,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "flush_step_events",
+        lambda model, step: None,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "ensure_optimizer_timing_installed",
+        lambda: None,
+    )
+
+    with instrumentation.trace_step(nn.Linear(2, 2)):
+        pass
+
+    assert calls == [("_traceml_internal:step_time", "step", True)]
+
+
 def test_trace_step_marks_recording_draining_after_configured_step(
     monkeypatch,
 ):
@@ -414,14 +466,74 @@ def test_wrap_dataloader_fetch_rejects_torch_dataloader_when_auto_patch_active(
         wrappers.wrap_dataloader_fetch(loader)
 
 
+def test_auto_dataloader_patch_records_gpu_events(monkeypatch):
+    import traceml_ai.instrumentation.patches.dataloader_patch as dataloader_patch
+
+    calls = []
+
+    @contextmanager
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
+        yield
+
+    monkeypatch.setattr(
+        dataloader_patch,
+        "timed_region",
+        fake_timed_region,
+    )
+
+    from torch.utils.data import DataLoader
+
+    loader = DataLoader([1, 2, 3], batch_size=1)
+
+    assert len(list(dataloader_patch._traceml_dataloader_iter(loader))) == 3
+    assert calls == [
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+    ]
+
+
+def test_wrap_dataloader_fetch_records_gpu_events(monkeypatch):
+    wrappers = _reload_wrappers_module()
+
+    calls = []
+
+    @contextmanager
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
+        yield
+
+    monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
+
+    from torch.utils.data import DataLoader
+
+    monkeypatch.setattr(
+        DataLoader,
+        "_traceml_patched",
+        False,
+        raising=False,
+    )
+
+    wrapped = wrappers.wrap_dataloader_fetch(iter([1, 2]))
+
+    assert list(wrapped) == [1, 2]
+    assert calls == [
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+        ("_traceml_internal:dataloader_next", "step", True),
+    ]
+
+
 def test_wrap_forward_times_model_instance(monkeypatch):
     wrappers = _reload_wrappers_module()
 
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
@@ -448,8 +560,8 @@ def test_wrap_backward_times_backward(monkeypatch):
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)
@@ -481,8 +593,8 @@ def test_wrap_optimizer_preserves_identity_and_times_step(monkeypatch):
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     monkeypatch.setattr(wrappers, "timed_region", fake_timed_region)

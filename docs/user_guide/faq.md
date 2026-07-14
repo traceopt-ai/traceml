@@ -225,8 +225,7 @@ Yes.
 Run:
 
 ```bash
-pip install "traceml-ai[dashboard]"
-traceml run train.py --mode=dashboard
+traceml run train.py
 ```
 
 The local UI is intended for single-node runs, including single-node
@@ -235,15 +234,31 @@ multi-GPU. For multi-node runs, use summary mode.
 The local UI runs at:
 
 ```text
-http://localhost:8765
+http://127.0.0.1:8765
 ```
+
+<details>
+<summary>Running on a remote server?</summary>
+
+SSH into the server and start the dashboard there. TraceML prints a tunnel
+command like this:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Copy that command into a local terminal on your laptop. Leave the training
+command running on the server, then open `http://127.0.0.1:8765` locally.
+
+</details>
 
 ---
 
 ## What is the default run mode?
 
-`traceml run train.py` uses live CLI mode on single-node runs. When launched
-with `--nnodes > 1`, it uses summary mode by default.
+`traceml run train.py` uses live dashboard mode on single-node runs. The
+dashboard listens on `http://127.0.0.1:8765` by default. When launched with
+`--nnodes > 1`, TraceML uses summary mode by default.
 
 You can make summary mode explicit:
 
@@ -352,10 +367,9 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
-In distributed runs, TraceML first discounts backward time that can be explained
-by another rank's non-backward work. `INPUT STRAGGLER` means dataloader excess
-on the worst clean-step rank dominates compute, H2D, and residual excess by at
-least `1.25x`.
+In distributed runs, TraceML accounts for time another rank may spend waiting
+during backward. `INPUT STRAGGLER` means input-wait excess on the slowest rank
+dominates compute, H2D, and residual differences by at least `1.25x`.
 
 Common causes:
 
@@ -371,13 +385,12 @@ See:
 
 ## What does `COMPUTE STRAGGLER` mean?
 
-It means one rank is slower in clean compute than the typical rank.
+It means one rank spends more time in model compute than the typical rank.
 
-Clean compute is forward plus optimizer plus backward after discounting
-backward time that can be explained by another rank's non-backward work. TraceML
-uses `COMPUTE STRAGGLER` when clean-compute excess dominates dataloader, H2D,
-and residual excess by at least `1.25x`; otherwise the mixed case remains
-`STRAGGLER`.
+TraceML accounts for backward time that can be explained by another rank
+arriving late. It uses `COMPUTE STRAGGLER` when compute-time excess dominates
+input wait, H2D, and residual differences by at least `1.25x`; otherwise the
+mixed case remains `STRAGGLER`.
 
 Common causes:
 

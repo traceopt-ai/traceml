@@ -14,15 +14,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
 from traceml_ai.reporting.config import normalize_summary_window_rows
-from traceml_ai.reporting.sections.step_time.alignment import (
-    AlignedStepWindow,
-    build_aligned_step_summary,
-)
 from traceml_ai.reporting.sections.step_time.model import (
     MAX_SUMMARY_WINDOW_ROWS,
     GlobalRankIdentity,
     RankStepSummary,
-    build_rank_summary,
+    rank_summaries_from_window,
+)
+from traceml_ai.utils.step_time_window import (
+    StepTimeWindow,
+    build_step_time_window_from_events,
 )
 
 
@@ -32,11 +32,8 @@ class StepTimeSectionData:
 
     training_steps: int
     latest_step_observed: Optional[int]
-    aligned_summary: Dict[int, RankStepSummary]
-    aligned_step_metrics: Dict[int, Dict[int, Dict[str, float]]]
-    aligned_window: AlignedStepWindow
+    step_time_window: StepTimeWindow
     per_global_rank_summary: Dict[int, RankStepSummary]
-    per_global_rank_step_metrics: Dict[int, Dict[int, Dict[str, float]]]
     identities: Dict[int, GlobalRankIdentity]
     max_rows: int
 
@@ -143,11 +140,7 @@ def load_step_time_section_data(
         ]
         identities = load_global_rank_identities(conn, global_ranks_present)
 
-        per_global_rank_summary: Dict[int, RankStepSummary] = {}
-        per_global_rank_step_metrics: Dict[
-            int,
-            Dict[int, Dict[str, float]],
-        ] = {}
+        per_global_rank_steps: Dict[int, Dict[int, Dict[str, Any]]] = {}
 
         for global_rank in global_ranks_present:
             step_rows = load_global_rank_step_rows(
@@ -155,30 +148,28 @@ def load_step_time_section_data(
                 global_rank=global_rank,
                 max_rows=row_limit,
             )
-            analysis = build_rank_summary(step_rows)
-            if analysis is not None:
-                per_global_rank_summary[global_rank] = analysis.summary
-                per_global_rank_step_metrics[global_rank] = (
-                    analysis.per_step_metrics
-                )
+            step_map = {
+                int(row["step"]): row["events"]
+                for row in step_rows
+                if row.get("step") is not None
+            }
+            if step_map:
+                per_global_rank_steps[int(global_rank)] = step_map
 
-        aligned_summary, aligned_step_metrics, aligned_window = (
-            build_aligned_step_summary(
-                per_global_rank_step_metrics=per_global_rank_step_metrics,
-                max_rows=row_limit,
-            )
+        step_time_window = build_step_time_window_from_events(
+            per_global_rank_steps,
+            max_rows=row_limit,
+            expected_ranks=global_ranks_present,
         )
+        selected_summary = rank_summaries_from_window(step_time_window)
     finally:
         conn.close()
 
     return StepTimeSectionData(
         training_steps=training_steps,
         latest_step_observed=latest_step_observed,
-        aligned_summary=aligned_summary,
-        aligned_step_metrics=aligned_step_metrics,
-        aligned_window=aligned_window,
-        per_global_rank_summary=per_global_rank_summary,
-        per_global_rank_step_metrics=per_global_rank_step_metrics,
+        step_time_window=step_time_window,
+        per_global_rank_summary=selected_summary,
         identities=identities,
         max_rows=row_limit,
     )

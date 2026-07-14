@@ -13,6 +13,7 @@ import pytest
 
 from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
+    _dashboard_access_box,
     _launch_defaults_for_topology,
     resolve_existing_script_path,
     run_view,
@@ -70,10 +71,13 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert default_args.mode is None
 
 
-def test_launch_defaults_use_cli_for_single_node_topologies() -> None:
+def test_launch_defaults_use_dashboard_for_single_node_topologies() -> None:
     defaults = {"mode": "summary", "interval": 2.0}
 
-    assert _launch_defaults_for_topology(defaults, nnodes=1)["mode"] == "cli"
+    assert (
+        _launch_defaults_for_topology(defaults, nnodes=1)["mode"]
+        == "dashboard"
+    )
 
 
 def test_launch_defaults_use_summary_for_multinode_topologies() -> None:
@@ -203,7 +207,7 @@ def test_trace_max_steps_must_be_positive() -> None:
         validate_launch_args(args)
 
 
-def test_dashboard_mode_requires_dashboard_extra(monkeypatch) -> None:
+def test_dashboard_mode_requires_dashboard_dependencies(monkeypatch) -> None:
     args = argparse.Namespace(
         mode="dashboard",
         no_history=False,
@@ -225,8 +229,45 @@ def test_dashboard_mode_requires_dashboard_extra(monkeypatch) -> None:
         lambda package: None if package == "nicegui" else object(),
     )
 
-    with pytest.raises(SystemExit, match=r"traceml-ai\[dashboard\]"):
+    with pytest.raises(SystemExit, match="pip install -U traceml-ai"):
         validate_launch_args(args)
+
+
+def test_implicit_mode_defers_dashboard_dependency_check_until_config_resolution(
+    monkeypatch,
+) -> None:
+    args = argparse.Namespace(
+        mode=None,
+        no_history=False,
+        nnodes=1,
+        nproc_per_node=1,
+        node_rank=0,
+        master_addr="127.0.0.1",
+        master_port=29500,
+        aggregator_host=None,
+        aggregator_bind_host=None,
+        aggregator_port=29765,
+        run_name="",
+        session_id="",
+        summary_window_rows=DEFAULT_SUMMARY_WINDOW_ROWS,
+    )
+
+    monkeypatch.setattr(
+        "traceml_ai.launcher.commands.importlib.util.find_spec",
+        lambda package: None if package == "nicegui" else object(),
+    )
+
+    validate_launch_args(args)
+
+
+def test_dashboard_access_box_highlights_url_and_ssh_tunnel() -> None:
+    box = _dashboard_access_box(9000)
+
+    assert "TraceML dashboard" in box
+    assert "http://127.0.0.1:9000" in box
+    assert "ssh -L 9000:127.0.0.1:9000 user@remote-host" in box
+    assert box.splitlines()[0].startswith("+")
+    assert box.splitlines()[-1].startswith("+")
 
 
 def test_multinode_launch_requires_run_name_or_session_id() -> None:

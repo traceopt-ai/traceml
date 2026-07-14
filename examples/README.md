@@ -24,10 +24,12 @@ These are the main user-facing examples.
 If you only try one example first, use:
 
 ```bash
-traceml run examples/quickstart.py --mode=summary
+traceml run examples/quickstart.py
 ```
 
-Then keep the TraceML final summary JSON if you want to compare runs later with `traceml compare`.
+Single-node runs open the dashboard by default at
+`http://127.0.0.1:8765`. Keep the TraceML final summary JSON if you want to
+compare runs later with `traceml compare`.
 
 ---
 
@@ -42,7 +44,7 @@ These examples are still user-facing, but they are more about showing specific T
 
 These are useful when you want to see how TraceML behaves on a known bottleneck.
 
-To contrast a normal input path with a synthetic DataLoader bottleneck:
+To contrast a normal input path with a synthetic input pipeline bottleneck:
 
 ```bash
 traceml run examples/diagnosis/dataloader_bottleneck_demo.py --args --scenario fast
@@ -72,18 +74,53 @@ GPUs such as T4 or L4.
 
 ---
 
+## Advanced workloads
+
+These are real or heavier workloads intended for focused investigations, not
+first-run examples.
+
+| Example | What it demonstrates | Works on | Notes |
+|---|---|---|---|
+| `advanced/bert_single_gpu_compare.py` | Run the same fixed BERT workload on different single-GPU machines, then compare TraceML summaries | CUDA | Use the same batch size, sequence length, precision, and step count on each machine |
+
+Example hardware comparison run:
+
+```bash
+traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --summary-window-rows 300 --run-name bert_l40s_bs32_seq256 --args --model-name bert-large-uncased --batch-size 32 --max-length 256 --max-steps 350 --warmup-steps 50 --num-workers 4 --precision fp16
+```
+
+---
+
 ## How to run examples
 
-Standard run:
+Standard run with the dashboard:
 
 ```bash
 traceml run examples/quickstart.py
 ```
 
-Local UI:
+The dashboard listens on `http://127.0.0.1:8765` by default. Choose another
+local browser port with `--dashboard-port`:
 
 ```bash
-traceml run examples/quickstart.py --mode=dashboard
+traceml run examples/quickstart.py --dashboard-port=9000
+```
+
+On a remote machine, forward that dashboard port before opening the browser on
+your laptop:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Then open `http://127.0.0.1:8765` locally. The launcher also prints this URL
+and SSH tunnel command in a boxed message after the aggregator and training
+process have launched.
+
+Terminal UI:
+
+```bash
+traceml run examples/quickstart.py --mode=cli
 ```
 
 Summary mode:
@@ -129,7 +166,7 @@ Starter examples now prefer the top-level public API:
 
 Lightning examples use `traceml_ai.integrations.lightning.init()` with
 `TraceMLCallback()` so Lightning can keep owning the training loop while
-TraceML records DataLoader, transfer, step, phase, and memory timing.
+TraceML records input fetch, transfer, step, phase, and memory timing.
 
 Ray Data examples wrap `iter_torch_batches(...)` with
 `traceml.wrap_dataloader_fetch(...)` because Ray Data iterators are not PyTorch

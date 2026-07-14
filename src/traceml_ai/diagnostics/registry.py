@@ -27,11 +27,14 @@ class ModelDiagnosticContext:
     not perform database I/O.
     """
 
-    step_time_metrics: Sequence[StepCombinedTimeMetric]
     step_memory_metrics: Sequence[StepMemoryCombinedMetric]
+    step_time_diagnosis_metrics: Sequence[StepCombinedTimeMetric] = field(
+        default_factory=tuple
+    )
     step_time_per_rank_timing: Dict[int, Dict[str, float]] = field(
         default_factory=dict
     )
+    step_time_diagnosis_clock: str = "cpu"
     step_memory_status_message: Optional[str] = None
     gpu_total_bytes: Optional[float] = None
 

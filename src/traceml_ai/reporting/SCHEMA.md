@@ -1,6 +1,6 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.5`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.6`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
@@ -16,7 +16,7 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.5,
+  "schema_version": 1.6,
   "generated_at": "...",
   "duration_s": null,
   "meta": {
@@ -64,7 +64,7 @@ remains in each section-local `card` field.
 ```
 
 `primary_diagnosis` is derived from already-built section payloads. It does not
-read telemetry tables or recompute diagnostics. In schema `1.5`, Step Time
+read telemetry tables or recompute diagnostics. In schema `1.6`, Step Time
 diagnoses drive primary performance diagnosis. System GPU utilization is only
 supporting evidence, except for the fallback
 `LOW_GPU_UTILIZATION_UNEXPLAINED` when Step Time has no useful performance
@@ -87,7 +87,7 @@ Selection policy:
 
 High temperature, memory pressure, memory creep, high RSS, high CPU, and other
 resource-health findings are not promoted into `primary_diagnosis` in schema
-`1.5`. They remain available under their section's `diagnosis` and `issues`.
+`1.6`. They remain available under their section's `diagnosis` and `issues`.
 
 Primary diagnosis evidence uses a small union:
 
@@ -96,16 +96,19 @@ Primary diagnosis evidence uses a small union:
   "type": "phase_share",
   "basis": "average",
   "steps_analyzed": 256,
-  "total_step_ms": 272.3,
-  "dataloader_ms": 161.0,
-  "h2d_ms": 0.1,
-  "compute_ms": 109.6,
-  "residual_ms": 1.6,
+  "total_step_ms": 200.0,
+  "dataloader_ms": 40.0,
+  "input_wait_ms": 80.0,
+  "step_time_ms": 160.0,
+  "diagnosis_clock": "gpu",
+  "h2d_ms": 0.4,
+  "compute_ms": 120.0,
+  "residual_ms": 39.6,
   "shares": {
-    "dataloader_pct": 59.1,
-    "h2d_pct": 0.0,
-    "compute_pct": 40.3,
-    "residual_pct": 0.6
+    "input_wait_pct": 50.0,
+    "h2d_pct": 0.3,
+    "compute_pct": 75.0,
+    "residual_pct": 24.8
   },
   "gpu_util_avg_percent": 37.8
 }
@@ -117,8 +120,8 @@ Values come from `step_time.global.average`.
 ```json
 {
   "type": "rank_comparison",
-  "metric": "dataloader_ms",
-  "phase": "dataloader",
+  "metric": "input_wait_ms",
+  "phase": "input",
   "steps_analyzed": 256,
   "median": {"rank": 0, "value_ms": 0.7},
   "worst": {"rank": 2, "value_ms": 180.9},
@@ -283,6 +286,8 @@ in `global_ranks_used`.
   "step_time": [
     "total_step_ms",
     "dataloader_ms",
+    "input_wait_ms",
+    "step_time_ms",
     "h2d_ms",
     "compute_ms",
     "residual_ms",
@@ -307,25 +312,37 @@ Metric suffixes are units:
 
 ## Step Time Residual
 
-`residual_ms` is residual unattributed step time:
+Step Time uses one selected clock per aligned window. GPU timing is used when
+the window has complete GPU event timings; otherwise explicit CPU timing is
+used. `input_wait_ms` and `step_time_ms` expose this selected-clock timing.
+The public `dataloader_ms` key is kept for compatibility and represents CPU
+dataloader fetch wall time.
+The public `total_step_ms` key is also CPU-clocked for compatibility; it is
+not the denominator for selected-clock phase shares. The final text report
+uses selected-clock `step_time_ms` for phase shares and labels CPU
+compatibility rows separately.
+
+`residual_ms` is residual unattributed step time. It is averaged from
+per-step clamped residuals, not recomputed from already-averaged phase totals:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
-residual_ms = traced_step_ms - known_step_ms
-total_step_ms = dataloader_ms + traced_step_ms
+traced_step_ms = selected step envelope timing
+residual_ms = average(max(0, traced_step_ms - known_step_ms))
+total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 
-The public contract is:
+The selected-clock diagnosis contract is:
 
 ```text
-total_step_ms = dataloader_ms + h2d_ms + compute_ms + residual_ms
+input_wait_ms = selected-clock input wait
+step_time_ms = selected-clock traced step envelope
+diagnosis_clock = "cpu" | "gpu"
 ```
 
-`traced_step_ms` and the raw `trace_step` wall timer are internal measurement
-details and are not emitted in final-summary JSON. `residual_ms` can include
-validation, checkpointing, logging, framework orchestration, CPU stalls,
-unobserved transfer stalls, or other work outside the traced H2D and compute
-phases. Do not treat it as NCCL, all-reduce, or synchronization overhead
-without profiler evidence.
+`duration_ms` is stored compatibility timing and is not a Step Time display or
+diagnosis fallback. `residual_ms` can include validation, checkpointing,
+logging, framework orchestration, CPU stalls, unobserved transfer stalls, or
+other work outside the traced H2D and compute phases. Do not treat it as NCCL,
+all-reduce, or synchronization overhead without profiler evidence.

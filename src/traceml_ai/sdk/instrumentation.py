@@ -155,7 +155,9 @@ def trace_step(model: nn.Module):
 
     try:
         with timed_region(
-            "_traceml_internal:step_time", scope="step", use_gpu=False
+            "_traceml_internal:step_time",
+            scope="step",
+            record_gpu_events=True,
         ):
             with (
                 forward_auto_timer(model),
@@ -192,7 +194,7 @@ def trace_step(model: nn.Module):
 def trace_time(
     name: str,
     scope: str = "global",
-    use_gpu: bool = True,
+    record_gpu_events: bool = True,
 ) -> Callable:
     """
     Decorator to time a function.
@@ -205,8 +207,8 @@ def trace_time(
         Semantic scope of this timing:
         - "step": attributed to the current training step
         - "global": not step-attributed
-    use_gpu:
-        If True, record CUDA timing when available.
+    record_gpu_events:
+        If True, record PyTorch CUDA stream events when available.
     """
     if _traceml_disabled():
         return lambda func: func
@@ -219,7 +221,11 @@ def trace_time(
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            with timed_region(name, scope=scope, use_gpu=use_gpu):
+            with timed_region(
+                name,
+                scope=scope,
+                record_gpu_events=record_gpu_events,
+            ):
                 return func(*args, **kwargs)
 
         return wrapper

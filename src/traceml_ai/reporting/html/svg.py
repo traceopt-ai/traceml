@@ -13,9 +13,9 @@ from typing import Any, Dict, List, Tuple
 from .sections_helpers import sorted_rows
 from .textutils import esc, fmt_value
 
-# step_time phase breakdown, in stacking order: (metric, label, css var).
+# step_time selected-clock breakdown, in stacking order.
 _PHASES = (
-    ("dataloader_ms", "dataloader", "var(--dl)"),
+    ("input_wait_ms", "input wait", "var(--dl)"),
     ("h2d_ms", "h2d", "var(--h2d)"),
     ("forward_ms", "forward", "var(--fwd)"),
     ("backward_ms", "backward", "var(--bwd)"),
@@ -31,6 +31,9 @@ def phase_bar(step_time_section: Dict[str, Any]) -> str:
     total = 0.0
     for metric, label, color in _PHASES:
         value = avg.get(metric)
+        if value is None and metric == "input_wait_ms":
+            # Back-compat: schema < 1.6 reports carry dataloader_ms only.
+            value = avg.get("dataloader_ms")
         if isinstance(value, (int, float)) and value > 0:
             present.append((label, color, float(value)))
             total += float(value)

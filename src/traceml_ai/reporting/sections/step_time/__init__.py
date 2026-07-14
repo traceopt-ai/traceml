@@ -33,7 +33,6 @@ from traceml_ai.reporting.sections.step_time.loader import (
 )
 from traceml_ai.reporting.sections.step_time.model import (
     MAX_SUMMARY_WINDOW_ROWS,
-    to_rank_signals,
 )
 
 
@@ -58,11 +57,9 @@ class StepTimeSummarySection(
         self,
         data: StepTimeSectionData,
     ) -> StepTimeDiagnosisInput:
-        """Adapt aligned Step Time summaries to the diagnosis contract."""
+        """Adapt the canonical Step Time window to diagnosis."""
         return StepTimeDiagnosisInput(
-            rank_signals=to_rank_signals(data.aligned_summary),
-            per_rank_step_metrics=data.aligned_step_metrics,
-            max_rows=data.max_rows,
+            window=data.step_time_window,
         )
 
     def diagnose(

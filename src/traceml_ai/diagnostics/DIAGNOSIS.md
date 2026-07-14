@@ -7,7 +7,7 @@ also copies that same item to `diagnosis`.
 The final summary also includes a top-level `primary_diagnosis`. That field is
 a run-level performance finding promoted from existing section diagnoses. It is
 not a replacement for section diagnoses and it is not a health-warning rollup.
-In schema `1.5`, Step Time drives the top-level primary diagnosis; System GPU
+In schema `1.6`, Step Time drives the top-level primary diagnosis; System GPU
 utilization can appear as supporting evidence or as an unexplained-utilization
 fallback. System, Process, and Step Memory resource findings remain canonical
 inside their sections.
@@ -66,23 +66,42 @@ Training-step timing.
 - `WARMUP`: some data exists, but not enough for a stable diagnosis.
 - `BALANCED`: no clear timing bottleneck or rank straggler.
 - `STRAGGLER`: one rank has a mixed clean-step straggler signal.
-- `INPUT_STRAGGLER`: one rank has materially higher dataloader time.
+- `INPUT_STRAGGLER`: one rank has materially higher selected-clock input wait.
 - `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
 - `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
 - `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
-- `INPUT_BOUND`: dataloader time dominates the typical step.
+- `INPUT_BOUND`: selected-clock input wait dominates the typical step.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
 
+Step-time diagnosis uses one selected clock for the analyzed window. It uses
+GPU event timing when every rank/step has GPU timing for the step envelope,
+input wait, and traced phase events present in the window. Otherwise it uses
+explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
+summary use this same selected-clock window for diagnosis-facing timing.
+Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
+The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
+`total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
+These compatibility fields are not selected-clock phase-share denominators.
+`duration_ms` stays stored compatibility timing and is not used for Step Time
+display or diagnosis. In the final text report, selected-clock phase shares
+are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
+
+`INPUT_BOUND` uses selected-clock `input_wait_ms / step_time_ms`. This compares
+pre-step input wait with the traced step envelope, not end-to-end wall time, so
+the ratio can exceed 100%. Live diagnosis warns at 25% and is critical at 35%.
+Summary diagnosis is more conservative because it covers a larger final window:
+it warns at 30% and is critical at 40%.
+
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
-unattributed step time:
+unattributed step time averaged from per-step clamped residuals:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
-residual_ms = traced_step_ms - known_step_ms
-total_step_ms = dataloader_ms + traced_step_ms
+traced_step_ms = selected step envelope timing
+residual_ms = average(max(0, traced_step_ms - known_step_ms))
+total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 
 Rank-local stragglers use clean-step evidence. TraceML first discounts backward
@@ -90,15 +109,15 @@ time that can be explained by another rank's non-backward work:
 
 ```text
 residual_r = residual_proxy_r
-non_bwd_r = dataloader_r + h2d_r + forward_r + optimizer_r + residual_r
+non_bwd_r = input_wait_r + h2d_r + forward_r + optimizer_r + residual_r
 clean_bwd_r = max(0, backward_r - max(0, max(non_bwd) - non_bwd_r))
 clean_compute_r = forward_r + clean_bwd_r + optimizer_r
-clean_step_r = dataloader_r + h2d_r + clean_compute_r + residual_r
+clean_step_r = input_wait_r + h2d_r + clean_compute_r + residual_r
 score = (max(clean_step) - median(clean_step)) / median(actual_step)
 ```
 
 If `score < 0.10`, TraceML does not report a rank-local straggler. Otherwise it
-blames the largest worst-rank excess over peer median among dataloader, clean
+blames the largest worst-rank excess over peer median among input wait, clean
 compute, H2D, and residual. The largest excess must dominate the next-largest
 excess by `1.25x`; otherwise the diagnosis stays mixed `STRAGGLER`.
 

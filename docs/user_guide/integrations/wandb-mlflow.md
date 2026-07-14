@@ -262,7 +262,6 @@ Good ways to reduce that:
 Launch the local UI with:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 

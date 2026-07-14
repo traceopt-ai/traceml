@@ -48,8 +48,8 @@ class StepTimeComparer:
                     key="input_ms",
                     label="Input",
                     unit="ms",
-                    lhs=self._value(lhs, "dataloader_ms"),
-                    rhs=self._value(rhs, "dataloader_ms"),
+                    lhs=self._input_value(lhs),
+                    rhs=self._input_value(rhs),
                     direction="higher_is_worse",
                 ),
                 "h2d_ms": numeric_metric(
@@ -112,9 +112,16 @@ class StepTimeComparer:
     def _value(self, section: Any, key: str) -> Any:
         return global_average(section, key)
 
+    def _input_value(self, section: Any) -> Any:
+        """Return selected-clock input wait, falling back for pre-1.6 data."""
+        value = self._value(section, "input_wait_ms")
+        return (
+            self._value(section, "dataloader_ms") if value is None else value
+        )
+
     def _dominant_phase(self, section: Any) -> Any:
         phases = {
-            "dataloader": as_float(self._value(section, "dataloader_ms")),
+            "input": as_float(self._input_value(section)),
             "h2d": as_float(self._value(section, "h2d_ms")),
             "forward": as_float(self._value(section, "forward_ms")),
             "backward": as_float(self._value(section, "backward_ms")),

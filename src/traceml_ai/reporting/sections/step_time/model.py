@@ -11,15 +11,20 @@ from typing import Any, Dict, Iterable, Optional
 
 import numpy as np
 
-from traceml_ai.diagnostics.step_time.adapters import RankStepSignals
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.summaries.summary_formatting import safe_float
+from traceml_ai.utils.step_time_window import (
+    StepTimeWindow,
+    public_step_time_metric_values,
+)
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
     "total_step_ms",
     "dataloader_ms",
+    "input_wait_ms",
+    "step_time_ms",
     "h2d_ms",
     "compute_ms",
     "residual_ms",
@@ -33,48 +38,6 @@ def finite_float(x: Any) -> float:
     """Convert to float; coerce non-finite values to 0.0."""
     v = safe_float(x)
     return v if np.isfinite(v) else 0.0
-
-
-def _event_total_ms(by_dev: Any) -> float:
-    """Sum ``duration_ms`` across all devices for one event."""
-    if not isinstance(by_dev, dict):
-        return 0.0
-
-    total = 0.0
-    for stats in by_dev.values():
-        if not isinstance(stats, dict):
-            continue
-        total += finite_float(stats.get("duration_ms"))
-    return total
-
-
-def _event_bucket(name: str) -> Optional[str]:
-    """Map a raw event name to a step-time bucket."""
-    n = str(name).lower()
-
-    if "step_time" in n:
-        return "step_time"
-    if "dataloader_next" in n:
-        return "dataloader"
-    if "h2d_time" in n or "host_to_device" in n:
-        return "h2d"
-    if "forward_time" in n:
-        return "forward"
-    if "backward_time" in n:
-        return "backward"
-    if "optimizer_step" in n:
-        return "optimizer"
-
-    if "data" in n or "dataloader" in n or "input" in n or "batch" in n:
-        return "dataloader"
-    if "forward" in n or n == "fwd":
-        return "forward"
-    if "backward" in n or "bwd" in n:
-        return "backward"
-    if "optim" in n or "optimizer" in n or n in {"step", "update"}:
-        return "optimizer"
-
-    return None
 
 
 def closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
@@ -110,26 +73,20 @@ def closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
 
 @dataclass
 class RankStepSummary:
-    """Per-rank averaged step-time summary."""
+    """Per-rank Step Time summary with compatibility and diagnosis fields."""
 
     steps_analyzed: int
     avg_dataloader_ms: float
+    avg_input_wait_ms: float
+    avg_step_time_ms: float
     avg_h2d_ms: float
     avg_forward_ms: float
     avg_backward_ms: float
     avg_optimizer_ms: float
-    avg_step_cpu_ms: float
     avg_traced_step_ms: float
-    avg_gpu_compute_ms: float
+    avg_compute_ms: float
+    avg_residual_ms: float
     avg_total_step_ms: float
-
-
-@dataclass
-class RankStepAnalysis:
-    """Per-rank summary plus per-step metrics."""
-
-    summary: RankStepSummary
-    per_step_metrics: Dict[int, Dict[str, float]]
 
 
 @dataclass(frozen=True)
@@ -144,172 +101,51 @@ class GlobalRankIdentity:
     world_size: Optional[int]
 
 
-def to_rank_signals(
-    per_global_rank_summary: Dict[int, RankStepSummary],
-) -> Dict[int, RankStepSignals]:
-    """
-    Convert global-rank summaries to diagnosis adapter input objects.
-    """
-    return {
-        int(rank): RankStepSignals(
-            steps_analyzed=int(s.steps_analyzed),
-            dataloader_ms=finite_float(s.avg_dataloader_ms),
-            h2d_ms=finite_float(s.avg_h2d_ms),
-            forward_ms=finite_float(s.avg_forward_ms),
-            backward_ms=finite_float(s.avg_backward_ms),
-            optimizer_ms=finite_float(s.avg_optimizer_ms),
-            step_cpu_ms=finite_float(s.avg_step_cpu_ms),
-        )
-        for rank, s in per_global_rank_summary.items()
-    }
-
-
-def _row_metrics(events: Dict[str, Any]) -> Optional[Dict[str, float]]:
-    """
-    Convert one step's event map into canonical timing buckets.
-
-    Returns
-    -------
-    dict with keys:
-      - dataloader
-      - forward
-      - backward
-      - optimizer
-      - step_time
-
-    or None if nothing usable was found.
-    """
-    metrics = {
-        "dataloader": 0.0,
-        "h2d": 0.0,
-        "forward": 0.0,
-        "backward": 0.0,
-        "optimizer": 0.0,
-        "step_time": 0.0,
-    }
-
-    for evt_name, by_dev in events.items():
-        bucket = _event_bucket(str(evt_name))
-        if bucket is None:
-            continue
-        metrics[bucket] += _event_total_ms(by_dev)
-
-    if (
-        metrics["dataloader"] <= 0.0
-        and metrics["forward"] <= 0.0
-        and metrics["backward"] <= 0.0
-        and metrics["optimizer"] <= 0.0
-        and metrics["step_time"] <= 0.0
-    ):
-        return None
-
-    return metrics
-
-
-def build_rank_summary(
-    step_rows: list[Dict[str, Any]],
-) -> Optional[RankStepAnalysis]:
-    """
-    Build a per-rank summary and per-step canonical metrics over provided rows.
-
-    For each step:
-        known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
-        residual_ms = traced_step_ms - known_step_ms
-        total_step_ms = dataloader_ms + traced_step_ms
-    """
-    if not step_rows:
-        return None
-
-    sum_dl = 0.0
-    sum_h2d = 0.0
-    sum_fwd = 0.0
-    sum_bwd = 0.0
-    sum_opt = 0.0
-    sum_step_cpu = 0.0
-    sum_traced_step = 0.0
-    sum_total = 0.0
-    n = 0
-
-    per_step_metrics: Dict[int, Dict[str, float]] = {}
-
-    for row in step_rows:
-        step_id = row.get("step")
-        metrics = _row_metrics(row["events"])
-        if metrics is None or step_id is None:
-            continue
-
-        dl = finite_float(metrics["dataloader"])
-        h2d = finite_float(metrics["h2d"])
-        fwd = finite_float(metrics["forward"])
-        bwd = finite_float(metrics["backward"])
-        opt = finite_float(metrics["optimizer"])
-        step_cpu = finite_float(metrics["step_time"])
-
-        compute_ms = fwd + bwd + opt
-        known_step_ms = h2d + compute_ms
-        # raw step = the direct trace_step wall timer.
-        # traced step = max(raw step, known_step_ms) to avoid impossible negative residual
-        # when CPU wall timing and CUDA event timing differ slightly.
-        traced_step = max(step_cpu, known_step_ms)
-        residual_proxy = max(0.0, traced_step - known_step_ms)
-        total_step = dl + traced_step
-
-        per_step_metrics[int(step_id)] = {
-            "dataloader_fetch": dl,
-            "h2d": h2d,
-            "forward": fwd,
-            "backward": bwd,
-            "optimizer_step": opt,
-            "step_time": traced_step,
-            "residual_proxy": residual_proxy,
-        }
-
-        sum_dl += dl
-        sum_h2d += h2d
-        sum_fwd += fwd
-        sum_bwd += bwd
-        sum_opt += opt
-        sum_step_cpu += step_cpu
-        sum_traced_step += traced_step
-        sum_total += total_step
-        n += 1
-
-    if n == 0:
-        return None
-
-    summary = RankStepSummary(
-        steps_analyzed=n,
-        avg_dataloader_ms=sum_dl / n,
-        avg_h2d_ms=sum_h2d / n,
-        avg_forward_ms=sum_fwd / n,
-        avg_backward_ms=sum_bwd / n,
-        avg_optimizer_ms=sum_opt / n,
-        avg_step_cpu_ms=sum_step_cpu / n,
-        avg_traced_step_ms=sum_traced_step / n,
-        avg_gpu_compute_ms=(sum_fwd + sum_bwd + sum_opt) / n,
-        avg_total_step_ms=sum_total / n,
+def rank_summary_from_timing(
+    timing: Dict[str, float],
+    *,
+    steps_analyzed: int,
+) -> RankStepSummary:
+    """Build the public summary view from one canonical rank timing row."""
+    public = public_step_time_metric_values(timing)
+    return RankStepSummary(
+        steps_analyzed=max(0, int(steps_analyzed)),
+        avg_dataloader_ms=finite_float(public["dataloader_ms"]),
+        avg_input_wait_ms=finite_float(public["input_wait_ms"]),
+        avg_step_time_ms=finite_float(public["step_time_ms"]),
+        avg_h2d_ms=finite_float(public["h2d_ms"]),
+        avg_forward_ms=finite_float(public["forward_ms"]),
+        avg_backward_ms=finite_float(public["backward_ms"]),
+        avg_optimizer_ms=finite_float(public["optimizer_ms"]),
+        avg_traced_step_ms=finite_float(timing.get("step_time")),
+        avg_compute_ms=finite_float(public["compute_ms"]),
+        avg_residual_ms=finite_float(public["residual_ms"]),
+        avg_total_step_ms=finite_float(public["total_step_ms"]),
     )
-    return RankStepAnalysis(summary=summary, per_step_metrics=per_step_metrics)
+
+
+def rank_summaries_from_window(
+    window: StepTimeWindow,
+) -> Dict[int, RankStepSummary]:
+    """Return final-summary rank rows from one canonical Step Time window."""
+    return {
+        int(rank): rank_summary_from_timing(
+            dict(timing),
+            steps_analyzed=int(window.coverage.steps_used),
+        )
+        for rank, timing in window.per_rank_timing.items()
+    }
 
 
 def compute_residual_avg_ms(s: RankStepSummary) -> float:
     """
-    Return average residual proxy for one rank summary.
+    Return canonical average residual for one rank summary.
 
-    known_step_ms = h2d_ms + forward_ms + backward_ms + optimizer_ms
-    residual_ms = traced_step_ms - known_step_ms
-    total_step_ms = dataloader_ms + traced_step_ms
+    residual_ms is averaged from per-step clamped residuals:
+    max(0, step_time_ms - h2d_ms - compute_ms). This intentionally differs
+    from clamping the already-averaged phase totals.
     """
-    return max(
-        0.0,
-        finite_float(s.avg_traced_step_ms)
-        - (
-            finite_float(s.avg_h2d_ms)
-            + finite_float(s.avg_forward_ms)
-            + finite_float(s.avg_backward_ms)
-            + finite_float(s.avg_optimizer_ms)
-        ),
-    )
+    return finite_float(s.avg_residual_ms)
 
 
 def _rank_metric_values(
@@ -325,12 +161,20 @@ def _rank_metric_values(
             int(rank): finite_float(summary.avg_dataloader_ms)
             for rank, summary in per_global_rank_summary.items()
         },
+        "input_wait_ms": {
+            int(rank): finite_float(summary.avg_input_wait_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
+        "step_time_ms": {
+            int(rank): finite_float(summary.avg_step_time_ms)
+            for rank, summary in per_global_rank_summary.items()
+        },
         "h2d_ms": {
             int(rank): finite_float(summary.avg_h2d_ms)
             for rank, summary in per_global_rank_summary.items()
         },
         "compute_ms": {
-            int(rank): finite_float(summary.avg_gpu_compute_ms)
+            int(rank): finite_float(summary.avg_compute_ms)
             for rank, summary in per_global_rank_summary.items()
         },
         "residual_ms": {
@@ -357,8 +201,10 @@ def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
     return {
         "total_step_ms": finite_float(summary.avg_total_step_ms),
         "dataloader_ms": finite_float(summary.avg_dataloader_ms),
+        "input_wait_ms": finite_float(summary.avg_input_wait_ms),
+        "step_time_ms": finite_float(summary.avg_step_time_ms),
         "h2d_ms": finite_float(summary.avg_h2d_ms),
-        "compute_ms": finite_float(summary.avg_gpu_compute_ms),
+        "compute_ms": finite_float(summary.avg_compute_ms),
         "residual_ms": compute_residual_avg_ms(summary),
         "forward_ms": finite_float(summary.avg_forward_ms),
         "backward_ms": finite_float(summary.avg_backward_ms),
@@ -418,21 +264,22 @@ def build_global_rollup(
     per_global_rank_summary: Dict[int, RankStepSummary],
     median_global_rank: Optional[int],
     worst_global_rank: Optional[int],
-    analysis_window: Any,
+    analysis_window: StepTimeWindow,
 ) -> Dict[str, Any]:
     """Build the top-level step-time rollup for the run window."""
-    window_json = dict(analysis_window.to_json())
-    steps_analyzed = window_json.get("aligned_steps_analyzed", 0)
-    end_step = window_json.get("end_step")
+    steps = [int(step) for step in analysis_window.steps]
+    start_step = steps[0] if steps else None
+    end_step = steps[-1] if steps else None
     window = GlobalWindow(
         kind="step_window",
-        alignment=str(window_json.get("alignment") or "common_steps"),
-        steps_analyzed=int(steps_analyzed or 0),
-        start_step=window_json.get("start_step"),
+        alignment="common_steps",
+        steps_analyzed=int(analysis_window.coverage.steps_used),
+        start_step=start_step,
         end_step=end_step,
         completed_step=end_step,
-        window_size=window_json.get("window_size"),
+        window_size=int(analysis_window.coverage.expected_steps),
     ).to_json()
+    window["diagnosis_clock"] = analysis_window.clock
     if not per_global_rank_summary:
         return BaseGlobal(
             index_by="global_rank",
@@ -512,14 +359,13 @@ __all__ = [
     "MAX_SUMMARY_WINDOW_ROWS",
     "STEP_TIME_METRIC_NAMES",
     "GlobalRankIdentity",
-    "RankStepAnalysis",
     "RankStepSummary",
     "build_global_rollup",
     "build_overview",
-    "build_rank_summary",
     "closest_rank_to_median",
     "compute_residual_avg_ms",
     "finite_float",
+    "rank_summaries_from_window",
+    "rank_summary_from_timing",
     "summary_metric_values",
-    "to_rank_signals",
 ]

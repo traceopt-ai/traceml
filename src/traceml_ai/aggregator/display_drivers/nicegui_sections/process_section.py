@@ -100,10 +100,11 @@ def build_process_section() -> Dict[str, Any]:
                     .classes("kpi")
                     .style(f"--acc:{acc}; flex:1 1 0; min-width:0;")
                 ):
-                    ui.html(f"{lab} <span class='kq'>{qual}</span>").classes(
-                        "klab"
-                    )
-                    kpis[key] = ui.html("—").classes("kval")
+                    ui.html(
+                        f"{lab} <span class='kq'>{qual}</span>",
+                        sanitize=False,
+                    ).classes("klab")
+                    kpis[key] = ui.html("—", sanitize=False).classes("kval")
     return {"chart": chart, "win": win, "kpis": kpis}
 
 

@@ -32,7 +32,7 @@ diagnosis or symptom.
 
 | What you see | Start here |
 |---|---|
-| Step Time says `INPUT-BOUND` | [Find DataLoader Bottlenecks](pytorch-dataloader-bottleneck.md) |
+| Step Time says `INPUT-BOUND` | [Find Input Pipeline Bottlenecks](pytorch-input-pipeline-bottleneck.md) |
 | System says `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION` | [Debug Low GPU Utilization](low-gpu-utilization-pytorch.md) |
 | Step Time says `INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `RESIDUAL STRAGGLER`, or `STRAGGLER` | [Debug DDP Rank Stragglers](ddp-slow-training-rank-straggler.md) |
 | Step Memory says `MEMORY CREEP` or `MEMORY RISING` | [Find PyTorch Memory Creep](pytorch-memory-creep.md) |
@@ -41,16 +41,16 @@ diagnosis or symptom.
 
 ## Quick interpretation
 
-`INPUT-BOUND` means dataloader or input work is taking a large share of the
-typical step. Confirm the input path before tuning model compute.
+`INPUT-BOUND` means input wait is taking a large share of the typical step.
+Confirm the input path before tuning model compute.
 
 `LOW_GPU_UTILIZATION` and `MODERATE_GPU_UTILIZATION` are system-level symptoms.
 They say the GPU was not fully busy, not why it was not fully busy. Pair them
 with Step Time.
 
-`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`, `RESIDUAL STRAGGLER`, and
-`STRAGGLER` are distributed clean-step signals. Inspect the called-out worst
-rank and compare it with the median rank.
+`INPUT STRAGGLER`, `COMPUTE STRAGGLER`, `H2D STRAGGLER`,
+`RESIDUAL STRAGGLER`, and `STRAGGLER` are distributed rank-skew signals.
+Inspect the called-out worst rank and compare it with the median rank.
 
 `MEMORY CREEP` and `MEMORY RISING` are step-memory trend signals. Inspect
 retained tensors, caches, and per-step state that may stay alive.
@@ -59,13 +59,13 @@ retained tensors, caches, and per-step state that may stay alive.
 observed step. Use TraceML to choose the hot phase, then use an operator-level
 profiler if you need kernel or operator detail.
 
-`RESIDUAL-HEAVY` is residual time not attributed to dataloader, H2D, forward,
+`RESIDUAL-HEAVY` is residual time not attributed to input wait, H2D, forward,
 backward, or optimizer work. Inspect logging, checkpointing, validation,
 CPU-side stalls, framework orchestration, or unobserved transfers.
 
 ## What not to assume
 
-- Low GPU utilization alone does not prove a DataLoader bottleneck.
+- Low GPU utilization alone does not prove an input pipeline bottleneck.
 - A DDP slowdown is not always NCCL. TraceML currently reports rank skew and
   residual residual, not explicit collective timing.
 - `BALANCED` means no clear bottleneck in the observed window. It does not

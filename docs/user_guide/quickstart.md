@@ -41,10 +41,39 @@ Wrap the work from `zero_grad(...)` through `optimizer.step()`.
 traceml run train.py
 ```
 
+This starts the live browser dashboard and prints the local URL, usually
+`http://127.0.0.1:8765`. Open it to see live bottleneck diagnostics while the
+job runs.
+
+<details>
+<summary>Running on a remote server?</summary>
+
+SSH into the server and start TraceML there:
+
+```bash
+traceml run train.py
+```
+
+TraceML prints a tunnel command like this:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Copy that tunnel command into a local terminal on your laptop. Leave the
+training command running on the server, then open `http://127.0.0.1:8765`
+locally.
+
+</details>
+
+If you want a live view without a browser or SSH tunnel, use
+`traceml run train.py --mode=cli`. Use `traceml run train.py --mode=summary`
+for headless jobs, CI, DDP, FSDP, Slurm, or multi-node runs.
+
 To try the same flow with a checked-in example first:
 
 ```bash
-traceml run examples/quickstart.py --mode=summary
+traceml run examples/quickstart.py
 ```
 
 TraceML writes:
@@ -79,7 +108,7 @@ For DDP, FSDP, and multi-node launches, see
 +----------------------------------------------------------------------------+
 |                                                                            |
 |  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
-|  Why: Rank r0 dataloader was 254.5ms vs median rank r1 at 3.8ms.           |
+|  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
 |  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
 |  slow rank.                                                                |
 |                                                                            |
@@ -103,7 +132,7 @@ For DDP, FSDP, and multi-node launches, see
 |  Phase           Median        Worst         Skew        Scope             |
 |  --------------------------------------------------------------------------|
 |  Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
-|  Dataloader      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
+|  Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
 |  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
 +----------------------------------------------------------------------------+
 ```
@@ -119,10 +148,9 @@ Live terminal view:
 traceml run train.py --mode=cli
 ```
 
-Browser view:
+Browser view, explicit:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 

@@ -36,17 +36,14 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import traceml_ai.instrumentation.patches.forward_auto_timer_patch as fwd_patch
-import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
-import traceml_ai.utils.timing as timing_module
-from traceml_ai.instrumentation.h2d import is_cuda_target
-from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
-    _H2D_TLS,
-    _ORIG_TENSOR_TO,
-    _traceml_tensor_to,
-    h2d_auto_timer,
-)
-from traceml_ai.sdk.wrappers import wrap_h2d
+import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch  # noqa: E402
+import traceml_ai.utils.timing as timing_module  # noqa: E402
+from traceml_ai.instrumentation.h2d import is_cuda_target  # noqa: E402
+from traceml_ai.sdk.wrappers import wrap_h2d  # noqa: E402
+
+_H2D_TLS = h2d_patch._H2D_TLS
+_traceml_tensor_to = h2d_patch._traceml_tensor_to
+h2d_auto_timer = h2d_patch.h2d_auto_timer
 
 
 # _reload_initialization and _reload_h2d_patch use local imports intentionally.
@@ -167,7 +164,7 @@ class TestH2DAutoTimerPatch:
         tensor = torch.ones(4)
         recorded = []
 
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             # Should never be reached when disabled
             recorded.append(name)
 
@@ -191,7 +188,7 @@ class TestH2DAutoTimerPatch:
         tensor = torch.ones(4)
         recorded = []
 
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
 
             @contextmanager
@@ -220,7 +217,7 @@ class TestH2DAutoTimerPatch:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 
@@ -246,7 +243,7 @@ class TestH2DAutoTimerPatch:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 
@@ -279,7 +276,7 @@ class TestH2DAutoTimerPatch:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 
@@ -404,7 +401,7 @@ class TestWrapH2D:
         recorded = []
 
         @contextmanager
-        def fake_timed_region(name, scope, use_gpu):
+        def fake_timed_region(name, scope, record_gpu_events):
             recorded.append(name)
             yield
 

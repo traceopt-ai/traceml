@@ -46,10 +46,14 @@ from traceml_ai.runtime.session import get_session_id
 from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
-DASHBOARD_EXTRA_INSTALL_HINT = (
-    "Dashboard mode requires optional dependencies. Install them with "
-    "`pip install 'traceml-ai[dashboard]'`."
+DASHBOARD_DEPENDENCY_INSTALL_HINT = (
+    "Dashboard mode requires nicegui and plotly. They are included in the "
+    "default TraceML install; if they are missing, run "
+    "`pip install -U traceml-ai` or `pip install nicegui plotly`."
 )
+
+SINGLE_NODE_DEFAULT_MODE = "dashboard"
+MULTI_NODE_DEFAULT_MODE = "summary"
 
 
 def _launch_defaults_for_topology(
@@ -59,8 +63,66 @@ def _launch_defaults_for_topology(
 ) -> dict[str, Any]:
     """Return built-in launch defaults adjusted for the requested topology."""
     resolved = dict(defaults)
-    resolved["mode"] = "summary" if int(nnodes) > 1 else "cli"
+    resolved["mode"] = (
+        MULTI_NODE_DEFAULT_MODE
+        if int(nnodes) > 1
+        else SINGLE_NODE_DEFAULT_MODE
+    )
     return resolved
+
+
+def _require_dashboard_dependencies(mode: str) -> None:
+    """Validate dashboard dependencies when dashboard mode is active."""
+    if mode != "dashboard":
+        return
+
+    missing = [
+        package
+        for package in ("nicegui", "plotly")
+        if importlib.util.find_spec(package) is None
+    ]
+    if missing:
+        raise SystemExit(
+            "[TraceML] ERROR: "
+            f"{DASHBOARD_DEPENDENCY_INSTALL_HINT} "
+            f"Missing: {', '.join(missing)}."
+        )
+
+
+def _dashboard_url(dashboard_port: int) -> str:
+    """Return the local browser URL for the dashboard."""
+    return f"http://127.0.0.1:{int(dashboard_port)}"
+
+
+def _dashboard_ssh_tunnel_command(dashboard_port: int) -> str:
+    """Return an SSH tunnel template for viewing a remote dashboard locally."""
+    port = int(dashboard_port)
+    return f"ssh -L {port}:127.0.0.1:{port} user@remote-host"
+
+
+def _boxed_message(title: str, lines: list[str]) -> str:
+    """Format a high-visibility ASCII box for important launch messages."""
+    content = [title, *lines]
+    width = max(len(line) for line in content)
+    border = "+" + "-" * (width + 2) + "+"
+    rows = [border]
+    rows.extend(f"| {line.ljust(width)} |" for line in content)
+    rows.append(border)
+    return "\n".join(rows)
+
+
+def _dashboard_access_box(dashboard_port: int) -> str:
+    """Return the dashboard access instructions shown after launch."""
+    url = _dashboard_url(dashboard_port)
+    ssh_cmd = _dashboard_ssh_tunnel_command(dashboard_port)
+    return _boxed_message(
+        "TraceML dashboard",
+        [
+            f"Open locally: {url}",
+            f"Remote SSH tunnel: {ssh_cmd}",
+            "Then open the local URL above in your browser.",
+        ],
+    )
 
 
 def _log_launcher_exception(message: str, exc: Exception) -> None:
@@ -103,21 +165,21 @@ def resolve_existing_script_path(script_path: str) -> str:
 
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
-    if getattr(args, "mode", None) == "dashboard":
-        missing = [
-            package
-            for package in ("nicegui", "plotly")
-            if importlib.util.find_spec(package) is None
-        ]
-        if missing:
-            raise SystemExit(
-                "[TraceML] ERROR: "
-                f"{DASHBOARD_EXTRA_INSTALL_HINT} Missing: {', '.join(missing)}."
-            )
+    try:
+        launch_cfg = DistributedLaunchConfig.from_args(args)
+        RunIdentity.from_args(
+            args,
+            generated_session_id="validation_placeholder",
+            require_explicit=launch_cfg.torchrun.nnodes > 1,
+        )
+    except ValueError as exc:
+        raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
 
-    if getattr(args, "mode", None) == "summary" and getattr(
-        args, "no_history", False
-    ):
+    explicit_mode = getattr(args, "mode", None)
+    if explicit_mode is not None:
+        _require_dashboard_dependencies(str(explicit_mode))
+
+    if explicit_mode == "summary" and getattr(args, "no_history", False):
         raise SystemExit(
             "[TraceML] ERROR: --mode=summary requires history. "
             "Remove --no-history to enable final summary generation."
@@ -143,15 +205,6 @@ def validate_launch_args(args: argparse.Namespace) -> None:
         raise SystemExit(
             "[TraceML] ERROR: --trace-max-steps must be greater than 0."
         )
-    try:
-        launch_cfg = DistributedLaunchConfig.from_args(args)
-        RunIdentity.from_args(
-            args,
-            generated_session_id="validation_placeholder",
-            require_explicit=launch_cfg.torchrun.nnodes > 1,
-        )
-    except ValueError as exc:
-        raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
 
 
 def launch_process(script_path: str, args: argparse.Namespace) -> None:
@@ -232,6 +285,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             f"[TraceML] ERROR: invalid mode '{cfg['mode']}'. "
             f"Valid modes: {sorted(supported_modes)}"
         )
+    _require_dashboard_dependencies(str(cfg["mode"]))
 
     owns_aggregator = aggregator_cfg.is_owner(node_rank=torchrun_cfg.node_rank)
 
@@ -445,6 +499,8 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     stderr_capture = (
         start_stderr_tail_capture(train_proc) if capture_stderr else None
     )
+    if owns_aggregator and cfg["mode"] == "dashboard":
+        print(_dashboard_access_box(int(cfg["dashboard_port"])))
 
     while True:
         train_rc = train_proc.poll()

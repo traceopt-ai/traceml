@@ -73,14 +73,14 @@ These fingerprints came from the DDP demo on two nodes with one GPU per node.
 | Scenario | Diagnosis | Key signal |
 |---|---|---|
 | Balanced | `COMPUTE-BOUND` | total `124.6/124.6ms`, input `1.4/1.4ms`, compute `122.4/122.4ms` |
-| Input straggler | `INPUT STRAGGLER` | r0 dataloader `201.6ms` vs r1 `1.4ms` |
+| Input straggler | `INPUT STRAGGLER` | r0 input wait `201.6ms` vs r1 `1.4ms` |
 | Compute straggler | `COMPUTE STRAGGLER` | r0 optimizer `33.1ms` vs r1 `14.5ms` |
 
 Read the balanced run as the control: both ranks have similar total step time,
 input time is small, and the run is mostly compute.
 
 Read the input-straggler run as a rank-local input issue: rank 0 reaches compute
-late because its dataloader path is slower.
+late because its input path is slower.
 
 Read the compute-straggler run as a rank-local compute issue: rank 0 spends more
 time in optimizer work than the peer rank.
@@ -91,25 +91,25 @@ Start with the Step Time diagnosis.
 
 | Diagnosis | Meaning |
 |---|---|
-| `INPUT STRAGGLER` | one rank has meaningfully more dataloader burden than a typical rank |
-| `COMPUTE STRAGGLER` | one rank has meaningfully more clean compute burden than a typical rank |
+| `INPUT STRAGGLER` | one rank spends much longer waiting for input than peer ranks |
+| `COMPUTE STRAGGLER` | one rank spends meaningfully more time in compute than peer ranks |
 | `H2D STRAGGLER` | one rank has meaningfully more host-to-device transfer burden than a typical rank |
 | `RESIDUAL STRAGGLER` | one rank has meaningfully more rank-local residual `residual_proxy` than a typical rank |
-| `STRAGGLER` | one rank is slower, but dataloader, clean compute, H2D, and residual excess are mixed |
+| `STRAGGLER` | one rank is slower, but input wait, compute, H2D, and residual signals are mixed |
 | `INPUT-BOUND` | input work is broad, not just one bad rank |
-| `RESIDUAL-HEAVY` | meaningful residual time is not attributed to dataloader, H2D, forward, backward, or optimizer work |
+| `RESIDUAL-HEAVY` | meaningful residual time is not attributed to input wait, H2D, forward, backward, or optimizer work |
 
-For rank-local stragglers, TraceML uses clean-step attribution before blaming a
-component. It discounts backward time that can be explained by another rank's
-non-backward work, then compares clean step across ranks. The component label is
-the largest worst-rank excess over peer median among dataloader, clean compute,
-H2D, and residual, and it must dominate the next-largest excess by `1.25x`.
+For rank-local stragglers, TraceML first accounts for time a rank may spend
+waiting during backward because another rank arrived late. It then compares
+ranks and labels the largest timing difference among input wait, compute, H2D,
+and residual. The largest difference must be at least `1.25x` the next-largest
+difference.
 
 Then inspect:
 
 - `Worst Rank`
 - worst vs median timing
-- `Dataloader Fetch`
+- `Input Wait`
 - `Forward`
 - `Backward`
 - `Optimizer Step`
@@ -141,7 +141,7 @@ worst rank: logging, checkpointing, validation, callbacks, CPU stalls, or
 unobserved transfer work.
 
 If the diagnosis is `STRAGGLER`, reduce the problem one phase at a time. Start
-with the largest clean-step component gap.
+with the largest timing gap on the slow rank.
 
 If the diagnosis is `RESIDUAL-HEAVY`, remember that TraceML reports residual
 time as a derived bucket. It is not direct NCCL or all-reduce timing. Inspect logging,
@@ -172,7 +172,7 @@ residual time, and diagnosis.
 ## Related
 
 - [Find why PyTorch training is slow](slow-pytorch-training.md)
-- [Find DataLoader Bottlenecks](pytorch-dataloader-bottleneck.md)
+- [Find Input Pipeline Bottlenecks](pytorch-input-pipeline-bottleneck.md)
 - [Distributed Training](../user_guide/distributed-training.md)
 - [Running on Slurm](../user_guide/slurm.md)
 - [How to Read TraceML Output](../user_guide/reading-output.md)

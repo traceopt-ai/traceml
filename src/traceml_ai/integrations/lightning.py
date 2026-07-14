@@ -221,7 +221,7 @@ class TraceMLCallback(_CallbackBase):
             with timed_region(
                 "_traceml_internal:forward_time",
                 scope=TimeScope.STEP,
-                use_gpu=True,
+                record_gpu_events=True,
             ):
                 return original_forward(*args, **kwargs)
 
@@ -311,7 +311,9 @@ class TraceMLCallback(_CallbackBase):
         if TRACEML_DISABLED:
             return
         self._traceml_step_ctx = timed_region(
-            "_traceml_internal:step_time", scope="step", use_gpu=False
+            "_traceml_internal:step_time",
+            scope="step",
+            record_gpu_events=True,
         )
         self._traceml_step_ctx.__enter__()
 

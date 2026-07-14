@@ -48,8 +48,8 @@ def test_lightning_forward_wrapper_times_only_forward(monkeypatch):
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu=True):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events=True):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     monkeypatch.setattr(
@@ -89,8 +89,8 @@ def test_lightning_batch_start_does_not_open_forward_region(monkeypatch):
     calls = []
 
     @contextmanager
-    def fake_timed_region(name, scope, use_gpu=True):
-        calls.append((name, scope, use_gpu))
+    def fake_timed_region(name, scope, record_gpu_events=True):
+        calls.append((name, scope, record_gpu_events))
         yield
 
     class FakeMemoryTracker:
@@ -121,4 +121,4 @@ def test_lightning_batch_start_does_not_open_forward_region(monkeypatch):
     )
     callback._close_context("_traceml_step_ctx")
 
-    assert calls == [("_traceml_internal:step_time", "step", False)]
+    assert calls == [("_traceml_internal:step_time", "step", True)]

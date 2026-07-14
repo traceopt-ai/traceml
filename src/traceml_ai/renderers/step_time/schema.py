@@ -40,50 +40,11 @@ class StepCombinedTimeMetric:
     coverage: StepCombinedTimeCoverage
 
 
-# -----------------------------
-# New: dashboard rank heatmap data
-# -----------------------------
-
-
-@dataclass(frozen=True)
-class StepCombinedRankRow:
-    """
-    One row in the rank heatmap table.
-
-    All values are window sums over the last K fully-common steps.
-    """
-
-    rank: int
-    sums_ms: Dict[str, float]  # metric_key -> window sum in ms
-
-
-@dataclass(frozen=True)
-class StepCombinedRankHeatmap:
-    """
-    Rank x Metric heatmap payload (dashboard-oriented).
-
-    - rows are ranks
-    - columns are metrics (metric_keys)
-    - each cell is sum over last K fully-common steps
-
-    Sorting:
-    - rows are sorted by (step_time_ms desc, dataloader_fetch desc) by default
-    """
-
-    window_size: int
-    steps_used: int
-    metric_keys: List[str]
-    rows: List[StepCombinedRankRow]
-    sort_by: List[str] = field(
-        default_factory=lambda: ["step_time_ms", "dataloader_fetch"]
-    )
-
-
 @dataclass(frozen=True)
 class StepCombinedTimeResult:
-    metrics: List[StepCombinedTimeMetric]
     status_message: str = "OK"
     per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
-
-    # Optional dashboard payload (safe for older consumers)
-    rank_heatmap: Optional[StepCombinedRankHeatmap] = None
+    diagnosis_clock: str = "cpu"
+    diagnosis_metrics: List[StepCombinedTimeMetric] = field(
+        default_factory=list
+    )

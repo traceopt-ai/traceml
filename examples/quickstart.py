@@ -2,7 +2,7 @@
 
 Run with:
 
-    traceml run examples/quickstart.py --mode=summary
+    traceml run examples/quickstart.py
 
 The example uses 128 completed steps so the end-of-run Step Time and Step
 Memory summaries clear TraceML's 50-step diagnosis threshold.

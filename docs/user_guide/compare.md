@@ -188,8 +188,11 @@ That means:
 - if one summary has a field and the other does not, comparison still runs
 - if a section is missing, TraceML skips noisy output instead of failing when possible
 - if newer TraceML versions add more fields later, older comparisons should still remain usable for the shared fields
+- if the two summaries use different schema versions, compare emits a warning because some fields may have changed meaning
 
 This helps keep compare useful across incremental TraceML releases.
+For Step Time input timing, schema 1.6 compares selected-clock `input_wait_ms`
+when present and falls back to legacy `dataloader_ms` for older summaries.
 
 ---
 
