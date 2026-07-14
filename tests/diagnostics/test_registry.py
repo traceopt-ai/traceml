@@ -207,8 +207,6 @@ def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
 def test_model_step_time_diagnostics_do_not_fallback_to_public_metrics(
     monkeypatch,
 ):
-    import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
-
     captured = {}
 
     def fake_diagnosis(metrics, **kwargs):
