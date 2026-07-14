@@ -7,10 +7,8 @@ read back correctly using the same framing protocol.
 
 import json
 import struct
-import tempfile
-from io import StringIO
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

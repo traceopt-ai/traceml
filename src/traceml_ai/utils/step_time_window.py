@@ -33,6 +33,7 @@ from traceml_ai.utils.step_windows import common_suffix_steps
 if TYPE_CHECKING:
     from traceml_ai.diagnostics.common import DiagnosticResult
     from traceml_ai.diagnostics.step_time.api import StepDiagnosis
+    from traceml_ai.diagnostics.step_time.policy import StepTimeDiagnosisPolicy
 
 DiagnosisClock = Literal["cpu", "gpu"]
 

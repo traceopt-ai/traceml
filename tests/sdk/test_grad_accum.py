@@ -2,7 +2,7 @@ import pytest
 
 L = pytest.importorskip("lightning")
 torch = pytest.importorskip("torch")
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset  # noqa: E402
 
 
 class DummyModel(L.LightningModule):

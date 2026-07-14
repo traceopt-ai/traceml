@@ -13,7 +13,6 @@ from traceml_ai.diagnostics.step_memory.rules import (
     DEFAULT_STEP_MEMORY_SUMMARY_RULES,
     run_step_memory_summary_rules,
 )
-from traceml_ai.diagnostics.step_memory.trend import evaluate_step_memory_creep
 from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
