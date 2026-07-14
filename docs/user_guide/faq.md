@@ -321,21 +321,6 @@ traceml run train.py --disable-traceml
 
 ---
 
-## How can I keep stderr from a native training crash?
-
-Enable the opt-in bounded stderr tail:
-
-```bash
-traceml run train.py --mode=summary --capture-stderr
-```
-
-You can also set `TRACEML_CAPTURE_STDERR=1`. TraceML continues to print the
-child process's stderr to the terminal and stores only its last 64 KiB in
-`logs/<run-name>/crash_stderr.log` when the child exits. The file remains local
-and stderr capture is disabled by default.
-
----
-
 ## What does `MEMORY CREEP` usually mean?
 
 It usually means memory is rising over time instead of staying stable.

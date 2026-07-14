@@ -219,9 +219,6 @@ def collect_existing_artifacts(
         candidates["code_manifest"] = (
             Path(session_root).resolve() / "code_manifest.json"
         )
-        candidates["crash_stderr_log"] = (
-            Path(session_root).resolve() / "crash_stderr.log"
-        )
 
     return {
         name: str(path) for name, path in candidates.items() if path.exists()
