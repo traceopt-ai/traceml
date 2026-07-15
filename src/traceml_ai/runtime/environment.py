@@ -6,10 +6,11 @@
 
 """Runtime environment classification for a TraceML training rank.
 
-This module classifies the local runtime environment so a future sampler can
-persist rank-scoped context such as topology, torch.distributed state, and the
-observed training strategy. It is not transport metadata: TCP envelope `meta`
-continues to describe the sender, while this data belongs in a sampler body row.
+This module classifies the local runtime environment so the runtime environment
+sampler can persist rank-scoped context such as topology, torch.distributed
+state, and the observed training strategy. It is not transport metadata: TCP
+envelope `meta` continues to describe the sender, while this data belongs in a
+sampler body row.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ class RuntimeEnvironmentInfo:
     strategy_confidence: str
 
     def to_record(self) -> dict[str, Any]:
-        """Return a JSON/msgpack-safe body row for future sampler transport."""
+        """Return a JSON/msgpack-safe body row for sampler transport."""
         return {
             "topology": self.topology,
             "distributed_initialized": bool(self.distributed_initialized),

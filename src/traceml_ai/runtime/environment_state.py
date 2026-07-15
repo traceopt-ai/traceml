@@ -6,9 +6,9 @@
 
 """Process-local state for one-shot runtime environment telemetry.
 
-Runtime environment data is rank-scoped context that later travels as sampler
-body rows. This module keeps first-publish-wins state separate from transport
-metadata and from the detector itself.
+Runtime environment data is one rank-scoped context row that later travels as
+sampler body data. This module keeps first-publish-wins state separate from
+transport metadata and from the detector itself.
 """
 
 from __future__ import annotations
