@@ -16,7 +16,11 @@ if str(SRC) not in sys.path:
 def _reload_initialization_module():
     import traceml_ai.sdk.initial as initialization
 
-    return importlib.reload(initialization)
+    importlib.reload(initialization)
+    # These tests exercise instrumentation patch policy, not runtime startup.
+    # Stub the runtime bootstrap so init() does not try to reach an aggregator.
+    initialization._start_runtime_for_init = lambda **kwargs: None
+    return initialization
 
 
 def _reload_instrumentation_module():
