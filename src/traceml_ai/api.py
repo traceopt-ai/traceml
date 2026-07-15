@@ -108,8 +108,16 @@ def init(
     aggregator_port: Optional[int] = None,
     connect_timeout_sec: float = 10.0,
     connect_retry_interval_sec: float = 0.25,
+    on_missing_aggregator: Optional[str] = None,
 ) -> TraceMLInitConfig:
-    """Initialize TraceML and start its runtime for this process."""
+    """Initialize TraceML and start its runtime for this process.
+
+    ``on_missing_aggregator`` controls what happens when the aggregator is
+    unreachable (or the runtime fails to start): ``'warn'`` (default) emits one
+    stderr warning and continues as a no-op so tracing never crashes training;
+    ``'raise'`` fails hard. Defaults to ``TRACEML_ON_MISSING_AGGREGATOR`` then
+    ``'warn'``.
+    """
     from traceml_ai.sdk.initial import init as _init
 
     return _init(
@@ -128,6 +136,7 @@ def init(
         aggregator_port=aggregator_port,
         connect_timeout_sec=connect_timeout_sec,
         connect_retry_interval_sec=connect_retry_interval_sec,
+        on_missing_aggregator=on_missing_aggregator,
     )
 
 

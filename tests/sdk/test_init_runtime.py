@@ -129,10 +129,39 @@ def test_init_starts_runtime_when_aggregator_reachable(
     assert initialization._RUNTIME_HANDLE is fake_handle
 
 
-def test_init_raises_when_aggregator_unreachable(initialization, monkeypatch):
+def test_init_warns_and_noops_when_aggregator_unreachable(
+    initialization, monkeypatch, capsys
+):
     import traceml_ai.runtime.lifecycle as lifecycle
 
     monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
+    started = []
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
+    monkeypatch.setattr(
+        lifecycle, "wait_for_aggregator", lambda *a, **k: False
+    )
+    monkeypatch.setattr(
+        lifecycle, "start_runtime", lambda *a, **k: started.append(1)
+    )
+
+    # Default is fail-open: a library call inside user code must never crash
+    # the training process for a transport reason. Detach to a no-op + warn.
+    cfg = initialization.init(mode="manual", connect_timeout_sec=1.0)
+
+    assert cfg.disabled is True
+    assert started == []  # never started after a failed preflight
+    assert "[TraceML]" in capsys.readouterr().err  # detached loudly
+    assert initialization.get_init_config() is cfg  # no-op config stored
+
+
+def test_init_raises_when_aggregator_unreachable_and_strict(
+    initialization, monkeypatch
+):
+    import traceml_ai.runtime.lifecycle as lifecycle
+
+    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
     started = []
     monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
     monkeypatch.setattr(
@@ -143,7 +172,11 @@ def test_init_raises_when_aggregator_unreachable(initialization, monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="could not reach the aggregator"):
-        initialization.init(mode="manual", connect_timeout_sec=1.0)
+        initialization.init(
+            mode="manual",
+            connect_timeout_sec=1.0,
+            on_missing_aggregator="raise",
+        )
 
     assert started == []  # never started after a failed preflight
     assert initialization.get_init_config() is None  # config not stored

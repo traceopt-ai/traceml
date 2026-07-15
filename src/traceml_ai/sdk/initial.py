@@ -326,6 +326,24 @@ def _resolve_runtime_settings(
     )
 
 
+def _resolve_on_missing_aggregator(value: Optional[str]) -> str:
+    """Resolve the missing-aggregator policy: explicit arg > env > 'warn'."""
+    import os
+
+    resolved = (
+        value
+        if value is not None
+        else os.environ.get("TRACEML_ON_MISSING_AGGREGATOR")
+    ) or "warn"
+    resolved = str(resolved).strip().lower()
+    if resolved not in ("warn", "raise"):
+        raise ValueError(
+            "on_missing_aggregator must be 'warn' or 'raise', got "
+            f"{resolved!r}."
+        )
+    return resolved
+
+
 def _start_runtime_for_init(
     *,
     ui_mode: Optional[str],
@@ -416,6 +434,7 @@ def init(
     aggregator_port: Optional[int] = None,
     connect_timeout_sec: float = 10.0,
     connect_retry_interval_sec: float = 0.25,
+    on_missing_aggregator: Optional[str] = None,
     _source: str = "user",
 ) -> TraceMLInitConfig:
     """
@@ -472,6 +491,11 @@ def init(
         Bounded period to wait for the aggregator before failing.
     connect_retry_interval_sec:
         Delay between aggregator connection attempts.
+    on_missing_aggregator:
+        Policy when the aggregator is unreachable (or the runtime fails to
+        start): 'warn' (default) emits one stderr warning and continues as a
+        no-op so instrumentation never crashes training; 'raise' fails hard.
+        Defaults to ``TRACEML_ON_MISSING_AGGREGATOR`` then 'warn'.
 
     Returns
     -------
@@ -483,8 +507,9 @@ def init(
     ValueError
         If the init request is invalid.
     RuntimeError
-        If init conflicts with an existing config, patch installation fails, or
-        the aggregator is unreachable within ``connect_timeout_sec``.
+        If init conflicts with an existing config or patch installation fails.
+        An unreachable aggregator raises only when
+        ``on_missing_aggregator='raise'``; by default it warns and no-ops.
 
     Notes
     -----
@@ -545,17 +570,50 @@ def init(
         # preflight). Doing so before installing patches keeps torch untouched
         # when the aggregator is missing, and matches the runtime-then-patches
         # order used by the in-process framework integrations.
-        _start_runtime_for_init(
-            ui_mode=ui_mode,
-            interval=interval,
-            logs_dir=logs_dir,
-            enable_logging=enable_logging,
-            session_id=session_id,
-            aggregator_host=aggregator_host,
-            aggregator_port=aggregator_port,
-            connect_timeout_sec=connect_timeout_sec,
-            connect_retry_interval_sec=connect_retry_interval_sec,
-        )
+        try:
+            _start_runtime_for_init(
+                ui_mode=ui_mode,
+                interval=interval,
+                logs_dir=logs_dir,
+                enable_logging=enable_logging,
+                session_id=session_id,
+                aggregator_host=aggregator_host,
+                aggregator_port=aggregator_port,
+                connect_timeout_sec=connect_timeout_sec,
+                connect_retry_interval_sec=connect_retry_interval_sec,
+            )
+        except RuntimeError as exc:
+            # Fail-open ladder (see project failure-handling policy): a library
+            # call inside user code must never crash the training process for a
+            # transport reason. On an unreachable aggregator (or a runtime that
+            # fails to start) detach to a no-op with ONE loud stderr warning,
+            # installing no patches. Opt into hard failure with
+            # on_missing_aggregator='raise' (e.g. CI that wants misconfigured
+            # telemetry to fail the run).
+            if (
+                _resolve_on_missing_aggregator(on_missing_aggregator)
+                == "raise"
+            ):
+                raise
+            import sys
+
+            print(
+                f"[TraceML] {exc} Continuing without tracing (no-op). Pass "
+                "on_missing_aggregator='raise' (or set "
+                "TRACEML_ON_MISSING_AGGREGATOR=raise) to fail instead.",
+                file=sys.stderr,
+            )
+            noop_config = TraceMLInitConfig(
+                mode="manual",
+                patch_dataloader=False,
+                patch_forward=False,
+                patch_backward=False,
+                patch_h2d=False,
+                source=_source,
+                disabled=True,
+            )
+            _INIT_CONFIG = noop_config
+            return noop_config
         _apply_requested_patches(requested)
         _INIT_CONFIG = requested
         return requested
