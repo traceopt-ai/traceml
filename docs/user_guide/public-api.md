@@ -103,9 +103,21 @@ For torchrun and multi-node, bind the aggregator so workers on other nodes can
 connect:
 
 ```bash
-traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> --aggregator-port 29765
-torchrun ... train.py
+# aggregator node: --nnodes x --nproc-per-node = total workers, so the
+# aggregator waits for every rank before finalizing (and warns about ranks
+# that never report)
+traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
+  --aggregator-port 29765 --nnodes <N> --nproc-per-node <M>
+
+# each training node: workers read the aggregator endpoint from the
+# environment, so set it before torchrun
+TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
+  torchrun ... train.py
 ```
+
+Workers resolve the aggregator host from `TRACEML_AGGREGATOR_HOST` (default
+`127.0.0.1`), so on multi-node it must be set on every non-aggregator node or
+those workers cannot reach node 0.
 
 `traceml serve` flags:
 
@@ -114,6 +126,7 @@ torchrun ... train.py
 | `--aggregator-host` | Address workers connect to. Default `127.0.0.1`. |
 | `--aggregator-bind-host` | Address the aggregator binds to. Use `0.0.0.0` for multi-node. Default `127.0.0.1`. |
 | `--aggregator-port` | Aggregator TCP port. Default `29765`. |
+| `--nnodes` / `--nproc-per-node` | Total ranks = product. The aggregator waits for all of them before finalizing and warns about missing ranks. Falls back to `TRACEML_EXPECTED_WORLD_SIZE`, else 1. |
 | `--mode` | Display mode: `summary` (default), `cli`, or `dashboard`. |
 | `--logs-dir` | Directory for session logs. |
 | `--run-name` / `--session-id` | Run identity. Workers must use the same value for shared artifacts. |

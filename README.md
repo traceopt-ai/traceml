@@ -122,11 +122,14 @@ For torchrun and multi-node, bind the aggregator so workers on other nodes can
 reach it:
 
 ```bash
-# on the aggregator node
-traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> --aggregator-port 29765
+# on the aggregator node (--nnodes x --nproc-per-node = total workers, so the
+# aggregator waits for every rank before finalizing)
+traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
+  --aggregator-port 29765 --nnodes <N> --nproc-per-node <M>
 
-# on each training node
-torchrun ... train.py
+# on each training node: point workers at node 0's aggregator, then launch
+TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
+  torchrun ... train.py
 ```
 
 `traceml.init(...)` takes runtime settings as arguments (for example
