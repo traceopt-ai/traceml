@@ -92,7 +92,7 @@ Start with the Step Time diagnosis.
 | Diagnosis | Meaning |
 |---|---|
 | `INPUT STRAGGLER` | one rank spends much longer waiting for input than peer ranks |
-| `COMPUTE STRAGGLER` | one rank spends meaningfully more time in compute than peer ranks |
+| `COMPUTE STRAGGLER` | one rank has meaningfully more observed forward/backward/optimizer time; in FSDP this may include collective wait |
 | `H2D STRAGGLER` | one rank has meaningfully more host-to-device transfer burden than a typical rank |
 | `RESIDUAL STRAGGLER` | one rank has meaningfully more rank-local residual `residual_proxy` than a typical rank |
 | `STRAGGLER` | one rank is slower, but input wait, compute, H2D, and residual signals are mixed |
@@ -124,8 +124,8 @@ If the diagnosis is `INPUT STRAGGLER`, inspect input loading on the worst rank:
 - slow storage path on one host
 - custom collation or tokenization on one rank
 
-If the diagnosis is `COMPUTE STRAGGLER`, inspect model-side work on the worst
-rank:
+If the diagnosis is `COMPUTE STRAGGLER`, inspect observed compute-phase work on
+the worst rank:
 
 - uneven input shapes
 - rank-local branching
@@ -154,8 +154,12 @@ TraceML supports single-node multi-GPU DDP and FSDP in the current public docs.
 Multi-node DDP summary reports are supported. Multi-node FSDP uses the same
 distributed launch path as DDP, but should be validated in your environment.
 
-Use this guide for rank-skew symptoms in FSDP runs, but do not treat it as
-FSDP-specific collective timing.
+TraceML's clean-step rank attribution is calibrated for DDP-style backward
+synchronization. In FSDP, forward time can include parameter all-gather wait
+caused by another rank arriving late. Use this guide for FSDP rank-skew
+symptoms, but treat `COMPUTE STRAGGLER` as observed compute-phase skew, not
+proof of rank-local model compute. TraceML does not yet report explicit FSDP
+all-gather or reduce-scatter timing.
 
 ## Compare a fix
 

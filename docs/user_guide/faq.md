@@ -189,6 +189,10 @@ yet supported.
 
 Yes, for single-node FSDP. Multi-node FSDP summary reports use the same
 distributed launch path as DDP, but should be validated on your environment.
+TraceML currently surfaces FSDP timing and rank skew, but it does not yet split
+FSDP parameter all-gather or reduce-scatter wait into separate collective
+buckets. In FSDP, elevated forward time may be real compute or exposed
+all-gather wait.
 
 If you hit an issue on your setup, please open an issue with a minimal repro and environment details.
 
@@ -385,7 +389,8 @@ See:
 
 ## What does `COMPUTE STRAGGLER` mean?
 
-It means one rank spends more time in model compute than the typical rank.
+It means one rank spends more time in observed compute phases than the typical
+rank.
 
 TraceML accounts for backward time that can be explained by another rank
 arriving late. It uses `COMPUTE STRAGGLER` when compute-time excess dominates
