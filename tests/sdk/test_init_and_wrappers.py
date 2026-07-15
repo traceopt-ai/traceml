@@ -262,6 +262,11 @@ def _run_trace_step_once(*, mode, monkeypatch):
         "ensure_optimizer_timing_installed",
         lambda: calls.append("optimizer"),
     )
+    monkeypatch.setattr(
+        instrumentation,
+        "_publish_runtime_environment",
+        lambda model: None,
+    )
 
     model = nn.Linear(2, 2)
     with instrumentation.trace_step(model):
@@ -278,6 +283,71 @@ def test_trace_step_only_auto_installs_optimizer_timing(monkeypatch):
     assert (
         _run_trace_step_once(mode="selective", monkeypatch=monkeypatch) == []
     )
+
+
+def test_trace_step_publishes_runtime_environment_once(monkeypatch):
+    _reload_initialization_module()
+    instrumentation = _reload_instrumentation_module()
+    published = []
+
+    monkeypatch.setattr(
+        instrumentation,
+        "timed_region",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "forward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "backward_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "h2d_auto_timer",
+        _noop_context_manager,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "StepMemoryTracker",
+        _NoopStepMemoryTracker,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "flush_step_events",
+        lambda model, step: None,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "ensure_optimizer_timing_installed",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "has_runtime_environment_info",
+        lambda: bool(published),
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "detect_runtime_environment",
+        lambda model: ("runtime-info", id(model)),
+    )
+    monkeypatch.setattr(
+        instrumentation,
+        "publish_runtime_environment_once",
+        lambda info: published.append(info) or True,
+    )
+
+    model = nn.Linear(2, 2)
+    with instrumentation.trace_step(model):
+        pass
+    with instrumentation.trace_step(model):
+        pass
+
+    assert published == [("runtime-info", id(model))]
 
 
 def test_trace_step_without_init_does_not_auto_install_optimizer_timing(

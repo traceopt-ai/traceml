@@ -80,6 +80,7 @@ def _selected_keys(
 def test_watch_cli_selects_host_process_and_stdout_samplers() -> None:
     assert _selected_keys(profile="watch", mode="cli") == (
         "system",
+        "runtime_environment",
         "process",
         "stdout_stderr",
     )
@@ -88,6 +89,7 @@ def test_watch_cli_selects_host_process_and_stdout_samplers() -> None:
 def test_watch_dashboard_omits_stdout_sampler() -> None:
     assert _selected_keys(profile="watch", mode="dashboard") == (
         "system",
+        "runtime_environment",
         "process",
     )
 
@@ -95,6 +97,7 @@ def test_watch_dashboard_omits_stdout_sampler() -> None:
 def test_run_cli_selects_step_samplers() -> None:
     assert _selected_keys(profile="run", mode="cli") == (
         "system",
+        "runtime_environment",
         "process",
         "stdout_stderr",
         "step_time",
@@ -118,6 +121,7 @@ def test_ddp_nonzero_rank_skips_rank_zero_only_system_sampler() -> None:
         is_ddp=True,
         local_rank=1,
     ) == (
+        "runtime_environment",
         "process",
         "stdout_stderr",
         "step_time",
@@ -133,6 +137,7 @@ def test_ddp_rank_zero_keeps_rank_zero_only_system_sampler() -> None:
         local_rank=0,
     ) == (
         "system",
+        "runtime_environment",
         "process",
         "stdout_stderr",
         "step_time",
@@ -143,6 +148,7 @@ def test_ddp_rank_zero_keeps_rank_zero_only_system_sampler() -> None:
 def test_unknown_profile_keeps_only_profile_agnostic_samplers() -> None:
     assert _selected_keys(profile="unknown", mode="cli") == (
         "system",
+        "runtime_environment",
         "process",
         "stdout_stderr",
     )
@@ -237,6 +243,7 @@ def test_queue_backed_samplers_are_marked_for_final_recording_drain() -> None:
     }
 
     assert specs["system"].drain_on_recording_stop is False
+    assert specs["runtime_environment"].drain_on_recording_stop is True
     assert specs["process"].drain_on_recording_stop is False
     assert specs["step_time"].drain_on_recording_stop is True
     assert specs["step_memory"].drain_on_recording_stop is True
