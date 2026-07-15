@@ -102,6 +102,28 @@ def test_serve_maps_flags_into_aggregator_settings(monkeypatch) -> None:
     assert settings.aggregator.port == 40000
 
 
+def test_serve_threads_expected_world_size(monkeypatch) -> None:
+    monkeypatch.delenv("TRACEML_EXPECTED_WORLD_SIZE", raising=False)
+    parser = build_parser()
+
+    # Explicit --nnodes x --nproc-per-node sets the rank count so the
+    # aggregator waits for ALL ranks before finalizing.
+    args = parser.parse_args(
+        ["serve", "--nnodes", "2", "--nproc-per-node", "4"]
+    )
+    assert _resolve_serve_settings(args).expected_world_size == 8
+
+    # Falls back to TRACEML_EXPECTED_WORLD_SIZE (matching `traceml run`).
+    monkeypatch.setenv("TRACEML_EXPECTED_WORLD_SIZE", "3")
+    args = parser.parse_args(["serve"])
+    assert _resolve_serve_settings(args).expected_world_size == 3
+
+    # Default is 1 when neither flags nor env are set.
+    monkeypatch.delenv("TRACEML_EXPECTED_WORLD_SIZE", raising=False)
+    args = parser.parse_args(["serve"])
+    assert _resolve_serve_settings(args).expected_world_size == 1
+
+
 def test_serve_configures_logging_without_preset_env(
     monkeypatch, tmp_path
 ) -> None:

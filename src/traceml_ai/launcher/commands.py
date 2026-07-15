@@ -533,8 +533,26 @@ def _resolve_serve_settings(args: argparse.Namespace):
     bind_host = str(getattr(args, "aggregator_bind_host", None) or "127.0.0.1")
     port = int(getattr(args, "aggregator_port", 29765))
 
+    # Expected worker count so the aggregator waits for ALL ranks before
+    # finalizing (and warns about ranks that never report). Prefer explicit
+    # --nnodes x --nproc-per-node, else TRACEML_EXPECTED_WORLD_SIZE (matching
+    # the `traceml run` launcher), else 1. Without this the finalize gate
+    # treats the first finished rank as "all done" on multi-rank jobs.
+    nnodes = getattr(args, "nnodes", None)
+    nproc = getattr(args, "nproc_per_node", None)
+    if nnodes and nproc:
+        expected_world_size = int(nnodes) * int(nproc)
+    else:
+        env_ws = os.environ.get("TRACEML_EXPECTED_WORLD_SIZE")
+        try:
+            expected_world_size = int(env_ws) if env_ws else 1
+        except ValueError:
+            expected_world_size = 1
+    expected_world_size = max(1, expected_world_size)
+
     return TraceMLSettings(
         mode=str(cfg["mode"]),
+        expected_world_size=expected_world_size,
         render_interval_sec=float(cfg["interval"]),
         enable_logging=bool(cfg["enable_logging"]),
         logs_dir=str(cfg["logs_dir"]),

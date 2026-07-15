@@ -277,6 +277,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Backward-compatible alias for --run-name.",
     )
     serve_parser.add_argument(
+        "--nnodes",
+        type=int,
+        default=None,
+        help=(
+            "Total nodes in the training job. With --nproc-per-node, sets the "
+            "expected worker count so the aggregator waits for ALL ranks "
+            "before finalizing (and warns about ranks that never report). "
+            "Without it the aggregator finalizes after the first rank."
+        ),
+    )
+    serve_parser.add_argument(
+        "--nproc-per-node",
+        type=int,
+        default=None,
+        help="Workers per node. Multiplied by --nnodes for the rank count.",
+    )
+    serve_parser.add_argument(
         "--interval",
         type=float,
         default=None,
