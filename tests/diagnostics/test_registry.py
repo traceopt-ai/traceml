@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
+import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
     ModelDiagnosisItem,
@@ -11,6 +11,7 @@ from traceml_ai.diagnostics.registry import (
     DiagnosticDomainSpec,
     ModelDiagnosticContext,
 )
+from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
 from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
