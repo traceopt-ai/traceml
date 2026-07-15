@@ -138,10 +138,12 @@ class _BoomRuntime:
 
 
 def test_start_runtime_fail_open_registers_noop_handle(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, capsys
 ) -> None:
     # A failed start with fail_open=True must still register a no-op active
-    # handle so a later traceml.init() does not try to start the runtime again.
+    # handle so a later traceml.init() does not try to start the runtime again,
+    # and it must detach LOUDLY (one stderr warning) so a silently dark
+    # integration is never mistaken for a healthy run.
     monkeypatch.setattr(lifecycle, "TraceMLRuntime", _BoomRuntime)
     lifecycle._ACTIVE_RUNTIME_HANDLE = None
     try:
@@ -151,5 +153,6 @@ def test_start_runtime_fail_open_registers_noop_handle(
         )
         assert lifecycle.get_active_runtime_handle() is handle
         assert isinstance(handle.runtime, lifecycle.NoOpRuntime)
+        assert "[TraceML]" in capsys.readouterr().err  # detached loudly
     finally:
         lifecycle._ACTIVE_RUNTIME_HANDLE = None

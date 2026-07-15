@@ -66,9 +66,15 @@ def wait_for_aggregator(
     poll_interval_sec: float = 0.25,
 ) -> bool:
     """Return True once ``(host, port)`` accepts a TCP connection.
-    Retries for a bounded period. Used by ``traceml.init()`` to fail fast and
-    clearly when the aggregator is not running, instead of silently producing
-    no telemetry.
+
+    Retries for a bounded period. Used by ``traceml.init()`` as a best-effort
+    reachability probe before starting the runtime.
+
+    Limitation: this is a bare TCP accept, not a TraceML protocol/session
+    handshake, so any listener on the port (a foreign process, a stale
+    aggregator, or one serving a different session) passes the check. A real
+    handshake is a wire-format change tracked as a follow-up; on a genuine
+    mismatch the runtime simply produces no telemetry for this session.
     """
     deadline = time.monotonic() + float(timeout_sec)
     while True:
@@ -261,9 +267,19 @@ def start_runtime(
             on_error(exc)
         if not fail_open:
             raise
-        # Fail-open: the runtime lifecycle for this process has still been
-        # decided here, so register the no-op handle. A later traceml.init()
-        # sees an active handle and does not try to start the runtime again.
+        # Fail-open ladder: the runtime lifecycle for this process has still
+        # been decided here, so register the no-op handle. A later
+        # traceml.init() sees an active handle and does not try to start the
+        # runtime again. Detach LOUDLY (one stderr warning) so a silently
+        # dark integration (e.g. a Ray worker whose aggregator is down) is
+        # never mistaken for a healthy run.
+        import sys
+
+        print(
+            f"[TraceML] Runtime failed to start ({exc}); continuing without "
+            "tracing (no-op). Telemetry for this process will be absent.",
+            file=sys.stderr,
+        )
         handle = RuntimeHandle(NoOpRuntime())
         _register_active_runtime_handle(handle)
         return handle
