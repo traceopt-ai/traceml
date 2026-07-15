@@ -262,7 +262,11 @@ What to do next:
 
 Meaning:
 
-- one rank has meaningfully more compute burden than a typical rank
+- one rank has meaningfully more observed compute-phase burden than a typical
+  rank
+
+For FSDP, observed forward time may include parameter all-gather wait, so this
+is not proof of pure rank-local model compute.
 
 TraceML uses this idea:
 
@@ -273,7 +277,8 @@ TraceML uses this idea:
 
 In simpler words:
 
-- one rank is doing more model-side work than the others
+- one rank is spending more time in the observed forward, backward, or optimizer
+  phases than the others
 
 Common causes:
 
@@ -760,7 +765,7 @@ Use these as context cards:
 | `INPUT-BOUND` | inspect input loading, preprocessing, and storage |
 | `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
 | `INPUT STRAGGLER` | inspect input path on the worst rank |
-| `COMPUTE STRAGGLER` | inspect compute path on the worst rank |
+| `COMPUTE STRAGGLER` | inspect observed compute-phase skew on the worst rank |
 | `H2D STRAGGLER` | inspect host-to-device transfer on the worst rank |
 | `RESIDUAL STRAGGLER` | inspect rank-local host-side work on the worst rank |
 | `STRAGGLER` | inspect mixed rank unevenness |

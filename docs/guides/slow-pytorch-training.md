@@ -66,8 +66,9 @@ CPU-side stalls, framework orchestration, or unobserved transfers.
 ## What not to assume
 
 - Low GPU utilization alone does not prove an input pipeline bottleneck.
-- A DDP slowdown is not always NCCL. TraceML currently reports rank skew and
-  residual residual, not explicit collective timing.
+- A distributed slowdown is not always NCCL. TraceML currently reports rank
+  skew and residual time, not explicit collective timing. In FSDP, forward time
+  may include parameter all-gather wait.
 - `BALANCED` means no clear bottleneck in the observed window. It does not
   prove the run is globally optimal.
 - A single slow run is easier to trust after comparing it with a known good
