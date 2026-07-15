@@ -203,7 +203,7 @@ the likely bottleneck category so you know where to look next.
 |---|---|---|
 | Input pipeline | High input time or a slow input rank | `num_workers`, `pin_memory`, transforms, tokenization, `collate_fn`, dataset and storage latency |
 | GPU utilization | Step time split across input, compute, and residual time | input pipeline, CPU/GPU handoff, synchronization, distributed coordination |
-| Distributed skew | One DDP or FSDP rank slower than the others | rank-local dataloading, data imbalance, node variance, storage, and network differences |
+| Distributed skew | Rank timing skew in DDP/FSDP runs; FSDP forward time may include parameter all-gather wait | rank-local dataloading, data imbalance, node variance, storage, and network differences |
 | Memory creep | Memory usage growing during the run | retained tensors, logging references, loss accumulation, cached activations |
 | Run regression | Changed metrics versus a known-good run | code, data, batch size, container, driver, hardware, and infrastructure changes |
 | Compute-heavy runs | Most time is spent in compute | `torch.profiler`, Kineto, or Nsight for operator- and kernel-level detail |
@@ -336,6 +336,9 @@ when you need operator- or kernel-level detail.
 - Multi-node runs on Slurm
 - Run-to-run comparison from `final_summary.json`
 - Custom PyTorch loops, Hugging Face, PyTorch Lightning, and Ray Train
+
+FSDP support means timing collection and rank-skew surfacing; explicit FSDP
+collective attribution is on the roadmap.
 
 **On the roadmap:**
 
