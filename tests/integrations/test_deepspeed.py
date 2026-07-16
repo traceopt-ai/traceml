@@ -77,12 +77,17 @@ def _reset_traceml_state() -> None:
         configure_trace_recording,
         reset_trace_session_state,
     )
+    from traceml_ai.utils.timing import _STEP_BUFFER
 
     reset_trace_session_state()
     # Restore a fresh RECORDING state in case a prior test left the runtime in
     # a draining/complete state (which would silently drop step events).
     configure_trace_recording(max_steps=None)
     _drain_step_time_queue()
+    # Iterating a DataLoader to exhaustion leaves one unflushed dataloader_next
+    # event from the terminal StopIteration fetch; clear it so it cannot leak
+    # into the next test's first StepTimeBatch.
+    _STEP_BUFFER.clear()
 
 
 def _install_auto_instrumentation() -> None:
@@ -92,6 +97,9 @@ def _install_auto_instrumentation() -> None:
     from traceml_ai.instrumentation.patches.backward_auto_timer_patch import (
         patch_backward,
     )
+    from traceml_ai.instrumentation.patches.dataloader_patch import (
+        patch_dataloader,
+    )
     from traceml_ai.instrumentation.patches.forward_auto_timer_patch import (
         patch_forward,
     )
@@ -99,9 +107,12 @@ def _install_auto_instrumentation() -> None:
         patch_h2d,
     )
 
+    # Install the full auto set that init(mode="auto") installs, including the
+    # DataLoader patch, so tests can verify the dataloader_next stream too.
     patch_forward()
     patch_backward()
     patch_h2d()
+    patch_dataloader()
     ensure_optimizer_timing_installed()
 
 
@@ -157,6 +168,63 @@ def test_deepspeed_recipe_brackets_step():
     assert _every_batch_has("_traceml_internal:optimizer_step"), (
         "optimizer timing should be captured because engine.step() reaches "
         "the underlying torch optimizer's step()."
+    )
+    assert _every_batch_has(
+        "_traceml_internal:step_time"
+    ), "step timing should be captured once per trace_step block."
+
+
+def test_deepspeed_recipe_emits_dataloader_next_over_real_loader():
+    """The recipe must emit dataloader_next when iterating a real DataLoader.
+
+    dataloader_next is the fragile stream the docs promise (it records
+    DataLoader fetch time). It rides a class-level patch of
+    ``DataLoader.__iter__``, so it only lands when a real ``torch`` DataLoader
+    is iterated. The recipe iterates the loader OUTSIDE ``trace_step``; the
+    fetch is buffered by the process-wide recording gate and flushed into that
+    step's StepTimeBatch, so every batch must carry the event. Asserted as rows
+    landed, not as "a patch ran".
+    """
+    from torch.utils.data import DataLoader, TensorDataset
+
+    _reset_traceml_state()
+    _install_auto_instrumentation()
+
+    num_steps = 3
+    dataset = TensorDataset(
+        torch.randn(num_steps * BATCH_SIZE, INPUT_DIM),
+        torch.randint(0, NUM_CLASSES, (num_steps * BATCH_SIZE,)),
+    )
+    loader = DataLoader(dataset, batch_size=BATCH_SIZE)
+
+    engine = _FakeDeepSpeedEngine(_TinyMLP())
+    criterion = nn.CrossEntropyLoss()
+
+    for batch_x, batch_y in loader:
+        # Fetch happens OUTSIDE trace_step, exactly like the documented recipe.
+        with traceml.trace_step(engine.module):
+            logits = engine(batch_x)
+            loss = criterion(logits, batch_y)
+            engine.backward(loss)
+            engine.step()
+
+    batches = _drain_step_time_queue()
+    assert len(batches) == num_steps, (
+        f"Expected one StepTimeBatch per step ({num_steps}), "
+        f"got {len(batches)}."
+    )
+
+    dark = [
+        i
+        for i, batch in enumerate(batches)
+        if not any(
+            evt.name == "_traceml_internal:dataloader_next"
+            for evt in batch.events
+        )
+    ]
+    assert not dark, (
+        "dataloader_next stream is dark for the DeepSpeed recipe over a real "
+        f"DataLoader: StepTimeBatch(es) {dark} of {num_steps} carry no event."
     )
 
 

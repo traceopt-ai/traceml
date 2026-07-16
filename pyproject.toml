@@ -84,7 +84,7 @@ ray = [
 ]
 
 deepspeed = [
-    "deepspeed",
+    "deepspeed>=0.10.0",
 ]
 
 docs = [

@@ -46,10 +46,11 @@ for batch_x, batch_y in loader:
 ```
 
 `traceml.init(mode="auto")` installs TraceML's process-wide auto-timers, so it
-records DataLoader fetch timing, host-to-device (H2D) copies, forward,
-backward, optimizer, and step timing, plus GPU and process memory, and writes
-an end-of-run summary. Forward is timed on `model_engine.module`; backward is
-captured because `model_engine.backward(loss)` reaches `torch.Tensor.backward()`;
+records DataLoader fetch timing (when you iterate a real PyTorch `DataLoader`,
+as above), host-to-device (H2D) copies, forward, backward, optimizer, and step
+timing, plus GPU and process memory, and writes an end-of-run summary.
+Forward is timed on `model_engine.module`; backward is captured because
+`model_engine.backward(loss)` reaches `torch.Tensor.backward()`;
 optimizer time is captured from the underlying torch optimizer step inside
 `model_engine.step()`. You do not need to add anything else per step.
 
@@ -85,6 +86,12 @@ For multi-node launch commands, see
   optimizer step reached inside `model_engine.step()`. DeepSpeed's own work
   around that step (loss scaling, gradient clipping, ZeRO partitioning) is
   outside the traced phases and shows up as residual.
+- **Gradient accumulation.** The example config uses
+  `gradient_accumulation_steps: 1`, so each `trace_step` brackets one optimizer
+  step. With accumulation greater than 1, `model_engine.step()` runs the
+  optimizer only on boundary micro-steps, so backward is timed every step while
+  optimizer time appears only on those boundaries, and TraceML's step count
+  follows micro-steps rather than optimizer steps.
 
 ## Troubleshooting
 

@@ -118,7 +118,7 @@ def main() -> None:
 
     for epoch in range(EPOCHS):
         train_sampler.set_epoch(epoch)
-        running_loss = 0.0
+        running_loss = torch.zeros((), device=device)
 
         for batch_x, batch_y in train_loader:
             # Wrap the DeepSpeed step. Pass model_engine.module (the unwrapped
@@ -134,18 +134,27 @@ def main() -> None:
                 model_engine.backward(loss)
                 model_engine.step()
 
-                running_loss += float(loss.detach())
-                global_step += 1
+            # Keep loss logging OUTSIDE trace_step so it never inflates the
+            # measured step, and accumulate on-device so there is no per-step
+            # device-to-host sync (only when we actually print), mirroring the
+            # quickstart example.
+            running_loss += loss.detach()
+            global_step += 1
 
-                if rank == 0 and global_step % 50 == 0:
-                    print(
-                        f"Epoch {epoch + 1} | Step {global_step} | "
-                        f"loss: {running_loss / 50:.4f}"
-                    )
-                    running_loss = 0.0
+            if rank == 0 and global_step % 50 == 0:
+                print(
+                    f"Epoch {epoch + 1} | Step {global_step} | "
+                    f"loss: {float(running_loss) / 50:.4f}"
+                )
+                running_loss.zero_()
 
     if rank == 0:
         print("Done.")
+
+    # Match the DDP / FSDP examples: tear down the process group that
+    # deepspeed.init_distributed() set up.
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
