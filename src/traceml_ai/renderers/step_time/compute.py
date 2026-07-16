@@ -13,7 +13,12 @@ STEP_TIME_TABLE = "step_time_samples"
 
 
 class StepCombinedComputer:
-    """Compute selected-clock Step Time diagnosis payloads from SQLite."""
+    """
+    Compute selected-clock Step Time diagnosis payloads from SQLite.
+
+    Live payloads use global-rank ids from SQLite while preserving the existing
+    rank-shaped output contract for CLI/dashboard consumers.
+    """
 
     def __init__(
         self,
@@ -125,16 +130,17 @@ class StepCombinedComputer:
 
     def _load_ranks(self, conn: sqlite3.Connection) -> List[int]:
         """
-        Load available ranks from the step-time table.
+        Load available global ranks from the step-time table.
 
-        Returns only non-null ranks, optionally filtered by `rank_filter`.
+        Returns ids as `rank` values to preserve the existing live payload
+        contract, optionally filtered by `rank_filter`.
         """
         rows = conn.execute(
             f"""
-            SELECT DISTINCT rank
+            SELECT DISTINCT global_rank AS rank
             FROM {self.table}
-            WHERE rank IS NOT NULL
-            ORDER BY rank ASC;
+            WHERE global_rank IS NOT NULL
+            ORDER BY global_rank ASC;
             """
         ).fetchall()
 
@@ -174,7 +180,7 @@ class StepCombinedComputer:
                     FROM (
                         SELECT step, events_json
                         FROM {self.table}
-                        WHERE rank = ?
+                        WHERE global_rank = ?
                         ORDER BY step DESC, id DESC
                         LIMIT ?
                     )
