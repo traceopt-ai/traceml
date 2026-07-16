@@ -17,6 +17,10 @@ class DiagnosisThresholds:
     where ``iteration_time_ms = input_wait_ms + step_time_ms``. This keeps the
     traced step envelope stable while measuring input wait against the full
     selected-clock iteration time.
+
+    ``min_steps_for_warning_diag`` is the minimum window size for warning-only
+    bottleneck diagnoses. ``min_steps_for_confident_diag`` is the minimum window
+    size for critical diagnoses.
     """
 
     straggler_score_warn: float = 0.10
@@ -35,6 +39,7 @@ class DiagnosisThresholds:
     compute_bound_share_warn: float = 0.85
     compute_bound_share_crit: float = 0.92
 
+    min_steps_for_warning_diag: int = 2
     min_steps_for_confident_diag: int = 20
 
 

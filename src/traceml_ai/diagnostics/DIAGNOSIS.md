@@ -63,7 +63,7 @@ Traced process pressure.
 Training-step timing.
 
 - `NO_DATA`: no usable step-time data.
-- `WARMUP`: some data exists, but not enough for a stable diagnosis.
+- `WARMUP`: some data exists, but not enough for diagnosis.
 - `BALANCED`: no clear timing bottleneck or rank straggler.
 - `STRAGGLER`: one rank has a mixed clean-step straggler signal.
 - `INPUT_STRAGGLER`: one rank has materially higher selected-clock input wait.
@@ -94,6 +94,11 @@ separately.
 input wait with the full selected-clock iteration time while leaving
 `step_time_ms` as the traced step envelope. Live and summary diagnosis both
 warn at 10% and are critical at 20%.
+
+Shared Step Time diagnosis needs at least 2 steps to emit warning-only
+bottleneck diagnoses. Critical diagnoses are allowed once the window has at
+least 20 steps. Higher-level summary policies may still require a larger
+aligned window before calling shared Step Time diagnosis.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:

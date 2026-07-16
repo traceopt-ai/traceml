@@ -84,6 +84,8 @@ Selection policy:
   GPU utilization is not low/moderate.
 - `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA` or
   `WARMUP`.
+- Step Time may emit warning-only bottleneck diagnoses before its confident
+  threshold; critical Step Time diagnoses require the confident window size.
 
 High temperature, memory pressure, memory creep, high RSS, high CPU, and other
 resource-health findings are not promoted into `primary_diagnosis` in schema

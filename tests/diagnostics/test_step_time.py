@@ -202,6 +202,7 @@ def _single_rank_step_metrics(
     backward: float = 50.0,
     optimizer: float = 10.0,
     residual: float = 5.0,
+    steps: int = 64,
 ) -> tuple[StepCombinedTimeMetric, ...]:
     return (
         _time_metric(
@@ -210,6 +211,7 @@ def _single_rank_step_metrics(
             worst=step,
             worst_rank=0,
             world_size=1,
+            steps=steps,
         ),
         _time_metric(
             "input_wait",
@@ -217,6 +219,7 @@ def _single_rank_step_metrics(
             worst=dataloader,
             worst_rank=0,
             world_size=1,
+            steps=steps,
         ),
         _time_metric(
             "forward",
@@ -224,6 +227,7 @@ def _single_rank_step_metrics(
             worst=forward,
             worst_rank=0,
             world_size=1,
+            steps=steps,
         ),
         _time_metric(
             "backward",
@@ -231,6 +235,7 @@ def _single_rank_step_metrics(
             worst=backward,
             worst_rank=0,
             world_size=1,
+            steps=steps,
         ),
         _time_metric(
             "optimizer_step",
@@ -238,6 +243,7 @@ def _single_rank_step_metrics(
             worst=optimizer,
             worst_rank=0,
             world_size=1,
+            steps=steps,
         ),
         _time_metric(
             "residual_proxy",
@@ -245,6 +251,7 @@ def _single_rank_step_metrics(
             worst=residual,
             worst_rank=0,
             world_size=1,
+            steps=steps,
         ),
     )
 
@@ -597,6 +604,38 @@ def test_step_time_primary_prefers_clean_straggler_over_residual_heavy() -> (
     }
 
 
+def test_step_time_early_warning_band_caps_severity() -> None:
+    per_rank = {
+        0: _timing_row(dataloader=50.0, step_time=100.0),
+    }
+
+    warmup = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank, steps=1),
+        per_rank_timing=per_rank,
+    )
+    assert warmup.primary.kind == "WARMUP"
+    assert (
+        warmup.primary.reason
+        == "Only 1 step per rank available; diagnosis requires 2."
+    )
+
+    warning = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank, steps=5),
+        per_rank_timing=per_rank,
+    )
+    assert warning.primary.kind == "INPUT_BOUND"
+    assert warning.primary.severity == "warn"
+    assert warning.issues[0].severity == "warn"
+
+    confident = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank, steps=20),
+        per_rank_timing=per_rank,
+    )
+    assert confident.primary.kind == "INPUT_BOUND"
+    assert confident.primary.severity == "crit"
+    assert confident.issues[0].severity == "crit"
+
+
 def test_summary_step_time_window_uses_summary_policy_by_default() -> None:
     warmup = _diagnose_summary_events(
         {0: _summary_step_events(input_wait_gpu=None, steps=40)},
@@ -606,7 +645,7 @@ def test_summary_step_time_window_uses_summary_policy_by_default() -> None:
     assert warmup.primary.kind == "WARMUP"
     assert (
         warmup.primary.reason
-        == "Only 40 steps per rank available; summary diagnosis requires 50."
+        == "Only 40 steps per rank available; diagnosis requires 50."
     )
 
     result = _diagnose_summary_events(
