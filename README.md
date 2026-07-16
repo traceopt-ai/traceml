@@ -371,8 +371,8 @@ when you need operator- or kernel-level detail.
 - Run-to-run comparison from `final_summary.json`
 - Custom PyTorch loops, Hugging Face, PyTorch Lightning, and Ray Train
 
-FSDP support means timing collection and rank-skew surfacing; explicit FSDP
-collective attribution is on the roadmap.
+Validated on single-process and DDP. Runs on FSDP; under-reports due to
+collective masking.
 
 **On the roadmap:**
 

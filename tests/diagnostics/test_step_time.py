@@ -635,6 +635,15 @@ def test_step_time_early_warning_band_caps_severity() -> None:
     assert confident.primary.severity == "crit"
     assert confident.issues[0].severity == "crit"
 
+    fsdp = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank, steps=20),
+        per_rank_timing=per_rank,
+        training_strategy="fsdp",
+    )
+    assert fsdp.primary.kind == "INPUT_BOUND"
+    assert fsdp.primary.severity == "warn"
+    assert all(issue.severity == "warn" for issue in fsdp.issues)
+
 
 def test_summary_step_time_window_uses_summary_policy_by_default() -> None:
     short_window = _diagnose_summary_events(

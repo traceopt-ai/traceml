@@ -411,6 +411,10 @@ def build_step_diagnosis_result(
     )
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
+    if context.training_strategy == "fsdp":
+        issue_list = [
+            _cap_issue_severity(issue, "warn") for issue in issue_list
+        ]
     if steps_used < thresholds.min_steps_for_confident_diag:
         issue_list = [
             _cap_issue_severity(issue, "warn") for issue in issue_list

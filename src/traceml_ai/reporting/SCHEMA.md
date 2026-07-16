@@ -91,7 +91,8 @@ Selection policy:
   diagnosis gate.
 - Step Time diagnosis may consume advisory runtime training strategy context
   when available. This does not add a public summary metric; missing or
-  unrecognized strategy metadata defaults to `ddp`.
+  unrecognized strategy metadata defaults to `ddp`. FSDP Step Time diagnosis
+  severity is capped at warning.
 
 High temperature, memory pressure, memory creep, high RSS, high CPU, and other
 resource-health findings are not promoted into `primary_diagnosis` in schema

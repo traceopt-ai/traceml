@@ -105,7 +105,10 @@ When runtime environment metadata is available, Step Time diagnosis also
 receives an advisory training strategy such as `ddp` or `fsdp`. This context is
 used only to choose diagnosis attribution behavior; it is not a public Step
 Time metric. Missing or unrecognized strategy metadata defaults to `ddp` to
-preserve the current straggler behavior.
+preserve the current straggler behavior. DDP remains eligible for critical
+Step Time diagnoses once thresholds and confidence gates are met. FSDP Step
+Time diagnoses are capped at warning because collective masking can make
+attribution under-confident.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:
