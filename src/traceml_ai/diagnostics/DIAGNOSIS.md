@@ -70,7 +70,7 @@ Training-step timing.
 - `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
 - `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
 - `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
-- `INPUT_BOUND`: selected-clock input wait dominates the typical step.
+- `INPUT_BOUND`: selected-clock input wait dominates iteration time.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
 
@@ -84,14 +84,16 @@ The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
 `total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
 These compatibility fields are not selected-clock phase-share denominators.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
-display or diagnosis. In the final text report, selected-clock phase shares
-are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
+display or diagnosis. In the final text report, most selected-clock phase
+shares are divided by `step_time_ms`; CPU compatibility rows are labeled
+separately.
 
-`INPUT_BOUND` uses selected-clock `input_wait_ms / step_time_ms`. This compares
-pre-step input wait with the traced step envelope, not end-to-end wall time, so
-the ratio can exceed 100%. Live diagnosis warns at 25% and is critical at 35%.
-Summary diagnosis is more conservative because it covers a larger final window:
-it warns at 30% and is critical at 40%.
+`INPUT_BOUND` uses selected-clock
+`input_wait_ms / iteration_time_ms`, where
+`iteration_time_ms = input_wait_ms + step_time_ms`. This compares pre-step
+input wait with the full selected-clock iteration time while leaving
+`step_time_ms` as the traced step envelope. Live and summary diagnosis both
+warn at 10% and are critical at 20%.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:
@@ -100,6 +102,7 @@ unattributed step time averaged from per-step clamped residuals:
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = selected step envelope timing
+iteration_time_ms = selected input_wait_ms + selected traced_step_ms
 residual_ms = average(max(0, traced_step_ms - known_step_ms))
 total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```

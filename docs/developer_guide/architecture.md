@@ -103,7 +103,7 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | Phase | A timed part of a step: input wait, H2D, forward, backward, or optimizer. |
 | Step / trace_step | A training iteration; `with trace_step(model)` marks the boundary that phase timing is computed against. |
 | Residual (residual_proxy) | Residual step time, `max(0, step - h2d - forward - backward - optimizer)`. |
-| INPUT_BOUND / COMPUTE_BOUND | The step is dominated by input wait or compute. |
+| INPUT_BOUND / COMPUTE_BOUND | Input wait dominates iteration time, or compute dominates the traced step. |
 | INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / RESIDUAL_STRAGGLER / STRAGGLER | One rank is slower than typical after accounting for backward waiting; the label names the dominant timing difference, or `STRAGGLER` when mixed. |
 | RESIDUAL_HEAVY | A large window-wide share of step time is unattributed residual time. |
 | HIGH_PRESSURE / IMBALANCE | GPU memory is near capacity, or uneven across ranks. |

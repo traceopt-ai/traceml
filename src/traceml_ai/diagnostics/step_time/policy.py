@@ -13,19 +13,18 @@ class DiagnosisThresholds:
     Live and summary policies may choose different values, but they still run
     the same rules and produce the same diagnosis vocabulary.
 
-    INPUT_BOUND uses selected-clock ``input_wait_ms / step_time_ms``. This is
-    a pre-step wait compared with the traced step envelope, not an end-to-end
-    wall-time share, so values can exceed 1.0. Summary thresholds are slightly
-    more conservative than live thresholds because the final report should call
-    only durable bottlenecks across a larger window.
+    INPUT_BOUND uses selected-clock ``input_wait_ms / iteration_time_ms``,
+    where ``iteration_time_ms = input_wait_ms + step_time_ms``. This keeps the
+    traced step envelope stable while measuring input wait against the full
+    selected-clock iteration time.
     """
 
     straggler_score_warn: float = 0.10
     straggler_score_crit: float = 0.20
     straggler_dominance_tolerance: float = 1.25
 
-    input_share_warn: float = 0.25
-    input_share_crit: float = 0.35
+    input_share_warn: float = 0.10
+    input_share_crit: float = 0.20
 
     residual_share_warn: float = 0.15
     residual_share_crit: float = 0.25
@@ -61,8 +60,8 @@ SUMMARY_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
     thresholds=DiagnosisThresholds(
         straggler_score_warn=0.10,
         straggler_score_crit=0.18,
-        input_share_warn=0.30,
-        input_share_crit=0.40,
+        input_share_warn=0.10,
+        input_share_crit=0.20,
         residual_share_warn=0.18,
         residual_share_crit=0.28,
         input_bound_max_skew=0.05,

@@ -94,6 +94,7 @@ class StepTimeAnalysisContext:
     diagnosis_clock: str
     input_wait_total: float
     input_bound_step_total: float
+    iteration_time_total: float
 
     largest_compute: Optional[ComputeSignal]
 
@@ -594,6 +595,7 @@ def build_step_time_context(
     input_bound_step_total = (
         input_step_worst if single_rank else input_step_median
     )
+    iteration_time_total = input_wait_total + input_bound_step_total
     input_bound_skew = (
         0.0
         if single_rank or input_wait_median <= 0.0
@@ -628,7 +630,7 @@ def build_step_time_context(
         compute_total=compute_total_value,
         residual_share=share(residual_total, step_total),
         compute_share=share(compute_total_value, step_total),
-        input_bound_share=share(input_wait_total, input_bound_step_total),
+        input_bound_share=share(input_wait_total, iteration_time_total),
         input_bound_skew=input_bound_skew,
         compute_skew=compute_skew_value,
         input_bound_worst_rank=input_wait_worst_rank,
@@ -637,6 +639,7 @@ def build_step_time_context(
         ),
         input_wait_total=input_wait_total,
         input_bound_step_total=input_bound_step_total,
+        iteration_time_total=iteration_time_total,
         largest_compute=largest_compute,
         rank_values=rank_values,
         clean_rank_values=clean_rank_values,

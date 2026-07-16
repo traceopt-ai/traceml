@@ -457,10 +457,11 @@ def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
     assert issue.kind == "INPUT_BOUND"
     assert issue.metric == "input_wait"
     assert issue.phase == "input"
-    assert issue.share_pct == pytest.approx(0.35)
+    assert issue.share_pct == pytest.approx(35.0 / 135.0)
     assert issue.evidence["diagnosis_clock"] == "cpu"
     assert issue.evidence["input_wait_ms"] == pytest.approx(35.0)
     assert issue.evidence["step_time_ms"] == pytest.approx(100.0)
+    assert issue.evidence["iteration_time_ms"] == pytest.approx(135.0)
 
 
 def test_input_bound_rule_ignores_duration_without_explicit_clocks() -> None:
@@ -487,7 +488,7 @@ def test_input_bound_rule_uses_input_wait_skew() -> None:
         }
     )
 
-    assert ctx.input_bound_share == pytest.approx(0.35)
+    assert ctx.input_bound_share == pytest.approx(35.0 / 135.0)
     assert InputBoundRule().evaluate(ctx) is None
 
 
@@ -682,6 +683,9 @@ def test_summary_input_bound_uses_explicit_input_clocks() -> None:
     assert high_wait.primary.kind == "INPUT_BOUND"
     assert high_wait.issues[0].evidence["diagnosis_clock"] == "gpu"
     assert high_wait.issues[0].evidence["input_wait_ms"] == pytest.approx(25.0)
+    assert high_wait.issues[0].evidence["iteration_time_ms"] == pytest.approx(
+        85.0
+    )
 
 
 def test_summary_input_bound_trend_uses_selected_input_wait_series() -> None:
