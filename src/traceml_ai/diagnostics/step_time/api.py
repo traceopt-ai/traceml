@@ -343,6 +343,7 @@ def build_step_diagnosis_result(
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
 ) -> DiagnosticResult[StepDiagnosis]:
     """
     Build a rich step-time diagnosis result from one analyzed window.
@@ -406,6 +407,7 @@ def build_step_diagnosis_result(
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
         diagnosis_clock=diagnosis_clock,
+        training_strategy=training_strategy,
     )
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
@@ -611,6 +613,7 @@ def build_step_diagnosis(
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
 ) -> StepDiagnosis:
     """
     Build one primary diagnosis from step-combined metrics.
@@ -623,6 +626,7 @@ def build_step_diagnosis(
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
         diagnosis_clock=diagnosis_clock,
+        training_strategy=training_strategy,
     ).primary
     if not isinstance(primary, StepDiagnosis):
         raise TypeError(

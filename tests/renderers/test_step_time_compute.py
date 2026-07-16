@@ -92,6 +92,7 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
     assert metrics["input_wait"].series.worst == [4.0, 6.0]
     assert metrics["input_wait"].series.sum == [4.0, 6.0]
     assert result.diagnosis_clock == "gpu"
+    assert result.training_strategy == "ddp"
 
     per_rank = result.per_rank_timing[0]
     assert per_rank["input_wait"] == 5.0

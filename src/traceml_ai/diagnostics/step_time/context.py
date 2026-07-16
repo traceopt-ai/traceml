@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.utils.training_strategy import normalize_training_strategy
 
 if TYPE_CHECKING:
     from .policy import DiagnosisThresholds
@@ -65,12 +66,16 @@ class StepTimeAnalysisContext:
     """
     Normalized step-time analysis state shared by all step-time diagnosis
     rules.
+
+    `training_strategy` is advisory run context from runtime metadata. It is
+    not a public metric; rules may use it to choose attribution logic.
     """
 
     thresholds: "DiagnosisThresholds"
     single_rank: bool
     steps_used: int
     overall_worst_rank: Optional[int]
+    training_strategy: str
 
     step_metric: StepCombinedTimeMetric
     input_wait_metric: Optional[StepCombinedTimeMetric]
@@ -490,6 +495,7 @@ def build_step_time_context(
     thresholds: "DiagnosisThresholds",
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
 ) -> StepTimeAnalysisContext:
     """
     Build one normalized context shared by all step-time diagnosis rules.
@@ -618,6 +624,7 @@ def build_step_time_context(
         single_rank=single_rank,
         steps_used=steps_used,
         overall_worst_rank=overall_worst_rank,
+        training_strategy=normalize_training_strategy(training_strategy),
         step_metric=step_metric,
         input_wait_metric=input_wait_metric,
         h2d_metric=h2d_metric,
@@ -660,6 +667,7 @@ __all__ = [
     "metric_worst_rank",
     "metric_worst_total",
     "non_negative_finite",
+    "normalize_training_strategy",
     "rank_values_from_metric",
     "share",
 ]

@@ -17,14 +17,50 @@ from traceml_ai.utils.step_time_window import (
     StepTimeWindow,
     build_step_time_window_from_events,
 )
+from traceml_ai.utils.training_strategy import (
+    DEFAULT_TRAINING_STRATEGY,
+    KNOWN_TRAINING_STRATEGIES,
+    normalize_training_strategy,
+)
 
 
 @dataclass(frozen=True)
 class StepTimeSQLiteWindow:
-    """A Step Time window plus the global-rank ids used to build it."""
+    """A Step Time window plus run context used by diagnosis."""
 
     window: StepTimeWindow
     global_ranks: tuple[int, ...]
+    training_strategy: str = DEFAULT_TRAINING_STRATEGY
+
+
+def load_training_strategy_from_sqlite(
+    conn: sqlite3.Connection,
+) -> str:
+    """
+    Load best-effort run-level training strategy from runtime metadata.
+
+    Runtime environment rows can arrive from ranks in any order. Step Time uses
+    the latest available non-empty row for this one training run. Missing,
+    old, or unrecognized metadata defaults to `ddp` so existing backward-clean
+    straggler attribution remains unchanged until strategy-specific rules run.
+    """
+    try:
+        row = conn.execute(
+            """
+            SELECT training_strategy
+            FROM runtime_environment
+            WHERE training_strategy IS NOT NULL
+              AND TRIM(training_strategy) != ''
+            ORDER BY id DESC
+            LIMIT 1;
+            """
+        ).fetchone()
+    except Exception:
+        return DEFAULT_TRAINING_STRATEGY
+
+    if not row:
+        return DEFAULT_TRAINING_STRATEGY
+    return normalize_training_strategy(row[0])
 
 
 def load_step_time_window_from_sqlite(
@@ -41,7 +77,8 @@ def load_step_time_window_from_sqlite(
     The loader reads `global_rank` ids and returns them as rank-shaped data for
     existing diagnosis, CLI/dashboard, and summary contracts. `max_rows` is the
     final aligned window size; `lookback_factor` only controls how much recent
-    per-rank history is read before common-step alignment.
+    per-rank history is read before common-step alignment. Training strategy is
+    advisory diagnosis context loaded from the latest runtime metadata row.
     """
     row_limit = max(1, int(max_rows))
     lookback = max(row_limit * max(1, int(lookback_factor)), row_limit)
@@ -110,10 +147,14 @@ def load_step_time_window_from_sqlite(
             expected_ranks=global_ranks,
         ),
         global_ranks=global_ranks,
+        training_strategy=load_training_strategy_from_sqlite(conn),
     )
 
 
 __all__ = [
+    "DEFAULT_TRAINING_STRATEGY",
+    "KNOWN_TRAINING_STRATEGIES",
     "StepTimeSQLiteWindow",
+    "load_training_strategy_from_sqlite",
     "load_step_time_window_from_sqlite",
 ]

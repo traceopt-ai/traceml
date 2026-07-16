@@ -84,10 +84,12 @@ def _summary(
         per_global_rank_summary=selected_summary,
         identities={},
         max_rows=window_size,
+        training_strategy="ddp",
     )
     diagnosis = diagnose_step_time_summary(
         StepTimeDiagnosisInput(
             window=window,
+            training_strategy=data.training_strategy,
         )
     )
     return build_step_time_payload(data, diagnosis)

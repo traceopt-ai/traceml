@@ -33,6 +33,7 @@ class StepTimeSectionData:
     per_global_rank_summary: Dict[int, RankStepSummary]
     identities: Dict[int, GlobalRankIdentity]
     max_rows: int
+    training_strategy: str = "ddp"
 
 
 def load_global_rank_identities(
@@ -78,7 +79,8 @@ def load_step_time_section_data(
     Load final-report Step Time data from SQLite.
 
     Summary uses the shared global-rank Step Time window loader, then adds
-    report-only metadata such as training-step counts and rank identities.
+    report-only metadata such as training-step counts, rank identities, and
+    advisory training strategy context for diagnosis.
     """
     row_limit = normalize_summary_window_rows(max_rows)
     conn = sqlite3.connect(db_path)
@@ -115,6 +117,7 @@ def load_step_time_section_data(
         per_global_rank_summary=selected_summary,
         identities=identities,
         max_rows=row_limit,
+        training_strategy=loaded.training_strategy,
     )
 
 

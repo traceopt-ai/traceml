@@ -511,6 +511,7 @@ def diagnose_step_time_window(
     window: StepTimeWindow,
     *,
     policy: "StepTimeDiagnosisPolicy",
+    training_strategy: str = "ddp",
 ) -> "DiagnosticResult[StepDiagnosis]":
     """Run shared Step Time diagnosis over one selected-clock window."""
     from traceml_ai.diagnostics.step_time.api import (
@@ -524,6 +525,7 @@ def diagnose_step_time_window(
         thresholds=policy.thresholds,
         per_rank_timing=window.per_rank_timing,
         diagnosis_clock=window.clock,
+        training_strategy=training_strategy,
     )
 
 

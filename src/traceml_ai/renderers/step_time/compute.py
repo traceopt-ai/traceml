@@ -113,6 +113,7 @@ class StepCombinedComputer:
             status_message=status,
             per_rank_timing=window.per_rank_timing,
             diagnosis_clock=window.clock,
+            training_strategy=loaded.training_strategy,
             diagnosis_metrics=window.metrics,
         )
 
@@ -146,6 +147,7 @@ class StepCombinedComputer:
                     status_message=msg,
                     per_rank_timing=self._last_ok.per_rank_timing,
                     diagnosis_clock=self._last_ok.diagnosis_clock,
+                    training_strategy=self._last_ok.training_strategy,
                     diagnosis_metrics=self._last_ok.diagnosis_metrics,
                 )
         return StepCombinedTimeResult(

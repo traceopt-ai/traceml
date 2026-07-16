@@ -101,6 +101,12 @@ bottleneck diagnoses. Critical diagnoses are allowed once the window has at
 least 20 steps. Live and summary use the same diagnosis gates; they differ by
 the selected timing window size.
 
+When runtime environment metadata is available, Step Time diagnosis also
+receives an advisory training strategy such as `ddp` or `fsdp`. This context is
+used only to choose diagnosis attribution behavior; it is not a public Step
+Time metric. Missing or unrecognized strategy metadata defaults to `ddp` to
+preserve the current straggler behavior.
+
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:
 
