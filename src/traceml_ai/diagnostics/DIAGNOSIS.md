@@ -78,7 +78,8 @@ Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
 input wait, and traced phase events present in the window. Otherwise it uses
 explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
-summary use this same selected-clock window for diagnosis-facing timing.
+summary use the same global-rank SQLite loader and selected-clock window
+builder for diagnosis-facing timing; they differ only by row window sizing.
 Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
 The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
 `total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.

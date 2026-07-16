@@ -8,10 +8,9 @@
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional
 
 from traceml_ai.reporting.config import normalize_summary_window_rows
 from traceml_ai.reporting.sections.step_time.model import (
@@ -20,10 +19,8 @@ from traceml_ai.reporting.sections.step_time.model import (
     RankStepSummary,
     rank_summaries_from_window,
 )
-from traceml_ai.utils.step_time_window import (
-    StepTimeWindow,
-    build_step_time_window_from_events,
-)
+from traceml_ai.utils.step_time_sqlite import load_step_time_window_from_sqlite
+from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 @dataclass(frozen=True)
@@ -36,37 +33,6 @@ class StepTimeSectionData:
     per_global_rank_summary: Dict[int, RankStepSummary]
     identities: Dict[int, GlobalRankIdentity]
     max_rows: int
-
-
-def load_global_rank_step_rows(
-    conn: sqlite3.Connection,
-    *,
-    global_rank: int,
-    max_rows: int,
-) -> list[Dict[str, Any]]:
-    """Load the latest bounded step-time rows for one global rank."""
-    cur = conn.execute(
-        """
-        SELECT step, events_json
-        FROM step_time_samples
-        WHERE global_rank = ?
-        ORDER BY step DESC, id DESC
-        LIMIT ?;
-        """,
-        (int(global_rank), int(max_rows)),
-    )
-
-    rows: list[Dict[str, Any]] = []
-    for step, events_json in cur:
-        if step is None or not events_json:
-            continue
-        try:
-            events = json.loads(events_json)
-        except Exception:
-            continue
-        if isinstance(events, dict):
-            rows.append({"step": int(step), "events": events})
-    return rows
 
 
 def load_global_rank_identities(
@@ -109,7 +75,10 @@ def load_step_time_section_data(
     max_rows: int = MAX_SUMMARY_WINDOW_ROWS,
 ) -> StepTimeSectionData:
     """
-    Load bounded step-time section data from the SQLite history database.
+    Load final-report Step Time data from SQLite.
+
+    Summary uses the shared global-rank Step Time window loader, then adds
+    report-only metadata such as training-step counts and rank identities.
     """
     row_limit = normalize_summary_window_rows(max_rows)
     conn = sqlite3.connect(db_path)
@@ -127,40 +96,14 @@ def load_step_time_section_data(
             latest_step_observed + 1 if latest_step_observed is not None else 0
         )
 
-        global_rank_rows = conn.execute(
-            """
-            SELECT DISTINCT global_rank
-            FROM step_time_samples
-            WHERE global_rank IS NOT NULL
-            ORDER BY global_rank ASC;
-            """
-        ).fetchall()
-        global_ranks_present = [
-            int(row[0]) for row in global_rank_rows if row[0] is not None
-        ]
-        identities = load_global_rank_identities(conn, global_ranks_present)
-
-        per_global_rank_steps: Dict[int, Dict[int, Dict[str, Any]]] = {}
-
-        for global_rank in global_ranks_present:
-            step_rows = load_global_rank_step_rows(
-                conn,
-                global_rank=global_rank,
-                max_rows=row_limit,
-            )
-            step_map = {
-                int(row["step"]): row["events"]
-                for row in step_rows
-                if row.get("step") is not None
-            }
-            if step_map:
-                per_global_rank_steps[int(global_rank)] = step_map
-
-        step_time_window = build_step_time_window_from_events(
-            per_global_rank_steps,
+        loaded = load_step_time_window_from_sqlite(
+            conn,
             max_rows=row_limit,
-            expected_ranks=global_ranks_present,
+            lookback_factor=1,
         )
+        global_ranks_present = loaded.global_ranks
+        identities = load_global_rank_identities(conn, global_ranks_present)
+        step_time_window = loaded.window
         selected_summary = rank_summaries_from_window(step_time_window)
     finally:
         conn.close()
@@ -178,6 +121,5 @@ def load_step_time_section_data(
 __all__ = [
     "StepTimeSectionData",
     "load_global_rank_identities",
-    "load_global_rank_step_rows",
     "load_step_time_section_data",
 ]

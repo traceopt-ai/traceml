@@ -1,13 +1,10 @@
-import json
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Dict, Optional, Sequence
 
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
-)
+from traceml_ai.utils.step_time_sqlite import load_step_time_window_from_sqlite
 
 STEP_TIME_TABLE = "step_time_samples"
 
@@ -16,8 +13,9 @@ class StepCombinedComputer:
     """
     Compute selected-clock Step Time diagnosis payloads from SQLite.
 
-    Live payloads use global-rank ids from SQLite while preserving the existing
-    rank-shaped output contract for CLI/dashboard consumers.
+    Live delegates global-rank SQLite loading to the shared Step Time window
+    loader, then adds CLI/dashboard-specific stale handling and status text.
+    The output remains rank-shaped for existing UI and diagnosis consumers.
     """
 
     def __init__(
@@ -79,23 +77,28 @@ class StepCombinedComputer:
         self,
         conn: sqlite3.Connection,
     ) -> StepCombinedTimeResult:
-        ranks = self._load_ranks(conn)
+        loaded = load_step_time_window_from_sqlite(
+            conn,
+            max_rows=self.window_size,
+            lookback_factor=self.lookback_factor,
+            table=self.table,
+            rank_filter=(
+                tuple(self.rank_filter)
+                if self.rank_filter is not None
+                else None
+            ),
+        )
+        ranks = loaded.global_ranks
         if not ranks:
             return StepCombinedTimeResult(
                 status_message="No ranks available",
             )
 
-        per_rank_steps = self._load_last_steps(conn, ranks)
-        if not per_rank_steps:
+        window = loaded.window
+        if window.coverage.ranks_present <= 0:
             return StepCombinedTimeResult(
                 status_message="No StepTime data available",
             )
-
-        window = build_step_time_window_from_events(
-            per_rank_steps,
-            max_rows=self.window_size,
-            expected_ranks=ranks,
-        )
         if not window.metrics:
             return StepCombinedTimeResult(
                 status_message="No common step window yet",
@@ -127,100 +130,6 @@ class StepCombinedComputer:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
-
-    def _load_ranks(self, conn: sqlite3.Connection) -> List[int]:
-        """
-        Load available global ranks from the step-time table.
-
-        Returns ids as `rank` values to preserve the existing live payload
-        contract, optionally filtered by `rank_filter`.
-        """
-        rows = conn.execute(
-            f"""
-            SELECT DISTINCT global_rank AS rank
-            FROM {self.table}
-            WHERE global_rank IS NOT NULL
-            ORDER BY global_rank ASC;
-            """
-        ).fetchall()
-
-        ranks = [int(r["rank"]) for r in rows if r["rank"] is not None]
-        if self.rank_filter is not None:
-            ranks = [r for r in ranks if r in self.rank_filter]
-        return ranks
-
-    def _load_last_steps(
-        self,
-        conn: sqlite3.Connection,
-        ranks: List[int],
-    ) -> Dict[int, Dict[int, Dict[str, Any]]]:
-        """
-        Load a bounded recent step map per rank.
-
-        To avoid scanning the full table, this method only reads a recent
-        suffix per rank. The lookback is intentionally larger than the final
-        window size so the common-step suffix has room to form even when some
-        ranks are slightly ahead/behind.
-
-        Returns
-        -------
-        dict[int, dict[int, dict]]
-            rank -> step -> events_payload
-        """
-        out: Dict[int, Dict[int, Dict[str, Any]]] = {}
-        lookback = max(
-            self.window_size * self.lookback_factor, self.window_size
-        )
-
-        for rank in ranks:
-            try:
-                rows = conn.execute(
-                    f"""
-                    SELECT step, events_json
-                    FROM (
-                        SELECT step, events_json
-                        FROM {self.table}
-                        WHERE global_rank = ?
-                        ORDER BY step DESC, id DESC
-                        LIMIT ?
-                    )
-                    ORDER BY step ASC;
-                    """,
-                    (int(rank), int(lookback)),
-                ).fetchall()
-
-                if not rows:
-                    continue
-
-                step_map: Dict[int, Dict[str, Any]] = {}
-                for row in rows:
-                    step_raw = row["step"]
-                    if step_raw is None:
-                        continue
-
-                    step = int(step_raw)
-                    # If duplicates somehow exist, keep the latest from the DESC/limit
-                    # selection; the final ORDER BY ASC preserves chronological order.
-                    if step in step_map:
-                        continue
-
-                    events_json = row["events_json"]
-                    try:
-                        parsed = json.loads(events_json) if events_json else {}
-                    except Exception:
-                        parsed = {}
-
-                    step_map[step] = parsed if isinstance(parsed, dict) else {}
-
-                if step_map:
-                    out[int(rank)] = step_map
-
-            except Exception:
-                self.logger.exception(
-                    "Failed loading step data for rank=%s", rank
-                )
-
-        return out
 
     # ------------------------------------------------------------------
     # Stale handling
