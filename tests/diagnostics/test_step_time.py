@@ -637,16 +637,13 @@ def test_step_time_early_warning_band_caps_severity() -> None:
 
 
 def test_summary_step_time_window_uses_summary_policy_by_default() -> None:
-    warmup = _diagnose_summary_events(
+    short_window = _diagnose_summary_events(
         {0: _summary_step_events(input_wait_gpu=None, steps=40)},
         max_rows=100,
     )
-    assert warmup is not None
-    assert warmup.primary.kind == "WARMUP"
-    assert (
-        warmup.primary.reason
-        == "Only 40 steps per rank available; diagnosis requires 50."
-    )
+    assert short_window is not None
+    assert short_window.primary.kind == "COMPUTE_BOUND"
+    assert short_window.primary.steps_used == 40
 
     result = _diagnose_summary_events(
         {0: _summary_step_events(input_wait_gpu=None, steps=60)},

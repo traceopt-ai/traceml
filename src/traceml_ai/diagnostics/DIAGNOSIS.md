@@ -97,8 +97,8 @@ warn at 10% and are critical at 20%.
 
 Shared Step Time diagnosis needs at least 2 steps to emit warning-only
 bottleneck diagnoses. Critical diagnoses are allowed once the window has at
-least 20 steps. Higher-level summary policies may still require a larger
-aligned window before calling shared Step Time diagnosis.
+least 20 steps. Live and summary use the same diagnosis gates; they differ by
+the selected timing window size.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:

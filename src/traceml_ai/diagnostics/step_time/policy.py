@@ -11,7 +11,8 @@ class DiagnosisThresholds:
     Thresholds used by the shared step-time rules.
 
     Live and summary policies may choose different values, but they still run
-    the same rules and produce the same diagnosis vocabulary.
+    the same rules and produce the same diagnosis vocabulary. Live and summary
+    differ by the selected timing window, not by extra diagnosis gates.
 
     INPUT_BOUND uses selected-clock ``input_wait_ms / iteration_time_ms``,
     where ``iteration_time_ms = input_wait_ms + step_time_ms``. This keeps the
@@ -45,26 +46,24 @@ class DiagnosisThresholds:
 
 @dataclass(frozen=True)
 class StepTimeDiagnosisPolicy:
-    """Named threshold set for one step-time diagnosis window type."""
+    """Named threshold set for shared Step Time diagnosis."""
 
     name: str
     thresholds: DiagnosisThresholds = field(
         default_factory=DiagnosisThresholds
     )
-    min_steps_for_diag: int = 20
 
 
 LIVE_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
     name="live",
     thresholds=DiagnosisThresholds(),
-    min_steps_for_diag=20,
 )
 
 SUMMARY_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
     name="summary",
     thresholds=DiagnosisThresholds(
         straggler_score_warn=0.10,
-        straggler_score_crit=0.18,
+        straggler_score_crit=0.20,
         input_share_warn=0.10,
         input_share_crit=0.20,
         residual_share_warn=0.18,
@@ -75,7 +74,6 @@ SUMMARY_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
         compute_bound_share_crit=0.94,
         min_steps_for_confident_diag=20,
     ),
-    min_steps_for_diag=50,
 )
 
 DEFAULT_THRESHOLDS = LIVE_STEP_TIME_POLICY.thresholds

@@ -86,6 +86,8 @@ Selection policy:
   `WARMUP`.
 - Step Time may emit warning-only bottleneck diagnoses before its confident
   threshold; critical Step Time diagnoses require the confident window size.
+  Summary uses a larger selected-clock window, but not a separate Step Time
+  diagnosis gate.
 
 High temperature, memory pressure, memory creep, high RSS, high CPU, and other
 resource-health findings are not promoted into `primary_diagnosis` in schema
