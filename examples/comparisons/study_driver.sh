@@ -13,7 +13,9 @@ STEPS="${STEPS:-300}"
 BATCH="${BATCH:-64}"
 ACTIVE="${ACTIVE:-15}"           # torch.profiler active window
 OUT="${OUT:-$HOME/study_out}"
-H="$HOME/harness"
+# Default to this script's own directory so a fresh clone runs as-is;
+# override with H=/path for the scp-to-box flow (files copied elsewhere).
+H="${H:-$(cd "$(dirname "$0")" && pwd)}"
 
 mkdir -p "$OUT"
 cd "$H" || { echo "no harness dir"; exit 1; }
