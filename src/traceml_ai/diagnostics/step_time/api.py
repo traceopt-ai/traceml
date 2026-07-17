@@ -24,6 +24,7 @@ from ..common import (
 )
 from .context import (
     build_step_time_context,
+    compute_rank_values_from_components,
     metric_median_total,
     metric_skew,
     metric_total,
@@ -44,7 +45,6 @@ DiagnosisKind = Literal[
     "INPUT_STRAGGLER",
     "COMPUTE_STRAGGLER",
     "H2D_STRAGGLER",
-    "RESIDUAL_STRAGGLER",
     "INPUT_BOUND",
     "COMPUTE_BOUND",
     "RESIDUAL_HEAVY",
@@ -58,7 +58,6 @@ _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
     "COMPUTE_STRAGGLER": "COMPUTE STRAGGLER",
     "H2D_STRAGGLER": "H2D STRAGGLER",
-    "RESIDUAL_STRAGGLER": "RESIDUAL STRAGGLER",
     "INPUT_BOUND": "INPUT-BOUND",
     "COMPUTE_BOUND": "COMPUTE-BOUND",
     "RESIDUAL_HEAVY": "RESIDUAL-HEAVY",
@@ -69,7 +68,6 @@ _PRIMARY_KIND_PRIORITY: dict[str, int] = {
     "INPUT_STRAGGLER": 40,
     "COMPUTE_STRAGGLER": 40,
     "H2D_STRAGGLER": 40,
-    "RESIDUAL_STRAGGLER": 40,
     "INPUT_BOUND": 30,
     "RESIDUAL_HEAVY": 20,
     "COMPUTE_BOUND": 10,
@@ -428,7 +426,6 @@ def build_step_diagnosis_result(
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
         "H2D_STRAGGLER",
-        "RESIDUAL_STRAGGLER",
     }:
         worst_rank = primary_issue.ranks[0] if primary_issue.ranks else None
         primary = _mk_diag(
@@ -514,20 +511,9 @@ def build_step_diagnosis_result(
             ),
         )
 
-    fwd_rank_values = context.rank_values.get("forward", {})
-    bwd_rank_values = context.rank_values.get("backward", {})
-    opt_rank_values = context.rank_values.get("optimizer_step", {})
-    compute_rank_values = context.clean_rank_values.get("clean_compute", {})
-    if not compute_rank_values:
-        compute_rank_values = {}
-        for rank in sorted(
-            set(fwd_rank_values) | set(bwd_rank_values) | set(opt_rank_values)
-        ):
-            compute_rank_values[int(rank)] = (
-                non_negative_finite(fwd_rank_values.get(rank, 0.0))
-                + non_negative_finite(bwd_rank_values.get(rank, 0.0))
-                + non_negative_finite(opt_rank_values.get(rank, 0.0))
-            )
+    compute_rank_values = compute_rank_values_from_components(
+        context.rank_values
+    )
     (
         compute_median_ms,
         compute_worst_ms,
@@ -555,7 +541,7 @@ def build_step_diagnosis_result(
         "forward": _metric_attribution_entry(
             metric=context.forward_metric,
             metric_key="forward",
-            rank_values=fwd_rank_values,
+            rank_values=context.rank_values.get("forward", {}),
             step_total=context.step_total,
             single_rank=context.single_rank,
             phase="forward",
@@ -563,7 +549,7 @@ def build_step_diagnosis_result(
         "backward": _metric_attribution_entry(
             metric=context.backward_metric,
             metric_key="backward",
-            rank_values=bwd_rank_values,
+            rank_values=context.rank_values.get("backward", {}),
             step_total=context.step_total,
             single_rank=context.single_rank,
             phase="backward",
@@ -571,7 +557,7 @@ def build_step_diagnosis_result(
         "optimizer_step": _metric_attribution_entry(
             metric=context.optimizer_metric,
             metric_key="optimizer_step",
-            rank_values=opt_rank_values,
+            rank_values=context.rank_values.get("optimizer_step", {}),
             step_total=context.step_total,
             single_rank=context.single_rank,
             phase="optimizer",
@@ -594,7 +580,7 @@ def build_step_diagnosis_result(
         ),
         "compute": {
             "metric": "compute",
-            "phase": "clean_compute",
+            "phase": "compute",
             "median_total_ms": compute_median_ms,
             "worst_total_ms": compute_worst_ms,
             "worst_rank": compute_worst_rank,

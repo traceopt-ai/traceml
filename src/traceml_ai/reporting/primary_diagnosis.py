@@ -26,7 +26,7 @@ Primary diagnosis policy
 ------------------------
 1. Step-time rank-skew findings become primary performance findings:
    ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, ``H2D_STRAGGLER``,
-   ``RESIDUAL_STRAGGLER``, ``STRAGGLER``.
+   ``STRAGGLER``.
 2. Step-time phase-share findings become primary performance findings:
    ``RESIDUAL_HEAVY``, ``INPUT_BOUND``, ``COMPUTE_BOUND``.
 3. If Step Time is ``BALANCED`` and System reports low or moderate GPU
@@ -54,9 +54,8 @@ Evidence policy
 
 ``rank_comparison``
     Used for ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``,
-    ``H2D_STRAGGLER``, ``RESIDUAL_STRAGGLER``, and ``STRAGGLER``. Values come
-    from ``step_time.global.median[metric]`` and
-    ``step_time.global.worst[metric]`` because the diagnosis compares ranks.
+    ``H2D_STRAGGLER``, and ``STRAGGLER``. Values come from step-time rank
+    summaries because the diagnosis compares ranks.
 
 ``utilization_fallback``
     Used only when Step Time is balanced and System GPU utilization is low or
@@ -86,7 +85,6 @@ STRAGGLER_KINDS = {
     "INPUT_STRAGGLER",
     "COMPUTE_STRAGGLER",
     "H2D_STRAGGLER",
-    "RESIDUAL_STRAGGLER",
     "STRAGGLER",
 }
 INSUFFICIENT_STEP_TIME_KINDS = {"NO_DATA", "WARMUP"}
@@ -286,8 +284,6 @@ def _metric_for_step_time_issue(issue: Mapping[str, Any]) -> Optional[str]:
         return "compute_ms"
     if kind == "H2D_STRAGGLER":
         return "h2d_ms"
-    if kind == "RESIDUAL_STRAGGLER":
-        return "residual_ms"
     return None
 
 
@@ -305,8 +301,6 @@ def _metric_for_primary_diagnosis(
         return "compute_ms"
     if kind == "H2D_STRAGGLER":
         return "h2d_ms"
-    if kind == "RESIDUAL_STRAGGLER":
-        return "residual_ms"
     return None
 
 
@@ -477,7 +471,7 @@ def _rank_comparison_summary(
 ) -> str:
     """Return a concise primary summary for rank-comparison diagnoses."""
     if kind == "STRAGGLER":
-        return "Multiple clean-step components varied across ranks."
+        return "Visible rank skew was sync-bound or unattributed."
 
     metric = str(evidence.get("metric") or "step_time")
     phase = str(evidence.get("phase") or metric.replace("_ms", ""))

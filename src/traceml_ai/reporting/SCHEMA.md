@@ -73,9 +73,8 @@ section diagnoses.
 
 Selection policy:
 
-- `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, `H2D_STRAGGLER`,
-  `RESIDUAL_STRAGGLER`, and `STRAGGLER` use rank-comparison evidence and are
-  promoted from `step_time.diagnosis`.
+- `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, `H2D_STRAGGLER`, and `STRAGGLER`
+  use rank-comparison evidence and are promoted from `step_time.diagnosis`.
 - `RESIDUAL_HEAVY`, `INPUT_BOUND`, and `COMPUTE_BOUND` use phase-share evidence
   and are promoted from `step_time.diagnosis`.
 - `LOW_GPU_UTILIZATION_UNEXPLAINED` appears only when Step Time is `BALANCED`
@@ -144,10 +143,9 @@ other phase-share percentages use `step_time_ms`.
 ```
 
 `rank_comparison` is used for `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`,
-`H2D_STRAGGLER`, `RESIDUAL_STRAGGLER`, and `STRAGGLER`. Values come from
-`step_time.global.median[metric]` and
-`step_time.global.worst[metric]`. Generic `STRAGGLER` may contain a
-`comparisons` array instead of a single metric comparison.
+`H2D_STRAGGLER`, and `STRAGGLER`. Values come from `step_time.global` rank
+summaries. Generic `STRAGGLER` may contain a `comparisons` array instead of a
+single metric comparison.
 
 Fallback evidence types are:
 

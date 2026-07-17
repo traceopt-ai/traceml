@@ -104,7 +104,7 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | Step / trace_step | A training iteration; `with trace_step(model)` marks the boundary that phase timing is computed against. |
 | Residual (residual_proxy) | Residual step time, `max(0, step - h2d - forward - backward - optimizer)`. |
 | INPUT_BOUND / COMPUTE_BOUND | Input wait dominates iteration time, or compute dominates the traced step. |
-| INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / RESIDUAL_STRAGGLER / STRAGGLER | One rank is slower than typical after accounting for backward waiting; the label names the dominant timing difference, or `STRAGGLER` when mixed. |
+| INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / STRAGGLER | Visible rank skew exists; the label names the culprit's material input, DDP-forward, or H2D excess, or `STRAGGLER` when the skew is sync-bound or unattributed. |
 | RESIDUAL_HEAVY | A large window-wide share of step time is unattributed residual time. |
 | HIGH_PRESSURE / IMBALANCE | GPU memory is near capacity, or uneven across ranks. |
 | CREEP_EARLY / CREEP_CONFIRMED | Direction-confirmed GPU-memory growth across the run, early or confirmed. |

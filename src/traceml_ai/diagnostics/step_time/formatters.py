@@ -27,7 +27,6 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",
         "H2D_STRAGGLER",
-        "RESIDUAL_STRAGGLER",
         "STRAGGLER",
         "RESIDUAL_HEAVY",
     }:

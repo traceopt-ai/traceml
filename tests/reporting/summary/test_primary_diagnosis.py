@@ -211,23 +211,6 @@ def test_h2d_straggler_uses_rank_comparison_evidence() -> None:
     assert primary["evidence"]["phase"] == "h2d"
 
 
-def test_residual_straggler_uses_rank_comparison_evidence() -> None:
-    primary = _primary(
-        _step_time(
-            "RESIDUAL_STRAGGLER",
-            status="RESIDUAL STRAGGLER",
-            phase="residual",
-        )
-    )
-
-    assert primary["kind"] == "RESIDUAL_STRAGGLER"
-    assert primary["summary"] == (
-        "Rank r2 residual time was 70.0ms vs median rank r0 at 20.0ms."
-    )
-    assert primary["evidence"]["metric"] == "residual_ms"
-    assert primary["evidence"]["phase"] == "residual"
-
-
 def test_straggler_includes_input_and_compute_comparisons() -> None:
     issues = [
         {
