@@ -325,22 +325,37 @@ def _build_rank_straggler_evidence(
 
     DDP/default uses backward as the visible synchronization phase. FSDP uses
     forward + backward because FSDP can communicate on both sides of module
-    execution. Component attribution compares the culprit rank directly to the
-    victim rank and only emits a subtype for material positive excess.
+    execution. Only ranks with measured visible-phase anchors and a measured
+    step envelope are eligible. Component attribution compares the culprit rank
+    directly to the victim rank and only emits a subtype for material positive
+    excess.
     """
     if len(per_rank_timing) <= 1:
         return None
 
     strategy = normalize_training_strategy(training_strategy)
     visible_metric = "forward_backward" if strategy == "fsdp" else "backward"
+    eligible_ranks = []
+    for rank in sorted(int(rank) for rank in per_rank_timing):
+        forward = _rank_metric_value(per_rank_timing, rank, "forward")
+        backward = _rank_metric_value(per_rank_timing, rank, "backward")
+        step_time = _rank_metric_value(per_rank_timing, rank, "step_time")
+        if step_time <= 0.0 or backward <= 0.0:
+            continue
+        if strategy == "fsdp" and forward <= 0.0:
+            continue
+        eligible_ranks.append(rank)
+    if len(eligible_ranks) <= 1:
+        return None
+
     visible_values = {
         int(rank): (
-            _rank_metric_value(per_rank_timing, int(rank), "forward")
-            + _rank_metric_value(per_rank_timing, int(rank), "backward")
+            _rank_metric_value(per_rank_timing, rank, "forward")
+            + _rank_metric_value(per_rank_timing, rank, "backward")
             if strategy == "fsdp"
-            else _rank_metric_value(per_rank_timing, int(rank), "backward")
+            else _rank_metric_value(per_rank_timing, rank, "backward")
         )
-        for rank in per_rank_timing
+        for rank in eligible_ranks
     }
     pair = _rank_straggler_pair(visible_values)
     if pair is None:
@@ -351,8 +366,6 @@ def _build_rank_straggler_evidence(
     iteration_time = _rank_metric_value(
         per_rank_timing, victim, "input_wait"
     ) + _rank_metric_value(per_rank_timing, victim, "step_time")
-    if iteration_time <= 0.0:
-        return None
 
     score = pair.cost_ms / iteration_time
     threshold = non_negative_finite(score_threshold)
@@ -375,10 +388,14 @@ def _build_rank_straggler_evidence(
         # stragglers from forward excess.
         forward_excess = 0.0
     else:
-        forward_excess = max(
-            0.0,
-            _rank_metric_value(per_rank_timing, culprit, "forward")
-            - _rank_metric_value(per_rank_timing, victim, "forward"),
+        culprit_forward = _rank_metric_value(
+            per_rank_timing, culprit, "forward"
+        )
+        victim_forward = _rank_metric_value(per_rank_timing, victim, "forward")
+        forward_excess = (
+            max(0.0, culprit_forward - victim_forward)
+            if culprit_forward > 0.0 and victim_forward > 0.0
+            else 0.0
         )
 
     component_excesses = {

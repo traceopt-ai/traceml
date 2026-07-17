@@ -133,6 +133,19 @@ visible_r = backward_r              # DDP/default
 visible_r = forward_r + backward_r  # FSDP
 ```
 
+Only ranks with measured visible-phase anchors and a measured step envelope are
+eligible:
+
+```text
+DDP/default: backward_r > 0 and step_time_r > 0
+FSDP:        forward_r > 0 and backward_r > 0 and step_time_r > 0
+```
+
+If fewer than two ranks are eligible, TraceML does not report a rank straggler.
+Missing visible instrumentation causes this rule to abstain instead of treating
+zero as a fast rank. `input_wait == 0` and `h2d == 0` remain valid component
+values.
+
 The culprit rank is the rank with the minimum visible value. This is the rank
 that likely arrived late and therefore waited least in the visible phase. The
 victim rank is the upper actual median rank by visible value.
@@ -150,6 +163,9 @@ input_excess = input_wait_culprit - input_wait_victim
 h2d_excess = h2d_culprit - h2d_victim
 forward_excess = forward_culprit - forward_victim  # DDP/default only
 ```
+
+DDP/default compute attribution requires measured forward time on both the
+culprit and victim ranks.
 
 The largest material positive excess becomes `INPUT_STRAGGLER`,
 `H2D_STRAGGLER`, or, for DDP/default only, `COMPUTE_STRAGGLER`. If no such

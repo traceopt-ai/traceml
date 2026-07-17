@@ -670,6 +670,75 @@ def test_rank_straggler_not_emitted_below_visible_wait_threshold() -> None:
     assert RankStragglerRule().evaluate(ctx) is None
 
 
+def test_rank_straggler_excludes_rank_with_missing_backward() -> None:
+    per_rank = {
+        0: _timing_row(dataloader=200.0, backward=0.0, step_time=200.0),
+        1: _timing_row(dataloader=80.0, backward=20.0, step_time=100.0),
+        2: _timing_row(dataloader=0.0, backward=120.0, step_time=140.0),
+    }
+    ctx = _rank_context(per_rank)
+
+    assert ctx.rank_straggler is not None
+    assert ctx.rank_straggler.culprit_rank == 1
+    assert ctx.rank_straggler.victim_rank == 2
+    assert RankStragglerRule().evaluate(ctx).kind == "INPUT_STRAGGLER"
+
+
+def test_rank_straggler_abstains_when_all_backward_missing() -> None:
+    per_rank = {
+        0: _timing_row(backward=0.0, step_time=100.0),
+        1: _timing_row(backward=0.0, step_time=120.0),
+    }
+    ctx = _rank_context(per_rank)
+
+    assert ctx.rank_straggler is None
+    assert RankStragglerRule().evaluate(ctx) is None
+
+
+def test_rank_straggler_excludes_rank_with_missing_step_time() -> None:
+    per_rank = {
+        0: _timing_row(dataloader=200.0, backward=1.0, step_time=0.0),
+        1: _timing_row(dataloader=80.0, backward=20.0, step_time=100.0),
+        2: _timing_row(dataloader=0.0, backward=120.0, step_time=140.0),
+    }
+    ctx = _rank_context(per_rank)
+
+    assert ctx.rank_straggler is not None
+    assert ctx.rank_straggler.culprit_rank == 1
+    assert ctx.rank_straggler.victim_rank == 2
+    assert RankStragglerRule().evaluate(ctx).kind == "INPUT_STRAGGLER"
+
+
+def test_fsdp_rank_straggler_excludes_missing_visible_constituents() -> None:
+    per_rank = {
+        0: _timing_row(dataloader=200.0, forward=0.0, backward=1.0),
+        1: _timing_row(dataloader=160.0, forward=10.0, backward=0.0),
+        2: _timing_row(dataloader=80.0, forward=20.0, backward=20.0),
+        3: _timing_row(dataloader=0.0, forward=80.0, backward=80.0),
+    }
+    ctx = _rank_context(per_rank, training_strategy="fsdp")
+
+    assert ctx.rank_straggler is not None
+    assert ctx.rank_straggler.culprit_rank == 2
+    assert ctx.rank_straggler.victim_rank == 3
+    assert RankStragglerRule().evaluate(ctx).kind == "INPUT_STRAGGLER"
+
+
+def test_ddp_missing_forward_does_not_emit_compute_straggler() -> None:
+    per_rank = {
+        0: _timing_row(forward=100.0, backward=20.0, optimizer=0.0),
+        1: _timing_row(forward=0.0, backward=120.0, optimizer=0.0),
+    }
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+    )
+
+    assert result.primary.kind == "STRAGGLER"
+    assert result.issues[0].phase == "sync"
+    assert result.issues[0].evidence["component"] == "sync_or_unattributed"
+
+
 def test_rank_straggler_uses_actual_upper_median_victim_rank() -> None:
     per_rank = {
         0: _timing_row(backward=10.0, forward=10.0, optimizer=0.0),
