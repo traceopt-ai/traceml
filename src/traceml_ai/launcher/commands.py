@@ -22,6 +22,7 @@ from typing import Any, Mapping, Optional
 from traceml_ai.launcher.launch_config import (
     DistributedLaunchConfig,
     RunIdentity,
+    TorchrunLaunchConfig,
 )
 from traceml_ai.launcher.manifest import (
     collect_existing_artifacts,
@@ -163,10 +164,72 @@ def resolve_existing_script_path(script_path: str) -> str:
     return str(path.resolve())
 
 
+def _disable_traceml_requested(
+    args: argparse.Namespace, environ: Mapping[str, str]
+) -> bool:
+    """Return True when the CLI or parent environment requests native launch."""
+    return bool(getattr(args, "disable_traceml", False)) or (
+        environ.get("TRACEML_DISABLED") == "1"
+    )
+
+
+def _disabled_native_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """Copy the user environment while removing stale TraceML settings."""
+    env = {
+        key: value
+        for key, value in environ.items()
+        if not key.startswith("TRACEML_")
+    }
+    env["TRACEML_DISABLED"] = "1"
+    return env
+
+
+def _launch_disabled_process(
+    *,
+    script_path: str,
+    args: argparse.Namespace,
+    torchrun_cfg: Any,
+    launch_context: LaunchContext,
+) -> None:
+    """Launch the target script natively with TraceML disabled."""
+    print(
+        "[TraceML] TraceML is disabled via --disable-traceml. "
+        "Running natively."
+    )
+    train_cmd = [
+        *torchrun_cfg.to_command(),
+        str(script_path),
+        *(args.args or []),
+    ]
+    env = _disabled_native_env(os.environ)
+
+    train_proc: Optional[subprocess.Popen] = None
+    install_shutdown_handlers(lambda: (train_proc,), manifest_path=None)
+    train_proc = start_training_process(
+        train_cmd=train_cmd,
+        env=env,
+        cwd=launch_context.launch_cwd,
+        capture_stderr=False,
+    )
+    train_proc.wait()
+    raise SystemExit(train_proc.returncode)
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
+    if _disable_traceml_requested(args, os.environ):
+        try:
+            TorchrunLaunchConfig.from_args(args)
+        except ValueError as exc:
+            raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+        return
+
     try:
         launch_cfg = DistributedLaunchConfig.from_args(args)
+    except ValueError as exc:
+        raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+
+    try:
         RunIdentity.from_args(
             args,
             generated_session_id="validation_placeholder",
@@ -209,14 +272,26 @@ def validate_launch_args(args: argparse.Namespace) -> None:
 
 def launch_process(script_path: str, args: argparse.Namespace) -> None:
     """Launch the TraceML aggregator and target training process."""
+    launch_context = LaunchContext.capture()
+
+    if _disable_traceml_requested(args, os.environ):
+        torchrun_cfg = TorchrunLaunchConfig.from_args(args)
+        _launch_disabled_process(
+            script_path=script_path,
+            args=args,
+            torchrun_cfg=torchrun_cfg,
+            launch_context=launch_context,
+        )
+
+    launch_cfg = DistributedLaunchConfig.from_args(args)
+    torchrun_cfg = launch_cfg.torchrun
+
     from traceml_ai.config.yaml_loader import (
         BUILT_IN_DEFAULTS,
         find_config_file,
         load_yaml_config,
         resolve_config,
     )
-
-    launch_context = LaunchContext.capture()
 
     config_path = find_config_file(Path(launch_context.launch_cwd))
     try:
@@ -236,8 +311,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
             "TRACEML_UI_MODE": os.environ["TRACEML_MODE"],
         }
 
-    launch_cfg = DistributedLaunchConfig.from_args(args)
-    torchrun_cfg = launch_cfg.torchrun
     aggregator_cfg = launch_cfg.aggregator
     launch_defaults = _launch_defaults_for_topology(
         BUILT_IN_DEFAULTS,
@@ -292,9 +365,7 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
-    env["TRACEML_DISABLED"] = (
-        "1" if getattr(args, "disable_traceml", False) else "0"
-    )
+    env["TRACEML_DISABLED"] = "0"
     capture_stderr = _stderr_capture_enabled(args, launcher_env)
     env["TRACEML_CAPTURE_STDERR"] = "1" if capture_stderr else "0"
     env["TRACEML_PROFILE"] = getattr(args, "profile", "watch")
@@ -386,44 +457,6 @@ def launch_process(script_path: str, args: argparse.Namespace) -> None:
     traceml_root = Path(__file__).resolve().parents[1]
     runner_path = str(traceml_root / "runtime" / "executor.py")
     script_args = args.args or []
-
-    if env["TRACEML_DISABLED"] == "1":
-        print(
-            "[TraceML] TraceML is disabled via --disable-traceml. Running natively."
-        )
-        if getattr(args, "html_report", False):
-            print(
-                "[TraceML] --html-report ignored: TraceML is disabled.",
-                file=sys.stderr,
-            )
-        train_cmd = [
-            *torchrun_cfg.to_command(),
-            str(script_path),
-            *script_args,
-        ]
-        train_proc = start_training_process(
-            train_cmd=train_cmd,
-            env=env,
-            cwd=execution_cwd,
-            capture_stderr=capture_stderr,
-        )
-        stderr_capture = (
-            start_stderr_tail_capture(train_proc) if capture_stderr else None
-        )
-        install_shutdown_handlers(
-            lambda: (train_proc, None), manifest_path=manifest_path
-        )
-        train_proc.wait()
-        _finish_stderr_capture(stderr_capture, session_root)
-        final_status = "completed" if train_proc.returncode == 0 else "failed"
-        update_run_manifest(
-            manifest_path,
-            status=final_status,
-            artifacts=collect_existing_artifacts(
-                db_path, session_root=session_root
-            ),
-        )
-        raise SystemExit(train_proc.returncode)
 
     train_cmd = [
         *torchrun_cfg.to_command(),
@@ -680,7 +713,7 @@ def run_serve(args: argparse.Namespace) -> None:
         if missing:
             raise SystemExit(
                 "[TraceML] ERROR: "
-                f"{DASHBOARD_EXTRA_INSTALL_HINT} Missing: {', '.join(missing)}."
+                f"{DASHBOARD_DEPENDENCY_INSTALL_HINT} Missing: {', '.join(missing)}."
             )
 
     try:

@@ -98,8 +98,12 @@ else:
     IS_LIGHTNING_AVAILABLE = True
 
 
-TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
 _MISSING = object()
+
+
+def _traceml_disabled() -> bool:
+    """Read the TraceML kill switch dynamically."""
+    return os.environ.get("TRACEML_DISABLED") == "1"
 
 
 def init():
@@ -199,6 +203,8 @@ class TraceMLCallback(_CallbackBase):
         setattr(self, ctx_attr, None)
 
     def setup(self, trainer, pl_module, stage=None):
+        if _traceml_disabled():
+            return
         self._wrap_forward(trainer, pl_module)
         self._wrap_batch_to_device(trainer, pl_module)
 
@@ -215,7 +221,7 @@ class TraceMLCallback(_CallbackBase):
 
         @functools.wraps(original_forward)
         def wrapped_forward(*args, **kwargs):
-            if TRACEML_DISABLED or not getattr(trainer, "training", False):
+            if _traceml_disabled() or not getattr(trainer, "training", False):
                 return original_forward(*args, **kwargs)
 
             with timed_region(
@@ -248,7 +254,7 @@ class TraceMLCallback(_CallbackBase):
 
         def wrapped_batch_to_device(batch, *args, **kwargs):
             if (
-                TRACEML_DISABLED
+                _traceml_disabled()
                 or not getattr(trainer, "training", True)
                 or not _lightning_uses_cuda(trainer, pl_module)
             ):
@@ -308,7 +314,7 @@ class TraceMLCallback(_CallbackBase):
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         # Start overall step timing
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         self._traceml_step_ctx = timed_region(
             "_traceml_internal:step_time",
@@ -330,7 +336,7 @@ class TraceMLCallback(_CallbackBase):
             self._mem_tracker = None
 
     def on_before_backward(self, trainer, pl_module, loss):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # Start backward timing
         self._backward_ctx = timed_region(
@@ -339,13 +345,13 @@ class TraceMLCallback(_CallbackBase):
         self._backward_ctx.__enter__()
 
     def on_after_backward(self, trainer, pl_module):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # End backward timing
         self._close_context("_backward_ctx")
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         self._opt_step_occurred = True
 
@@ -356,7 +362,7 @@ class TraceMLCallback(_CallbackBase):
         self._optimizer_ctx.__enter__()
 
     def on_before_zero_grad(self, trainer, pl_module, optimizer):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # End optimizer step timing (zero_grad happens after step)
         self._close_context("_optimizer_ctx")
@@ -364,7 +370,7 @@ class TraceMLCallback(_CallbackBase):
     def on_train_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx
     ):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # Safety: end any active context managers (edge cases)
         for ctx_attr in (

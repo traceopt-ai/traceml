@@ -555,6 +555,11 @@ def test_auto_dataloader_patch_records_gpu_events(monkeypatch):
         "timed_region",
         fake_timed_region,
     )
+    monkeypatch.setattr(
+        dataloader_patch,
+        "is_tracing_armed",
+        lambda: True,
+    )
 
     from torch.utils.data import DataLoader
 
@@ -567,6 +572,35 @@ def test_auto_dataloader_patch_records_gpu_events(monkeypatch):
         ("_traceml_internal:dataloader_next", "step", True),
         ("_traceml_internal:dataloader_next", "step", True),
     ]
+
+
+def test_auto_dataloader_patch_passes_through_when_unarmed(monkeypatch):
+    import traceml_ai.instrumentation.patches.dataloader_patch as dataloader_patch
+
+    calls = []
+
+    @contextmanager
+    def fake_timed_region(name, scope, record_gpu_events):
+        calls.append((name, scope, record_gpu_events))
+        yield
+
+    monkeypatch.setattr(
+        dataloader_patch,
+        "timed_region",
+        fake_timed_region,
+    )
+    monkeypatch.setattr(
+        dataloader_patch,
+        "is_tracing_armed",
+        lambda: False,
+    )
+
+    from torch.utils.data import DataLoader
+
+    loader = DataLoader([1, 2, 3], batch_size=1)
+
+    assert len(list(dataloader_patch._traceml_dataloader_iter(loader))) == 3
+    assert calls == []
 
 
 def test_wrap_dataloader_fetch_records_gpu_events(monkeypatch):

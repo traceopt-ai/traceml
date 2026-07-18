@@ -89,6 +89,56 @@ def test_init_disabled_via_env(initialization, monkeypatch):
     assert started == []
 
 
+def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
+    import torch.nn as nn
+
+    from traceml_ai.utils.step_memory import (
+        StepMemoryTracker,
+        flush_step_memory_buffer,
+        step_memory_queue,
+    )
+    from traceml_ai.utils.timing import (
+        TimeEvent,
+        TimeScope,
+        flush_step_time_buffer,
+        get_step_time_queue,
+        record_event,
+        timed_region,
+    )
+
+    step_time_queue = get_step_time_queue()
+    while not step_time_queue.empty():
+        step_time_queue.get_nowait()
+    while not step_memory_queue.empty():
+        step_memory_queue.get_nowait()
+
+    monkeypatch.setenv("TRACEML_DISABLED", "1")
+
+    record_event(
+        TimeEvent(
+            name="disabled_step",
+            device="cpu",
+            cpu_start=0.0,
+            cpu_end=1.0,
+            scope=TimeScope.STEP,
+        )
+    )
+    flush_step_time_buffer(1)
+
+    model = nn.Linear(1, 1)
+    tracker = StepMemoryTracker(model)
+    tracker.reset()
+    tracker.record()
+    flush_step_memory_buffer(model, 1)
+
+    with timed_region("disabled_region"):
+        pass
+    flush_step_time_buffer(2)
+
+    assert step_time_queue.empty()
+    assert step_memory_queue.empty()
+
+
 def test_init_starts_runtime_when_aggregator_reachable(
     initialization, monkeypatch
 ):
@@ -127,6 +177,79 @@ def test_init_starts_runtime_when_aggregator_reachable(
     assert captured["settings"].aggregator.connect_host == "10.0.0.5"
     assert captured["settings"].aggregator.port == 40000
     assert initialization._RUNTIME_HANDLE is fake_handle
+
+
+def test_patch_install_failure_warns_noops_and_stops_runtime(
+    initialization, monkeypatch, capsys
+):
+    import traceml_ai.instrumentation.patches.forward_auto_timer_patch as forward_patch
+    import traceml_ai.runtime.lifecycle as lifecycle
+
+    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
+    fake_handle = _FakeHandle()
+
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
+    monkeypatch.setattr(lifecycle, "wait_for_aggregator", lambda *a, **k: True)
+    monkeypatch.setattr(
+        lifecycle, "start_runtime", lambda *a, **k: fake_handle
+    )
+    monkeypatch.setattr(
+        forward_patch,
+        "patch_forward",
+        lambda: (_ for _ in ()).throw(RuntimeError("patch boom")),
+    )
+
+    cfg = initialization.init(
+        mode="selective",
+        patch_forward=True,
+        aggregator_host="127.0.0.1",
+        aggregator_port=40000,
+    )
+
+    assert cfg.disabled is True
+    assert cfg.patch_forward is False
+    assert fake_handle.stops == 1
+    assert initialization.get_init_config() is cfg
+    assert initialization.is_tracing_armed() is False
+    assert os.environ["TRACEML_DISABLED"] == "1"
+    captured = capsys.readouterr()
+    assert "[TraceML]" in captured.err
+    assert "patch boom" in captured.err
+
+
+def test_patch_install_failure_strict_raises_and_cleans_up(
+    initialization, monkeypatch
+):
+    import traceml_ai.instrumentation.patches.forward_auto_timer_patch as forward_patch
+    import traceml_ai.runtime.lifecycle as lifecycle
+
+    monkeypatch.delenv("TRACEML_DISABLED", raising=False)
+    fake_handle = _FakeHandle()
+
+    monkeypatch.setattr(lifecycle, "get_active_runtime_handle", lambda: None)
+    monkeypatch.setattr(lifecycle, "wait_for_aggregator", lambda *a, **k: True)
+    monkeypatch.setattr(
+        lifecycle, "start_runtime", lambda *a, **k: fake_handle
+    )
+    monkeypatch.setattr(
+        forward_patch,
+        "patch_forward",
+        lambda: (_ for _ in ()).throw(RuntimeError("patch boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="patch boom"):
+        initialization.init(
+            mode="selective",
+            patch_forward=True,
+            aggregator_host="127.0.0.1",
+            aggregator_port=40000,
+            on_missing_aggregator="raise",
+        )
+
+    assert fake_handle.stops == 1
+    assert initialization.get_init_config() is None
+    assert initialization.is_tracing_armed() is False
 
 
 def test_init_warns_and_noops_when_aggregator_unreachable(
