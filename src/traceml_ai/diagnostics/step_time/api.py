@@ -18,6 +18,7 @@ from ..common import (
     DiagnosticIssue,
     DiagnosticResult,
     Severity,
+    severity_rank,
     sort_issues,
     validate_confidence,
 )
@@ -124,7 +125,7 @@ def build_step_warmup_diagnosis(
 
     ``NO_DATA`` is reserved for missing or unusable timing data. ``WARMUP``
     means TraceML has timing samples, but fewer than the configured minimum for
-    a stable summary diagnosis.
+    diagnosis.
     """
     low = max(0, int(steps_used))
     high = max(low, int(max_steps_used if max_steps_used is not None else low))
@@ -135,8 +136,8 @@ def build_step_warmup_diagnosis(
         kind="WARMUP",
         severity="info",
         reason=(
-            f"Only {available} {suffix} per rank available; summary "
-            f"diagnosis requires {required}."
+            f"Only {available} {suffix} per rank available; diagnosis "
+            f"requires {required}."
         ),
         action="Use a longer run for a stable timing diagnosis.",
         steps_used=low,
@@ -178,6 +179,18 @@ def _primary_issue_rank(issue: DiagnosticIssue) -> int:
     Rank contributor issues for primary-diagnosis selection.
     """
     return _PRIMARY_KIND_PRIORITY.get(issue.kind, 0)
+
+
+def _cap_issue_severity(
+    issue: DiagnosticIssue,
+    severity: Severity,
+) -> DiagnosticIssue:
+    """
+    Return an issue whose severity is no stronger than `severity`.
+    """
+    if severity_rank(issue.severity) <= severity_rank(severity):
+        return issue
+    return replace(issue, severity=severity)
 
 
 def _top_rank_entries(
@@ -330,6 +343,7 @@ def build_step_diagnosis_result(
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
 ) -> DiagnosticResult[StepDiagnosis]:
     """
     Build a rich step-time diagnosis result from one analyzed window.
@@ -379,10 +393,10 @@ def build_step_diagnosis_result(
         )
         return DiagnosticResult(primary=primary)
 
-    if steps_used < thresholds.min_steps_for_confident_diag:
+    if steps_used < thresholds.min_steps_for_warning_diag:
         result = build_step_warmup_diagnosis(
             steps_used=steps_used,
-            required_steps=thresholds.min_steps_for_confident_diag,
+            required_steps=thresholds.min_steps_for_warning_diag,
         )
         return DiagnosticResult(
             primary=replace(result.primary, worst_rank=overall_worst_rank)
@@ -393,9 +407,18 @@ def build_step_diagnosis_result(
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
         diagnosis_clock=diagnosis_clock,
+        training_strategy=training_strategy,
     )
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
+    if context.training_strategy == "fsdp":
+        issue_list = [
+            _cap_issue_severity(issue, "warn") for issue in issue_list
+        ]
+    if steps_used < thresholds.min_steps_for_confident_diag:
+        issue_list = [
+            _cap_issue_severity(issue, "warn") for issue in issue_list
+        ]
 
     issues = sort_issues(issue_list)
     primary_issue = _select_primary_issue(issues)
@@ -594,6 +617,7 @@ def build_step_diagnosis(
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
 ) -> StepDiagnosis:
     """
     Build one primary diagnosis from step-combined metrics.
@@ -606,6 +630,7 @@ def build_step_diagnosis(
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
         diagnosis_clock=diagnosis_clock,
+        training_strategy=training_strategy,
     ).primary
     if not isinstance(primary, StepDiagnosis):
         raise TypeError(

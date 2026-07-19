@@ -161,7 +161,7 @@ What to do next:
 
 Meaning:
 
-- input wait is taking a large share of the typical step
+- input wait is taking a large share of iteration time
 
 Common causes:
 

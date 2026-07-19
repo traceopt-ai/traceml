@@ -15,6 +15,7 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
             CREATE TABLE step_time_samples (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 rank INTEGER,
+                global_rank INTEGER,
                 step INTEGER,
                 events_json TEXT NOT NULL
             );
@@ -62,17 +63,17 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
         }
         conn.execute(
             """
-            INSERT INTO step_time_samples(rank, step, events_json)
-            VALUES (?, ?, ?);
+            INSERT INTO step_time_samples(rank, global_rank, step, events_json)
+            VALUES (?, ?, ?, ?);
             """,
-            (0, 1, json.dumps(events_1)),
+            (0, 0, 1, json.dumps(events_1)),
         )
         conn.execute(
             """
-            INSERT INTO step_time_samples(rank, step, events_json)
-            VALUES (?, ?, ?);
+            INSERT INTO step_time_samples(rank, global_rank, step, events_json)
+            VALUES (?, ?, ?, ?);
             """,
-            (0, 2, json.dumps(events_2)),
+            (0, 0, 2, json.dumps(events_2)),
         )
         conn.commit()
     finally:
@@ -91,6 +92,7 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
     assert metrics["input_wait"].series.worst == [4.0, 6.0]
     assert metrics["input_wait"].series.sum == [4.0, 6.0]
     assert result.diagnosis_clock == "gpu"
+    assert result.training_strategy == "ddp"
 
     per_rank = result.per_rank_timing[0]
     assert per_rank["input_wait"] == 5.0

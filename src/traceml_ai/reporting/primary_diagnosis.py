@@ -224,11 +224,18 @@ def _phase_share_evidence(
     *,
     step_time_summary: Mapping[str, Any],
     system_summary: Mapping[str, Any],
+    include_iteration_time: bool = False,
 ) -> JsonDict:
     """Build evidence for diagnoses based on average step-time shares."""
     average = _global_average(step_time_summary)
     total_ms = _float_or_none(average.get("total_step_ms"))
     step_time_ms = _float_or_none(average.get("step_time_ms"))
+    input_wait_ms = _float_or_none(average.get("input_wait_ms"))
+    iteration_time_ms = (
+        input_wait_ms + step_time_ms
+        if input_wait_ms is not None and step_time_ms is not None
+        else None
+    )
     denominator_ms = step_time_ms or total_ms
     window = _global_window(step_time_summary)
     evidence: JsonDict = {
@@ -240,6 +247,8 @@ def _phase_share_evidence(
         "diagnosis_clock": window.get("diagnosis_clock"),
         "dataloader_ms": _round(_float_or_none(average.get("dataloader_ms"))),
     }
+    if include_iteration_time:
+        evidence["iteration_time_ms"] = _round(iteration_time_ms)
 
     for metric in PHASE_METRICS:
         evidence[metric] = _round(_float_or_none(average.get(metric)))
@@ -248,9 +257,16 @@ def _phase_share_evidence(
     for metric in PHASE_METRICS:
         value = _float_or_none(average.get(metric))
         key = metric.replace("_ms", "_pct")
+        metric_denominator_ms = (
+            iteration_time_ms if metric == "input_wait_ms" else denominator_ms
+        )
         shares[key] = (
-            _round(100.0 * value / denominator_ms)
-            if value is not None and denominator_ms and denominator_ms > 0.0
+            _round(100.0 * value / metric_denominator_ms)
+            if (
+                value is not None
+                and metric_denominator_ms
+                and metric_denominator_ms > 0.0
+            )
             else None
         )
     evidence["shares"] = shares
@@ -429,13 +445,13 @@ def _phase_share_summary(kind: str, evidence: Mapping[str, Any]) -> str:
     )
     if kind == "INPUT_BOUND":
         value = _float_or_none(evidence.get("input_wait_ms"))
-        step_time = _float_or_none(evidence.get("step_time_ms"))
-        if value is not None and step_time is not None:
+        iteration_time = _float_or_none(evidence.get("iteration_time_ms"))
+        if value is not None and iteration_time is not None:
             return (
-                f"Input wait was {value:.1f}ms before a "
-                f"{step_time:.1f}ms traced step."
+                f"Input wait was {value:.1f}ms of "
+                f"{iteration_time:.1f}ms iteration time."
             )
-        return "Input wait was a large pre-step delay."
+        return "Input wait took a large share of iteration time."
     if kind == "RESIDUAL_HEAVY":
         value = _float_or_none(evidence.get("residual_ms"))
         if value is not None and total is not None:
@@ -502,6 +518,7 @@ def _promote_step_time_primary(
         evidence = _phase_share_evidence(
             step_time_summary=step_time_summary,
             system_summary=system_summary,
+            include_iteration_time=(kind == "INPUT_BOUND"),
         )
         summary = _phase_share_summary(kind, evidence)
     else:

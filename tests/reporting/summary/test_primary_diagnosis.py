@@ -104,7 +104,7 @@ def test_input_bound_uses_phase_share_evidence() -> None:
     assert primary["section"] == "step_time"
     assert primary["scope"] == "performance"
     assert primary["summary"] == (
-        "Input wait was 80.0ms before a 160.0ms traced step."
+        "Input wait was 80.0ms of 240.0ms iteration time."
     )
     assert primary["evidence"] == {
         "type": "phase_share",
@@ -112,6 +112,7 @@ def test_input_bound_uses_phase_share_evidence() -> None:
         "steps_analyzed": 256,
         "total_step_ms": 200.0,
         "step_time_ms": 160.0,
+        "iteration_time_ms": 240.0,
         "diagnosis_clock": "gpu",
         "dataloader_ms": 50.0,
         "input_wait_ms": 80.0,
@@ -119,7 +120,7 @@ def test_input_bound_uses_phase_share_evidence() -> None:
         "compute_ms": 120.0,
         "residual_ms": 20.0,
         "shares": {
-            "input_wait_pct": 50.0,
+            "input_wait_pct": 33.333,
             "h2d_pct": 6.25,
             "compute_pct": 75.0,
             "residual_pct": 12.5,

@@ -174,6 +174,7 @@ def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
     def fake_diagnosis(metrics, **kwargs):
         captured["metrics"] = metrics
         captured["diagnosis_clock"] = kwargs.get("diagnosis_clock")
+        captured["training_strategy"] = kwargs.get("training_strategy")
         return SimpleNamespace(
             kind="INPUT_BOUND",
             severity="warn",
@@ -195,11 +196,13 @@ def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
     payload = build_model_diagnostics_payload(
         step_time_diagnosis_metrics=diagnosis_metrics,
         step_time_diagnosis_clock="gpu",
+        step_time_training_strategy="fsdp",
         step_memory_metrics=(),
     )
 
     assert captured["metrics"] == diagnosis_metrics
     assert captured["diagnosis_clock"] == "gpu"
+    assert captured["training_strategy"] == "fsdp"
     assert payload.items[0].status == "INPUT-BOUND"
     assert payload.items[0].evidence["dominant"] == "input wait"
 

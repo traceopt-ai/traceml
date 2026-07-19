@@ -63,14 +63,14 @@ Traced process pressure.
 Training-step timing.
 
 - `NO_DATA`: no usable step-time data.
-- `WARMUP`: some data exists, but not enough for a stable diagnosis.
+- `WARMUP`: some data exists, but not enough for diagnosis.
 - `BALANCED`: no clear timing bottleneck or rank straggler.
 - `STRAGGLER`: one rank has a mixed clean-step straggler signal.
 - `INPUT_STRAGGLER`: one rank has materially higher selected-clock input wait.
 - `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
 - `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
 - `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
-- `INPUT_BOUND`: selected-clock input wait dominates the typical step.
+- `INPUT_BOUND`: selected-clock input wait dominates iteration time.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
 
@@ -78,20 +78,37 @@ Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
 input wait, and traced phase events present in the window. Otherwise it uses
 explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
-summary use this same selected-clock window for diagnosis-facing timing.
+summary use the same global-rank SQLite loader and selected-clock window
+builder for diagnosis-facing timing; they differ only by row window sizing.
 Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
 The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
 `total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
 These compatibility fields are not selected-clock phase-share denominators.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
-display or diagnosis. In the final text report, selected-clock phase shares
-are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
+display or diagnosis. In the final text report, most selected-clock phase
+shares are divided by `step_time_ms`; CPU compatibility rows are labeled
+separately.
 
-`INPUT_BOUND` uses selected-clock `input_wait_ms / step_time_ms`. This compares
-pre-step input wait with the traced step envelope, not end-to-end wall time, so
-the ratio can exceed 100%. Live diagnosis warns at 25% and is critical at 35%.
-Summary diagnosis is more conservative because it covers a larger final window:
-it warns at 30% and is critical at 40%.
+`INPUT_BOUND` uses selected-clock
+`input_wait_ms / iteration_time_ms`, where
+`iteration_time_ms = input_wait_ms + step_time_ms`. This compares pre-step
+input wait with the full selected-clock iteration time while leaving
+`step_time_ms` as the traced step envelope. Live and summary diagnosis both
+warn at 10% and are critical at 20%.
+
+Shared Step Time diagnosis needs at least 2 steps to emit warning-only
+bottleneck diagnoses. Critical diagnoses are allowed once the window has at
+least 20 steps. Live and summary use the same diagnosis gates; they differ by
+the selected timing window size.
+
+When runtime environment metadata is available, Step Time diagnosis also
+receives an advisory training strategy such as `ddp` or `fsdp`. This context is
+used only to choose diagnosis attribution behavior; it is not a public Step
+Time metric. Missing or unrecognized strategy metadata defaults to `ddp` to
+preserve the current straggler behavior. DDP remains eligible for critical
+Step Time diagnoses once thresholds and confidence gates are met. FSDP Step
+Time diagnoses are capped at warning because collective masking can make
+attribution under-confident.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:
@@ -100,6 +117,7 @@ unattributed step time averaged from per-step clamped residuals:
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = selected step envelope timing
+iteration_time_ms = selected input_wait_ms + selected traced_step_ms
 residual_ms = average(max(0, traced_step_ms - known_step_ms))
 total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```

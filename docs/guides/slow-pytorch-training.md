@@ -41,7 +41,7 @@ diagnosis or symptom.
 
 ## Quick interpretation
 
-`INPUT-BOUND` means input wait is taking a large share of the typical step.
+`INPUT-BOUND` means input wait is taking a large share of iteration time.
 Confirm the input path before tuning model compute.
 
 `LOW_GPU_UTILIZATION` and `MODERATE_GPU_UTILIZATION` are system-level symptoms.

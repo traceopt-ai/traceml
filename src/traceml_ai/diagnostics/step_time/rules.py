@@ -186,7 +186,7 @@ class InputBoundRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"Input wait is {_pct(context.input_bound_share)} of the "
-                f"typical {context.diagnosis_clock} step."
+                f"typical {context.diagnosis_clock} iteration time."
             ),
             action="Increase workers, prefetch, or storage throughput.",
             metric="input_wait",
@@ -197,6 +197,7 @@ class InputBoundRule(_BaseStepTimeRule):
             evidence={
                 "input_wait_ms": context.input_wait_total,
                 "step_time_ms": context.input_bound_step_total,
+                "iteration_time_ms": context.iteration_time_total,
                 "input_bound_share": context.input_bound_share,
                 "diagnosis_clock": context.diagnosis_clock,
             },
