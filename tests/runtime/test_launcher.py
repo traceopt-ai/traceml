@@ -125,6 +125,35 @@ def test_serve_threads_expected_world_size(monkeypatch) -> None:
     assert _resolve_serve_settings(args).expected_world_size == 1
 
 
+def test_serve_dashboard_missing_deps_reports_hint_not_nameerror(
+    monkeypatch,
+) -> None:
+    # Regression: run_serve referenced an undefined constant on the
+    # dashboard-deps-missing path, so it raised NameError instead of the
+    # SystemExit install hint. Pin that it names the missing deps and exits.
+    import importlib.util as importlib_util
+
+    real_find_spec = importlib_util.find_spec
+    monkeypatch.setattr(
+        importlib_util,
+        "find_spec",
+        lambda name, *a, **k: (
+            None
+            if name in ("nicegui", "plotly")
+            else real_find_spec(name, *a, **k)
+        ),
+    )
+    from traceml_ai.launcher.commands import run_serve
+
+    args = build_parser().parse_args(["serve", "--mode", "dashboard"])
+    with pytest.raises(SystemExit) as excinfo:
+        run_serve(args)
+
+    message = str(excinfo.value)
+    assert "nicegui" in message and "plotly" in message
+    assert "Missing:" in message
+
+
 def test_serve_configures_logging_without_preset_env(
     monkeypatch, tmp_path
 ) -> None:
