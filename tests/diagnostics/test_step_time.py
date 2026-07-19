@@ -15,10 +15,8 @@ from traceml_ai.diagnostics.step_time.api import (
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.rules import (
-    CleanStragglerRule,
-    ComputeBoundRule,
     InputBoundRule,
-    ResidualHeavyRule,
+    RankStragglerRule,
 )
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
@@ -173,12 +171,16 @@ def _metrics_from_per_rank_timing(
     return tuple(metrics)
 
 
-def _clean_context(
+def _rank_context(
     per_rank_timing: dict[int, dict[str, float]],
+    *,
+    training_strategy: str = "ddp",
 ):
-    return _time_context(
-        *_metrics_from_per_rank_timing(per_rank_timing),
+    return build_step_time_context(
+        metrics=_metrics_from_per_rank_timing(per_rank_timing),
+        thresholds=DEFAULT_THRESHOLDS,
         per_rank_timing=per_rank_timing,
+        training_strategy=training_strategy,
     )
 
 
@@ -253,115 +255,6 @@ def _single_rank_step_metrics(
             world_size=1,
             steps=steps,
         ),
-    )
-
-
-def test_step_time_rules_trigger_and_no_trigger_cases() -> None:
-    input_ctx = _clean_context(
-        {
-            0: _timing_row(dataloader=10.0),
-            1: _timing_row(dataloader=90.0),
-        }
-    )
-    assert CleanStragglerRule().evaluate(input_ctx).kind == "INPUT_STRAGGLER"
-    assert (
-        CleanStragglerRule().evaluate(
-            _time_context(*_single_rank_step_metrics())
-        )
-        is None
-    )
-
-    compute_ctx = _clean_context(
-        {
-            0: _timing_row(forward=20.0, backward=30.0),
-            1: _timing_row(forward=90.0, backward=30.0),
-        }
-    )
-    assert CleanStragglerRule().evaluate(compute_ctx).kind == (
-        "COMPUTE_STRAGGLER"
-    )
-
-    input_bound = _time_context(
-        *_single_rank_step_metrics(
-            step=100.0,
-            dataloader=35.0,
-            forward=20.0,
-            backward=30.0,
-            optimizer=5.0,
-            residual=10.0,
-        ),
-        per_rank_timing={
-            0: _timing_row(
-                dataloader=35.0,
-                forward=20.0,
-                backward=30.0,
-                optimizer=5.0,
-                residual=10.0,
-                input_wait_gpu=35.0,
-                step_time_gpu=100.0,
-            )
-        },
-        diagnosis_clock="gpu",
-    )
-    issue = InputBoundRule().evaluate(input_bound)
-    assert issue is not None
-    assert issue.kind == "INPUT_BOUND"
-    assert issue.metric == "input_wait"
-    assert issue.phase == "input"
-    assert issue.evidence["diagnosis_clock"] == "gpu"
-    assert (
-        InputBoundRule().evaluate(
-            _time_context(
-                *_single_rank_step_metrics(dataloader=50.0),
-                per_rank_timing={
-                    0: _timing_row(
-                        dataloader=50.0,
-                        input_wait_gpu=5.0,
-                        step_time_gpu=100.0,
-                    )
-                },
-            )
-        )
-        is None
-    )
-
-    assert (
-        ResidualHeavyRule()
-        .evaluate(_time_context(*_single_rank_step_metrics(residual=20.0)))
-        .kind
-        == "RESIDUAL_HEAVY"
-    )
-    assert (
-        ResidualHeavyRule().evaluate(
-            _time_context(*_single_rank_step_metrics(residual=5.0))
-        )
-        is None
-    )
-
-    assert (
-        ComputeBoundRule()
-        .evaluate(
-            _time_context(
-                *_single_rank_step_metrics(dataloader=2.0, residual=3.0)
-            )
-        )
-        .kind
-        == "COMPUTE_BOUND"
-    )
-    assert (
-        ComputeBoundRule().evaluate(
-            _time_context(
-                *_single_rank_step_metrics(dataloader=5.0, residual=3.0),
-                per_rank_timing={
-                    0: _timing_row(
-                        dataloader=5.0,
-                        input_wait_cpu=35.0,
-                        step_time_cpu=100.0,
-                    )
-                },
-            )
-        )
-        is None
     )
 
 
@@ -480,7 +373,7 @@ def test_input_bound_rule_ignores_duration_without_explicit_clocks() -> None:
 
 
 def test_input_bound_rule_uses_input_wait_skew() -> None:
-    ctx = _clean_context(
+    ctx = _rank_context(
         {
             0: _timing_row(
                 dataloader=10.0,
@@ -499,76 +392,52 @@ def test_input_bound_rule_uses_input_wait_skew() -> None:
     assert InputBoundRule().evaluate(ctx) is None
 
 
-def test_clean_backward_discount_removes_telescoped_delay_from_peer() -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=100.0,
-            forward=20.0,
-            backward=20.0,
-            optimizer=0.0,
-            total_step=140.0,
-        ),
-        1: _timing_row(
-            dataloader=0.0,
-            forward=20.0,
-            backward=120.0,
-            optimizer=0.0,
-            total_step=140.0,
-        ),
-    }
-    ctx = _clean_context(per_rank)
-    issue = CleanStragglerRule().evaluate(ctx)
-
-    assert ctx.clean_rank_values["clean_backward"][1] == pytest.approx(20.0)
-    assert ctx.clean_rank_values["clean_compute"][0] == pytest.approx(40.0)
-    assert ctx.clean_rank_values["clean_compute"][1] == pytest.approx(40.0)
-    assert ctx.clean_rank_values["clean_step"][0] == pytest.approx(140.0)
-    assert issue is not None
-    assert issue.kind == "INPUT_STRAGGLER"
-    assert issue.ranks == (0,)
-    assert issue.evidence["component_excesses_ms"]["input"] == pytest.approx(
-        50.0
-    )
-
-
 @pytest.mark.parametrize(
     ("per_rank", "expected_kind", "expected_phase"),
     [
         (
             {
-                0: _timing_row(forward=20.0),
-                1: _timing_row(forward=100.0),
+                0: _timing_row(
+                    dataloader=100.0,
+                    backward=20.0,
+                    optimizer=0.0,
+                ),
+                1: _timing_row(
+                    dataloader=0.0,
+                    backward=120.0,
+                    optimizer=0.0,
+                ),
             },
-            "COMPUTE_STRAGGLER",
-            "compute",
+            "INPUT_STRAGGLER",
+            "input",
         ),
         (
             {
-                0: _timing_row(h2d=0.0),
-                1: _timing_row(h2d=80.0),
+                0: _timing_row(h2d=80.0, backward=20.0, optimizer=0.0),
+                1: _timing_row(h2d=0.0, backward=120.0, optimizer=0.0),
             },
             "H2D_STRAGGLER",
             "h2d",
         ),
         (
             {
-                0: _timing_row(residual=0.0),
-                1: _timing_row(residual=80.0),
+                0: _timing_row(forward=100.0, backward=20.0, optimizer=0.0),
+                1: _timing_row(forward=20.0, backward=120.0, optimizer=0.0),
             },
-            "RESIDUAL_STRAGGLER",
-            "residual",
+            "COMPUTE_STRAGGLER",
+            "forward",
         ),
         (
             {
-                0: _timing_row(dataloader=10.0, forward=20.0),
-                1: _timing_row(dataloader=60.0, forward=40.0),
+                0: _timing_row(forward=20.0, backward=20.0, optimizer=0.0),
+                1: _timing_row(forward=20.0, backward=120.0, optimizer=0.0),
             },
             "STRAGGLER",
-            "mixed",
+            "sync",
         ),
     ],
 )
-def test_clean_straggler_classifies_component_excess(
+def test_rank_straggler_classifies_culprit_excess(
     per_rank: dict[int, dict[str, float]],
     expected_kind: str,
     expected_phase: str,
@@ -579,17 +448,213 @@ def test_clean_straggler_classifies_component_excess(
     )
 
     assert result.primary.kind == expected_kind
-    assert result.primary.worst_rank == 1
+    assert result.primary.worst_rank == 0
     assert result.issues[0].phase == expected_phase
-    assert result.issues[0].evidence["clean_step_slack_ms"] > 0.0
+    assert result.issues[0].evidence["culprit_rank"] == 0
+    assert result.issues[0].evidence["victim_rank"] == 1
+    assert result.issues[0].evidence["visible_cost_ms"] > 0.0
 
 
-def test_step_time_primary_prefers_clean_straggler_over_residual_heavy() -> (
+@pytest.mark.parametrize(
+    ("per_rank", "expected_kind", "expected_phase"),
+    [
+        (
+            {
+                0: _timing_row(
+                    dataloader=100.0,
+                    forward=20.0,
+                    backward=20.0,
+                    optimizer=0.0,
+                ),
+                1: _timing_row(
+                    dataloader=0.0,
+                    forward=80.0,
+                    backward=80.0,
+                    optimizer=0.0,
+                ),
+            },
+            "INPUT_STRAGGLER",
+            "input",
+        ),
+        (
+            {
+                0: _timing_row(
+                    h2d=80.0,
+                    forward=20.0,
+                    backward=20.0,
+                    optimizer=0.0,
+                ),
+                1: _timing_row(
+                    h2d=0.0,
+                    forward=80.0,
+                    backward=80.0,
+                    optimizer=0.0,
+                ),
+            },
+            "H2D_STRAGGLER",
+            "h2d",
+        ),
+        (
+            {
+                0: _timing_row(forward=100.0, backward=20.0, optimizer=0.0),
+                1: _timing_row(forward=20.0, backward=200.0, optimizer=0.0),
+            },
+            "STRAGGLER",
+            "sync",
+        ),
+    ],
+)
+def test_fsdp_rank_straggler_uses_input_h2d_or_unattributed(
+    per_rank: dict[int, dict[str, float]],
+    expected_kind: str,
+    expected_phase: str,
+) -> None:
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+        training_strategy="fsdp",
+    )
+
+    assert result.primary.kind == expected_kind
+    assert result.primary.worst_rank == 0
+    assert result.issues[0].phase == expected_phase
+    if expected_kind == "STRAGGLER":
+        assert result.issues[0].evidence["component"] == "sync_or_unattributed"
+
+
+def test_rank_straggler_not_emitted_below_visible_wait_threshold() -> None:
+    per_rank = {
+        0: _timing_row(backward=115.0),
+        1: _timing_row(backward=120.0),
+    }
+    ctx = _rank_context(per_rank)
+
+    assert ctx.rank_straggler is None
+    assert RankStragglerRule().evaluate(ctx) is None
+
+
+@pytest.mark.parametrize(
+    ("training_strategy", "per_rank", "expected"),
+    [
+        (
+            "ddp",
+            {
+                0: _timing_row(
+                    dataloader=200.0,
+                    backward=0.0,
+                    step_time=200.0,
+                ),
+                1: _timing_row(
+                    dataloader=80.0,
+                    backward=20.0,
+                    step_time=100.0,
+                ),
+                2: _timing_row(
+                    dataloader=0.0,
+                    backward=120.0,
+                    step_time=140.0,
+                ),
+            },
+            ("INPUT_STRAGGLER", 1, 2),
+        ),
+        (
+            "ddp",
+            {
+                0: _timing_row(backward=0.0, step_time=100.0),
+                1: _timing_row(backward=0.0, step_time=120.0),
+            },
+            None,
+        ),
+        (
+            "ddp",
+            {
+                0: _timing_row(
+                    dataloader=200.0,
+                    backward=1.0,
+                    step_time=0.0,
+                ),
+                1: _timing_row(
+                    dataloader=80.0,
+                    backward=20.0,
+                    step_time=100.0,
+                ),
+                2: _timing_row(
+                    dataloader=0.0,
+                    backward=120.0,
+                    step_time=140.0,
+                ),
+            },
+            ("INPUT_STRAGGLER", 1, 2),
+        ),
+        (
+            "fsdp",
+            {
+                0: _timing_row(dataloader=200.0, forward=0.0, backward=1.0),
+                1: _timing_row(dataloader=160.0, forward=10.0, backward=0.0),
+                2: _timing_row(dataloader=80.0, forward=20.0, backward=20.0),
+                3: _timing_row(dataloader=0.0, forward=80.0, backward=80.0),
+            },
+            ("INPUT_STRAGGLER", 2, 3),
+        ),
+    ],
+)
+def test_rank_straggler_uses_only_valid_visible_ranks(
+    training_strategy: str,
+    per_rank: dict[int, dict[str, float]],
+    expected: tuple[str, int, int] | None,
+) -> None:
+    ctx = _rank_context(per_rank, training_strategy=training_strategy)
+    issue = RankStragglerRule().evaluate(ctx)
+
+    if expected is None:
+        assert ctx.rank_straggler is None
+        assert issue is None
+        return
+
+    expected_kind, expected_culprit, expected_victim = expected
+    assert ctx.rank_straggler is not None
+    assert ctx.rank_straggler.culprit_rank == expected_culprit
+    assert ctx.rank_straggler.victim_rank == expected_victim
+    assert issue is not None
+    assert issue.kind == expected_kind
+
+
+def test_ddp_missing_forward_does_not_emit_compute_straggler() -> None:
+    per_rank = {
+        0: _timing_row(forward=100.0, backward=20.0, optimizer=0.0),
+        1: _timing_row(forward=0.0, backward=120.0, optimizer=0.0),
+    }
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+    )
+
+    assert result.primary.kind == "STRAGGLER"
+    assert result.issues[0].phase == "sync"
+    assert result.issues[0].evidence["component"] == "sync_or_unattributed"
+
+
+def test_rank_straggler_uses_actual_upper_median_victim_rank() -> None:
+    per_rank = {
+        0: _timing_row(backward=10.0, forward=10.0, optimizer=0.0),
+        1: _timing_row(backward=20.0, forward=10.0, optimizer=0.0),
+        2: _timing_row(backward=30.0, forward=10.0, optimizer=0.0),
+        3: _timing_row(backward=40.0, forward=10.0, optimizer=0.0),
+    }
+    ctx = _rank_context(per_rank)
+
+    assert ctx.rank_straggler is not None
+    assert ctx.rank_straggler.culprit_rank == 0
+    assert ctx.rank_straggler.victim_rank == 2
+    assert ctx.rank_straggler.visible_victim_ms == pytest.approx(30.0)
+
+
+def test_step_time_primary_prefers_rank_straggler_over_residual_heavy() -> (
     None
 ):
     per_rank = {
-        0: _timing_row(dataloader=10.0, residual=80.0),
-        1: _timing_row(dataloader=110.0, residual=80.0),
+        0: _timing_row(dataloader=110.0, backward=20.0, residual=80.0),
+        1: _timing_row(dataloader=10.0, backward=120.0, residual=80.0),
     }
 
     result = build_step_diagnosis_result(

@@ -26,7 +26,6 @@ class DiagnosisThresholds:
 
     straggler_score_warn: float = 0.10
     straggler_score_crit: float = 0.20
-    straggler_dominance_tolerance: float = 1.25
 
     input_share_warn: float = 0.10
     input_share_crit: float = 0.20

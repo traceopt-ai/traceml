@@ -363,17 +363,8 @@ def _step_time_card_reason(
             f"{_global_rank_label(stats.h2d.worst_global_rank)} H2D was "
             f"slower than median global rank ({evidence})."
         )
-    if kind == "RESIDUAL_STRAGGLER":
-        evidence = _format_ms_pair(
-            stats.residual.worst_ms,
-            stats.residual.median_ms,
-        )
-        return (
-            f"{_global_rank_label(stats.residual.worst_global_rank)} residual "
-            f"time was higher than median global rank ({evidence})."
-        )
     if kind == "STRAGGLER":
-        return "Multiple clean-step components varied across ranks."
+        return "Visible rank skew was sync-bound or unattributed."
     if kind == "INPUT_BOUND":
         issue = _issue_by_kind(issues, "INPUT_BOUND")
         evidence_reason = _input_bound_evidence_reason(issue or diagnosis)

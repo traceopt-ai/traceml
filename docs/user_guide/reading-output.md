@@ -135,7 +135,7 @@ It is based on:
 - optimizer time
 - step time
 - residual / overhead
-- worst-rank vs median-rank differences in distributed runs
+- culprit/victim visible rank skew in distributed runs
 
 ### `BALANCED`
 
@@ -227,10 +227,12 @@ Meaning:
 
 TraceML uses this idea:
 
-- account for backward time that can be explained by another rank arriving late
-- compare the slowest rank to the typical rank
-- blame input wait when its worst-rank excess over peer median dominates the
-  other timing differences by at least `1.25x`
+- detect visible wait cost from backward in DDP/default, or forward + backward
+  in FSDP
+- identify the likely culprit as the rank that waited least in the visible
+  phase
+- blame input wait when the culprit has material input-wait excess compared
+  with the victim rank
 
 In simpler words:
 
@@ -246,13 +248,14 @@ Common causes:
 What to look at:
 
 - `Input Wait`
-- worst rank
+- culprit rank
+- victim/reference rank
 - skew (%)
 - diagnosis evidence
 
 What to do next:
 
-- inspect input loading on the worst rank
+- inspect input loading on the culprit rank
 - compare batch preparation across ranks
 - check for host-side interference or noisy neighbors
 
@@ -262,23 +265,21 @@ What to do next:
 
 Meaning:
 
-- one rank has meaningfully more observed compute-phase burden than a typical
-  rank
+- in DDP/default strategy, the likely culprit rank has materially more forward
+  time than the victim rank
 
-For FSDP, observed forward time may include parameter all-gather wait, so this
-is not proof of pure rank-local model compute.
+FSDP does not emit `COMPUTE STRAGGLER` from the rank-skew rule for now because
+forward and backward can include sharding communication.
 
 TraceML uses this idea:
 
-- account for backward time that can be explained by another rank arriving late
-- compare the worst rank's compute time to peer median
-- blame compute when compute-time excess dominates input wait, H2D, and
-  residual differences by at least `1.25x`
+- detect visible wait cost from backward in DDP/default strategy
+- compare the culprit rank's forward time with the victim rank
+- blame compute when the forward excess is material
 
 In simpler words:
 
-- one rank is spending more time in the observed forward, backward, or optimizer
-  phases than the others
+- one rank is spending more time in forward work than the victim rank
 
 Common causes:
 
@@ -289,17 +290,15 @@ Common causes:
 What to look at:
 
 - `Forward`
-- `Backward`
-- `Optimizer Step`
-- worst rank
+- culprit rank
+- victim/reference rank
 - skew (%)
 - diagnosis note
 
 What to do next:
 
-- inspect the called-out compute phase on the worst rank
+- inspect the called-out forward phase on the culprit rank
 - compare input shapes and rank-local logic
-- inspect imbalance in backward or optimizer time
 
 ---
 
@@ -310,7 +309,7 @@ Meaning:
 - one rank spends meaningfully more time in host-to-device transfer than a
   typical rank
 
-TraceML reports this when H2D is the largest timing difference on the slow
+TraceML reports this when H2D is the largest material excess on the culprit
 rank.
 
 Common causes:
@@ -321,30 +320,8 @@ Common causes:
 
 What to do next:
 
-- inspect batch shapes and transfer placement on the worst rank
+- inspect batch shapes and transfer placement on the culprit rank
 - compare CPU-to-GPU copy timing across ranks
-
----
-
-### `RESIDUAL STRAGGLER`
-
-Meaning:
-
-- one rank has meaningfully more rank-local residual `residual_proxy` than a
-  typical rank
-
-This is rank-local residual excess. It differs from `RESIDUAL-HEAVY`, which
-describes a window-wide residual time share.
-
-Common causes:
-
-- rank-local logging, checkpointing, validation, callbacks, CPU stalls, or
-  unobserved transfer work inside the timed step
-
-What to do next:
-
-- inspect host-side work on the worst rank
-- compare callbacks and per-rank side effects
 
 ---
 
@@ -352,15 +329,15 @@ What to do next:
 
 Meaning:
 
-- one rank is slower, but no single timing category clearly dominates
+- visible rank skew exists, but input wait, H2D, and DDP forward do not explain
+  the likely culprit
 
 In the current policy, this is used when:
 
 - the rank difference is large enough to matter
-- the largest worst-rank excess among input wait, compute, H2D, and residual
-  is less than `1.25x` the next-largest excess
+- the culprit's input wait, H2D, and DDP forward excesses are not material
 
-This is a mixed unevenness case.
+This is sync-bound or unattributed rank skew.
 
 Common causes:
 
@@ -371,7 +348,7 @@ Common causes:
 What to do next:
 
 - inspect input wait, H2D, compute, and residual signals
-- inspect the worst rank and the largest uneven phases
+- inspect sync, collective, and unattributed work around the culprit rank
 - reduce complexity by isolating one issue at a time
 
 ---
@@ -730,9 +707,9 @@ It gives:
 
 This card shows:
 
-- median vs worst step breakdown
-- gap
-- worst rank
+- median/reference vs rank breakdown
+- visible rank skew
+- culprit rank when a rank straggler is diagnosed
 - residual time
 - dominant split
 
@@ -764,11 +741,10 @@ Use these as context cards:
 |---|---|
 | `INPUT-BOUND` | inspect input loading, preprocessing, and storage |
 | `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
-| `INPUT STRAGGLER` | inspect input path on the worst rank |
-| `COMPUTE STRAGGLER` | inspect observed compute-phase skew on the worst rank |
-| `H2D STRAGGLER` | inspect host-to-device transfer on the worst rank |
-| `RESIDUAL STRAGGLER` | inspect rank-local host-side work on the worst rank |
-| `STRAGGLER` | inspect mixed rank unevenness |
+| `INPUT STRAGGLER` | inspect input path on the culprit rank |
+| `COMPUTE STRAGGLER` | inspect DDP forward work on the culprit rank |
+| `H2D STRAGGLER` | inspect host-to-device transfer on the culprit rank |
+| `STRAGGLER` | inspect sync, collective, or unattributed work around the culprit rank |
 | `RESIDUAL-HEAVY` | inspect logging, checkpointing, validation, CPU stalls, and unobserved transfer paths |
 | `MEMORY RISING` | inspect retained state and watch the next window |
 | `MEMORY CREEP` | inspect retained tensors and growing caches |
@@ -824,8 +800,8 @@ Always read:
 If you are in a hurry:
 
 1. read the diagnosis
-2. identify the worst rank if shown
-3. compare worst vs median
+2. identify the culprit rank if shown
+3. compare culprit vs victim/reference rank
 4. look at residual time or memory trend
 5. take the suggested next action
 

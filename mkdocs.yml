@@ -95,5 +95,6 @@ nav:
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
+      - Rank Straggler Policy: developer_guide/rank-straggler-policy.md
       - Extending TraceML: developer_guide/extending.md
       - Contributing: developer_guide/contributing.md

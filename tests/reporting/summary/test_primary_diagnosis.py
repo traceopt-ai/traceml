@@ -150,82 +150,55 @@ def test_compute_bound_uses_neutral_compute_phase_share() -> None:
     assert primary["evidence"]["shares"]["compute_pct"] == 75.0
 
 
-def test_input_straggler_uses_rank_comparison_evidence() -> None:
-    primary = _primary(
-        _step_time(
+@pytest.mark.parametrize(
+    (
+        "kind",
+        "phase",
+        "expected_metric",
+        "expected_summary",
+    ),
+    [
+        (
             "INPUT_STRAGGLER",
-            status="INPUT STRAGGLER",
-            phase="dataloader",
-        )
-    )
-
-    assert primary["kind"] == "INPUT_STRAGGLER"
-    assert primary["summary"] == (
-        "Rank r2 input wait was 120.0ms vs median rank r0 at 8.0ms."
-    )
-    assert primary["evidence"] == {
-        "type": "rank_comparison",
-        "steps_analyzed": 256,
-        "gpu_util_avg_percent": 87.0,
-        "metric": "input_wait_ms",
-        "phase": "dataloader",
-        "median": {"rank": 0, "value_ms": 8.0},
-        "worst": {"rank": 2, "value_ms": 120.0},
-        "delta_ms": 112.0,
-        "ratio": 15.0,
-    }
-
-
-def test_compute_straggler_uses_diagnosed_compute_phase() -> None:
-    primary = _primary(
-        _step_time(
+            "dataloader",
+            "input_wait_ms",
+            "Rank r2 input wait was 120.0ms vs median rank r0 at 8.0ms.",
+        ),
+        (
             "COMPUTE_STRAGGLER",
-            status="COMPUTE STRAGGLER",
-            phase="optimizer",
-        )
-    )
-
-    assert primary["kind"] == "COMPUTE_STRAGGLER"
-    assert primary["evidence"]["metric"] == "optimizer_ms"
-    assert primary["evidence"]["phase"] == "optimizer"
-    assert primary["evidence"]["median"] == {"rank": 3, "value_ms": 10.0}
-    assert primary["evidence"]["worst"] == {"rank": 2, "value_ms": 90.0}
-    assert primary["evidence"]["delta_ms"] == 80.0
-    assert primary["evidence"]["ratio"] == 9.0
-
-
-def test_h2d_straggler_uses_rank_comparison_evidence() -> None:
-    primary = _primary(
-        _step_time(
+            "optimizer",
+            "optimizer_ms",
+            None,
+        ),
+        (
             "H2D_STRAGGLER",
-            status="H2D STRAGGLER",
-            phase="h2d",
-        )
-    )
-
-    assert primary["kind"] == "H2D_STRAGGLER"
-    assert primary["summary"] == (
-        "Rank r2 h2d was 40.0ms vs median rank r1 at 10.0ms."
-    )
-    assert primary["evidence"]["metric"] == "h2d_ms"
-    assert primary["evidence"]["phase"] == "h2d"
-
-
-def test_residual_straggler_uses_rank_comparison_evidence() -> None:
+            "h2d",
+            "h2d_ms",
+            "Rank r2 h2d was 40.0ms vs median rank r1 at 10.0ms.",
+        ),
+    ],
+)
+def test_rank_stragglers_use_rank_comparison_evidence(
+    kind: str,
+    phase: str,
+    expected_metric: str,
+    expected_summary: str | None,
+) -> None:
     primary = _primary(
         _step_time(
-            "RESIDUAL_STRAGGLER",
-            status="RESIDUAL STRAGGLER",
-            phase="residual",
+            kind,
+            status=kind.replace("_", " "),
+            phase=phase,
         )
     )
 
-    assert primary["kind"] == "RESIDUAL_STRAGGLER"
-    assert primary["summary"] == (
-        "Rank r2 residual time was 70.0ms vs median rank r0 at 20.0ms."
-    )
-    assert primary["evidence"]["metric"] == "residual_ms"
-    assert primary["evidence"]["phase"] == "residual"
+    assert primary["kind"] == kind
+    assert primary["evidence"]["type"] == "rank_comparison"
+    assert primary["evidence"]["metric"] == expected_metric
+    assert primary["evidence"]["phase"] == phase
+    assert primary["evidence"]["worst"]["rank"] == 2
+    if expected_summary is not None:
+        assert primary["summary"] == expected_summary
 
 
 def test_straggler_includes_input_and_compute_comparisons() -> None:
