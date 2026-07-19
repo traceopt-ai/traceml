@@ -54,6 +54,34 @@ For the live browser dashboard:
 pip install traceml-ai
 ```
 
+Or install with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv pip install traceml-ai
+```
+
+For a uv-managed project, add TraceML to the project's dependencies instead:
+
+```bash
+uv add traceml-ai
+```
+
+Extras use the same syntax with pip and uv. For example:
+
+```bash
+pip install "traceml-ai[dashboard]"
+uv add "traceml-ai[dashboard]"
+uv add "traceml-ai[torch]"
+```
+
+To try TraceML immediately in an environment managed by uv, install the
+`torch` extra required by the example:
+
+```bash
+uv pip install "traceml-ai[torch]"
+traceml run examples/quickstart.py
+```
+
 Using Hugging Face Trainer, PyTorch Lightning, Ray Train, W&B, or MLflow?
 Start with the native integration path in
 [Use With Your Stack](docs/user_guide/integrations.md).
