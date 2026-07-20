@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import traceml_ai.launcher.commands as launcher_commands
 from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
     _dashboard_access_box,
@@ -255,6 +256,16 @@ def test_build_parser_preserves_launch_commands() -> None:
     assert default_args.mode is None
 
 
+def test_build_parser_accepts_disable_traceml_aliases() -> None:
+    parser = build_parser()
+
+    dashed = parser.parse_args(["run", "train.py", "--disable-traceml"])
+    underscored = parser.parse_args(["run", "train.py", "--disable_traceml"])
+
+    assert dashed.disable_traceml is True
+    assert underscored.disable_traceml is True
+
+
 def test_launch_defaults_use_dashboard_for_single_node_topologies() -> None:
     defaults = {"mode": "summary", "interval": 2.0}
 
@@ -346,6 +357,167 @@ def test_summary_mode_requires_history() -> None:
 
     with pytest.raises(SystemExit):
         validate_launch_args(args)
+
+
+def test_disabled_launch_validation_skips_traceml_only_checks(
+    monkeypatch,
+) -> None:
+    args = argparse.Namespace(
+        mode="dashboard",
+        no_history=True,
+        html_report=True,
+        nnodes=2,
+        nproc_per_node=1,
+        node_rank=0,
+        master_addr="127.0.0.1",
+        master_port=29500,
+        aggregator_host=None,
+        aggregator_bind_host=None,
+        aggregator_port=0,
+        run_name="",
+        session_id="",
+        summary_window_rows=0,
+        finalize_timeout_sec=-1.0,
+        trace_max_steps=0,
+        disable_traceml=True,
+    )
+    monkeypatch.setattr(
+        "traceml_ai.launcher.commands.importlib.util.find_spec",
+        lambda package: None,
+    )
+
+    validate_launch_args(args)
+
+
+def test_disabled_launch_validation_honors_env_kill_switch(
+    monkeypatch,
+) -> None:
+    args = argparse.Namespace(
+        mode="summary",
+        no_history=True,
+        html_report=True,
+        nnodes=2,
+        nproc_per_node=1,
+        node_rank=0,
+        master_addr="127.0.0.1",
+        master_port=29500,
+        aggregator_host=None,
+        aggregator_bind_host=None,
+        aggregator_port=0,
+        run_name="",
+        session_id="",
+        summary_window_rows=0,
+        finalize_timeout_sec=-1.0,
+        trace_max_steps=0,
+        disable_traceml=None,
+    )
+    monkeypatch.setenv("TRACEML_DISABLED", "1")
+
+    validate_launch_args(args)
+
+
+def test_disabled_launch_runs_script_directly_and_skips_traceml_setup(
+    monkeypatch, tmp_path
+) -> None:
+    script = tmp_path / "train.py"
+    script.write_text("print('native')\n", encoding="utf-8")
+    (tmp_path / "traceml.yaml").write_text("mode: [\n", encoding="utf-8")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "run",
+            str(script),
+            "--disable-traceml",
+            "--mode",
+            "summary",
+            "--no-history",
+            "--html-report",
+            "--capture-stderr",
+            "--logs-dir",
+            str(tmp_path / "logs"),
+            "--aggregator-port",
+            "0",
+            "--nnodes",
+            "2",
+            "--nproc-per-node",
+            "3",
+            "--node-rank",
+            "1",
+            "--master-addr",
+            "10.0.0.10",
+            "--master-port",
+            "29511",
+            "--args",
+            "--epochs",
+            "1",
+        ]
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRACEML_AGGREGATOR_PORT", "9999")
+    observed = {}
+
+    class _Proc:
+        pid = 12345
+        returncode = 17
+
+        def wait(self):
+            return self.returncode
+
+    def _start_training_process(train_cmd, env, cwd, *, capture_stderr=False):
+        observed["train_cmd"] = train_cmd
+        observed["env"] = env
+        observed["cwd"] = cwd
+        observed["capture_stderr"] = capture_stderr
+        return _Proc()
+
+    def _record_shutdown_handler(get_procs, manifest_path=None):
+        observed["manifest_path"] = manifest_path
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("TraceML setup must not run when disabled")
+
+    monkeypatch.setattr(
+        launcher_commands,
+        "start_training_process",
+        _start_training_process,
+    )
+    monkeypatch.setattr(
+        launcher_commands,
+        "install_shutdown_handlers",
+        _record_shutdown_handler,
+    )
+    monkeypatch.setattr(
+        launcher_commands, "start_aggregator_process", _forbidden
+    )
+    monkeypatch.setattr(launcher_commands, "write_code_manifest", _forbidden)
+    monkeypatch.setattr(launcher_commands, "write_run_manifest", _forbidden)
+    monkeypatch.setattr(launcher_commands, "update_run_manifest", _forbidden)
+
+    with pytest.raises(SystemExit) as exc:
+        launcher_commands.launch_process(str(script), args)
+
+    assert exc.value.code == 17
+    assert observed["train_cmd"] == [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--nnodes=2",
+        "--nproc_per_node=3",
+        "--node_rank=1",
+        "--master_addr=10.0.0.10",
+        "--master_port=29511",
+        str(script),
+        "--epochs",
+        "1",
+    ]
+    assert observed["env"]["TRACEML_DISABLED"] == "1"
+    assert [key for key in observed["env"] if key.startswith("TRACEML_")] == [
+        "TRACEML_DISABLED"
+    ]
+    assert observed["cwd"] == str(tmp_path.resolve())
+    assert observed["capture_stderr"] is False
+    assert observed["manifest_path"] is None
+    assert not (tmp_path / "logs").exists()
 
 
 def test_summary_window_rows_must_be_positive() -> None:

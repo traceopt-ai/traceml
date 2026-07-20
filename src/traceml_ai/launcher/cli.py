@@ -195,6 +195,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--disable-traceml",
+        "--disable_traceml",
+        dest="disable_traceml",
         action="store_const",
         const=True,
         default=None,

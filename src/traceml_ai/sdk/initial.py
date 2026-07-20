@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Literal, Optional
 
+from traceml_ai.runtime.arming import _set_tracing_armed, is_tracing_armed
+
 TraceMLInitMode = Literal["auto", "manual", "selective"]
 
 
@@ -43,6 +45,23 @@ _INIT_CONFIG: Optional[TraceMLInitConfig] = None
 # the runtime is stopped exactly once, only when init() actually started it.
 _RUNTIME_HANDLE: Any = None
 _ATEXIT_REGISTERED: bool = False
+
+
+def _noop_config(source: str) -> TraceMLInitConfig:
+    """Build the stored disabled config used by fail-open paths."""
+    import os
+
+    os.environ["TRACEML_DISABLED"] = "1"
+    _set_tracing_armed(False)
+    return TraceMLInitConfig(
+        mode="manual",
+        patch_dataloader=False,
+        patch_forward=False,
+        patch_backward=False,
+        patch_h2d=False,
+        source=source,
+        disabled=True,
+    )
 
 
 def _canonical_mode(mode: str) -> TraceMLInitMode:
@@ -135,6 +154,7 @@ def _build_config(
 
 def _apply_requested_patches(config: TraceMLInitConfig) -> None:
     """Apply the patch set requested by the validated config."""
+    _set_tracing_armed(False)
     if not any(
         (
             config.patch_dataloader,
@@ -177,10 +197,11 @@ def _apply_requested_patches(config: TraceMLInitConfig) -> None:
         raise RuntimeError(
             "TraceML initialization failed while installing automatic "
             f"instrumentation patches for mode={config.mode!r}. "
-            "This error is fatal because partial patch installation can lead "
-            "to inconsistent tracing behavior. "
+            "Patch wrappers will remain disabled so any partial installation "
+            "passes through natively. "
             f"Original error: {exc}"
         ) from exc
+    _set_tracing_armed(True)
 
 
 def get_init_config() -> Optional[TraceMLInitConfig]:
@@ -507,9 +528,9 @@ def init(
     ValueError
         If the init request is invalid.
     RuntimeError
-        If init conflicts with an existing config or patch installation fails.
-        An unreachable aggregator raises only when
-        ``on_missing_aggregator='raise'``; by default it warns and no-ops.
+        If init conflicts with an existing config. Missing aggregators,
+        runtime startup failures, and patch installation failures raise only
+        when ``on_missing_aggregator='raise'``; by default they warn and no-op.
 
     Notes
     -----
@@ -530,16 +551,7 @@ def init(
     )
 
     if is_disabled:
-        os.environ["TRACEML_DISABLED"] = "1"
-        disabled_config = TraceMLInitConfig(
-            mode="manual",
-            patch_dataloader=False,
-            patch_forward=False,
-            patch_backward=False,
-            patch_h2d=False,
-            source=_source,
-            disabled=True,
-        )
+        disabled_config = _noop_config(_source)
         with _INIT_LOCK:
             if _INIT_CONFIG is not None:
                 if _INIT_CONFIG.same_effective_configuration(disabled_config):
@@ -603,18 +615,30 @@ def init(
                 "TRACEML_ON_MISSING_AGGREGATOR=raise) to fail instead.",
                 file=sys.stderr,
             )
-            noop_config = TraceMLInitConfig(
-                mode="manual",
-                patch_dataloader=False,
-                patch_forward=False,
-                patch_backward=False,
-                patch_h2d=False,
-                source=_source,
-                disabled=True,
-            )
+            noop_config = _noop_config(_source)
             _INIT_CONFIG = noop_config
             return noop_config
-        _apply_requested_patches(requested)
+        try:
+            _apply_requested_patches(requested)
+        except RuntimeError as exc:
+            if (
+                _resolve_on_missing_aggregator(on_missing_aggregator)
+                == "raise"
+            ):
+                _stop_runtime_for_init()
+                raise
+            import sys
+
+            _stop_runtime_for_init()
+            print(
+                f"[TraceML] {exc} Continuing without tracing (no-op). Pass "
+                "on_missing_aggregator='raise' (or set "
+                "TRACEML_ON_MISSING_AGGREGATOR=raise) to fail instead.",
+                file=sys.stderr,
+            )
+            noop_config = _noop_config(_source)
+            _INIT_CONFIG = noop_config
+            return noop_config
         _INIT_CONFIG = requested
         return requested
 
@@ -667,6 +691,7 @@ __all__ = [
     "TraceMLInitConfig",
     "TraceMLInitMode",
     "is_initialized",
+    "is_tracing_armed",
     "get_init_config",
     "init",
     "start",
