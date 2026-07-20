@@ -88,6 +88,21 @@ identical args (`--duration-sec 600 --batch-size 256 --hidden-dim 4096`).
 Full write-up with plots:
 [`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md).
 
+## Results: second campaign (2026-07-19, `ddp_mlp_e2e`, v0.3.5)
+
+Rerun on TraceML v0.3.5 to confirm the overhead figure held across
+versions. 5 paired repeats × 2 modes × 2 topologies (single GPU, 4-GPU
+single-node DDP), 300 s/trial. Hardware: 1× AWS `g4dn.12xlarge` (4×
+Tesla T4), `eu-central-1`.
+
+| Topology | Throughput overhead | Wall-clock overhead |
+|---|---|---|
+| Single GPU (1× T4)          | **+0.95% ± 0.09** | +2.16% ± 0.34 |
+| 4-GPU single-node DDP        | **+0.41% ± 0.07** | +1.76% ± 0.36 |
+
+Full write-up:
+[`analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md`](analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md).
+
 ## Multi-Node Method
 
 Multi-node needs one launcher per node. Use the same `--run-name` on every
