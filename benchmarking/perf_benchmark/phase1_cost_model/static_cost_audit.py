@@ -299,7 +299,7 @@ def run_audit(repo_root: Path, output_dir: Path) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--repo-root", type=Path, default=Path(__file__).resolve().parents[2]
+        "--repo-root", type=Path, default=Path(__file__).resolve().parents[3]
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
