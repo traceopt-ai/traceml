@@ -3,7 +3,7 @@ from typing import Any
 
 import torch
 
-from traceml_ai.sdk.initial import is_tracing_armed
+from traceml_ai.runtime.arming import is_tracing_armed
 from traceml_ai.utils.timing import timed_region
 
 _BACKWARD_TLS = threading.local()

@@ -2,7 +2,7 @@ import threading
 
 import torch.nn as nn
 
-from traceml_ai.sdk.initial import is_tracing_armed
+from traceml_ai.runtime.arming import is_tracing_armed
 from traceml_ai.utils.timing import timed_region
 
 _TLS = threading.local()

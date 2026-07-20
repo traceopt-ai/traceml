@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any, Literal, Optional
 
+from traceml_ai.runtime.arming import _set_tracing_armed, is_tracing_armed
+
 TraceMLInitMode = Literal["auto", "manual", "selective"]
 
 
@@ -43,22 +45,6 @@ _INIT_CONFIG: Optional[TraceMLInitConfig] = None
 # the runtime is stopped exactly once, only when init() actually started it.
 _RUNTIME_HANDLE: Any = None
 _ATEXIT_REGISTERED: bool = False
-_TRACING_ARMED: bool = False
-
-
-def is_tracing_armed() -> bool:
-    """
-    Return True only after the requested automatic patches installed cleanly.
-
-    Patch wrappers consult this gate so a failed partial installation degrades
-    to native pass-through behavior instead of half-instrumenting training.
-    """
-    return _TRACING_ARMED
-
-
-def _set_tracing_armed(value: bool) -> None:
-    global _TRACING_ARMED
-    _TRACING_ARMED = bool(value)
 
 
 def _noop_config(source: str) -> TraceMLInitConfig:
@@ -705,6 +691,7 @@ __all__ = [
     "TraceMLInitConfig",
     "TraceMLInitMode",
     "is_initialized",
+    "is_tracing_armed",
     "get_init_config",
     "init",
     "start",
