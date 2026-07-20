@@ -119,7 +119,13 @@ def require_config(config: dict[str, Any], args: argparse.Namespace) -> None:
 def result_dir(config: dict[str, Any], args: argparse.Namespace) -> Path:
     output_root = (
         args.output_root
-        or Path(str(config.get("output_root", "benchmarking/perf_benchmark/results")))
+        or Path(
+            str(
+                config.get(
+                    "output_root", "benchmarking/perf_benchmark/results"
+                )
+            )
+        )
     ).resolve()
     run_id = (
         args.run_id.strip()
