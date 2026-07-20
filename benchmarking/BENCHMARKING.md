@@ -1,8 +1,8 @@
 # TraceML overhead benchmarking
 
-TraceML measures its own runtime cost through two independent tracks. Both
-live in this branch; neither has moved or been renamed to make this doc —
-follow the links below for the actual instructions.
+TraceML measures its own runtime cost through two independent tracks, both
+living under this `benchmarking/` folder — follow the links below for the
+actual instructions.
 
 ```mermaid
 flowchart LR
@@ -38,11 +38,11 @@ xychart-beta
     bar [1.02, 0, 0.95, 0.41]
 ```
 
-![Throughput across the 2026-06-11 campaign](benchmarking/analysis/2026-06-11_pr153_ddp_mlp_g4dn/plots/06_throughput.png)
+![Throughput across the 2026-06-11 campaign](analysis/2026-06-11_pr153_ddp_mlp_g4dn/plots/06_throughput.png)
 
-Full write-ups: [`benchmarking/README.md`](benchmarking/README.md),
-[`benchmarking/analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](benchmarking/analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md),
-[`benchmarking/analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md`](benchmarking/analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md).
+Full write-ups: [`README.md`](README.md),
+[`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md),
+[`analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md`](analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md).
 
 ## Attribution / automated harness — `perf_benchmark/`
 

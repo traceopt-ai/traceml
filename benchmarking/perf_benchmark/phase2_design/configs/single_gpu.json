@@ -1,6 +1,6 @@
 {
   "run_id": "phase3_single_gpu",
-  "output_root": "perf_benchmark/results",
+  "output_root": "benchmarking/perf_benchmark/results",
   "require_cuda": true,
   "device": "auto",
   "steps": 1000,

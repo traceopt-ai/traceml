@@ -1,7 +1,7 @@
 # TraceML Overhead Benchmark
 
 Public, reproducible scripts for measuring TraceML runtime overhead. All code
-is under `perf_benchmark/`; TraceML source is not modified.
+is under `benchmarking/perf_benchmark/`; TraceML source is not modified.
 
 ## Purpose
 
@@ -45,8 +45,8 @@ results/             generated outputs
 ## Phase 1: Static Cost Audit
 
 ```bash
-python perf_benchmark/phase1_cost_model/static_cost_audit.py \
-  --output-dir perf_benchmark/results/phase1_static
+python benchmarking/perf_benchmark/phase1_cost_model/static_cost_audit.py \
+  --output-dir benchmarking/perf_benchmark/results/phase1_static
 ```
 
 Outputs:
@@ -61,9 +61,9 @@ static_cost_audit.md
 Review or edit:
 
 ```text
-perf_benchmark/phase2_design/methodology.md
-perf_benchmark/phase2_design/experiment_matrix.md
-perf_benchmark/phase2_design/configs/
+benchmarking/perf_benchmark/phase2_design/methodology.md
+benchmarking/perf_benchmark/phase2_design/experiment_matrix.md
+benchmarking/perf_benchmark/phase2_design/configs/
 ```
 
 Tune batch sizes for the target GPU before publishing.
@@ -71,16 +71,16 @@ Tune batch sizes for the target GPU before publishing.
 ## Phase 3: Local Smoke
 
 ```bash
-python perf_benchmark/phase3_benchmark/run_benchmark.py \
-  --config perf_benchmark/phase2_design/configs/local_smoke.json \
+python benchmarking/perf_benchmark/phase3_benchmark/run_benchmark.py \
+  --config benchmarking/perf_benchmark/phase2_design/configs/local_smoke.json \
   --aggregate-after
 ```
 
 ## Phase 3: Single GPU
 
 ```bash
-python perf_benchmark/phase3_benchmark/run_benchmark.py \
-  --config perf_benchmark/phase2_design/configs/single_gpu.json \
+python benchmarking/perf_benchmark/phase3_benchmark/run_benchmark.py \
+  --config benchmarking/perf_benchmark/phase2_design/configs/single_gpu.json \
   --aggregate-after
 ```
 
@@ -94,8 +94,8 @@ Run once per node, at the same time.
 Node 0:
 
 ```bash
-python perf_benchmark/phase3_benchmark/run_benchmark.py \
-  --config perf_benchmark/phase2_design/configs/multinode_2x1.json \
+python benchmarking/perf_benchmark/phase3_benchmark/run_benchmark.py \
+  --config benchmarking/perf_benchmark/phase2_design/configs/multinode_2x1.json \
   --run-id <UNIQUE_RUN_ID> \
   --node-rank 0 \
   --master-addr <NODE0_IP>
@@ -104,8 +104,8 @@ python perf_benchmark/phase3_benchmark/run_benchmark.py \
 Node 1:
 
 ```bash
-python perf_benchmark/phase3_benchmark/run_benchmark.py \
-  --config perf_benchmark/phase2_design/configs/multinode_2x1.json \
+python benchmarking/perf_benchmark/phase3_benchmark/run_benchmark.py \
+  --config benchmarking/perf_benchmark/phase2_design/configs/multinode_2x1.json \
   --run-id <UNIQUE_RUN_ID> \
   --node-rank 1 \
   --master-addr <NODE0_IP>
@@ -120,8 +120,8 @@ do not publish its timings.
 Run once per node:
 
 ```bash
-python perf_benchmark/phase3_benchmark/run_benchmark.py \
-  --config perf_benchmark/phase2_design/configs/multinode_4x1.json \
+python benchmarking/perf_benchmark/phase3_benchmark/run_benchmark.py \
+  --config benchmarking/perf_benchmark/phase2_design/configs/multinode_4x1.json \
   --run-id <UNIQUE_RUN_ID> \
   --node-rank <0|1|2|3> \
   --master-addr <NODE0_IP>
@@ -137,8 +137,8 @@ If each node has local storage, copy every node's `runs/` subtree back under
 the same result directory on node 0. Then run:
 
 ```bash
-python perf_benchmark/phase3_benchmark/aggregate_results.py \
-  --results-dir perf_benchmark/results/<run_id>
+python benchmarking/perf_benchmark/phase3_benchmark/aggregate_results.py \
+  --results-dir benchmarking/perf_benchmark/results/<run_id>
 ```
 
 This writes:
@@ -154,8 +154,8 @@ report.md
 Optional dependency check:
 
 ```bash
-python perf_benchmark/phase3_benchmark/run_ray_train.py \
-  --config perf_benchmark/phase2_design/configs/multinode_2x1.json \
+python benchmarking/perf_benchmark/phase3_benchmark/run_ray_train.py \
+  --config benchmarking/perf_benchmark/phase2_design/configs/multinode_2x1.json \
   --dry-run
 ```
 

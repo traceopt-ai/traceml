@@ -1,6 +1,6 @@
 {
   "run_id": "phase3_local_smoke",
-  "output_root": "perf_benchmark/results",
+  "output_root": "benchmarking/perf_benchmark/results",
   "require_cuda": false,
   "device": "auto",
   "steps": 20,
