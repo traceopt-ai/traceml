@@ -713,7 +713,8 @@ def run_serve(args: argparse.Namespace) -> None:
         if missing:
             raise SystemExit(
                 "[TraceML] ERROR: "
-                f"{DASHBOARD_DEPENDENCY_INSTALL_HINT} Missing: {', '.join(missing)}."
+                f"{DASHBOARD_DEPENDENCY_INSTALL_HINT} "
+                f"Missing: {', '.join(missing)}."
             )
 
     try:
