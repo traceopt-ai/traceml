@@ -91,6 +91,28 @@ def collect_phase_values(payloads: list[dict], phase: str) -> list[float]:
     return values
 
 
+def collect_repeat_medians(payloads: list[dict], phase: str) -> list[dict]:
+    """Summarize one independent process repeat at a time.
+
+    The primary rows intentionally pool all measured samples. This companion
+    view keeps each ``repeat_XX`` separate so a report can expose variation
+    across fresh process launches rather than implying that every step sample
+    is an independent benchmark replicate.
+    """
+    by_repeat: dict[str, list[float]] = defaultdict(list)
+    for payload in payloads:
+        repeat = str(payload.get("_repeat", "repeat_unknown"))
+        by_repeat[repeat].extend(
+            float(record["phases_ms"][phase])
+            for record in payload.get("records", [])
+            if not record.get("is_warmup")
+        )
+    return [
+        {"repeat": repeat, **summary_stats(values)}
+        for repeat, values in sorted(by_repeat.items())
+    ]
+
+
 def collect_rank_rows(payloads: list[dict], phase: str) -> list[dict]:
     rows = []
     for payload in payloads:
@@ -246,6 +268,8 @@ def build_summary(results_dir: Path) -> dict:
                 ] = network_row["total_bytes"]
 
     rows = []
+    repeat_rows = []
+    repeat_summary_rows = []
     rank_rows = []
     skew_rows = []
     gil_rows = []
@@ -286,6 +310,42 @@ def build_summary(results_dir: Path) -> dict:
                     ),
                 }
             )
+            per_repeat = collect_repeat_medians(group, phase)
+            repeat_medians = [row["median_ms"] for row in per_repeat]
+            if repeat_medians:
+                repeat_stats = summary_stats(repeat_medians)
+                repeat_summary_rows.append(
+                    {
+                        "cell_name": cell_name,
+                        "timing_mode": timing,
+                        "phase": phase,
+                        "workload": workload,
+                        "repeat_count": len(per_repeat),
+                        "median_of_repeat_medians_ms": repeat_stats[
+                            "median_ms"
+                        ],
+                        "p95_of_repeat_medians_ms": repeat_stats["p95_ms"],
+                        "p99_of_repeat_medians_ms": repeat_stats["p99_ms"],
+                        "mean_of_repeat_medians_ms": repeat_stats["mean_ms"],
+                        "std_of_repeat_medians_ms": repeat_stats["std_ms"],
+                        "min_of_repeat_medians_ms": repeat_stats["min_ms"],
+                        "max_of_repeat_medians_ms": repeat_stats["max_ms"],
+                    }
+                )
+                for repeat_row in per_repeat:
+                    repeat_rows.append(
+                        {
+                            "cell_name": cell_name,
+                            "timing_mode": timing,
+                            "phase": phase,
+                            "workload": workload,
+                            "repeat": repeat_row["repeat"],
+                            "sample_count": repeat_row["n"],
+                            "repeat_median_ms": repeat_row["median_ms"],
+                            "repeat_p95_ms": repeat_row["p95_ms"],
+                            "repeat_p99_ms": repeat_row["p99_ms"],
+                        }
+                    )
             for rank_row in collect_rank_rows(group, phase):
                 rank_rows.append(
                     {
@@ -342,6 +402,8 @@ def build_summary(results_dir: Path) -> dict:
         "results_dir": str(results_dir),
         "rank_file_count": len(payloads),
         "rows": rows,
+        "repeat_rows": repeat_rows,
+        "repeat_summary_rows": repeat_summary_rows,
         "rank_rows": rank_rows,
         "skew_rows": skew_rows,
         "gil_rows": gil_rows,
@@ -396,6 +458,42 @@ def write_csv(summary: dict, path: Path) -> None:
                     "overhead_median_pct": row["overhead_median_pct"],
                     "baseline_noise_floor_ms": row["baseline_noise_floor_ms"],
                     "within_baseline_noise": row["within_baseline_noise"],
+                }
+            )
+
+
+def write_repeat_csv(summary: dict, path: Path) -> None:
+    fieldnames = [
+        "cell_name",
+        "timing_mode",
+        "phase",
+        "model",
+        "batch_size",
+        "dataloader",
+        "repeat",
+        "sample_count",
+        "repeat_median_ms",
+        "repeat_p95_ms",
+        "repeat_p99_ms",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in summary["repeat_rows"]:
+            workload = row["workload"]
+            writer.writerow(
+                {
+                    "cell_name": row["cell_name"],
+                    "timing_mode": row["timing_mode"],
+                    "phase": row["phase"],
+                    "model": workload.get("model"),
+                    "batch_size": workload.get("batch_size"),
+                    "dataloader": workload.get("dataloader"),
+                    "repeat": row["repeat"],
+                    "sample_count": row["sample_count"],
+                    "repeat_median_ms": row["repeat_median_ms"],
+                    "repeat_p95_ms": row["repeat_p95_ms"],
+                    "repeat_p99_ms": row["repeat_p99_ms"],
                 }
             )
 
@@ -455,6 +553,41 @@ def write_report(summary: dict, results_dir: Path, path: Path) -> None:
                 overhead=overhead_label(row),
             )
         )
+
+    total_repeat_rows = [
+        row
+        for row in summary["repeat_summary_rows"]
+        if row["phase"] == "total_step_ms"
+    ]
+    if total_repeat_rows:
+        lines.extend(
+            [
+                "",
+                "## Independent Repeat Medians — Total Step",
+                "",
+                "Each value below is the median from one fresh process "
+                "repeat. The table summarizes variation across those "
+                "independent repeat medians, rather than across pooled "
+                "per-step samples.",
+                "",
+                "| Cell | Timing | Workload | Repeats | Median of repeat medians (ms) | Std dev (ms) | Min (ms) | Max (ms) |",
+                "|---|---|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for row in total_repeat_rows:
+            lines.append(
+                "| {cell} | {timing} | {workload} | {count} | {median} | "
+                "{std} | {minimum} | {maximum} |".format(
+                    cell=row["cell_name"],
+                    timing=row["timing_mode"],
+                    workload=workload_label(row["workload"]),
+                    count=row["repeat_count"],
+                    median=fmt(row["median_of_repeat_medians_ms"]),
+                    std=fmt(row["std_of_repeat_medians_ms"]),
+                    minimum=fmt(row["min_of_repeat_medians_ms"]),
+                    maximum=fmt(row["max_of_repeat_medians_ms"]),
+                )
+            )
 
     lines.extend(
         [
@@ -588,6 +721,7 @@ def write_report(summary: dict, results_dir: Path, path: Path) -> None:
             "- Raw rank files: `runs/<cell>/repeat_<n>/rank_<rank>.json`",
             "- Aggregate JSON: `summary.json`",
             "- Flat table: `summary.csv`",
+            "- Per-repeat medians: `repeat_medians.csv`",
         ]
     )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -601,6 +735,7 @@ def main() -> int:
     summary = build_summary(results_dir)
     write_json(results_dir / "summary.json", summary)
     write_csv(summary, results_dir / "summary.csv")
+    write_repeat_csv(summary, results_dir / "repeat_medians.csv")
     write_report(summary, results_dir, results_dir / "report.md")
     print(f"[phase3-aggregate] wrote {results_dir / 'report.md'}")
     return 0
