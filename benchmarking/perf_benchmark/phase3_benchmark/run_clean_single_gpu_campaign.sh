@@ -3,8 +3,8 @@
 #
 # Default: 10 fresh repeats each of never_init, trace_manual, and trace_auto.
 # Results are grouped under tmp/ and are directly consumable by
-# aggregate_results.py. The GIL probe is deliberately omitted: train_worker
-# defaults it to false unless --gil-probe is explicitly supplied.
+# aggregate_results.py. The GIL probe is off by default; it may be enabled
+# only with the explicit diagnostic flag below.
 
 set -Eeuo pipefail
 
@@ -17,6 +17,8 @@ REPEATS=10
 BATCH_SIZE=256
 MODEL=tiny_mlp
 OUTPUT_ROOT=""
+TIMING_MODE=step
+GIL_PROBE=false
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 usage() {
@@ -27,6 +29,8 @@ Options:
   --repeats N       Independent repeats per cell (default: 10)
   --batch-size N    Per-rank batch size (default: 256)
   --model NAME      Benchmark model (default: tiny_mlp)
+  --timing-mode M   step or phase (default: step)
+  --gil-probe       Enable the CPU/GIL contention diagnostic (default: off)
   --output-root DIR Campaign output directory (default: tmp/clean_single_gpu_<UTC timestamp>)
   -h, --help        Show this help
 EOF
@@ -45,6 +49,14 @@ while [[ $# -gt 0 ]]; do
     --model)
       MODEL="$2"
       shift 2
+      ;;
+    --timing-mode)
+      TIMING_MODE="$2"
+      shift 2
+      ;;
+    --gil-probe)
+      GIL_PROBE=true
+      shift
       ;;
     --output-root)
       OUTPUT_ROOT="$2"
@@ -70,6 +82,10 @@ if ! [[ "$BATCH_SIZE" =~ ^[1-9][0-9]*$ ]]; then
   echo "--batch-size must be a positive integer" >&2
   exit 2
 fi
+if [[ "$TIMING_MODE" != "step" && "$TIMING_MODE" != "phase" ]]; then
+  echo "--timing-mode must be step or phase" >&2
+  exit 2
+fi
 
 if [[ -z "$OUTPUT_ROOT" ]]; then
   OUTPUT_ROOT="${REPO_ROOT}/tmp/clean_single_gpu_$(date -u +%Y%m%dT%H%M%SZ)"
@@ -88,8 +104,8 @@ cat >"$OUTPUT_ROOT/README.txt" <<EOF
 Clean single-GPU TraceML overhead campaign
 
 Cells: never_init (launcher disabled), trace_manual, trace_auto
-Timing mode: step (one CUDA synchronize before and after each full step)
-GIL probe: disabled for every worker
+Timing mode: $TIMING_MODE
+GIL probe: $GIL_PROBE
 Repeats per cell: $REPEATS
 Model: $MODEL
 Per-rank batch size: $BATCH_SIZE
@@ -103,10 +119,11 @@ run_cell() {
   local cell="$1"
   local repeat="$2"
   local seed="$3"
-  local run_dir="${OUTPUT_ROOT}/runs/${cell}_step_${MODEL}_synthetic/repeat_$(printf '%02d' "$repeat")"
-  local run_name="clean_$(printf 'r%02d' "$repeat")_${cell}"
+  local run_dir="${OUTPUT_ROOT}/runs/${cell}_${TIMING_MODE}_${MODEL}_synthetic/repeat_$(printf '%02d' "$repeat")"
+  local run_name="clean_$(printf 'r%02d' "$repeat")_${TIMING_MODE}_${cell}"
   local trace_mode
   local -a launcher_args
+  local -a worker_extra_args
 
   case "$cell" in
     never_init)
@@ -126,6 +143,10 @@ run_cell() {
       exit 2
       ;;
   esac
+  worker_extra_args=()
+  if [[ "$GIL_PROBE" == true ]]; then
+    worker_extra_args=(--gil-probe)
+  fi
 
   mkdir -p "$run_dir"
   echo "[clean-campaign] repeat=${repeat} cell=${cell}"
@@ -150,7 +171,7 @@ run_cell() {
         --output-dir "$run_dir" \
         --cell-name "$cell" \
         --trace-mode "$trace_mode" \
-        --timing-mode step \
+        --timing-mode "$TIMING_MODE" \
         --steps 1000 \
         --warmup 100 \
         --model "$MODEL" \
@@ -160,24 +181,25 @@ run_cell() {
         --require-cuda \
         --pin-memory \
         --seed "$seed" \
-        --collector-interval-sec 1
+        --collector-interval-sec 1 \
+        "${worker_extra_args[@]}"
   ) 2>&1 | tee "$run_dir/launcher.log"
 
   env PYTHONPATH="$PYTHONPATH_VALUE" "$PYTHON_BIN" -c '
 import json
 import sys
 
-path, expected_cell, expected_mode = sys.argv[1:]
+path, expected_cell, expected_mode, expected_timing, expected_gil = sys.argv[1:]
 payload = json.load(open(path, encoding="utf-8"))
 assert payload["cell_name"] == expected_cell, payload["cell_name"]
 assert payload["args"]["trace_mode"] == expected_mode
-assert payload["args"]["timing_mode"] == "step"
-assert payload["args"]["gil_probe"] is False
+assert payload["args"]["timing_mode"] == expected_timing
+assert payload["args"]["gil_probe"] is (expected_gil == "true")
 assert payload["rank"]["world_size"] == 1
 assert payload["phase_stats_measured"]["total_step_ms"]["n"] == 1000
 median = payload["phase_stats_measured"]["total_step_ms"]["median_ms"]
 print("[clean-campaign] median_ms={:.6f}".format(median))
-' "$run_dir/rank_0.json" "$cell" "$trace_mode"
+' "$run_dir/rank_0.json" "$cell" "$trace_mode" "$TIMING_MODE" "$GIL_PROBE"
 }
 
 orders=(
