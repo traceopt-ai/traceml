@@ -137,6 +137,10 @@ For code extension points, see
 - Run basic training loops to verify no regressions
 - Performance-sensitive changes should include a short explanation
 
+CodeRabbit reviews every pull request automatically and leaves inline comments.
+Treat it like a first-pass reviewer: worth reading, not a blocker. A maintainer
+still reviews and merges every PR.
+
 ---
 
 ## What We Are Not Looking For (Yet)
