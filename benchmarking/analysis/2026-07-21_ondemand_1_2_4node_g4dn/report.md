@@ -65,6 +65,16 @@ either side of the noise floor.
    full incident history). Not expected to affect the timing numbers
    themselves, but worth noting since prior campaigns in this repo used
    spot.
+4. **No plots this campaign** — same gap the 2026-07-19 rerun's own
+   report flagged for 2026-06-11: those plots came from a Jupyter
+   notebook (in a different repo, `traceopt-viewer/study/`) whose
+   markdown output and images were hand-extracted into that campaign's
+   folder, not the notebook itself. That notebook targets the core
+   TraceML `final_summary.json` schema; this `perf_benchmark` harness
+   (added 2026-07-20) has its own, different `summary.json`/`summary.csv`
+   schema, so the existing notebook wouldn't plot it without rework
+   anyway. Raw data for charts is in `1node_summary.csv` / `2node_summary.csv`
+   / `4node_summary.csv` for whoever picks this up next.
 
 ## Known artifact: phase-attribution percentages near a zero baseline
 
