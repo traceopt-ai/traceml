@@ -24,6 +24,7 @@ from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.lifecycle import RuntimeHandle, start_aggregator
 from traceml_ai.runtime.lifecycle import start_runtime as start_runtime_handle
 from traceml_ai.runtime.settings import (
+    DEFAULT_INTERVAL_SEC,
     AggregatorEndpoint,
     AggregatorTransportSettings,
     TraceMLSettings,
@@ -60,7 +61,8 @@ class TraceMLRayConfig:
         Optional explicit TraceML session id. If omitted, a unique Ray session
         id is generated for each ``fit()`` call.
     sampler_interval_sec:
-        Background sampler cadence in seconds.
+        Background sampler cadence in seconds. The aggregator actor uses the
+        same value for its live UI refresh cadence; TCP ingestion is immediate.
     summary_window_rows:
         Number of recent history rows used by final summary generation.
     bind_host:
@@ -81,7 +83,7 @@ class TraceMLRayConfig:
     patch_h2d: Optional[bool] = None
     logs_dir: str = "./logs"
     session_id: str = ""
-    sampler_interval_sec: float = 1.0
+    sampler_interval_sec: float = DEFAULT_INTERVAL_SEC
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
     bind_host: str = "0.0.0.0"
     port: int = 0
@@ -135,7 +137,7 @@ def _build_aggregator_settings(
     return TraceMLSettings(
         mode=str(config.mode),
         profile=str(config.profile),
-        sampler_interval_sec=float(config.sampler_interval_sec),
+        render_interval_sec=float(config.sampler_interval_sec),
         logs_dir=str(config.logs_dir),
         session_id=str(config.session_id),
         summary_window_rows=int(config.summary_window_rows),

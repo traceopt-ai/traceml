@@ -40,6 +40,7 @@ from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.lifecycle import start_aggregator
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
+    DEFAULT_INTERVAL_SEC,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -110,7 +111,9 @@ def read_traceml_env() -> dict[str, Any]:
     return {
         "mode": ui_mode,
         "profile": os.environ.get("TRACEML_PROFILE", "run"),
-        "interval": float(os.environ.get("TRACEML_INTERVAL", "1.0")),
+        "interval": float(
+            os.environ.get("TRACEML_INTERVAL", str(DEFAULT_INTERVAL_SEC))
+        ),
         "enable_logging": os.environ.get("TRACEML_ENABLE_LOGGING", "0") == "1",
         "logs_dir": os.environ.get("TRACEML_LOGS_DIR", "./logs"),
         "aggregator_host": os.environ.get(

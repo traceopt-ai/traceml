@@ -32,6 +32,7 @@ def test_normalize_config_generates_session_id():
     assert config.session_id.startswith("ray_")
     assert config.mode == "summary"
     assert config.port == 0
+    assert config.sampler_interval_sec == 2.0
 
 
 def test_normalize_config_preserves_explicit_session_id():
@@ -67,6 +68,7 @@ def test_aggregator_settings_use_actor_node_as_connect_host():
     assert settings.aggregator.connect_host == "10.0.0.9"
     assert settings.aggregator.bind_host == "0.0.0.0"
     assert settings.aggregator.port == 0
+    assert settings.render_interval_sec == 2.0
 
 
 def test_worker_settings_connect_to_actor_endpoint():

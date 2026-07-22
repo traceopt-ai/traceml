@@ -39,6 +39,7 @@ from traceml_ai.runtime.executor import (  # noqa: E402
 )
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
+    TraceMLSettings,
 )  # noqa: E402
 
 
@@ -143,6 +144,20 @@ def test_read_traceml_env_parses_trace_max_steps(monkeypatch):
     assert cfg["trace_max_steps"] == 123
     assert cfg["finalize_timeout_sec"] == 42.5
     assert cfg["expected_world_size"] == 8
+
+
+def test_read_traceml_env_defaults_to_two_second_interval(monkeypatch):
+    monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
+    monkeypatch.delenv("TRACEML_INTERVAL", raising=False)
+
+    assert read_traceml_env()["interval"] == 2.0
+
+
+def test_trace_settings_default_to_two_second_cadences():
+    settings = TraceMLSettings()
+
+    assert settings.sampler_interval_sec == 2.0
+    assert settings.render_interval_sec == 2.0
 
 
 def test_build_runtime_settings_carries_trace_max_steps():
