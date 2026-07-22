@@ -18,7 +18,10 @@ from traceml_ai.launcher.commands import (
     validate_launch_args,
 )
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
-from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
+    DEFAULT_INTERVAL_SEC,
+)
 
 
 def _add_launch_args(parser: argparse.ArgumentParser) -> None:
@@ -44,7 +47,11 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
         "--interval",
         type=float,
         default=None,
-        help="Polling interval in seconds.",
+        help=(
+            "Worker sampler interval and live UI refresh interval in seconds "
+            f"(default: {DEFAULT_INTERVAL_SEC:g}). TCP ingestion is "
+            "event-driven."
+        ),
     )
     parser.add_argument(
         "--enable-logging",
