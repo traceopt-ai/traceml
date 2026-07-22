@@ -99,3 +99,28 @@ def ensure_optimizer_timing_installed() -> None:
         return
     install_optimizer_time_hooks()
     torch.optim.Optimizer._traceml_opt_hooks_installed = True
+
+
+def reset_optimizer_timing() -> None:
+    """
+    Remove the global optimizer-step timing hooks, clear in-flight state, and
+    reset the installed flag.
+
+    Inverse of ``ensure_optimizer_timing_installed()``; intended for tests and
+    re-initialization. Best-effort and never raises. After this call,
+    ``wrap_optimizer()`` is permitted again and the auto path can re-install.
+    """
+    global _HANDLES
+    if _HANDLES is not None:
+        for handle in _HANDLES:
+            try:
+                handle.remove()
+            except Exception:
+                pass
+        _HANDLES = None
+    _OPT_INFLIGHT.clear()
+    try:
+        if hasattr(torch.optim.Optimizer, "_traceml_opt_hooks_installed"):
+            torch.optim.Optimizer._traceml_opt_hooks_installed = False
+    except Exception:
+        pass
