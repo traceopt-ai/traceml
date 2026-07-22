@@ -72,12 +72,37 @@ def baseline_noise_floor(base_stats: dict[str, Any]) -> float | None:
     return max(float(std), abs(float(p95) - float(median)))
 
 
+# A never_init baseline below this is treated as too small for a
+# percentage to be meaningful, regardless of how precisely it was
+# measured: dividing by a sub-50-microsecond denominator turns a small,
+# real, absolute overhead (e.g. ~0.08ms of trace-context bookkeeping)
+# into a five-figure percentage that reads as a regression it isn't. See
+# traceml issue #233 (median trace_context_enter/exit_ms baselines of
+# ~0.005-0.006ms produced 1,500-5,100% "overhead" for ~0.08-0.3ms of
+# real, fixed instrumentation cost). This is a fixed floor, not a
+# noise-floor comparison, since a tiny baseline can still be measured
+# with a tight noise floor (as it is here) and the problem is scale, not
+# measurement reliability.
+MIN_BASELINE_MS_FOR_PCT = 0.05
+
+
+def baseline_too_small_for_pct(base_median: float | None) -> bool:
+    """A percentage computed against a near-zero baseline is meaningless."""
+    return (
+        base_median is not None
+        and float(base_median) < MIN_BASELINE_MS_FOR_PCT
+    )
+
+
 def overhead_label(row: dict[str, Any]) -> str:
     delta = row.get("overhead_median_ms")
     noise = row.get("baseline_noise_floor_ms")
     pct_value = row.get("overhead_median_pct")
+    base_median = row.get("baseline_median_ms")
     if delta is None:
         return "baseline"
     if row.get("within_baseline_noise"):
         return f"within noise (|delta| <= {fmt(noise)} ms)"
+    if baseline_too_small_for_pct(base_median):
+        return f"{fmt(delta)} ms (baseline too small for a reliable %)"
     return f"{fmt(delta)} ms / {fmt(pct_value, 2)}%"
