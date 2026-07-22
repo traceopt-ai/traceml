@@ -1,5 +1,14 @@
 # 1/2/4-Node Scaling Campaign (`perf_benchmark`, on-demand g4dn.xlarge)
 
+> **Superseded 2026-07-22.** `run_benchmark.py` enables `--gil-probe` by
+> default — an unthrottled, continuously-running CPU thread that competes
+> for the GIL in every cell, including `never_init` — and none of the
+> configs below overrode it. Per @abhinavsriva (issue #233, PR #230) and
+> confirmed independently on a clean rerun, the numbers in this report are
+> GIL-stress diagnostic data, not normal TraceML overhead evidence. See
+> [`../2026-07-22_clean_1_2_4node_g4dn/report.md`](../2026-07-22_clean_1_2_4node_g4dn/report.md)
+> for the clean rerun with `gil_probe: false`.
+
 - **Date:** 2026-07-21
 - **Scope:** First real run of Abhinav's `perf_benchmark` harness (added
   2026-07-20) across three topologies — 1 node, 2 nodes, 4 nodes — each
