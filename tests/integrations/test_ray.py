@@ -88,3 +88,60 @@ def test_worker_settings_connect_to_actor_endpoint():
     assert settings.sampler_interval_sec == 2.0
     assert settings.aggregator.connect_host == "10.0.0.9"
     assert settings.aggregator.port == 34567
+
+
+def test_ray_disabled_delegates_to_native_torch_trainer(monkeypatch):
+    import traceml_ai.integrations.ray as ray_integration
+
+    observed = {}
+
+    class _FakeRay:
+        def remote(self, *args, **kwargs):
+            raise AssertionError("disabled Ray path must not create actors")
+
+    class _FakeTorchTrainer:
+        def __init__(
+            self,
+            train_loop_per_worker,
+            *,
+            train_loop_config=None,
+            **kwargs,
+        ):
+            observed["train_loop_per_worker"] = train_loop_per_worker
+            observed["train_loop_config"] = dict(train_loop_config or {})
+            observed["kwargs"] = dict(kwargs)
+
+        def fit(self):
+            return self._run_native()
+
+        def _run_native(self):
+            return observed["train_loop_per_worker"](
+                observed["train_loop_config"]
+            )
+
+    def _train_loop(config):
+        return {"native": True, "config": config}
+
+    monkeypatch.setenv("TRACEML_DISABLED", "1")
+    monkeypatch.setattr(
+        ray_integration,
+        "_require_ray",
+        lambda: (_FakeRay(), _FakeTorchTrainer),
+    )
+
+    trainer = ray_integration.TraceMLTorchTrainer(
+        _train_loop,
+        train_loop_config={"batch_size": 4},
+        scaling_config="native-scaling",
+    )
+
+    assert trainer.fit() == {
+        "native": True,
+        "config": {"batch_size": 4},
+    }
+    assert not isinstance(
+        observed["train_loop_per_worker"],
+        ray_integration._TraceMLWorkerLoop,
+    )
+    assert observed["kwargs"] == {"scaling_config": "native-scaling"}
+    assert trainer.last_endpoint is None

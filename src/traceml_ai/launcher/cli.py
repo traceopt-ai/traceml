@@ -13,6 +13,7 @@ import argparse
 from traceml_ai.launcher.commands import (
     run_compare,
     run_inspect,
+    run_serve,
     run_view,
     run_with_tracing,
     validate_launch_args,
@@ -201,6 +202,8 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--disable-traceml",
+        "--disable_traceml",
+        dest="disable_traceml",
         action="store_const",
         const=True,
         default=None,
@@ -251,6 +254,97 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a script with TraceML bottleneck instrumentation.",
     )
     _add_launch_args(run_parser)
+
+    serve_parser = sub.add_parser(
+        "serve",
+        help=(
+            "Start the TraceML aggregator standalone. Use with scripts "
+            "launched directly via `python` or `torchrun` that call "
+            "traceml.init(...)."
+        ),
+    )
+    serve_parser.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        choices=["cli", "dashboard", "summary"],
+        help="TraceML display mode for the aggregator. Default: summary.",
+    )
+    serve_parser.add_argument(
+        "--logs-dir",
+        type=str,
+        default=None,
+        help="Directory for TraceML session logs.",
+    )
+    serve_parser.add_argument(
+        "--run-name",
+        type=str,
+        default="",
+        help=(
+            "Human-readable TraceML run name. Determines the output folder "
+            "under --logs-dir. Workers must use the same run name."
+        ),
+    )
+    serve_parser.add_argument(
+        "--session-id",
+        type=str,
+        default="",
+        help="Backward-compatible alias for --run-name.",
+    )
+    serve_parser.add_argument(
+        "--nnodes",
+        type=int,
+        default=None,
+        help=(
+            "Total nodes in the training job. With --nproc-per-node, sets the "
+            "expected worker count so the aggregator waits for ALL ranks "
+            "before finalizing (and warns about ranks that never report). "
+            "Without it the aggregator finalizes after the first rank."
+        ),
+    )
+    serve_parser.add_argument(
+        "--nproc-per-node",
+        type=int,
+        default=None,
+        help="Workers per node. Multiplied by --nnodes for the rank count.",
+    )
+    serve_parser.add_argument(
+        "--interval",
+        type=float,
+        default=None,
+        help="Aggregator render/polling interval in seconds.",
+    )
+    serve_parser.add_argument(
+        "--enable-logging",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Enable TraceML logging output.",
+    )
+    serve_parser.add_argument(
+        "--aggregator-host",
+        type=str,
+        default=None,
+        help=(
+            "Address workers use to connect to this aggregator. Defaults to "
+            "127.0.0.1. Set to node 0's reachable address for multi-node."
+        ),
+    )
+    serve_parser.add_argument(
+        "--aggregator-bind-host",
+        type=str,
+        default=None,
+        help=(
+            "Address the aggregator binds to. Defaults to 127.0.0.1. Use "
+            "0.0.0.0 when workers on other nodes must connect."
+        ),
+    )
+    serve_parser.add_argument(
+        "--aggregator-port",
+        type=int,
+        default=29765,
+        help="TraceML aggregator port.",
+    )
 
     compare_parser = sub.add_parser(
         "compare",
@@ -316,6 +410,8 @@ def main() -> None:
         run_with_tracing(args, profile="watch")
     elif args.command == "run":
         run_with_tracing(args, profile="run")
+    elif args.command == "serve":
+        run_serve(args)
     elif args.command == "compare":
         run_compare(args)
     elif args.command == "view":

@@ -100,6 +100,7 @@ def build_model_diagnostics_payload(
     ] = None,
     step_time_per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     step_time_diagnosis_clock: str = "cpu",
+    step_time_training_strategy: str = "ddp",
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
@@ -117,6 +118,7 @@ def build_model_diagnostics_payload(
         step_time_diagnosis_metrics=tuple(step_time_diagnosis_metrics or ()),
         step_time_per_rank_timing=dict(step_time_per_rank_timing or {}),
         step_time_diagnosis_clock=str(step_time_diagnosis_clock or "cpu"),
+        step_time_training_strategy=str(step_time_training_strategy or "ddp"),
         step_memory_metrics=step_memory_metrics,
         step_memory_status_message=step_memory_status_message,
         gpu_total_bytes=gpu_total_bytes,
@@ -157,6 +159,7 @@ def _build_step_time_item(
         context.step_time_diagnosis_metrics,
         per_rank_timing=context.step_time_per_rank_timing,
         diagnosis_clock=context.step_time_diagnosis_clock,
+        training_strategy=context.step_time_training_strategy,
     )
     return ModelDiagnosisItem(
         source="step_time",
