@@ -147,6 +147,19 @@ def test_aggregator_unavailable_does_not_block_or_crash() -> None:
         exporter.stop()
 
 
+def test_enqueue_after_stop_is_dropped() -> None:
+    client = _FakeClient()
+    exporter = TelemetryExporter(tcp_client=client, logger=_FakeLogger())
+    exporter.start()
+    exporter.stop()
+
+    exporter.send_batch([{"id": 1}])
+
+    assert exporter.queue_size == 0
+    assert exporter.dropped_count == 1
+    assert client.call_count == 0
+
+
 def test_shutdown_drain_timeout_is_bounded() -> None:
     client = _FakeClient(send_delay=2.0)
     exporter = TelemetryExporter(
@@ -165,6 +178,30 @@ def test_shutdown_drain_timeout_is_bounded() -> None:
 
     # Must return before a single slow send completes, not after draining all.
     assert elapsed < 2.0
+
+
+def test_shutdown_drain_timeout_counts_and_logs_remaining_batches() -> None:
+    logger = _FakeLogger()
+    client = _FakeClient(send_delay=0.2)
+    exporter = TelemetryExporter(
+        tcp_client=client,
+        drain_timeout_sec=0.0,
+        poll_interval_sec=0.01,
+        logger=logger,
+    )
+    exporter.start()
+    exporter.send_batch([{"id": 1}])
+    assert _wait_until(lambda: client.call_count == 1)
+    exporter.send_batch([{"id": 2}])
+    exporter.send_batch([{"id": 3}])
+
+    exporter.stop()
+
+    assert exporter.queue_size == 0
+    assert exporter.dropped_count == 2
+    assert any(
+        "shutdown dropped 2 queued payload batches" in e for e in logger.errors
+    )
 
 
 def test_tick_enqueues_and_does_not_send_inline() -> None:

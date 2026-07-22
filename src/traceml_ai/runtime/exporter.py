@@ -58,7 +58,7 @@ class TelemetryExporter:
 
     @property
     def dropped_count(self) -> int:
-        """Number of payload batches dropped on queue overflow."""
+        """Number of payload batches dropped on overflow or shutdown."""
         with self._cond:
             return self._dropped
 
@@ -116,6 +116,9 @@ class TelemetryExporter:
 
     def _enqueue(self, batch: List[Any]) -> None:
         with self._cond:
+            if self._stopped:
+                self._dropped += 1
+                return
             if len(self._queue) >= self._max_queue_size:
                 self._queue.popleft()  # drop oldest
                 self._dropped += 1
@@ -150,6 +153,19 @@ class TelemetryExporter:
             if batch is None:
                 return
             self._send(batch)
+
+        with self._cond:
+            remaining = len(self._queue)
+            if remaining:
+                self._queue.clear()
+                self._dropped += remaining
+
+        if remaining:
+            self._logger.error(
+                "[TraceML] exporter shutdown dropped %d queued payload batches "
+                "after drain timeout",
+                remaining,
+            )
 
     def _send(self, batch: List[Any]) -> None:
         # Network send runs outside the queue lock so enqueue never blocks.
