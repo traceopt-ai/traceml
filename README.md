@@ -46,26 +46,6 @@ TraceML produces actionable diagnostics with under 1% overhead in current benchm
 
 ## Quickstart
 
-### Try it in Docker
-
-Build the image from the repository checkout, then run the default CPU demo:
-
-```bash
-docker build -t traceml-demo .
-docker run --rm traceml-demo
-```
-
-The image installs TraceML from the checkout with PyTorch support and runs the
-slow DataLoader diagnosis demo in summary mode. The final report should identify
-the run as input-bound; no external dataset or GPU is required.
-
-If the host has the NVIDIA Container Toolkit configured and the installed
-PyTorch build supports CUDA, the same demo can optionally access the GPU:
-
-```bash
-docker run --rm --gpus all traceml-demo
-```
-
 ### 1. Install TraceML
 
 For the live browser dashboard:
@@ -184,6 +164,26 @@ TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
 back to `TRACEML_*` environment variables and `traceml.yaml`. The aggregator
 endpoint is configured with `traceml serve` flags. See
 [Public API](docs/user_guide/public-api.md#direct-launch-with-traceml-serve).
+
+### Try it in Docker
+
+Build the image from the repository checkout, then run the default CPU demo:
+
+```bash
+docker build -t traceml-demo .
+docker run --rm traceml-demo
+```
+
+The image installs TraceML from the checkout with PyTorch support and runs the
+slow DataLoader diagnosis demo in summary mode. The final report should identify
+the run as input-bound; no external dataset or GPU is required.
+
+If the host has the NVIDIA Container Toolkit configured and the installed
+PyTorch build supports CUDA, the same demo can optionally access the GPU:
+
+```bash
+docker run --rm --gpus all traceml-demo
+```
 
 ---
 
