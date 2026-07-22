@@ -1,0 +1,13 @@
+{
+  "name": "TraceML",
+  "image": "mcr.microsoft.com/devcontainers/python:3.10",
+  "postCreateCommand": "pip install -e '.[dev,torch]' && pre-commit install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ]
+    }
+  }
+}
