@@ -18,7 +18,7 @@ from traceml_ai.loggers.error_log import get_error_logger
 
 DEFAULT_EXPORT_QUEUE_SIZE = 2048
 DEFAULT_EXPORT_DRAIN_TIMEOUT_SEC = 2.0
-_EXPORT_POLL_INTERVAL_SEC = 0.5
+_EXPORT_POLL_INTERVAL_SEC = 1.0
 
 
 class TelemetryExporter:
