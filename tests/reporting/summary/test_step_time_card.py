@@ -147,6 +147,7 @@ def _input_bound_step_metrics(
     step_time_cpu: float = 90.0,
     input_wait_gpu: float,
     step_time_gpu: float,
+    h2d_gpu: float = 0.0,
     steps: int = 64,
 ) -> dict[int, dict]:
     return {
@@ -154,6 +155,7 @@ def _input_bound_step_metrics(
             "_traceml_internal:dataloader_next": _event_stats(
                 cpu_ms=dataloader_cpu, gpu_ms=input_wait_gpu
             ),
+            "_traceml_internal:h2d_time": _event_stats(gpu_ms=h2d_gpu),
             "_traceml_internal:step_time": _event_stats(
                 cpu_ms=step_time_cpu,
                 gpu_ms=step_time_gpu,
@@ -311,6 +313,40 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     assert (
         "- Why: Input wait was 40.0ms of 140.0ms gpu iteration time."
         in payload["card"]
+    )
+    _assert_compact_card(payload["card"])
+
+
+def test_step_time_h2d_bound_card_uses_short_reason() -> None:
+    payload = _summary(
+        {
+            0: _rank(
+                dataloader=12.0,
+                h2d=20.0,
+                forward=20.0,
+                backward=35.0,
+                optimizer=5.0,
+                step_cpu=100.0,
+            )
+        },
+        per_rank_steps={
+            0: _input_bound_step_metrics(
+                input_wait_gpu=0.0,
+                h2d_gpu=20.0,
+                step_time_cpu=100.0,
+                step_time_gpu=100.0,
+            )
+        },
+    )
+
+    assert payload["diagnosis"] == payload["issues"][0]
+    assert payload["diagnosis"]["status"] == "H2D-BOUND"
+    assert payload["diagnosis"]["metric"] == "h2d"
+    assert payload["diagnosis"]["phase"] == "h2d"
+    assert payload["diagnosis"]["evidence"]["h2d_ms"] == 20.0
+    assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
+    assert (
+        "- Why: H2D transfer was high inside the total step" in payload["card"]
     )
     _assert_compact_card(payload["card"])
 

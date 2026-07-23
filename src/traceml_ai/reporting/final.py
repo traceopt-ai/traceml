@@ -603,11 +603,11 @@ def _append_step_time_evidence_single(
 ) -> None:
     """Append selected-clock average/share Step Time evidence."""
     widths = (16, 16, 12)
-    share_total = _average_value(step_time_summary, "step_time_ms")
+    step_time = _average_value(step_time_summary, "step_time_ms")
     input_wait = _average_value(step_time_summary, "input_wait_ms")
     iteration_time = (
-        input_wait + share_total
-        if input_wait is not None and share_total is not None
+        input_wait + step_time
+        if input_wait is not None and step_time is not None
         else None
     )
     lines.append(row("Step Time Evidence", width=SUMMARY_WIDTH))
@@ -622,14 +622,10 @@ def _append_step_time_evidence_single(
         value = _average_value(step_time_summary, metric)
         if metric in _STEP_TIME_CPU_COMPAT_METRICS:
             # These fields stay CPU-clocked for compatibility; selected-clock
-            # phase shares generally use step_time_ms as the denominator.
+            # phase shares use selected-clock iteration time as the denominator.
             share = "compat"
-        elif metric == "input_wait_ms":
-            share = _format_share(value, iteration_time)
-        elif metric == "step_time_ms":
-            share = "100.0%"
         else:
-            share = _format_share(value, share_total)
+            share = _format_share(value, iteration_time)
         lines.append(
             row(
                 _table_line(

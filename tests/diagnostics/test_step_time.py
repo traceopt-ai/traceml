@@ -6,16 +6,21 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
 
 from traceml_ai.diagnostics.step_time.api import (
     DEFAULT_THRESHOLDS,
+    StepDiagnosis,
     build_step_diagnosis_result,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
+from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.rules import (
     ComputeBoundRule,
+    H2DBoundRule,
     InputBoundRule,
     RankStragglerRule,
     ResidualHeavyRule,
@@ -177,12 +182,14 @@ def _rank_context(
     per_rank_timing: dict[int, dict[str, float]],
     *,
     training_strategy: str = "ddp",
+    diagnosis_clock: str = "cpu",
 ):
     return build_step_time_context(
         metrics=_metrics_from_per_rank_timing(per_rank_timing),
         thresholds=DEFAULT_THRESHOLDS,
         per_rank_timing=per_rank_timing,
         training_strategy=training_strategy,
+        diagnosis_clock=diagnosis_clock,
     )
 
 
@@ -425,6 +432,98 @@ def test_input_bound_uses_iteration_share_thresholds(
 
 
 @pytest.mark.parametrize(
+    ("h2d", "expected_severity"),
+    [(10.0, "warn"), (20.0, "crit")],
+)
+def test_h2d_bound_uses_gpu_iteration_share_thresholds(
+    h2d: float,
+    expected_severity: str,
+) -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            h2d=h2d,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    issue = H2DBoundRule().evaluate(
+        _rank_context(per_rank, diagnosis_clock="gpu")
+    )
+
+    assert issue is not None
+    assert issue.metric == "h2d"
+    assert issue.phase == "h2d"
+    assert issue.share_pct == pytest.approx(h2d / 100.0)
+    assert issue.severity == expected_severity
+
+
+def test_h2d_bound_abstains_below_warning_threshold() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            h2d=9.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    assert (
+        H2DBoundRule().evaluate(_rank_context(per_rank, diagnosis_clock="gpu"))
+        is None
+    )
+
+
+def test_h2d_bound_requires_gpu_selected_timing() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            h2d=80.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    assert H2DBoundRule().evaluate(_rank_context(per_rank)) is None
+
+
+def test_h2d_bound_keeps_skew_as_evidence() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            h2d=10.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=0.0,
+            h2d=90.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+    }
+
+    issue = H2DBoundRule().evaluate(
+        _rank_context(per_rank, diagnosis_clock="gpu")
+    )
+
+    assert issue is not None
+    assert issue.skew_pct is not None
+    assert issue.ranks == (1,)
+
+
+@pytest.mark.parametrize(
     ("residual", "expected_severity"),
     [(10.0, "warn"), (20.0, "crit")],
 )
@@ -488,6 +587,89 @@ def test_compute_bound_requires_existing_dominance_threshold() -> None:
     }
 
     assert ComputeBoundRule().evaluate(_rank_context(per_rank)) is None
+
+
+def test_compute_bound_abstains_for_material_h2d() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            h2d=10.0,
+            forward=90.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    assert (
+        ComputeBoundRule().evaluate(
+            _rank_context(per_rank, diagnosis_clock="gpu")
+        )
+        is None
+    )
+
+
+def test_cpu_h2d_does_not_suppress_compute_bound() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            h2d=80.0,
+            forward=90.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    issue = ComputeBoundRule().evaluate(_rank_context(per_rank))
+
+    assert issue is not None
+    assert issue.kind == "COMPUTE_BOUND"
+
+
+def test_input_bound_remains_primary_when_h2d_is_also_material() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=20.0,
+            h2d=20.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+        diagnosis_clock="gpu",
+    )
+
+    assert result.primary.kind == "INPUT_BOUND"
+    assert {issue.kind for issue in result.issues} >= {
+        "INPUT_BOUND",
+        "H2D_BOUND",
+    }
+
+
+@pytest.mark.parametrize(
+    ("severity", "style"),
+    [("warn", "bold yellow"), ("crit", "bold red")],
+)
+def test_h2d_bound_cli_style_matches_severity(
+    severity: Literal["warn", "crit"],
+    style: str,
+) -> None:
+    diagnosis = StepDiagnosis(
+        kind="H2D_BOUND",
+        status="H2D-BOUND",
+        severity=severity,
+        reason="H2D transfer is material.",
+        action="Inspect transfers.",
+        steps_used=64,
+    )
+
+    assert f"[{style}]H2D-BOUND[/{style}]" in format_cli_diagnosis(diagnosis)
 
 
 def test_compute_bound_is_secondary_to_rank_straggler() -> None:
@@ -881,6 +1063,7 @@ def _event_stats(
 def _summary_step_events(
     *,
     input_wait_gpu: float | None,
+    h2d: float = 0.0,
     step_time_gpu: float = 60.0,
     steps: int = 60,
 ) -> dict[int, dict]:
@@ -888,7 +1071,7 @@ def _summary_step_events(
     for step in range(steps):
         events = {
             "_traceml_internal:dataloader_next": _event_stats(cpu_ms=5.0),
-            "_traceml_internal:h2d_time": _event_stats(cpu_ms=0.0),
+            "_traceml_internal:h2d_time": _event_stats(cpu_ms=h2d),
             "_traceml_internal:forward_time": _event_stats(cpu_ms=20.0),
             "_traceml_internal:backward_time": _event_stats(cpu_ms=30.0),
             "_traceml_internal:optimizer_step": _event_stats(cpu_ms=10.0),
@@ -899,7 +1082,7 @@ def _summary_step_events(
                 "_traceml_internal:dataloader_next": _event_stats(
                     gpu_ms=input_wait_gpu
                 ),
-                "_traceml_internal:h2d_time": _event_stats(gpu_ms=0.0),
+                "_traceml_internal:h2d_time": _event_stats(gpu_ms=h2d),
                 "_traceml_internal:forward_time": _event_stats(gpu_ms=20.0),
                 "_traceml_internal:backward_time": _event_stats(gpu_ms=30.0),
                 "_traceml_internal:optimizer_step": _event_stats(gpu_ms=10.0),
@@ -928,6 +1111,28 @@ def test_summary_input_bound_uses_explicit_input_clocks() -> None:
     assert high_wait.issues[0].evidence["iteration_time_ms"] == pytest.approx(
         85.0
     )
+
+
+def test_summary_h2d_bound_uses_gpu_selected_h2d_timing() -> None:
+    result = _diagnose_summary_events(
+        {0: _summary_step_events(input_wait_gpu=0.0, h2d=12.0)},
+        max_rows=100,
+    )
+
+    assert result.primary.kind == "H2D_BOUND"
+    issue = next(issue for issue in result.issues if issue.kind == "H2D_BOUND")
+    assert issue.severity == "crit"
+    assert issue.evidence["diagnosis_clock"] == "gpu"
+    assert issue.share_pct == pytest.approx(12.0 / 60.0)
+
+
+def test_summary_h2d_bound_ignores_cpu_selected_h2d_timing() -> None:
+    result = _diagnose_summary_events(
+        {0: _summary_step_events(input_wait_gpu=None, h2d=80.0)},
+        max_rows=100,
+    )
+
+    assert all(issue.kind != "H2D_BOUND" for issue in result.issues)
 
 
 def test_summary_input_bound_trend_uses_selected_input_wait_series() -> None:

@@ -233,7 +233,7 @@ def test_final_text_uses_single_process_average_layout():
     assert "Total             139.1ms           compat" in text
     assert "Input Wait        130.8ms           48.5%" in text
     assert "Dataloader        120.0ms           compat" in text
-    assert "Step Time         139.1ms           100.0%" in text
+    assert "Step Time         139.1ms           51.5%" in text
     assert "Median" not in text
     assert "Worst" not in text
     assert "Skew" not in text
@@ -274,10 +274,49 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
     text = payload["text"]
     assert "Total             10.5ms            compat" in text
     assert "Dataloader        0.5ms             compat" in text
-    assert "Step Time         50.0ms            100.0%" in text
-    assert "Compute           48.0ms            96.0%" in text
+    assert "Step Time         50.0ms            96.2%" in text
+    assert "Compute           48.0ms            92.3%" in text
     assert "457.1%" not in text
     assert "476.2%" not in text
+
+
+def test_final_text_includes_h2d_bound_diagnosis():
+    step_time = _payload(
+        metadata={"global_ranks_used": 1},
+        diagnosis=_diagnosis(
+            "H2D_BOUND",
+            "H2D-BOUND",
+            severity="crit",
+            action="Inspect pinned memory and batch transfers.",
+        ),
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
+            "average": {
+                "total_step_ms": 150.0,
+                "dataloader_ms": 40.0,
+                "input_wait_ms": 40.0,
+                "step_time_ms": 100.0,
+                "h2d_ms": 20.0,
+                "compute_ms": 70.0,
+                "residual_ms": 10.0,
+            },
+        },
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", _status_payload("NORMAL")),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+    assert "TraceML Verdict: H2D-BOUND / CRITICAL" in payload["text"]
+    assert "Why: H2D transfer took 20.0ms of 140.0ms iteration time." in (
+        payload["text"]
+    )
 
 
 def test_final_text_uses_multi_process_comparison_layout():

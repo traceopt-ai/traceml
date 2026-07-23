@@ -175,7 +175,7 @@ Common causes:
 What to look at:
 
 - `Input Wait`
-- its share of the step
+- its share of iteration time
 - whether the issue is broad or rank-specific
 
 What to do next:
@@ -184,6 +184,30 @@ What to do next:
 - reduce preprocessing cost
 - improve storage throughput
 - inspect batch construction
+
+---
+
+### `H2D-BOUND`
+
+Meaning:
+
+- host-to-device transfer is taking a large share of typical iteration time
+- TraceML uses the median per-rank H2D share, so one unusually slow rank does
+  not hide a broad transfer bottleneck
+- this diagnosis requires GPU-selected timing; CPU host-call duration is not
+  treated as transfer cost
+
+TraceML reports a warning at 10% of iteration time and critical severity at
+20%.
+
+What to do next:
+
+- use pinned host memory where appropriate
+- inspect batch transfer placement and non-blocking copies
+- reduce transferred batch size or unnecessary host-to-device copies
+
+`H2D-BOUND` describes broad transfer cost. `H2D STRAGGLER` instead describes
+one rank with excess transfer time.
 
 ---
 
@@ -748,6 +772,7 @@ Use these as context cards:
 | Diagnosis | Good next step |
 |---|---|
 | `INPUT-BOUND` | inspect input loading, preprocessing, and storage |
+| `H2D-BOUND` | inspect pinned memory, batch transfer, and host-to-device copies |
 | `COMPUTE-BOUND` | inspect forward/backward/optimizer cost |
 | `INPUT STRAGGLER` | inspect input path on the culprit rank |
 | `COMPUTE STRAGGLER` | inspect DDP forward work on the culprit rank |

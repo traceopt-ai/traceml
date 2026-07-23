@@ -373,6 +373,12 @@ def _step_time_card_reason(
         return str(
             getattr(diagnosis, "reason", "") or "Input wait was high."
         ).strip()
+    if kind == "H2D_BOUND":
+        evidence = (
+            f"{format_ms(stats.h2d.worst_ms)}/"
+            f"{format_ms(stats.total_step.worst_ms)}"
+        )
+        return f"H2D transfer was high inside the total step ({evidence})."
     if kind == "RESIDUAL_HEAVY":
         evidence = (
             f"{format_ms(stats.residual.worst_ms)}/"
