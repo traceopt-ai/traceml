@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "traceml-ai"
-version = "0.3.4"
+dynamic = ["version"]
 
 description = "TraceML: Lightweight runtime bottleneck diagnostics for PyTorch training."
 authors = [{ name = "OptAI UG (haftungsbeschränkt)", email = "support@traceopt.ai" }]
@@ -118,3 +122,9 @@ where = ["src"]
 # Offline-bundled dashboard fonts must ship in the wheel (served at runtime by
 # the NiceGUI driver); without this they fall back to the system font stack.
 traceml_ai = ["aggregator/display_drivers/assets/fonts/*.woff2"]
+
+[tool.setuptools_scm]
+# Version is derived from the nearest git tag (e.g. v0.3.4) instead of a
+# hand-maintained string, so a release tag and the built package can no
+# longer drift apart. Written to a generated file read by __init__.py.
+version_file = "src/traceml_ai/_version.py"
