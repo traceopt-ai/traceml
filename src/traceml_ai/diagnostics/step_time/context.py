@@ -532,6 +532,29 @@ def compute_rank_values_from_components(
     return out
 
 
+def _median_iteration_component_share(
+    per_rank_timing: Dict[int, Dict[str, float]],
+    component: str,
+) -> float:
+    """Return the median selected-clock iteration share for one component."""
+    shares = []
+    for values in per_rank_timing.values():
+        if not {
+            "input_wait",
+            "step_time",
+            component,
+        }.issubset(values):
+            continue
+        iteration = non_negative_finite(
+            values["input_wait"]
+        ) + non_negative_finite(values["step_time"])
+        if iteration > 0.0:
+            shares.append(
+                share(non_negative_finite(values[component]), iteration)
+            )
+    return _median(shares)
+
+
 def build_step_time_context(
     *,
     metrics: Sequence[StepCombinedTimeMetric],
@@ -677,9 +700,15 @@ def build_step_time_context(
         step_total=step_total,
         residual_total=residual_total,
         compute_total=compute_total_value,
-        residual_share=share(residual_total, step_total),
+        residual_share=_median_iteration_component_share(
+            local_per_rank_timing,
+            "residual_proxy",
+        ),
         compute_share=share(compute_total_value, step_total),
-        input_bound_share=share(input_wait_total, iteration_time_total),
+        input_bound_share=_median_iteration_component_share(
+            local_per_rank_timing,
+            "input_wait",
+        ),
         input_bound_skew=input_bound_skew,
         compute_skew=compute_skew_value,
         input_bound_worst_rank=input_wait_worst_rank,

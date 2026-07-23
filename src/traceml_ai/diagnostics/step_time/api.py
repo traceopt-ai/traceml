@@ -324,8 +324,8 @@ def _apply_trend_note(
             input_wait_metric=input_wait_metric,
             residual_share=residual_share,
             input_bound_share=input_bound_share,
-            residual_warn_threshold=thresholds.residual_share_warn,
-            input_warn_threshold=thresholds.input_share_warn,
+            residual_warn_threshold=thresholds.overhead_share_warn,
+            input_warn_threshold=thresholds.overhead_share_warn,
             cfg=DEFAULT_STEP_TREND_HEURISTICS,
         )
         if not trend_note:

@@ -14,10 +14,11 @@ class DiagnosisThresholds:
     the same rules and produce the same diagnosis vocabulary. Live and summary
     differ by the selected timing window, not by extra diagnosis gates.
 
-    INPUT_BOUND uses selected-clock ``input_wait_ms / iteration_time_ms``,
-    where ``iteration_time_ms = input_wait_ms + step_time_ms``. This keeps the
-    traced step envelope stable while measuring input wait against the full
-    selected-clock iteration time.
+    Typical overhead diagnoses use selected-clock per-rank iteration shares.
+    The context takes the median of those shares across ranks, where
+    ``iteration_time_ms = input_wait_ms + step_time_ms``. The shared overhead
+    thresholds are the future configuration surface for input, residual, and
+    H2D policies.
 
     ``min_steps_for_warning_diag`` is the minimum window size for warning-only
     bottleneck diagnoses. ``min_steps_for_confident_diag`` is the minimum window
@@ -27,17 +28,10 @@ class DiagnosisThresholds:
     straggler_score_warn: float = 0.10
     straggler_score_crit: float = 0.20
 
-    input_share_warn: float = 0.10
-    input_share_crit: float = 0.20
-
-    residual_share_warn: float = 0.15
-    residual_share_crit: float = 0.25
-
-    input_bound_max_skew: float = 0.06
-    compute_bound_max_skew: float = 0.06
+    overhead_share_warn: float = 0.10
+    overhead_share_crit: float = 0.20
 
     compute_bound_share_warn: float = 0.85
-    compute_bound_share_crit: float = 0.92
 
     min_steps_for_warning_diag: int = 2
     min_steps_for_confident_diag: int = 20
@@ -63,14 +57,9 @@ SUMMARY_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
     thresholds=DiagnosisThresholds(
         straggler_score_warn=0.10,
         straggler_score_crit=0.20,
-        input_share_warn=0.10,
-        input_share_crit=0.20,
-        residual_share_warn=0.18,
-        residual_share_crit=0.28,
-        input_bound_max_skew=0.05,
-        compute_bound_max_skew=0.05,
+        overhead_share_warn=0.10,
+        overhead_share_crit=0.20,
         compute_bound_share_warn=0.88,
-        compute_bound_share_crit=0.94,
         min_steps_for_confident_diag=20,
     ),
 )

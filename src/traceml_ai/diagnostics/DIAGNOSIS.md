@@ -73,9 +73,11 @@ Training-step timing.
   materially higher forward time than the victim rank.
 - `H2D_STRAGGLER`: the culprit rank has materially higher host-to-device
   transfer time than the victim rank.
-- `INPUT_BOUND`: selected-clock input wait dominates iteration time.
-- `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
-- `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
+- `INPUT_BOUND`: selected-clock input wait is a material typical iteration cost.
+- `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step;
+  this is informational when no material overhead is visible.
+- `RESIDUAL_HEAVY`: unattributed residual time is a material typical iteration
+  cost.
 
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
@@ -92,12 +94,19 @@ display or diagnosis. In the final text report, most selected-clock phase
 shares are divided by `step_time_ms`; CPU compatibility rows are labeled
 separately.
 
-`INPUT_BOUND` uses selected-clock
-`input_wait_ms / iteration_time_ms`, where
-`iteration_time_ms = input_wait_ms + step_time_ms`. This compares pre-step
-input wait with the full selected-clock iteration time while leaving
-`step_time_ms` as the traced step envelope. Live and summary diagnosis both
-warn at 10% and are critical at 20%.
+Typical overhead diagnoses use selected-clock per-rank iteration shares:
+
+```text
+iteration_r = input_wait_r + step_time_r
+component_share_r = component_r / iteration_r
+typical_component_share = median(component_share_r across ranks)
+```
+
+`INPUT_BOUND` uses `input_wait` and `RESIDUAL_HEAVY` uses residual as the
+component. Both warn at 10% and are critical at 20%. Cross-rank skew remains
+evidence in the finding, but does not suppress a bottleneck affecting typical
+ranks. `COMPUTE_BOUND` remains an informational finding when compute dominates
+the traced step and no material input or residual overhead is visible.
 
 Shared Step Time diagnosis needs at least 2 steps to emit warning-only
 bottleneck diagnoses. Critical diagnoses are allowed once the window has at
