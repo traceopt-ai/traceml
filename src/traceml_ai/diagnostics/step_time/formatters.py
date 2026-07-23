@@ -21,7 +21,7 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
         style = "bold green"
     elif diagnosis.kind in {"NO_DATA", "WARMUP"}:
         style = "bold bright_black"
-    elif diagnosis.kind in {"INPUT_BOUND", "COMPUTE_BOUND"}:
+    elif diagnosis.kind == "INPUT_BOUND":
         style = "bold yellow"
     elif diagnosis.kind in {
         "INPUT_STRAGGLER",
