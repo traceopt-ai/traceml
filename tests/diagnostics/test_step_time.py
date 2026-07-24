@@ -793,7 +793,7 @@ def test_rank_straggler_classifies_culprit_excess(
         (
             {
                 0: _timing_row(
-                    h2d=80.0,
+                    h2d=100.0,
                     forward=20.0,
                     backward=20.0,
                     optimizer=0.0,
@@ -845,6 +845,193 @@ def test_rank_straggler_not_emitted_below_visible_wait_threshold() -> None:
 
     assert ctx.rank_straggler is None
     assert RankStragglerRule().evaluate(ctx) is None
+
+
+@pytest.mark.parametrize(
+    ("visible_cost", "expected_severity"),
+    [(9.0, None), (10.0, "warn"), (20.0, "crit")],
+)
+def test_rank_straggler_uses_victim_iteration_impact_thresholds(
+    visible_cost: float,
+    expected_severity: str | None,
+) -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            backward=10.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=0.0,
+            backward=10.0 + visible_cost,
+            step_time=100.0,
+        ),
+    }
+
+    issue = RankStragglerRule().evaluate(_rank_context(per_rank))
+
+    if expected_severity is None:
+        assert issue is None
+        return
+
+    assert issue is not None
+    assert issue.kind == "STRAGGLER"
+    assert issue.severity == expected_severity
+    assert issue.score == pytest.approx(visible_cost / 100.0)
+
+
+@pytest.mark.parametrize(
+    ("component", "excess", "expected_kind"),
+    [
+        ("input", 79.0, "STRAGGLER"),
+        ("input", 80.0, "INPUT_STRAGGLER"),
+        ("h2d", 79.0, "STRAGGLER"),
+        ("h2d", 80.0, "H2D_STRAGGLER"),
+        ("compute", 79.0, "STRAGGLER"),
+        ("compute", 80.0, "COMPUTE_STRAGGLER"),
+    ],
+)
+def test_rank_straggler_requires_component_coverage_for_attribution(
+    component: str,
+    excess: float,
+    expected_kind: str,
+) -> None:
+    culprit = _timing_row(
+        dataloader=0.0,
+        backward=20.0,
+        step_time=100.0,
+    )
+    victim = _timing_row(
+        dataloader=0.0,
+        backward=120.0,
+        step_time=100.0,
+    )
+    if component == "input":
+        culprit["input_wait"] = excess
+        victim["input_wait"] = 0.0
+    elif component == "h2d":
+        culprit["h2d"] = excess
+        victim["h2d"] = 0.0
+    else:
+        culprit["forward"] = 20.0 + excess
+        victim["forward"] = 20.0
+
+    issue = RankStragglerRule().evaluate(
+        _rank_context({0: culprit, 1: victim})
+    )
+
+    assert issue is not None
+    assert issue.kind == expected_kind
+    assert issue.severity == "crit"
+    assert issue.score == pytest.approx(1.0)
+    assert issue.evidence["component_excesses_ms"][component] == pytest.approx(
+        excess
+    )
+    assert issue.evidence["component_coverage"][component] == pytest.approx(
+        excess / 100.0
+    )
+
+
+def test_rank_straggler_coverage_changes_attribution_not_severity() -> None:
+    def _issue(input_excess: float):
+        culprit = _timing_row(
+            dataloader=input_excess,
+            backward=20.0,
+            step_time=100.0,
+        )
+        victim = _timing_row(
+            dataloader=0.0,
+            backward=120.0,
+            step_time=100.0,
+        )
+        issue = RankStragglerRule().evaluate(
+            _rank_context({0: culprit, 1: victim})
+        )
+        assert issue is not None
+        return issue
+
+    generic = _issue(79.0)
+    named = _issue(80.0)
+
+    assert generic.kind == "STRAGGLER"
+    assert named.kind == "INPUT_STRAGGLER"
+    assert generic.score == named.score == pytest.approx(1.0)
+    assert generic.severity == named.severity == "crit"
+
+
+def test_rank_straggler_component_coverage_is_bounded() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            h2d=140.0,
+            backward=20.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=0.0,
+            h2d=0.0,
+            backward=120.0,
+            step_time=100.0,
+        ),
+    }
+
+    issue = RankStragglerRule().evaluate(_rank_context(per_rank))
+
+    assert issue is not None
+    assert issue.kind == "H2D_STRAGGLER"
+    assert issue.evidence["component_excesses_ms"]["h2d"] == 140.0
+    assert issue.evidence["component_coverage"]["h2d"] == 1.0
+
+
+def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
+    ddp_per_rank = {
+        0: _timing_row(
+            dataloader=100.0,
+            backward=20.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=0.0,
+            backward=120.0,
+            step_time=100.0,
+        ),
+    }
+    early = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(ddp_per_rank, steps=5),
+        per_rank_timing=ddp_per_rank,
+    )
+    confident = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(ddp_per_rank, steps=20),
+        per_rank_timing=ddp_per_rank,
+    )
+
+    assert early.primary.kind == "INPUT_STRAGGLER"
+    assert early.primary.severity == "warn"
+    assert confident.primary.kind == "INPUT_STRAGGLER"
+    assert confident.primary.severity == "crit"
+
+    fsdp_per_rank = {
+        0: _timing_row(
+            dataloader=100.0,
+            forward=20.0,
+            backward=20.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=0.0,
+            forward=80.0,
+            backward=80.0,
+            step_time=100.0,
+        ),
+    }
+    fsdp = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(fsdp_per_rank, steps=20),
+        per_rank_timing=fsdp_per_rank,
+        training_strategy="fsdp",
+    )
+
+    assert fsdp.primary.kind == "INPUT_STRAGGLER"
+    assert fsdp.primary.severity == "warn"
 
 
 @pytest.mark.parametrize(
@@ -905,7 +1092,7 @@ def test_rank_straggler_not_emitted_below_visible_wait_threshold() -> None:
             {
                 0: _timing_row(dataloader=200.0, forward=0.0, backward=1.0),
                 1: _timing_row(dataloader=160.0, forward=10.0, backward=0.0),
-                2: _timing_row(dataloader=80.0, forward=20.0, backward=20.0),
+                2: _timing_row(dataloader=100.0, forward=20.0, backward=20.0),
                 3: _timing_row(dataloader=0.0, forward=80.0, backward=80.0),
             },
             ("INPUT_STRAGGLER", 2, 3),

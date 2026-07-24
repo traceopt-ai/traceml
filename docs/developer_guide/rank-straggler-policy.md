@@ -20,7 +20,7 @@ window, as opposed to the single-rank bottleneck kinds (`INPUT_BOUND`,
 
 | Kind | Meaning |
 |---|---|
-| `STRAGGLER` | Visible rank skew exists, but input wait, H2D, and forward do not explain the likely culprit. |
+| `STRAGGLER` | Visible rank skew exists, but no measured component explains enough of the visible wait to name a cause. |
 | `INPUT_STRAGGLER` | The culprit rank has materially higher selected-clock input wait than the victim. |
 | `COMPUTE_STRAGGLER` | DDP / default strategy only: the culprit rank has materially higher forward time than the victim. |
 | `H2D_STRAGGLER` | The culprit rank has materially higher host-to-device transfer time than the victim. |
@@ -72,8 +72,10 @@ denom = input_wait_victim + step_time_victim
 score = (visible_victim - visible_culprit) / denom
 ```
 
-If `score < 0.10`, TraceML does not report a rank straggler. The gap is treated
-as normal run-to-run variation rather than a real straggler.
+If `score < 0.10`, TraceML does not report a rank straggler. At 10% it emits a
+warning; at 20% it emits critical severity when the existing confidence gates
+permit it. The gap below 10% is treated as normal run-to-run variation rather
+than a real straggler.
 
 ## Attribution
 
@@ -86,14 +88,25 @@ h2d_excess     = h2d_culprit - h2d_victim
 forward_excess = forward_culprit - forward_victim   # DDP / default only
 ```
 
-The largest material positive excess selects the kind: `INPUT_STRAGGLER`,
-`H2D_STRAGGLER`, or (DDP / default only) `COMPUTE_STRAGGLER`. DDP / default
-compute attribution requires measured forward time on both the culprit and the
-victim. If no excess explains the visible wait cost, the diagnosis stays
-`STRAGGLER` with a sync-or-unattributed component. That residual can cover
-validation, checkpointing, logging, framework orchestration, CPU stalls, or
-unobserved transfer stalls inside the timed step. It is not direct NCCL,
-all-reduce, or synchronization timing.
+Each excess is converted into bounded cause coverage of the visible wait:
+
+```text
+cause_coverage = min(1, component_excess / visible_cost)
+```
+
+The component with the highest coverage names `INPUT_STRAGGLER`,
+`H2D_STRAGGLER`, or (DDP / default only) `COMPUTE_STRAGGLER` only when its
+coverage reaches 80%. DDP / default compute attribution requires measured
+forward time on both the culprit and victim. Otherwise the diagnosis stays
+`STRAGGLER` with a sync-or-unattributed component. The issue evidence includes
+both `component_excesses_ms` and `component_coverage`, keyed by `input`,
+`h2d`, and `compute`.
+
+Cause coverage chooses the diagnosis label. The straggler score above remains
+the sole source of warning or critical severity. Generic residual attribution
+can cover validation, checkpointing, logging, framework orchestration, CPU
+stalls, or unobserved transfer stalls inside the timed step. It is not direct
+NCCL, all-reduce, or synchronization timing.
 
 ## Training strategy context
 

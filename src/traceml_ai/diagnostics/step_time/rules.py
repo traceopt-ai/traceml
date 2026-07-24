@@ -117,16 +117,15 @@ class RankStragglerRule(_BaseStepTimeRule):
             "h2d": "H2D",
             "sync_or_unattributed": "sync or unattributed work",
         }.get(evidence.component, evidence.component)
+        cause_coverage = non_negative_finite(
+            evidence.component_coverage.get(evidence.component, 0.0)
+        )
         if evidence.kind == "STRAGGLER":
-            explanation = (
-                "no input or H2D excess explains it"
-                if context.training_strategy == "fsdp"
-                else "no input, H2D, or DDP-forward excess explains it"
-            )
             summary = (
                 f"{_rank_str(rank)} appears to be the culprit rank "
-                f"(~{_pct(evidence.score)} victim wait cost); "
-                f"{explanation}."
+                f"(~{_pct(evidence.score)} impact); no measured component "
+                f"explains {_pct(context.thresholds.straggler_cause_coverage_min)} "
+                "of visible wait cost."
             )
             action = (
                 "Inspect synchronization, collectives, and unattributed work "
@@ -135,7 +134,8 @@ class RankStragglerRule(_BaseStepTimeRule):
         else:
             summary = (
                 f"{_rank_str(rank)} has excess {component_label} burden "
-                f"explaining ~{_pct(evidence.score)} victim wait cost."
+                f"(~{_pct(evidence.score)} impact; "
+                f"~{_pct(cause_coverage)} of visible wait cost)."
             )
             action = f"Inspect {component_label} on {_rank_str(rank)}."
 
@@ -163,6 +163,7 @@ class RankStragglerRule(_BaseStepTimeRule):
                 "visible_cost_ms": evidence.visible_cost_ms,
                 "iteration_time_ms": evidence.iteration_time_ms,
                 "component_excesses_ms": evidence.component_excesses_ms,
+                "component_coverage": evidence.component_coverage,
             },
         )
 
