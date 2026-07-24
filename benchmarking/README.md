@@ -48,10 +48,7 @@ is reported as a bound, never as zero.
 
 Percentages are deliberately not the headline here: the same ~0.4 ms cost
 is 42% of a 1.4 ms single-node step but 4% of a 9.3 ms 4-node step — the
-baseline grows with node count, the cost does not. An earlier 2026-07-21
-campaign is retained as GIL-stress diagnostic data only (its configs
-unknowingly ran the GIL stress probe in every cell); see
-[`reports/README.md`](reports/README.md).
+baseline grows with node count, the cost does not. 
 
 ## If you only need one number
 
