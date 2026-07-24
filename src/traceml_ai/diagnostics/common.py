@@ -108,25 +108,6 @@ def severity_rank(severity: Severity) -> int:
     return {"crit": 2, "warn": 1, "info": 0}.get(severity, 0)
 
 
-def sort_issues(
-    issues: Sequence[DiagnosticIssue],
-) -> Tuple[DiagnosticIssue, ...]:
-    """
-    Return issues sorted by severity, score, and attribution breadth.
-    """
-    return tuple(
-        sorted(
-            issues,
-            key=lambda item: (
-                severity_rank(item.severity),
-                float(item.score or 0.0),
-                len(item.ranks),
-            ),
-            reverse=True,
-        )
-    )
-
-
 def validate_confidence(confidence: Optional[float]) -> None:
     """
     Validate an optional confidence value.
@@ -223,7 +204,6 @@ __all__ = [
     "DiagnosticResult",
     "DiagnosticRule",
     "severity_rank",
-    "sort_issues",
     "validate_confidence",
     "diagnosis_to_issue",
     "ensure_primary_issue",
