@@ -2,6 +2,7 @@ import threading
 
 import torch.nn as nn
 
+from traceml_ai.runtime.arming import is_tracing_armed
 from traceml_ai.utils.timing import timed_region
 
 _TLS = threading.local()
@@ -48,7 +49,7 @@ def _collect_forward_target_ids(model: nn.Module | None) -> set[int]:
 
 
 def _traceml_module_call(self: nn.Module, *args, **kwargs):
-    if not _enabled() or not _is_target(self):
+    if not is_tracing_armed() or not _enabled() or not _is_target(self):
         return _ORIG_MODULE_CALL(self, *args, **kwargs)
 
     # Only time the OUTERMOST forward to avoid submodule spam

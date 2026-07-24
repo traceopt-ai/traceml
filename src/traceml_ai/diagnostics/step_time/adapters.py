@@ -24,17 +24,22 @@ DEFAULT_SUMMARY_DIAG_CONFIG = SUMMARY_STEP_TIME_POLICY
 
 @dataclass(frozen=True)
 class StepTimeDiagnosisInput:
-    """Canonical Step Time window consumed by final-summary diagnosis."""
+    """Canonical Step Time window and advisory context for summary diagnosis."""
 
     window: StepTimeWindow
     policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG
+    training_strategy: str = "ddp"
 
 
 def diagnose_step_time_summary(
     data: StepTimeDiagnosisInput,
 ) -> DiagnosticResult[StepDiagnosis]:
     """Run final-summary Step Time diagnosis from the canonical window."""
-    return diagnose_step_time_window(data.window, policy=data.policy)
+    return diagnose_step_time_window(
+        data.window,
+        policy=data.policy,
+        training_strategy=data.training_strategy,
+    )
 
 
 __all__ = [

@@ -60,7 +60,7 @@ class _BaseStepTimeRule(DiagnosticRule[StepTimeAnalysisContext]):
         ranks: Sequence[Optional[int]] = (),
         evidence: Optional[Dict[str, Any]] = None,
     ) -> DiagnosticIssue:
-        clean_ranks: Tuple[int, ...] = tuple(
+        issue_ranks: Tuple[int, ...] = tuple(
             int(rank) for rank in ranks if rank is not None
         )
         return DiagnosticIssue(
@@ -80,18 +80,18 @@ class _BaseStepTimeRule(DiagnosticRule[StepTimeAnalysisContext]):
             skew_pct=(
                 non_negative_finite(skew_pct) if skew_pct is not None else None
             ),
-            ranks=clean_ranks,
+            ranks=issue_ranks,
             evidence=evidence or {},
         )
 
 
 @dataclass(frozen=True)
-class CleanStragglerRule(_BaseStepTimeRule):
+class RankStragglerRule(_BaseStepTimeRule):
     """
-    Detect rank-local clean-step stragglers and classify the dominant cause.
+    Detect visible rank stragglers and classify the likely culprit cause.
     """
 
-    name: str = "clean_straggler"
+    name: str = "rank_straggler"
 
     def evaluate(
         self,
@@ -100,29 +100,36 @@ class CleanStragglerRule(_BaseStepTimeRule):
         if context.single_rank:
             return None
 
-        evidence = context.clean_straggler
+        evidence = context.rank_straggler
         if evidence is None:
             return None
 
-        rank = evidence.worst_rank
+        rank = evidence.culprit_rank
         component_label = {
             "input": "input wait",
-            "compute": "clean compute",
+            "compute": "forward compute",
             "h2d": "H2D",
-            "residual": "residual",
-            "mixed": "multiple components",
+            "sync_or_unattributed": "sync or unattributed work",
         }.get(evidence.component, evidence.component)
         if evidence.kind == "STRAGGLER":
-            summary = (
-                f"{_rank_str(rank)} is slower after backward-delay discount "
-                f"(~{_pct(evidence.score)} of a typical step); no component "
-                "dominates."
+            explanation = (
+                "no input or H2D excess explains it"
+                if context.training_strategy == "fsdp"
+                else "no input, H2D, or DDP-forward excess explains it"
             )
-            action = "Inspect input, H2D, compute, and residual time on the slow rank."
+            summary = (
+                f"{_rank_str(rank)} appears to be the culprit rank "
+                f"(~{_pct(evidence.score)} victim wait cost); "
+                f"{explanation}."
+            )
+            action = (
+                "Inspect synchronization, collectives, and unattributed work "
+                f"around {_rank_str(rank)}."
+            )
         else:
             summary = (
                 f"{_rank_str(rank)} has excess {component_label} burden "
-                f"(~{_pct(evidence.score)} of a typical step)."
+                f"explaining ~{_pct(evidence.score)} victim wait cost."
             )
             action = f"Inspect {component_label} on {_rank_str(rank)}."
 
@@ -138,20 +145,17 @@ class CleanStragglerRule(_BaseStepTimeRule):
             metric=evidence.metric,
             phase=evidence.phase,
             score=evidence.score,
-            skew_pct=(
-                evidence.clean_step_slack_ms / evidence.clean_step_median_ms
-                if evidence.clean_step_median_ms > 0.0
-                else 0.0
-            ),
+            skew_pct=evidence.score,
             ranks=(rank,),
             evidence={
                 "component": evidence.component,
-                "clean_step_median_ms": evidence.clean_step_median_ms,
-                "clean_step_worst_ms": evidence.clean_step_worst_ms,
-                "clean_step_slack_ms": evidence.clean_step_slack_ms,
-                "typical_step_ms": evidence.typical_step_ms,
-                "top_excess_ms": evidence.top_excess_ms,
-                "second_excess_ms": evidence.second_excess_ms,
+                "culprit_rank": evidence.culprit_rank,
+                "victim_rank": evidence.victim_rank,
+                "visible_metric": evidence.visible_metric,
+                "visible_culprit_ms": evidence.visible_culprit_ms,
+                "visible_victim_ms": evidence.visible_victim_ms,
+                "visible_cost_ms": evidence.visible_cost_ms,
+                "iteration_time_ms": evidence.iteration_time_ms,
                 "component_excesses_ms": evidence.component_excesses_ms,
             },
         )
@@ -186,7 +190,7 @@ class InputBoundRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"Input wait is {_pct(context.input_bound_share)} of the "
-                f"typical {context.diagnosis_clock} step."
+                f"typical {context.diagnosis_clock} iteration time."
             ),
             action="Increase workers, prefetch, or storage throughput.",
             metric="input_wait",
@@ -197,6 +201,7 @@ class InputBoundRule(_BaseStepTimeRule):
             evidence={
                 "input_wait_ms": context.input_wait_total,
                 "step_time_ms": context.input_bound_step_total,
+                "iteration_time_ms": context.iteration_time_total,
                 "input_bound_share": context.input_bound_share,
                 "diagnosis_clock": context.diagnosis_clock,
             },
@@ -252,7 +257,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.clean_straggler is not None:
+        if context.rank_straggler is not None:
             return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
@@ -290,7 +295,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
 DEFAULT_STEP_TIME_RULES: Tuple[
     DiagnosticRule[StepTimeAnalysisContext], ...
 ] = (
-    CleanStragglerRule(),
+    RankStragglerRule(),
     InputBoundRule(),
     ResidualHeavyRule(),
     ComputeBoundRule(),
@@ -317,9 +322,9 @@ def run_step_time_rules(
 
 __all__ = [
     "DEFAULT_STEP_TIME_RULES",
-    "CleanStragglerRule",
     "ComputeBoundRule",
     "InputBoundRule",
+    "RankStragglerRule",
     "ResidualHeavyRule",
     "run_step_time_rules",
 ]

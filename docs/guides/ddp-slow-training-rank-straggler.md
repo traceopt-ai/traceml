@@ -1,11 +1,11 @@
 # Debug slow DDP training and rank stragglers
 
 Use this guide when PyTorch DDP training is slow, uneven, or controlled by one
-slow rank.
+culprit rank.
 
-TraceML compares worst-rank and median-rank timing in distributed runs. It can
-surface input stragglers, compute stragglers, mixed stragglers, and residual-heavy
-windows.
+TraceML looks for visible rank skew in distributed runs, identifies a culprit
+rank and a victim/reference rank, then attributes material culprit excess to
+input, H2D, DDP forward compute, or sync/unattributed work.
 
 For whole-run triage, start with
 [Find why PyTorch training is slow](slow-pytorch-training.md). This page stays
@@ -92,56 +92,56 @@ Start with the Step Time diagnosis.
 | Diagnosis | Meaning |
 |---|---|
 | `INPUT STRAGGLER` | one rank spends much longer waiting for input than peer ranks |
-| `COMPUTE STRAGGLER` | one rank has meaningfully more observed forward/backward/optimizer time; in FSDP this may include collective wait |
-| `H2D STRAGGLER` | one rank has meaningfully more host-to-device transfer burden than a typical rank |
-| `RESIDUAL STRAGGLER` | one rank has meaningfully more rank-local residual `residual_proxy` than a typical rank |
-| `STRAGGLER` | one rank is slower, but input wait, compute, H2D, and residual signals are mixed |
+| `COMPUTE STRAGGLER` | in DDP, the culprit rank has materially more forward-time burden than the victim rank |
+| `H2D STRAGGLER` | the culprit rank has meaningfully more host-to-device transfer burden than the victim rank |
+| `STRAGGLER` | visible rank skew exists, but input wait, H2D, and DDP forward do not explain it |
 | `INPUT-BOUND` | input work is broad, not just one bad rank |
 | `RESIDUAL-HEAVY` | meaningful residual time is not attributed to input wait, H2D, forward, backward, or optimizer work |
 
-For rank-local stragglers, TraceML first accounts for time a rank may spend
-waiting during backward because another rank arrived late. It then compares
-ranks and labels the largest timing difference among input wait, compute, H2D,
-and residual. The largest difference must be at least `1.25x` the next-largest
-difference.
+For rank stragglers, TraceML first looks for visible wait cost: in DDP this is
+the gap between the upper-median backward time and the rank with the smallest
+backward time. The smallest-backward rank is the likely culprit because it
+arrived late and waited least. TraceML then compares that culprit with the
+victim rank to see whether input wait, H2D, or DDP forward time explains the
+cost.
 
 Then inspect:
 
-- `Worst Rank`
-- worst vs median timing
+- culprit rank
+- victim/reference rank
+- visible rank skew
 - `Input Wait`
 - `Forward`
 - `Backward`
 - `Optimizer Step`
 - `Residual`
 
-## How to triage the worst rank
+## How to triage the culprit rank
 
-If the diagnosis is `INPUT STRAGGLER`, inspect input loading on the worst rank:
+If the diagnosis is `INPUT STRAGGLER`, inspect input loading on the culprit
+rank:
 
 - uneven shards or batch construction
 - rank-local preprocessing jitter
 - slow storage path on one host
 - custom collation or tokenization on one rank
 
-If the diagnosis is `COMPUTE STRAGGLER`, inspect observed compute-phase work on
-the worst rank:
+If the diagnosis is `COMPUTE STRAGGLER`, inspect DDP forward work on the
+culprit rank:
 
 - uneven input shapes
 - rank-local branching
-- extra forward, backward, or optimizer work
+- extra forward work
 - framework hooks or callbacks that run on one rank
 
 If the diagnosis is `H2D STRAGGLER`, inspect host-to-device transfer on the
-worst rank: batch shapes, transfer placement, pinned memory, and transfer
+culprit rank: batch shapes, transfer placement, pinned memory, and transfer
 jitter.
 
-If the diagnosis is `RESIDUAL STRAGGLER`, inspect rank-local host-side work on the
-worst rank: logging, checkpointing, validation, callbacks, CPU stalls, or
-unobserved transfer work.
-
-If the diagnosis is `STRAGGLER`, reduce the problem one phase at a time. Start
-with the largest timing gap on the slow rank.
+If the diagnosis is `STRAGGLER`, inspect synchronization, collectives, and
+unattributed work around the culprit rank. Explicit collective timing is not
+available yet, so this is the honest fallback when input, H2D, and DDP forward
+do not explain the visible wait cost.
 
 If the diagnosis is `RESIDUAL-HEAVY`, remember that TraceML reports residual
 time as a derived bucket. It is not direct NCCL or all-reduce timing. Inspect logging,
@@ -154,12 +154,11 @@ TraceML supports single-node multi-GPU DDP and FSDP in the current public docs.
 Multi-node DDP summary reports are supported. Multi-node FSDP uses the same
 distributed launch path as DDP, but should be validated in your environment.
 
-TraceML's clean-step rank attribution is calibrated for DDP-style backward
-synchronization. In FSDP, forward time can include parameter all-gather wait
-caused by another rank arriving late. Use this guide for FSDP rank-skew
-symptoms, but treat `COMPUTE STRAGGLER` as observed compute-phase skew, not
-proof of rank-local model compute. TraceML does not yet report explicit FSDP
-all-gather or reduce-scatter timing.
+TraceML uses backward as the visible rank-skew phase for DDP/default strategy.
+For FSDP, it uses forward + backward because sharding communication can appear
+in both phases. FSDP rank stragglers can still be attributed to input wait or
+H2D, but TraceML does not emit `COMPUTE STRAGGLER` from the FSDP rank-skew
+rule without explicit all-gather or reduce-scatter timing.
 
 ## Compare a fix
 
@@ -170,8 +169,8 @@ the old and new summaries:
 traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
-Look for changes in total step time, worst-rank skew, input time, compute time,
-residual time, and diagnosis.
+Look for changes in total step time, visible rank skew, input time, compute
+time, residual time, and diagnosis.
 
 ## Related
 

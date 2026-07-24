@@ -41,7 +41,10 @@ It helps you answer:
 - Is memory usage silently growing?
 - Did a code, data, or infrastructure change make the run slower?
 
-TraceML produces actionable diagnostics with under 1% overhead in current benchmarks.
+**Measured overhead:** in our current benchmark configuration, TraceML adds
+less than 1 ms per rank per training step. See the
+[benchmark methodology and results](benchmarking/README.md) for the
+tested configurations and how to reproduce them.
 
 ---
 
@@ -53,6 +56,34 @@ For the live browser dashboard:
 
 ```bash
 pip install traceml-ai
+```
+
+Or install with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv pip install traceml-ai
+```
+
+For a uv-managed project, add TraceML to the project's dependencies instead:
+
+```bash
+uv add traceml-ai
+```
+
+Extras use the same syntax with pip and uv. For example:
+
+```bash
+pip install "traceml-ai[dashboard]"
+uv add "traceml-ai[dashboard]"
+uv add "traceml-ai[torch]"
+```
+
+To try TraceML immediately in an environment managed by uv, install the
+`torch` extra required by the example:
+
+```bash
+uv pip install "traceml-ai[torch]"
+traceml run examples/quickstart.py
 ```
 
 Using Hugging Face Trainer, PyTorch Lightning, Ray Train, W&B, or MLflow?
@@ -131,6 +162,40 @@ traceml run train.py --mode=summary
 
 For DDP, FSDP, Slurm, and multi-node runs, see
 [Distributed Training](docs/user_guide/distributed-training.md).
+
+### Or launch your script directly
+
+Prefer to launch training yourself with `python` or `torchrun`? Start the
+TraceML aggregator once with `traceml serve`, then run your script directly.
+`traceml.init(...)` connects to the aggregator over TCP:
+
+```bash
+# terminal 1: start the TraceML aggregator
+traceml serve --aggregator-host 127.0.0.1 --aggregator-port 29765
+
+# terminal 2: run your script directly
+python train.py
+```
+
+For torchrun and multi-node, bind the aggregator so workers on other nodes can
+reach it:
+
+```bash
+# on the aggregator node (--nnodes x --nproc-per-node = total workers, so the
+# aggregator waits for every rank before finalizing)
+traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
+  --aggregator-port 29765 --nnodes <N> --nproc-per-node <M>
+
+# on each training node: point workers at node 0's aggregator, then launch
+TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
+  torchrun ... train.py
+```
+
+`traceml.init(...)` takes runtime settings as arguments (for example
+`traceml.init(mode="auto", logs_dir="logs", aggregator_port=29765)`), and falls
+back to `TRACEML_*` environment variables and `traceml.yaml`. The aggregator
+endpoint is configured with `traceml serve` flags. See
+[Public API](docs/user_guide/public-api.md#direct-launch-with-traceml-serve).
 
 ---
 
@@ -338,8 +403,8 @@ when you need operator- or kernel-level detail.
 - Run-to-run comparison from `final_summary.json`
 - Custom PyTorch loops, Hugging Face, PyTorch Lightning, and Ray Train
 
-FSDP support means timing collection and rank-skew surfacing; explicit FSDP
-collective attribution is on the roadmap.
+Validated on single-process and DDP. Runs on FSDP; under-reports due to
+collective masking.
 
 **On the roadmap:**
 

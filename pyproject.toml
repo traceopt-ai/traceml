@@ -89,6 +89,10 @@ ray = [
     "ray[train]>=2.0.0",
 ]
 
+deepspeed = [
+    "deepspeed>=0.10.0",
+]
+
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

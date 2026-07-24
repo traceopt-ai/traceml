@@ -100,6 +100,43 @@ tables.)
 For DDP, FSDP, and multi-node launches, see
 [Distributed Training](distributed-training.md).
 
+### Alternative: launch your script directly
+
+If you would rather launch training yourself with `python` or `torchrun`, start
+the TraceML aggregator once, then run your script directly. `traceml.init(...)`
+connects to the running aggregator:
+
+```bash
+# terminal 1
+traceml serve --aggregator-host 127.0.0.1 --aggregator-port 29765
+
+# terminal 2
+python train.py
+```
+
+For torchrun and multi-node, bind the aggregator so other nodes can connect:
+
+```bash
+# aggregator node: --nnodes x --nproc-per-node = total workers, so the
+# aggregator waits for every rank before finalizing
+traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
+  --aggregator-port 29765 --nnodes <N> --nproc-per-node <M>
+
+# each training node: point workers at node 0's aggregator, then launch
+TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
+  torchrun ... train.py
+```
+
+In the direct-launch path you cannot pass `traceml run` flags, so runtime
+settings come from `traceml.init(...)` arguments, then `TRACEML_*` environment
+variables, then `traceml.yaml`, then built-in defaults. The aggregator endpoint
+is set with `traceml serve` flags. If the aggregator is not reachable,
+`traceml.init(...)` prints one warning and continues without tracing (a no-op),
+so instrumentation never crashes your training run. Pass
+`traceml.init(on_missing_aggregator="raise")` to fail hard instead, or
+`traceml.init(disabled=True)` to silence it entirely. See
+[Public API](public-api.md#direct-launch-with-traceml-serve).
+
 ## 4. Read Your Diagnosis
 
 ```text
