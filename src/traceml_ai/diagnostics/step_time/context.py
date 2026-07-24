@@ -622,6 +622,13 @@ def build_step_time_context(
         int(rank): {str(k): non_negative_finite(v) for k, v in values.items()}
         for rank, values in (per_rank_timing or {}).items()
     }
+    for values in local_per_rank_timing.values():
+        if {"forward", "backward", "optimizer_step"}.issubset(values):
+            values["compute"] = (
+                values["forward"]
+                + values["backward"]
+                + values["optimizer_step"]
+            )
     if local_per_rank_timing:
         rank_values = {
             "input_wait": {
@@ -716,7 +723,10 @@ def build_step_time_context(
             local_per_rank_timing,
             "residual_proxy",
         ),
-        compute_share=share(compute_total_value, step_total),
+        compute_share=_median_iteration_component_share(
+            local_per_rank_timing,
+            "compute",
+        ),
         input_bound_share=_median_iteration_component_share(
             local_per_rank_timing,
             "input_wait",

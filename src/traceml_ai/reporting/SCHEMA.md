@@ -124,7 +124,10 @@ Primary diagnosis evidence uses a small union:
 `COMPUTE_BOUND`. Millisecond values come from `step_time.global.average` and
 are supporting observations only. For scored typical bottlenecks, `score` is
 the authoritative median per-rank iteration-impact fraction. Informational
-`COMPUTE_BOUND` has no fabricated iteration-impact score.
+`COMPUTE_BOUND` uses the median per-rank
+`(forward_ms + backward_ms + optimizer_ms) / iteration_time_ms` share with a
+90% threshold, but has no score because it is excluded from impact-based
+primary ordering.
 
 ```json
 {

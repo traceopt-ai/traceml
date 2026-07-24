@@ -17,7 +17,10 @@ from traceml_ai.diagnostics.step_time.api import (
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
-from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
+from traceml_ai.diagnostics.step_time.policy import (
+    LIVE_STEP_TIME_POLICY,
+    SUMMARY_STEP_TIME_POLICY,
+)
 from traceml_ai.diagnostics.step_time.rules import (
     ComputeBoundRule,
     H2DBoundRule,
@@ -581,6 +584,57 @@ def test_compute_bound_is_informational_despite_compute_skew() -> None:
     assert issue.skew_pct is not None
 
 
+@pytest.mark.parametrize(
+    ("compute", "expected"),
+    [(89.9, False), (90.0, True)],
+)
+def test_compute_bound_uses_iteration_share_threshold(
+    compute: float,
+    expected: bool,
+) -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            forward=compute,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    issue = ComputeBoundRule().evaluate(_rank_context(per_rank))
+
+    assert (issue is not None) is expected
+    if issue is not None:
+        assert issue.share_pct == pytest.approx(0.90)
+        assert issue.score is None
+
+
+def test_compute_share_is_median_of_per_rank_iteration_shares() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            forward=100.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=100.0,
+            forward=80.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+    }
+
+    context = _rank_context(per_rank)
+
+    assert context.compute_share == pytest.approx(0.70)
+    aggregate_median_ratio = 90.0 / (50.0 + 100.0)
+    assert context.compute_share != pytest.approx(aggregate_median_ratio)
+
+
 def test_compute_bound_requires_existing_dominance_threshold() -> None:
     per_rank = {
         0: _timing_row(
@@ -614,6 +668,31 @@ def test_compute_bound_abstains_for_material_h2d() -> None:
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    ("input_wait", "residual", "step_time"),
+    [(10.0, 0.0, 90.0), (0.0, 10.0, 100.0)],
+)
+def test_compute_bound_abstains_for_material_iteration_overhead(
+    input_wait: float,
+    residual: float,
+    step_time: float,
+) -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=input_wait,
+            forward=90.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=residual,
+            step_time=step_time,
+        )
+    }
+    context = _rank_context(per_rank)
+
+    assert context.compute_share == pytest.approx(0.90)
+    assert ComputeBoundRule().evaluate(context) is None
 
 
 def test_cpu_h2d_does_not_suppress_compute_bound() -> None:
@@ -1372,6 +1451,27 @@ def test_summary_step_time_window_uses_summary_policy_by_default() -> None:
 
     assert result is not None
     assert result.primary.steps_used == 60
+
+
+def test_builtin_live_and_summary_policies_use_identical_thresholds() -> None:
+    live_thresholds = LIVE_STEP_TIME_POLICY.thresholds
+    summary_thresholds = SUMMARY_STEP_TIME_POLICY.thresholds
+
+    assert live_thresholds is summary_thresholds
+    assert live_thresholds.compute_bound_share_warn == pytest.approx(0.90)
+
+    window = build_step_time_window_from_events(
+        {0: _summary_step_events(input_wait_gpu=None, steps=40)},
+        max_rows=100,
+    )
+    live = diagnose_step_time_window(window, policy=LIVE_STEP_TIME_POLICY)
+    summary = diagnose_step_time_window(
+        window,
+        policy=SUMMARY_STEP_TIME_POLICY,
+    )
+
+    assert live.primary == summary.primary
+    assert live.issues == summary.issues
 
 
 def _event_stats(
