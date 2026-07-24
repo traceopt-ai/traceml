@@ -63,7 +63,8 @@ class _RankStragglerEvidence:
 
     The score is visible wait cost paid by the victim rank, normalized by that
     victim's selected-clock iteration time. Component attribution compares the
-    culprit's own input/H2D/forward values against the victim rank.
+    culprit's own input/H2D/forward values against the victim rank and names a
+    cause only when it covers enough of the visible cost.
     """
 
     kind: str
@@ -80,6 +81,7 @@ class _RankStragglerEvidence:
     visible_cost_ms: float
     iteration_time_ms: float
     component_excesses_ms: Dict[str, float]
+    component_coverage: Dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -319,6 +321,7 @@ def _build_rank_straggler_evidence(
     *,
     per_rank_timing: Dict[int, Dict[str, float]],
     score_threshold: float,
+    cause_coverage_threshold: float,
     training_strategy: str,
 ) -> Optional[_RankStragglerEvidence]:
     """
@@ -328,8 +331,8 @@ def _build_rank_straggler_evidence(
     forward + backward because FSDP can communicate on both sides of module
     execution. Only ranks with measured visible-phase anchors and a measured
     step envelope are eligible. Component attribution compares the culprit rank
-    directly to the victim rank and only emits a subtype for material positive
-    excess.
+    directly to the victim rank and emits a subtype only when one component
+    explains enough of the visible cost.
     """
     if len(per_rank_timing) <= 1:
         return None
@@ -404,6 +407,10 @@ def _build_rank_straggler_evidence(
         "h2d": h2d_excess,
         "compute": forward_excess,
     }
+    component_coverage = {
+        component: min(1.0, excess / pair.cost_ms)
+        for component, excess in component_excesses.items()
+    }
     components = {
         "input": ("INPUT_STRAGGLER", "INPUT STRAGGLER", "input_wait", "input"),
         "h2d": ("H2D_STRAGGLER", "H2D STRAGGLER", "h2d", "h2d"),
@@ -415,14 +422,16 @@ def _build_rank_straggler_evidence(
         ),
     }
     ordered = sorted(
-        component_excesses.items(),
+        component_coverage.items(),
         key=lambda item: (
             -item[1],
             ("input", "h2d", "compute").index(item[0]),
         ),
     )
-    top_component, top_excess = ordered[0]
-    if top_excess > 0.0 and (top_excess / iteration_time) >= threshold:
+    top_component, top_coverage = ordered[0]
+    if top_coverage > 0.0 and top_coverage >= non_negative_finite(
+        cause_coverage_threshold
+    ):
         kind, status, metric, phase = components[top_component]
         component = top_component
     else:
@@ -449,6 +458,7 @@ def _build_rank_straggler_evidence(
         visible_cost_ms=pair.cost_ms,
         iteration_time_ms=iteration_time,
         component_excesses_ms=component_excesses,
+        component_coverage=component_coverage,
     )
 
 
@@ -677,6 +687,7 @@ def build_step_time_context(
     rank_straggler = _build_rank_straggler_evidence(
         per_rank_timing=local_per_rank_timing,
         score_threshold=thresholds.straggler_score_warn,
+        cause_coverage_threshold=thresholds.straggler_cause_coverage_min,
         training_strategy=training_strategy,
     )
     compute_rank_values = compute_rank_values_from_components(rank_values)

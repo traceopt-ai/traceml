@@ -22,11 +22,13 @@ class DiagnosisThresholds:
 
     ``min_steps_for_warning_diag`` is the minimum window size for warning-only
     bottleneck diagnoses. ``min_steps_for_confident_diag`` is the minimum window
-    size for critical diagnoses.
+    size for critical diagnoses. ``straggler_cause_coverage_min`` is the future
+    configuration surface for naming a rank-straggler cause.
     """
 
     straggler_score_warn: float = 0.10
     straggler_score_crit: float = 0.20
+    straggler_cause_coverage_min: float = 0.80
 
     overhead_share_warn: float = 0.10
     overhead_share_crit: float = 0.20

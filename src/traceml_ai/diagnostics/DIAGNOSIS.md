@@ -169,8 +169,9 @@ denom = input_wait_victim + step_time_victim
 score = (visible_victim - visible_culprit) / denom
 ```
 
-If `score < 0.10`, TraceML does not report a rank straggler. Otherwise it
-compares the culprit directly with the victim:
+If `score < 0.10`, TraceML does not report a rank straggler. At 10% it reports
+a warning; at 20% it reports critical severity when the existing confidence
+gates permit it. Otherwise it compares the culprit directly with the victim:
 
 ```text
 input_excess = input_wait_culprit - input_wait_victim
@@ -179,12 +180,17 @@ forward_excess = forward_culprit - forward_victim  # DDP/default only
 ```
 
 DDP/default compute attribution requires measured forward time on both the
-culprit and victim ranks.
+culprit and victim ranks. A component names the cause only when it covers at
+least 80% of visible wait cost:
 
-The largest material positive excess becomes `INPUT_STRAGGLER`,
-`H2D_STRAGGLER`, or, for DDP/default only, `COMPUTE_STRAGGLER`. If no such
-excess explains the visible wait cost, the diagnosis stays `STRAGGLER` with a
-sync-or-unattributed component.
+```text
+component_coverage = min(1, component_excess / visible_cost)
+```
+
+The highest qualifying coverage becomes `INPUT_STRAGGLER`, `H2D_STRAGGLER`,
+or, for DDP/default only, `COMPUTE_STRAGGLER`. Otherwise the diagnosis stays
+`STRAGGLER` with a sync-or-unattributed component and coverage evidence.
+Coverage chooses the label; the score alone chooses severity.
 
 It can include validation, checkpointing, logging, framework orchestration, CPU
 stalls, unobserved transfer stalls, or other work inside the timed step but
