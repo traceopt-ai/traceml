@@ -382,6 +382,36 @@ def _rank_comparison_evidence(
     return evidence
 
 
+def _step_time_score_evidence(
+    *,
+    kind: str,
+    diagnosis: Mapping[str, Any],
+) -> JsonDict:
+    """Return the exact policy score and denominator for a promoted finding."""
+    score = _float_or_none(diagnosis.get("score"))
+    if score is None:
+        return {}
+
+    if kind in PHASE_SHARE_KINDS:
+        return {
+            "score": score,
+            "score_basis": "median_per_rank_iteration_share",
+            "score_denominator": "input_wait_ms + step_time_ms per rank",
+        }
+
+    issue_evidence = _mapping(diagnosis.get("evidence"))
+    return {
+        "score": score,
+        "score_basis": "visible_cost_ms / victim_iteration_time_ms",
+        "score_numerator_ms": _float_or_none(
+            issue_evidence.get("visible_cost_ms")
+        ),
+        "score_denominator_ms": _float_or_none(
+            issue_evidence.get("iteration_time_ms")
+        ),
+    }
+
+
 def _straggler_comparisons(
     *,
     step_time_summary: Mapping[str, Any],
@@ -529,6 +559,7 @@ def _promote_step_time_primary(
             diagnosis=diagnosis,
         )
         summary = _rank_comparison_summary(kind, evidence)
+    evidence.update(_step_time_score_evidence(kind=kind, diagnosis=diagnosis))
 
     return _primary_payload(
         kind=kind,

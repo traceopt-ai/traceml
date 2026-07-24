@@ -19,7 +19,6 @@ from ..common import (
     DiagnosticResult,
     Severity,
     severity_rank,
-    sort_issues,
     validate_confidence,
 )
 from .context import (
@@ -65,16 +64,14 @@ _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "RESIDUAL_HEAVY": "RESIDUAL-HEAVY",
 }
 
-_PRIMARY_KIND_PRIORITY: dict[str, int] = {
-    "STRAGGLER": 50,
-    "INPUT_STRAGGLER": 40,
-    "COMPUTE_STRAGGLER": 40,
-    "H2D_STRAGGLER": 40,
-    "INPUT_BOUND": 30,
-    "H2D_BOUND": 30,
-    "RESIDUAL_HEAVY": 20,
-    "COMPUTE_BOUND": 10,
-}
+_RANK_STRAGGLER_KINDS = frozenset(
+    {
+        "STRAGGLER",
+        "INPUT_STRAGGLER",
+        "COMPUTE_STRAGGLER",
+        "H2D_STRAGGLER",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -175,11 +172,15 @@ def _severity(value: float, crit_threshold: float) -> Severity:
     return "crit" if non_negative_finite(value) >= crit_threshold else "warn"
 
 
-def _primary_issue_rank(issue: DiagnosticIssue) -> int:
-    """
-    Rank contributor issues for primary-diagnosis selection.
-    """
-    return _PRIMARY_KIND_PRIORITY.get(issue.kind, 0)
+def _step_time_issue_sort_key(
+    issue: DiagnosticIssue,
+) -> tuple[int, float, int]:
+    """Order Step Time findings by severity, impact, then rank-local scope."""
+    return (
+        severity_rank(issue.severity),
+        non_negative_finite(issue.score or 0.0),
+        int(issue.kind in _RANK_STRAGGLER_KINDS),
+    )
 
 
 def _cap_issue_severity(
@@ -282,25 +283,6 @@ def _metric_attribution_entry(
         ),
         "top_ranks": _top_rank_entries(rank_values),
     }
-
-
-def _select_primary_issue(
-    issues: Sequence[DiagnosticIssue],
-) -> Optional[DiagnosticIssue]:
-    """
-    Return the strongest atomic issue candidate.
-    """
-    if not issues:
-        return None
-    ranked = sorted(
-        issues,
-        key=lambda issue: (
-            _primary_issue_rank(issue),
-            float(issue.score or 0.0),
-        ),
-        reverse=True,
-    )
-    return ranked[0]
 
 
 def _apply_trend_note(
@@ -421,8 +403,10 @@ def build_step_diagnosis_result(
             _cap_issue_severity(issue, "warn") for issue in issue_list
         ]
 
-    issues = sort_issues(issue_list)
-    primary_issue = _select_primary_issue(issues)
+    issues = tuple(
+        sorted(issue_list, key=_step_time_issue_sort_key, reverse=True)
+    )
+    primary_issue = issues[0] if issues else None
 
     if primary_issue is not None and primary_issue.kind in {
         "STRAGGLER",

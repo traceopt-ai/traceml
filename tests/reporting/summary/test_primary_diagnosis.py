@@ -146,6 +146,48 @@ def test_h2d_bound_uses_iteration_phase_share_evidence() -> None:
     }
 
 
+def test_phase_share_primary_keeps_the_diagnosis_impact_score() -> None:
+    step_time = _step_time("H2D_BOUND", status="H2D-BOUND")
+    step_time["diagnosis"].update(
+        {
+            "score": 0.23125,
+            "evidence": {"h2d_share": 0.23125},
+        }
+    )
+
+    primary = _primary(step_time)
+
+    assert primary["evidence"]["score"] == 0.23125
+    assert primary["evidence"]["score_basis"] == (
+        "median_per_rank_iteration_share"
+    )
+    assert primary["evidence"]["score_denominator"] == (
+        "input_wait_ms + step_time_ms per rank"
+    )
+
+
+def test_straggler_primary_keeps_the_diagnosis_impact_score() -> None:
+    step_time = _step_time("STRAGGLER", status="STRAGGLER")
+    step_time["diagnosis"].update(
+        {
+            "score": 0.23,
+            "evidence": {
+                "visible_cost_ms": 23.0,
+                "iteration_time_ms": 100.0,
+            },
+        }
+    )
+
+    primary = _primary(step_time)
+
+    assert primary["evidence"]["score"] == 0.23
+    assert primary["evidence"]["score_basis"] == (
+        "visible_cost_ms / victim_iteration_time_ms"
+    )
+    assert primary["evidence"]["score_numerator_ms"] == 23.0
+    assert primary["evidence"]["score_denominator_ms"] == 100.0
+
+
 def test_residual_heavy_uses_residual_phase_share() -> None:
     primary = _primary(_step_time("RESIDUAL_HEAVY", status="RESIDUAL-HEAVY"))
 

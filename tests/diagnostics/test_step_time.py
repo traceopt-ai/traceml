@@ -31,6 +31,9 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
 )
+from traceml_ai.reporting.summaries.issue_summary import (
+    diagnostic_result_to_json,
+)
 from traceml_ai.utils.step_time_window import (
     build_step_time_window_from_events,
     diagnose_step_time_window,
@@ -367,6 +370,7 @@ def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
     assert issue.metric == "input_wait"
     assert issue.phase == "input"
     assert issue.share_pct == pytest.approx(35.0 / 135.0)
+    assert issue.score == issue.share_pct
     assert issue.evidence["diagnosis_clock"] == "cpu"
     assert issue.evidence["input_wait_ms"] == pytest.approx(35.0)
     assert issue.evidence["step_time_ms"] == pytest.approx(100.0)
@@ -458,6 +462,7 @@ def test_h2d_bound_uses_gpu_iteration_share_thresholds(
     assert issue.metric == "h2d"
     assert issue.phase == "h2d"
     assert issue.share_pct == pytest.approx(h2d / 100.0)
+    assert issue.score == issue.share_pct
     assert issue.severity == expected_severity
 
 
@@ -546,6 +551,7 @@ def test_residual_heavy_uses_iteration_share_thresholds(
 
     assert issue is not None
     assert issue.share_pct == pytest.approx(residual / 100.0)
+    assert issue.score == issue.share_pct
     assert issue.severity == expected_severity
 
 
@@ -571,6 +577,7 @@ def test_compute_bound_is_informational_despite_compute_skew() -> None:
 
     assert issue is not None
     assert issue.severity == "info"
+    assert issue.score is None
     assert issue.skew_pct is not None
 
 
@@ -650,6 +657,139 @@ def test_input_bound_remains_primary_when_h2d_is_also_material() -> None:
         "INPUT_BOUND",
         "H2D_BOUND",
     }
+
+
+def test_step_time_primary_orders_by_severity_before_impact() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=30.0,
+            step_time=100.0,
+        )
+    }
+
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+    )
+
+    assert result.primary.kind == "RESIDUAL_HEAVY"
+    assert [issue.kind for issue in result.issues[:2]] == [
+        "RESIDUAL_HEAVY",
+        "INPUT_BOUND",
+    ]
+    assert result.issues[0].severity == "crit"
+    assert result.issues[1].severity == "warn"
+
+
+def test_step_time_primary_orders_equal_severity_by_impact() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=15.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=19.0,
+            step_time=100.0,
+        )
+    }
+
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+    )
+
+    assert result.primary.kind == "RESIDUAL_HEAVY"
+    assert [issue.kind for issue in result.issues[:2]] == [
+        "RESIDUAL_HEAVY",
+        "INPUT_BOUND",
+    ]
+    assert result.issues[0].severity == result.issues[1].severity == "warn"
+    assert result.issues[0].score > result.issues[1].score
+
+
+def test_rank_straggler_wins_only_an_exact_impact_tie() -> None:
+    tied = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=20.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=40.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+    }
+    higher_typical = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=20.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=35.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+    }
+
+    tied_result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(tied),
+        per_rank_timing=tied,
+    )
+    typical_result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(higher_typical),
+        per_rank_timing=higher_typical,
+    )
+
+    assert tied_result.primary.kind == "STRAGGLER"
+    assert [issue.kind for issue in tied_result.issues[:2]] == [
+        "STRAGGLER",
+        "INPUT_BOUND",
+    ]
+    assert tied_result.issues[0].score == tied_result.issues[1].score
+
+    assert typical_result.primary.kind == "INPUT_BOUND"
+    assert [issue.kind for issue in typical_result.issues[:2]] == [
+        "INPUT_BOUND",
+        "STRAGGLER",
+    ]
+    assert typical_result.issues[0].score > typical_result.issues[1].score
+
+
+def test_step_time_primary_uses_capped_severity_before_impact() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=30.0,
+            step_time=100.0,
+        )
+    }
+
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank, steps=5),
+        per_rank_timing=per_rank,
+    )
+    diagnosis_json, issues_json = diagnostic_result_to_json(result)
+
+    assert result.primary.kind == "RESIDUAL_HEAVY"
+    assert all(issue.severity == "warn" for issue in result.issues)
+    assert diagnosis_json == issues_json[0]
 
 
 @pytest.mark.parametrize(

@@ -113,6 +113,17 @@ contrast, `H2D_STRAGGLER` identifies one rank's excess H2D time.
 `COMPUTE_BOUND` remains an informational finding when compute dominates the
 traced step and no material input, H2D, or residual overhead is visible.
 
+Step Time uses `DiagnosticIssue.score` as normalized iteration impact for
+`INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and all rank-straggler findings.
+Typical findings use the median per-rank share above; stragglers use the
+culprit/victim score below. `COMPUTE_BOUND` has no score because its
+informational 85% gate remains compute divided by step time.
+
+When several Step Time findings qualify, TraceML orders them by severity, then
+score. A rank straggler wins only an exact severity-and-score tie with a
+typical finding; ties within the same scope preserve rule order. The primary
+diagnosis is always the first ordered issue.
+
 Shared Step Time diagnosis needs at least 2 steps to emit warning-only
 bottleneck diagnoses. Critical diagnoses are allowed once the window has at
 least 20 steps. Live and summary use the same diagnosis gates; they differ by

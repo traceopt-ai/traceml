@@ -197,6 +197,7 @@ class InputBoundRule(_BaseStepTimeRule):
             action="Increase workers, prefetch, or storage throughput.",
             metric="input_wait",
             phase="input",
+            score=context.input_bound_share,
             share_pct=context.input_bound_share,
             skew_pct=context.input_bound_skew,
             ranks=(context.input_bound_worst_rank,),
@@ -243,6 +244,7 @@ class H2DBoundRule(_BaseStepTimeRule):
             ),
             metric="h2d",
             phase="h2d",
+            score=context.h2d_share,
             share_pct=context.h2d_share,
             skew_pct=metric_skew(
                 context.h2d_metric,
@@ -292,6 +294,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
             ),
             metric="residual_proxy",
             phase="residual",
+            score=context.residual_share,
             share_pct=context.residual_share,
             ranks=(context.overall_worst_rank,),
         )

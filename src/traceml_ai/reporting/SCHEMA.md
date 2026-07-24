@@ -249,6 +249,9 @@ Fallback evidence types are:
 - `status` is the user-facing display label.
 - `summary` is the short explanation. Older `reason` fields should be treated
   as pre-`1.4` input, not the current final-summary contract.
+- `score` is an optional section-specific ranking signal. In Step Time, scored
+  typical bottlenecks use median per-rank iteration impact and stragglers use
+  visible wait cost divided by victim iteration time.
 - Section-specific details such as `scope`, `samples_used`, `steps_used`,
   `note`, and `confidence` belong in `evidence`.
 - `groups.rows` contains row data only: `identity` and `metrics`.

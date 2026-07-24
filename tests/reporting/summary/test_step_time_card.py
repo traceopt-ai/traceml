@@ -148,6 +148,7 @@ def _input_bound_step_metrics(
     input_wait_gpu: float,
     step_time_gpu: float,
     h2d_gpu: float = 0.0,
+    compute_gpu: float = 0.0,
     steps: int = 64,
 ) -> dict[int, dict]:
     return {
@@ -156,6 +157,7 @@ def _input_bound_step_metrics(
                 cpu_ms=dataloader_cpu, gpu_ms=input_wait_gpu
             ),
             "_traceml_internal:h2d_time": _event_stats(gpu_ms=h2d_gpu),
+            "_traceml_internal:forward_time": _event_stats(gpu_ms=compute_gpu),
             "_traceml_internal:step_time": _event_stats(
                 cpu_ms=step_time_cpu,
                 gpu_ms=step_time_gpu,
@@ -286,6 +288,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
             0: _input_bound_step_metrics(
                 input_wait_gpu=40.0,
                 step_time_gpu=100.0,
+                compute_gpu=90.0,
             )
         },
     )
@@ -333,6 +336,7 @@ def test_step_time_h2d_bound_card_uses_short_reason() -> None:
             0: _input_bound_step_metrics(
                 input_wait_gpu=0.0,
                 h2d_gpu=20.0,
+                compute_gpu=70.0,
                 step_time_cpu=100.0,
                 step_time_gpu=100.0,
             )
