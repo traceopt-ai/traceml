@@ -438,7 +438,7 @@ def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
 
 
 @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
-def test_hf_init_enables_dataloader_and_h2d_patches():
+def test_hf_init_enables_dataloader_and_h2d_patches(monkeypatch):
     """
     init() must enable the process-wide patches the callback cannot install on
     its own. The DataLoader fetch patch in particular is what lets TraceML
@@ -446,6 +446,14 @@ def test_hf_init_enables_dataloader_and_h2d_patches():
     never installs it. The H2D Tensor.to patch is gated the same way: the
     auto-timer trace_step arms each step is a no-op unless the patch is on.
     """
+    # This test verifies patch policy, not runtime startup. Stub the runtime
+    # bootstrap so init() does not try to reach an aggregator over TCP.
+    import traceml_ai.sdk.initial as initialization
+
+    monkeypatch.setattr(
+        initialization, "_start_runtime_for_init", lambda **kwargs: None
+    )
+
     config = init()
 
     assert config.patch_dataloader, (

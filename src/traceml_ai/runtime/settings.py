@@ -21,6 +21,9 @@ from typing import Optional
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
 DEFAULT_FINALIZE_TIMEOUT_SEC = 300.0
+# The public ``interval`` setting uses this value unless explicitly overridden
+# through the CLI, environment, YAML, or an integration-specific config.
+DEFAULT_INTERVAL_SEC = 2.0
 
 
 @dataclass(frozen=True)
@@ -54,8 +57,9 @@ class TraceMLSettings:
     High-level TraceML settings shared across runtime and aggregator.
 
     Notes:
-    - `sampler_interval_sec` controls sampling cadence (all ranks).
-    - `render_interval_sec` controls UI cadence (aggregator only).
+    - `sampler_interval_sec` controls worker sampling cadence (all ranks).
+    - `render_interval_sec` controls aggregator UI cadence only; TCP telemetry
+      is drained as soon as data arrives.
     - `mode` selects display backend and capture behavior ("cli" | "summary" | "dashboard").
     - `summary` mode disables live rendering and prints only the final
       end-of-run summary.
@@ -65,8 +69,8 @@ class TraceMLSettings:
 
     profile: str = "run"
     mode: str = "cli"
-    sampler_interval_sec: float = 1.0
-    render_interval_sec: float = 1.0
+    sampler_interval_sec: float = DEFAULT_INTERVAL_SEC
+    render_interval_sec: float = DEFAULT_INTERVAL_SEC
     logs_dir: str = "./logs"
     enable_logging: bool = False
     dashboard_port: int = 8765

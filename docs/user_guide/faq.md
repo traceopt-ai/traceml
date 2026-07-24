@@ -371,9 +371,10 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
-In distributed runs, TraceML accounts for time another rank may spend waiting
-during backward. `INPUT STRAGGLER` means input-wait excess on the slowest rank
-dominates compute, H2D, and residual differences by at least `1.25x`.
+In distributed runs, TraceML first finds visible wait cost. In DDP/default
+strategy that signal comes from backward time; in FSDP it comes from forward +
+backward time. `INPUT STRAGGLER` means the likely culprit rank has material
+input-wait excess compared with the victim rank.
 
 Common causes:
 
@@ -389,19 +390,19 @@ See:
 
 ## What does `COMPUTE STRAGGLER` mean?
 
-It means one rank spends more time in observed compute phases than the typical
-rank.
+It means the likely culprit rank spends materially more time in DDP forward
+compute than the victim rank.
 
-TraceML accounts for backward time that can be explained by another rank
-arriving late. It uses `COMPUTE STRAGGLER` when compute-time excess dominates
-input wait, H2D, and residual differences by at least `1.25x`; otherwise the
-mixed case remains `STRAGGLER`.
+TraceML emits `COMPUTE STRAGGLER` from the rank-skew rule for DDP/default
+strategy only. For FSDP, forward and backward can include sharding
+communication, so unexplained rank skew remains `STRAGGLER` unless input wait
+or H2D explains it.
 
 Common causes:
 
 - uneven shapes or data
 - rank-local branching or extra work
-- compute imbalance in forward, backward, or optimizer
+- compute imbalance in forward
 
 See:
 
