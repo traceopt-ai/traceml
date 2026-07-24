@@ -113,6 +113,7 @@ class StepTimeAnalysisContext:
     residual_share: float
     compute_share: float
     input_bound_share: float
+    h2d_share: float
 
     input_bound_skew: float
     compute_skew: float
@@ -708,6 +709,10 @@ def build_step_time_context(
         input_bound_share=_median_iteration_component_share(
             local_per_rank_timing,
             "input_wait",
+        ),
+        h2d_share=_median_iteration_component_share(
+            local_per_rank_timing,
+            "h2d",
         ),
         input_bound_skew=input_bound_skew,
         compute_skew=compute_skew_value,

@@ -121,11 +121,28 @@ def test_input_bound_uses_phase_share_evidence() -> None:
         "residual_ms": 20.0,
         "shares": {
             "input_wait_pct": 33.333,
-            "h2d_pct": 6.25,
-            "compute_pct": 75.0,
-            "residual_pct": 12.5,
+            "h2d_pct": 4.167,
+            "compute_pct": 50.0,
+            "residual_pct": 8.333,
         },
         "gpu_util_avg_percent": 38.0,
+    }
+
+
+def test_h2d_bound_uses_iteration_phase_share_evidence() -> None:
+    primary = _primary(_step_time("H2D_BOUND", status="H2D-BOUND"))
+
+    assert primary["kind"] == "H2D_BOUND"
+    assert primary["summary"] == (
+        "H2D transfer took 10.0ms of 240.0ms iteration time."
+    )
+    assert primary["evidence"]["type"] == "phase_share"
+    assert primary["evidence"]["iteration_time_ms"] == 240.0
+    assert primary["evidence"]["shares"] == {
+        "input_wait_pct": 33.333,
+        "h2d_pct": 4.167,
+        "compute_pct": 50.0,
+        "residual_pct": 8.333,
     }
 
 
@@ -137,7 +154,7 @@ def test_residual_heavy_uses_residual_phase_share() -> None:
         "Residual time took 20.0ms of a 160.0ms average step."
     )
     assert primary["evidence"]["type"] == "phase_share"
-    assert primary["evidence"]["shares"]["residual_pct"] == 12.5
+    assert primary["evidence"]["shares"]["residual_pct"] == 8.333
 
 
 def test_compute_bound_uses_neutral_compute_phase_share() -> None:
@@ -147,7 +164,7 @@ def test_compute_bound_uses_neutral_compute_phase_share() -> None:
     assert primary["summary"] == (
         "Model compute took 120.0ms of a 160.0ms average step."
     )
-    assert primary["evidence"]["shares"]["compute_pct"] == 75.0
+    assert primary["evidence"]["shares"]["compute_pct"] == 50.0
 
 
 @pytest.mark.parametrize(

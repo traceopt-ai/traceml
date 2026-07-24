@@ -23,6 +23,8 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
         style = "bold bright_black"
     elif diagnosis.kind == "INPUT_BOUND":
         style = "bold yellow"
+    elif diagnosis.kind == "H2D_BOUND":
+        style = "bold red" if diagnosis.severity == "crit" else "bold yellow"
     elif diagnosis.kind in {
         "INPUT_STRAGGLER",
         "COMPUTE_STRAGGLER",

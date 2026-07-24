@@ -74,6 +74,8 @@ Training-step timing.
 - `H2D_STRAGGLER`: the culprit rank has materially higher host-to-device
   transfer time than the victim rank.
 - `INPUT_BOUND`: selected-clock input wait is a material typical iteration cost.
+- `H2D_BOUND`: selected-clock GPU H2D transfer is a material typical iteration
+  cost.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step;
   this is informational when no material overhead is visible.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material typical iteration
@@ -90,9 +92,9 @@ The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
 `total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
 These compatibility fields are not selected-clock phase-share denominators.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
-display or diagnosis. In the final text report, most selected-clock phase
-shares are divided by `step_time_ms`; CPU compatibility rows are labeled
-separately.
+display or diagnosis. In the final text report, selected-clock phase shares
+are divided by `input_wait_ms + step_time_ms`; CPU compatibility rows are
+labeled separately.
 
 Typical overhead diagnoses use selected-clock per-rank iteration shares:
 
@@ -102,11 +104,14 @@ component_share_r = component_r / iteration_r
 typical_component_share = median(component_share_r across ranks)
 ```
 
-`INPUT_BOUND` uses `input_wait` and `RESIDUAL_HEAVY` uses residual as the
-component. Both warn at 10% and are critical at 20%. Cross-rank skew remains
-evidence in the finding, but does not suppress a bottleneck affecting typical
-ranks. `COMPUTE_BOUND` remains an informational finding when compute dominates
-the traced step and no material input or residual overhead is visible.
+`INPUT_BOUND` uses `input_wait`, `H2D_BOUND` uses H2D transfer, and
+`RESIDUAL_HEAVY` uses residual as the component. They warn at 10% and are
+critical at 20%. `H2D_BOUND` requires GPU-selected timing, so asynchronous CPU
+host-call duration is not reported as transfer cost. Cross-rank skew remains
+evidence in a typical-bottleneck finding, but does not suppress one. In
+contrast, `H2D_STRAGGLER` identifies one rank's excess H2D time.
+`COMPUTE_BOUND` remains an informational finding when compute dominates the
+traced step and no material input, H2D, or residual overhead is visible.
 
 Shared Step Time diagnosis needs at least 2 steps to emit warning-only
 bottleneck diagnoses. Critical diagnoses are allowed once the window has at

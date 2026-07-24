@@ -12,7 +12,13 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 from ..common import DiagnosticIssue, DiagnosticRule
-from .context import StepTimeAnalysisContext, non_negative_finite
+from .context import (
+    StepTimeAnalysisContext,
+    metric_skew,
+    metric_total,
+    metric_worst_rank,
+    non_negative_finite,
+)
 
 
 def _severity(value: float, crit_threshold: float) -> str:
@@ -204,6 +210,56 @@ class InputBoundRule(_BaseStepTimeRule):
 
 
 @dataclass(frozen=True)
+class H2DBoundRule(_BaseStepTimeRule):
+    """Detect broad H2D transfer cost from GPU-selected timing."""
+
+    name: str = "h2d_bound"
+
+    def evaluate(
+        self,
+        context: StepTimeAnalysisContext,
+    ) -> Optional[DiagnosticIssue]:
+        if context.diagnosis_clock != "gpu":
+            return None
+        if context.h2d_share < context.thresholds.overhead_share_warn:
+            return None
+        worst_rank = metric_worst_rank(context.h2d_metric)
+
+        return self._issue(
+            kind="H2D_BOUND",
+            status="H2D-BOUND",
+            severity=_severity(
+                context.h2d_share,
+                context.thresholds.overhead_share_crit,
+            ),
+            summary=(
+                f"H2D transfer is {_pct(context.h2d_share)} of the "
+                "typical GPU iteration time."
+            ),
+            action=(
+                "Inspect pinned memory, batch transfer, and host-to-device "
+                "copies."
+            ),
+            metric="h2d",
+            phase="h2d",
+            share_pct=context.h2d_share,
+            skew_pct=metric_skew(
+                context.h2d_metric,
+                single_rank=context.single_rank,
+            ),
+            ranks=(worst_rank,) if worst_rank is not None else (),
+            evidence={
+                "h2d_ms": metric_total(
+                    context.h2d_metric,
+                    single_rank=context.single_rank,
+                ),
+                "h2d_share": context.h2d_share,
+                "diagnosis_clock": context.diagnosis_clock,
+            },
+        )
+
+
+@dataclass(frozen=True)
 class ResidualHeavyRule(_BaseStepTimeRule):
     """
     Detect windows dominated by residual time rather than traced local work.
@@ -256,6 +312,11 @@ class ComputeBoundRule(_BaseStepTimeRule):
             return None
         if context.input_bound_share >= context.thresholds.overhead_share_warn:
             return None
+        if (
+            context.diagnosis_clock == "gpu"
+            and context.h2d_share >= context.thresholds.overhead_share_warn
+        ):
+            return None
         if context.residual_share >= context.thresholds.overhead_share_warn:
             return None
 
@@ -283,6 +344,7 @@ DEFAULT_STEP_TIME_RULES: Tuple[
 ] = (
     RankStragglerRule(),
     InputBoundRule(),
+    H2DBoundRule(),
     ResidualHeavyRule(),
     ComputeBoundRule(),
 )
@@ -309,6 +371,7 @@ def run_step_time_rules(
 __all__ = [
     "DEFAULT_STEP_TIME_RULES",
     "ComputeBoundRule",
+    "H2DBoundRule",
     "InputBoundRule",
     "RankStragglerRule",
     "ResidualHeavyRule",

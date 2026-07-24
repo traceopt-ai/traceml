@@ -46,6 +46,7 @@ DiagnosisKind = Literal[
     "COMPUTE_STRAGGLER",
     "H2D_STRAGGLER",
     "INPUT_BOUND",
+    "H2D_BOUND",
     "COMPUTE_BOUND",
     "RESIDUAL_HEAVY",
 ]
@@ -59,6 +60,7 @@ _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "COMPUTE_STRAGGLER": "COMPUTE STRAGGLER",
     "H2D_STRAGGLER": "H2D STRAGGLER",
     "INPUT_BOUND": "INPUT-BOUND",
+    "H2D_BOUND": "H2D-BOUND",
     "COMPUTE_BOUND": "COMPUTE-BOUND",
     "RESIDUAL_HEAVY": "RESIDUAL-HEAVY",
 }
@@ -69,6 +71,7 @@ _PRIMARY_KIND_PRIORITY: dict[str, int] = {
     "COMPUTE_STRAGGLER": 40,
     "H2D_STRAGGLER": 40,
     "INPUT_BOUND": 30,
+    "H2D_BOUND": 30,
     "RESIDUAL_HEAVY": 20,
     "COMPUTE_BOUND": 10,
 }
@@ -445,6 +448,17 @@ def build_step_diagnosis_result(
             steps_used=context.steps_used,
             worst_rank=(
                 None if context.single_rank else context.input_bound_worst_rank
+            ),
+        )
+    elif primary_issue is not None and primary_issue.kind == "H2D_BOUND":
+        primary = _mk_diag(
+            kind="H2D_BOUND",
+            severity=primary_issue.severity,
+            reason=primary_issue.summary,
+            action=primary_issue.action,
+            steps_used=context.steps_used,
+            worst_rank=(
+                primary_issue.ranks[0] if primary_issue.ranks else None
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "RESIDUAL_HEAVY":

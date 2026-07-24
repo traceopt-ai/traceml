@@ -75,8 +75,8 @@ Selection policy:
 
 - `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, `H2D_STRAGGLER`, and `STRAGGLER`
   use rank-comparison evidence and are promoted from `step_time.diagnosis`.
-- `RESIDUAL_HEAVY`, `INPUT_BOUND`, and `COMPUTE_BOUND` use phase-share evidence
-  and are promoted from `step_time.diagnosis`.
+- `RESIDUAL_HEAVY`, `INPUT_BOUND`, `H2D_BOUND`, and `COMPUTE_BOUND` use
+  phase-share evidence and are promoted from `step_time.diagnosis`.
 - `LOW_GPU_UTILIZATION_UNEXPLAINED` appears only when Step Time is `BALANCED`
   and System reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
 - `NO_CLEAR_PERFORMANCE_BOTTLENECK` appears when Step Time is `BALANCED` and
@@ -115,18 +115,17 @@ Primary diagnosis evidence uses a small union:
   "residual_ms": 39.6,
   "shares": {
     "input_wait_pct": 33.3,
-    "h2d_pct": 0.3,
-    "compute_pct": 75.0,
-    "residual_pct": 24.8
+    "h2d_pct": 0.2,
+    "compute_pct": 50.0,
+    "residual_pct": 16.5
   },
   "gpu_util_avg_percent": 37.8
 }
 ```
 
-`phase_share` is used for `INPUT_BOUND`, `RESIDUAL_HEAVY`, and `COMPUTE_BOUND`.
-Values come from `step_time.global.average`. For `INPUT_BOUND`,
-`input_wait_pct` uses `iteration_time_ms = input_wait_ms + step_time_ms`;
-other phase-share percentages use `step_time_ms`.
+`phase_share` is used for `INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and
+`COMPUTE_BOUND`. Values come from `step_time.global.average`. All phase-share
+percentages use `iteration_time_ms = input_wait_ms + step_time_ms`.
 
 ```json
 {
@@ -329,9 +328,8 @@ The public `dataloader_ms` key is kept for compatibility and represents CPU
 dataloader fetch wall time.
 The public `total_step_ms` key is also CPU-clocked for compatibility; it is
 not the denominator for selected-clock phase shares. The final text report
-uses selected-clock `step_time_ms` for most phase shares and labels CPU
-compatibility rows separately. `INPUT_BOUND` input-wait share uses derived
-`iteration_time_ms = input_wait_ms + step_time_ms`.
+uses derived `iteration_time_ms = input_wait_ms + step_time_ms` for every
+selected-clock phase share and labels CPU compatibility rows separately.
 
 `residual_ms` is residual unattributed step time. It is averaged from
 per-step clamped residuals, not recomputed from already-averaged phase totals:
