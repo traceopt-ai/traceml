@@ -41,7 +41,10 @@ It helps you answer:
 - Is memory usage silently growing?
 - Did a code, data, or infrastructure change make the run slower?
 
-TraceML produces actionable diagnostics with under 1% overhead in current benchmarks.
+**Measured overhead:** in our current benchmark configuration, TraceML adds
+less than 1 ms per rank per training step. See the
+[benchmark methodology and results](benchmarking/BENCHMARKING.md) for the
+tested configurations and how to reproduce them.
 
 ---
 

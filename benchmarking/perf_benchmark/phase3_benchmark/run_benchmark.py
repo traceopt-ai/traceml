@@ -217,7 +217,11 @@ def worker_args(
         args.append("--pin-memory")
     if bool(config.get("require_cuda", True)):
         args.append("--require-cuda")
-    if bool(config.get("gil_probe", True)):
+    # Opt-in only: GilVictim is an active GIL-contention stress injector
+    # (unthrottled CPU loop), not a passive probe. Running it by default
+    # contaminated the 2026-07-21 campaign's baselines (~1.4ms/step became
+    # ~221ms/step); see PR #230 discussion.
+    if bool(config.get("gil_probe", False)):
         args.append("--gil-probe")
     return args
 

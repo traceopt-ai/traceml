@@ -23,6 +23,12 @@ overhead"; deltas inside baseline noise are reported as `within noise <= X ms`.
 - TraceML cells: `trace_manual`, `trace_auto`.
 - Warmup steps are discarded.
 - CPU runs are smoke tests only.
+- GIL stress probe (`gil_probe`): **off by default, opt-in only.** It runs
+  `GilVictim`, an unthrottled CPU loop that actively competes for the GIL in
+  every cell including `never_init` — a stress diagnostic, not a passive
+  observation. Never enable it for a normal-overhead campaign; results with
+  it on are GIL-contention stress data and must be labelled as such. Enable
+  via `"gil_probe": true` in a config only for a dedicated GIL diagnostic.
 
 ## Layout
 

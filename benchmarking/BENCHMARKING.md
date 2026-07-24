@@ -59,8 +59,20 @@ plus a static source audit tagging every hook `critical_path: true/false`.
 [`perf_benchmark/README.md`](perf_benchmark/README.md) for the full
 methodology and every reproduction command.
 
-**Status:** harness and methodology landed 2026-07-20; no campaign has been
-run yet. This section will gain a results row once one has.
+**Campaigns so far:**
+
+| Date | TraceML version | Hardware | Headline |
+|---|---|---|---|
+| 2026-07-22 | benchmarking branch @ `58a177c` | 1/2/4× AWS g4dn.xlarge (1× T4 each), on-demand | `trace_auto` adds **< 1 ms per rank per step** (0.17–0.58 ms measured) across every topology and batch size (256/512/1024) tested |
+
+The absolute cost stays roughly constant while the baseline step time grows
+with node count, so the same overhead reads as 42% of a 1.4 ms single-node
+step but only ~4% of a 9.3 ms 4-node step — lead with the ms figure, not
+the percentage. Full write-up:
+[`analysis/2026-07-22_clean_1_2_4node_g4dn/report.md`](analysis/2026-07-22_clean_1_2_4node_g4dn/report.md).
+(An earlier 2026-07-21 campaign is retained as GIL-stress diagnostic data
+only — its configs unknowingly ran the GIL stress probe in every cell; see
+that report's superseded banner.)
 
 ## Reading this as an outside visitor
 
@@ -69,7 +81,4 @@ If you only need one number: the wall-clock track's latest campaign
 attribution track exists to explain *why* that number is what it is, not
 to replace it.
 
-## TODO
-
-Point the main repository README at this doc once `benchmarking` lands on
-`main` (tracked separately — this branch has not merged yet).
+The main repository README's measured-overhead line links here.
