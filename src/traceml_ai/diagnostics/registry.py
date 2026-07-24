@@ -35,6 +35,7 @@ class ModelDiagnosticContext:
         default_factory=dict
     )
     step_time_diagnosis_clock: str = "cpu"
+    step_time_training_strategy: str = "ddp"
     step_memory_status_message: Optional[str] = None
     gpu_total_bytes: Optional[float] = None
 

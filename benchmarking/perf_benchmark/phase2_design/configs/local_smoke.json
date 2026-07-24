@@ -1,0 +1,30 @@
+{
+  "run_id": "phase3_local_smoke",
+  "output_root": "benchmarking/perf_benchmark/results",
+  "require_cuda": false,
+  "device": "auto",
+  "steps": 20,
+  "warmup": 5,
+  "repeats": 1,
+  "timing_modes": ["step", "phase"],
+  "cells": ["never_init", "trace_manual", "trace_auto"],
+  "workloads": [
+    {
+      "model": "tiny_mlp",
+      "batch_size": 16,
+      "dataloader": "synthetic",
+      "pin_memory": false
+    }
+  ],
+  "launch": {
+    "nnodes": 1,
+    "nproc_per_node": 1,
+    "master_addr": "127.0.0.1",
+    "master_port": 29500,
+    "aggregator_port": 29765,
+    "interval": 1.0,
+    "finalize_timeout_sec": 60,
+    "per_cell_timeout_sec": 300,
+    "summary_window_rows": 1000
+  }
+}

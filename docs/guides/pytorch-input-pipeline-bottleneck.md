@@ -56,7 +56,7 @@ Start with `TraceML Verdict`, then check the `Step Time Evidence` table.
 
 For input pipeline problems, the most relevant diagnoses are:
 
-- `INPUT-BOUND`: input wait is taking a large share of the typical step
+- `INPUT-BOUND`: input wait is taking a large share of iteration time
 - `INPUT STRAGGLER`: one rank has meaningfully more input-wait burden than a
   typical rank
 

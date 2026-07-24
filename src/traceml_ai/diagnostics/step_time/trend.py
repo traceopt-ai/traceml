@@ -124,10 +124,7 @@ def build_step_trend_note(
                 f"{step_state} ({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
             )
 
-        if (
-            diagnosis_kind in {"RESIDUAL_HEAVY", "RESIDUAL_STRAGGLER"}
-            and residual_state
-        ):
+        if diagnosis_kind == "RESIDUAL_HEAVY" and residual_state:
             return (
                 "Trend: residual time is "
                 f"{residual_state} ({format_trend_pct(residual_tr, deadband_pct=cfg.deadband_pct)})."

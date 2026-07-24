@@ -1,0 +1,39 @@
+{
+  "run_id": "phase3_multinode_2x1",
+  "output_root": "benchmarking/perf_benchmark/results",
+  "require_cuda": true,
+  "device": "auto",
+  "steps": 1000,
+  "warmup": 100,
+  "repeats": 3,
+  "timing_modes": ["step", "phase"],
+  "cells": ["never_init", "trace_manual", "trace_auto"],
+  "workloads": [
+    {
+      "model": "tiny_mlp",
+      "batch_size": 256,
+      "dataloader": "synthetic"
+    },
+    {
+      "model": "tiny_transformer",
+      "batch_size": 8,
+      "dataloader": "synthetic",
+      "seq_len": 128,
+      "hidden_dim": 384,
+      "layers": 4
+    }
+  ],
+  "launch": {
+    "nnodes": 2,
+    "nproc_per_node": 1,
+    "master_addr": "<NODE0_IP>",
+    "master_port": 29500,
+    "aggregator_port": 29765,
+    "barrier_port": 29900,
+    "rendezvous_timeout_sec": 120,
+    "interval": 1.0,
+    "finalize_timeout_sec": 300,
+    "per_cell_timeout_sec": 900,
+    "summary_window_rows": 2500
+  }
+}

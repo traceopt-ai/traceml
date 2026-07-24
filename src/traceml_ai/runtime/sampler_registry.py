@@ -9,6 +9,9 @@ from traceml_ai.core import Registry
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.samplers.base_sampler import BaseSampler
 from traceml_ai.samplers.process_sampler import ProcessSampler
+from traceml_ai.samplers.runtime_environment_sampler import (
+    RuntimeEnvironmentSampler,
+)
 from traceml_ai.samplers.stdout_stderr_sampler import StdoutStderrSampler
 from traceml_ai.samplers.step_memory_sampler import StepMemorySampler
 from traceml_ai.samplers.step_time_sampler import StepTimeSampler
@@ -70,6 +73,11 @@ def _spec(
 DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
     [
         _spec("system", SystemSampler, rank_zero_only=True),
+        _spec(
+            "runtime_environment",
+            RuntimeEnvironmentSampler,
+            drain_on_recording_stop=True,
+        ),
         _spec("process", ProcessSampler),
         _spec("stdout_stderr", StdoutStderrSampler, modes=("cli",)),
         _spec(

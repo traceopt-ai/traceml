@@ -63,14 +63,17 @@ Traced process pressure.
 Training-step timing.
 
 - `NO_DATA`: no usable step-time data.
-- `WARMUP`: some data exists, but not enough for a stable diagnosis.
+- `WARMUP`: some data exists, but not enough for diagnosis.
 - `BALANCED`: no clear timing bottleneck or rank straggler.
-- `STRAGGLER`: one rank has a mixed clean-step straggler signal.
-- `INPUT_STRAGGLER`: one rank has materially higher selected-clock input wait.
-- `COMPUTE_STRAGGLER`: one rank has materially higher clean compute time.
-- `H2D_STRAGGLER`: one rank has materially higher host-to-device transfer time.
-- `RESIDUAL_STRAGGLER`: one rank has materially higher residual `residual_proxy`.
-- `INPUT_BOUND`: selected-clock input wait dominates the typical step.
+- `STRAGGLER`: visible rank skew exists, but input wait, H2D, and DDP forward
+  do not explain the likely culprit.
+- `INPUT_STRAGGLER`: the culprit rank has materially higher selected-clock
+  input wait than the victim rank.
+- `COMPUTE_STRAGGLER`: in DDP/default strategy, the culprit rank has
+  materially higher forward time than the victim rank.
+- `H2D_STRAGGLER`: the culprit rank has materially higher host-to-device
+  transfer time than the victim rank.
+- `INPUT_BOUND`: selected-clock input wait dominates iteration time.
 - `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material share of the step.
 
@@ -78,20 +81,37 @@ Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
 input wait, and traced phase events present in the window. Otherwise it uses
 explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
-summary use this same selected-clock window for diagnosis-facing timing.
+summary use the same global-rank SQLite loader and selected-clock window
+builder for diagnosis-facing timing; they differ only by row window sizing.
 Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
 The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
 `total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
 These compatibility fields are not selected-clock phase-share denominators.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
-display or diagnosis. In the final text report, selected-clock phase shares
-are divided by `step_time_ms`; CPU compatibility rows are labeled separately.
+display or diagnosis. In the final text report, most selected-clock phase
+shares are divided by `step_time_ms`; CPU compatibility rows are labeled
+separately.
 
-`INPUT_BOUND` uses selected-clock `input_wait_ms / step_time_ms`. This compares
-pre-step input wait with the traced step envelope, not end-to-end wall time, so
-the ratio can exceed 100%. Live diagnosis warns at 25% and is critical at 35%.
-Summary diagnosis is more conservative because it covers a larger final window:
-it warns at 30% and is critical at 40%.
+`INPUT_BOUND` uses selected-clock
+`input_wait_ms / iteration_time_ms`, where
+`iteration_time_ms = input_wait_ms + step_time_ms`. This compares pre-step
+input wait with the full selected-clock iteration time while leaving
+`step_time_ms` as the traced step envelope. Live and summary diagnosis both
+warn at 10% and are critical at 20%.
+
+Shared Step Time diagnosis needs at least 2 steps to emit warning-only
+bottleneck diagnoses. Critical diagnoses are allowed once the window has at
+least 20 steps. Live and summary use the same diagnosis gates; they differ by
+the selected timing window size.
+
+When runtime environment metadata is available, Step Time diagnosis also
+receives an advisory training strategy such as `ddp` or `fsdp`. This context is
+used only to choose diagnosis attribution behavior; it is not a public Step
+Time metric. Missing or unrecognized strategy metadata defaults to `ddp` to
+preserve the DDP/default visible-backward straggler behavior. DDP remains
+eligible for critical Step Time diagnoses once thresholds and confidence gates
+are met. FSDP Step Time diagnoses are capped at warning because collective
+masking can make attribution under-confident.
 
 `RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
 unattributed step time averaged from per-step clamped residuals:
@@ -100,26 +120,57 @@ unattributed step time averaged from per-step clamped residuals:
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = selected step envelope timing
+iteration_time_ms = selected input_wait_ms + selected traced_step_ms
 residual_ms = average(max(0, traced_step_ms - known_step_ms))
 total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 
-Rank-local stragglers use clean-step evidence. TraceML first discounts backward
-time that can be explained by another rank's non-backward work:
+Rank stragglers use culprit/victim evidence from selected-clock timing. TraceML
+first chooses one visible synchronization phase:
 
 ```text
-residual_r = residual_proxy_r
-non_bwd_r = input_wait_r + h2d_r + forward_r + optimizer_r + residual_r
-clean_bwd_r = max(0, backward_r - max(0, max(non_bwd) - non_bwd_r))
-clean_compute_r = forward_r + clean_bwd_r + optimizer_r
-clean_step_r = input_wait_r + h2d_r + clean_compute_r + residual_r
-score = (max(clean_step) - median(clean_step)) / median(actual_step)
+visible_r = backward_r              # DDP/default
+visible_r = forward_r + backward_r  # FSDP
 ```
 
-If `score < 0.10`, TraceML does not report a rank-local straggler. Otherwise it
-blames the largest worst-rank excess over peer median among input wait, clean
-compute, H2D, and residual. The largest excess must dominate the next-largest
-excess by `1.25x`; otherwise the diagnosis stays mixed `STRAGGLER`.
+Only ranks with measured visible-phase anchors and a measured step envelope are
+eligible:
+
+```text
+DDP/default: backward_r > 0 and step_time_r > 0
+FSDP:        forward_r > 0 and backward_r > 0 and step_time_r > 0
+```
+
+If fewer than two ranks are eligible, TraceML does not report a rank straggler.
+Missing visible instrumentation causes this rule to abstain instead of treating
+zero as a fast rank. `input_wait == 0` and `h2d == 0` remain valid component
+values.
+
+The culprit rank is the rank with the minimum visible value. This is the rank
+that likely arrived late and therefore waited least in the visible phase. The
+victim rank is the upper actual median rank by visible value.
+
+```text
+denom = input_wait_victim + step_time_victim
+score = (visible_victim - visible_culprit) / denom
+```
+
+If `score < 0.10`, TraceML does not report a rank straggler. Otherwise it
+compares the culprit directly with the victim:
+
+```text
+input_excess = input_wait_culprit - input_wait_victim
+h2d_excess = h2d_culprit - h2d_victim
+forward_excess = forward_culprit - forward_victim  # DDP/default only
+```
+
+DDP/default compute attribution requires measured forward time on both the
+culprit and victim ranks.
+
+The largest material positive excess becomes `INPUT_STRAGGLER`,
+`H2D_STRAGGLER`, or, for DDP/default only, `COMPUTE_STRAGGLER`. If no such
+excess explains the visible wait cost, the diagnosis stays `STRAGGLER` with a
+sync-or-unattributed component.
 
 It can include validation, checkpointing, logging, framework orchestration, CPU
 stalls, unobserved transfer stalls, or other work inside the timed step but

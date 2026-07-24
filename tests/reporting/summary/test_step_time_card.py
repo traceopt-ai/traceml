@@ -84,10 +84,12 @@ def _summary(
         per_global_rank_summary=selected_summary,
         identities={},
         max_rows=window_size,
+        training_strategy="ddp",
     )
     diagnosis = diagnose_step_time_summary(
         StepTimeDiagnosisInput(
             window=window,
+            training_strategy=data.training_strategy,
         )
     )
     return build_step_time_payload(data, diagnosis)
@@ -211,14 +213,14 @@ def test_step_time_balanced_card_is_compact() -> None:
     payload = _summary(
         {
             0: _rank(
-                dataloader=20.0,
+                dataloader=5.0,
                 forward=20.0,
                 backward=35.0,
                 optimizer=5.0,
                 step_cpu=70.0,
             ),
             1: _rank(
-                dataloader=20.0,
+                dataloader=5.0,
                 forward=21.0,
                 backward=34.0,
                 optimizer=5.0,
@@ -290,6 +292,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     assert payload["diagnosis"]["phase"] == "input"
     assert payload["diagnosis"]["evidence"]["input_wait_ms"] == 40.0
     assert payload["diagnosis"]["evidence"]["step_time_ms"] == 100.0
+    assert payload["diagnosis"]["evidence"]["iteration_time_ms"] == 140.0
     assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
     assert payload["global"]["window"]["diagnosis_clock"] == "gpu"
     average = payload["global"]["average"]
@@ -304,7 +307,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     assert row_metrics["total_step_ms"] == 102.0
     _assert_public_step_metrics_keep_dataloader(payload)
     assert (
-        "- Why: Input wait was 40.0ms before a 100.0ms gpu traced step."
+        "- Why: Input wait was 40.0ms of 140.0ms gpu iteration time."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])

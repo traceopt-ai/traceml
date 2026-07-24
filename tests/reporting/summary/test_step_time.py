@@ -16,6 +16,9 @@ from traceml_ai.reporting.sections.step_time.loader import (
 from traceml_ai.reporting.sections.step_time.model import (
     rank_summaries_from_window,
 )
+from traceml_ai.utils.step_time_sqlite import (
+    load_training_strategy_from_sqlite,
+)
 from traceml_ai.utils.step_time_window import (
     build_step_time_window_from_events,
 )
@@ -42,6 +45,21 @@ def _create_step_time_db(path: str) -> None:
                 events_json        TEXT NOT NULL
             );
             """
+        )
+        conn.execute(
+            """
+            CREATE TABLE runtime_environment (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                training_strategy TEXT
+            );
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO runtime_environment(training_strategy)
+            VALUES (?);
+            """,
+            [("ddp",), ("fsdp",)],
         )
         events = {
             "_traceml_internal:dataloader_next": {
@@ -160,6 +178,27 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
     assert "Global: n/a" not in summary["card"]
 
 
+def test_training_strategy_loader_uses_latest_available_row(tmp_path) -> None:
+    db_path = tmp_path / "telemetry"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE runtime_environment (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                training_strategy TEXT
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO runtime_environment(training_strategy) VALUES (?);",
+            [("fsdp",), ("ddp",)],
+        )
+        assert load_training_strategy_from_sqlite(conn) == "ddp"
+    finally:
+        conn.close()
+
+
 def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
     window = build_step_time_window_from_events(
         {
@@ -209,8 +248,11 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
 
     assert data.training_steps == 3
     assert data.latest_step_observed == 2
+    assert data.training_strategy == "fsdp"
     assert data.per_global_rank_summary[0].steps_analyzed == 2
     assert data.step_time_window.coverage.steps_used == 2
+    diagnosis_input = StepTimeSummarySection().to_diagnosis_input(data)
+    assert diagnosis_input.training_strategy == "fsdp"
     assert result.section == "step_time"
     assert result.payload["metadata"]["global_ranks_seen"] == 1
     assert result.payload["global"]["median"]["total_step_ms"]["value"] == 31.0

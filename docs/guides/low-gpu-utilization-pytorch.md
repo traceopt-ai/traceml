@@ -32,12 +32,11 @@ After confirming low or moderate GPU utilization, read the Step Time diagnosis.
 | Step Time diagnosis | What to do |
 |---|---|
 | `INPUT-BOUND` | Inspect input loading, preprocessing, collation, and storage. |
-| `INPUT STRAGGLER` | Inspect the slow input rank. |
-| `H2D STRAGGLER` | Inspect host-to-device transfer on the worst rank. |
-| `RESIDUAL STRAGGLER` | Inspect rank-local host-side work on the worst rank. |
+| `INPUT STRAGGLER` | Inspect input loading on the culprit rank. |
+| `H2D STRAGGLER` | Inspect host-to-device transfer on the culprit rank. |
 | `RESIDUAL-HEAVY` | Inspect work outside traced phases, such as logging, checkpointing, validation, CPU stalls, framework orchestration, or unobserved transfers. |
 | `COMPUTE-BOUND` | Inspect forward, backward, and optimizer time before changing the DataLoader. |
-| `COMPUTE STRAGGLER` or `STRAGGLER` | Inspect rank skew and the called-out worst rank. |
+| `COMPUTE STRAGGLER` or `STRAGGLER` | Inspect visible rank skew and the culprit rank. |
 | `BALANCED` | Compare against a known good run or use a heavier profiler for lower-level detail. |
 
 Low GPU utilization plus `INPUT-BOUND` is a strong signal to start with the
@@ -68,7 +67,7 @@ If residual time is high:
 If one rank is worse than the others:
 
 - use the [DDP rank straggler guide](ddp-slow-training-rank-straggler.md)
-- compare the worst rank with the median rank
+- compare the culprit rank with the victim/reference rank
 
 ## Compare a fix
 

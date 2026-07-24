@@ -287,7 +287,7 @@ def start_training_process(
     capture_stderr: bool = False,
 ) -> subprocess.Popen:
     """Start the user training process in a separate process group."""
-    print("[TraceML] Launching TraceML executor:", " ".join(train_cmd))
+    print("[TraceML] Launching training process:", " ".join(train_cmd))
     popen_kwargs = {}
     if capture_stderr:
         popen_kwargs["stderr"] = subprocess.PIPE

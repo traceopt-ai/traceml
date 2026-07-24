@@ -73,9 +73,8 @@ section diagnoses.
 
 Selection policy:
 
-- `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, `H2D_STRAGGLER`,
-  `RESIDUAL_STRAGGLER`, and `STRAGGLER` use rank-comparison evidence and are
-  promoted from `step_time.diagnosis`.
+- `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`, `H2D_STRAGGLER`, and `STRAGGLER`
+  use rank-comparison evidence and are promoted from `step_time.diagnosis`.
 - `RESIDUAL_HEAVY`, `INPUT_BOUND`, and `COMPUTE_BOUND` use phase-share evidence
   and are promoted from `step_time.diagnosis`.
 - `LOW_GPU_UTILIZATION_UNEXPLAINED` appears only when Step Time is `BALANCED`
@@ -84,6 +83,15 @@ Selection policy:
   GPU utilization is not low/moderate.
 - `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA` or
   `WARMUP`.
+- Step Time may emit warning-only bottleneck diagnoses before its confident
+  threshold; critical Step Time diagnoses require the confident window size.
+  Live and summary use the same global-rank Step Time SQLite window loader;
+  summary uses a larger selected-clock window, but not a separate Step Time
+  diagnosis gate.
+- Step Time diagnosis may consume advisory runtime training strategy context
+  when available. This does not add a public summary metric; missing or
+  unrecognized strategy metadata defaults to `ddp`. FSDP Step Time diagnosis
+  severity is capped at warning.
 
 High temperature, memory pressure, memory creep, high RSS, high CPU, and other
 resource-health findings are not promoted into `primary_diagnosis` in schema
@@ -100,12 +108,13 @@ Primary diagnosis evidence uses a small union:
   "dataloader_ms": 40.0,
   "input_wait_ms": 80.0,
   "step_time_ms": 160.0,
+  "iteration_time_ms": 240.0,
   "diagnosis_clock": "gpu",
   "h2d_ms": 0.4,
   "compute_ms": 120.0,
   "residual_ms": 39.6,
   "shares": {
-    "input_wait_pct": 50.0,
+    "input_wait_pct": 33.3,
     "h2d_pct": 0.3,
     "compute_pct": 75.0,
     "residual_pct": 24.8
@@ -115,7 +124,9 @@ Primary diagnosis evidence uses a small union:
 ```
 
 `phase_share` is used for `INPUT_BOUND`, `RESIDUAL_HEAVY`, and `COMPUTE_BOUND`.
-Values come from `step_time.global.average`.
+Values come from `step_time.global.average`. For `INPUT_BOUND`,
+`input_wait_pct` uses `iteration_time_ms = input_wait_ms + step_time_ms`;
+other phase-share percentages use `step_time_ms`.
 
 ```json
 {
@@ -132,10 +143,9 @@ Values come from `step_time.global.average`.
 ```
 
 `rank_comparison` is used for `INPUT_STRAGGLER`, `COMPUTE_STRAGGLER`,
-`H2D_STRAGGLER`, `RESIDUAL_STRAGGLER`, and `STRAGGLER`. Values come from
-`step_time.global.median[metric]` and
-`step_time.global.worst[metric]`. Generic `STRAGGLER` may contain a
-`comparisons` array instead of a single metric comparison.
+`H2D_STRAGGLER`, and `STRAGGLER`. Values come from `step_time.global` rank
+summaries. Generic `STRAGGLER` may contain a `comparisons` array instead of a
+single metric comparison.
 
 Fallback evidence types are:
 
@@ -319,8 +329,9 @@ The public `dataloader_ms` key is kept for compatibility and represents CPU
 dataloader fetch wall time.
 The public `total_step_ms` key is also CPU-clocked for compatibility; it is
 not the denominator for selected-clock phase shares. The final text report
-uses selected-clock `step_time_ms` for phase shares and labels CPU
-compatibility rows separately.
+uses selected-clock `step_time_ms` for most phase shares and labels CPU
+compatibility rows separately. `INPUT_BOUND` input-wait share uses derived
+`iteration_time_ms = input_wait_ms + step_time_ms`.
 
 `residual_ms` is residual unattributed step time. It is averaged from
 per-step clamped residuals, not recomputed from already-averaged phase totals:
@@ -329,6 +340,7 @@ per-step clamped residuals, not recomputed from already-averaged phase totals:
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
 traced_step_ms = selected step envelope timing
+iteration_time_ms = selected input_wait_ms + selected traced_step_ms
 residual_ms = average(max(0, traced_step_ms - known_step_ms))
 total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
@@ -338,6 +350,7 @@ The selected-clock diagnosis contract is:
 ```text
 input_wait_ms = selected-clock input wait
 step_time_ms = selected-clock traced step envelope
+iteration_time_ms = input_wait_ms + step_time_ms, emitted only as diagnosis evidence
 diagnosis_clock = "cpu" | "gpu"
 ```
 
