@@ -43,7 +43,7 @@ It helps you answer:
 
 **Measured overhead:** in our current benchmark configuration, TraceML adds
 less than 1 ms per rank per training step. See the
-[benchmark methodology and results](benchmarking/BENCHMARKING.md) for the
+[benchmark methodology and results](benchmarking/README.md) for the
 tested configurations and how to reproduce them.
 
 ---

@@ -1,151 +1,92 @@
-# TraceML Benchmarks
+# TraceML overhead benchmarking
 
-## Simple End-To-End Timing
+TraceML measures its own runtime cost through two independent tracks, both
+living under this `benchmarking/` folder — follow the links below for the
+actual instructions.
 
-For the simplest user-facing overhead check, run the same normal DDP MLP
-training script with and without TraceML and compare shell wall time.
-
-Single GPU native:
-
-```bash
-time torchrun --nproc_per_node=1 benchmarking/workloads/ddp_mlp_e2e.py \
-  --duration-sec 600 \
-  --batch-size 256 \
-  --hidden-dim 4096
+```mermaid
+flowchart LR
+    A["Wall-clock overhead<br/>workloads/<br/>(coarse, paired repeats)"] -->|"answers:<br/>is there overhead?"| C[Overhead story]
+    B["Attribution harness<br/>perf_benchmark/<br/>(fine, per-hook, per-baseline)"] -->|"answers:<br/>where does it come from?"| C
 ```
 
-Single GPU with TraceML:
+## Layout
 
-```bash
-time traceml run benchmarking/workloads/ddp_mlp_e2e.py \
-  --mode=summary \
-  --run-name=e2e_1gpu_traceml_r01 \
-  --nproc-per-node=1 \
-  --args \
-  --duration-sec 600 \
-  --batch-size 256 \
-  --hidden-dim 4096
-```
-
-Repeat both commands several times and alternate order:
-
-```text
-repeat 1: native, TraceML
-repeat 2: TraceML, native
-repeat 3: native, TraceML
-```
-
-Use the shell `real` time:
-
-```text
-overhead_pct = ((traceml_real_time / native_real_time) - 1) * 100
-```
-
-Increase `--batch-size`, `--hidden-dim`, or `--hidden-layers` if the training
-step is too fast. Keep the exact same arguments for native and TraceML runs.
-
-## What To Publish
-
-Use the end-to-end overhead percentage:
-
-```text
-overhead_pct = ((traceml_real_time / native_real_time) - 1) * 100
-```
-
-Publish average and median overhead across successful paired repeats, plus
-min/max or IQR. Keep the raw shell `real` times.
-
-For publishable numbers, use at least:
-
-```text
-5 repeats x 2 modes x each topology
-```
-
-Two or three repeats are fine for smoke tests.
-
-## Results: first campaign (2026-06-11, `ddp_mlp_e2e`)
-
-5 paired repeats × 2 modes × 2 topologies, 600 s/trial, alternating order,
-identical args (`--duration-sec 600 --batch-size 256 --hidden-dim 4096`).
-20/20 trials, 0 failures. Hardware: 2× AWS `g4dn.xlarge` (1× Tesla T4 each),
-`eu-central-1`; torch 2.11.0+cu130, CUDA 13.0, NCCL 2.28.9.
-
-| Topology | Native real (s) | TraceML real (s) | Wall overhead | Throughput overhead |
-|---|---|---|---|---|
-| Single GPU (1× T4)   | 613.43 | 618.98 | **+0.90%** | **+1.02%** |
-| DDP (2 nodes × 1 T4) | 614.67 | 618.62 | **+0.64%** | **≈0%** (network-bound) |
-
-- **Single GPU:** ~5.5 s fixed startup + ~1% per-step, stable across repeats.
-- **DDP:** ~92% of the step is backward/all-reduce over TCP, so TraceML's
-  per-step cost is not measurable. (Repeat 1 ran on g4dn network burst
-  credits; repeats 2-5 sat at the stable floor, throughput is reported as
-  the median to exclude that confound.)
-- Wall overhead is the metric defined in "What To Publish" above; throughput
-  (`native_steps_per_s / traceml_steps_per_s − 1`) is shown alongside because
-  for a fixed-duration workload, wall time mainly captures fixed startup, not
-  per-step cost.
-
-Full write-up with plots:
-[`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md).
-
-## Results: second campaign (2026-07-19, `ddp_mlp_e2e`, v0.3.5)
-
-Rerun on TraceML v0.3.5 to confirm the overhead figure held across
-versions. 5 paired repeats × 2 modes × 2 topologies (single GPU, 4-GPU
-single-node DDP), 300 s/trial. Hardware: 1× AWS `g4dn.12xlarge` (4×
-Tesla T4), `eu-central-1`.
-
-| Topology | Throughput overhead | Wall-clock overhead |
+| Folder | What it holds | Doc |
 |---|---|---|
-| Single GPU (1× T4)          | **+0.95% ± 0.09** | +2.16% ± 0.34 |
-| 4-GPU single-node DDP        | **+0.41% ± 0.07** | +1.76% ± 0.36 |
+| [`workloads/`](workloads/) | Wall-clock harness: the training script + paired `time` methodology | [`workloads/README.md`](workloads/README.md) |
+| [`perf_benchmark/`](perf_benchmark/) | Attribution harness: config-driven runner, baselines, aggregation | [`perf_benchmark/README.md`](perf_benchmark/README.md) |
+| [`analysis/`](analysis/) | Dated campaign write-ups from **both** tracks (report + distilled CSVs) | [`analysis/README.md`](analysis/README.md) |
 
-Full write-up:
+## Wall-clock overhead — `workloads/`
+
+**What it measures:** end-to-end training-time cost of the full multi-node
+telemetry/aggregation layer, as a single number per topology.
+
+**Granularity:** coarse. One wall-clock and one throughput percentage per
+topology; no breakdown of which internal component contributes the cost.
+
+**Method:** paired repeats — `time torchrun ...` (native) vs
+`time traceml run ...` (TraceML), alternated order to cancel thermal/
+environment bias, identical args each time. Requires no TraceML-specific
+tooling to reproduce; anyone can run the same two `time` commands themselves.
+
+**Campaigns so far:**
+
+| Date | TraceML version | Hardware | 1-GPU throughput overhead | Multi-GPU/DDP throughput overhead |
+|---|---|---|---|---|
+| 2026-06-11 | v0.3.1 | 2× AWS g4dn.xlarge (T4) | +1.02% | ≈0% (network-bound floor) |
+| 2026-07-19 | v0.3.5 | AWS g4dn.12xlarge (T4) | +0.95% ± 0.09 | +0.41% ± 0.07 |
+
+```mermaid
+xychart-beta
+    title "Throughput overhead by campaign (%)"
+    x-axis ["06-11 1xT4", "06-11 2-node DDP", "07-19 1xT4", "07-19 4xT4 DDP"]
+    y-axis "Overhead %" 0 --> 1.5
+    bar [1.02, 0, 0.95, 0.41]
+```
+
+![Throughput across the 2026-06-11 campaign](analysis/2026-06-11_pr153_ddp_mlp_g4dn/plots/06_throughput.png)
+
+Full write-ups: [`workloads/README.md`](workloads/README.md),
+[`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md),
 [`analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md`](analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md).
 
-## Multi-Node Method
+## Attribution / automated harness — `perf_benchmark/`
 
-Multi-node needs one launcher per node. Use the same `--run-name` on every
-node. First run the native command on both nodes with `torchrun`, then run the
-TraceML command on both nodes with `traceml run`.
+**What it measures:** where overhead comes from — which instrumentation
+hook (dataloader, forward, backward, H2D, optimizer, background sampler
+thread) contributes, and whether that hook runs on the training-critical
+path or off-thread.
 
-TraceML node 0:
+**Granularity:** fine. Three baselines (`never_init` / `trace_manual` /
+`trace_auto`) × two timing modes (`step` headline / `phase` attribution),
+plus a static source audit tagging every hook `critical_path: true/false`.
 
-```bash
-time traceml run benchmarking/workloads/ddp_mlp_e2e.py \
-  --mode=summary \
-  --logs-dir=benchmarking/results/logs \
-  --run-name=e2e_2x1_traceml_r01 \
-  --nnodes=2 \
-  --node-rank=0 \
-  --nproc-per-node=1 \
-  --master-addr=<node0-ip> \
-  --master-port=29500 \
-  --aggregator-port=29765 \
-  --args \
-  --duration-sec 600 \
-  --batch-size 256 \
-  --hidden-dim 4096
-```
+**Method:** JSON-config-driven automated runner + aggregator; see
+[`perf_benchmark/README.md`](perf_benchmark/README.md) for the full
+methodology and every reproduction command.
 
-TraceML node 1:
+**Campaigns so far:**
 
-```bash
-time traceml run benchmarking/workloads/ddp_mlp_e2e.py \
-  --mode=summary \
-  --logs-dir=benchmarking/results/logs \
-  --run-name=e2e_2x1_traceml_r01 \
-  --nnodes=2 \
-  --node-rank=1 \
-  --nproc-per-node=1 \
-  --master-addr=<node0-ip> \
-  --master-port=29500 \
-  --aggregator-port=29765 \
-  --args \
-  --duration-sec 600 \
-  --batch-size 256 \
-  --hidden-dim 4096
-```
+| Date | TraceML version | Hardware | Headline |
+|---|---|---|---|
+| 2026-07-22 | benchmarking branch @ `58a177c` | 1/2/4× AWS g4dn.xlarge (1× T4 each), on-demand | `trace_auto` adds **< 1 ms per rank per step** (0.17–0.58 ms measured) across every topology and batch size (256/512/1024) tested |
 
-For Slurm, keep the existing TraceML pattern: allocate one task per node, run
-one `traceml run` launcher per node, and let TraceML spawn one worker per GPU.
+The absolute cost stays roughly constant while the baseline step time grows
+with node count, so the same overhead reads as 42% of a 1.4 ms single-node
+step but only ~4% of a 9.3 ms 4-node step — lead with the ms figure, not
+the percentage. Full write-up:
+[`analysis/2026-07-22_clean_1_2_4node_g4dn/report.md`](analysis/2026-07-22_clean_1_2_4node_g4dn/report.md).
+(An earlier 2026-07-21 campaign is retained as GIL-stress diagnostic data
+only — its configs unknowingly ran the GIL stress probe in every cell; see
+that report's superseded banner.)
+
+## Reading this as an outside visitor
+
+If you only need one number: the wall-clock track's latest campaign
+(2026-07-19 row above) is the current headline overhead figure. The
+attribution track exists to explain *why* that number is what it is, not
+to replace it.
+
+The main repository README's measured-overhead line links here.
