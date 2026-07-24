@@ -214,17 +214,19 @@ def test_step_time_balanced_card_is_compact() -> None:
         {
             0: _rank(
                 dataloader=5.0,
+                h2d=15.0,
                 forward=20.0,
                 backward=35.0,
                 optimizer=5.0,
-                step_cpu=70.0,
+                step_cpu=75.0,
             ),
             1: _rank(
                 dataloader=5.0,
+                h2d=15.0,
                 forward=21.0,
                 backward=34.0,
                 optimizer=5.0,
-                step_cpu=70.0,
+                step_cpu=75.0,
             ),
         }
     )
@@ -388,6 +390,7 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
     )
     assert "issues" not in payload["groups"]["rows"]["1"]
     assert {issue["kind"] for issue in payload["issues"]} == {
-        "INPUT_STRAGGLER"
+        "INPUT_STRAGGLER",
+        "INPUT_BOUND",
     }
     _assert_compact_card(payload["card"])

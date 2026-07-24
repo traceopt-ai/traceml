@@ -162,6 +162,8 @@ What to do next:
 Meaning:
 
 - input wait is taking a large share of iteration time
+- TraceML uses the median per-rank input share, so one unusually slow rank
+  does not hide a broad input bottleneck
 
 Common causes:
 
@@ -190,6 +192,7 @@ What to do next:
 Meaning:
 
 - model compute dominates the typical step
+- this is informational when no material input or residual overhead is visible
 
 In practice this means most step time is going into:
 
@@ -365,6 +368,11 @@ In TraceML:
 - `compute = forward + backward + optimizer`
 - `residual = step_time - h2d - compute`
 - `total_step = input_wait + step_time`
+
+TraceML evaluates residual as the median per-rank share of selected-clock
+iteration time (`input_wait + step_time`). Input and residual findings warn at
+10% and are critical at 20%; rank skew is supporting evidence rather than a
+gate that hides a typical bottleneck.
 
 This is residual unattributed time inside the traced step, not direct
 collective, NCCL, or all-reduce timing.

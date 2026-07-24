@@ -173,12 +173,7 @@ class InputBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.input_bound_share < context.thresholds.input_share_warn:
-            return None
-
-        if not context.single_rank and (
-            context.input_bound_skew > context.thresholds.input_bound_max_skew
-        ):
+        if context.input_bound_share < context.thresholds.overhead_share_warn:
             return None
 
         return self._issue(
@@ -186,7 +181,7 @@ class InputBoundRule(_BaseStepTimeRule):
             status="INPUT-BOUND",
             severity=_severity(
                 context.input_bound_share,
-                context.thresholds.input_share_crit,
+                context.thresholds.overhead_share_crit,
             ),
             summary=(
                 f"Input wait is {_pct(context.input_bound_share)} of the "
@@ -220,7 +215,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.residual_share < context.thresholds.residual_share_warn:
+        if context.residual_share < context.thresholds.overhead_share_warn:
             return None
 
         return self._issue(
@@ -228,7 +223,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
             status="RESIDUAL-HEAVY",
             severity=_severity(
                 context.residual_share,
-                context.thresholds.residual_share_crit,
+                context.thresholds.overhead_share_crit,
             ),
             summary=(
                 f"Residual time is {_pct(context.residual_share)} of the "
@@ -248,7 +243,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
 @dataclass(frozen=True)
 class ComputeBoundRule(_BaseStepTimeRule):
     """
-    Detect windows dominated by compute without a strong cross-rank straggler.
+    Report dominant compute as informational context.
     """
 
     name: str = "compute_bound"
@@ -257,17 +252,11 @@ class ComputeBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.rank_straggler is not None:
-            return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
-        if context.input_bound_share >= context.thresholds.input_share_warn:
+        if context.input_bound_share >= context.thresholds.overhead_share_warn:
             return None
-        if context.residual_share >= context.thresholds.residual_share_warn:
-            return None
-        if not context.single_rank and (
-            context.compute_skew > context.thresholds.compute_bound_max_skew
-        ):
+        if context.residual_share >= context.thresholds.overhead_share_warn:
             return None
 
         label = (
@@ -278,10 +267,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
         return self._issue(
             kind="COMPUTE_BOUND",
             status="COMPUTE-BOUND",
-            severity=_severity(
-                context.compute_share,
-                context.thresholds.compute_bound_share_crit,
-            ),
+            severity="info",
             summary=f"Compute-bound; {label.lower()} is the largest phase.",
             action="Optimize model compute or reduce step cost.",
             metric="compute",
