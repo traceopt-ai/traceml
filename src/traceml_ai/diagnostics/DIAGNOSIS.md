@@ -94,7 +94,8 @@ These compatibility fields are not selected-clock phase-share denominators.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
 display or diagnosis. In the final text report, selected-clock phase shares
 are divided by `input_wait_ms + step_time_ms`; CPU compatibility rows are
-labeled separately.
+labeled separately. These report-table shares are observational and do not
+replace the median per-rank diagnosis score.
 
 Typical overhead diagnoses use selected-clock per-rank iteration shares:
 
@@ -123,6 +124,10 @@ When several Step Time findings qualify, TraceML orders them by severity, then
 score. A rank straggler wins only an exact severity-and-score tie with a
 typical finding; ties within the same scope preserve rule order. The primary
 diagnosis is always the first ordered issue.
+
+The Step Time summary card reuses the selected issue summary for its reason
+text. It does not recompute phase shares or rank-straggler attribution from
+display rollups.
 
 Shared Step Time diagnosis needs at least 2 steps to emit warning-only
 bottleneck diagnoses. Critical diagnoses are allowed once the window has at

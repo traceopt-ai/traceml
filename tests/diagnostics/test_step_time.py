@@ -1097,6 +1097,11 @@ def test_rank_straggler_coverage_changes_attribution_not_severity() -> None:
     assert named.kind == "INPUT_STRAGGLER"
     assert generic.score == named.score == pytest.approx(1.0)
     assert generic.severity == named.severity == "crit"
+    assert "r0 is slower than victim r1" in generic.summary
+    assert "r0 has excess input wait burden relative to victim r1" in (
+        named.summary
+    )
+    assert "~80.0% of visible wait cost" in named.summary
 
 
 def test_rank_straggler_component_coverage_is_bounded() -> None:

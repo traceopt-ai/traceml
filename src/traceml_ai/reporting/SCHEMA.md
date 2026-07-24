@@ -113,19 +113,18 @@ Primary diagnosis evidence uses a small union:
   "h2d_ms": 0.4,
   "compute_ms": 120.0,
   "residual_ms": 39.6,
-  "shares": {
-    "input_wait_pct": 33.3,
-    "h2d_pct": 0.2,
-    "compute_pct": 50.0,
-    "residual_pct": 16.5
-  },
+  "score": 0.333,
+  "score_basis": "median_per_rank_iteration_share",
+  "score_denominator": "input_wait_ms + step_time_ms per rank",
   "gpu_util_avg_percent": 37.8
 }
 ```
 
 `phase_share` is used for `INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and
-`COMPUTE_BOUND`. Values come from `step_time.global.average`. All phase-share
-percentages use `iteration_time_ms = input_wait_ms + step_time_ms`.
+`COMPUTE_BOUND`. Millisecond values come from `step_time.global.average` and
+are supporting observations only. For scored typical bottlenecks, `score` is
+the authoritative median per-rank iteration-impact fraction. Informational
+`COMPUTE_BOUND` has no fabricated iteration-impact score.
 
 ```json
 {
@@ -333,6 +332,8 @@ The public `total_step_ms` key is also CPU-clocked for compatibility; it is
 not the denominator for selected-clock phase shares. The final text report
 uses derived `iteration_time_ms = input_wait_ms + step_time_ms` for every
 selected-clock phase share and labels CPU compatibility rows separately.
+Those table shares are observational averages and may differ from the
+authoritative median per-rank diagnosis `score`.
 
 `residual_ms` is residual unattributed step time. It is averaged from
 per-step clamped residuals, not recomputed from already-averaged phase totals:

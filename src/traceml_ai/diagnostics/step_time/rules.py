@@ -122,9 +122,11 @@ class RankStragglerRule(_BaseStepTimeRule):
         )
         if evidence.kind == "STRAGGLER":
             summary = (
-                f"{_rank_str(rank)} appears to be the culprit rank "
+                f"{_rank_str(rank)} is slower than victim "
+                f"{_rank_str(evidence.victim_rank)} "
                 f"(~{_pct(evidence.score)} impact); no measured component "
-                f"explains {_pct(context.thresholds.straggler_cause_coverage_min)} "
+                "explains "
+                f"{_pct(context.thresholds.straggler_cause_coverage_min)} "
                 "of visible wait cost."
             )
             action = (
@@ -134,6 +136,7 @@ class RankStragglerRule(_BaseStepTimeRule):
         else:
             summary = (
                 f"{_rank_str(rank)} has excess {component_label} burden "
+                f"relative to victim {_rank_str(evidence.victim_rank)} "
                 f"(~{_pct(evidence.score)} impact; "
                 f"~{_pct(cause_coverage)} of visible wait cost)."
             )
@@ -286,7 +289,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"Residual time is {_pct(context.residual_share)} of the "
-                "typical step."
+                f"typical {context.diagnosis_clock} iteration time."
             ),
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "

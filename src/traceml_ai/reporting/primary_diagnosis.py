@@ -49,13 +49,15 @@ Evidence policy
 ---------------
 ``phase_share``
     Used for ``INPUT_BOUND``, ``H2D_BOUND``, ``RESIDUAL_HEAVY``, and
-    ``COMPUTE_BOUND``. Values come from ``step_time.global.average`` because
-    the diagnosis describes where the average step time went.
+    ``COMPUTE_BOUND``. Raw timing values from ``step_time.global.average`` are
+    supporting observations; the promoted diagnosis keeps the policy score
+    emitted by Step Time.
 
 ``rank_comparison``
     Used for ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``,
-    ``H2D_STRAGGLER``, and ``STRAGGLER``. Values come from step-time rank
-    summaries because the diagnosis compares ranks.
+    ``H2D_STRAGGLER``, and ``STRAGGLER``. Rank summaries are supporting
+    observations; culprit, victim, impact, and attribution remain owned by
+    the Step Time diagnosis.
 
 ``utilization_fallback``
     Used only when Step Time is balanced and System GPU utilization is low or
@@ -228,7 +230,7 @@ def _phase_share_evidence(
     step_time_summary: Mapping[str, Any],
     system_summary: Mapping[str, Any],
 ) -> JsonDict:
-    """Build evidence with selected-clock iteration-time phase shares."""
+    """Build supporting average phase observations for a Step Time finding."""
     average = _global_average(step_time_summary)
     total_ms = _float_or_none(average.get("total_step_ms"))
     step_time_ms = _float_or_none(average.get("step_time_ms"))
@@ -253,20 +255,6 @@ def _phase_share_evidence(
     for metric in PHASE_METRICS:
         evidence[metric] = _round(_float_or_none(average.get(metric)))
 
-    shares: JsonDict = {}
-    for metric in PHASE_METRICS:
-        value = _float_or_none(average.get(metric))
-        key = metric.replace("_ms", "_pct")
-        shares[key] = (
-            _round(100.0 * value / iteration_time_ms)
-            if (
-                value is not None
-                and iteration_time_ms
-                and iteration_time_ms > 0.0
-            )
-            else None
-        )
-    evidence["shares"] = shares
     evidence["gpu_util_avg_percent"] = _round(_gpu_util_avg(system_summary))
     return evidence
 
@@ -461,83 +449,6 @@ def _straggler_comparisons(
     ]
 
 
-def _phase_share_summary(kind: str, evidence: Mapping[str, Any]) -> str:
-    """Return a concise primary summary for phase-share diagnoses."""
-    total = _float_or_none(evidence.get("step_time_ms")) or _float_or_none(
-        evidence.get("total_step_ms")
-    )
-    if kind == "INPUT_BOUND":
-        value = _float_or_none(evidence.get("input_wait_ms"))
-        iteration_time = _float_or_none(evidence.get("iteration_time_ms"))
-        if value is not None and iteration_time is not None:
-            return (
-                f"Input wait was {value:.1f}ms of "
-                f"{iteration_time:.1f}ms iteration time."
-            )
-        return "Input wait took a large share of iteration time."
-    if kind == "H2D_BOUND":
-        value = _float_or_none(evidence.get("h2d_ms"))
-        iteration_time = _float_or_none(evidence.get("iteration_time_ms"))
-        if value is not None and iteration_time is not None:
-            return (
-                f"H2D transfer took {value:.1f}ms of "
-                f"{iteration_time:.1f}ms iteration time."
-            )
-        return "H2D transfer took a large share of iteration time."
-    if kind == "RESIDUAL_HEAVY":
-        value = _float_or_none(evidence.get("residual_ms"))
-        if value is not None and total is not None:
-            return (
-                f"Residual time took {value:.1f}ms of a "
-                f"{total:.1f}ms average step."
-            )
-        return "Residual time took a large share of step time."
-    if kind == "COMPUTE_BOUND":
-        value = _float_or_none(evidence.get("compute_ms"))
-        if value is not None and total is not None:
-            return (
-                f"Model compute took {value:.1f}ms of a "
-                f"{total:.1f}ms average step."
-            )
-        return "Most step time was model compute."
-    return "Step time was dominated by one phase."
-
-
-def _rank_comparison_summary(
-    kind: str,
-    evidence: Mapping[str, Any],
-) -> str:
-    """Return a concise primary summary for rank-comparison diagnoses."""
-    if kind == "STRAGGLER":
-        return "Visible rank skew was sync-bound or unattributed."
-
-    metric = str(evidence.get("metric") or "step_time")
-    phase = str(evidence.get("phase") or metric.replace("_ms", ""))
-    phase_label = {
-        "dataloader": "input wait",
-        "input": "input wait",
-        "residual": "residual time",
-    }.get(phase, phase)
-    median = _mapping(evidence.get("median"))
-    worst = _mapping(evidence.get("worst"))
-    worst_rank = _int_or_none(worst.get("rank"))
-    median_rank = _int_or_none(median.get("rank"))
-    worst_value = _float_or_none(worst.get("value_ms"))
-    median_value = _float_or_none(median.get("value_ms"))
-
-    if (
-        worst_rank is not None
-        and median_rank is not None
-        and worst_value is not None
-        and median_value is not None
-    ):
-        return (
-            f"Rank r{worst_rank} {phase_label} was {worst_value:.1f}ms "
-            f"vs median rank r{median_rank} at {median_value:.1f}ms."
-        )
-    return "One rank was materially slower than its peers."
-
-
 def _promote_step_time_primary(
     *,
     kind: str,
@@ -551,14 +462,12 @@ def _promote_step_time_primary(
             step_time_summary=step_time_summary,
             system_summary=system_summary,
         )
-        summary = _phase_share_summary(kind, evidence)
     else:
         evidence = _rank_comparison_evidence(
             step_time_summary=step_time_summary,
             system_summary=system_summary,
             diagnosis=diagnosis,
         )
-        summary = _rank_comparison_summary(kind, evidence)
     evidence.update(_step_time_score_evidence(kind=kind, diagnosis=diagnosis))
 
     return _primary_payload(
@@ -566,7 +475,7 @@ def _promote_step_time_primary(
         status=_diag_field(diagnosis, "status", kind),
         severity=_diag_field(diagnosis, "severity", "info"),
         section=STEP_TIME_SECTION,
-        summary=summary or _diag_field(diagnosis, "summary", ""),
+        summary=_diag_field(diagnosis, "summary", ""),
         action=_diag_field(diagnosis, "action", ""),
         evidence=evidence,
     )
