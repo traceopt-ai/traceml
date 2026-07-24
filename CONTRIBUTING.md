@@ -154,6 +154,31 @@ To keep the project focused, we are currently **not** accepting:
 
 ---
 
+## Releasing (maintainers)
+
+There is no version to edit anywhere in the repo. The package version comes
+from the git tag (`setuptools-scm`), and a tag is what starts a release.
+
+**Cut a release from the Actions tab:** go to Actions -> "Cut a release" ->
+Run workflow, type the version (e.g. `0.3.5`, no leading `v`). This tags,
+builds, and publishes to PyPI in one run. No git commands to remember.
+
+Pushing a tag from a local checkout still works too, if you'd rather:
+
+```bash
+git tag v0.3.5
+git push upstream v0.3.5
+```
+
+Either path publishes to PyPI automatically. From there, conda-forge's own
+bot picks up the new PyPI release and opens a version-bump PR on the
+`traceml-ai` feedstock. If the release only changed the version, that PR
+merges itself. If it added, dropped, or repinned a runtime dependency,
+someone edits the recipe in that bot PR by hand before it merges, since the
+bot only knows how to bump a version number.
+
+---
+
 ## Communication
 
 - Bugs and features: GitHub Issues
