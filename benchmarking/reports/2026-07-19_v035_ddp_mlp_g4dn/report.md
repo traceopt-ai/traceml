@@ -6,7 +6,7 @@
   [`../2026-06-11_pr153_ddp_mlp_g4dn/report.md`](../2026-06-11_pr153_ddp_mlp_g4dn/report.md))
   on a newer TraceML version and different hardware, to confirm the
   overhead figure still holds.
-- **Workload:** [`benchmarking/workloads/ddp_mlp_e2e.py`](../../workloads/ddp_mlp_e2e.py)
+- **Workload:** [`benchmarking/wallclock_overhead/ddp_mlp_e2e.py`](../../wallclock_overhead/ddp_mlp_e2e.py)
 - **Hardware:** 1× AWS `g4dn.12xlarge` (4× Tesla T4), `eu-central-1`,
   spot instance.
 

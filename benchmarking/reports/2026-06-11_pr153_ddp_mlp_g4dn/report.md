@@ -3,7 +3,7 @@
 - **Date:** 2026-06-12 · **Version:** TraceML v0.3.1 (`multnode_display` branch)
 - **Scope:** Performance and resource overhead of the base multi-node / DDP
   aggregator + display telemetry layer introduced by PR #153.
-- **Workload:** [`benchmarking/workloads/ddp_mlp_e2e.py`](../../workloads/ddp_mlp_e2e.py)
+- **Workload:** [`benchmarking/wallclock_overhead/ddp_mlp_e2e.py`](../../wallclock_overhead/ddp_mlp_e2e.py)
 - **Hardware:** 2× AWS `g4dn.xlarge` (1× Tesla T4, 16 GB RAM each),
   `eu-central-1`; driver 595.71.05, CUDA 13.0, torch 2.11.0+cu130,
   NCCL 2.28.9, Python 3.13. Multi-node = 2 nodes × 1 GPU, static

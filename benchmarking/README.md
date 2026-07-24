@@ -1,92 +1,61 @@
 # TraceML overhead benchmarking
 
-TraceML measures its own runtime cost through two independent tracks, both
-living under this `benchmarking/` folder — follow the links below for the
-actual instructions.
+Two independent tracks measure TraceML's runtime cost. The wall-clock
+track answers "how much slower is training end to end?"; the attribution
+track answers "which instrumentation hook costs what, per step?".
+
+**Headline (as of 2026-07-22):** TraceML adds **less than 1 ms per rank
+per training step**, and end-to-end throughput overhead has measured at
+**roughly 1% or below** on every configuration tested.
 
 ```mermaid
 flowchart LR
-    A["Wall-clock overhead<br/>workloads/<br/>(coarse, paired repeats)"] -->|"answers:<br/>is there overhead?"| C[Overhead story]
+    A["Wall-clock overhead<br/>wallclock_overhead/<br/>(coarse, paired repeats)"] -->|"answers:<br/>is there overhead?"| C[Overhead story]
     B["Attribution harness<br/>perf_benchmark/<br/>(fine, per-hook, per-baseline)"] -->|"answers:<br/>where does it come from?"| C
 ```
 
 ## Layout
 
-| Folder | What it holds | Doc |
-|---|---|---|
-| [`workloads/`](workloads/) | Wall-clock harness: the training script + paired `time` methodology | [`workloads/README.md`](workloads/README.md) |
-| [`perf_benchmark/`](perf_benchmark/) | Attribution harness: config-driven runner, baselines, aggregation | [`perf_benchmark/README.md`](perf_benchmark/README.md) |
-| [`analysis/`](analysis/) | Dated campaign write-ups from **both** tracks (report + distilled CSVs) | [`analysis/README.md`](analysis/README.md) |
+| Folder | What it holds |
+|---|---|
+| [`wallclock_overhead/`](wallclock_overhead/) | Wall-clock track: training script + paired `time` methodology and reproduction commands |
+| [`perf_benchmark/`](perf_benchmark/) | Attribution track: config-driven runner, baselines, aggregation |
+| [`reports/`](reports/) | Dated campaign reports from both tracks (report + distilled CSVs) |
 
-## Wall-clock overhead — `workloads/`
+## Wall-clock overhead — [`wallclock_overhead/`](wallclock_overhead/README.md)
 
-**What it measures:** end-to-end training-time cost of the full multi-node
-telemetry/aggregation layer, as a single number per topology.
+Paired repeats of the same training script — `time torchrun ...` (native)
+vs `time traceml run ...` (TraceML) — alternated in order to cancel
+thermal/environment drift, identical args each time. Reproducible with
+nothing but the two `time` commands.
 
-**Granularity:** coarse. One wall-clock and one throughput percentage per
-topology; no breakdown of which internal component contributes the cost.
+| Campaign | TraceML | Hardware / topology | Workload & config | Repeats | Throughput overhead |
+|---|---|---|---|---|---|
+| [2026-06-11](reports/2026-06-11_pr153_ddp_mlp_g4dn/report.md) | v0.3.1 | 2× g4dn.xlarge (1× T4 each): single GPU and 2-node DDP | DDP MLP, batch 256, hidden dim 4096, 600 s/trial | 5 paired per topology, 20/20 trials clean | **+1.02%** single GPU · **≈0%** 2-node DDP (network-bound) |
+| [2026-07-19](reports/2026-07-19_v035_ddp_mlp_g4dn/report.md) | v0.3.5 | 1× g4dn.12xlarge (4× T4): single GPU and 4-GPU DDP | same script, identical native/TraceML args, 300 s/trial | 5 paired per topology | **+0.95% ± 0.09** single GPU · **+0.41% ± 0.07** 4-GPU DDP |
 
-**Method:** paired repeats — `time torchrun ...` (native) vs
-`time traceml run ...` (TraceML), alternated order to cancel thermal/
-environment bias, identical args each time. Requires no TraceML-specific
-tooling to reproduce; anyone can run the same two `time` commands themselves.
+## Attribution — [`perf_benchmark/`](perf_benchmark/README.md)
 
-**Campaigns so far:**
+Config-driven runner comparing three cells per condition —
+`never_init` (TraceML never initialized), `trace_manual`, `trace_auto` —
+with CUDA-synced step timing. Statistics use the median of independent
+process-repeat medians, and any delta inside the baseline's noise floor
+is reported as a bound, never as zero.
 
-| Date | TraceML version | Hardware | 1-GPU throughput overhead | Multi-GPU/DDP throughput overhead |
-|---|---|---|---|---|
-| 2026-06-11 | v0.3.1 | 2× AWS g4dn.xlarge (T4) | +1.02% | ≈0% (network-bound floor) |
-| 2026-07-19 | v0.3.5 | AWS g4dn.12xlarge (T4) | +0.95% ± 0.09 | +0.41% ± 0.07 |
+| Campaign | Code | Hardware / topology | Workload & config | Repeats | Per-step overhead vs `never_init` |
+|---|---|---|---|---|---|
+| [2026-07-22](reports/2026-07-22_clean_1_2_4node_g4dn/report.md) | `benchmarking` @ `58a177c` | 1 / 2 / 4 nodes, each g4dn.xlarge (1× T4), on-demand | `tiny_mlp`, synthetic data, batch 256 / 512 / 1024, 1000 timed steps + 100 warmup discarded, step timing, GIL probe off | 10 fresh processes per cell | `trace_auto` **+0.17–0.58 ms per rank** · `trace_manual` **+0.05–0.28 ms per rank** |
 
-```mermaid
-xychart-beta
-    title "Throughput overhead by campaign (%)"
-    x-axis ["06-11 1xT4", "06-11 2-node DDP", "07-19 1xT4", "07-19 4xT4 DDP"]
-    y-axis "Overhead %" 0 --> 1.5
-    bar [1.02, 0, 0.95, 0.41]
-```
+Percentages are deliberately not the headline here: the same ~0.4 ms cost
+is 42% of a 1.4 ms single-node step but 4% of a 9.3 ms 4-node step — the
+baseline grows with node count, the cost does not. An earlier 2026-07-21
+campaign is retained as GIL-stress diagnostic data only (its configs
+unknowingly ran the GIL stress probe in every cell); see
+[`reports/README.md`](reports/README.md).
 
-![Throughput across the 2026-06-11 campaign](analysis/2026-06-11_pr153_ddp_mlp_g4dn/plots/06_throughput.png)
+## If you only need one number
 
-Full write-ups: [`workloads/README.md`](workloads/README.md),
-[`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md),
-[`analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md`](analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md).
-
-## Attribution / automated harness — `perf_benchmark/`
-
-**What it measures:** where overhead comes from — which instrumentation
-hook (dataloader, forward, backward, H2D, optimizer, background sampler
-thread) contributes, and whether that hook runs on the training-critical
-path or off-thread.
-
-**Granularity:** fine. Three baselines (`never_init` / `trace_manual` /
-`trace_auto`) × two timing modes (`step` headline / `phase` attribution),
-plus a static source audit tagging every hook `critical_path: true/false`.
-
-**Method:** JSON-config-driven automated runner + aggregator; see
-[`perf_benchmark/README.md`](perf_benchmark/README.md) for the full
-methodology and every reproduction command.
-
-**Campaigns so far:**
-
-| Date | TraceML version | Hardware | Headline |
-|---|---|---|---|
-| 2026-07-22 | benchmarking branch @ `58a177c` | 1/2/4× AWS g4dn.xlarge (1× T4 each), on-demand | `trace_auto` adds **< 1 ms per rank per step** (0.17–0.58 ms measured) across every topology and batch size (256/512/1024) tested |
-
-The absolute cost stays roughly constant while the baseline step time grows
-with node count, so the same overhead reads as 42% of a 1.4 ms single-node
-step but only ~4% of a 9.3 ms 4-node step — lead with the ms figure, not
-the percentage. Full write-up:
-[`analysis/2026-07-22_clean_1_2_4node_g4dn/report.md`](analysis/2026-07-22_clean_1_2_4node_g4dn/report.md).
-(An earlier 2026-07-21 campaign is retained as GIL-stress diagnostic data
-only — its configs unknowingly ran the GIL stress probe in every cell; see
-that report's superseded banner.)
-
-## Reading this as an outside visitor
-
-If you only need one number: the wall-clock track's latest campaign
-(2026-07-19 row above) is the current headline overhead figure. The
-attribution track exists to explain *why* that number is what it is, not
-to replace it.
-
-The main repository README's measured-overhead line links here.
+TraceML costs **under 1 ms per rank per training step** (attribution
+track), which shows up as **roughly 1% or less** end-to-end on the
+configurations tested (wall-clock track). The main repository README's
+measured-overhead line links to this page.

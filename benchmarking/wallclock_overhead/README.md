@@ -4,7 +4,7 @@ The coarse overhead track: paired `time torchrun` vs `time traceml run`
 runs of [`ddp_mlp_e2e.py`](ddp_mlp_e2e.py), no TraceML-specific tooling
 required to reproduce. For how this track relates to the attribution
 harness (`perf_benchmark/`), see the [benchmarking overview](../README.md).
-Campaign write-ups live in [`../analysis/`](../analysis/README.md).
+Campaign write-ups live in [`../reports/`](../reports/README.md).
 
 ## Simple End-To-End Timing
 
@@ -14,7 +14,7 @@ training script with and without TraceML and compare shell wall time.
 Single GPU native:
 
 ```bash
-time torchrun --nproc_per_node=1 benchmarking/workloads/ddp_mlp_e2e.py \
+time torchrun --nproc_per_node=1 benchmarking/wallclock_overhead/ddp_mlp_e2e.py \
   --duration-sec 600 \
   --batch-size 256 \
   --hidden-dim 4096
@@ -23,7 +23,7 @@ time torchrun --nproc_per_node=1 benchmarking/workloads/ddp_mlp_e2e.py \
 Single GPU with TraceML:
 
 ```bash
-time traceml run benchmarking/workloads/ddp_mlp_e2e.py \
+time traceml run benchmarking/wallclock_overhead/ddp_mlp_e2e.py \
   --mode=summary \
   --run-name=e2e_1gpu_traceml_r01 \
   --nproc-per-node=1 \
@@ -92,7 +92,7 @@ identical args (`--duration-sec 600 --batch-size 256 --hidden-dim 4096`).
   per-step cost.
 
 Full write-up with plots:
-[`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](../analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md).
+[`analysis/2026-06-11_pr153_ddp_mlp_g4dn/report.md`](../reports/2026-06-11_pr153_ddp_mlp_g4dn/report.md).
 
 ## Results: second campaign (2026-07-19, `ddp_mlp_e2e`, v0.3.5)
 
@@ -107,7 +107,7 @@ Tesla T4), `eu-central-1`.
 | 4-GPU single-node DDP        | **+0.41% ± 0.07** | +1.76% ± 0.36 |
 
 Full write-up:
-[`analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md`](../analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md).
+[`analysis/2026-07-19_v035_ddp_mlp_g4dn/report.md`](../reports/2026-07-19_v035_ddp_mlp_g4dn/report.md).
 
 ## Multi-Node Method
 
@@ -118,7 +118,7 @@ TraceML command on both nodes with `traceml run`.
 TraceML node 0:
 
 ```bash
-time traceml run benchmarking/workloads/ddp_mlp_e2e.py \
+time traceml run benchmarking/wallclock_overhead/ddp_mlp_e2e.py \
   --mode=summary \
   --logs-dir=benchmarking/results/logs \
   --run-name=e2e_2x1_traceml_r01 \
@@ -137,7 +137,7 @@ time traceml run benchmarking/workloads/ddp_mlp_e2e.py \
 TraceML node 1:
 
 ```bash
-time traceml run benchmarking/workloads/ddp_mlp_e2e.py \
+time traceml run benchmarking/wallclock_overhead/ddp_mlp_e2e.py \
   --mode=summary \
   --logs-dir=benchmarking/results/logs \
   --run-name=e2e_2x1_traceml_r01 \

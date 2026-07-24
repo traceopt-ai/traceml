@@ -3,8 +3,8 @@
 This is intentionally close to ``examples/ddp_minimal.py`` but parameterized
 for benchmark runs. Use it to compare whole-command wall time:
 
-    time torchrun --nproc_per_node=1 benchmarking/workloads/ddp_mlp_e2e.py
-    time traceml run benchmarking/workloads/ddp_mlp_e2e.py --nproc-per-node=1
+    time torchrun --nproc_per_node=1 benchmarking/wallclock_overhead/ddp_mlp_e2e.py
+    time traceml run benchmarking/wallclock_overhead/ddp_mlp_e2e.py --nproc-per-node=1
 
 The script only enables TraceML when it is launched by ``traceml run``.
 Plain ``python``/``torchrun`` runs execute normal PyTorch training.
