@@ -232,18 +232,32 @@ def test_resolve_config_history_disabled_via_cli() -> None:
     assert result["history_enabled"] is False
 
 
-def test_load_yaml_config_unreadable_file(tmp_path: Path) -> None:
+def test_load_yaml_config_unreadable_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A file that exists but cannot be read raises OSError with a clear message."""
+    import builtins
     import os
+    import stat
     import sys
 
     if sys.platform == "win32":
         pytest.skip("chmod is not enforced the same way on Windows")
-    if getattr(os, "geteuid", lambda: -1)() == 0:
-        pytest.skip("root bypasses the permission bits this test relies on")
 
     p = _write(tmp_path, "mode: cli\n")
     p.chmod(0o000)
+
+    if os.geteuid() == 0:
+        real_open = builtins.open
+
+        # Root ignores the mode bits, so apply the read check the kernel skips.
+        def guarded_open(file, *args, **kwargs):
+            if file == p and not (p.stat().st_mode & stat.S_IRUSR):
+                raise PermissionError(13, "Permission denied")
+            return real_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", guarded_open)
+
     try:
         with pytest.raises(OSError, match="Cannot read config file"):
             load_yaml_config(p)
