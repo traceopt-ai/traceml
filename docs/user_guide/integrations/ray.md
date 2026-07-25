@@ -203,7 +203,7 @@ TraceMLRayConfig(
     patch_h2d=None,
     logs_dir="./logs",
     session_id="",
-    sampler_interval_sec=1.0,
+    sampler_interval_sec=2.0,
     bind_host="0.0.0.0",
     port=0,
 )
@@ -212,6 +212,10 @@ TraceMLRayConfig(
 The default ``mode="summary"`` is recommended for Ray because distributed worker
 logs are noisy. Use ``mode="cli"`` only when you specifically want live terminal
 rendering from the aggregator actor.
+
+``sampler_interval_sec`` defaults to ``2.0`` seconds. It controls worker sampling
+and the aggregator actor's live UI refresh; incoming TCP telemetry is drained as
+soon as it arrives.
 
 ``init_mode`` is passed to ``traceml.init(mode="auto")`` inside each Ray
 worker. The Ray Data ``wrap_dataloader_fetch(...)`` pattern above works with

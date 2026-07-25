@@ -60,6 +60,7 @@ class StepTimeSummarySection(
         """Adapt the canonical Step Time window to diagnosis."""
         return StepTimeDiagnosisInput(
             window=data.step_time_window,
+            training_strategy=data.training_strategy,
         )
 
     def diagnose(

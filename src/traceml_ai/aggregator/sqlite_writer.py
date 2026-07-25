@@ -16,6 +16,9 @@ from typing import Any, Dict, Iterator, Optional
 
 from traceml_ai.aggregator.sqlite_writers import process as process_sql_writer
 from traceml_ai.aggregator.sqlite_writers import (
+    runtime_environment as runtime_environment_sql_writer,
+)
+from traceml_ai.aggregator.sqlite_writers import (
     stdout_stderr as stdout_stderr_sql_writer,
 )
 from traceml_ai.aggregator.sqlite_writers import (
@@ -36,6 +39,7 @@ from traceml_ai.telemetry.envelope import (
 )
 
 _PROJECTION_WRITERS = [
+    runtime_environment_sql_writer,
     system_sql_writer,
     process_sql_writer,
     step_time_sql_writer,
