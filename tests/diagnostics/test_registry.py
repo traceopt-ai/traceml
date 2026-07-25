@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from traceml_ai.diagnostics import model_diagnostics
 from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
@@ -281,8 +282,6 @@ def test_default_model_diagnostics_payload_keeps_existing_sources():
 
 
 def test_model_step_memory_diagnostics_use_live_policy(monkeypatch):
-    import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
-
     captured = {}
 
     def fake_diagnosis(metrics, *, thresholds, **kwargs):

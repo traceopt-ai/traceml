@@ -234,10 +234,13 @@ def test_resolve_config_history_disabled_via_cli() -> None:
 
 def test_load_yaml_config_unreadable_file(tmp_path: Path) -> None:
     """A file that exists but cannot be read raises OSError with a clear message."""
+    import os
     import sys
 
     if sys.platform == "win32":
         pytest.skip("chmod is not enforced the same way on Windows")
+    if getattr(os, "geteuid", lambda: -1)() == 0:
+        pytest.skip("root bypasses the permission bits this test relies on")
 
     p = _write(tmp_path, "mode: cli\n")
     p.chmod(0o000)
