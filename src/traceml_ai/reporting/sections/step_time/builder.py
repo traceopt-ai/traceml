@@ -232,173 +232,6 @@ def _format_card_ranks(stats: StepTimeCardStats) -> Optional[str]:
     )
 
 
-def _largest_compute_phase(
-    summary: Optional[RankStepSummary],
-) -> Optional[str]:
-    """Return the largest compute bucket for one rank summary."""
-    if summary is None:
-        return None
-    values = {
-        "forward": finite_float(summary.avg_forward_ms),
-        "backward": finite_float(summary.avg_backward_ms),
-        "optimizer": finite_float(summary.avg_optimizer_ms),
-    }
-    return max(values, key=values.get) if values else None
-
-
-def _issue_by_kind(issues: tuple[Any, ...], kind: str) -> Optional[Any]:
-    """Return the first issue with the requested kind."""
-    for issue in issues:
-        if str(getattr(issue, "kind", "") or "") == kind:
-            return issue
-    return None
-
-
-def _diagnosis_evidence(diagnosis: Any) -> Dict[str, Any]:
-    """Return diagnosis evidence as a plain mapping."""
-    evidence = getattr(diagnosis, "evidence", None)
-    return evidence if isinstance(evidence, dict) else {}
-
-
-def _input_bound_evidence_reason(diagnosis: Any) -> Optional[str]:
-    """Build a short input-bound reason from selected-clock evidence."""
-    evidence = _diagnosis_evidence(diagnosis)
-    input_wait_ms = evidence.get("input_wait_ms")
-    step_time_ms = evidence.get("step_time_ms")
-    iteration_time_ms = evidence.get("iteration_time_ms")
-    diagnosis_clock = str(evidence.get("diagnosis_clock") or "").lower()
-    if input_wait_ms is None or step_time_ms is None:
-        return None
-    if iteration_time_ms is None:
-        try:
-            iteration_time_ms = float(input_wait_ms) + float(step_time_ms)
-        except Exception:
-            return None
-    clock_text = (
-        f" {diagnosis_clock}" if diagnosis_clock in {"cpu", "gpu"} else ""
-    )
-    return (
-        f"Input wait was {format_ms(input_wait_ms)} of "
-        f"{format_ms(iteration_time_ms)}{clock_text} iteration time."
-    )
-
-
-def _compute_phase_pair_from_rank_values(
-    phase: str,
-    per_global_rank_summary: Dict[int, RankStepSummary],
-) -> StepTimeMetricPair:
-    """Return median/worst timing values for one compute phase."""
-    phase_key = str(phase or "").lower()
-    field_by_phase = {
-        "forward": "avg_forward_ms",
-        "backward": "avg_backward_ms",
-        "optimizer": "avg_optimizer_ms",
-    }
-    field_name = field_by_phase.get(phase_key)
-    if field_name is None:
-        return StepTimeMetricPair(None, None, None, None)
-
-    return _metric_pair_from_rank_values(
-        {
-            int(rank): finite_float(getattr(summary, field_name))
-            for rank, summary in per_global_rank_summary.items()
-        }
-    )
-
-
-def _step_time_card_reason(
-    diagnosis: Any,
-    *,
-    stats: Optional[StepTimeCardStats],
-    per_global_rank_summary: Dict[int, RankStepSummary],
-    issues: tuple[Any, ...] = (),
-) -> str:
-    """Build the short `Why` line used only by the human card."""
-    kind = str(getattr(diagnosis, "kind", "") or "")
-    if kind == "NO_DATA":
-        return "Need more step-time samples."
-    if kind == "WARMUP":
-        return str(getattr(diagnosis, "reason", "") or "").strip()
-    if stats is None:
-        return str(getattr(diagnosis, "reason", "") or "n/a")
-
-    if kind == "BALANCED":
-        return "No clear timing bottleneck."
-    if kind == "INPUT_STRAGGLER":
-        evidence = _format_ms_pair(stats.input.worst_ms, stats.input.median_ms)
-        return (
-            f"{_global_rank_label(stats.input.worst_global_rank)} input was "
-            f"slower than median global rank ({evidence})."
-        )
-    if kind == "COMPUTE_STRAGGLER":
-        issue = _issue_by_kind(issues, "COMPUTE_STRAGGLER")
-        phase = str(getattr(issue, "phase", "") or "").lower()
-        phase_stats = _compute_phase_pair_from_rank_values(
-            phase,
-            per_global_rank_summary,
-        )
-        if phase_stats.worst_ms is not None:
-            ranks = tuple(getattr(issue, "ranks", ()) or ())
-            rank = int(ranks[0]) if ranks else phase_stats.worst_global_rank
-            evidence = _format_ms_pair(
-                phase_stats.worst_ms,
-                phase_stats.median_ms,
-            )
-            return (
-                f"{_global_rank_label(rank)} {phase} was slower than "
-                f"peer median ({evidence})."
-            )
-
-        evidence = _format_ms_pair(
-            stats.compute.worst_ms,
-            stats.compute.median_ms,
-        )
-        return (
-            f"{_global_rank_label(stats.compute.worst_global_rank)} compute "
-            f"was slower than median global rank ({evidence})."
-        )
-    if kind == "H2D_STRAGGLER":
-        evidence = _format_ms_pair(stats.h2d.worst_ms, stats.h2d.median_ms)
-        return (
-            f"{_global_rank_label(stats.h2d.worst_global_rank)} H2D was "
-            f"slower than median global rank ({evidence})."
-        )
-    if kind == "STRAGGLER":
-        return "Visible rank skew was sync-bound or unattributed."
-    if kind == "INPUT_BOUND":
-        issue = _issue_by_kind(issues, "INPUT_BOUND")
-        evidence_reason = _input_bound_evidence_reason(issue or diagnosis)
-        if evidence_reason:
-            return evidence_reason
-        return str(
-            getattr(diagnosis, "reason", "") or "Input wait was high."
-        ).strip()
-    if kind == "H2D_BOUND":
-        evidence = (
-            f"{format_ms(stats.h2d.worst_ms)}/"
-            f"{format_ms(stats.total_step.worst_ms)}"
-        )
-        return f"H2D transfer was high inside the total step ({evidence})."
-    if kind == "RESIDUAL_HEAVY":
-        evidence = (
-            f"{format_ms(stats.residual.worst_ms)}/"
-            f"{format_ms(stats.total_step.worst_ms)}"
-        )
-        return f"Residual time was high inside the total step ({evidence})."
-    if kind == "COMPUTE_BOUND":
-        summary = per_global_rank_summary.get(stats.compute.worst_global_rank)
-        phase = _largest_compute_phase(summary)
-        suffix = f"; {phase} was largest" if phase else ""
-        evidence = (
-            f"{format_ms(stats.compute.worst_ms)}/"
-            f"{format_ms(stats.total_step.worst_ms)}"
-        )
-        return f"Compute dominated ({evidence}){suffix}."
-
-    reason = str(getattr(diagnosis, "reason", "") or "").strip()
-    return reason or "No clear timing bottleneck."
-
-
 def _global_rank_entry_to_json(
     global_rank: int,
     summary: RankStepSummary,
@@ -456,6 +289,7 @@ def build_step_time_payload(
     summary_diag = diagnosis_result.primary
     issues = diagnosis_result.issues
     diagnosis_json, issues_json = diagnostic_result_to_json(diagnosis_result)
+    primary_issue = issues[0]
 
     global_rollup = build_global_rollup(
         per_global_rank_summary=rank_summary,
@@ -471,12 +305,11 @@ def build_step_time_payload(
     )
     lines = [title, "Step Time"]
     diagnosis_status = summary_diag.status
-    diagnosis_why = _step_time_card_reason(
-        summary_diag,
-        stats=card_stats,
-        per_global_rank_summary=rank_summary,
-        issues=tuple(issues),
-    )
+    diagnosis_why = str(
+        primary_issue.summary
+        or summary_diag.reason
+        or "No clear timing bottleneck."
+    ).strip()
 
     if not rank_summary:
         latest_step_text = (

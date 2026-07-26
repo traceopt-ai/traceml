@@ -178,6 +178,7 @@ def test_final_text_uses_single_process_average_layout():
         "INPUT_BOUND",
         "INPUT-BOUND",
         severity="crit",
+        summary="Input wait is 48.5% of the typical GPU iteration time.",
         action="Increase workers, prefetch, or storage throughput.",
     )
     step_time = _payload(
@@ -224,7 +225,9 @@ def test_final_text_uses_single_process_average_layout():
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
-    assert "Why: Input wait was 130.8ms of 269.9ms iteration time." in text
+    assert (
+        "Why: Input wait is 48.5% of the typical GPU iteration time." in text
+    )
     assert "Next: Increase workers, prefetch, or storage throughput." in text
     assert "System Evidence" in text
     assert "Metric            Average" in text
@@ -287,6 +290,7 @@ def test_final_text_includes_h2d_bound_diagnosis():
             "H2D_BOUND",
             "H2D-BOUND",
             severity="crit",
+            summary="H2D transfer is 14.3% of the typical GPU iteration time.",
             action="Inspect pinned memory and batch transfers.",
         ),
         global_summary={
@@ -314,7 +318,7 @@ def test_final_text_includes_h2d_bound_diagnosis():
     )
 
     assert "TraceML Verdict: H2D-BOUND / CRITICAL" in payload["text"]
-    assert "Why: H2D transfer took 20.0ms of 140.0ms iteration time." in (
+    assert "Why: H2D transfer is 14.3% of the typical GPU iteration time." in (
         payload["text"]
     )
 
@@ -324,6 +328,10 @@ def test_final_text_uses_multi_process_comparison_layout():
         "INPUT_STRAGGLER",
         "INPUT STRAGGLER",
         severity="crit",
+        summary=(
+            "r0 has excess input wait burden relative to victim r1 "
+            "(~82.6% impact; ~100.0% of visible wait cost)."
+        ),
         phase="input",
         action=(
             "Inspect input wait, collate_fn, preprocessing, and storage "
@@ -406,9 +414,11 @@ def test_final_text_uses_multi_process_comparison_layout():
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text
-    assert (
-        "Rank r0 input wait was 264.5ms vs median rank r1 at 13.8ms." in text
+    assert payload["primary_diagnosis"]["summary"] == (
+        "r0 has excess input wait burden relative to victim r1 "
+        "(~82.6% impact; ~100.0% of visible wait cost)."
     )
+    assert "Why: r0 has excess input wait burden relative to victim r1" in text
     assert (
         "Metric          Median        Worst         Skew        Scope" in text
     )

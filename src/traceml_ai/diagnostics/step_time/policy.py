@@ -10,15 +10,16 @@ class DiagnosisThresholds:
     """
     Thresholds used by the shared step-time rules.
 
-    Live and summary policies may choose different values, but they still run
-    the same rules and produce the same diagnosis vocabulary. Live and summary
-    differ by the selected timing window, not by extra diagnosis gates.
+    Built-in live and summary policies share these values and differ only by
+    their selected timing windows. Explicit callers may still supply a custom
+    policy.
 
     Typical overhead diagnoses use selected-clock per-rank iteration shares.
     The context takes the median of those shares across ranks, where
     ``iteration_time_ms = input_wait_ms + step_time_ms``. The shared overhead
     thresholds are the future configuration surface for input, residual, and
-    H2D policies.
+    H2D policies. Compute-bound uses the same denominator and a separate
+    informational dominance threshold.
 
     ``min_steps_for_warning_diag`` is the minimum window size for warning-only
     bottleneck diagnoses. ``min_steps_for_confident_diag`` is the minimum window
@@ -33,7 +34,7 @@ class DiagnosisThresholds:
     overhead_share_warn: float = 0.10
     overhead_share_crit: float = 0.20
 
-    compute_bound_share_warn: float = 0.85
+    compute_bound_share_warn: float = 0.90
 
     min_steps_for_warning_diag: int = 2
     min_steps_for_confident_diag: int = 20
@@ -49,24 +50,17 @@ class StepTimeDiagnosisPolicy:
     )
 
 
+DEFAULT_THRESHOLDS = DiagnosisThresholds()
+
 LIVE_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
     name="live",
-    thresholds=DiagnosisThresholds(),
+    thresholds=DEFAULT_THRESHOLDS,
 )
 
 SUMMARY_STEP_TIME_POLICY = StepTimeDiagnosisPolicy(
     name="summary",
-    thresholds=DiagnosisThresholds(
-        straggler_score_warn=0.10,
-        straggler_score_crit=0.20,
-        overhead_share_warn=0.10,
-        overhead_share_crit=0.20,
-        compute_bound_share_warn=0.88,
-        min_steps_for_confident_diag=20,
-    ),
+    thresholds=DEFAULT_THRESHOLDS,
 )
-
-DEFAULT_THRESHOLDS = LIVE_STEP_TIME_POLICY.thresholds
 
 
 __all__ = [

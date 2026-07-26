@@ -37,6 +37,7 @@ def _step_time(
     kind: str,
     *,
     status: str | None = None,
+    summary: str = "step-time summary",
     phase: str | None = None,
     issues: list[dict] | None = None,
 ) -> dict:
@@ -44,7 +45,7 @@ def _step_time(
         "kind": kind,
         "status": status or kind.replace("_", "-"),
         "severity": "warn",
-        "summary": "step-time summary",
+        "summary": summary,
         "action": "step-time action",
         "metric": None,
         "phase": phase,
@@ -96,7 +97,11 @@ def _primary(step_time: dict, system: dict | None = None) -> dict:
 
 def test_input_bound_uses_phase_share_evidence() -> None:
     primary = _primary(
-        _step_time("INPUT_BOUND", status="INPUT-BOUND"),
+        _step_time(
+            "INPUT_BOUND",
+            status="INPUT-BOUND",
+            summary="Input wait is 33.3% of the typical GPU iteration time.",
+        ),
         _system(gpu_util=38.0),
     )
 
@@ -104,7 +109,7 @@ def test_input_bound_uses_phase_share_evidence() -> None:
     assert primary["section"] == "step_time"
     assert primary["scope"] == "performance"
     assert primary["summary"] == (
-        "Input wait was 80.0ms of 240.0ms iteration time."
+        "Input wait is 33.3% of the typical GPU iteration time."
     )
     assert primary["evidence"] == {
         "type": "phase_share",
@@ -119,52 +124,107 @@ def test_input_bound_uses_phase_share_evidence() -> None:
         "h2d_ms": 10.0,
         "compute_ms": 120.0,
         "residual_ms": 20.0,
-        "shares": {
-            "input_wait_pct": 33.333,
-            "h2d_pct": 4.167,
-            "compute_pct": 50.0,
-            "residual_pct": 8.333,
-        },
         "gpu_util_avg_percent": 38.0,
     }
 
 
 def test_h2d_bound_uses_iteration_phase_share_evidence() -> None:
-    primary = _primary(_step_time("H2D_BOUND", status="H2D-BOUND"))
+    primary = _primary(
+        _step_time(
+            "H2D_BOUND",
+            status="H2D-BOUND",
+            summary="H2D transfer is 23.1% of the typical GPU iteration time.",
+        )
+    )
 
     assert primary["kind"] == "H2D_BOUND"
     assert primary["summary"] == (
-        "H2D transfer took 10.0ms of 240.0ms iteration time."
+        "H2D transfer is 23.1% of the typical GPU iteration time."
     )
     assert primary["evidence"]["type"] == "phase_share"
     assert primary["evidence"]["iteration_time_ms"] == 240.0
-    assert primary["evidence"]["shares"] == {
-        "input_wait_pct": 33.333,
-        "h2d_pct": 4.167,
-        "compute_pct": 50.0,
-        "residual_pct": 8.333,
-    }
+    assert "shares" not in primary["evidence"]
+
+
+def test_phase_share_primary_keeps_the_diagnosis_impact_score() -> None:
+    step_time = _step_time("H2D_BOUND", status="H2D-BOUND")
+    step_time["diagnosis"].update(
+        {
+            "score": 0.23125,
+            "evidence": {"h2d_share": 0.23125},
+        }
+    )
+
+    primary = _primary(step_time)
+
+    assert primary["evidence"]["score"] == 0.23125
+    assert primary["evidence"]["h2d_ms"] == 10.0
+    assert primary["evidence"]["iteration_time_ms"] == 240.0
+    assert primary["evidence"]["score"] != pytest.approx(10.0 / 240.0)
+    assert primary["evidence"]["score_basis"] == (
+        "median_per_rank_iteration_share"
+    )
+    assert primary["evidence"]["score_denominator"] == (
+        "input_wait_ms + step_time_ms per rank"
+    )
+    assert "shares" not in primary["evidence"]
+
+
+def test_straggler_primary_keeps_the_diagnosis_impact_score() -> None:
+    step_time = _step_time("STRAGGLER", status="STRAGGLER")
+    step_time["diagnosis"].update(
+        {
+            "score": 0.23,
+            "evidence": {
+                "visible_cost_ms": 23.0,
+                "iteration_time_ms": 100.0,
+            },
+        }
+    )
+
+    primary = _primary(step_time)
+
+    assert primary["evidence"]["score"] == 0.23
+    assert primary["evidence"]["score_basis"] == (
+        "visible_cost_ms / victim_iteration_time_ms"
+    )
+    assert primary["evidence"]["score_numerator_ms"] == 23.0
+    assert primary["evidence"]["score_denominator_ms"] == 100.0
 
 
 def test_residual_heavy_uses_residual_phase_share() -> None:
-    primary = _primary(_step_time("RESIDUAL_HEAVY", status="RESIDUAL-HEAVY"))
+    primary = _primary(
+        _step_time(
+            "RESIDUAL_HEAVY",
+            status="RESIDUAL-HEAVY",
+            summary=(
+                "Residual time is 21.0% of the typical GPU iteration time."
+            ),
+        )
+    )
 
     assert primary["kind"] == "RESIDUAL_HEAVY"
     assert primary["summary"] == (
-        "Residual time took 20.0ms of a 160.0ms average step."
+        "Residual time is 21.0% of the typical GPU iteration time."
     )
     assert primary["evidence"]["type"] == "phase_share"
-    assert primary["evidence"]["shares"]["residual_pct"] == 8.333
+    assert "shares" not in primary["evidence"]
 
 
 def test_compute_bound_uses_neutral_compute_phase_share() -> None:
-    primary = _primary(_step_time("COMPUTE_BOUND", status="COMPUTE-BOUND"))
+    primary = _primary(
+        _step_time(
+            "COMPUTE_BOUND",
+            status="COMPUTE-BOUND",
+            summary="Compute-bound; backward is the largest phase.",
+        )
+    )
 
     assert primary["kind"] == "COMPUTE_BOUND"
-    assert primary["summary"] == (
-        "Model compute took 120.0ms of a 160.0ms average step."
+    assert (
+        primary["summary"] == "Compute-bound; backward is the largest phase."
     )
-    assert primary["evidence"]["shares"]["compute_pct"] == 50.0
+    assert "shares" not in primary["evidence"]
 
 
 @pytest.mark.parametrize(
@@ -172,26 +232,22 @@ def test_compute_bound_uses_neutral_compute_phase_share() -> None:
         "kind",
         "phase",
         "expected_metric",
-        "expected_summary",
     ),
     [
         (
             "INPUT_STRAGGLER",
             "dataloader",
             "input_wait_ms",
-            "Rank r2 input wait was 120.0ms vs median rank r0 at 8.0ms.",
         ),
         (
             "COMPUTE_STRAGGLER",
             "optimizer",
             "optimizer_ms",
-            None,
         ),
         (
             "H2D_STRAGGLER",
             "h2d",
             "h2d_ms",
-            "Rank r2 h2d was 40.0ms vs median rank r1 at 10.0ms.",
         ),
     ],
 )
@@ -199,7 +255,6 @@ def test_rank_stragglers_use_rank_comparison_evidence(
     kind: str,
     phase: str,
     expected_metric: str,
-    expected_summary: str | None,
 ) -> None:
     primary = _primary(
         _step_time(
@@ -214,8 +269,7 @@ def test_rank_stragglers_use_rank_comparison_evidence(
     assert primary["evidence"]["metric"] == expected_metric
     assert primary["evidence"]["phase"] == phase
     assert primary["evidence"]["worst"]["rank"] == 2
-    if expected_summary is not None:
-        assert primary["summary"] == expected_summary
+    assert primary["summary"] == "step-time summary"
 
 
 def test_straggler_includes_input_and_compute_comparisons() -> None:

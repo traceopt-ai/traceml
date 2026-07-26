@@ -94,7 +94,8 @@ These compatibility fields are not selected-clock phase-share denominators.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
 display or diagnosis. In the final text report, selected-clock phase shares
 are divided by `input_wait_ms + step_time_ms`; CPU compatibility rows are
-labeled separately.
+labeled separately. These report-table shares are observational and do not
+replace the median per-rank diagnosis score.
 
 Typical overhead diagnoses use selected-clock per-rank iteration shares:
 
@@ -110,8 +111,25 @@ critical at 20%. `H2D_BOUND` requires GPU-selected timing, so asynchronous CPU
 host-call duration is not reported as transfer cost. Cross-rank skew remains
 evidence in a typical-bottleneck finding, but does not suppress one. In
 contrast, `H2D_STRAGGLER` identifies one rank's excess H2D time.
-`COMPUTE_BOUND` remains an informational finding when compute dominates the
-traced step and no material input, H2D, or residual overhead is visible.
+`COMPUTE_BOUND` remains an informational finding when the median per-rank
+compute share reaches 90% of selected-clock iteration time and no material
+input, H2D, or residual overhead is visible. Built-in live and summary policies
+use this same threshold; their analyzed window sizes differ.
+
+Step Time uses `DiagnosticIssue.score` as normalized iteration impact for
+`INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and all rank-straggler findings.
+Typical findings use the median per-rank share above; stragglers use the
+culprit/victim score below. `COMPUTE_BOUND` has no score because its
+informational context is excluded from impact-based primary ordering.
+
+When several Step Time findings qualify, TraceML orders them by severity, then
+score. A rank straggler wins only an exact severity-and-score tie with a
+typical finding; ties within the same scope preserve rule order. The primary
+diagnosis is always the first ordered issue.
+
+The Step Time summary card reuses the selected issue summary for its reason
+text. It does not recompute phase shares or rank-straggler attribution from
+display rollups.
 
 Shared Step Time diagnosis needs at least 2 steps to emit warning-only
 bottleneck diagnoses. Critical diagnoses are allowed once the window has at

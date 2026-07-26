@@ -17,7 +17,10 @@ from traceml_ai.diagnostics.step_time.api import (
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
-from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
+from traceml_ai.diagnostics.step_time.policy import (
+    LIVE_STEP_TIME_POLICY,
+    SUMMARY_STEP_TIME_POLICY,
+)
 from traceml_ai.diagnostics.step_time.rules import (
     ComputeBoundRule,
     H2DBoundRule,
@@ -30,6 +33,9 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
+)
+from traceml_ai.reporting.summaries.issue_summary import (
+    diagnostic_result_to_json,
 )
 from traceml_ai.utils.step_time_window import (
     build_step_time_window_from_events,
@@ -367,6 +373,7 @@ def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
     assert issue.metric == "input_wait"
     assert issue.phase == "input"
     assert issue.share_pct == pytest.approx(35.0 / 135.0)
+    assert issue.score == issue.share_pct
     assert issue.evidence["diagnosis_clock"] == "cpu"
     assert issue.evidence["input_wait_ms"] == pytest.approx(35.0)
     assert issue.evidence["step_time_ms"] == pytest.approx(100.0)
@@ -458,6 +465,7 @@ def test_h2d_bound_uses_gpu_iteration_share_thresholds(
     assert issue.metric == "h2d"
     assert issue.phase == "h2d"
     assert issue.share_pct == pytest.approx(h2d / 100.0)
+    assert issue.score == issue.share_pct
     assert issue.severity == expected_severity
 
 
@@ -546,6 +554,7 @@ def test_residual_heavy_uses_iteration_share_thresholds(
 
     assert issue is not None
     assert issue.share_pct == pytest.approx(residual / 100.0)
+    assert issue.score == issue.share_pct
     assert issue.severity == expected_severity
 
 
@@ -571,7 +580,59 @@ def test_compute_bound_is_informational_despite_compute_skew() -> None:
 
     assert issue is not None
     assert issue.severity == "info"
+    assert issue.score is None
     assert issue.skew_pct is not None
+
+
+@pytest.mark.parametrize(
+    ("compute", "expected"),
+    [(89.9, False), (90.0, True)],
+)
+def test_compute_bound_uses_iteration_share_threshold(
+    compute: float,
+    expected: bool,
+) -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            forward=compute,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        )
+    }
+
+    issue = ComputeBoundRule().evaluate(_rank_context(per_rank))
+
+    assert (issue is not None) is expected
+    if issue is not None:
+        assert issue.share_pct == pytest.approx(0.90)
+        assert issue.score is None
+
+
+def test_compute_share_is_median_of_per_rank_iteration_shares() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=0.0,
+            forward=100.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=100.0,
+            forward=80.0,
+            backward=0.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+    }
+
+    context = _rank_context(per_rank)
+
+    assert context.compute_share == pytest.approx(0.70)
+    aggregate_median_ratio = 90.0 / (50.0 + 100.0)
+    assert context.compute_share != pytest.approx(aggregate_median_ratio)
 
 
 def test_compute_bound_requires_existing_dominance_threshold() -> None:
@@ -607,6 +668,31 @@ def test_compute_bound_abstains_for_material_h2d() -> None:
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    ("input_wait", "residual", "step_time"),
+    [(10.0, 0.0, 90.0), (0.0, 10.0, 100.0)],
+)
+def test_compute_bound_abstains_for_material_iteration_overhead(
+    input_wait: float,
+    residual: float,
+    step_time: float,
+) -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=input_wait,
+            forward=90.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=residual,
+            step_time=step_time,
+        )
+    }
+    context = _rank_context(per_rank)
+
+    assert context.compute_share == pytest.approx(0.90)
+    assert ComputeBoundRule().evaluate(context) is None
 
 
 def test_cpu_h2d_does_not_suppress_compute_bound() -> None:
@@ -650,6 +736,139 @@ def test_input_bound_remains_primary_when_h2d_is_also_material() -> None:
         "INPUT_BOUND",
         "H2D_BOUND",
     }
+
+
+def test_step_time_primary_orders_by_severity_before_impact() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=30.0,
+            step_time=100.0,
+        )
+    }
+
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+    )
+
+    assert result.primary.kind == "RESIDUAL_HEAVY"
+    assert [issue.kind for issue in result.issues[:2]] == [
+        "RESIDUAL_HEAVY",
+        "INPUT_BOUND",
+    ]
+    assert result.issues[0].severity == "crit"
+    assert result.issues[1].severity == "warn"
+
+
+def test_step_time_primary_orders_equal_severity_by_impact() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=15.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=19.0,
+            step_time=100.0,
+        )
+    }
+
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank),
+        per_rank_timing=per_rank,
+    )
+
+    assert result.primary.kind == "RESIDUAL_HEAVY"
+    assert [issue.kind for issue in result.issues[:2]] == [
+        "RESIDUAL_HEAVY",
+        "INPUT_BOUND",
+    ]
+    assert result.issues[0].severity == result.issues[1].severity == "warn"
+    assert result.issues[0].score > result.issues[1].score
+
+
+def test_rank_straggler_wins_only_an_exact_impact_tie() -> None:
+    tied = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=20.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=40.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+    }
+    higher_typical = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=20.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+        1: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=35.0,
+            optimizer=0.0,
+            step_time=100.0,
+        ),
+    }
+
+    tied_result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(tied),
+        per_rank_timing=tied,
+    )
+    typical_result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(higher_typical),
+        per_rank_timing=higher_typical,
+    )
+
+    assert tied_result.primary.kind == "STRAGGLER"
+    assert [issue.kind for issue in tied_result.issues[:2]] == [
+        "STRAGGLER",
+        "INPUT_BOUND",
+    ]
+    assert tied_result.issues[0].score == tied_result.issues[1].score
+
+    assert typical_result.primary.kind == "INPUT_BOUND"
+    assert [issue.kind for issue in typical_result.issues[:2]] == [
+        "INPUT_BOUND",
+        "STRAGGLER",
+    ]
+    assert typical_result.issues[0].score > typical_result.issues[1].score
+
+
+def test_step_time_primary_uses_capped_severity_before_impact() -> None:
+    per_rank = {
+        0: _timing_row(
+            dataloader=20.0,
+            forward=0.0,
+            backward=0.0,
+            optimizer=0.0,
+            residual=30.0,
+            step_time=100.0,
+        )
+    }
+
+    result = build_step_diagnosis_result(
+        _metrics_from_per_rank_timing(per_rank, steps=5),
+        per_rank_timing=per_rank,
+    )
+    diagnosis_json, issues_json = diagnostic_result_to_json(result)
+
+    assert result.primary.kind == "RESIDUAL_HEAVY"
+    assert all(issue.severity == "warn" for issue in result.issues)
+    assert diagnosis_json == issues_json[0]
 
 
 @pytest.mark.parametrize(
@@ -957,6 +1176,11 @@ def test_rank_straggler_coverage_changes_attribution_not_severity() -> None:
     assert named.kind == "INPUT_STRAGGLER"
     assert generic.score == named.score == pytest.approx(1.0)
     assert generic.severity == named.severity == "crit"
+    assert "r0 is slower than victim r1" in generic.summary
+    assert "r0 has excess input wait burden relative to victim r1" in (
+        named.summary
+    )
+    assert "~80.0% of visible wait cost" in named.summary
 
 
 def test_rank_straggler_component_coverage_is_bounded() -> None:
@@ -1227,6 +1451,27 @@ def test_summary_step_time_window_uses_summary_policy_by_default() -> None:
 
     assert result is not None
     assert result.primary.steps_used == 60
+
+
+def test_builtin_live_and_summary_policies_use_identical_thresholds() -> None:
+    live_thresholds = LIVE_STEP_TIME_POLICY.thresholds
+    summary_thresholds = SUMMARY_STEP_TIME_POLICY.thresholds
+
+    assert live_thresholds is summary_thresholds
+    assert live_thresholds.compute_bound_share_warn == pytest.approx(0.90)
+
+    window = build_step_time_window_from_events(
+        {0: _summary_step_events(input_wait_gpu=None, steps=40)},
+        max_rows=100,
+    )
+    live = diagnose_step_time_window(window, policy=LIVE_STEP_TIME_POLICY)
+    summary = diagnose_step_time_window(
+        window,
+        policy=SUMMARY_STEP_TIME_POLICY,
+    )
+
+    assert live.primary == summary.primary
+    assert live.issues == summary.issues
 
 
 def _event_stats(

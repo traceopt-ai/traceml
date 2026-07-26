@@ -122,9 +122,11 @@ class RankStragglerRule(_BaseStepTimeRule):
         )
         if evidence.kind == "STRAGGLER":
             summary = (
-                f"{_rank_str(rank)} appears to be the culprit rank "
+                f"{_rank_str(rank)} is slower than victim "
+                f"{_rank_str(evidence.victim_rank)} "
                 f"(~{_pct(evidence.score)} impact); no measured component "
-                f"explains {_pct(context.thresholds.straggler_cause_coverage_min)} "
+                "explains "
+                f"{_pct(context.thresholds.straggler_cause_coverage_min)} "
                 "of visible wait cost."
             )
             action = (
@@ -134,6 +136,7 @@ class RankStragglerRule(_BaseStepTimeRule):
         else:
             summary = (
                 f"{_rank_str(rank)} has excess {component_label} burden "
+                f"relative to victim {_rank_str(evidence.victim_rank)} "
                 f"(~{_pct(evidence.score)} impact; "
                 f"~{_pct(cause_coverage)} of visible wait cost)."
             )
@@ -197,6 +200,7 @@ class InputBoundRule(_BaseStepTimeRule):
             action="Increase workers, prefetch, or storage throughput.",
             metric="input_wait",
             phase="input",
+            score=context.input_bound_share,
             share_pct=context.input_bound_share,
             skew_pct=context.input_bound_skew,
             ranks=(context.input_bound_worst_rank,),
@@ -243,6 +247,7 @@ class H2DBoundRule(_BaseStepTimeRule):
             ),
             metric="h2d",
             phase="h2d",
+            score=context.h2d_share,
             share_pct=context.h2d_share,
             skew_pct=metric_skew(
                 context.h2d_metric,
@@ -284,7 +289,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"Residual time is {_pct(context.residual_share)} of the "
-                "typical step."
+                f"typical {context.diagnosis_clock} iteration time."
             ),
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "
@@ -292,6 +297,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
             ),
             metric="residual_proxy",
             phase="residual",
+            score=context.residual_share,
             share_pct=context.residual_share,
             ranks=(context.overall_worst_rank,),
         )

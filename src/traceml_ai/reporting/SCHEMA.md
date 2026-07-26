@@ -113,19 +113,21 @@ Primary diagnosis evidence uses a small union:
   "h2d_ms": 0.4,
   "compute_ms": 120.0,
   "residual_ms": 39.6,
-  "shares": {
-    "input_wait_pct": 33.3,
-    "h2d_pct": 0.2,
-    "compute_pct": 50.0,
-    "residual_pct": 16.5
-  },
+  "score": 0.333,
+  "score_basis": "median_per_rank_iteration_share",
+  "score_denominator": "input_wait_ms + step_time_ms per rank",
   "gpu_util_avg_percent": 37.8
 }
 ```
 
 `phase_share` is used for `INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and
-`COMPUTE_BOUND`. Values come from `step_time.global.average`. All phase-share
-percentages use `iteration_time_ms = input_wait_ms + step_time_ms`.
+`COMPUTE_BOUND`. Millisecond values come from `step_time.global.average` and
+are supporting observations only. For scored typical bottlenecks, `score` is
+the authoritative median per-rank iteration-impact fraction. Informational
+`COMPUTE_BOUND` uses the median per-rank
+`(forward_ms + backward_ms + optimizer_ms) / iteration_time_ms` share with a
+90% threshold, but has no score because it is excluded from impact-based
+primary ordering.
 
 ```json
 {
@@ -249,6 +251,9 @@ Fallback evidence types are:
 - `status` is the user-facing display label.
 - `summary` is the short explanation. Older `reason` fields should be treated
   as pre-`1.4` input, not the current final-summary contract.
+- `score` is an optional section-specific ranking signal. In Step Time, scored
+  typical bottlenecks use median per-rank iteration impact and stragglers use
+  visible wait cost divided by victim iteration time.
 - Section-specific details such as `scope`, `samples_used`, `steps_used`,
   `note`, and `confidence` belong in `evidence`.
 - `groups.rows` contains row data only: `identity` and `metrics`.
@@ -330,6 +335,8 @@ The public `total_step_ms` key is also CPU-clocked for compatibility; it is
 not the denominator for selected-clock phase shares. The final text report
 uses derived `iteration_time_ms = input_wait_ms + step_time_ms` for every
 selected-clock phase share and labels CPU compatibility rows separately.
+Those table shares are observational averages and may differ from the
+authoritative median per-rank diagnosis `score`.
 
 `residual_ms` is residual unattributed step time. It is averaged from
 per-step clamped residuals, not recomputed from already-averaged phase totals:
