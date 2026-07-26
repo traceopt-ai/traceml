@@ -45,6 +45,7 @@ class StepCombinedTimeResult:
     status_message: str = "OK"
     per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
     diagnosis_clock: str = "cpu"
+    training_strategy: str = "ddp"
     diagnosis_metrics: List[StepCombinedTimeMetric] = field(
         default_factory=list
     )

@@ -20,7 +20,10 @@ import warnings
 from pathlib import Path
 from typing import Any, Mapping
 
-from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
+    DEFAULT_INTERVAL_SEC,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -33,6 +36,8 @@ _MAX_WALK_LEVELS = 10
 # To add a setting: add here, add to BUILT_IN_DEFAULTS, add default=None in cli.py.
 YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
     "mode": ("TRACEML_UI_MODE", str),
+    # This is the one public cadence control: sampler frequency on workers and
+    # UI refresh frequency on the aggregator. TCP ingestion remains event-driven.
     "interval": ("TRACEML_INTERVAL", float),
     "enable_logging": ("TRACEML_ENABLE_LOGGING", bool),
     "logs_dir": ("TRACEML_LOGS_DIR", str),
@@ -46,7 +51,7 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
 # The launcher promotes mode to "summary" for multi-node runs.
 BUILT_IN_DEFAULTS: dict[str, Any] = {
     "mode": "dashboard",
-    "interval": 2.0,
+    "interval": DEFAULT_INTERVAL_SEC,
     "enable_logging": False,
     "logs_dir": "./logs",
     "history_enabled": True,

@@ -131,8 +131,11 @@ def _drain_step_time_queue() -> list:
 def _reset_traceml_state() -> None:
     """Reset TraceML's process-local step counter and drain shared queues."""
     from traceml_ai.runtime.state import reset_trace_session_state
+    from traceml_ai.utils import timing
 
     reset_trace_session_state()
+    # Unflushed step events from a previous test would land in our first batch.
+    timing._STEP_BUFFER.clear()
     _drain_step_time_queue()
     # Drain any leftover step-memory events. We don't filter by model_id here
     # because we want a clean slate; older tests' events would otherwise leak
@@ -221,6 +224,8 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches():
     accumulated micro-batches within a single trace_step bracket.
     """
     _reset_traceml_state()
+    # Auto-timers trace_step arms are no-ops until init() installs the patches.
+    init()
     max_steps = 3
     grad_accum = 2
 
@@ -438,7 +443,7 @@ def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
 
 
 @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
-def test_hf_init_enables_dataloader_and_h2d_patches():
+def test_hf_init_enables_dataloader_and_h2d_patches(monkeypatch):
     """
     init() must enable the process-wide patches the callback cannot install on
     its own. The DataLoader fetch patch in particular is what lets TraceML
@@ -446,6 +451,14 @@ def test_hf_init_enables_dataloader_and_h2d_patches():
     never installs it. The H2D Tensor.to patch is gated the same way: the
     auto-timer trace_step arms each step is a no-op unless the patch is on.
     """
+    # This test verifies patch policy, not runtime startup. Stub the runtime
+    # bootstrap so init() does not try to reach an aggregator over TCP.
+    import traceml_ai.sdk.initial as initialization
+
+    monkeypatch.setattr(
+        initialization, "_start_runtime_for_init", lambda **kwargs: None
+    )
+
     config = init()
 
     assert config.patch_dataloader, (

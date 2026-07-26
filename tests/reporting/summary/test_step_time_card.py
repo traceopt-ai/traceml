@@ -84,10 +84,12 @@ def _summary(
         per_global_rank_summary=selected_summary,
         identities={},
         max_rows=window_size,
+        training_strategy="ddp",
     )
     diagnosis = diagnose_step_time_summary(
         StepTimeDiagnosisInput(
             window=window,
+            training_strategy=data.training_strategy,
         )
     )
     return build_step_time_payload(data, diagnosis)
@@ -145,6 +147,8 @@ def _input_bound_step_metrics(
     step_time_cpu: float = 90.0,
     input_wait_gpu: float,
     step_time_gpu: float,
+    h2d_gpu: float = 0.0,
+    compute_gpu: float = 0.0,
     steps: int = 64,
 ) -> dict[int, dict]:
     return {
@@ -152,6 +156,8 @@ def _input_bound_step_metrics(
             "_traceml_internal:dataloader_next": _event_stats(
                 cpu_ms=dataloader_cpu, gpu_ms=input_wait_gpu
             ),
+            "_traceml_internal:h2d_time": _event_stats(gpu_ms=h2d_gpu),
+            "_traceml_internal:forward_time": _event_stats(gpu_ms=compute_gpu),
             "_traceml_internal:step_time": _event_stats(
                 cpu_ms=step_time_cpu,
                 gpu_ms=step_time_gpu,
@@ -203,7 +209,7 @@ def test_step_time_no_data_card_is_compact() -> None:
     assert payload["diagnosis"]["kind"] == "NO_DATA"
     assert "- Diagnosis: NO DATA" in payload["card"]
     assert "- Stats: n/a" in payload["card"]
-    assert "- Why: Need more step-time samples." in payload["card"]
+    assert "- Why: step_time metric is missing." in payload["card"]
     _assert_compact_card(payload["card"])
 
 
@@ -211,18 +217,20 @@ def test_step_time_balanced_card_is_compact() -> None:
     payload = _summary(
         {
             0: _rank(
-                dataloader=20.0,
+                dataloader=5.0,
+                h2d=15.0,
                 forward=20.0,
                 backward=35.0,
                 optimizer=5.0,
-                step_cpu=70.0,
+                step_cpu=75.0,
             ),
             1: _rank(
-                dataloader=20.0,
+                dataloader=5.0,
+                h2d=15.0,
                 forward=21.0,
                 backward=34.0,
                 optimizer=5.0,
-                step_cpu=70.0,
+                step_cpu=75.0,
             ),
         }
     )
@@ -234,7 +242,10 @@ def test_step_time_balanced_card_is_compact() -> None:
     assert "- Residual: median/worst" in payload["card"]
     assert "- Ranks: median/worst |" in payload["card"]
     assert "- Residual ranks: median/worst" in payload["card"]
-    assert "- Why: No clear timing bottleneck." in payload["card"]
+    assert (
+        "- Why: No dominant bottleneck is visible in this window."
+        in payload["card"]
+    )
     _assert_compact_card(payload["card"])
 
 
@@ -259,7 +270,7 @@ def test_step_time_compute_bound_card_uses_short_reason() -> None:
     )
     assert "- Residual: 5.0ms" in payload["card"]
     assert (
-        "- Why: Compute dominated (90.0ms/97.0ms); backward was largest."
+        "- Why: Compute-bound; backward is the largest phase."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
@@ -280,6 +291,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
             0: _input_bound_step_metrics(
                 input_wait_gpu=40.0,
                 step_time_gpu=100.0,
+                compute_gpu=90.0,
             )
         },
     )
@@ -290,6 +302,7 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     assert payload["diagnosis"]["phase"] == "input"
     assert payload["diagnosis"]["evidence"]["input_wait_ms"] == 40.0
     assert payload["diagnosis"]["evidence"]["step_time_ms"] == 100.0
+    assert payload["diagnosis"]["evidence"]["iteration_time_ms"] == 140.0
     assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
     assert payload["global"]["window"]["diagnosis_clock"] == "gpu"
     average = payload["global"]["average"]
@@ -304,7 +317,43 @@ def test_step_time_input_bound_card_uses_short_reason() -> None:
     assert row_metrics["total_step_ms"] == 102.0
     _assert_public_step_metrics_keep_dataloader(payload)
     assert (
-        "- Why: Input wait was 40.0ms before a 100.0ms gpu traced step."
+        "- Why: Input wait is 28.6% of the typical gpu iteration time."
+        in payload["card"]
+    )
+    _assert_compact_card(payload["card"])
+
+
+def test_step_time_h2d_bound_card_uses_short_reason() -> None:
+    payload = _summary(
+        {
+            0: _rank(
+                dataloader=12.0,
+                h2d=20.0,
+                forward=20.0,
+                backward=35.0,
+                optimizer=5.0,
+                step_cpu=100.0,
+            )
+        },
+        per_rank_steps={
+            0: _input_bound_step_metrics(
+                input_wait_gpu=0.0,
+                h2d_gpu=20.0,
+                compute_gpu=70.0,
+                step_time_cpu=100.0,
+                step_time_gpu=100.0,
+            )
+        },
+    )
+
+    assert payload["diagnosis"] == payload["issues"][0]
+    assert payload["diagnosis"]["status"] == "H2D-BOUND"
+    assert payload["diagnosis"]["metric"] == "h2d"
+    assert payload["diagnosis"]["phase"] == "h2d"
+    assert payload["diagnosis"]["evidence"]["h2d_ms"] == 20.0
+    assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
+    assert (
+        "- Why: H2D transfer is 20.0% of the typical GPU iteration time."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
@@ -326,10 +375,43 @@ def test_step_time_residual_heavy_card_uses_short_reason() -> None:
     assert payload["diagnosis"] == payload["issues"][0]
     assert payload["diagnosis"]["status"] == "RESIDUAL-HEAVY"
     assert (
-        "- Why: Residual time was high inside the total step (30.0ms/102.0ms)."
+        "- Why: Residual time is 29.4% of the typical cpu iteration time."
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
+
+
+def test_step_time_card_uses_h2d_diagnosis_score_not_worst_rollups() -> None:
+    payload = _summary(
+        {
+            0: _rank(h2d=10.0, forward=90.0, backward=0.0, optimizer=0.0),
+            1: _rank(h2d=90.0, forward=10.0, backward=0.0, optimizer=0.0),
+        },
+        per_rank_steps={
+            0: _input_bound_step_metrics(
+                input_wait_gpu=0.0,
+                h2d_gpu=10.0,
+                compute_gpu=90.0,
+                step_time_cpu=300.0,
+                step_time_gpu=100.0,
+            ),
+            1: _input_bound_step_metrics(
+                input_wait_gpu=20.0,
+                h2d_gpu=90.0,
+                compute_gpu=10.0,
+                step_time_cpu=120.0,
+                step_time_gpu=100.0,
+            ),
+        },
+    )
+
+    assert payload["diagnosis"]["status"] == "H2D-BOUND"
+    assert payload["diagnosis"]["score"] == 0.425
+    assert (
+        "- Why: H2D transfer is 42.5% of the typical GPU iteration time."
+        in payload["card"]
+    )
+    assert "90.0ms/312.0ms" not in payload["card"]
 
 
 def test_step_time_residual_uses_average_of_per_step_clamps() -> None:
@@ -354,7 +436,8 @@ def test_step_time_residual_uses_average_of_per_step_clamps() -> None:
     )
     assert primary["kind"] == "RESIDUAL_HEAVY"
     assert primary["evidence"]["residual_ms"] == 25.0
-    assert primary["evidence"]["shares"]["residual_pct"] == 33.333
+    assert primary["evidence"]["score"] == payload["diagnosis"]["score"]
+    assert "shares" not in primary["evidence"]
 
 
 def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
@@ -380,11 +463,27 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
     _assert_public_step_metrics_keep_dataloader(payload)
     assert "- Ranks: median/worst |" in payload["card"]
     assert (
-        "- Why: r1 input was slower than median global rank (70.0/40.0ms)."
-        in payload["card"]
+        "- Why: r1 has excess input wait burden relative to victim r0 "
+        "(~24.0% impact; ~100.0% of visible wait cost)." in payload["card"]
     )
     assert "issues" not in payload["groups"]["rows"]["1"]
     assert {issue["kind"] for issue in payload["issues"]} == {
-        "INPUT_STRAGGLER"
+        "INPUT_STRAGGLER",
+        "INPUT_BOUND",
     }
     _assert_compact_card(payload["card"])
+
+
+def test_step_time_generic_straggler_card_uses_canonical_summary() -> None:
+    payload = _summary(
+        {
+            0: _rank(backward=50.0),
+            1: _rank(backward=100.0),
+        }
+    )
+
+    assert payload["diagnosis"]["kind"] == "STRAGGLER"
+    assert (
+        "- Why: r0 is slower than victim r1 (~34.5% impact); no measured "
+        "component explains 80.0% of visible wait cost." in payload["card"]
+    )

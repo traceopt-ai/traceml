@@ -511,25 +511,21 @@ def diagnose_step_time_window(
     window: StepTimeWindow,
     *,
     policy: "StepTimeDiagnosisPolicy",
+    training_strategy: str = "ddp",
 ) -> "DiagnosticResult[StepDiagnosis]":
-    """Run Step Time diagnosis over one canonical selected-clock window."""
+    """Run shared Step Time diagnosis over one selected-clock window."""
     from traceml_ai.diagnostics.step_time.api import (
         build_step_diagnosis_result,
-        build_step_warmup_diagnosis,
     )
 
     if not window.metrics:
         return build_step_diagnosis_result([], thresholds=policy.thresholds)
-    if int(window.coverage.steps_used) < int(policy.min_steps_for_diag):
-        return build_step_warmup_diagnosis(
-            steps_used=int(window.coverage.steps_used),
-            required_steps=int(policy.min_steps_for_diag),
-        )
     return build_step_diagnosis_result(
         window.metrics,
         thresholds=policy.thresholds,
         per_rank_timing=window.per_rank_timing,
         diagnosis_clock=window.clock,
+        training_strategy=training_strategy,
     )
 
 

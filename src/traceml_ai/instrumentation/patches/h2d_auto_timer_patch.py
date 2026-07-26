@@ -46,6 +46,7 @@ from typing import Any
 import torch
 
 from traceml_ai.instrumentation.h2d import should_time_h2d
+from traceml_ai.runtime.arming import is_tracing_armed
 from traceml_ai.utils.timing import timed_region
 
 _H2D_TLS = threading.local()
@@ -63,7 +64,7 @@ def _enabled() -> bool:
 
 
 def _traceml_tensor_to(self: torch.Tensor, *args: Any, **kwargs: Any) -> Any:
-    if not _enabled():
+    if not is_tracing_armed() or not _enabled():
         return _ORIG_TENSOR_TO(self, *args, **kwargs)
 
     if not should_time_h2d(self, args, kwargs):

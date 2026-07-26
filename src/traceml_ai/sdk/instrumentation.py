@@ -36,6 +36,11 @@ from traceml_ai.instrumentation.patches.forward_auto_timer_patch import (
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
 )
+from traceml_ai.runtime.environment import detect_runtime_environment
+from traceml_ai.runtime.environment_state import (
+    has_runtime_environment_info,
+    publish_runtime_environment_once,
+)
 from traceml_ai.runtime.state import (
     TraceSessionState,
     get_trace_session_state,
@@ -101,6 +106,14 @@ def _should_auto_install_optimizer_timing() -> bool:
     return getattr(cfg, "mode", "auto") == "auto"
 
 
+def _publish_runtime_environment(model: nn.Module) -> None:
+    """Queue rank-scoped runtime environment info once, fail-open."""
+    if has_runtime_environment_info():
+        return
+    info = detect_runtime_environment(model)
+    publish_runtime_environment_once(info)
+
+
 class _TraceStateMeta(type):
     @property
     def step(cls) -> int:
@@ -143,6 +156,11 @@ def trace_step(model: nn.Module):
     if _traceml_disabled():
         yield
         return
+
+    try:
+        _publish_runtime_environment(model)
+    except Exception as exc:
+        _log_instrumentation_error("runtime environment detection failed", exc)
 
     trace_state = get_trace_session_state()
     mem_tracker = StepMemoryTracker(model)

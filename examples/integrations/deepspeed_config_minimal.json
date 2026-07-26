@@ -1,0 +1,13 @@
+{
+    "train_micro_batch_size_per_gpu": 256,
+    "gradient_accumulation_steps": 1,
+    "optimizer": {
+        "type": "Adam",
+        "params": {
+            "lr": 1e-3
+        }
+    },
+    "zero_optimization": {
+        "stage": 2
+    }
+}

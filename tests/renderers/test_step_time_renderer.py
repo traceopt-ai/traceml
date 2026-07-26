@@ -58,6 +58,7 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
     payload = StepCombinedTimeResult(
         per_rank_timing={0: {"input_wait": 40.0, "step_time": 100.0}},
         diagnosis_clock="gpu",
+        training_strategy="fsdp",
         diagnosis_metrics=diagnosis_metrics,
     )
     seen = {}
@@ -65,6 +66,7 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
     def fake_build_step_diagnosis(metrics, **kwargs):
         seen["metrics"] = metrics
         seen["diagnosis_clock"] = kwargs.get("diagnosis_clock")
+        seen["training_strategy"] = kwargs.get("training_strategy")
         return StepDiagnosis(
             kind="INPUT_BOUND",
             status="INPUT-BOUND",
@@ -86,6 +88,7 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
 
     assert seen["metrics"] is diagnosis_metrics
     assert seen["diagnosis_clock"] == "gpu"
+    assert seen["training_strategy"] == "fsdp"
     assert "IW" in text
     assert "DL" not in text
     assert "Average (1 steps)" in text

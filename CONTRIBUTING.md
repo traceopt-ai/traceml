@@ -49,6 +49,14 @@ Requirements:
 - PyTorch 2.5+ for Torch-backed examples and tests
 - CUDA enabled GPU for GPU/distributed changes. Many docs, reporting, CLI, and CPU smoke-test changes can be developed without a GPU.
 
+### Develop in a container
+
+If you use VS Code with the Dev Containers extension (or GitHub Codespaces),
+open the repository in the provided dev container. It installs an editable
+`.[dev,torch]` build and enables the pre-commit hooks for you, so the
+environment matches what CI expects. The container is CPU-only; GPU work still
+needs a local CUDA setup.
+
 ---
 
 ## Open tasks for first contributors

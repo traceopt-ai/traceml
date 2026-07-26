@@ -26,9 +26,9 @@ Primary diagnosis policy
 ------------------------
 1. Step-time rank-skew findings become primary performance findings:
    ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``, ``H2D_STRAGGLER``,
-   ``RESIDUAL_STRAGGLER``, ``STRAGGLER``.
+   ``STRAGGLER``.
 2. Step-time phase-share findings become primary performance findings:
-   ``RESIDUAL_HEAVY``, ``INPUT_BOUND``, ``COMPUTE_BOUND``.
+   ``RESIDUAL_HEAVY``, ``INPUT_BOUND``, ``H2D_BOUND``, ``COMPUTE_BOUND``.
 3. If Step Time is ``BALANCED`` and System reports low or moderate GPU
    utilization, the primary becomes ``LOW_GPU_UTILIZATION_UNEXPLAINED``.
    GPU utilization is treated as a symptom or fallback, not root-cause proof.
@@ -48,15 +48,16 @@ primary.
 Evidence policy
 ---------------
 ``phase_share``
-    Used for ``INPUT_BOUND``, ``RESIDUAL_HEAVY``, and ``COMPUTE_BOUND``. Values
-    come from ``step_time.global.average`` because the diagnosis describes
-    where the average step time went.
+    Used for ``INPUT_BOUND``, ``H2D_BOUND``, ``RESIDUAL_HEAVY``, and
+    ``COMPUTE_BOUND``. Raw timing values from ``step_time.global.average`` are
+    supporting observations; the promoted diagnosis keeps the policy score
+    emitted by Step Time.
 
 ``rank_comparison``
     Used for ``INPUT_STRAGGLER``, ``COMPUTE_STRAGGLER``,
-    ``H2D_STRAGGLER``, ``RESIDUAL_STRAGGLER``, and ``STRAGGLER``. Values come
-    from ``step_time.global.median[metric]`` and
-    ``step_time.global.worst[metric]`` because the diagnosis compares ranks.
+    ``H2D_STRAGGLER``, and ``STRAGGLER``. Rank summaries are supporting
+    observations; culprit, victim, impact, and attribution remain owned by
+    the Step Time diagnosis.
 
 ``utilization_fallback``
     Used only when Step Time is balanced and System GPU utilization is low or
@@ -81,12 +82,16 @@ JsonDict = Dict[str, Any]
 STEP_TIME_SECTION = "step_time"
 PERFORMANCE_SCOPE = "performance"
 
-PHASE_SHARE_KINDS = {"INPUT_BOUND", "RESIDUAL_HEAVY", "COMPUTE_BOUND"}
+PHASE_SHARE_KINDS = {
+    "INPUT_BOUND",
+    "H2D_BOUND",
+    "RESIDUAL_HEAVY",
+    "COMPUTE_BOUND",
+}
 STRAGGLER_KINDS = {
     "INPUT_STRAGGLER",
     "COMPUTE_STRAGGLER",
     "H2D_STRAGGLER",
-    "RESIDUAL_STRAGGLER",
     "STRAGGLER",
 }
 INSUFFICIENT_STEP_TIME_KINDS = {"NO_DATA", "WARMUP"}
@@ -225,11 +230,16 @@ def _phase_share_evidence(
     step_time_summary: Mapping[str, Any],
     system_summary: Mapping[str, Any],
 ) -> JsonDict:
-    """Build evidence for diagnoses based on average step-time shares."""
+    """Build supporting average phase observations for a Step Time finding."""
     average = _global_average(step_time_summary)
     total_ms = _float_or_none(average.get("total_step_ms"))
     step_time_ms = _float_or_none(average.get("step_time_ms"))
-    denominator_ms = step_time_ms or total_ms
+    input_wait_ms = _float_or_none(average.get("input_wait_ms"))
+    iteration_time_ms = (
+        input_wait_ms + step_time_ms
+        if input_wait_ms is not None and step_time_ms is not None
+        else None
+    )
     window = _global_window(step_time_summary)
     evidence: JsonDict = {
         "type": "phase_share",
@@ -240,20 +250,11 @@ def _phase_share_evidence(
         "diagnosis_clock": window.get("diagnosis_clock"),
         "dataloader_ms": _round(_float_or_none(average.get("dataloader_ms"))),
     }
+    evidence["iteration_time_ms"] = _round(iteration_time_ms)
 
     for metric in PHASE_METRICS:
         evidence[metric] = _round(_float_or_none(average.get(metric)))
 
-    shares: JsonDict = {}
-    for metric in PHASE_METRICS:
-        value = _float_or_none(average.get(metric))
-        key = metric.replace("_ms", "_pct")
-        shares[key] = (
-            _round(100.0 * value / denominator_ms)
-            if value is not None and denominator_ms and denominator_ms > 0.0
-            else None
-        )
-    evidence["shares"] = shares
     evidence["gpu_util_avg_percent"] = _round(_gpu_util_avg(system_summary))
     return evidence
 
@@ -270,8 +271,6 @@ def _metric_for_step_time_issue(issue: Mapping[str, Any]) -> Optional[str]:
         return "compute_ms"
     if kind == "H2D_STRAGGLER":
         return "h2d_ms"
-    if kind == "RESIDUAL_STRAGGLER":
-        return "residual_ms"
     return None
 
 
@@ -289,8 +288,6 @@ def _metric_for_primary_diagnosis(
         return "compute_ms"
     if kind == "H2D_STRAGGLER":
         return "h2d_ms"
-    if kind == "RESIDUAL_STRAGGLER":
-        return "residual_ms"
     return None
 
 
@@ -373,6 +370,36 @@ def _rank_comparison_evidence(
     return evidence
 
 
+def _step_time_score_evidence(
+    *,
+    kind: str,
+    diagnosis: Mapping[str, Any],
+) -> JsonDict:
+    """Return the exact policy score and denominator for a promoted finding."""
+    score = _float_or_none(diagnosis.get("score"))
+    if score is None:
+        return {}
+
+    if kind in PHASE_SHARE_KINDS:
+        return {
+            "score": score,
+            "score_basis": "median_per_rank_iteration_share",
+            "score_denominator": "input_wait_ms + step_time_ms per rank",
+        }
+
+    issue_evidence = _mapping(diagnosis.get("evidence"))
+    return {
+        "score": score,
+        "score_basis": "visible_cost_ms / victim_iteration_time_ms",
+        "score_numerator_ms": _float_or_none(
+            issue_evidence.get("visible_cost_ms")
+        ),
+        "score_denominator_ms": _float_or_none(
+            issue_evidence.get("iteration_time_ms")
+        ),
+    }
+
+
 def _straggler_comparisons(
     *,
     step_time_summary: Mapping[str, Any],
@@ -422,74 +449,6 @@ def _straggler_comparisons(
     ]
 
 
-def _phase_share_summary(kind: str, evidence: Mapping[str, Any]) -> str:
-    """Return a concise primary summary for phase-share diagnoses."""
-    total = _float_or_none(evidence.get("step_time_ms")) or _float_or_none(
-        evidence.get("total_step_ms")
-    )
-    if kind == "INPUT_BOUND":
-        value = _float_or_none(evidence.get("input_wait_ms"))
-        step_time = _float_or_none(evidence.get("step_time_ms"))
-        if value is not None and step_time is not None:
-            return (
-                f"Input wait was {value:.1f}ms before a "
-                f"{step_time:.1f}ms traced step."
-            )
-        return "Input wait was a large pre-step delay."
-    if kind == "RESIDUAL_HEAVY":
-        value = _float_or_none(evidence.get("residual_ms"))
-        if value is not None and total is not None:
-            return (
-                f"Residual time took {value:.1f}ms of a "
-                f"{total:.1f}ms average step."
-            )
-        return "Residual time took a large share of step time."
-    if kind == "COMPUTE_BOUND":
-        value = _float_or_none(evidence.get("compute_ms"))
-        if value is not None and total is not None:
-            return (
-                f"Model compute took {value:.1f}ms of a "
-                f"{total:.1f}ms average step."
-            )
-        return "Most step time was model compute."
-    return "Step time was dominated by one phase."
-
-
-def _rank_comparison_summary(
-    kind: str,
-    evidence: Mapping[str, Any],
-) -> str:
-    """Return a concise primary summary for rank-comparison diagnoses."""
-    if kind == "STRAGGLER":
-        return "Multiple clean-step components varied across ranks."
-
-    metric = str(evidence.get("metric") or "step_time")
-    phase = str(evidence.get("phase") or metric.replace("_ms", ""))
-    phase_label = {
-        "dataloader": "input wait",
-        "input": "input wait",
-        "residual": "residual time",
-    }.get(phase, phase)
-    median = _mapping(evidence.get("median"))
-    worst = _mapping(evidence.get("worst"))
-    worst_rank = _int_or_none(worst.get("rank"))
-    median_rank = _int_or_none(median.get("rank"))
-    worst_value = _float_or_none(worst.get("value_ms"))
-    median_value = _float_or_none(median.get("value_ms"))
-
-    if (
-        worst_rank is not None
-        and median_rank is not None
-        and worst_value is not None
-        and median_value is not None
-    ):
-        return (
-            f"Rank r{worst_rank} {phase_label} was {worst_value:.1f}ms "
-            f"vs median rank r{median_rank} at {median_value:.1f}ms."
-        )
-    return "One rank was materially slower than its peers."
-
-
 def _promote_step_time_primary(
     *,
     kind: str,
@@ -503,21 +462,20 @@ def _promote_step_time_primary(
             step_time_summary=step_time_summary,
             system_summary=system_summary,
         )
-        summary = _phase_share_summary(kind, evidence)
     else:
         evidence = _rank_comparison_evidence(
             step_time_summary=step_time_summary,
             system_summary=system_summary,
             diagnosis=diagnosis,
         )
-        summary = _rank_comparison_summary(kind, evidence)
+    evidence.update(_step_time_score_evidence(kind=kind, diagnosis=diagnosis))
 
     return _primary_payload(
         kind=kind,
         status=_diag_field(diagnosis, "status", kind),
         severity=_diag_field(diagnosis, "severity", "info"),
         section=STEP_TIME_SECTION,
-        summary=summary or _diag_field(diagnosis, "summary", ""),
+        summary=_diag_field(diagnosis, "summary", ""),
         action=_diag_field(diagnosis, "action", ""),
         evidence=evidence,
     )
