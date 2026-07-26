@@ -95,6 +95,11 @@ Or try the self-contained example first:
 traceml run examples/quickstart.py
 ```
 
+### Try a real GPU demo in Colab
+
+- Any PyTorch loop: data-loading bottleneck before/after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb)
+- Hugging Face Trainer: data-loading bottleneck before/after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/huggingface_dataloading_bottleneck.ipynb)
+
 <details>
 <summary>Running on a remote server?</summary>
 
