@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
     ModelDiagnosisItem,
