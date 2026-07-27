@@ -13,9 +13,13 @@ Upper bounds remain allowed, but they must be listed in
 ALLOWED_UPPER_BOUNDS with a reason, so the decision is explicit and
 reviewable rather than incidental.
 
-This parses pyproject.toml directly rather than using tomllib, which is
-absent on Python 3.10, the version CI runs for pull requests. A skipped
-guard on the one leg that always runs would defeat the purpose.
+The manifest is read with a real TOML parser. An earlier revision matched
+quoted strings with a regex, which dropped a dependency whose URL carried
+a ``#`` fragment and then swallowed the following entry along with it. A
+guard that silently omits a dependency is the failure it exists to catch,
+so the parse is never approximated. ``tomllib`` covers 3.11 and newer and
+``tomli`` covers 3.10; if neither is importable the guard fails rather
+than skipping.
 """
 
 from __future__ import annotations
@@ -25,6 +29,14 @@ from pathlib import Path
 
 import pytest
 
+try:  # Python 3.11+
+    import tomllib as _toml
+except ModuleNotFoundError:  # Python 3.10
+    try:
+        import tomli as _toml  # type: ignore[no-redef]
+    except ModuleNotFoundError:  # pragma: no cover - environment error
+        _toml = None  # type: ignore[assignment]
+
 PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 # Dependency name -> reason the upper bound is justified.
@@ -32,33 +44,29 @@ PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 ALLOWED_UPPER_BOUNDS: dict[str, str] = {}
 
 _UPPER_BOUND_PATTERN = re.compile(r"(<=|<|==|~=)\s*[0-9]")
-_DEPENDENCIES_BLOCK = re.compile(
-    r"^dependencies\s*=\s*\[(?P<body>.*?)\]", re.MULTILINE | re.DOTALL
-)
-# TOML allows both basic ("...") and literal ('...') strings. Matching only
-# one style would drop a requirement from the guard entirely, which would let
-# an upper bound through silently.
-_TOML_STRING = re.compile(r"\"([^\"]*)\"|'([^']*)'")
 
 
 def _parse_dependencies(text: str) -> list[str]:
-    """Extract the [project] dependencies array from pyproject.toml text."""
-    match = _DEPENDENCIES_BLOCK.search(text)
-    if match is None:
+    """Return the [project] dependencies array from pyproject.toml text."""
+    if _toml is None:
         raise AssertionError(
-            "could not locate the [project] dependencies array"
+            "no TOML parser available. Install tomli on Python 3.10 "
+            "(pip install \"tomli; python_version < '3.11'\") so this "
+            "guard can read pyproject.toml."
         )
 
-    body = match.group("body")
-    # Drop comments so a quoted string inside one is not read as a
-    # requirement.
-    body = "\n".join(line.split("#", 1)[0] for line in body.splitlines())
+    data = _toml.loads(text)
+    try:
+        dependencies = data["project"]["dependencies"]
+    except KeyError as exc:
+        raise AssertionError(
+            f"could not locate [project].dependencies: missing {exc}"
+        ) from None
 
-    return [
-        basic or literal
-        for basic, literal in _TOML_STRING.findall(body)
-        if (basic or literal).strip()
-    ]
+    if not isinstance(dependencies, list):
+        raise AssertionError("[project].dependencies is not an array")
+
+    return [str(item) for item in dependencies]
 
 
 def _runtime_dependencies() -> list[str]:
@@ -68,7 +76,7 @@ def _runtime_dependencies() -> list[str]:
 
 def _requirement_name(requirement: str) -> str:
     """Return the bare distribution name from a requirement string."""
-    name = re.split(r"[\[(;<>=!~ ]", requirement.strip(), maxsplit=1)[0]
+    name = re.split(r"[\[(;<>=!~ @]", requirement.strip(), maxsplit=1)[0]
     return name.strip().lower()
 
 
@@ -77,42 +85,45 @@ def _version_specifier(requirement: str) -> str:
     return requirement.split(";")[0]
 
 
-def test_parser_reads_both_toml_string_styles() -> None:
-    """A requirement must not vanish because of how it is quoted.
+def test_parser_handles_quote_styles_comments_and_url_fragments() -> None:
+    """No dependency may disappear because of how it is written.
 
-    A dependency the parser cannot see is a dependency the guard cannot
-    check, so the bound would ship unnoticed.
+    A dependency the parser cannot see is one the guard cannot check, so
+    the bound would ship unnoticed. The URL fragment is the case that
+    broke an earlier regex version: the ``#`` ended the string early and
+    the entry after it was lost too.
     """
     text = """
 [project]
 dependencies = [
     "double>=1.0",
-    'literal<3',  # a comment mentioning "quoted" text
-    "spans-comment",
+    'literal<3',
+    "fragment @ https://example.com/pkg-1.0.whl#sha256=deadbeef",
+    "capped<2",
 ]
 """
 
     assert _parse_dependencies(text) == [
         "double>=1.0",
         "literal<3",
-        "spans-comment",
+        "fragment @ https://example.com/pkg-1.0.whl#sha256=deadbeef",
+        "capped<2",
     ]
 
 
-def test_parser_catches_an_upper_bound_in_a_literal_string() -> None:
-    """The upper-bound check must fire regardless of quote style."""
+def test_upper_bound_is_detected_in_every_quote_style() -> None:
+    """The upper-bound check must fire regardless of how a dep is quoted."""
     text = """
 [project]
-dependencies = ['capped<2']
+dependencies = ["basic<2", 'literal<=3']
 """
 
-    (requirement,) = _parse_dependencies(text)
-
-    assert _UPPER_BOUND_PATTERN.search(requirement) is not None
+    for requirement in _parse_dependencies(text):
+        assert _UPPER_BOUND_PATTERN.search(requirement) is not None
 
 
 def test_runtime_dependencies_are_parsed() -> None:
-    """The parser must actually find dependencies, or the guard is inert."""
+    """The parser must find dependencies, or the guard is inert."""
     dependencies = _runtime_dependencies()
 
     assert dependencies, "no runtime dependencies parsed from pyproject.toml"
