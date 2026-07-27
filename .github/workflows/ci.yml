@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'version_*']
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - '.gitignore'
   pull_request:
-    branches: [main]
+    branches: [main, 'version_*']
     paths-ignore:
       - 'docs/**'
       - '*.md'
