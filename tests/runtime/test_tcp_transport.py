@@ -1,3 +1,5 @@
+import socket
+
 from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 
 
@@ -55,5 +57,37 @@ def test_tcp_server_starts_without_so_reuseport(monkeypatch) -> None:
     server.start()
     try:
         assert server.port > 0
+    finally:
+        server.stop()
+
+
+def test_tcp_server_starts_when_so_reuseport_is_rejected(
+    monkeypatch,
+) -> None:
+    # A kernel older than the headers Python was built against exposes the
+    # constant but rejects the option, so presence alone is not enough.
+    monkeypatch.setattr(
+        "traceml_ai.transport.tcp_transport.socket.SO_REUSEPORT",
+        15,
+        raising=False,
+    )
+
+    class _RejectingSocket(_FakeSocket):
+        def setsockopt(self, _level, option, _value):
+            if option == socket.SO_REUSEPORT:
+                raise OSError(92, "Protocol not available")
+            return None
+
+    fake = _RejectingSocket()
+    monkeypatch.setattr(
+        "traceml_ai.transport.tcp_transport.socket.socket",
+        lambda *_args, **_kwargs: fake,
+    )
+
+    server = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    server.start()
+    try:
+        assert fake.bound_to == ("127.0.0.1", 0)
+        assert server.port == 54321
     finally:
         server.stop()
