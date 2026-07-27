@@ -137,6 +137,30 @@ It is based on:
 - residual / overhead
 - culprit/victim visible rank skew in distributed runs
 
+A signal that was never measured in the analyzed window is reported as
+missing (`null` in `final_summary.json`, `n/a` in text), never as a fake
+`0.0`. A phase measured at zero milliseconds stays `0.0`.
+
+### `INCOMPLETE DATA`
+
+Meaning:
+
+- timing samples exist, but one or more phase signals were never measured,
+  and no reliable conclusion is possible from the signals that remain
+
+This usually means:
+
+- an integration or manual-mode setup did not instrument every phase (for
+  example calling `model.forward(...)` directly, an unwrapped DataLoader,
+  or a custom optimizer without `wrap_optimizer`)
+
+What to do next:
+
+- check the missing signal names listed in the diagnosis evidence
+- use auto mode or the matching `wrap_*` helpers to restore coverage
+
+---
+
 ### `BALANCED`
 
 Meaning:

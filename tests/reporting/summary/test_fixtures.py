@@ -30,7 +30,6 @@ from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.reporting.sections.system import SystemSummarySection
 
-
 SECTION_KEYS = {
     "metadata",
     "diagnosis",
@@ -866,7 +865,7 @@ def test_final_summary_fixture_schema_contains_all_sections(
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.6
+    assert payload["schema_version"] == 1.7
     assert set(payload) == {
         "schema_version",
         "generated_at",

@@ -1,8 +1,15 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.6`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.7`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
+
+Schema `1.7` made every public Step Time metric nullable. `null` means the
+underlying timing signal was never measured in the analyzed window (missing
+instrumentation), while a measured zero stays `0.0`. Null metrics are
+excluded from `global.average`, `global.median`, and `global.worst` and from
+rank median/worst selection; a rank with only some metrics measured (for
+example an H2D-only rank) keeps its row with `null` for the others.
 
 Sections:
 
@@ -16,7 +23,7 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.6,
+  "schema_version": 1.7,
   "generated_at": "...",
   "duration_s": null,
   "meta": {
@@ -260,6 +267,9 @@ Fallback evidence types are:
 - Row-level diagnosis is intentionally omitted for now.
 - `global.average`, `global.median`, `global.worst`, and
   `groups.rows[*].metrics` must use exactly `metadata.section_metric_names`.
+  Keys are always present; a Step Time metric whose signal was never
+  measured carries `null` (`{"value": null, "idx": null}` for rank points)
+  and never a fabricated `0.0`.
 - `global.index_by` must match `groups.by`.
 - `idx` points to a key in `groups.rows`.
 - `metadata.global_ranks_seen` is all observed ranks.

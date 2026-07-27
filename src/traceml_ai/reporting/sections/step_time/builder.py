@@ -29,8 +29,8 @@ from traceml_ai.reporting.sections.step_time.model import (
     build_global_rollup,
     build_overview,
     closest_rank_to_median,
-    compute_residual_avg_ms,
     finite_float,
+    finite_float_or_none,
     summary_metric_values,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
@@ -125,38 +125,25 @@ def _build_card_stats(
     if not per_global_rank_summary:
         return None
 
+    def _measured(field: str) -> Dict[int, float]:
+        # Ranks whose signal was never measured stay out of the card
+        # statistics; a measured zero stays in.
+        out: Dict[int, float] = {}
+        for rank, summary in per_global_rank_summary.items():
+            value = finite_float_or_none(getattr(summary, field))
+            if value is not None:
+                out[int(rank)] = value
+        return out
+
     return StepTimeCardStats(
         global_rank_count=len(per_global_rank_summary),
         total_step=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_total_step_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
+            _measured("avg_total_step_ms")
         ),
-        compute=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_compute_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
-        residual=_metric_pair_from_rank_values(
-            {
-                int(rank): compute_residual_avg_ms(summary)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
-        input=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_input_wait_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
-        h2d=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_h2d_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
+        compute=_metric_pair_from_rank_values(_measured("avg_compute_ms")),
+        residual=_metric_pair_from_rank_values(_measured("avg_residual_ms")),
+        input=_metric_pair_from_rank_values(_measured("avg_input_wait_ms")),
+        h2d=_metric_pair_from_rank_values(_measured("avg_h2d_ms")),
     )
 
 

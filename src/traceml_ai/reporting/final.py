@@ -41,6 +41,11 @@ from traceml_ai.sdk.protocol import (
 )
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
+# Version of the final_summary.json contract. 1.7 made every public
+# Step Time metric nullable: null means the signal was never measured in
+# the analyzed window, while a measured zero stays 0.0.
+SCHEMA_VERSION = 1.7
+
 SUMMARY_WIDTH = 78
 SUMMARY_INNER_TEXT_WIDTH = SUMMARY_WIDTH - 4
 
@@ -831,7 +836,7 @@ class FinalReportGenerator:
         )
 
         return {
-            "schema_version": 1.6,
+            "schema_version": SCHEMA_VERSION,
             "generated_at": utc_now_iso(),
             "duration_s": _summary_duration_s(
                 step_time_summary,

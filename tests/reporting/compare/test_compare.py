@@ -503,8 +503,9 @@ def test_compare_warns_when_summary_schema_versions_differ() -> None:
     assert compare_payload["warnings"] == [
         (
             "Summary schema versions differ: A uses 1.5, B uses 1.6. "
-            "Step Time fields changed in schema 1.6, so Step Time deltas "
-            "may not be directly comparable."
+            "Step Time fields changed in schema 1.6 and became nullable "
+            "in schema 1.7, so Step Time deltas may not be directly "
+            "comparable."
         )
     ]
     assert "Notes" in text

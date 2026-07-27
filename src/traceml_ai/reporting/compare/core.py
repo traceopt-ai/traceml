@@ -62,7 +62,8 @@ def _schema_warnings(
         (
             "Summary schema versions differ: A uses "
             f"{lhs_version}, B uses {rhs_version}. Step Time fields changed "
-            "in schema 1.6, so Step Time deltas may not be directly "
+            "in schema 1.6 and became nullable in schema 1.7, so Step "
+            "Time deltas may not be directly "
             "comparable."
         )
     ]

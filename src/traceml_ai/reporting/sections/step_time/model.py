@@ -40,6 +40,22 @@ def finite_float(x: Any) -> float:
     return v if np.isfinite(v) else 0.0
 
 
+def finite_float_or_none(x: Any) -> Optional[float]:
+    """Convert to float, preserving missing values.
+
+    ``None`` (a signal never measured in the window) stays ``None`` so it
+    can be reported as unavailable instead of a fake zero; unusable
+    non-finite values also become ``None``.
+    """
+    if x is None:
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if np.isfinite(v) else None
+
+
 def closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
     """
     Return the rank whose value is closest to the median of all values.
@@ -73,20 +89,24 @@ def closest_rank_to_median(rank_to_value: Dict[int, float]) -> Optional[int]:
 
 @dataclass
 class RankStepSummary:
-    """Per-rank Step Time summary with compatibility and diagnosis fields."""
+    """Per-rank Step Time summary with compatibility and diagnosis fields.
+
+    A ``None`` metric means the underlying signal was never measured in
+    the analyzed window; a measured zero stays ``0.0``.
+    """
 
     steps_analyzed: int
-    avg_dataloader_ms: float
-    avg_input_wait_ms: float
-    avg_step_time_ms: float
-    avg_h2d_ms: float
-    avg_forward_ms: float
-    avg_backward_ms: float
-    avg_optimizer_ms: float
-    avg_traced_step_ms: float
-    avg_compute_ms: float
-    avg_residual_ms: float
-    avg_total_step_ms: float
+    avg_dataloader_ms: Optional[float]
+    avg_input_wait_ms: Optional[float]
+    avg_step_time_ms: Optional[float]
+    avg_h2d_ms: Optional[float]
+    avg_forward_ms: Optional[float]
+    avg_backward_ms: Optional[float]
+    avg_optimizer_ms: Optional[float]
+    avg_traced_step_ms: Optional[float]
+    avg_compute_ms: Optional[float]
+    avg_residual_ms: Optional[float]
+    avg_total_step_ms: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -110,17 +130,17 @@ def rank_summary_from_timing(
     public = public_step_time_metric_values(timing)
     return RankStepSummary(
         steps_analyzed=max(0, int(steps_analyzed)),
-        avg_dataloader_ms=finite_float(public["dataloader_ms"]),
-        avg_input_wait_ms=finite_float(public["input_wait_ms"]),
-        avg_step_time_ms=finite_float(public["step_time_ms"]),
-        avg_h2d_ms=finite_float(public["h2d_ms"]),
-        avg_forward_ms=finite_float(public["forward_ms"]),
-        avg_backward_ms=finite_float(public["backward_ms"]),
-        avg_optimizer_ms=finite_float(public["optimizer_ms"]),
-        avg_traced_step_ms=finite_float(timing.get("step_time")),
-        avg_compute_ms=finite_float(public["compute_ms"]),
-        avg_residual_ms=finite_float(public["residual_ms"]),
-        avg_total_step_ms=finite_float(public["total_step_ms"]),
+        avg_dataloader_ms=finite_float_or_none(public["dataloader_ms"]),
+        avg_input_wait_ms=finite_float_or_none(public["input_wait_ms"]),
+        avg_step_time_ms=finite_float_or_none(public["step_time_ms"]),
+        avg_h2d_ms=finite_float_or_none(public["h2d_ms"]),
+        avg_forward_ms=finite_float_or_none(public["forward_ms"]),
+        avg_backward_ms=finite_float_or_none(public["backward_ms"]),
+        avg_optimizer_ms=finite_float_or_none(public["optimizer_ms"]),
+        avg_traced_step_ms=finite_float_or_none(timing.get("step_time")),
+        avg_compute_ms=finite_float_or_none(public["compute_ms"]),
+        avg_residual_ms=finite_float_or_none(public["residual_ms"]),
+        avg_total_step_ms=finite_float_or_none(public["total_step_ms"]),
     )
 
 
@@ -137,78 +157,62 @@ def rank_summaries_from_window(
     }
 
 
-def compute_residual_avg_ms(s: RankStepSummary) -> float:
+def compute_residual_avg_ms(s: RankStepSummary) -> Optional[float]:
     """
     Return canonical average residual for one rank summary.
 
     residual_ms is averaged from per-step clamped residuals:
     max(0, step_time_ms - h2d_ms - compute_ms). This intentionally differs
-    from clamping the already-averaged phase totals.
+    from clamping the already-averaged phase totals. ``None`` means a
+    component phase was never measured, so the residual is underivable.
     """
-    return finite_float(s.avg_residual_ms)
+    return finite_float_or_none(s.avg_residual_ms)
+
+
+_METRIC_FIELDS: Dict[str, str] = {
+    "total_step_ms": "avg_total_step_ms",
+    "dataloader_ms": "avg_dataloader_ms",
+    "input_wait_ms": "avg_input_wait_ms",
+    "step_time_ms": "avg_step_time_ms",
+    "h2d_ms": "avg_h2d_ms",
+    "compute_ms": "avg_compute_ms",
+    "residual_ms": "avg_residual_ms",
+    "forward_ms": "avg_forward_ms",
+    "backward_ms": "avg_backward_ms",
+    "optimizer_ms": "avg_optimizer_ms",
+}
 
 
 def _rank_metric_values(
     per_global_rank_summary: Dict[int, RankStepSummary],
 ) -> Dict[str, Dict[int, float]]:
-    """Return global-rank values for each Step Time metric."""
-    return {
-        "total_step_ms": {
-            int(rank): finite_float(summary.avg_total_step_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "dataloader_ms": {
-            int(rank): finite_float(summary.avg_dataloader_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "input_wait_ms": {
-            int(rank): finite_float(summary.avg_input_wait_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "step_time_ms": {
-            int(rank): finite_float(summary.avg_step_time_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "h2d_ms": {
-            int(rank): finite_float(summary.avg_h2d_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "compute_ms": {
-            int(rank): finite_float(summary.avg_compute_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "residual_ms": {
-            int(rank): compute_residual_avg_ms(summary)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "forward_ms": {
-            int(rank): finite_float(summary.avg_forward_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "backward_ms": {
-            int(rank): finite_float(summary.avg_backward_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-        "optimizer_ms": {
-            int(rank): finite_float(summary.avg_optimizer_ms)
-            for rank, summary in per_global_rank_summary.items()
-        },
-    }
+    """Return global-rank values for each Step Time metric.
+
+    Ranks whose metric is ``None`` (never measured) are excluded, so
+    missing values cannot enter averages, medians, or worst-rank picks.
+    """
+    out: Dict[str, Dict[int, float]] = {}
+    for metric, field in _METRIC_FIELDS.items():
+        values: Dict[int, float] = {}
+        for rank, summary in per_global_rank_summary.items():
+            value = finite_float_or_none(getattr(summary, field))
+            if value is not None:
+                values[int(rank)] = value
+        out[metric] = values
+    return out
 
 
-def summary_metric_values(summary: RankStepSummary) -> Dict[str, float]:
-    """Return public row metrics for one global-rank step-time summary."""
+def summary_metric_values(
+    summary: RankStepSummary,
+) -> Dict[str, Optional[float]]:
+    """Return public row metrics for one global-rank step-time summary.
+
+    Every metric key is always present; a signal never measured for this
+    rank is ``None`` (rendered as ``n/a``), a measured zero stays ``0.0``.
+    """
     return {
-        "total_step_ms": finite_float(summary.avg_total_step_ms),
-        "dataloader_ms": finite_float(summary.avg_dataloader_ms),
-        "input_wait_ms": finite_float(summary.avg_input_wait_ms),
-        "step_time_ms": finite_float(summary.avg_step_time_ms),
-        "h2d_ms": finite_float(summary.avg_h2d_ms),
-        "compute_ms": finite_float(summary.avg_compute_ms),
-        "residual_ms": compute_residual_avg_ms(summary),
-        "forward_ms": finite_float(summary.avg_forward_ms),
-        "backward_ms": finite_float(summary.avg_backward_ms),
-        "optimizer_ms": finite_float(summary.avg_optimizer_ms),
+        metric: finite_float_or_none(getattr(summary, field))
+        for metric, field in _METRIC_FIELDS.items()
     }
 
 
@@ -314,14 +318,25 @@ def build_overview(
             "step_time_skew_percent": None,
         }
 
+    # Ranks whose total step is unavailable (e.g. an H2D-only rank) keep
+    # their row but cannot compete for median or worst selection.
     avg_total_by_rank = {
-        rank: s.avg_total_step_ms
+        rank: value
         for rank, s in per_global_rank_summary.items()
+        if (value := finite_float_or_none(s.avg_total_step_ms)) is not None
     }
-    worst_global_rank = max(avg_total_by_rank, key=avg_total_by_rank.get)
+    worst_global_rank = (
+        max(avg_total_by_rank, key=avg_total_by_rank.get)
+        if avg_total_by_rank
+        else None
+    )
     median_global_rank = closest_rank_to_median(avg_total_by_rank)
 
-    worst_avg_step_ms = avg_total_by_rank.get(worst_global_rank)
+    worst_avg_step_ms = (
+        avg_total_by_rank.get(worst_global_rank)
+        if worst_global_rank is not None
+        else None
+    )
     median_avg_step_ms = (
         avg_total_by_rank.get(median_global_rank)
         if median_global_rank is not None
