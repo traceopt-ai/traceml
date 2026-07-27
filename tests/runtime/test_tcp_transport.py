@@ -41,3 +41,19 @@ def test_tcp_server_exposes_actual_port_for_dynamic_bind(monkeypatch) -> None:
     finally:
         server.stop()
     assert fake.closed
+
+
+def test_tcp_server_starts_without_so_reuseport(monkeypatch) -> None:
+    # Uses a real socket: _FakeSocket swallows setsockopt, so only a
+    # genuine bind proves the Windows path (no SO_REUSEPORT) works.
+    monkeypatch.delattr(
+        "traceml_ai.transport.tcp_transport.socket.SO_REUSEPORT",
+        raising=False,
+    )
+
+    server = TCPServer(TCPConfig(host="127.0.0.1", port=0))
+    server.start()
+    try:
+        assert server.port > 0
+    finally:
+        server.stop()

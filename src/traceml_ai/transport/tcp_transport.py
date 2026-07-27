@@ -48,7 +48,10 @@ class TCPServer:
     def start(self) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        # SO_REUSEPORT is POSIX-only; Windows has no equivalent and the
+        # constant is absent there, so setting it unconditionally raises.
+        if hasattr(socket, "SO_REUSEPORT"):
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self._sock.bind((self.cfg.host, self.cfg.port))
         self._port = int(self._sock.getsockname()[1])
         self._sock.listen(self.cfg.backlog)
