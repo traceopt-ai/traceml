@@ -74,6 +74,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "datasets",
     "transformers",
+    'tomli; python_version < "3.11"',
 ]
 
 hf = [
