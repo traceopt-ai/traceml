@@ -35,7 +35,11 @@ class _FakeHtml:
         self.content = ""
 
 
-def _metric(name: str, value: float) -> StepCombinedTimeMetric:
+def _metric(
+    name: str,
+    value: float,
+    worst: float | None = None,
+) -> StepCombinedTimeMetric:
     return StepCombinedTimeMetric(
         metric=name,
         clock="gpu",
@@ -44,7 +48,7 @@ def _metric(name: str, value: float) -> StepCombinedTimeMetric:
             window_size=5,
             steps_used=5,
             median_total=value,
-            worst_total=value,
+            worst_total=worst if worst is not None else value,
             worst_rank=0,
             skew_ratio=0.0,
             skew_pct=0.0,
@@ -99,13 +103,14 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     # The panel updated (no freeze): window label reflects the sparse
     # window and flags the partial coverage.
     assert panel["win"].text == "5 aligned steps · partial signals"
-    # Missing phases render as empty segments; measured phases keep
-    # their proportional widths (input_wait 10 of 80 measured -> 12.5%).
+    # Missing phases render as empty segments; measured phases scale
+    # against the iteration envelope (input_wait 10 + step 100 = 110),
+    # so unmeasured time stays visible as empty ribbon space.
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
     assert by_key["h2d"].styles[-1] == "width:0.000%"
     assert by_key["residual_proxy"].styles[-1] == "width:0.000%"
-    assert by_key["input_wait"].styles[-1] == "width:12.500%"
+    assert by_key["input_wait"].styles[-1] == "width:9.091%"
     # An underivable residual shows n/a, never a fake 0%.
     assert "n/a" in panel["kpis"]["residual"].content
     assert panel["kpis"]["median"].content.startswith("100")
@@ -118,7 +123,7 @@ def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
         _metric("forward", 20.0),
         _metric("backward", 30.0),
         _metric("optimizer_step", 20.0),
-        _metric("residual_proxy", 20.0),
+        _metric("residual_proxy", 30.0),
         _metric("step_time", 100.0),
     ]
     payload = StepCombinedTimeResult(
@@ -134,17 +139,75 @@ def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
     assert "n/a" not in panel["kpis"]["residual"].content
 
 
+def test_step_time_dashboard_hero_absent_h2d_is_not_partial() -> None:
+    # H2D events are occurrence-driven: a run with no host-to-device
+    # copies emits none, which is complete coverage, not partial.
+    diagnosis_metrics = [
+        _metric("input_wait", 10.0),
+        _metric("forward", 20.0),
+        _metric("backward", 30.0),
+        _metric("optimizer_step", 20.0),
+        _metric("residual_proxy", 30.0),
+        _metric("step_time", 100.0),
+    ]
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=diagnosis_metrics,
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    assert panel["win"].text == "5 aligned steps"
+    keys = [key for _, key, _ in theme.PHASES]
+    by_key = dict(zip(keys, panel["seg_divs"]))
+    assert by_key["h2d"].styles[-1] == "width:0.000%"
+
+
+def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=[_metric("step_time", 100.0)],
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    assert panel["win"].text == "5 aligned steps · partial signals"
+    assert all(seg.styles[-1] == "width:0.000%" for seg in panel["seg_divs"])
+    assert "n/a" in panel["kpis"]["residual"].content
+    assert panel["kpis"]["median"].content.startswith("100")
+
+
+def test_step_time_dashboard_hero_ignores_payload_without_step_time() -> None:
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("input_wait", 10.0),
+            _metric("forward", 20.0),
+        ],
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    # Without the step envelope there is nothing coherent to draw: the
+    # panel stays untouched instead of raising into the UI tick.
+    assert panel["win"].text == ""
+
+
 def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert theme.PHASES[0][:2] == ("IW", "input_wait")
 
+    # Self-consistent window shape: phases sum to input_wait + step.
     diagnosis_metrics = [
         _metric("input_wait", 10.0),
         _metric("h2d", 10.0),
         _metric("forward", 20.0),
         _metric("backward", 30.0),
         _metric("optimizer_step", 20.0),
-        _metric("residual_proxy", 10.0),
-        _metric("step_time", 100.0),
+        _metric("residual_proxy", 20.0),
+        _metric("step_time", 100.0, worst=200.0),
     ]
     payload = StepCombinedTimeResult(
         diagnosis_metrics=diagnosis_metrics,
@@ -155,10 +218,11 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     update_model_combined_section(panel, payload)
 
     assert panel["seg_labs"][0].text == "IW"
-    assert panel["seg_divs"][0].styles[-1] == "width:10.000%"
+    # input_wait 10 of the 110 ms iteration envelope.
+    assert panel["seg_divs"][0].styles[-1] == "width:9.091%"
     assert panel["win"].text == "5 aligned steps"
     assert panel["kpis"]["median"].content.startswith("100")
-    assert panel["kpis"]["worst"].content.startswith("100")
+    assert panel["kpis"]["worst"].content.startswith("200")
     assert not panel["kpis"]["median"].content.startswith("20")
 
 

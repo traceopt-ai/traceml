@@ -73,6 +73,8 @@ jobs:
             tests/telemetry/test_distributed.py \
             tests/telemetry/test_msgpack.py \
             tests/telemetry/test_sender_sequence.py \
+            tests/renderers \
+            tests/display \
             -q
 
   test-integration:

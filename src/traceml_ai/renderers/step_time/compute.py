@@ -52,6 +52,16 @@ class StepCombinedComputer:
     def compute_dashboard(self) -> StepCombinedTimeResult:
         return self._compute()
 
+    @property
+    def had_ok(self) -> bool:
+        """Whether any compute ever produced diagnosis metrics.
+
+        Lets renderers distinguish "no data yet" (calm waiting state)
+        from "had data, now expired" (the run died) when a compute
+        returns empty metrics.
+        """
+        return self._last_ok is not None
+
     def _compute(self) -> StepCombinedTimeResult:
         try:
             with self._connect() as conn:

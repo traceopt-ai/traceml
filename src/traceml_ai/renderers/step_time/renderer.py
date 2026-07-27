@@ -11,7 +11,6 @@ Behavior:
 
 import math
 import shutil
-from typing import Optional
 
 from rich.console import Group
 from rich.panel import Panel
@@ -67,7 +66,7 @@ class StepCombinedRenderer(BaseRenderer):
         )
         self._computer = StepCombinedComputer(db_path=db_path)
 
-    def _payload(self) -> Optional[StepCombinedTimeResult]:
+    def _payload(self) -> StepCombinedTimeResult:
         """
         CLI compute is summary-only (cheap).
 
@@ -80,7 +79,9 @@ class StepCombinedRenderer(BaseRenderer):
     def get_panel_renderable(self) -> Panel:
         payload = self._payload()
 
-        if payload is None:
+        if not payload.diagnosis_metrics and not self._computer.had_ok:
+            # Never had data: normal warm-up, keep the calm waiting state
+            # instead of alarming with a NO DATA diagnosis.
             return Panel(
                 "Waiting for first fully completed step across all ranks…",
                 title="Model Step Summary",
@@ -97,11 +98,13 @@ class StepCombinedRenderer(BaseRenderer):
         metrics = _table_metrics(payload.diagnosis_metrics)
 
         if not metrics:
+            # Had data before, none now: the run stopped reporting and
+            # the computer's stale window expired.
             return Panel(
                 Group(
                     diag_text,
                     "",
-                    "Waiting for selected step-time diagnosis metrics…",
+                    "No fresh step timing; the last window expired.",
                 ),
                 title="Model Step Summary",
                 border_style="cyan",

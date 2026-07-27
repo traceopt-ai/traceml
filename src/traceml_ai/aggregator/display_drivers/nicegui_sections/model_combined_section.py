@@ -121,15 +121,24 @@ def update_model_combined_section(
     # A metric absent from the payload was never measured this window: it
     # renders as an empty segment instead of freezing the whole card on
     # the last complete view. Measured zeros stay zero-width but count as
-    # measured.
+    # measured. H2D events are occurrence-driven (no transfers, no
+    # events), so an absent H2D counts as measured-zero, not as partial
+    # coverage.
     vals: Dict[str, Optional[float]] = {
         k: (float(m[k].summary.median_total or 0.0) if k in m else None)
         for _, k, _ in theme.PHASES
     }
     measured = {k: v for k, v in vals.items() if v is not None}
-    tot = sum(measured.values()) or 1.0
     st = m["step_time"].summary
-    partial = len(measured) < len(vals)
+    partial = any(value is None for key, value in vals.items() if key != "h2d")
+    # Denominator: at least the median iteration envelope (input wait +
+    # step envelope), so unmeasured time shows as empty ribbon space
+    # instead of stretching the measured phases to fill 100%.
+    input_wait_value = vals.get("input_wait")
+    envelope = float(st.median_total or 0.0) + (
+        input_wait_value if input_wait_value is not None else 0.0
+    )
+    tot = max(sum(measured.values()), envelope) or 1.0
 
     sig = tuple(
         round(vals[k], 3) if vals[k] is not None else None

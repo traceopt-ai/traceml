@@ -122,3 +122,74 @@ def test_worst_rank_requires_measured_total_step() -> None:
         )
         == 0
     )
+
+
+def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
+    """The last-ok window is the only flicker/dead-view bridge (issue #259).
+
+    A transient empty compute re-serves the last good metrics with a
+    STALE status; once the TTL passes, the empty result comes through
+    and had_ok records that data existed before.
+    """
+    from traceml_ai.renderers.step_time import compute as compute_module
+    from traceml_ai.renderers.step_time.schema import (
+        StepCombinedTimeCoverage,
+        StepCombinedTimeMetric,
+        StepCombinedTimeResult,
+        StepCombinedTimeSummary,
+    )
+
+    metric = StepCombinedTimeMetric(
+        metric="step_time",
+        clock="cpu",
+        series=None,
+        summary=StepCombinedTimeSummary(
+            window_size=1,
+            steps_used=1,
+            median_total=10.0,
+            worst_total=10.0,
+            worst_rank=0,
+            skew_ratio=0.0,
+            skew_pct=0.0,
+        ),
+        coverage=StepCombinedTimeCoverage(
+            expected_steps=1,
+            steps_used=1,
+            completed_step=1,
+            world_size=1,
+            ranks_present=1,
+            incomplete=False,
+        ),
+    )
+    good = StepCombinedTimeResult(
+        status_message="OK",
+        per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
+        diagnosis_clock="cpu",
+        diagnosis_metrics=[metric],
+    )
+    empty = StepCombinedTimeResult(status_message="no rows")
+
+    computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
+    assert computer.had_ok is False
+
+    results = iter([good, empty, empty])
+    monkeypatch.setattr(computer, "_compute_impl", lambda conn: next(results))
+
+    assert computer.compute_cli().diagnosis_metrics == [metric]
+    assert computer.had_ok is True
+
+    # Within the TTL a transient gap re-serves the last good metrics.
+    bridged = computer.compute_cli()
+    assert bridged.diagnosis_metrics == [metric]
+    assert bridged.status_message.startswith("STALE")
+
+    # Past the TTL the empty result comes through unbridged.
+    monkeypatch.setattr(
+        compute_module.time,
+        "time",
+        lambda: computer._last_ok_ts + 31.0,
+    )
+    expired = computer.compute_cli()
+    assert expired.diagnosis_metrics == []
+    assert expired.status_message == "No fresh step-combined data"
+    assert computer.had_ok is True
