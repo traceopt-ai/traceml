@@ -92,6 +92,7 @@ jobs:
             tests/runtime/test_telemetry_publisher.py \
             tests/reporting/compare \
             tests/reporting/html \
+            tests/reporting/summary \
             -q
 
   smoke-test-install:

@@ -261,17 +261,6 @@ def build_step_time_payload(
 
     median_global_rank = overview["median_global_rank"]
     worst_global_rank = overview["worst_global_rank"]
-    median_summary = (
-        rank_summary.get(median_global_rank)
-        if median_global_rank is not None
-        else None
-    )
-    worst_summary = (
-        rank_summary.get(worst_global_rank)
-        if worst_global_rank is not None
-        else None
-    )
-    primary_summary = median_summary or worst_summary
 
     summary_diag = diagnosis_result.primary
     issues = diagnosis_result.issues
@@ -312,13 +301,23 @@ def build_step_time_payload(
                 f"- Why: {diagnosis_why}",
             ]
         )
-    elif len(global_ranks_used) == 1 and primary_summary is not None:
+    elif len(global_ranks_used) == 1:
+        # The single-rank wording must not depend on the rank winning a
+        # median/worst pick: a rank whose total step is unmeasured (for
+        # example H2D-only) is excluded from those picks but is still the
+        # run's only rank.
         only_rank = global_ranks_used[0]
+        only_summary = rank_summary.get(only_rank)
+        steps_analyzed = (
+            only_summary.steps_analyzed
+            if only_summary is not None
+            else step_time_window.coverage.steps_used
+        )
         lines.extend(
             [
                 f"- Diagnosis: {diagnosis_status}",
                 (
-                    f"- Scope: last {primary_summary.steps_analyzed} "
+                    f"- Scope: last {steps_analyzed} "
                     f"aligned steps on global rank r{only_rank}"
                 ),
             ]

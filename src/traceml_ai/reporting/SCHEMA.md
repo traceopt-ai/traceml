@@ -88,8 +88,12 @@ Selection policy:
   and System reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
 - `NO_CLEAR_PERFORMANCE_BOTTLENECK` appears when Step Time is `BALANCED` and
   GPU utilization is not low/moderate.
-- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA` or
-  `WARMUP`.
+- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA`,
+  `WARMUP`, or `INCOMPLETE_DATA`. For `INCOMPLETE_DATA` its summary and
+  action name the missing-phase problem, its evidence carries
+  `step_time_status: "INCOMPLETE DATA"`, and the Step Time section's
+  diagnosis evidence lists `missing_signals` plus per-signal
+  `signal_coverage`.
 - Step Time may emit warning-only bottleneck diagnoses before its confident
   threshold; critical Step Time diagnoses require the confident window size.
   Live and summary use the same global-rank Step Time SQLite window loader;

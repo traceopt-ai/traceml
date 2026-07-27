@@ -57,7 +57,8 @@ def _create_db(path: str, per_rank_events: dict) -> None:
     """Create a step_time db; per_rank_events maps rank -> metric ms map."""
     conn = sqlite3.connect(path)
     try:
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE step_time_samples (
                 id                 INTEGER PRIMARY KEY AUTOINCREMENT,
                 recv_ts_ns         INTEGER NOT NULL,
@@ -73,13 +74,16 @@ def _create_db(path: str, per_rank_events: dict) -> None:
                 step               INTEGER,
                 events_json        TEXT NOT NULL
             );
-            """)
-        conn.execute("""
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE runtime_environment (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 training_strategy TEXT
             );
-            """)
+            """
+        )
         conn.execute(
             "INSERT INTO runtime_environment(training_strategy) VALUES (?);",
             ("ddp",),
@@ -223,3 +227,60 @@ def test_compare_treats_null_metric_as_unavailable(tmp_path) -> None:
     assert metrics["compute_ms"]["pct_change"] is None
     # Null on both sides is equally quiet.
     assert metrics["residual_ms"]["delta"] is None
+
+
+def test_single_rank_scope_wording_survives_null_total(tmp_path) -> None:
+    db = tmp_path / "telemetry"
+    _create_db(str(db), {0: {"h2d": 3.0}})
+    summary = generate_step_time_summary_card(str(db), print_to_stdout=False)
+
+    # A single-rank run keeps single-rank wording even when its total
+    # step is unmeasured and it cannot win a median/worst pick.
+    assert "aligned steps on global rank r0" in summary["card"]
+    assert "across 1 global ranks" not in summary["card"]
+
+
+def test_all_ranks_without_total_step_null_the_rank_picks(tmp_path) -> None:
+    db = tmp_path / "telemetry"
+    _create_db(str(db), {0: {"h2d": 2.0}, 1: {"h2d": 6.0}})
+    summary = generate_step_time_summary_card(str(db), print_to_stdout=False)
+
+    assert summary["global"]["worst"]["total_step_ms"] == {
+        "value": None,
+        "idx": None,
+    }
+    assert summary["global"]["average"]["total_step_ms"] is None
+    assert summary["global"]["average"]["h2d_ms"] == 4.0
+    assert summary["global"]["worst"]["h2d_ms"]["idx"] == "1"
+    assert "total n/a" in summary["card"]
+
+
+def test_partial_compute_triplet_nulls_only_derived_metrics(
+    tmp_path,
+) -> None:
+    db = tmp_path / "telemetry"
+    values = {k: v for k, v in _FULL_RANK_MS.items() if k != "optimizer_step"}
+    _create_db(str(db), {0: values})
+    summary = generate_step_time_summary_card(str(db), print_to_stdout=False)
+
+    metrics = summary["groups"]["rows"]["0"]["metrics"]
+    # Measured phases keep their values; only the metrics that need the
+    # unmeasured optimizer become null.
+    assert metrics["forward_ms"] == 5.0
+    assert metrics["backward_ms"] == 10.0
+    assert metrics["optimizer_ms"] is None
+    assert metrics["compute_ms"] is None
+    assert metrics["residual_ms"] is None
+    assert metrics["total_step_ms"] == 31.0
+
+
+def test_finite_float_or_none_preserves_missing_and_zero() -> None:
+    from traceml_ai.reporting.sections.step_time.model import (
+        finite_float_or_none,
+    )
+
+    assert finite_float_or_none(None) is None
+    assert finite_float_or_none(0.0) == 0.0
+    assert finite_float_or_none(float("nan")) is None
+    assert finite_float_or_none(float("inf")) is None
+    assert finite_float_or_none("bogus") is None

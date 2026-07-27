@@ -157,18 +157,6 @@ def rank_summaries_from_window(
     }
 
 
-def compute_residual_avg_ms(s: RankStepSummary) -> Optional[float]:
-    """
-    Return canonical average residual for one rank summary.
-
-    residual_ms is averaged from per-step clamped residuals:
-    max(0, step_time_ms - h2d_ms - compute_ms). This intentionally differs
-    from clamping the already-averaged phase totals. ``None`` means a
-    component phase was never measured, so the residual is underivable.
-    """
-    return finite_float_or_none(s.avg_residual_ms)
-
-
 _METRIC_FIELDS: Dict[str, str] = {
     "total_step_ms": "avg_total_step_ms",
     "dataloader_ms": "avg_dataloader_ms",
@@ -378,8 +366,8 @@ __all__ = [
     "build_global_rollup",
     "build_overview",
     "closest_rank_to_median",
-    "compute_residual_avg_ms",
     "finite_float",
+    "finite_float_or_none",
     "rank_summaries_from_window",
     "rank_summary_from_timing",
     "summary_metric_values",
