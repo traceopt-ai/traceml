@@ -9,15 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Literal,
-    Optional,
-    Sequence,
-    cast,
-)
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
 
