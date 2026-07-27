@@ -173,10 +173,14 @@ def _alternating_residual_step_metrics(steps: int = 64) -> dict[int, dict]:
         compute_ms, step_time_ms = (
             (50.0, 100.0) if step % 2 == 0 else (100.0, 50.0)
         )
+        # backward/optimizer are measured zeros: the residual derivation
+        # requires every compute phase to be measured, not assumed.
         out[step] = {
             "_traceml_internal:dataloader_next": _event_stats(cpu_ms=0.0),
             "_traceml_internal:h2d_time": _event_stats(cpu_ms=0.0),
             "_traceml_internal:forward_time": _event_stats(cpu_ms=compute_ms),
+            "_traceml_internal:backward_time": _event_stats(cpu_ms=0.0),
+            "_traceml_internal:optimizer_step": _event_stats(cpu_ms=0.0),
             "_traceml_internal:step_time": _event_stats(cpu_ms=step_time_ms),
         }
     return out

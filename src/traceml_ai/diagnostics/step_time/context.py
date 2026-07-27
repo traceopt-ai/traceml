@@ -12,8 +12,8 @@ individual diagnosis rules can stay small and focused. The intent is:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Dict, Optional, Sequence, Tuple
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
 from traceml_ai.utils.training_strategy import normalize_training_strategy
@@ -112,10 +112,10 @@ class StepTimeAnalysisContext:
     residual_total: float
     compute_total: float
 
-    residual_share: float
-    compute_share: float
-    input_bound_share: float
-    h2d_share: float
+    residual_share: Optional[float]
+    compute_share: Optional[float]
+    input_bound_share: Optional[float]
+    h2d_share: Optional[float]
 
     input_bound_skew: float
     compute_skew: float
@@ -129,6 +129,10 @@ class StepTimeAnalysisContext:
 
     rank_values: Dict[str, Dict[int, float]]
     rank_straggler: Optional[_RankStragglerEvidence]
+
+    ranks_observed: int = 0
+    signal_rank_counts: Dict[str, int] = field(default_factory=dict)
+    straggler_eligible_ranks: int = 0
 
 
 def non_negative_finite(value: float) -> float:
@@ -323,24 +327,32 @@ def _build_rank_straggler_evidence(
     score_threshold: float,
     cause_coverage_threshold: float,
     training_strategy: str,
-) -> Optional[_RankStragglerEvidence]:
+) -> Tuple[Optional[_RankStragglerEvidence], int]:
     """
     Build culprit/victim rank straggler evidence for distributed runs.
 
     DDP/default uses backward as the visible synchronization phase. FSDP uses
     forward + backward because FSDP can communicate on both sides of module
-    execution. Only ranks with measured visible-phase anchors and a measured
-    step envelope are eligible. Component attribution compares the culprit rank
-    directly to the victim rank and emits a subtype only when one component
-    explains enough of the visible cost.
+    execution. Only ranks with measured visible-phase anchors, a measured
+    step envelope, and a measured input wait are eligible. Component
+    attribution compares the culprit rank directly to the victim rank,
+    considers only components measured on both ranks, and emits a subtype
+    only when one component explains enough of the visible cost.
+
+    Returns the evidence (or ``None``) plus the eligible-rank count so
+    callers can distinguish a healthy abstention from a missing-signal
+    abstention.
     """
     if len(per_rank_timing) <= 1:
-        return None
+        return None, len(per_rank_timing)
 
     strategy = normalize_training_strategy(training_strategy)
     visible_metric = "forward_backward" if strategy == "fsdp" else "backward"
     eligible_ranks = []
     for rank in sorted(int(rank) for rank in per_rank_timing):
+        values = per_rank_timing.get(int(rank), {})
+        if "input_wait" not in values:
+            continue
         forward = _rank_metric_value(per_rank_timing, rank, "forward")
         backward = _rank_metric_value(per_rank_timing, rank, "backward")
         step_time = _rank_metric_value(per_rank_timing, rank, "step_time")
@@ -350,7 +362,7 @@ def _build_rank_straggler_evidence(
             continue
         eligible_ranks.append(rank)
     if len(eligible_ranks) <= 1:
-        return None
+        return None, len(eligible_ranks)
 
     visible_values = {
         int(rank): (
@@ -363,7 +375,7 @@ def _build_rank_straggler_evidence(
     }
     pair = _rank_straggler_pair(visible_values)
     if pair is None:
-        return None
+        return None, len(eligible_ranks)
 
     culprit = pair.culprit_rank
     victim = pair.victim_rank
@@ -374,39 +386,42 @@ def _build_rank_straggler_evidence(
     score = pair.cost_ms / iteration_time
     threshold = non_negative_finite(score_threshold)
     if score < threshold:
-        return None
+        return None, len(eligible_ranks)
 
-    input_excess = max(
-        0.0,
-        _rank_metric_value(per_rank_timing, culprit, "input_wait")
-        - _rank_metric_value(per_rank_timing, victim, "input_wait"),
-    )
-    h2d_excess = max(
-        0.0,
-        _rank_metric_value(per_rank_timing, culprit, "h2d")
-        - _rank_metric_value(per_rank_timing, victim, "h2d"),
-    )
-    if strategy == "fsdp":
+    def _measured_on_both(metric: str) -> bool:
+        return metric in per_rank_timing.get(
+            culprit, {}
+        ) and metric in per_rank_timing.get(victim, {})
+
+    # Eligibility guarantees input_wait on both ranks; H2D joins the
+    # candidate set only when measured on both, so an unmeasured
+    # transfer phase can never name the cause.
+    component_excesses = {
+        "input": max(
+            0.0,
+            _rank_metric_value(per_rank_timing, culprit, "input_wait")
+            - _rank_metric_value(per_rank_timing, victim, "input_wait"),
+        )
+    }
+    if _measured_on_both("h2d"):
+        component_excesses["h2d"] = max(
+            0.0,
+            _rank_metric_value(per_rank_timing, culprit, "h2d")
+            - _rank_metric_value(per_rank_timing, victim, "h2d"),
+        )
+    if strategy != "fsdp":
         # FSDP interleaves collectives with forward/backward, so without
         # explicit collective timing this rule should not emit compute
         # stragglers from forward excess.
-        forward_excess = 0.0
-    else:
         culprit_forward = _rank_metric_value(
             per_rank_timing, culprit, "forward"
         )
         victim_forward = _rank_metric_value(per_rank_timing, victim, "forward")
-        forward_excess = (
-            max(0.0, culprit_forward - victim_forward)
-            if culprit_forward > 0.0 and victim_forward > 0.0
-            else 0.0
-        )
+        if culprit_forward > 0.0 and victim_forward > 0.0:
+            component_excesses["compute"] = max(
+                0.0, culprit_forward - victim_forward
+            )
 
-    component_excesses = {
-        "input": input_excess,
-        "h2d": h2d_excess,
-        "compute": forward_excess,
-    }
     component_coverage = {
         component: min(1.0, excess / pair.cost_ms)
         for component, excess in component_excesses.items()
@@ -459,7 +474,7 @@ def _build_rank_straggler_evidence(
         iteration_time_ms=iteration_time,
         component_excesses_ms=component_excesses,
         component_coverage=component_coverage,
-    )
+    ), len(eligible_ranks)
 
 
 def largest_compute_phase(
@@ -529,12 +544,15 @@ def compute_rank_values_from_components(
 ) -> Dict[int, float]:
     """
     Return rank -> forward + backward + optimizer_step from rank-value maps.
+
+    Only ranks with all three compute phases measured are included, so a
+    missing phase cannot understate a rank's compute as a partial sum.
     """
     forward = rank_values.get("forward", {})
     backward = rank_values.get("backward", {})
     optimizer = rank_values.get("optimizer_step", {})
     out: Dict[int, float] = {}
-    for rank in sorted(set(forward) | set(backward) | set(optimizer)):
+    for rank in sorted(set(forward) & set(backward) & set(optimizer)):
         out[int(rank)] = (
             non_negative_finite(forward.get(rank, 0.0))
             + non_negative_finite(backward.get(rank, 0.0))
@@ -546,8 +564,13 @@ def compute_rank_values_from_components(
 def _median_iteration_component_share(
     per_rank_timing: Dict[int, Dict[str, float]],
     component: str,
-) -> float:
-    """Return the median selected-clock iteration share for one component."""
+) -> Optional[float]:
+    """Return the median selected-clock iteration share for one component.
+
+    Returns ``None`` when no rank measured the component together with
+    its iteration anchors; a measured-zero share stays ``0.0`` so rules
+    can distinguish "signal absent" from "signal present and small".
+    """
     shares = []
     for values in per_rank_timing.values():
         if not {
@@ -563,6 +586,8 @@ def _median_iteration_component_share(
             shares.append(
                 share(non_negative_finite(values[component]), iteration)
             )
+    if not shares:
+        return None
     return _median(shares)
 
 
@@ -631,34 +656,20 @@ def build_step_time_context(
             )
     if local_per_rank_timing:
         rank_values = {
-            "input_wait": {
-                rank: non_negative_finite(values.get("input_wait", 0.0))
+            metric_key: {
+                rank: non_negative_finite(values[metric_key])
                 for rank, values in local_per_rank_timing.items()
-            },
-            "h2d": {
-                rank: non_negative_finite(values.get("h2d", 0.0))
-                for rank, values in local_per_rank_timing.items()
-            },
-            "forward": {
-                rank: non_negative_finite(values.get("forward", 0.0))
-                for rank, values in local_per_rank_timing.items()
-            },
-            "backward": {
-                rank: non_negative_finite(values.get("backward", 0.0))
-                for rank, values in local_per_rank_timing.items()
-            },
-            "optimizer_step": {
-                rank: non_negative_finite(values.get("optimizer_step", 0.0))
-                for rank, values in local_per_rank_timing.items()
-            },
-            "step_time": {
-                rank: non_negative_finite(values.get("step_time", 0.0))
-                for rank, values in local_per_rank_timing.items()
-            },
-            "residual_proxy": {
-                rank: non_negative_finite(values.get("residual_proxy", 0.0))
-                for rank, values in local_per_rank_timing.items()
-            },
+                if metric_key in values
+            }
+            for metric_key in (
+                "input_wait",
+                "h2d",
+                "forward",
+                "backward",
+                "optimizer_step",
+                "step_time",
+                "residual_proxy",
+            )
         }
 
     input_candidates = {
@@ -691,12 +702,27 @@ def build_step_time_context(
         if single_rank or input_wait_median <= 0.0
         else input_slack / input_wait_median
     )
-    rank_straggler = _build_rank_straggler_evidence(
+    rank_straggler, straggler_eligible_ranks = _build_rank_straggler_evidence(
         per_rank_timing=local_per_rank_timing,
         score_threshold=thresholds.straggler_score_warn,
         cause_coverage_threshold=thresholds.straggler_cause_coverage_min,
         training_strategy=training_strategy,
     )
+    signal_rank_counts = {
+        metric_key: sum(
+            1
+            for values in local_per_rank_timing.values()
+            if metric_key in values
+        )
+        for metric_key in (
+            "input_wait",
+            "h2d",
+            "forward",
+            "backward",
+            "optimizer_step",
+            "step_time",
+        )
+    }
     compute_rank_values = compute_rank_values_from_components(rank_values)
     _compute_median, _, _, _compute_slack = _rank_stats(compute_rank_values)
     compute_skew_value = (
@@ -747,6 +773,9 @@ def build_step_time_context(
         largest_compute=largest_compute,
         rank_values=rank_values,
         rank_straggler=rank_straggler,
+        ranks_observed=len(local_per_rank_timing),
+        signal_rank_counts=signal_rank_counts,
+        straggler_eligible_ranks=straggler_eligible_ranks,
     )
 
 

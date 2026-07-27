@@ -22,7 +22,7 @@ _SOURCE_NAMES = {
 # Color buckets come from the engine's own severity (info|warn|crit), already
 # present in the payload — never re-parsed from the status text. New diagnosis
 # kinds therefore color correctly with no change here (single source of truth).
-_NEUTRAL_KINDS = ("NO_DATA", "WARMUP", "NO_GPU")
+_NEUTRAL_KINDS = ("NO_DATA", "WARMUP", "NO_GPU", "INCOMPLETE_DATA")
 
 
 def _row_sev(item: Dict[str, Any]) -> str:

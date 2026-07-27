@@ -19,7 +19,7 @@ def _styled_status(diagnosis: StepDiagnosis) -> str:
     """Render a colored status label for Rich CLI output."""
     if diagnosis.kind == "BALANCED":
         style = "bold green"
-    elif diagnosis.kind in {"NO_DATA", "WARMUP"}:
+    elif diagnosis.kind in {"NO_DATA", "WARMUP", "INCOMPLETE_DATA"}:
         style = "bold bright_black"
     elif diagnosis.kind == "INPUT_BOUND":
         style = "bold yellow"

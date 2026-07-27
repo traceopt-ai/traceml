@@ -9,9 +9,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Literal, Optional, Sequence, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    Literal,
+    Optional,
+    Sequence,
+    cast,
+)
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+
+if TYPE_CHECKING:
+    from .context import StepTimeAnalysisContext
 
 from ..common import (
     BaseDiagnosis,
@@ -39,6 +50,7 @@ from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 DiagnosisKind = Literal[
     "NO_DATA",
     "WARMUP",
+    "INCOMPLETE_DATA",
     "BALANCED",
     "STRAGGLER",
     "INPUT_STRAGGLER",
@@ -53,6 +65,7 @@ DiagnosisKind = Literal[
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "NO_DATA": "NO DATA",
     "WARMUP": "WARMUP",
+    "INCOMPLETE_DATA": "INCOMPLETE DATA",
     "BALANCED": "BALANCED",
     "STRAGGLER": "STRAGGLER",
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
@@ -320,6 +333,77 @@ def _apply_trend_note(
         return diagnosis
 
 
+_MISSING_SIGNAL_ORDER: tuple[str, ...] = (
+    "input_wait",
+    "h2d",
+    "forward",
+    "backward",
+    "optimizer_step",
+    "step_time",
+)
+
+
+def _missing_signal_report(
+    context: "StepTimeAnalysisContext",
+) -> tuple[list[str], Dict[str, str]]:
+    """Return missing-signal names plus per-signal rank coverage.
+
+    A signal is reported when an abstaining rule required it and it was
+    not measured on every observed rank. Abstentions caused purely by
+    the clock gate (H2D on the cpu clock) are not missing data.
+    """
+    ranks = max(0, int(context.ranks_observed))
+    counts = context.signal_rank_counts or {}
+    needed: set[str] = set()
+
+    def _require(signals: Sequence[str]) -> None:
+        needed.update(signals)
+
+    if context.input_bound_share is None:
+        _require(("input_wait", "step_time"))
+    if context.diagnosis_clock == "gpu" and context.h2d_share is None:
+        _require(("h2d", "input_wait", "step_time"))
+    if context.compute_share is None:
+        _require(
+            (
+                "forward",
+                "backward",
+                "optimizer_step",
+                "input_wait",
+                "step_time",
+            )
+        )
+    if context.residual_share is None:
+        _require(
+            (
+                "forward",
+                "backward",
+                "optimizer_step",
+                "input_wait",
+                "step_time",
+            )
+        )
+        if context.diagnosis_clock == "gpu":
+            _require(("h2d",))
+    if (
+        not context.single_rank
+        and context.rank_straggler is None
+        and context.straggler_eligible_ranks < 2
+    ):
+        _require(("backward", "input_wait", "step_time"))
+        if context.training_strategy == "fsdp":
+            _require(("forward",))
+
+    required_ranks = max(1, ranks)
+    missing = [
+        name
+        for name in _MISSING_SIGNAL_ORDER
+        if name in needed and counts.get(name, 0) < required_ranks
+    ]
+    coverage = {name: f"{counts.get(name, 0)}/{ranks}" for name in missing}
+    return missing, coverage
+
+
 def build_step_diagnosis_result(
     metrics: Sequence[StepCombinedTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
@@ -471,16 +555,42 @@ def build_step_diagnosis_result(
             ),
         )
     else:
-        primary = _mk_diag(
-            kind="BALANCED",
-            severity="info",
-            reason="No dominant bottleneck is visible in this window.",
-            action="Focus on throughput only if overall speed is still low.",
-            steps_used=context.steps_used,
-            worst_rank=(
-                None if context.single_rank else context.overall_worst_rank
-            ),
-        )
+        missing_signals, signal_coverage = _missing_signal_report(context)
+        if missing_signals:
+            primary = _mk_diag(
+                kind="INCOMPLETE_DATA",
+                severity="info",
+                reason=(
+                    "Missing timing signals prevent a reliable diagnosis: "
+                    + ", ".join(missing_signals)
+                    + "."
+                ),
+                action=(
+                    "Instrument the missing phases (auto mode or the "
+                    "matching wrap_* helpers) to restore coverage."
+                ),
+                steps_used=context.steps_used,
+                worst_rank=(
+                    None if context.single_rank else context.overall_worst_rank
+                ),
+            )
+            incomplete_evidence = {
+                "missing_signals": list(missing_signals),
+                "signal_coverage": dict(signal_coverage),
+            }
+        else:
+            primary = _mk_diag(
+                kind="BALANCED",
+                severity="info",
+                reason="No dominant bottleneck is visible in this window.",
+                action=(
+                    "Focus on throughput only if overall speed is still low."
+                ),
+                steps_used=context.steps_used,
+                worst_rank=(
+                    None if context.single_rank else context.overall_worst_rank
+                ),
+            )
 
     primary = _apply_trend_note(
         primary,
@@ -488,8 +598,8 @@ def build_step_diagnosis_result(
         residual_metric=context.residual_metric,
         input_wait_metric=context.input_wait_metric,
         single_rank=context.single_rank,
-        residual_share=context.residual_share,
-        input_bound_share=context.input_bound_share,
+        residual_share=context.residual_share or 0.0,
+        input_bound_share=context.input_bound_share or 0.0,
         thresholds=thresholds,
     )
 
@@ -505,6 +615,11 @@ def build_step_diagnosis_result(
                     (primary.worst_rank,)
                     if primary.worst_rank is not None
                     else ()
+                ),
+                evidence=(
+                    incomplete_evidence
+                    if primary.kind == "INCOMPLETE_DATA"
+                    else {}
                 ),
             ),
         )

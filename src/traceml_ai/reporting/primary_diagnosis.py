@@ -94,7 +94,7 @@ STRAGGLER_KINDS = {
     "H2D_STRAGGLER",
     "STRAGGLER",
 }
-INSUFFICIENT_STEP_TIME_KINDS = {"NO_DATA", "WARMUP"}
+INSUFFICIENT_STEP_TIME_KINDS = {"NO_DATA", "WARMUP", "INCOMPLETE_DATA"}
 LOW_GPU_UTIL_KINDS = {
     "LOW_GPU_UTILIZATION",
     "MODERATE_GPU_UTILIZATION",
@@ -494,16 +494,28 @@ def _insufficient_step_time_primary(
         "steps_analyzed": _steps_analyzed(step_time_summary),
         "gpu_util_avg_percent": _round(_gpu_util_avg(system_summary)),
     }
+    if _diag_field(diagnosis, "kind", "") == "INCOMPLETE_DATA":
+        summary = (
+            "Step timing is missing phase signals, so no reliable "
+            "performance diagnosis is available."
+        )
+        action = (
+            "Instrument the missing phases; the Step Time section lists "
+            "the missing signal names."
+        )
+    else:
+        summary = (
+            "Not enough completed step-time samples were available for a "
+            "stable performance diagnosis."
+        )
+        action = "Run for more steps or ensure step timing is recorded."
     return _primary_payload(
         kind="INSUFFICIENT_STEP_TIME_DATA",
         status="INSUFFICIENT STEP-TIME DATA",
         severity="info",
         section=STEP_TIME_SECTION,
-        summary=(
-            "Not enough completed step-time samples were available for a "
-            "stable performance diagnosis."
-        ),
-        action="Run for more steps or ensure step timing is recorded.",
+        summary=summary,
+        action=action,
         evidence=evidence,
     )
 

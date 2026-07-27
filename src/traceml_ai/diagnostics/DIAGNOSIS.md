@@ -64,6 +64,11 @@ Training-step timing.
 
 - `NO_DATA`: no usable step-time data.
 - `WARMUP`: some data exists, but not enough for diagnosis.
+- `INCOMPLETE_DATA` with status `INCOMPLETE DATA`: timing exists, but one or
+  more phase signals were never measured in the window and no rule could
+  reach a reliable conclusion. The evidence lists `missing_signals` (metric
+  names) and per-signal `signal_coverage` (`measured ranks / observed
+  ranks`).
 - `BALANCED`: no clear timing bottleneck or rank straggler.
 - `STRAGGLER`: visible rank skew exists, but input wait, H2D, and DDP forward
   do not explain the likely culprit.
@@ -80,6 +85,25 @@ Training-step timing.
   this is informational when no material overhead is visible.
 - `RESIDUAL_HEAVY`: unattributed residual time is a material typical iteration
   cost.
+
+Missing signals and measured zeros are different things. A timing event that
+was never observed in the window stays an absent metric (it is not converted
+to `0.0`), while a phase measured at `0.0` stays a valid zero. A metric
+measured in at least one aligned step of a rank's window is *available* for
+that rank; steps where an available metric is absent count as zero work (the
+optimizer under gradient accumulation is the canonical case). Derived
+metrics exist only when their inputs are available: `compute` needs forward,
+backward, and optimizer; `total_step` needs input wait plus the step
+envelope; `residual_proxy` needs the step envelope plus every compute phase,
+and on the gpu clock also H2D (on the cpu clock H2D cost is unmeasurable by
+design and contributes zero). Each rule abstains when its required signals
+are unavailable: input needs input wait + step time; H2D needs GPU H2D +
+input wait + step time; compute and residual need every compute phase +
+input wait + step time; rank stragglers need their visible-phase anchors +
+input wait + step time. Rules still fire from the ranks that measured their
+signals, so one dark rank does not silence an otherwise measured finding.
+When no rule fires and at least one abstained for missing signals, Step Time
+reports `INCOMPLETE_DATA` instead of `BALANCED`.
 
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,
@@ -165,12 +189,13 @@ visible_r = backward_r              # DDP/default
 visible_r = forward_r + backward_r  # FSDP
 ```
 
-Only ranks with measured visible-phase anchors and a measured step envelope are
-eligible:
+Only ranks with measured visible-phase anchors, a measured step envelope, and
+a measured input wait are eligible:
 
 ```text
-DDP/default: backward_r > 0 and step_time_r > 0
-FSDP:        forward_r > 0 and backward_r > 0 and step_time_r > 0
+DDP/default: input_wait measured and backward_r > 0 and step_time_r > 0
+FSDP:        input_wait measured and forward_r > 0 and backward_r > 0
+             and step_time_r > 0
 ```
 
 If fewer than two ranks are eligible, TraceML does not report a rank straggler.
@@ -197,9 +222,11 @@ h2d_excess = h2d_culprit - h2d_victim
 forward_excess = forward_culprit - forward_victim  # DDP/default only
 ```
 
-DDP/default compute attribution requires measured forward time on both the
-culprit and victim ranks. A component names the cause only when it covers at
-least 80% of visible wait cost:
+Every candidate component must be measured on both the culprit and victim
+ranks: DDP/default compute attribution requires measured forward time on
+both, and H2D attribution requires measured H2D time on both, so an
+unmeasured phase can never name the cause. A component names the cause only
+when it covers at least 80% of visible wait cost:
 
 ```text
 component_coverage = min(1, component_excess / visible_cost)
