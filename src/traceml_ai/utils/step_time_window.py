@@ -73,11 +73,6 @@ DISPLAY_METRICS: tuple[str, ...] = (
     "residual_proxy",
 )
 
-WINDOW_AVERAGE_METRICS: tuple[str, ...] = DISPLAY_METRICS + (
-    DATALOADER_FETCH_KEY,
-    STEP_TIME_CPU_KEY,
-)
-
 REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
 
 
@@ -256,13 +251,14 @@ def _add_derived_step_metrics(
     """Attach derived metrics whose required inputs are available.
 
     ``residual_proxy`` needs the step envelope plus every compute phase.
-    On the gpu clock it also needs H2D; on the cpu clock H2D cost is
-    unmeasurable by design, so an unavailable H2D contributes zero.
-    ``total_step`` needs the input wait plus the step envelope.
+    H2D events are occurrence-driven (a fully instrumented run with no
+    host-to-device copies emits none), so an unavailable H2D contributes
+    zero rather than blocking the residual. ``total_step`` needs the
+    input wait plus the step envelope.
     """
+    del clock
     compute_available = all(key in available for key in _COMPUTE_KEYS)
-    h2d_ready = ("h2d" in available) or (clock == "cpu")
-    if "step_time" in available and compute_available and h2d_ready:
+    if "step_time" in available and compute_available:
         timing["residual_proxy"] = max(
             0.0,
             timing["step_time"]
@@ -300,10 +296,18 @@ def _average_rank_timing(
                 totals[metric_key] += (
                     float(value) if value is not None else 0.0
                 )
-        out[int(rank)] = {
+        averaged = {
             metric_key: float(value / divisor)
             for metric_key, value in totals.items()
         }
+        if "total_step" in averaged:
+            # Re-derive from the averaged components so complete-data
+            # output stays bit-identical to the historical
+            # avg(input_wait) + avg(step_time) formulation.
+            averaged["total_step"] = averaged.get(
+                INPUT_WAIT_KEY, 0.0
+            ) + averaged.get("step_time", 0.0)
+        out[int(rank)] = averaged
     return out
 
 

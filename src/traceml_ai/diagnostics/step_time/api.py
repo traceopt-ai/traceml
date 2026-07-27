@@ -335,7 +335,6 @@ def _apply_trend_note(
 
 _MISSING_SIGNAL_ORDER: tuple[str, ...] = (
     "input_wait",
-    "h2d",
     "forward",
     "backward",
     "optimizer_step",
@@ -349,10 +348,15 @@ def _missing_signal_report(
     """Return missing-signal names plus per-signal rank coverage.
 
     A signal is reported when an abstaining rule required it and it was
-    not measured on every observed rank. Abstentions caused purely by
-    the clock gate (H2D on the cpu clock) are not missing data.
+    not measured on every observed rank. H2D is never reported missing:
+    its events are occurrence-driven (a fully instrumented run with no
+    host-to-device copies emits none), so absence means no observed
+    transfers, not missing instrumentation. Without per-rank rows,
+    availability is unknowable, so nothing is reported missing either.
     """
     ranks = max(0, int(context.ranks_observed))
+    if ranks == 0:
+        return [], {}
     counts = context.signal_rank_counts or {}
     needed: set[str] = set()
 
@@ -361,8 +365,6 @@ def _missing_signal_report(
 
     if context.input_bound_share is None:
         _require(("input_wait", "step_time"))
-    if context.diagnosis_clock == "gpu" and context.h2d_share is None:
-        _require(("h2d", "input_wait", "step_time"))
     if context.compute_share is None:
         _require(
             (
@@ -383,8 +385,6 @@ def _missing_signal_report(
                 "step_time",
             )
         )
-        if context.diagnosis_clock == "gpu":
-            _require(("h2d",))
     if (
         not context.single_rank
         and context.rank_straggler is None
@@ -394,11 +394,10 @@ def _missing_signal_report(
         if context.training_strategy == "fsdp":
             _require(("forward",))
 
-    required_ranks = max(1, ranks)
     missing = [
         name
         for name in _MISSING_SIGNAL_ORDER
-        if name in needed and counts.get(name, 0) < required_ranks
+        if name in needed and counts.get(name, 0) < ranks
     ]
     coverage = {name: f"{counts.get(name, 0)}/{ranks}" for name in missing}
     return missing, coverage

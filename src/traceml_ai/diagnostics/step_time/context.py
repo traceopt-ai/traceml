@@ -409,10 +409,15 @@ def _build_rank_straggler_evidence(
             _rank_metric_value(per_rank_timing, culprit, "h2d")
             - _rank_metric_value(per_rank_timing, victim, "h2d"),
         )
-    if strategy != "fsdp":
+    if strategy == "fsdp":
         # FSDP interleaves collectives with forward/backward, so without
-        # explicit collective timing this rule should not emit compute
-        # stragglers from forward excess.
+        # explicit collective timing this rule never attributes compute
+        # from forward excess; the zero entry keeps the evidence shape.
+        component_excesses["compute"] = 0.0
+    elif _measured_on_both("forward"):
+        # A measured-zero forward stays in the maps with zero excess
+        # (matching the base attribution); only a forward that was never
+        # measured on either rank is excluded from attribution entirely.
         culprit_forward = _rank_metric_value(
             per_rank_timing, culprit, "forward"
         )
@@ -421,6 +426,8 @@ def _build_rank_straggler_evidence(
             component_excesses["compute"] = max(
                 0.0, culprit_forward - victim_forward
             )
+        else:
+            component_excesses["compute"] = 0.0
 
     component_coverage = {
         component: min(1.0, excess / pair.cost_ms)

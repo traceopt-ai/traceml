@@ -65,10 +65,10 @@ Training-step timing.
 - `NO_DATA`: no usable step-time data.
 - `WARMUP`: some data exists, but not enough for diagnosis.
 - `INCOMPLETE_DATA` with status `INCOMPLETE DATA`: timing exists, but one or
-  more phase signals were never measured in the window and no rule could
-  reach a reliable conclusion. The evidence lists `missing_signals` (metric
-  names) and per-signal `signal_coverage` (`measured ranks / observed
-  ranks`).
+  more phase signals were not measured on every observed rank and no rule
+  could reach a reliable conclusion. The evidence lists `missing_signals`
+  (metric names) and per-signal `signal_coverage` (`measured ranks /
+  observed ranks`).
 - `BALANCED`: no clear timing bottleneck or rank straggler.
 - `STRAGGLER`: visible rank skew exists, but input wait, H2D, and DDP forward
   do not explain the likely culprit.
@@ -91,19 +91,22 @@ was never observed in the window stays an absent metric (it is not converted
 to `0.0`), while a phase measured at `0.0` stays a valid zero. A metric
 measured in at least one aligned step of a rank's window is *available* for
 that rank; steps where an available metric is absent count as zero work (the
-optimizer under gradient accumulation is the canonical case). Derived
-metrics exist only when their inputs are available: `compute` needs forward,
-backward, and optimizer; `total_step` needs input wait plus the step
-envelope; `residual_proxy` needs the step envelope plus every compute phase,
-and on the gpu clock also H2D (on the cpu clock H2D cost is unmeasurable by
-design and contributes zero). Each rule abstains when its required signals
-are unavailable: input needs input wait + step time; H2D needs GPU H2D +
-input wait + step time; compute and residual need every compute phase +
-input wait + step time; rank stragglers need their visible-phase anchors +
-input wait + step time. Rules still fire from the ranks that measured their
-signals, so one dark rank does not silence an otherwise measured finding.
-When no rule fires and at least one abstained for missing signals, Step Time
-reports `INCOMPLETE_DATA` instead of `BALANCED`.
+optimizer under gradient accumulation is the canonical case). H2D is
+special: its events are occurrence-driven, so a fully instrumented run with
+no host-to-device copies emits none. An absent H2D therefore means "no
+observed transfers" and contributes zero to derived metrics; it is never
+reported as a missing signal. Derived metrics exist only when their inputs
+are available: `compute` needs forward, backward, and optimizer;
+`total_step` needs input wait plus the step envelope; `residual_proxy`
+needs the step envelope plus every compute phase. Each rule abstains when
+its required signals are unavailable: input needs input wait + step time;
+H2D needs GPU-clock H2D + input wait + step time; compute and residual need
+every compute phase + input wait + step time; rank stragglers need their
+visible-phase anchors + input wait + step time. Rules still fire from the
+ranks that measured their signals, so one dark rank does not silence an
+otherwise measured finding. When no rule fires and at least one abstained
+for missing signals, Step Time reports `INCOMPLETE_DATA` instead of
+`BALANCED`.
 
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
 GPU event timing when every rank/step has GPU timing for the step envelope,

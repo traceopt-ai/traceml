@@ -103,3 +103,15 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert panel["kpis"]["median"].content.startswith("100")
     assert panel["kpis"]["worst"].content.startswith("100")
     assert not panel["kpis"]["median"].content.startswith("20")
+
+
+def test_diagnostics_rail_incomplete_data_is_neutral() -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    assert (
+        mds._row_sev({"severity": "info", "kind": "INCOMPLETE_DATA"})
+        == "neutral"
+    )
+    assert mds._row_sev({"severity": "info", "kind": "BALANCED"}) == "healthy"

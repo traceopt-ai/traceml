@@ -97,3 +97,28 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
     per_rank = result.per_rank_timing[0]
     assert per_rank["input_wait"] == 5.0
     assert per_rank["step_time"] == 30.0
+
+
+def test_worst_rank_requires_measured_total_step() -> None:
+    from traceml_ai.renderers.step_time.compute import _worst_rank_from_window
+
+    # Ranks without a measured total step (input wait never measured)
+    # cannot win the status-line worst-rank pick with a fake zero.
+    assert (
+        _worst_rank_from_window(
+            {
+                0: {"step_time": 100.0},
+                1: {"step_time": 400.0},
+            }
+        )
+        is None
+    )
+    assert (
+        _worst_rank_from_window(
+            {
+                0: {"step_time": 100.0, "total_step": 105.0},
+                1: {"step_time": 400.0},
+            }
+        )
+        == 0
+    )

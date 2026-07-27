@@ -19,7 +19,10 @@ from typing import Iterable
 import pytest
 
 from traceml_ai.diagnostics.common import DiagnosticResult
-from traceml_ai.diagnostics.step_time.api import StepDiagnosis
+from traceml_ai.diagnostics.step_time.api import (
+    StepDiagnosis,
+    build_step_diagnosis_result,
+)
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
@@ -29,7 +32,10 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeSummary,
 )
-from traceml_ai.reporting.compare.policy import step_time_status_rank
+from traceml_ai.reporting.compare.policy import (
+    _STEP_TIME_STATUS_RANK,
+    step_time_status_rank,
+)
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
@@ -361,11 +367,14 @@ def test_missing_forward_blocks_fsdp_straggler() -> None:
 
 def _straggler_issue(
     per_rank_timing: dict[int, dict[str, float]],
+    *,
+    training_strategy: str = "ddp",
 ):
     context = build_step_time_context(
         metrics=(_step_metric(),),
         thresholds=SUMMARY_STEP_TIME_POLICY.thresholds,
         per_rank_timing=per_rank_timing,
+        training_strategy=training_strategy,
     )
     return RankStragglerRule().evaluate(context)
 
@@ -462,11 +471,17 @@ def test_incomplete_data_serializes_and_formats() -> None:
     assert issues_json[0] == diagnosis_json
 
     rendered = format_cli_diagnosis(result.primary)
-    assert "INCOMPLETE DATA" in rendered
+    # The neutral grey styling is the point of the formatter hunk, not
+    # incidental markup: the status must render like NO DATA / WARMUP.
+    assert "[bold bright_black]INCOMPLETE DATA[/bold bright_black]" in rendered
     assert "forward" in rendered
 
 
 def test_incomplete_data_compare_rank_matches_no_data_tier() -> None:
+    # Membership matters: step_time_status_rank defaults unknown statuses
+    # to 0, so asserting the rank alone could not detect a missing
+    # registration.
+    assert "INCOMPLETE DATA" in _STEP_TIME_STATUS_RANK
     assert step_time_status_rank("INCOMPLETE DATA") == 0
     assert step_time_status_rank("INCOMPLETE DATA") < step_time_status_rank(
         "BALANCED"
@@ -507,3 +522,130 @@ def test_incomplete_data_routes_to_insufficient_primary() -> None:
     assert primary["kind"] == "INSUFFICIENT_STEP_TIME_DATA"
     assert primary["evidence"]["step_time_status"] == "INCOMPLETE DATA"
     assert "missing phase signals" in primary["summary"]
+
+
+# ---------------------------------------------------------------------------
+# H2D is occurrence-driven: absence is never a missing signal
+# ---------------------------------------------------------------------------
+
+
+def test_gpu_run_without_h2d_events_stays_balanced() -> None:
+    # A fully instrumented gpu-clock run with zero host-to-device copies
+    # (device-resident data) emits no h2d events at all. That is not
+    # missing instrumentation and must not flip a healthy verdict.
+    result = _diagnose(
+        {
+            0: _step_events(
+                gpu=True,
+                omit=("h2d",),
+                **{k: v for k, v in _BALANCED_RANK.items() if k != "h2d"},
+            )
+        }
+    )
+
+    assert result.primary.kind == "BALANCED"
+
+
+def test_gpu_window_without_h2d_still_derives_residual() -> None:
+    window = build_step_time_window_from_events(
+        {
+            0: _step_events(
+                gpu=True,
+                omit=("h2d",),
+                **{k: v for k, v in _BALANCED_RANK.items() if k != "h2d"},
+            )
+        },
+        max_rows=30,
+    )
+
+    assert window.clock == "gpu"
+    assert "residual_proxy" in window.per_rank_timing[0]
+    assert "h2d" not in window.per_rank_timing[0]
+
+
+def test_gpu_missing_forward_reports_incomplete_data() -> None:
+    result = _diagnose(
+        {
+            0: _step_events(
+                gpu=True,
+                omit=("forward",),
+                input_wait=2.0,
+                h2d=1.0,
+                backward=60.0,
+                optimizer_step=10.0,
+                step_time=90.0,
+            )
+        }
+    )
+
+    assert result.primary.kind == "INCOMPLETE_DATA"
+    assert result.issues[0].evidence["missing_signals"] == ["forward"]
+
+
+# ---------------------------------------------------------------------------
+# Metrics-only callers: availability is unknowable, never "missing"
+# ---------------------------------------------------------------------------
+
+
+def test_metrics_only_diagnosis_stays_balanced() -> None:
+    window = build_step_time_window_from_events(
+        {0: _step_events(**_BALANCED_RANK)}, max_rows=30
+    )
+
+    result = build_step_diagnosis_result(window.metrics)
+
+    assert result.primary.kind == "BALANCED"
+
+
+# ---------------------------------------------------------------------------
+# Per-metric statistics come from exactly the measuring ranks
+# ---------------------------------------------------------------------------
+
+
+def test_partial_metric_stats_use_measuring_ranks() -> None:
+    window = build_step_time_window_from_events(
+        {
+            0: _step_events(
+                omit=("h2d",),
+                **{k: v for k, v in _BALANCED_RANK.items() if k != "h2d"},
+            ),
+            1: _step_events(**dict(_BALANCED_RANK, h2d=9.0)),
+        },
+        max_rows=30,
+    )
+
+    h2d_metric = next(m for m in window.metrics if m.metric == "h2d")
+    # Rank 0 never measured h2d: it cannot appear in the statistics.
+    assert h2d_metric.summary.worst_rank == 1
+    assert h2d_metric.summary.worst_total == pytest.approx(9.0)
+    assert h2d_metric.summary.median_total == pytest.approx(9.0)
+    assert h2d_metric.summary.skew_pct == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Straggler evidence keeps measured components in its maps
+# ---------------------------------------------------------------------------
+
+
+def test_fsdp_straggler_evidence_keeps_zero_compute_entry() -> None:
+    rows = {
+        0: {
+            "input_wait": 5.0,
+            "forward": 20.0,
+            "backward": 10.0,
+            "step_time": 100.0,
+        },
+        1: {
+            "input_wait": 5.0,
+            "forward": 20.0,
+            "backward": 50.0,
+            "step_time": 100.0,
+        },
+    }
+    issue = _straggler_issue(rows, training_strategy="fsdp")
+
+    assert issue is not None
+    # FSDP never attributes compute, but the measured phases keep their
+    # zero entry so the evidence shape matches complete-data output.
+    assert issue.evidence["component_excesses_ms"]["compute"] == 0.0
+    assert issue.evidence["component_coverage"]["compute"] == 0.0

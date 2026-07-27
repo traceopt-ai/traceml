@@ -161,13 +161,20 @@ class StepCombinedComputer:
 def _worst_rank_from_window(
     per_rank_timing: Dict[int, Dict[str, float]],
 ) -> Optional[int]:
-    """Return the slowest rank by selected average total step."""
-    if not per_rank_timing:
+    """Return the slowest rank by selected average total step.
+
+    Only ranks whose total step is measured compete; when none is (the
+    input wait was never measured anywhere), no rank is named rather
+    than defaulting every rank to a fake zero.
+    """
+    candidates = {
+        int(rank): float(values["total_step"])
+        for rank, values in per_rank_timing.items()
+        if "total_step" in values
+    }
+    if not candidates:
         return None
     return max(
-        per_rank_timing,
-        key=lambda rank: (
-            float(per_rank_timing.get(rank, {}).get("total_step", 0.0)),
-            -int(rank),
-        ),
+        candidates,
+        key=lambda rank: (candidates[rank], -rank),
     )
