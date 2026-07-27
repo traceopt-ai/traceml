@@ -4,10 +4,14 @@ from typing import Optional
 
 import pytest
 
-from traceml_ai.reporting.compare import build_compare_payload
-from traceml_ai.reporting.compare import build_compare_text
+from traceml_ai.diagnostics.step_time.api import _STATUS_BY_KIND
+from traceml_ai.reporting.compare import (
+    build_compare_payload,
+    build_compare_text,
+)
 from traceml_ai.reporting.compare.formatters import CompareTextFormatter
 from traceml_ai.reporting.compare.io import load_summary_json
+from traceml_ai.reporting.compare.policy import _STEP_TIME_STATUS_RANK
 
 BYTES_PER_GB = 1024.0**3
 
@@ -592,6 +596,45 @@ def test_compare_shows_system_gpu_utilization_diagnosis_change() -> None:
     assert "MODERATE GPU UTIL" in text
     assert "GPU util avg" in text
     assert "-49.1 pp" in text
+
+
+def test_every_emittable_step_time_status_has_a_rank() -> None:
+    # Guard against silent rank-0 fallback: any diagnosis status the engine
+    # can emit must be mapped, or step_time_status_rank() defaults it to 0 and
+    # a real regression (e.g. BALANCED -> H2D STRAGGLER) reads as no change.
+    unmapped = sorted(
+        status
+        for status in _STATUS_BY_KIND.values()
+        if status not in _STEP_TIME_STATUS_RANK
+    )
+    assert unmapped == []
+
+
+def test_compare_flags_regression_for_h2d_straggler() -> None:
+    lhs = _payload_with_sections(
+        step_time=_step_time_section(
+            status="BALANCED",
+            total_step_ms=300.0,
+            h2d_ms=2.0,
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_time=_step_time_section(
+            status="H2D STRAGGLER",
+            reason="r0 spends excess time on host-to-device copies.",
+            action="Inspect H2D transfer imbalance.",
+            total_step_ms=300.0,
+            h2d_ms=2.0,
+        ),
+    )
+
+    verdict = _build_compare(lhs, rhs)["verdict"]
+
+    assert verdict["status"] == "REGRESSION"
+    assert any(
+        "H2D STRAGGLER" in finding.get("why", "")
+        for finding in verdict["findings"]
+    )
 
 
 def test_compare_verdict_uses_priority_for_mixed_primary_signals() -> None:
