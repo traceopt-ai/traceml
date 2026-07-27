@@ -66,17 +66,16 @@ class StepCombinedRenderer(BaseRenderer):
             layout_section_name=MODEL_COMBINED_LAYOUT,
         )
         self._computer = StepCombinedComputer(db_path=db_path)
-        self._cached: Optional[StepCombinedTimeResult] = None
 
     def _payload(self) -> Optional[StepCombinedTimeResult]:
         """
         CLI compute is summary-only (cheap).
-        Cache to avoid flicker on transient incompleteness.
+
+        The computer already bridges transient gaps from its own last-ok
+        window; once that expires the empty result is rendered as-is so a
+        dead run can never keep showing its last complete table.
         """
-        payload = self._computer.compute_cli()
-        if payload and payload.diagnosis_metrics:
-            self._cached = payload
-        return self._cached
+        return self._computer.compute_cli()
 
     def get_panel_renderable(self) -> Panel:
         payload = self._payload()

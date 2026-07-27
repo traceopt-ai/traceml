@@ -99,6 +99,13 @@ When launched with `--mode=cli`, the terminal shows live:
 Live CLI mode is intended for single-node runs, including single-node
 multi-GPU.
 
+Phases that were never measured in the current window are omitted from the
+live step-time table rather than shown as `0.0 ms`, and the diagnosis block
+shows `INCOMPLETE DATA` with the missing signal names when no reliable
+conclusion is possible. The step-time dashboard card behaves the same way:
+unmeasured phases leave the ribbon, the window label adds `partial signals`,
+and an underivable residual shows `n/a`.
+
 ### Local UI
 
 The local UI shows the same ideas in a more compact review format:

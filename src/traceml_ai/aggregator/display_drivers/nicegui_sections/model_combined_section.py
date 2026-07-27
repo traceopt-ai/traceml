@@ -26,8 +26,6 @@ from traceml_ai.renderers.step_time.schema import (
 
 from . import theme
 
-_REQUIRED = {k for _, k, _ in theme.PHASES} | {"step_time"}
-
 
 def build_model_combined_section() -> Dict[str, Any]:
     seg_divs: List[Any] = []
@@ -117,16 +115,26 @@ def update_model_combined_section(
     if not payload or not getattr(payload, "diagnosis_metrics", None):
         return
     m = _index(payload.diagnosis_metrics)
-    if not _REQUIRED.issubset(m):
+    if "step_time" not in m:
         return
 
-    vals = {
-        k: float(m[k].summary.median_total or 0.0) for _, k, _ in theme.PHASES
+    # A metric absent from the payload was never measured this window: it
+    # renders as an empty segment instead of freezing the whole card on
+    # the last complete view. Measured zeros stay zero-width but count as
+    # measured.
+    vals: Dict[str, Optional[float]] = {
+        k: (float(m[k].summary.median_total or 0.0) if k in m else None)
+        for _, k, _ in theme.PHASES
     }
-    tot = sum(vals.values()) or 1.0
+    measured = {k: v for k, v in vals.items() if v is not None}
+    tot = sum(measured.values()) or 1.0
     st = m["step_time"].summary
+    partial = len(measured) < len(vals)
 
-    sig = tuple(round(vals[k], 3) for _, k, _ in theme.PHASES) + (
+    sig = tuple(
+        round(vals[k], 3) if vals[k] is not None else None
+        for _, k, _ in theme.PHASES
+    ) + (
         round(float(st.median_total or 0), 3),
         round(float(st.worst_total or 0), 3),
         int(st.steps_used or 0),
@@ -139,7 +147,8 @@ def update_model_combined_section(
     for (lab, key, _c), seg, sl in zip(
         theme.PHASES, panel["seg_divs"], panel["seg_labs"]
     ):
-        pct = vals[key] / tot * 100.0
+        value = vals[key]
+        pct = (value / tot * 100.0) if value is not None else 0.0
         seg.style(f"width:{pct:.3f}%")
         sl.text = lab if pct >= 7.0 else ""
 
@@ -154,12 +163,20 @@ def update_model_combined_section(
     )
     k["worst"].content = theme.kval(f"{float(st.worst_total or 0):.0f}", "ms")
     k["gap"].content = theme.kval(f"{float(st.skew_pct or 0):.0f}", "%")
-    residual_share = vals["residual_proxy"] / tot * 100.0 if tot > 0 else 0.0
-    k["residual"].content = theme.kval(f"{residual_share:.0f}", "%")
+    residual_value = vals.get("residual_proxy")
+    if residual_value is not None and tot > 0:
+        k["residual"].content = theme.kval(
+            f"{residual_value / tot * 100.0:.0f}", "%"
+        )
+    else:
+        k["residual"].content = theme.kval("n/a")
     k["rank"].content = theme.kval(
         f"r{int(st.worst_rank)}" if st.worst_rank is not None else "—"
     )
-    panel["win"].text = f"{int(st.steps_used or 0)} aligned steps"
+    steps_text = f"{int(st.steps_used or 0)} aligned steps"
+    if partial:
+        steps_text += " · partial signals"
+    panel["win"].text = steps_text
 
 
 def update_step_verdict(panel: Dict[str, Any], diag_payload: Any) -> None:

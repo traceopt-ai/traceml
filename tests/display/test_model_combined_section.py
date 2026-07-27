@@ -77,6 +77,63 @@ def _panel() -> dict:
     }
 
 
+def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
+    # h2d and residual_proxy were never measured: the hero must still
+    # update from the fresh sparse window instead of freezing on the last
+    # complete view (issue #259).
+    diagnosis_metrics = [
+        _metric("input_wait", 10.0),
+        _metric("forward", 20.0),
+        _metric("backward", 30.0),
+        _metric("optimizer_step", 20.0),
+        _metric("step_time", 100.0),
+    ]
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=diagnosis_metrics,
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    # The panel updated (no freeze): window label reflects the sparse
+    # window and flags the partial coverage.
+    assert panel["win"].text == "5 aligned steps · partial signals"
+    # Missing phases render as empty segments; measured phases keep
+    # their proportional widths (input_wait 10 of 80 measured -> 12.5%).
+    keys = [key for _, key, _ in theme.PHASES]
+    by_key = dict(zip(keys, panel["seg_divs"]))
+    assert by_key["h2d"].styles[-1] == "width:0.000%"
+    assert by_key["residual_proxy"].styles[-1] == "width:0.000%"
+    assert by_key["input_wait"].styles[-1] == "width:12.500%"
+    # An underivable residual shows n/a, never a fake 0%.
+    assert "n/a" in panel["kpis"]["residual"].content
+    assert panel["kpis"]["median"].content.startswith("100")
+
+
+def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
+    diagnosis_metrics = [
+        _metric("input_wait", 10.0),
+        _metric("h2d", 0.0),
+        _metric("forward", 20.0),
+        _metric("backward", 30.0),
+        _metric("optimizer_step", 20.0),
+        _metric("residual_proxy", 20.0),
+        _metric("step_time", 100.0),
+    ]
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=diagnosis_metrics,
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+
+    update_model_combined_section(panel, payload)
+
+    # A measured-zero H2D is complete coverage, not partial signals.
+    assert panel["win"].text == "5 aligned steps"
+    assert "n/a" not in panel["kpis"]["residual"].content
+
+
 def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert theme.PHASES[0][:2] == ("IW", "input_wait")
 
