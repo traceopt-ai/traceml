@@ -35,18 +35,35 @@ _UPPER_BOUND_PATTERN = re.compile(r"(<=|<|==|~=)\s*[0-9]")
 _DEPENDENCIES_BLOCK = re.compile(
     r"^dependencies\s*=\s*\[(?P<body>.*?)\]", re.MULTILINE | re.DOTALL
 )
+# TOML allows both basic ("...") and literal ('...') strings. Matching only
+# one style would drop a requirement from the guard entirely, which would let
+# an upper bound through silently.
+_TOML_STRING = re.compile(r"\"([^\"]*)\"|'([^']*)'")
+
+
+def _parse_dependencies(text: str) -> list[str]:
+    """Extract the [project] dependencies array from pyproject.toml text."""
+    match = _DEPENDENCIES_BLOCK.search(text)
+    if match is None:
+        raise AssertionError(
+            "could not locate the [project] dependencies array"
+        )
+
+    body = match.group("body")
+    # Drop comments so a quoted string inside one is not read as a
+    # requirement.
+    body = "\n".join(line.split("#", 1)[0] for line in body.splitlines())
+
+    return [
+        basic or literal
+        for basic, literal in _TOML_STRING.findall(body)
+        if (basic or literal).strip()
+    ]
 
 
 def _runtime_dependencies() -> list[str]:
     """Return the [project] dependencies list from pyproject.toml."""
-    text = PYPROJECT.read_text(encoding="utf-8")
-    match = _DEPENDENCIES_BLOCK.search(text)
-    if match is None:
-        raise AssertionError(
-            "could not locate the [project] dependencies array in "
-            f"{PYPROJECT}"
-        )
-    return re.findall(r'"([^"]+)"', match.group("body"))
+    return _parse_dependencies(PYPROJECT.read_text(encoding="utf-8"))
 
 
 def _requirement_name(requirement: str) -> str:
@@ -58,6 +75,40 @@ def _requirement_name(requirement: str) -> str:
 def _version_specifier(requirement: str) -> str:
     """Return the requirement text with any environment marker removed."""
     return requirement.split(";")[0]
+
+
+def test_parser_reads_both_toml_string_styles() -> None:
+    """A requirement must not vanish because of how it is quoted.
+
+    A dependency the parser cannot see is a dependency the guard cannot
+    check, so the bound would ship unnoticed.
+    """
+    text = """
+[project]
+dependencies = [
+    "double>=1.0",
+    'literal<3',  # a comment mentioning "quoted" text
+    "spans-comment",
+]
+"""
+
+    assert _parse_dependencies(text) == [
+        "double>=1.0",
+        "literal<3",
+        "spans-comment",
+    ]
+
+
+def test_parser_catches_an_upper_bound_in_a_literal_string() -> None:
+    """The upper-bound check must fire regardless of quote style."""
+    text = """
+[project]
+dependencies = ['capped<2']
+"""
+
+    (requirement,) = _parse_dependencies(text)
+
+    assert _UPPER_BOUND_PATTERN.search(requirement) is not None
 
 
 def test_runtime_dependencies_are_parsed() -> None:
