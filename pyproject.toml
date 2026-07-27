@@ -44,7 +44,7 @@ dependencies = [
     "rich>=12.0.0",
     "psutil>=5.0.0",
     "nvidia-ml-py",
-    "numpy>=1.24",
+    "numpy>=1.26",
     "msgspec",
     "pyyaml>=6.0",
     "nicegui",
