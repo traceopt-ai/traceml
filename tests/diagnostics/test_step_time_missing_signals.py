@@ -649,3 +649,95 @@ def test_fsdp_straggler_evidence_keeps_zero_compute_entry() -> None:
     # zero entry so the evidence shape matches complete-data output.
     assert issue.evidence["component_excesses_ms"]["compute"] == 0.0
     assert issue.evidence["component_coverage"]["compute"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Availability is metric-specific (review findings on the stack PR)
+# ---------------------------------------------------------------------------
+
+
+def test_intermittent_forward_drops_availability() -> None:
+    # forward measured in only 1 of 30 steps: the instrumentation dropped
+    # out mid-window. Averaging the fragment would understate compute and
+    # leak the missing work into the residual as a false RESIDUAL_HEAVY.
+    events = _step_events(
+        omit=("forward",),
+        input_wait=2.0,
+        backward=30.0,
+        optimizer_step=10.0,
+        step_time=100.0,
+    )
+    events[0][_EVENT_NAMES["forward"]] = _stats(40.0, gpu=False)
+
+    window = build_step_time_window_from_events({0: events}, max_rows=30)
+    assert "forward" not in window.per_rank_timing[0]
+    assert "residual_proxy" not in window.per_rank_timing[0]
+
+    result = diagnose_step_time_window(window, policy=SUMMARY_STEP_TIME_POLICY)
+    assert result.primary.kind == "INCOMPLETE_DATA"
+    assert "forward" in result.issues[0].evidence["missing_signals"]
+
+
+def test_every_step_forward_stays_available() -> None:
+    window = build_step_time_window_from_events(
+        {0: _step_events(**_BALANCED_RANK)}, max_rows=30
+    )
+
+    assert window.per_rank_timing[0]["forward"] == pytest.approx(30.0)
+    assert "residual_proxy" in window.per_rank_timing[0]
+
+
+def test_intermittent_optimizer_stays_available_occurrence_metric() -> None:
+    # The occurrence twin: sparse optimizer presence is gradient
+    # accumulation, not lost instrumentation (contrast with the
+    # intermittent-forward test above).
+    events = _step_events(omit=("optimizer_step",), steps=30)
+    events[0][_EVENT_NAMES["optimizer_step"]] = _stats(30.0, gpu=False)
+
+    window = build_step_time_window_from_events({0: events}, max_rows=30)
+
+    assert window.per_rank_timing[0]["optimizer_step"] == pytest.approx(1.0)
+    assert "residual_proxy" in window.per_rank_timing[0]
+
+
+def test_worst_value_and_rank_come_from_one_candidate_set() -> None:
+    # r1 is 4x slower but has no measured input wait: the step metric
+    # must not report r1's value with r0's rank.
+    window = build_step_time_window_from_events(
+        {
+            0: _step_events(step_time=100.0),
+            1: _step_events(
+                omit=("input_wait",),
+                **{
+                    key: value
+                    for key, value in dict(
+                        _DEFAULT_MS, step_time=400.0
+                    ).items()
+                    if key != "input_wait"
+                },
+            ),
+        },
+        max_rows=30,
+    )
+
+    step_metric = next(m for m in window.metrics if m.metric == "step_time")
+    assert step_metric.summary.worst_total == pytest.approx(400.0)
+    assert step_metric.summary.worst_rank == 1
+
+
+def test_public_projection_preserves_absence() -> None:
+    from traceml_ai.utils.step_time_window import (
+        public_step_time_metric_values,
+    )
+
+    # step envelope measured, input wait measured, compute never
+    # measured: the projection must not fabricate residual = step_time.
+    public = public_step_time_metric_values(
+        {"input_wait": 2.0, "step_time": 100.0, "step_time_cpu": 100.0}
+    )
+
+    assert public["input_wait_ms"] == 2.0
+    assert public["step_time_ms"] == 100.0
+    assert public["forward_ms"] is None
+    assert public["compute_ms"] is None
+    assert public["residual_ms"] is None

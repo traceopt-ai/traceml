@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, Optional, Sequence, Tuple
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.utils.step_time_window import worst_rank_by_total_step
 from traceml_ai.utils.training_strategy import normalize_training_strategy
 
 if TYPE_CHECKING:
@@ -622,7 +623,14 @@ def build_step_time_context(
     coverage = step_metric.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
     steps_used = int(step_metric.summary.steps_used)
-    overall_worst_rank = metric_worst_rank(step_metric)
+    # The run-level worst rank is ranked by full iteration time
+    # (total_step), kept distinct from the step-time metric's own
+    # self-coherent worst rank; metrics-only callers fall back to it.
+    overall_worst_rank = (
+        worst_rank_by_total_step(per_rank_timing)
+        if per_rank_timing
+        else metric_worst_rank(step_metric)
+    )
 
     step_total = metric_total(step_metric, single_rank=single_rank)
     residual_total = metric_total(residual_metric, single_rank=single_rank)

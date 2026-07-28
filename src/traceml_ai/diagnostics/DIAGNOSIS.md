@@ -88,17 +88,23 @@ Training-step timing.
 
 Missing signals and measured zeros are different things. A timing event that
 was never observed in the window stays an absent metric (it is not converted
-to `0.0`), while a phase measured at `0.0` stays a valid zero. A metric
-measured in at least one aligned step of a rank's window is *available* for
-that rank; steps where an available metric is absent count as zero work (the
-optimizer under gradient accumulation is the canonical case). H2D is
-special: its events are occurrence-driven, so a fully instrumented run with
-no host-to-device copies emits none. An absent H2D therefore means "no
-observed transfers" and contributes zero to derived metrics; it is never
-reported as a missing signal. Derived metrics exist only when their inputs
-are available: `compute` needs forward, backward, and optimizer;
-`total_step` needs input wait plus the step envelope; `residual_proxy`
-needs the step envelope plus every compute phase. Each rule abstains when
+to `0.0`), while a phase measured at `0.0` stays a valid zero. Availability
+is metric-specific. Occurrence-driven metrics (`optimizer_step`, `h2d`)
+legitimately skip steps: the optimizer under gradient accumulation, and H2D
+when a step performs no host-to-device copies. They are available for a rank
+when measured in at least one aligned step, and their absent steps count as
+zero work. Every other metric (`input_wait`, `forward`, `backward`,
+`step_time`) must occur on every bracketed step, so it is available only
+when measured in every aligned step of the rank's window; intermittent
+presence means the instrumentation dropped out mid-window and drops
+availability instead of synthesizing zeros that would leak the missing work
+into the residual. An absent H2D means "no observed transfers", contributes
+zero to derived metrics, and is never reported as a missing signal. Derived
+metrics exist only when their inputs are available: `compute` needs forward,
+backward, and optimizer; `total_step` needs input wait plus the step
+envelope; `residual_proxy` needs the step envelope plus every compute
+phase. The public final-summary projection preserves absence rather than
+re-deriving declined values. Each rule abstains when
 its required signals are unavailable: input needs input wait + step time;
 H2D needs GPU-clock H2D + input wait + step time; compute and residual need
 every compute phase + input wait + step time; rank stragglers need their

@@ -39,6 +39,26 @@ from .policy import DEFAULT_THRESHOLDS, DiagnosisThresholds
 from .rules import run_step_time_rules
 from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
+
+def _overall_worst_rank(
+    per_rank_timing: Optional[Dict[int, Dict[str, float]]],
+    step_metric: StepCombinedTimeMetric,
+) -> Optional[int]:
+    """Return the run-level slowest rank by full iteration time.
+
+    The run-level worst rank is ranked by ``total_step`` (input wait +
+    step envelope), a separate value from any single metric's own worst
+    rank, so the step-time metric summary stays self-coherent. Callers
+    without per-rank timing fall back to the step-time metric's own
+    worst rank.
+    """
+    from traceml_ai.utils.step_time_window import worst_rank_by_total_step
+
+    if per_rank_timing:
+        return worst_rank_by_total_step(per_rank_timing)
+    return metric_worst_rank(step_metric)
+
+
 DiagnosisKind = Literal[
     "NO_DATA",
     "WARMUP",
@@ -437,7 +457,7 @@ def build_step_diagnosis_result(
     coverage = step_metric.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
     steps_used = int(step_metric.summary.steps_used)
-    overall_worst_rank = metric_worst_rank(step_metric)
+    overall_worst_rank = _overall_worst_rank(per_rank_timing, step_metric)
     step_total = metric_total(step_metric, single_rank=single_rank)
 
     if step_total <= 0.0:
