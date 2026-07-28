@@ -32,6 +32,7 @@ _SIGNIFICANCE_ORDER = {
 _STEP_TIME_STATUS_RANK = {
     "NO DATA": 0,
     "WARMUP": 0,
+    "INCOMPLETE DATA": 0,
     "BALANCED": 1,
     "INPUT-BOUND": 2,
     "H2D-BOUND": 2,

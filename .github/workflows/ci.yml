@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'version_*']
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - '.gitignore'
   pull_request:
-    branches: [main]
+    branches: [main, 'version_*']
     paths-ignore:
       - 'docs/**'
       - '*.md'
@@ -64,6 +64,8 @@ jobs:
             tests/core \
             tests/diagnostics/test_bands.py \
             tests/diagnostics/test_common.py \
+            tests/diagnostics/test_step_time.py \
+            tests/diagnostics/test_step_time_missing_signals.py \
             tests/telemetry/test_distributed.py \
             tests/telemetry/test_msgpack.py \
             tests/telemetry/test_sender_sequence.py \

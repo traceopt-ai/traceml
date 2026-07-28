@@ -40,18 +40,22 @@ visible_r = backward_r              # DDP / default
 visible_r = forward_r + backward_r  # FSDP
 ```
 
-Only ranks with a measured visible-phase anchor and a measured step envelope are
-eligible:
+Only ranks with a measured visible-phase anchor, a measured step envelope,
+and a measured input wait are eligible:
 
 ```text
-DDP / default: backward_r > 0 and step_time_r > 0
-FSDP:          forward_r > 0 and backward_r > 0 and step_time_r > 0
+DDP / default: input_wait measured and backward_r > 0 and step_time_r > 0
+FSDP:          input_wait measured and forward_r > 0 and backward_r > 0
+               and step_time_r > 0
 ```
 
 If fewer than two ranks are eligible, TraceML does not report a rank straggler.
-Missing visible instrumentation makes the rule abstain rather than treat a
-zero as a fast rank. Component values of `input_wait == 0` and `h2d == 0` are
-still valid measurements and are kept.
+Missing instrumentation makes the rule abstain rather than treat a zero as a
+fast rank; when that abstention leaves the whole window without any finding,
+Step Time reports `INCOMPLETE_DATA` with the missing signal names instead of
+`BALANCED`. Component values of `input_wait == 0` and `h2d == 0` are still
+valid measurements and are kept: a metric measured somewhere in the window is
+never confused with one that was never measured at all.
 
 ## Culprit and victim selection
 
@@ -84,7 +88,8 @@ the victim to explain the visible wait:
 
 ```text
 input_excess   = input_wait_culprit - input_wait_victim
-h2d_excess     = h2d_culprit - h2d_victim
+h2d_excess     = h2d_culprit - h2d_victim           # only when H2D is
+                                                    # measured on both ranks
 forward_excess = forward_culprit - forward_victim   # DDP / default only
 ```
 
@@ -96,11 +101,14 @@ cause_coverage = min(1, component_excess / visible_cost)
 
 The component with the highest coverage names `INPUT_STRAGGLER`,
 `H2D_STRAGGLER`, or (DDP / default only) `COMPUTE_STRAGGLER` only when its
-coverage reaches 80%. DDP / default compute attribution requires measured
-forward time on both the culprit and victim. Otherwise the diagnosis stays
-`STRAGGLER` with a sync-or-unattributed component. The issue evidence includes
-both `component_excesses_ms` and `component_coverage`, keyed by `input`,
-`h2d`, and `compute`.
+coverage reaches 80%. Every candidate component must be measured on both the
+culprit and the victim rank: DDP / default compute attribution requires
+measured forward time on both, and H2D attribution requires measured H2D time
+on both, so an unmeasured phase can never name the cause. Otherwise the
+diagnosis stays `STRAGGLER` with a sync-or-unattributed component. The issue
+evidence includes both `component_excesses_ms` and `component_coverage`, keyed
+by `input`, `h2d`, and `compute`; components excluded for missing measurement
+are absent from both maps.
 
 Cause coverage chooses the diagnosis label. The straggler score above remains
 the sole source of warning or critical severity. Generic residual attribution

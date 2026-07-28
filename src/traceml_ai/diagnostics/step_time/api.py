@@ -9,9 +9,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Literal, Optional, Sequence, cast
+from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+
+if TYPE_CHECKING:
+    from .context import StepTimeAnalysisContext
 
 from ..common import (
     BaseDiagnosis,
@@ -36,9 +39,30 @@ from .policy import DEFAULT_THRESHOLDS, DiagnosisThresholds
 from .rules import run_step_time_rules
 from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
+
+def _overall_worst_rank(
+    per_rank_timing: Optional[Dict[int, Dict[str, float]]],
+    step_metric: StepCombinedTimeMetric,
+) -> Optional[int]:
+    """Return the run-level slowest rank by full iteration time.
+
+    The run-level worst rank is ranked by ``total_step`` (input wait +
+    step envelope), a separate value from any single metric's own worst
+    rank, so the step-time metric summary stays self-coherent. Callers
+    without per-rank timing fall back to the step-time metric's own
+    worst rank.
+    """
+    from traceml_ai.utils.step_time_window import worst_rank_by_total_step
+
+    if per_rank_timing:
+        return worst_rank_by_total_step(per_rank_timing)
+    return metric_worst_rank(step_metric)
+
+
 DiagnosisKind = Literal[
     "NO_DATA",
     "WARMUP",
+    "INCOMPLETE_DATA",
     "BALANCED",
     "STRAGGLER",
     "INPUT_STRAGGLER",
@@ -53,6 +77,7 @@ DiagnosisKind = Literal[
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "NO_DATA": "NO DATA",
     "WARMUP": "WARMUP",
+    "INCOMPLETE_DATA": "INCOMPLETE DATA",
     "BALANCED": "BALANCED",
     "STRAGGLER": "STRAGGLER",
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
@@ -320,6 +345,76 @@ def _apply_trend_note(
         return diagnosis
 
 
+_MISSING_SIGNAL_ORDER: tuple[str, ...] = (
+    "input_wait",
+    "forward",
+    "backward",
+    "optimizer_step",
+    "step_time",
+)
+
+
+def _missing_signal_report(
+    context: "StepTimeAnalysisContext",
+) -> tuple[list[str], Dict[str, str]]:
+    """Return missing-signal names plus per-signal rank coverage.
+
+    A signal is reported when an abstaining rule required it and it was
+    not measured on every observed rank. H2D is never reported missing:
+    its events are occurrence-driven (a fully instrumented run with no
+    host-to-device copies emits none), so absence means no observed
+    transfers, not missing instrumentation. Without per-rank rows,
+    availability is unknowable, so nothing is reported missing either.
+    """
+    ranks = max(0, int(context.ranks_observed))
+    if ranks == 0:
+        return [], {}
+    counts = context.signal_rank_counts or {}
+    needed: set[str] = set()
+
+    def _require(signals: Sequence[str]) -> None:
+        needed.update(signals)
+
+    if context.input_bound_share is None:
+        _require(("input_wait", "step_time"))
+    if context.compute_share is None:
+        _require(
+            (
+                "forward",
+                "backward",
+                "optimizer_step",
+                "input_wait",
+                "step_time",
+            )
+        )
+    if context.residual_share is None:
+        _require(
+            (
+                "forward",
+                "backward",
+                "optimizer_step",
+                "input_wait",
+                "step_time",
+            )
+        )
+    if (
+        not context.single_rank
+        and context.rank_straggler is None
+        and context.straggler_eligible_ranks < 2
+    ):
+        _require(("backward", "input_wait", "step_time"))
+        if context.training_strategy == "fsdp":
+            _require(("forward",))
+
+    missing = [
+        name
+        for name in _MISSING_SIGNAL_ORDER
+        if name in needed and counts.get(name, 0) < ranks
+    ]
+    coverage = {name: f"{counts.get(name, 0)}/{ranks}" for name in missing}
+    return missing, coverage
+
+
 def build_step_diagnosis_result(
     metrics: Sequence[StepCombinedTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
@@ -362,7 +457,7 @@ def build_step_diagnosis_result(
     coverage = step_metric.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
     steps_used = int(step_metric.summary.steps_used)
-    overall_worst_rank = metric_worst_rank(step_metric)
+    overall_worst_rank = _overall_worst_rank(per_rank_timing, step_metric)
     step_total = metric_total(step_metric, single_rank=single_rank)
 
     if step_total <= 0.0:
@@ -471,16 +566,42 @@ def build_step_diagnosis_result(
             ),
         )
     else:
-        primary = _mk_diag(
-            kind="BALANCED",
-            severity="info",
-            reason="No dominant bottleneck is visible in this window.",
-            action="Focus on throughput only if overall speed is still low.",
-            steps_used=context.steps_used,
-            worst_rank=(
-                None if context.single_rank else context.overall_worst_rank
-            ),
-        )
+        missing_signals, signal_coverage = _missing_signal_report(context)
+        if missing_signals:
+            primary = _mk_diag(
+                kind="INCOMPLETE_DATA",
+                severity="info",
+                reason=(
+                    "Missing timing signals prevent a reliable diagnosis: "
+                    + ", ".join(missing_signals)
+                    + "."
+                ),
+                action=(
+                    "Instrument the missing phases (auto mode or the "
+                    "matching wrap_* helpers) to restore coverage."
+                ),
+                steps_used=context.steps_used,
+                worst_rank=(
+                    None if context.single_rank else context.overall_worst_rank
+                ),
+            )
+            incomplete_evidence = {
+                "missing_signals": list(missing_signals),
+                "signal_coverage": dict(signal_coverage),
+            }
+        else:
+            primary = _mk_diag(
+                kind="BALANCED",
+                severity="info",
+                reason="No dominant bottleneck is visible in this window.",
+                action=(
+                    "Focus on throughput only if overall speed is still low."
+                ),
+                steps_used=context.steps_used,
+                worst_rank=(
+                    None if context.single_rank else context.overall_worst_rank
+                ),
+            )
 
     primary = _apply_trend_note(
         primary,
@@ -488,8 +609,8 @@ def build_step_diagnosis_result(
         residual_metric=context.residual_metric,
         input_wait_metric=context.input_wait_metric,
         single_rank=context.single_rank,
-        residual_share=context.residual_share,
-        input_bound_share=context.input_bound_share,
+        residual_share=context.residual_share or 0.0,
+        input_bound_share=context.input_bound_share or 0.0,
         thresholds=thresholds,
     )
 
@@ -505,6 +626,11 @@ def build_step_diagnosis_result(
                     (primary.worst_rank,)
                     if primary.worst_rank is not None
                     else ()
+                ),
+                evidence=(
+                    incomplete_evidence
+                    if primary.kind == "INCOMPLETE_DATA"
+                    else {}
                 ),
             ),
         )

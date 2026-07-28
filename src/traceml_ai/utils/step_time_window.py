@@ -73,11 +73,6 @@ DISPLAY_METRICS: tuple[str, ...] = (
     "residual_proxy",
 )
 
-WINDOW_AVERAGE_METRICS: tuple[str, ...] = DISPLAY_METRICS + (
-    DATALOADER_FETCH_KEY,
-    STEP_TIME_CPU_KEY,
-)
-
 REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
 
 
@@ -201,64 +196,135 @@ def _metric_from_events(
     metric_key: str,
     *,
     clock: DiagnosisClock,
-) -> float:
+) -> Optional[float]:
+    """Return the selected-clock value for one metric, or None if missing."""
     value = (
         _event_gpu_ms(events, metric_key)
         if clock == "gpu"
         else _event_cpu_ms(events, metric_key)
     )
-    return float(value) if value is not None else 0.0
+    return float(value) if value is not None else None
 
 
-def _build_rank_timing(
+_COMPUTE_KEYS: tuple[str, ...] = ("forward", "backward", "optimizer_step")
+
+# Occurrence-driven metrics legitimately skip steps: the optimizer under
+# gradient accumulation and H2D when a step performs no transfers. Every
+# other selected metric must occur on every bracketed step, so partial
+# presence there means lost instrumentation, not measured zeros.
+_OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
+
+
+def _rank_metric_availability(
+    step_map: Mapping[int, Mapping[str, Any]],
+    steps: Sequence[int],
     *,
-    input_wait: float,
-    dataloader_fetch: float,
-    h2d: float,
-    forward: float,
-    backward: float,
-    optimizer: float,
-    step_time: float,
-    step_time_cpu: float,
-) -> Dict[str, float]:
-    residual = max(0.0, step_time - h2d - forward - backward - optimizer)
+    clock: DiagnosisClock,
+) -> frozenset[str]:
+    """Return the metric keys considered measured for this rank's window.
 
-    return {
-        INPUT_WAIT_KEY: float(input_wait),
-        DATALOADER_FETCH_KEY: float(dataloader_fetch),
-        "h2d": float(h2d),
-        "forward": float(forward),
-        "backward": float(backward),
-        "optimizer_step": float(optimizer),
-        "step_time": float(step_time),
-        STEP_TIME_CPU_KEY: float(step_time_cpu),
-        "residual_proxy": residual,
-        "total_step": input_wait + step_time,
+    Availability is metric-specific. Occurrence-driven metrics
+    (``optimizer_step``, ``h2d``) are available when measured in at
+    least one aligned step; their absent steps are true zeros. Every
+    other metric must be measured in every aligned step: intermittent
+    presence means the instrumentation dropped out mid-window, and
+    averaging the fragments would understate the phase and leak the
+    missing work into the residual.
+    """
+    if not steps:
+        return frozenset()
+    seen_counts: Dict[str, int] = {}
+    for step in steps:
+        events = step_map.get(int(step), {})
+        for metric_key in SELECTED_METRICS:
+            if (
+                _metric_from_events(events, metric_key, clock=clock)
+                is not None
+            ):
+                seen_counts[metric_key] = seen_counts.get(metric_key, 0) + 1
+        if _event_cpu_ms(events, INPUT_WAIT_KEY) is not None:
+            seen_counts[DATALOADER_FETCH_KEY] = (
+                seen_counts.get(DATALOADER_FETCH_KEY, 0) + 1
+            )
+        if _event_cpu_ms(events, "step_time") is not None:
+            seen_counts[STEP_TIME_CPU_KEY] = (
+                seen_counts.get(STEP_TIME_CPU_KEY, 0) + 1
+            )
+    total = len(steps)
+    available = {
+        metric_key
+        for metric_key, count in seen_counts.items()
+        if count == total or metric_key in _OCCURRENCE_METRICS
     }
+    return frozenset(available)
+
+
+def _add_derived_step_metrics(
+    timing: Dict[str, float],
+    *,
+    available: frozenset[str],
+    clock: DiagnosisClock,
+) -> None:
+    """Attach derived metrics whose required inputs are available.
+
+    ``residual_proxy`` needs the step envelope plus every compute phase.
+    H2D events are occurrence-driven (a fully instrumented run with no
+    host-to-device copies emits none), so an unavailable H2D contributes
+    zero rather than blocking the residual. ``total_step`` needs the
+    input wait plus the step envelope.
+    """
+    del clock
+    compute_available = all(key in available for key in _COMPUTE_KEYS)
+    if "step_time" in available and compute_available:
+        timing["residual_proxy"] = max(
+            0.0,
+            timing["step_time"]
+            - timing.get("h2d", 0.0)
+            - timing["forward"]
+            - timing["backward"]
+            - timing["optimizer_step"],
+        )
+    if INPUT_WAIT_KEY in available and "step_time" in available:
+        timing["total_step"] = timing[INPUT_WAIT_KEY] + timing["step_time"]
 
 
 def _average_rank_timing(
     per_rank_step_timing: Mapping[int, Mapping[int, Mapping[str, float]]],
     steps: Sequence[int],
 ) -> Dict[int, Dict[str, float]]:
+    """Average each rank's measured metrics over the aligned steps.
+
+    Only keys present in the rank's step rows are averaged, so a metric
+    missing from the whole window stays absent instead of averaging to a
+    fake zero. The divisor stays the full step count: an available
+    metric absent at one step did no work at that step.
+    """
     out: Dict[int, Dict[str, float]] = {}
     divisor = float(len(steps)) if steps else 1.0
     for rank, step_map in per_rank_step_timing.items():
-        totals = {metric_key: 0.0 for metric_key in WINDOW_AVERAGE_METRICS}
+        keys: set[str] = set()
+        for step in steps:
+            keys.update(step_map.get(int(step), {}).keys())
+        totals = {metric_key: 0.0 for metric_key in keys}
         for step in steps:
             metrics = step_map.get(int(step), {})
-            for metric_key in WINDOW_AVERAGE_METRICS:
+            for metric_key in keys:
                 value = _safe_non_negative_float(metrics.get(metric_key))
                 totals[metric_key] += (
                     float(value) if value is not None else 0.0
                 )
-        out[int(rank)] = {
+        averaged = {
             metric_key: float(value / divisor)
             for metric_key, value in totals.items()
         }
-        out[int(rank)]["total_step"] = out[int(rank)].get(
-            INPUT_WAIT_KEY, 0.0
-        ) + out[int(rank)].get("step_time", 0.0)
+        if "total_step" in averaged:
+            # Re-derive from the averaged components so complete-data
+            # output stays bit-identical to the historical
+            # avg(input_wait) + avg(step_time) formulation.
+            averaged["total_step"] = averaged.get(
+                INPUT_WAIT_KEY, 0.0
+            ) + averaged.get("step_time", 0.0)
+        out[int(rank)] = averaged
     return out
 
 
@@ -268,27 +334,33 @@ def _selected_step_timing_from_events(
     *,
     clock: DiagnosisClock,
 ) -> Dict[int, Dict[int, Dict[str, float]]]:
+    """Build sparse per-step timing rows from raw event payloads.
+
+    A metric key appears only when it was measured somewhere in the
+    rank's window; a measured zero stays ``0.0``.
+    """
     out: Dict[int, Dict[int, Dict[str, float]]] = {}
     for rank, step_map in per_rank_steps.items():
+        available = _rank_metric_availability(step_map, steps, clock=clock)
         rank_timing: Dict[int, Dict[str, float]] = {}
         for step in steps:
             events = step_map.get(int(step), {})
-            selected = {
-                metric_key: _metric_from_events(
-                    events, metric_key, clock=clock
+            timing: Dict[str, float] = {}
+            for metric_key in SELECTED_METRICS:
+                if metric_key not in available:
+                    continue
+                value = _metric_from_events(events, metric_key, clock=clock)
+                timing[metric_key] = float(value) if value is not None else 0.0
+            if DATALOADER_FETCH_KEY in available:
+                timing[DATALOADER_FETCH_KEY] = (
+                    _event_cpu_ms(events, INPUT_WAIT_KEY) or 0.0
                 )
-                for metric_key in SELECTED_METRICS
-            }
-            rank_timing[int(step)] = _build_rank_timing(
-                input_wait=selected.get(INPUT_WAIT_KEY, 0.0),
-                dataloader_fetch=_event_cpu_ms(events, INPUT_WAIT_KEY) or 0.0,
-                h2d=selected.get("h2d", 0.0),
-                forward=selected.get("forward", 0.0),
-                backward=selected.get("backward", 0.0),
-                optimizer=selected.get("optimizer_step", 0.0),
-                step_time=selected.get("step_time", 0.0),
-                step_time_cpu=_event_cpu_ms(events, "step_time") or 0.0,
-            )
+            if STEP_TIME_CPU_KEY in available:
+                timing[STEP_TIME_CPU_KEY] = (
+                    _event_cpu_ms(events, "step_time") or 0.0
+                )
+            _add_derived_step_metrics(timing, available=available, clock=clock)
+            rank_timing[int(step)] = timing
         out[int(rank)] = rank_timing
     return out
 
@@ -314,26 +386,30 @@ def _metric_values(
     per_rank_timing: Mapping[int, Mapping[str, float]],
     metric_key: str,
 ) -> Dict[int, float]:
-    return {
-        int(rank): (_safe_non_negative_float(values.get(metric_key)) or 0.0)
-        for rank, values in per_rank_timing.items()
-    }
+    """Return rank values for ranks that measured this metric.
+
+    Ranks without the key are excluded so a missing metric cannot enter
+    medians or worst-rank picks as a fake zero; a measured zero stays.
+    """
+    out: Dict[int, float] = {}
+    for rank, values in per_rank_timing.items():
+        if metric_key not in values:
+            continue
+        out[int(rank)] = (
+            _safe_non_negative_float(values.get(metric_key)) or 0.0
+        )
+    return out
 
 
-def _worst_rank_by_total_step(
+def worst_rank_by_total_step(
     per_rank_timing: Mapping[int, Mapping[str, float]],
 ) -> Optional[int]:
-    if not per_rank_timing:
+    candidates = _metric_values(per_rank_timing, "total_step")
+    if not candidates:
         return None
     return max(
-        (int(rank) for rank in per_rank_timing),
-        key=lambda rank: (
-            _safe_non_negative_float(
-                per_rank_timing.get(rank, {}).get("total_step")
-            )
-            or 0.0,
-            -rank,
-        ),
+        candidates,
+        key=lambda rank: (candidates[rank], -rank),
     )
 
 
@@ -346,9 +422,15 @@ def build_step_time_metrics(
     per_rank_step_timing: Optional[
         Mapping[int, Mapping[int, Mapping[str, float]]]
     ] = None,
-    worst_rank_override: Optional[int] = None,
 ) -> list[StepCombinedTimeMetric]:
-    """Build selected-clock average metrics for diagnosis and display."""
+    """Build selected-clock average metrics for diagnosis and display.
+
+    A metric measured by no rank emits no entry at all; a metric
+    measured by a subset of ranks builds its statistics over exactly
+    those ranks. Each summary's ``worst_total`` and ``worst_rank`` come
+    from one ordering: the rank named is always the rank that produced
+    the reported worst value for that same metric.
+    """
     ranks = sorted(int(rank) for rank in per_rank_timing)
     if not ranks:
         return []
@@ -356,18 +438,19 @@ def build_step_time_metrics(
     metrics: list[StepCombinedTimeMetric] = []
     for metric_key in DISPLAY_METRICS:
         values = _metric_values(per_rank_timing, metric_key)
-        arr = np.asarray([values[rank] for rank in ranks], dtype=np.float64)
-        if arr.size == 0:
+        if not values:
             continue
+        metric_ranks = sorted(values)
+        arr = np.asarray(
+            [values[rank] for rank in metric_ranks], dtype=np.float64
+        )
 
         median_total = float(np.median(arr))
         worst_idx = int(np.argmax(arr))
         worst_total = float(arr[worst_idx])
-        worst_rank = int(ranks[worst_idx])
-        if metric_key == "step_time" and worst_rank_override is not None:
-            worst_rank = int(worst_rank_override)
+        worst_rank = int(metric_ranks[worst_idx])
 
-        if coverage.ranks_present <= 1:
+        if coverage.ranks_present <= 1 or len(metric_ranks) <= 1:
             median_total = worst_total
             skew_ratio = 0.0
             skew_pct = 0.0
@@ -393,7 +476,7 @@ def build_step_time_metrics(
                             .get(metric_key)
                         )
                         or 0.0
-                        for rank in ranks
+                        for rank in metric_ranks
                     ],
                     dtype=np.float64,
                 )
@@ -488,14 +571,12 @@ def build_step_time_window_from_events(
         ranks_present=len(per_rank_step_timing),
         incomplete=(len(per_rank_step_timing) < len(expected)),
     )
-    worst_rank = _worst_rank_by_total_step(per_rank_timing)
     metrics = build_step_time_metrics(
         per_rank_timing,
         coverage=coverage,
         clock=clock,
         series_steps=steps,
         per_rank_step_timing=per_rank_step_timing,
-        worst_rank_override=worst_rank,
     )
     return StepTimeWindow(
         clock=clock,
@@ -530,33 +611,44 @@ def diagnose_step_time_window(
 
 
 def public_step_time_metric_values(
-    timing: Mapping[str, float]
-) -> Dict[str, float]:
+    timing: Mapping[str, float],
+) -> Dict[str, Optional[float]]:
     """Map window timing to stable final_summary metric names.
 
     Selected-clock fields expose diagnosis timing. Dataloader and total-step
     compatibility fields use explicit CPU timings retained by the window.
+    Every public key is always present; a metric whose signal was never
+    measured in the window is ``None``, while a measured zero stays ``0.0``.
     """
-    forward = float(timing.get("forward", 0.0))
-    backward = float(timing.get("backward", 0.0))
-    optimizer = float(timing.get("optimizer_step", 0.0))
-    compute = forward + backward + optimizer
-    input_wait = float(timing.get(INPUT_WAIT_KEY, 0.0))
-    step_time = float(timing.get("step_time", 0.0))
-    dataloader_fetch = float(timing.get(DATALOADER_FETCH_KEY, 0.0))
-    step_time_cpu = float(timing.get(STEP_TIME_CPU_KEY, 0.0))
-    h2d = float(timing.get("h2d", 0.0))
-    residual_value = timing.get("residual_proxy")
-    if residual_value is None:
-        residual = max(0.0, step_time - h2d - compute)
-    else:
-        residual = max(0.0, float(residual_value))
+
+    def _value(key: str) -> Optional[float]:
+        if key not in timing:
+            return None
+        return float(timing[key])
+
+    forward = _value("forward")
+    backward = _value("backward")
+    optimizer = _value("optimizer_step")
+    compute = (
+        forward + backward + optimizer
+        if None not in (forward, backward, optimizer)
+        else None
+    )
+    dataloader_fetch = _value(DATALOADER_FETCH_KEY)
+    step_time_cpu = _value(STEP_TIME_CPU_KEY)
+    total_step = (
+        dataloader_fetch + step_time_cpu
+        if None not in (dataloader_fetch, step_time_cpu)
+        else None
+    )
+    residual_value = _value("residual_proxy")
+    residual = max(0.0, residual_value) if residual_value is not None else None
     return {
-        "total_step_ms": dataloader_fetch + step_time_cpu,
+        "total_step_ms": total_step,
         "dataloader_ms": dataloader_fetch,
-        "input_wait_ms": input_wait,
-        "step_time_ms": step_time,
-        "h2d_ms": h2d,
+        "input_wait_ms": _value(INPUT_WAIT_KEY),
+        "step_time_ms": _value("step_time"),
+        "h2d_ms": _value("h2d"),
         "compute_ms": compute,
         "residual_ms": residual,
         "forward_ms": forward,
@@ -581,4 +673,5 @@ __all__ = [
     "build_step_time_window_from_events",
     "diagnose_step_time_window",
     "public_step_time_metric_values",
+    "worst_rank_by_total_step",
 ]

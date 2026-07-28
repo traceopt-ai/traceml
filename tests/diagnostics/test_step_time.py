@@ -314,7 +314,10 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert selected.clock == "gpu"
     assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(4.0)
     assert selected.per_rank_timing[0]["step_time"] == pytest.approx(20.0)
-    assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(5.0)
+    # optimizer_step and h2d were never measured: the residual must not
+    # silently absorb them as zeros.
+    assert "residual_proxy" not in selected.per_rank_timing[0]
+    assert "optimizer_step" not in selected.per_rank_timing[0]
     assert selected.per_rank_step_timing[0][1]["input_wait"] == pytest.approx(
         4.0
     )
@@ -332,7 +335,9 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert selected.clock == "cpu"
     assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(12.0)
     assert selected.per_rank_timing[0]["step_time"] == pytest.approx(60.0)
-    assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(10.0)
+    # optimizer_step was never measured, so compute and residual stay
+    # underivable on the cpu clock as well.
+    assert "residual_proxy" not in selected.per_rank_timing[0]
 
     duration_only_events = {
         "_traceml_internal:dataloader_next": {"cpu": {"duration_ms": 12.0}},
@@ -349,9 +354,10 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     )
 
     assert selected.clock == "cpu"
-    assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(0.0)
-    assert selected.per_rank_timing[0]["step_time"] == pytest.approx(0.0)
-    assert selected.per_rank_timing[0]["residual_proxy"] == pytest.approx(0.0)
+    # duration-only stats carry no selected-clock timing at all: every
+    # metric is missing, not measured-as-zero.
+    assert selected.per_rank_timing[0] == {}
+    assert selected.metrics == []
 
 
 def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
