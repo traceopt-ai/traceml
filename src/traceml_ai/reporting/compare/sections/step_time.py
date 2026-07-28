@@ -14,6 +14,7 @@ from traceml_ai.reporting.compare.model import CompareSection
 from traceml_ai.reporting.compare.sections.base import (
     as_float,
     global_average,
+    global_average_has_key,
     numeric_metric,
     section_available,
     section_diagnosis,
@@ -113,11 +114,20 @@ class StepTimeComparer:
         return global_average(section, key)
 
     def _input_value(self, section: Any) -> Any:
-        """Return selected-clock input wait, falling back for pre-1.6 data."""
+        """Return selected-clock input wait.
+
+        Falls back to ``dataloader_ms`` only when ``input_wait_ms`` is
+        absent entirely (a pre-1.6 payload that never had the key). A
+        schema>=1.6 payload always carries the key; a present-but-null
+        value there means the signal was genuinely never measured this
+        window and must not be silently replaced by a different metric.
+        """
         value = self._value(section, "input_wait_ms")
-        return (
-            self._value(section, "dataloader_ms") if value is None else value
-        )
+        if value is not None:
+            return value
+        if global_average_has_key(section, "input_wait_ms"):
+            return None
+        return self._value(section, "dataloader_ms")
 
     def _dominant_phase(self, section: Any) -> Any:
         phases = {

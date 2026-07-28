@@ -307,12 +307,7 @@ def build_step_time_payload(
         # example H2D-only) is excluded from those picks but is still the
         # run's only rank.
         only_rank = global_ranks_used[0]
-        only_summary = rank_summary.get(only_rank)
-        steps_analyzed = (
-            only_summary.steps_analyzed
-            if only_summary is not None
-            else step_time_window.coverage.steps_used
-        )
+        steps_analyzed = rank_summary[only_rank].steps_analyzed
         lines.extend(
             [
                 f"- Diagnosis: {diagnosis_status}",
