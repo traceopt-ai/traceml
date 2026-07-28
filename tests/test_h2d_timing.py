@@ -39,6 +39,10 @@ if str(SRC) not in sys.path:
 import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch  # noqa: E402
 import traceml_ai.utils.timing as timing_module  # noqa: E402
 from traceml_ai.instrumentation.h2d import is_cuda_target  # noqa: E402
+from traceml_ai.runtime.arming import (  # noqa: E402
+    _set_tracing_armed,
+    is_tracing_armed,
+)
 from traceml_ai.sdk.wrappers import wrap_h2d  # noqa: E402
 
 _H2D_TLS = h2d_patch._H2D_TLS
@@ -88,6 +92,18 @@ def _recorded_h2d_events(buf: deque) -> list:
 
 def _fake_tensor_to(tensor, *args, **kwargs):
     return tensor
+
+
+@pytest.fixture(autouse=True)
+def _armed_tracing():
+    # The patched .to() checks the process-wide flag that init() raises once
+    # its patches install cleanly. These tests call the patch directly, so arm
+    # the flag here and restore it. Without this the patch passes straight
+    # through and the negative assertions below would hold vacuously.
+    previous = is_tracing_armed()
+    _set_tracing_armed(True)
+    yield
+    _set_tracing_armed(previous)
 
 
 # Auto-patch: CUDA target detection

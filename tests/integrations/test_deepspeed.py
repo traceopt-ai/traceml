@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 
 import traceml_ai as traceml
+from traceml_ai.runtime.arming import _set_tracing_armed, is_tracing_armed
 
 try:
     import deepspeed  # noqa: F401
@@ -114,6 +115,18 @@ def _install_auto_instrumentation() -> None:
     patch_h2d()
     patch_dataloader()
     ensure_optimizer_timing_installed()
+
+
+@pytest.fixture(autouse=True)
+def _armed_tracing():
+    # The patches are gated on the process-wide flag that init() raises once
+    # its patches install cleanly. This file installs the patches directly, so
+    # arm the flag here and restore it, keeping the file runnable on its own
+    # rather than depending on some earlier test having called init().
+    previous = is_tracing_armed()
+    _set_tracing_armed(True)
+    yield
+    _set_tracing_armed(previous)
 
 
 def test_deepspeed_recipe_brackets_step():
