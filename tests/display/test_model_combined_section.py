@@ -113,10 +113,13 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     by_key = dict(zip(keys, panel["seg_divs"]))
     by_lab = dict(zip(keys, panel["seg_labs"]))
     assert by_key["h2d"].styles[-1] == "width:0.000%"
-    assert (
-        f"width:{_UNMEASURED_SLIVER_PCT:.1f}%"
-        in by_key["residual_proxy"].styles[-1]
-    )
+    residual_sliver = by_key["residual_proxy"].styles[-1]
+    assert f"width:{_UNMEASURED_SLIVER_PCT:.1f}%" in residual_sliver
+    # The hatch is drawn in the PHASE'S OWN color (residual = gold), so the
+    # sliver still identifies which phase, matching the legend dot.
+    residual_color = dict((k, c) for _, k, c in theme.PHASES)["residual_proxy"]
+    assert "repeating-linear-gradient" in residual_sliver
+    assert residual_color in residual_sliver
     # The sliver carries NO on-segment text -- it would overlap the hatch
     # illegibly; the missing phases are named in the window meta instead.
     assert by_lab["residual_proxy"].text == ""

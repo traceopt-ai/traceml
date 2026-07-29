@@ -73,7 +73,7 @@ def build_model_combined_section() -> Dict[str, Any]:
                     ui.element("div").classes("legdot").style(
                         f"background:{col};"
                     )
-                    ui.label(lab)
+                    ui.label(theme.PHASE_LEGEND_LABELS.get(_key, lab))
 
         with (
             ui.row()
@@ -190,21 +190,23 @@ def update_model_combined_section(
         return
     panel["_last_sig"] = sig
 
-    for (lab, key, _c), seg, sl in zip(
+    for (lab, key, col), seg, sl in zip(
         theme.PHASES, panel["seg_divs"], panel["seg_labs"]
     ):
         value = vals[key]
         if key in unmeasured_non_h2d:
-            # Unmeasured non-h2d phase: a hatched sliver marks "unknown, not
-            # zero" (a dark stream must never read as confirmed-fast). No
-            # on-sliver text -- it would overlap the hatch illegibly at this
-            # width, and the window meta already names the missing phases
-            # ("partial: FWD,RESIDUAL") with the legend mapping position to
-            # phase.
+            # Unmeasured non-h2d phase: a hatched sliver in the PHASE'S OWN
+            # color marks "unknown, not zero" (a dark stream must never read
+            # as confirmed-fast). The color still identifies the phase (blue
+            # = forward, gold = residual, matching the legend); the diagonal
+            # hatch overlay is what says "unmeasured". No on-sliver text --
+            # it would overlap the hatch illegibly at this width, and the
+            # window meta already names the missing phases ("partial:
+            # FWD,RESIDUAL").
             seg.style(
                 f"width:{_UNMEASURED_SLIVER_PCT:.1f}%; "
                 "background:repeating-linear-gradient(45deg, "
-                "var(--muted) 0 2px, transparent 2px 5px);"
+                f"{col} 0 2px, transparent 2px 5px);"
             )
             sl.text = ""
             continue
