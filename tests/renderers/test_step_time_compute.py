@@ -175,13 +175,18 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     results = iter([good, empty, empty])
     monkeypatch.setattr(computer, "_compute_impl", lambda conn: next(results))
 
-    assert computer.compute_cli().diagnosis_metrics == [metric]
+    first = computer.compute_cli()
+    assert first.diagnosis_metrics == [metric]
     assert computer.had_ok is True
+    # The payload itself carries had_ok too (dashboard subscribers only
+    # ever see the payload, never the computer instance directly).
+    assert first.had_ok is True
 
     # Within the TTL a transient gap re-serves the last good metrics.
     bridged = computer.compute_cli()
     assert bridged.diagnosis_metrics == [metric]
     assert bridged.status_message.startswith("STALE")
+    assert bridged.had_ok is True
 
     # Past the TTL the empty result comes through unbridged.
     monkeypatch.setattr(
@@ -193,3 +198,23 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     assert expired.diagnosis_metrics == []
     assert expired.status_message == "No fresh step-combined data"
     assert computer.had_ok is True
+    assert expired.had_ok is True
+
+
+def test_computer_had_ok_stays_false_on_cold_start(monkeypatch) -> None:
+    """A payload that never had good data reports had_ok=False on itself,
+    not just on the computer -- distinguishes cold start from a dead run
+    for any consumer that only sees the payload (issue #259)."""
+    from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
+
+    computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
+    monkeypatch.setattr(
+        computer,
+        "_compute_impl",
+        lambda conn: StepCombinedTimeResult(status_message="no rows"),
+    )
+
+    result = computer.compute_cli()
+    assert result.diagnosis_metrics == []
+    assert result.had_ok is False
+    assert computer.had_ok is False

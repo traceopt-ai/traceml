@@ -49,3 +49,7 @@ class StepCombinedTimeResult:
     diagnosis_metrics: List[StepCombinedTimeMetric] = field(
         default_factory=list
     )
+    # Whether the producing computer ever had diagnosis metrics before
+    # this tick. Lets a consumer distinguish "no data yet" from "had
+    # data, now expired" without a side-channel to the computer.
+    had_ok: bool = False

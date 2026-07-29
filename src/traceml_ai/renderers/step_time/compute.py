@@ -1,5 +1,6 @@
 import sqlite3
 import time
+from dataclasses import replace
 from typing import Dict, Optional, Sequence
 
 from traceml_ai.loggers.error_log import get_error_logger
@@ -77,7 +78,7 @@ class StepCombinedComputer:
 
         self._last_ok = result
         self._last_ok_ts = time.time()
-        return result
+        return replace(result, had_ok=True)
 
     # ------------------------------------------------------------------
     # Core compute
@@ -148,6 +149,7 @@ class StepCombinedComputer:
 
     def _stale_or_empty(self, msg: str) -> StepCombinedTimeResult:
         now = time.time()
+        had_ok = self._last_ok is not None
         if self._last_ok is not None:
             if (
                 self._stale_ttl_s is None
@@ -159,12 +161,14 @@ class StepCombinedComputer:
                     diagnosis_clock=self._last_ok.diagnosis_clock,
                     training_strategy=self._last_ok.training_strategy,
                     diagnosis_metrics=self._last_ok.diagnosis_metrics,
+                    had_ok=True,
                 )
         return StepCombinedTimeResult(
             status_message="No fresh step-combined data",
             per_rank_timing={},
             diagnosis_clock="cpu",
             diagnosis_metrics=[],
+            had_ok=had_ok,
         )
 
 

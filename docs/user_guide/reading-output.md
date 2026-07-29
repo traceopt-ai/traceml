@@ -102,12 +102,15 @@ multi-GPU.
 Phases that were never measured in the current window are omitted from the
 live step-time table rather than shown as `0.0 ms`, and the diagnosis block
 shows `INCOMPLETE DATA` with the missing signal names when no reliable
-conclusion is possible. The step-time dashboard card behaves the same way:
-unmeasured phases leave the ribbon, the window label adds `partial signals`,
-and an underivable residual shows `n/a`. H2D is the exception on both
-surfaces: its events only occur when host-to-device copies happen, so an
-absent H2D means no observed transfers and never counts as partial
-coverage.
+conclusion is possible. The local UI's step-time hero card behaves the same
+way: an unmeasured phase renders as a hatched sliver on the ribbon, never as
+an empty (zero-width) segment, so a dark stream can never be mistaken for a
+confirmed-fast one; the window label adds `partial: <names>`, and an
+underivable residual shows `n/a`. If a run stops reporting entirely, both
+surfaces show the last window has expired instead of freezing on a dead
+run's numbers. H2D is the exception throughout: its events only occur when
+host-to-device copies happen, so an absent H2D means no observed transfers
+and never counts as partial coverage.
 
 ### Local UI
 

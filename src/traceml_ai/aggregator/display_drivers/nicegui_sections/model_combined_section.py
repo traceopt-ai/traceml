@@ -26,6 +26,11 @@ from traceml_ai.renderers.step_time.schema import (
 
 from . import theme
 
+# Fixed ribbon width for a non-h2d phase that was never measured this
+# window -- large enough to read as a deliberate marker, not a rounding
+# artifact of a real proportional segment.
+_UNMEASURED_SLIVER_PCT = 6.0
+
 
 def build_model_combined_section() -> Dict[str, Any]:
     seg_divs: List[Any] = []
@@ -109,10 +114,30 @@ def _index(
     return {m.metric: m for m in metrics}
 
 
+_EXPIRED_SIG = "__expired__"
+
+
+def _mark_expired(panel: Dict[str, Any]) -> None:
+    """Had data before, none now: the run stopped reporting and the
+    computer's stale window expired. Clear the card instead of freezing
+    on the last complete view (the CLI sibling does the same)."""
+    if panel.get("_last_sig") == _EXPIRED_SIG:
+        return
+    panel["_last_sig"] = _EXPIRED_SIG
+    for seg, sl in zip(panel["seg_divs"], panel["seg_labs"]):
+        seg.style("width:0%;")
+        sl.text = ""
+    for kpi in panel["kpis"].values():
+        kpi.content = theme.kval("—")
+    panel["win"].text = "window expired"
+
+
 def update_model_combined_section(
     panel: Dict[str, Any], payload: Optional[StepCombinedTimeResult]
 ) -> None:
     if not payload or not getattr(payload, "diagnosis_metrics", None):
+        if payload is not None and getattr(payload, "had_ok", False):
+            _mark_expired(panel)
         return
     m = _index(payload.diagnosis_metrics)
     if "step_time" not in m:
@@ -130,7 +155,8 @@ def update_model_combined_section(
     }
     measured = {k: v for k, v in vals.items() if v is not None}
     st = m["step_time"].summary
-    partial = any(value is None for key, value in vals.items() if key != "h2d")
+    missing = [key for key, value in vals.items() if value is None]
+    partial = any(key != "h2d" for key in missing)
     # Denominator: at least the median iteration envelope (input wait +
     # step envelope), so unmeasured time shows as empty ribbon space
     # instead of stretching the measured phases to fill 100%.
@@ -139,6 +165,17 @@ def update_model_combined_section(
         input_wait_value if input_wait_value is not None else 0.0
     )
     tot = max(sum(measured.values()), envelope) or 1.0
+
+    # A measured-zero segment and a genuinely unmeasured one must never
+    # render identically -- an absent input_wait would otherwise let the
+    # OTHER phases sum to exactly step_time (residual is a remainder), so
+    # the ribbon fills to 100% and a dark dataloader stream reads as a
+    # confirmed-fast one. Non-h2d unmeasured phases get a fixed hatched
+    # sliver instead of a proportional width; measured phases give up
+    # that width so the row still totals 100%.
+    unmeasured_non_h2d = [key for key in missing if key != "h2d"]
+    reserved_pct = _UNMEASURED_SLIVER_PCT * len(unmeasured_non_h2d)
+    measured_scale = max(0.0, (100.0 - reserved_pct) / 100.0)
 
     sig = tuple(
         round(vals[k], 3) if vals[k] is not None else None
@@ -157,7 +194,19 @@ def update_model_combined_section(
         theme.PHASES, panel["seg_divs"], panel["seg_labs"]
     ):
         value = vals[key]
-        pct = (value / tot * 100.0) if value is not None else 0.0
+        if key in unmeasured_non_h2d:
+            seg.style(
+                f"width:{_UNMEASURED_SLIVER_PCT:.1f}%; "
+                "background:repeating-linear-gradient(45deg, "
+                "var(--muted) 0 3px, transparent 3px 6px);"
+            )
+            sl.text = f"{lab}?"
+            continue
+        pct = (
+            (value / tot * 100.0 * measured_scale)
+            if value is not None
+            else 0.0
+        )
         seg.style(f"width:{pct:.3f}%")
         sl.text = lab if pct >= 7.0 else ""
 
@@ -184,7 +233,10 @@ def update_model_combined_section(
     )
     steps_text = f"{int(st.steps_used or 0)} aligned steps"
     if partial:
-        steps_text += " · partial signals"
+        missing_labels = ",".join(
+            lab for lab, key, _c in theme.PHASES if key in unmeasured_non_h2d
+        )
+        steps_text += f" · partial: {missing_labels}"
     panel["win"].text = steps_text
 
 
