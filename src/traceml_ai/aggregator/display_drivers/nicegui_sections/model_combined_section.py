@@ -195,12 +195,18 @@ def update_model_combined_section(
     ):
         value = vals[key]
         if key in unmeasured_non_h2d:
+            # Unmeasured non-h2d phase: a hatched sliver marks "unknown, not
+            # zero" (a dark stream must never read as confirmed-fast). No
+            # on-sliver text -- it would overlap the hatch illegibly at this
+            # width, and the window meta already names the missing phases
+            # ("partial: FWD,RESIDUAL") with the legend mapping position to
+            # phase.
             seg.style(
                 f"width:{_UNMEASURED_SLIVER_PCT:.1f}%; "
                 "background:repeating-linear-gradient(45deg, "
-                "var(--muted) 0 3px, transparent 3px 6px);"
+                "var(--muted) 0 2px, transparent 2px 5px);"
             )
-            sl.text = f"{lab}?"
+            sl.text = ""
             continue
         pct = (
             (value / tot * 100.0 * measured_scale)

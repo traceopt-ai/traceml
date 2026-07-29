@@ -111,11 +111,15 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     # 10 + step 100 = 110) minus the sliver's reserved width.
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
+    by_lab = dict(zip(keys, panel["seg_labs"]))
     assert by_key["h2d"].styles[-1] == "width:0.000%"
     assert (
         f"width:{_UNMEASURED_SLIVER_PCT:.1f}%"
         in by_key["residual_proxy"].styles[-1]
     )
+    # The sliver carries NO on-segment text -- it would overlap the hatch
+    # illegibly; the missing phases are named in the window meta instead.
+    assert by_lab["residual_proxy"].text == ""
     assert by_key["input_wait"].styles[-1] == "width:8.545%"
     # An underivable residual shows n/a, never a fake 0%.
     assert "n/a" in panel["kpis"]["residual"].content
