@@ -174,3 +174,27 @@ def test_numpy_is_not_capped_below_version_2() -> None:
             f"numpy is capped below 2 by {requirement!r}. This downgrades "
             "NumPy in place for every user on a modern scientific stack."
         )
+
+
+def test_nicegui_floor_covers_ui_context() -> None:
+    """Regression guard for issue #270.
+
+    The display driver calls ui.context, which nicegui added in 1.4.23.
+    Without a floor, an unrelated constraint elsewhere in the user's
+    environment (an old fastapi pin, for example) walks nicegui back to
+    a version that imports fine and raises AttributeError at runtime.
+    """
+    for requirement in _runtime_dependencies():
+        if _requirement_name(requirement) != "nicegui":
+            continue
+
+        specifier = _version_specifier(requirement).replace(" ", "")
+
+        assert ">=1.4.23" in specifier or ">1.4.22" in specifier, (
+            f"nicegui is declared as {requirement!r} without a floor "
+            "covering ui.context (added in 1.4.23). Resolvers may select "
+            "an older nicegui that breaks the dashboard at runtime."
+        )
+        return
+
+    pytest.fail("nicegui not found among runtime dependencies")
