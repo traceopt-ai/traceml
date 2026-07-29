@@ -51,14 +51,12 @@ dependencies = [
     # nicegui 1.4.23. Older nicegui imports fine and then raises
     # AttributeError at runtime.
     "nicegui>=1.4.23",
-    "plotly",
 ]
 
 [project.optional-dependencies]
 
 dashboard = [
     "nicegui>=1.4.23",
-    "plotly",
 ]
 
 torch = [
