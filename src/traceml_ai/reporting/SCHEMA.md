@@ -1,8 +1,15 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.6`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.7`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
+
+Schema `1.7` made every public Step Time metric nullable. `null` means the
+underlying timing signal was never measured in the analyzed window (missing
+instrumentation), while a measured zero stays `0.0`. Null metrics are
+excluded from `global.average`, `global.median`, and `global.worst` and from
+rank median/worst selection; a rank with only some metrics measured (for
+example an H2D-only rank) keeps its row with `null` for the others.
 
 Sections:
 
@@ -16,7 +23,7 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.6,
+  "schema_version": 1.7,
   "generated_at": "...",
   "duration_s": null,
   "meta": {
@@ -81,8 +88,12 @@ Selection policy:
   and System reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
 - `NO_CLEAR_PERFORMANCE_BOTTLENECK` appears when Step Time is `BALANCED` and
   GPU utilization is not low/moderate.
-- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA` or
-  `WARMUP`.
+- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA`,
+  `WARMUP`, or `INCOMPLETE_DATA`. For `INCOMPLETE_DATA` its summary and
+  action name the missing-phase problem, its evidence carries
+  `step_time_status: "INCOMPLETE DATA"`, and the Step Time section's
+  diagnosis evidence lists `missing_signals` plus per-signal
+  `signal_coverage`.
 - Step Time may emit warning-only bottleneck diagnoses before its confident
   threshold; critical Step Time diagnoses require the confident window size.
   Live and summary use the same global-rank Step Time SQLite window loader;
@@ -260,6 +271,9 @@ Fallback evidence types are:
 - Row-level diagnosis is intentionally omitted for now.
 - `global.average`, `global.median`, `global.worst`, and
   `groups.rows[*].metrics` must use exactly `metadata.section_metric_names`.
+  Keys are always present; a Step Time metric whose signal was never
+  measured carries `null` (`{"value": null, "idx": null}` for rank points)
+  and never a fabricated `0.0`.
 - `global.index_by` must match `groups.by`.
 - `idx` points to a key in `groups.rows`.
 - `metadata.global_ranks_seen` is all observed ranks.

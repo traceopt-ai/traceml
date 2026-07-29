@@ -29,8 +29,8 @@ from traceml_ai.reporting.sections.step_time.model import (
     build_global_rollup,
     build_overview,
     closest_rank_to_median,
-    compute_residual_avg_ms,
     finite_float,
+    finite_float_or_none,
     summary_metric_values,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
@@ -125,38 +125,25 @@ def _build_card_stats(
     if not per_global_rank_summary:
         return None
 
+    def _measured(field: str) -> Dict[int, float]:
+        # Ranks whose signal was never measured stay out of the card
+        # statistics; a measured zero stays in.
+        out: Dict[int, float] = {}
+        for rank, summary in per_global_rank_summary.items():
+            value = finite_float_or_none(getattr(summary, field))
+            if value is not None:
+                out[int(rank)] = value
+        return out
+
     return StepTimeCardStats(
         global_rank_count=len(per_global_rank_summary),
         total_step=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_total_step_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
+            _measured("avg_total_step_ms")
         ),
-        compute=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_compute_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
-        residual=_metric_pair_from_rank_values(
-            {
-                int(rank): compute_residual_avg_ms(summary)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
-        input=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_input_wait_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
-        h2d=_metric_pair_from_rank_values(
-            {
-                int(rank): finite_float(summary.avg_h2d_ms)
-                for rank, summary in per_global_rank_summary.items()
-            }
-        ),
+        compute=_metric_pair_from_rank_values(_measured("avg_compute_ms")),
+        residual=_metric_pair_from_rank_values(_measured("avg_residual_ms")),
+        input=_metric_pair_from_rank_values(_measured("avg_input_wait_ms")),
+        h2d=_metric_pair_from_rank_values(_measured("avg_h2d_ms")),
     )
 
 
@@ -274,17 +261,6 @@ def build_step_time_payload(
 
     median_global_rank = overview["median_global_rank"]
     worst_global_rank = overview["worst_global_rank"]
-    median_summary = (
-        rank_summary.get(median_global_rank)
-        if median_global_rank is not None
-        else None
-    )
-    worst_summary = (
-        rank_summary.get(worst_global_rank)
-        if worst_global_rank is not None
-        else None
-    )
-    primary_summary = median_summary or worst_summary
 
     summary_diag = diagnosis_result.primary
     issues = diagnosis_result.issues
@@ -325,13 +301,18 @@ def build_step_time_payload(
                 f"- Why: {diagnosis_why}",
             ]
         )
-    elif len(global_ranks_used) == 1 and primary_summary is not None:
+    elif len(global_ranks_used) == 1:
+        # The single-rank wording must not depend on the rank winning a
+        # median/worst pick: a rank whose total step is unmeasured (for
+        # example H2D-only) is excluded from those picks but is still the
+        # run's only rank.
         only_rank = global_ranks_used[0]
+        steps_analyzed = rank_summary[only_rank].steps_analyzed
         lines.extend(
             [
                 f"- Diagnosis: {diagnosis_status}",
                 (
-                    f"- Scope: last {primary_summary.steps_analyzed} "
+                    f"- Scope: last {steps_analyzed} "
                     f"aligned steps on global rank r{only_rank}"
                 ),
             ]

@@ -31,8 +31,16 @@ def phase_bar(step_time_section: Dict[str, Any]) -> str:
     total = 0.0
     for metric, label, color in _PHASES:
         value = avg.get(metric)
-        if value is None and metric == "input_wait_ms":
-            # Back-compat: schema < 1.6 reports carry dataloader_ms only.
+        if (
+            value is None
+            and metric == "input_wait_ms"
+            and "input_wait_ms" not in avg
+        ):
+            # Back-compat: a pre-1.6 report never carried this key at
+            # all. A schema>=1.6 report always carries the key, so a
+            # present-but-null value here means genuinely unmeasured,
+            # not "borrow dataloader_ms" -- fall through to the isinstance
+            # check below and drop this phase from the chart.
             value = avg.get("dataloader_ms")
         if isinstance(value, (int, float)) and value > 0:
             present.append((label, color, float(value)))

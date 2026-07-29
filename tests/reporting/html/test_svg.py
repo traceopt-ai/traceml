@@ -47,6 +47,27 @@ def test_phase_bar_falls_back_to_dataloader_ms_for_pre_1_6(
     assert out.count("<rect") == 2  # input (via dataloader_ms) + forward
 
 
+def test_phase_bar_null_input_wait_is_not_borrowed_from_dataloader(
+    make_section,
+) -> None:
+    # Schema >= 1.6 always carries the input_wait_ms key; a present-but-
+    # null value means genuinely unmeasured, not "old payload without
+    # the key" -- the chart must drop the phase, not borrow
+    # dataloader_ms's number under the "input wait" label.
+    section = make_section(
+        metric_names=["total_step_ms", "input_wait_ms", "forward_ms"],
+        average={
+            "input_wait_ms": None,
+            "dataloader_ms": 60.0,
+            "forward_ms": 40.0,
+            "total_step_ms": 100.0,
+        },
+    )
+    out = phase_bar(section)
+    assert "input wait" not in out
+    assert out.count("<rect") == 1  # forward only
+
+
 def test_phase_bar_empty_when_no_timing(make_section) -> None:
     section = make_section(
         metric_names=["total_step_ms"], average={"total_step_ms": 0.0}

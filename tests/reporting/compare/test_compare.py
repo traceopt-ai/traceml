@@ -503,8 +503,9 @@ def test_compare_warns_when_summary_schema_versions_differ() -> None:
     assert compare_payload["warnings"] == [
         (
             "Summary schema versions differ: A uses 1.5, B uses 1.6. "
-            "Step Time fields changed in schema 1.6, so Step Time deltas "
-            "may not be directly comparable."
+            "Step Time fields changed in schema 1.6 and became nullable "
+            "in schema 1.7, so Step Time deltas may not be directly "
+            "comparable."
         )
     ]
     assert "Notes" in text
@@ -543,6 +544,40 @@ def test_compare_step_time_input_prefers_selected_input_wait() -> None:
     assert step_time["metrics"]["input_ms"]["rhs"] == 7.0
     assert step_time["metrics"]["dominant_phase"]["lhs"] == "forward"
     assert step_time["metrics"]["dominant_phase"]["rhs"] == "forward"
+
+
+def test_compare_step_time_null_input_wait_is_not_borrowed_from_dataloader() -> (
+    None
+):
+    # Schema >= 1.6 always carries the input_wait_ms key; a present-but-
+    # null value means the signal was genuinely never measured this
+    # window (e.g. GPU clock dropped it on some step), not "old payload
+    # without the key" -- the fallback must not silently substitute
+    # dataloader_ms for it.
+    section = _step_time_section(total_step_ms=120.0)
+    section["global"]["average"]["input_wait_ms"] = None
+
+    payload = _payload_with_sections(step_time=section)
+    step_time = _build_compare(payload, payload)["sections"]["step_time"]
+
+    assert step_time["metrics"]["input_ms"]["lhs"] is None
+    assert step_time["metrics"]["input_ms"]["rhs"] is None
+
+
+def test_compare_step_time_absent_input_wait_still_falls_back_pre_1_6() -> (
+    None
+):
+    # True pre-1.6 shape: the key never existed at all. This case must
+    # keep falling back to dataloader_ms.
+    section = _step_time_section(total_step_ms=120.0)
+    assert "input_wait_ms" not in section["global"]["average"]
+
+    payload = _payload_with_sections(step_time=section)
+    step_time = _build_compare(payload, payload)["sections"]["step_time"]
+
+    assert step_time["metrics"]["input_ms"]["lhs"] == (
+        section["global"]["average"]["dataloader_ms"]
+    )
 
 
 def test_compare_includes_top_level_primary_diagnosis_change() -> None:

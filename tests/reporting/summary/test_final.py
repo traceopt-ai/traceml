@@ -116,7 +116,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.6
+    assert payload["schema_version"] == 1.7
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
@@ -244,6 +244,57 @@ def test_final_text_uses_single_process_average_layout():
     assert "node=n" not in text
     assert payload["step_time"]["card"] == "STEP TIME ORIGINAL CARD"
     assert payload["system"]["card"] == "SYSTEM ORIGINAL CARD"
+
+
+def test_final_text_renders_missing_step_metrics_as_na():
+    step_diag = _diagnosis(
+        "INCOMPLETE_DATA",
+        "INCOMPLETE DATA",
+        summary="Missing timing signals prevent a reliable diagnosis: h2d.",
+        action="Instrument the missing phases.",
+    )
+    step_time = _payload(
+        metadata={"global_ranks_used": 1},
+        diagnosis=step_diag,
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "cpu"},
+            "average": {
+                "total_step_ms": 139.1,
+                "dataloader_ms": 120.0,
+                "input_wait_ms": 130.8,
+                "step_time_ms": 139.1,
+                "compute_ms": None,
+                "residual_ms": None,
+                "h2d_ms": None,
+            },
+        },
+        card="STEP TIME ORIGINAL CARD",
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", _status_payload("NORMAL")),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+    text = payload["text"]
+    lines = text.splitlines()
+
+    def _evidence_row(label: str) -> str:
+        for line in lines:
+            if label in line:
+                return line
+        raise AssertionError(f"no evidence row for {label}")
+
+    # A never-measured metric renders n/a; measured metrics keep values.
+    assert "n/a" in _evidence_row("H2D")
+    assert "n/a" in _evidence_row("Compute")
+    assert "n/a" in _evidence_row("Residual")
+    assert "130.8ms" in _evidence_row("Input Wait")
 
 
 def test_final_text_uses_selected_step_time_for_phase_shares():
