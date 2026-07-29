@@ -162,6 +162,45 @@ To keep the project focused, we are currently **not** accepting:
 
 ---
 
+## Dependency Policy
+
+`pyproject.toml` is user-facing API. A wrong constraint does not break our
+CI; it breaks a stranger's environment, silently. A `numpy<2` cap shipped
+this way once: CI stayed green while `pip install traceml-ai` downgraded
+NumPy 2 in place, and resolvers that refuse to downgrade backsolved users
+to a months-old release instead (#263). These rules exist so that class of
+defect cannot ship again.
+
+1. **No upper bounds without a recorded reason.** A cap on a runtime
+   dependency is only allowed for a concrete, current incompatibility,
+   recorded in `ALLOWED_UPPER_BOUNDS` in
+   `tests/core/test_packaging_constraints.py`. The test fails on any
+   undocumented cap. "Might break someday" is not a reason: users can pin
+   around a missing cap, but cannot relax one we ship.
+2. **Lower bounds follow the APIs we call.** When code depends on a
+   specific API of a dependency, the dependency carries a floor naming the
+   first version that has it (e.g. `nicegui>=1.4.23` for `ui.context`),
+   with a comment in `pyproject.toml` recording why. Without a floor, a
+   resolver working around an unrelated conflict can select a version that
+   imports fine and breaks at runtime.
+3. **If the core import path does not import it, it is an extra.** Runtime
+   dependencies are for code every user runs. Anything only some modes or
+   integrations need belongs in an optional extra. The dashboard stack is
+   the known exception today; whether it migrates to an extra is tracked
+   in #268.
+4. **CI hears ecosystem drift before users do.** A scheduled CI leg
+   resolves the newest published versions of all dependencies and runs the
+   core suite, so a new NumPy or NiceGUI that breaks us is our alarm
+   rather than a user's bug report.
+
+Background reading:
+[Should You Use Upper Bound Version Constraints?](https://iscinumpy.dev/post/bound-version-constraints/)
+(Henry Schreiner) on why caps are harmful in Python's flat dependency
+model, and [SPEC 0](https://scientific-python.org/specs/spec-0000/) for
+the support windows the scientific Python ecosystem expects.
+
+---
+
 ## Releasing (maintainers)
 
 There is no version to edit anywhere in the repo. The package version comes
