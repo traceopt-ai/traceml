@@ -47,13 +47,16 @@ dependencies = [
     "numpy>=1.26",
     "msgspec",
     "pyyaml>=6.0",
-    "nicegui",
+    # Floor: the dashboard display driver calls ui.context, added in
+    # nicegui 1.4.23. Older nicegui imports fine and then raises
+    # AttributeError at runtime.
+    "nicegui>=1.4.23",
 ]
 
 [project.optional-dependencies]
 
 dashboard = [
-    "nicegui",
+    "nicegui>=1.4.23",
 ]
 
 torch = [
