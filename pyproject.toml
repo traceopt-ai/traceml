@@ -48,14 +48,12 @@ dependencies = [
     "msgspec",
     "pyyaml>=6.0",
     "nicegui",
-    "plotly",
 ]
 
 [project.optional-dependencies]
 
 dashboard = [
     "nicegui",
-    "plotly",
 ]
 
 torch = [
