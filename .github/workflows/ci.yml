@@ -73,8 +73,6 @@ jobs:
             tests/telemetry/test_distributed.py \
             tests/telemetry/test_msgpack.py \
             tests/telemetry/test_sender_sequence.py \
-            tests/renderers \
-            tests/display \
             -q
 
   test-integration:
@@ -89,7 +87,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[torch]"
+          pip install -e ".[torch,dashboard]"
           pip install pytest
       - name: Run integration tests
         run: |
@@ -99,6 +97,8 @@ jobs:
             tests/reporting/compare \
             tests/reporting/html \
             tests/reporting/summary \
+            tests/renderers \
+            tests/display \
             -q
 
   test-latest-deps:
