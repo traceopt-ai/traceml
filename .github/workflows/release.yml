@@ -37,8 +37,8 @@ jobs:
 
       - name: Validate version format
         run: |
-          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
-            echo "::error::Version must be X.Y.Z, e.g. 0.3.5 (no leading v, no suffix)"
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$' || {
+            echo "::error::Version must be X.Y.Z or X.Y.Z.W, e.g. 0.3.5 or 0.3.5.1 (no leading v, no suffix)"
             exit 1
           }
 
