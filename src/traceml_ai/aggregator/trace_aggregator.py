@@ -31,9 +31,9 @@ from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
 from traceml_ai.utils.atomic_io import write_json_atomic
 
 DASHBOARD_DEPENDENCY_INSTALL_HINT = (
-    "Dashboard mode requires nicegui and plotly. They are included in the "
-    "default TraceML install; if they are missing, run "
-    "`pip install -U traceml-ai` or `pip install nicegui plotly`."
+    "Dashboard mode requires nicegui. It is included in the "
+    "default TraceML install; if it is missing, run "
+    "`pip install -U traceml-ai` or `pip install nicegui`."
 )
 _SQLITE_FINALIZE_BUDGET_FRACTION = 0.25
 _SQLITE_FINALIZE_BUDGET_MIN_SEC = 5.0
@@ -69,7 +69,7 @@ def _resolve_display_driver(mode: str) -> Type[BaseDisplayDriver]:
                 NiceGUIDisplayDriver,
             )
         except ModuleNotFoundError as exc:
-            if exc.name in {"nicegui", "plotly"}:
+            if exc.name == "nicegui":
                 raise RuntimeError(
                     f"[TraceML] {DASHBOARD_DEPENDENCY_INSTALL_HINT}"
                 ) from exc
