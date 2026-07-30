@@ -146,8 +146,12 @@ jobs:
             -q
 
   smoke-test-install:
-    name: Clean-install Smoke Test
-    runs-on: ubuntu-latest
+    name: Clean-install Smoke Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -160,13 +164,26 @@ jobs:
           python -m pip install --upgrade pip build
           python -m build --wheel
       - name: Install the built wheel into a clean environment
+        shell: bash
         run: |
-          python -m venv /tmp/smoke-env
-          /tmp/smoke-env/bin/pip install --upgrade pip
-          /tmp/smoke-env/bin/pip install dist/*.whl
+          set -euo pipefail
+          python -m venv smoke-env
+          # venv writes console scripts to Scripts/ on Windows, bin/ elsewhere.
+          bindir=smoke-env/Scripts
+          [ -d "$bindir" ] || bindir=smoke-env/bin
+          echo "SMOKE_BIN=$bindir" >> "$GITHUB_ENV"
+          "$bindir/python" -m pip install --upgrade pip
+          "$bindir/python" -m pip install dist/*.whl
       - name: Assert documented CLI surface is installed
+        shell: bash
         run: |
-          /tmp/smoke-env/bin/traceml --help | grep -q 'view' || \
+          set -euo pipefail
+          # Redirect instead of piping into grep: grep -q closes the pipe on
+          # first match, which makes the launcher exit non-zero and would hide
+          # its real status. set -e then catches a launcher that cannot start.
+          "$SMOKE_BIN/traceml" --help > root-help.txt
+          "$SMOKE_BIN/traceml" run --help > run-help.txt
+          grep -q 'view' root-help.txt || \
             (echo "::error::traceml --help is missing the documented 'view' subcommand" && exit 1)
-          /tmp/smoke-env/bin/traceml run --help | grep -q 'html-report' || \
+          grep -q 'html-report' run-help.txt || \
             (echo "::error::traceml run --help is missing the documented '--html-report' flag" && exit 1)
