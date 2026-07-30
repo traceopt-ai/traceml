@@ -21,6 +21,10 @@ from typing import Any, BinaryIO, Callable, Iterable, Optional
 
 from traceml_ai.launcher.manifest import update_run_manifest
 
+_IS_WINDOWS = sys.platform == "win32"
+# Absent on POSIX, where start_new_session is used instead.
+_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+
 DEFAULT_TCP_READY_TIMEOUT_SEC = 15.0
 DEFAULT_SHUTDOWN_TIMEOUT_SEC = 5.0
 DEFAULT_STDERR_TAIL_BYTES = 64 * 1024
@@ -163,6 +167,44 @@ def start_stderr_tail_capture(
     )
 
 
+def process_group_kwargs() -> dict[str, Any]:
+    """Popen keyword arguments that isolate the child in its own group.
+
+    ``start_new_session`` is a ``setsid()`` call and exists only on POSIX.
+    On Windows the equivalent is the CREATE_NEW_PROCESS_GROUP creation flag.
+    Without one of the two, teardown can only reach the direct child and any
+    grandchildren it spawned, such as torchrun or DataLoader workers, are
+    left running.
+    """
+    if _IS_WINDOWS:
+        return {"creationflags": _CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _taskkill_tree(pid: int, *, force: bool) -> bool:
+    """Terminate a Windows process tree. Return True if taskkill ran.
+
+    Windows has no process-group signal, so the tree is walked by pid.
+    ``proc.terminate()`` alone would end only the direct child.
+    """
+    cmd = ["taskkill", "/T", "/PID", str(pid)]
+    if force:
+        cmd.insert(1, "/F")
+
+    try:
+        completed = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=DEFAULT_SHUTDOWN_TIMEOUT_SEC,
+        )
+    except Exception:
+        return False
+
+    # 128 means the pid was already gone, which is a success for our purpose.
+    return completed.returncode in (0, 128)
+
+
 def terminate_process_group(
     proc: Optional[subprocess.Popen],
     timeout_sec: float = DEFAULT_SHUTDOWN_TIMEOUT_SEC,
@@ -171,13 +213,20 @@ def terminate_process_group(
     if proc is None or proc.poll() is not None:
         return
 
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except Exception:
+    if _IS_WINDOWS:
+        if not _taskkill_tree(proc.pid, force=False):
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    else:
         try:
-            proc.terminate()
+            os.killpg(proc.pid, signal.SIGTERM)
         except Exception:
-            pass
+            try:
+                proc.terminate()
+            except Exception:
+                pass
 
     try:
         proc.wait(timeout=timeout_sec)
@@ -185,13 +234,20 @@ def terminate_process_group(
     except Exception:
         pass
 
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except Exception:
+    if _IS_WINDOWS:
+        if not _taskkill_tree(proc.pid, force=True):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    else:
         try:
-            proc.kill()
+            os.killpg(proc.pid, signal.SIGKILL)
         except Exception:
-            pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
 
 
 def wait_for_tcp_listen(
@@ -275,7 +331,7 @@ def start_aggregator_process(
         cmd,
         env=env,
         cwd=cwd,
-        start_new_session=True,
+        **process_group_kwargs(),
     )
 
 
@@ -295,6 +351,6 @@ def start_training_process(
         train_cmd,
         env=env,
         cwd=cwd,
-        start_new_session=True,
+        **process_group_kwargs(),
         **popen_kwargs,
     )

@@ -73,6 +73,25 @@ jobs:
             tests/telemetry/test_sender_sequence.py \
             -q
 
+  test-windows-teardown:
+    name: Windows Process Teardown
+    # The process-group teardown path is platform-specific and cannot be
+    # exercised on Linux, where the POSIX branch always wins. This is the
+    # only leg that proves a grandchild is actually reaped on Windows.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+      - name: Run process teardown tests
+        run: pytest tests/runtime/test_process_group_teardown.py -q
+
   test-integration:
     name: Integration Smoke Tests
     runs-on: ubuntu-latest
