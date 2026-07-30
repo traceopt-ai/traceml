@@ -23,13 +23,19 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeResult,
 )
+from traceml_ai.utils.step_time_window import OCCURRENCE_METRICS
 
 from . import theme
 
-# Fixed ribbon width for a non-h2d phase that was never measured this
-# window -- large enough to read as a deliberate marker, not a rounding
-# artifact of a real proportional segment.
+# Fixed ribbon width for a phase that was never measured this window --
+# large enough to read as a deliberate marker, not a rounding artifact of
+# a real proportional segment.
 _UNMEASURED_SLIVER_PCT = 6.0
+
+# Derived remainder, never carried per-rank: its availability comes from
+# the aggregate window (the engine emits it only when derivable), so the
+# per-rank coverage check below does not apply to it.
+_DERIVED_METRICS = frozenset(("residual_proxy",))
 
 
 def build_model_combined_section() -> Dict[str, Any]:
@@ -114,22 +120,49 @@ def _index(
     return {m.metric: m for m in metrics}
 
 
+def _partially_covered(
+    per_rank_timing: Dict[int, Dict[str, float]],
+    keys: List[str],
+) -> List[str]:
+    """Return phases measured on some observed ranks but not all.
+
+    Mirrors the diagnosis engine's rule (a signal counts as measured only
+    when every observed rank measured it). Occurrence-driven metrics are
+    exempt, derived remainders are never carried per-rank, and with no
+    per-rank rows availability is unknowable, so nothing is reported.
+    """
+    if len(per_rank_timing) < 2:
+        return []
+    thin: List[str] = []
+    for key in keys:
+        if key in OCCURRENCE_METRICS or key in _DERIVED_METRICS:
+            continue
+        seen = sum(1 for vals in per_rank_timing.values() if key in vals)
+        if 0 < seen < len(per_rank_timing):
+            thin.append(key)
+    return thin
+
+
 _EXPIRED_SIG = "__expired__"
+_NO_ENVELOPE_SIG = "__no_envelope__"
 
 
-def _mark_expired(panel: Dict[str, Any]) -> None:
-    """Had data before, none now: the run stopped reporting and the
-    computer's stale window expired. Clear the card instead of freezing
-    on the last complete view (the CLI sibling does the same)."""
-    if panel.get("_last_sig") == _EXPIRED_SIG:
+def _clear_view(panel: Dict[str, Any], sig: str, label: str) -> None:
+    """Blank the ribbon and KPIs, then state why.
+
+    Any path that cannot draw a trustworthy ribbon must clear it rather
+    than return early: a stale complete view left on screen is read as
+    current, which is the failure this issue exists to remove.
+    """
+    if panel.get("_last_sig") == sig:
         return
-    panel["_last_sig"] = _EXPIRED_SIG
+    panel["_last_sig"] = sig
     for seg, sl in zip(panel["seg_divs"], panel["seg_labs"]):
-        seg.style("width:0%;")
+        seg.style("width:0%; background:transparent;")
         sl.text = ""
     for kpi in panel["kpis"].values():
         kpi.content = theme.kval("—")
-    panel["win"].text = "window expired"
+    panel["win"].text = label
 
 
 def update_model_combined_section(
@@ -137,10 +170,17 @@ def update_model_combined_section(
 ) -> None:
     if not payload or not getattr(payload, "diagnosis_metrics", None):
         if payload is not None and getattr(payload, "had_ok", False):
-            _mark_expired(panel)
+            # Had data before, none now: the run stopped reporting and the
+            # computer's stale window expired (the CLI sibling does the
+            # same).
+            _clear_view(panel, _EXPIRED_SIG, "window expired")
         return
     m = _index(payload.diagnosis_metrics)
     if "step_time" not in m:
+        # No step envelope means no denominator, so every phase share
+        # would be invented. Clear rather than leave the previous ribbon
+        # and KPIs standing as if they described this window.
+        _clear_view(panel, _NO_ENVELOPE_SIG, "step envelope unavailable")
         return
 
     # A metric absent from the payload was never measured this window: it
@@ -156,7 +196,17 @@ def update_model_combined_section(
     measured = {k: v for k, v in vals.items() if v is not None}
     st = m["step_time"].summary
     missing = [key for key, value in vals.items() if value is None]
-    partial = any(key != "h2d" for key in missing)
+    # Aggregate presence is not coverage: a metric measured on rank 0 and
+    # absent on rank 1 still appears in the aggregate window, while the
+    # canonical diagnosis reports INCOMPLETE DATA for it. Re-derive
+    # coverage per rank so this card cannot claim complete data the
+    # engine is calling incomplete.
+    thin = _partially_covered(
+        getattr(payload, "per_rank_timing", None) or {},
+        [key for _, key, _ in theme.PHASES],
+    )
+    unmeasured = [key for key in missing if key not in OCCURRENCE_METRICS]
+    partial = bool(unmeasured or thin)
     # Denominator: at least the median iteration envelope (input wait +
     # step envelope), so unmeasured time shows as empty ribbon space
     # instead of stretching the measured phases to fill 100%.
@@ -173,18 +223,21 @@ def update_model_combined_section(
     # confirmed-fast one. Non-h2d unmeasured phases get a fixed hatched
     # sliver instead of a proportional width; measured phases give up
     # that width so the row still totals 100%.
-    unmeasured_non_h2d = [key for key in missing if key != "h2d"]
-    reserved_pct = _UNMEASURED_SLIVER_PCT * len(unmeasured_non_h2d)
+    reserved_pct = _UNMEASURED_SLIVER_PCT * len(unmeasured)
     measured_scale = max(0.0, (100.0 - reserved_pct) / 100.0)
 
-    sig = tuple(
-        round(vals[k], 3) if vals[k] is not None else None
-        for _, k, _ in theme.PHASES
-    ) + (
-        round(float(st.median_total or 0), 3),
-        round(float(st.worst_total or 0), 3),
-        int(st.steps_used or 0),
-        int(st.worst_rank if st.worst_rank is not None else -1),
+    sig = (
+        tuple(
+            round(vals[k], 3) if vals[k] is not None else None
+            for _, k, _ in theme.PHASES
+        )
+        + tuple(sorted(thin))
+        + (
+            round(float(st.median_total or 0), 3),
+            round(float(st.worst_total or 0), 3),
+            int(st.steps_used or 0),
+            int(st.worst_rank if st.worst_rank is not None else -1),
+        )
     )
     if panel.get("_last_sig") == sig:
         return
@@ -194,15 +247,14 @@ def update_model_combined_section(
         theme.PHASES, panel["seg_divs"], panel["seg_labs"]
     ):
         value = vals[key]
-        if key in unmeasured_non_h2d:
-            # Unmeasured non-h2d phase: a hatched sliver in the PHASE'S OWN
-            # color marks "unknown, not zero" (a dark stream must never read
-            # as confirmed-fast). The color still identifies the phase (blue
-            # = forward, gold = residual, matching the legend); the diagonal
+        if key in unmeasured:
+            # Unmeasured phase: a hatched sliver in the PHASE'S OWN color
+            # marks "unknown, not zero" (a dark stream must never read as
+            # confirmed-fast). The color still identifies the phase (blue =
+            # forward, gold = residual, matching the legend); the diagonal
             # hatch overlay is what says "unmeasured". No on-sliver text --
             # it would overlap the hatch illegibly at this width, and the
-            # window meta already names the missing phases ("partial:
-            # FWD,RESIDUAL").
+            # window meta already names the missing phases.
             seg.style(
                 f"width:{_UNMEASURED_SLIVER_PCT:.1f}%; "
                 "background:repeating-linear-gradient(45deg, "
@@ -215,7 +267,10 @@ def update_model_combined_section(
             if value is not None
             else 0.0
         )
-        seg.style(f"width:{pct:.3f}%")
+        # Always restate the background. Style updates MERGE, so a phase
+        # that was hatched while unmeasured would keep the hatch forever
+        # once it recovers if this path only set the width.
+        seg.style(f"width:{pct:.3f}%; background:{col};")
         sl.text = lab if pct >= 7.0 else ""
 
     # The verdict is intentionally NOT set here. It is owned by the diagnosis
@@ -241,10 +296,11 @@ def update_model_combined_section(
     )
     steps_text = f"{int(st.steps_used or 0)} aligned steps"
     if partial:
-        missing_labels = ",".join(
-            lab for lab, key, _c in theme.PHASES if key in unmeasured_non_h2d
+        incomplete = set(unmeasured) | set(thin)
+        labels = ",".join(
+            lab for lab, key, _c in theme.PHASES if key in incomplete
         )
-        steps_text += f" · partial: {missing_labels}"
+        steps_text += f" · partial: {labels}"
     panel["win"].text = steps_text
 
 

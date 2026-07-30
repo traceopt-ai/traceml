@@ -201,6 +201,87 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     assert expired.had_ok is True
 
 
+def test_dead_run_expires_even_though_sqlite_rows_persist(
+    monkeypatch,
+) -> None:
+    """The dead-run tripwire must actually trip.
+
+    SQLite rows outlive the process that wrote them, so a stopped run
+    keeps recomputing the SAME window successfully forever. Before source
+    -freshness tracking, that reset the stale timer on every tick and the
+    advertised expiry never fired in a real run, only in tests that
+    forced an empty compute.
+    """
+    from traceml_ai.renderers.step_time import compute as compute_module
+    from traceml_ai.renderers.step_time.schema import (
+        StepCombinedTimeCoverage,
+        StepCombinedTimeMetric,
+        StepCombinedTimeResult,
+        StepCombinedTimeSummary,
+    )
+
+    def _result(completed_step: int) -> StepCombinedTimeResult:
+        metric = StepCombinedTimeMetric(
+            metric="step_time",
+            clock="cpu",
+            series=None,
+            summary=StepCombinedTimeSummary(
+                window_size=1,
+                steps_used=1,
+                median_total=10.0,
+                worst_total=10.0,
+                worst_rank=0,
+                skew_ratio=0.0,
+                skew_pct=0.0,
+            ),
+            coverage=StepCombinedTimeCoverage(
+                expected_steps=1,
+                steps_used=1,
+                completed_step=completed_step,
+                world_size=1,
+                ranks_present=1,
+                incomplete=False,
+            ),
+        )
+        return StepCombinedTimeResult(
+            status_message="OK",
+            per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
+            diagnosis_clock="cpu",
+            diagnosis_metrics=[metric],
+        )
+
+    computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
+
+    now = [1000.0]
+    monkeypatch.setattr(compute_module.time, "time", lambda: now[0])
+
+    # Live run: the window advances, so every tick stays fresh.
+    step = [1]
+    monkeypatch.setattr(
+        computer, "_compute_impl", lambda conn: _result(step[0])
+    )
+    assert computer.compute_cli().diagnosis_metrics != []
+    now[0] += 60.0
+    step[0] = 2
+    assert computer.compute_cli().diagnosis_metrics != []
+
+    # Producer stops. Rows remain, so _compute_impl keeps succeeding with
+    # the SAME completed_step. Within the TTL the view is still served.
+    now[0] += 10.0
+    assert computer.compute_cli().diagnosis_metrics != []
+
+    # Past the TTL with no advance, the view must expire.
+    now[0] += 31.0
+    expired = computer.compute_cli()
+    assert expired.diagnosis_metrics == []
+    assert expired.had_ok is True
+    assert expired.status_message == "No fresh step-combined data"
+
+    # And it recovers if the producer comes back.
+    step[0] = 3
+    assert computer.compute_cli().diagnosis_metrics != []
+
+
 def test_computer_had_ok_stays_false_on_cold_start(monkeypatch) -> None:
     """A payload that never had good data reports had_ok=False on itself,
     not just on the computer -- distinguishes cold start from a dead run

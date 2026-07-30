@@ -212,7 +212,14 @@ _COMPUTE_KEYS: tuple[str, ...] = ("forward", "backward", "optimizer_step")
 # gradient accumulation and H2D when a step performs no transfers. Every
 # other selected metric must occur on every bracketed step, so partial
 # presence there means lost instrumentation, not measured zeros.
-_OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
+# Occurrence-driven metrics: an absent event means "no such work
+# happened", not "instrumentation missing", so absence never counts as a
+# coverage gap. Public because live surfaces must classify absence the
+# same way the diagnosis engine does; a second private copy in a renderer
+# is how the CLI and dashboard drift apart from the canonical verdict.
+OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
+
+_OCCURRENCE_METRICS = OCCURRENCE_METRICS
 
 
 def _rank_metric_availability(
@@ -665,6 +672,7 @@ __all__ = [
     "DiagnosisClock",
     "EVENT_ALIASES",
     "INPUT_WAIT_KEY",
+    "OCCURRENCE_METRICS",
     "SELECTED_METRICS",
     "STEP_TIME_EVENT_NAME",
     "STEP_TIME_CPU_KEY",

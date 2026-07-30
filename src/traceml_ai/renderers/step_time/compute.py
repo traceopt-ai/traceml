@@ -42,6 +42,13 @@ class StepCombinedComputer:
         self._stale_ttl_s = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
+        # Source-freshness cursor. SQLite rows outlive the process that
+        # wrote them, so a successful recompute proves only that rows
+        # exist, never that the run is alive. Liveness is an ADVANCING
+        # cursor; without this, a dead run recomputes the same window
+        # forever and the stale path never fires.
+        self._last_cursor: Optional[int] = None
+        self._last_advance_ts = time.time()
 
     # ------------------------------------------------------------------
     # Public API
@@ -76,8 +83,29 @@ class StepCombinedComputer:
         if not result.diagnosis_metrics:
             return self._stale_or_empty("STALE (no metrics this tick)")
 
+        now = time.time()
+        cursor = _window_cursor(result)
+        if cursor is not None and cursor == self._last_cursor:
+            # Rows are present but the window has not advanced: the
+            # producer may have stopped. Recomputing the same rows is not
+            # liveness, so age the view against the last real advance.
+            if (
+                self._stale_ttl_s is not None
+                and (now - self._last_advance_ts) > self._stale_ttl_s
+            ):
+                return StepCombinedTimeResult(
+                    status_message="No fresh step-combined data",
+                    per_rank_timing={},
+                    diagnosis_clock="cpu",
+                    diagnosis_metrics=[],
+                    had_ok=True,
+                )
+        elif cursor is not None:
+            self._last_cursor = cursor
+            self._last_advance_ts = now
+
         self._last_ok = result
-        self._last_ok_ts = time.time()
+        self._last_ok_ts = now
         return replace(result, had_ok=True)
 
     # ------------------------------------------------------------------
@@ -170,6 +198,21 @@ class StepCombinedComputer:
             diagnosis_metrics=[],
             had_ok=had_ok,
         )
+
+
+def _window_cursor(result: StepCombinedTimeResult) -> Optional[int]:
+    """Highest completed step in this window, or None if unknowable.
+
+    Monotonic marker of how far the producer has actually got. Used to
+    tell "the run is alive" from "the rows it already wrote are still on
+    disk", which a successful recompute alone cannot distinguish.
+    """
+    steps = [
+        int(metric.coverage.completed_step)
+        for metric in result.diagnosis_metrics
+        if metric.coverage is not None
+    ]
+    return max(steps) if steps else None
 
 
 def _worst_rank_from_window(

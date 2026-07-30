@@ -18,12 +18,40 @@ from traceml_ai.renderers.step_time.schema import (
 
 
 class _FakeSegment:
+    """Style double that MERGES like NiceGUI's ``Element.style()``.
+
+    An append-only list of style strings would let a stale declaration
+    (e.g. an unmeasured phase's hatch) survive a later width-only update
+    while every assertion still passed, because assertions read the last
+    call instead of the resulting style. Merging into a dict is what
+    makes that class of bug visible to a test at all. Pinned against the
+    real widget by ``test_fake_segment_matches_nicegui_style_merge``.
+    """
+
     def __init__(self) -> None:
         self.styles: list[str] = []
+        self.declarations: dict[str, str] = {}
 
     def style(self, value: str) -> "_FakeSegment":
         self.styles.append(value)
+        for part in value.split(";"):
+            if ":" not in part:
+                continue
+            name, _, val = part.partition(":")
+            self.declarations[name.strip()] = val.strip()
         return self
+
+    @property
+    def background(self) -> str:
+        return self.declarations.get("background", "")
+
+    @property
+    def width(self) -> str:
+        return self.declarations.get("width", "")
+
+    @property
+    def hatched(self) -> bool:
+        return "repeating-linear-gradient" in self.background
 
 
 class _FakeText:
@@ -112,18 +140,18 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
     by_lab = dict(zip(keys, panel["seg_labs"]))
-    assert by_key["h2d"].styles[-1] == "width:0.000%"
-    residual_sliver = by_key["residual_proxy"].styles[-1]
-    assert f"width:{_UNMEASURED_SLIVER_PCT:.1f}%" in residual_sliver
+    assert by_key["h2d"].width == "0.000%"
+    residual_seg = by_key["residual_proxy"]
+    assert residual_seg.width == f"{_UNMEASURED_SLIVER_PCT:.1f}%"
     # The hatch is drawn in the PHASE'S OWN color (residual = gold), so the
     # sliver still identifies which phase, matching the legend dot.
     residual_color = dict((k, c) for _, k, c in theme.PHASES)["residual_proxy"]
-    assert "repeating-linear-gradient" in residual_sliver
-    assert residual_color in residual_sliver
+    assert residual_seg.hatched
+    assert residual_color in residual_seg.background
     # The sliver carries NO on-segment text -- it would overlap the hatch
     # illegibly; the missing phases are named in the window meta instead.
     assert by_lab["residual_proxy"].text == ""
-    assert by_key["input_wait"].styles[-1] == "width:8.545%"
+    assert by_key["input_wait"].width == "8.545%"
     # An underivable residual shows n/a, never a fake 0%.
     assert "n/a" in panel["kpis"]["residual"].content
     assert panel["kpis"]["median"].content.startswith("100")
@@ -174,7 +202,7 @@ def test_step_time_dashboard_hero_absent_h2d_is_not_partial() -> None:
     assert panel["win"].text == "5 aligned steps"
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
-    assert by_key["h2d"].styles[-1] == "width:0.000%"
+    assert by_key["h2d"].width == "0.000%"
 
 
 def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
@@ -186,21 +214,20 @@ def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
 
     update_model_combined_section(panel, payload)
 
+    # h2d AND optimizer_step are occurrence-driven, so their absence is
+    # measured-zero, not a coverage gap -- matching the diagnosis engine's
+    # OCCURRENCE_METRICS. Only the required-every-step phases are partial.
     assert (
-        panel["win"].text
-        == "5 aligned steps · partial: IW,FWD,BWD,OPT,RESIDUAL"
+        panel["win"].text == "5 aligned steps · partial: IW,FWD,BWD,RESIDUAL"
     )
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
-    assert by_key["h2d"].styles[-1] == "width:0.000%"
-    for key in (
-        "input_wait",
-        "forward",
-        "backward",
-        "optimizer_step",
-        "residual_proxy",
-    ):
-        assert f"width:{_UNMEASURED_SLIVER_PCT:.1f}%" in by_key[key].styles[-1]
+    for occurrence in ("h2d", "optimizer_step"):
+        assert by_key[occurrence].width == "0.000%"
+        assert not by_key[occurrence].hatched
+    for key in ("input_wait", "forward", "backward", "residual_proxy"):
+        assert by_key[key].width == f"{_UNMEASURED_SLIVER_PCT:.1f}%"
+        assert by_key[key].hatched
     assert "n/a" in panel["kpis"]["residual"].content
     assert panel["kpis"]["median"].content.startswith("100")
 
@@ -231,10 +258,8 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
     # Unmeasured, not a confirmed-zero: the hatched sliver, not 0%.
-    assert (
-        f"width:{_UNMEASURED_SLIVER_PCT:.1f}%"
-        in by_key["input_wait"].styles[-1]
-    )
+    assert by_key["input_wait"].width == f"{_UNMEASURED_SLIVER_PCT:.1f}%"
+    assert by_key["input_wait"].hatched
     assert panel["win"].text == "5 aligned steps · partial: IW"
 
     # Control twin: input_wait genuinely measured as 0ms must render as
@@ -254,7 +279,7 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
     control_panel = _panel()
     update_model_combined_section(control_panel, measured_zero_input_wait)
     control_by_key = dict(zip(keys, control_panel["seg_divs"]))
-    assert control_by_key["input_wait"].styles[-1] == "width:0.000%"
+    assert control_by_key["input_wait"].width == "0.000%"
     assert control_panel["win"].text == "5 aligned steps"
 
 
@@ -293,28 +318,185 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     update_model_combined_section(panel, expired)
 
     assert panel["win"].text == "window expired"
-    assert all(seg.styles[-1] == "width:0%;" for seg in panel["seg_divs"])
+    assert all(seg.width == "0%" for seg in panel["seg_divs"])
     assert all(sl.text == "" for sl in panel["seg_labs"])
     assert all(
         kpi.content == theme.kval("—") for kpi in panel["kpis"].values()
     )
 
 
-def test_step_time_dashboard_hero_ignores_payload_without_step_time() -> None:
+def test_fake_segment_matches_nicegui_style_merge() -> None:
+    """Pin the double against the real widget.
+
+    ``Element.style()`` MERGES declarations, so a background set while a
+    phase was unmeasured outlives a later width-only update. A double
+    that only appended style strings could never express that, which is
+    how the stale-hatch bug reached review: the test could not fail.
+    """
+    from nicegui import ui
+
+    real = ui.element("div")
+    fake = _FakeSegment()
+    for call in (
+        "background:#1976d2; width:0%;",
+        "width:6.0%; background:repeating-linear-gradient(45deg, "
+        "#1976d2 0 2px, transparent 2px 5px);",
+        "width:33.000%; background:#1976d2;",
+    ):
+        real.style(call)
+        fake.style(call)
+
+    assert dict(real._style) == fake.declarations
+    # And the property the production fix depends on: restating the
+    # background is what clears a previously-hatched segment.
+    assert not fake.hatched
+
+
+def test_step_time_dashboard_hero_recovered_phase_drops_the_hatch() -> None:
+    # Stateful sparse -> complete. NiceGUI merges styles, so a phase that
+    # was hatched while unmeasured must have its solid background
+    # restored on recovery; otherwise it stays visually "unmeasured"
+    # forever while reporting a real width.
+    sparse = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("input_wait", 10.0),
+            _metric("h2d", 10.0),
+            _metric("backward", 30.0),
+            _metric("optimizer_step", 20.0),
+            _metric("residual_proxy", 20.0),
+            _metric("step_time", 100.0),
+        ],
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+    update_model_combined_section(panel, sparse)
+
+    keys = [key for _, key, _ in theme.PHASES]
+    by_key = dict(zip(keys, panel["seg_divs"]))
+    assert by_key["forward"].hatched
+    assert panel["win"].text == "5 aligned steps · partial: FWD"
+
+    # Forward starts reporting again.
+    complete = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("input_wait", 10.0),
+            _metric("h2d", 10.0),
+            _metric("forward", 20.0),
+            _metric("backward", 30.0),
+            _metric("optimizer_step", 20.0),
+            _metric("residual_proxy", 20.0),
+            _metric("step_time", 100.0),
+        ],
+        diagnosis_clock="cpu",
+    )
+    update_model_combined_section(panel, complete)
+
+    forward_color = dict((k, c) for _, k, c in theme.PHASES)["forward"]
+    assert not by_key["forward"].hatched
+    assert by_key["forward"].background == forward_color
+    assert by_key["forward"].width != f"{_UNMEASURED_SLIVER_PCT:.1f}%"
+    assert panel["win"].text == "5 aligned steps"
+
+
+def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
+    # Aggregate presence is not coverage. Backward is measured on rank 0
+    # and absent on rank 1, so the canonical diagnosis calls the window
+    # INCOMPLETE; the card must not report it as fully covered just
+    # because the aggregate metric exists.
     payload = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("input_wait", 10.0),
+            _metric("h2d", 10.0),
+            _metric("forward", 20.0),
+            _metric("backward", 30.0),
+            _metric("optimizer_step", 20.0),
+            _metric("residual_proxy", 20.0),
+            _metric("step_time", 100.0),
+        ],
+        per_rank_timing={
+            0: {
+                "input_wait": 10.0,
+                "h2d": 10.0,
+                "forward": 20.0,
+                "backward": 30.0,
+                "optimizer_step": 20.0,
+                "step_time": 100.0,
+                "total_step": 110.0,
+            },
+            1: {
+                "input_wait": 10.0,
+                "h2d": 10.0,
+                "forward": 20.0,
+                "optimizer_step": 20.0,
+                "step_time": 100.0,
+                "total_step": 110.0,
+            },
+        },
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+    update_model_combined_section(panel, payload)
+
+    assert panel["win"].text == "5 aligned steps · partial: BWD"
+
+    # Control twin: every rank measured everything -> not partial.
+    symmetric = StepCombinedTimeResult(
+        diagnosis_metrics=payload.diagnosis_metrics,
+        per_rank_timing={
+            rank: {
+                "input_wait": 10.0,
+                "h2d": 10.0,
+                "forward": 20.0,
+                "backward": 30.0,
+                "optimizer_step": 20.0,
+                "step_time": 100.0,
+                "total_step": 110.0,
+            }
+            for rank in (0, 1)
+        },
+        diagnosis_clock="cpu",
+    )
+    control = _panel()
+    update_model_combined_section(control, symmetric)
+    assert control["win"].text == "5 aligned steps"
+
+
+def test_step_time_dashboard_hero_clears_when_step_envelope_missing() -> None:
+    # Stateful: a COMPLETE window is drawn first, then a window arrives
+    # with no step_time. Without the envelope there is no denominator, so
+    # every share would be invented -- the card must clear rather than
+    # leave the previous ribbon and KPIs standing as if they were current.
+    complete = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("input_wait", 10.0),
+            _metric("h2d", 10.0),
+            _metric("forward", 20.0),
+            _metric("backward", 30.0),
+            _metric("optimizer_step", 20.0),
+            _metric("residual_proxy", 20.0),
+            _metric("step_time", 100.0),
+        ],
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+    update_model_combined_section(panel, complete)
+    assert panel["win"].text == "5 aligned steps"
+    assert panel["kpis"]["median"].content.startswith("100")
+
+    no_envelope = StepCombinedTimeResult(
         diagnosis_metrics=[
             _metric("input_wait", 10.0),
             _metric("forward", 20.0),
         ],
         diagnosis_clock="cpu",
     )
-    panel = _panel()
+    update_model_combined_section(panel, no_envelope)
 
-    update_model_combined_section(panel, payload)
-
-    # Without the step envelope there is nothing coherent to draw: the
-    # panel stays untouched instead of raising into the UI tick.
-    assert panel["win"].text == ""
+    assert panel["win"].text == "step envelope unavailable"
+    assert all(seg.width == "0%" for seg in panel["seg_divs"])
+    assert all(
+        kpi.content == theme.kval("—") for kpi in panel["kpis"].values()
+    )
 
 
 def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
@@ -340,7 +522,7 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
 
     assert panel["seg_labs"][0].text == "IW"
     # input_wait 10 of the 110 ms iteration envelope.
-    assert panel["seg_divs"][0].styles[-1] == "width:9.091%"
+    assert panel["seg_divs"][0].width == "9.091%"
     assert panel["win"].text == "5 aligned steps"
     assert panel["kpis"]["median"].content.startswith("100")
     assert panel["kpis"]["worst"].content.startswith("200")
