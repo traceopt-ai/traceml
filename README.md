@@ -25,13 +25,43 @@ and what to investigate next.
 Use TraceML as a first pass before opening an operator- or kernel-level
 profiler. It complements experiment trackers such as W&B and MLflow.
 
-<div align="center">
+```text
++----------------------------------------------------------------------------+
+|  TraceML Run Summary | duration 40.1s                                      |
++----------------------------------------------------------------------------+
+|                                                                            |
+|  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
+|  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
+|  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
+|  slow rank.                                                                |
+|                                                                            |
+|  Section Status                                                            |
+|  Section       Status                  Severity                            |
+|  ------------------------------------------------                          |
+|  Step Time     INPUT STRAGGLER         CRITICAL                            |
+|  System        LOW GPU UTIL            INFO                                |
+|  Process       NORMAL                  INFO                                |
+|  Step Memory   BALANCED                INFO                                |
+|                                                                            |
+|  System Evidence                                                           |
+|  Metric          Median        Worst         Skew        Scope             |
+|  --------------------------------------------------------------------------|
+|  CPU Util        18.4%         71.2%         52.8pp      node=n1           |
+|  GPU Util        14.0%         0.0%          14.0pp      node=n0           |
+|  GPU Memory      6.20GB        8.90GB        43.5%       node=n1           |
+|  GPU Temp        42C           58C           16C         node=n1           |
+|                                                                            |
+|  Step Time Evidence                                                        |
+|  Phase           Median        Worst         Skew        Scope             |
+|  --------------------------------------------------------------------------|
+|  Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
+|  Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
+|  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
++----------------------------------------------------------------------------+
+```
 
-![TraceML end-of-run diagnosis](docs/assets/end-of-run-summary.png)
-
-<sub>The default summary: an end-of-run diagnosis backed by timing, system, process, and memory evidence.</sub>
-
-</div>
+TraceML turns full-run telemetry into a diagnosis, supporting evidence, and
+the next action to take.
 
 ## Quickstart
 
