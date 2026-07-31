@@ -41,6 +41,7 @@ from traceml_ai.runtime.lifecycle import start_aggregator
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
+    DEFAULT_UI_MODE,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -105,7 +106,7 @@ def read_traceml_env() -> dict[str, Any]:
 
     ui_mode = os.environ.get(
         "TRACEML_UI_MODE",
-        os.environ.get("TRACEML_MODE", "cli"),
+        os.environ.get("TRACEML_MODE", DEFAULT_UI_MODE),
     )
 
     return {

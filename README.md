@@ -26,7 +26,7 @@
 
 ![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
 
-<sub>Live performance diagnostics for single-node PyTorch training. Multi-node jobs are supported through summary mode.</sub>
+<sub>Optional live dashboard for single-node PyTorch training. Summary mode is the default for every topology.</sub>
 
 </div>
 TraceML is open-source performance observability for PyTorch training.
@@ -49,7 +49,7 @@ TraceML produces actionable diagnostics with under 1% overhead in current benchm
 
 ### 1. Install TraceML
 
-For the live browser dashboard:
+Install with pip:
 
 ```bash
 pip install traceml-ai
@@ -108,14 +108,14 @@ for batch in dataloader:
 
 ### 3. Run your training
 
-Start your training with the live browser dashboard:
+Run your training:
 
 ```bash
 traceml run train.py
 ```
 
-TraceML prints the dashboard URL, usually `http://127.0.0.1:8765`.
-Open it to see live bottleneck diagnostics while the job runs.
+By default, TraceML runs without a live UI, prints a compact final diagnosis
+when training ends, and writes `final_summary.json` and `final_summary.txt`.
 
 Or try the self-contained example first:
 
@@ -129,12 +129,12 @@ traceml run examples/quickstart.py
 - Hugging Face Trainer: data-loading bottleneck before/after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/huggingface_dataloading_bottleneck.ipynb)
 
 <details>
-<summary>Running on a remote server?</summary>
+<summary>Want the browser dashboard on a remote server?</summary>
 
-SSH into the server and start TraceML there:
+SSH into the server and start TraceML in dashboard mode:
 
 ```bash
-traceml run train.py
+traceml run train.py --mode=dashboard
 ```
 
 TraceML prints a tunnel command like this:
@@ -155,8 +155,8 @@ If you want a live view without a browser or SSH tunnel, use terminal mode:
 traceml run train.py --mode=cli
 ```
 
-Use summary mode when no live display is needed, such as headless jobs, CI,
-DDP, FSDP, Slurm, or multi-node runs:
+Summary mode is the default for local, headless, CI, DDP, FSDP, Slurm, and
+multi-node runs. You can also select it explicitly:
 
 ```bash
 traceml run train.py --mode=summary
@@ -305,13 +305,15 @@ end-of-run artifacts.
 
 | Mode | Experience during training | Supported topology |
 |---|---|---|
-| `--mode=dashboard` | Live browser dashboard | Single-node; requires `pip install "traceml-ai[dashboard]"` |
+| `--mode=summary` (default) | No live view; final report is printed and saved | Single-node and multi-node multi-GPU |
 | `--mode=cli` | Live terminal diagnostics | Single-node, including multi-GPU |
-| `--mode=summary` | Silent execution with end-of-run report | Single-node and multi-node multi-GPU |
-| `mode="auto"` | Selects an appropriate runtime display | Use when embedding TraceML in training code |
+| `--mode=dashboard` | Live browser dashboard | Single-node; requires `pip install "traceml-ai[dashboard]"` |
 
-> **Headless, CI, or capturing stdout?** Use `--mode=summary`. TraceML still
-> writes the same `.json` and `.txt` artifacts at the end of the run.
+`traceml.init(mode="auto")` controls instrumentation, not the display mode.
+Use `ui_mode` when configuring the display through the SDK directly.
+
+> **Headless, CI, or capturing stdout?** The default summary mode writes
+> `.json` and `.txt` artifacts and prints the final report at the end.
 
 <div align="center">
 

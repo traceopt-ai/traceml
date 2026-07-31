@@ -25,6 +25,7 @@ from traceml_ai.runtime.runtime import TraceMLRuntime
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
+    DEFAULT_UI_MODE,
     AggregatorTransportSettings,
     TraceMLSettings,
 )
@@ -35,7 +36,6 @@ DEFAULT_AGGREGATOR_HOST = "127.0.0.1"
 DEFAULT_AGGREGATOR_BIND_HOST = "127.0.0.1"
 DEFAULT_AGGREGATOR_PORT = 29765
 DEFAULT_PROFILE = "run"
-DEFAULT_UI_MODE = "cli"
 USER_ERROR_LOG_NAME = "torchrun_error.log"
 RUNTIME_ERROR_LOG_NAME = "runtime_error.log"
 

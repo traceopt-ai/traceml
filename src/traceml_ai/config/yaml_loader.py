@@ -23,6 +23,7 @@ from typing import Any, Mapping
 from traceml_ai.runtime.settings import (
     DEFAULT_FINALIZE_TIMEOUT_SEC,
     DEFAULT_INTERVAL_SEC,
+    DEFAULT_UI_MODE,
 )
 
 _log = logging.getLogger(__name__)
@@ -48,9 +49,8 @@ YAML_KEY_SCHEMA: dict[str, tuple[str, type]] = {
 }
 
 # Fallback values used when no CLI flag, env var, or yaml entry is present.
-# The launcher promotes mode to "summary" for multi-node runs.
 BUILT_IN_DEFAULTS: dict[str, Any] = {
-    "mode": "dashboard",
+    "mode": DEFAULT_UI_MODE,
     "interval": DEFAULT_INTERVAL_SEC,
     "enable_logging": False,
     "logs_dir": "./logs",

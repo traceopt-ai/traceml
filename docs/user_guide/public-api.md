@@ -63,16 +63,16 @@ decorator compatibility paths.
 TraceML ships with a CLI entry point installed as `traceml`.
 
 ```bash
-traceml run <script>                 # default: live dashboard on single-node runs
-traceml run <script> --mode=summary  # final summary JSON/text only
+traceml run <script>                 # default: final summary JSON/text
+traceml run <script> --mode=summary  # explicit form of the default
 traceml run <script> --mode=cli      # explicit live terminal view
 traceml run <script> --mode=dashboard # live browser view
-traceml watch <script>               # zero-code system/process view
-traceml serve                        # standalone aggregator for direct launch
+traceml watch <script>               # zero-code system/process summary
+traceml serve                        # standalone summary aggregator by default
 ```
 
-Live `cli` and `dashboard` modes are intended for single-node runs. Multi-node
-runs default to summary mode.
+Summary mode is the default for every topology. Live `cli` and `dashboard`
+modes are intended for single-node runs.
 Dashboard mode is included in the default `traceml-ai` install.
 
 TraceML no longer ships layer-level/deep profiling. Use PyTorch Profiler,

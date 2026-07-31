@@ -41,17 +41,16 @@ Wrap the work from `zero_grad(...)` through `optimizer.step()`.
 traceml run train.py
 ```
 
-This starts the live browser dashboard and prints the local URL, usually
-`http://127.0.0.1:8765`. Open it to see live bottleneck diagnostics while the
-job runs.
+By default, TraceML runs without a live UI, prints a compact final diagnosis
+when training ends, and writes `final_summary.json` and `final_summary.txt`.
 
 <details>
-<summary>Running on a remote server?</summary>
+<summary>Want the browser dashboard on a remote server?</summary>
 
-SSH into the server and start TraceML there:
+SSH into the server and start TraceML in dashboard mode:
 
 ```bash
-traceml run train.py
+traceml run train.py --mode=dashboard
 ```
 
 TraceML prints a tunnel command like this:
@@ -67,8 +66,9 @@ locally.
 </details>
 
 If you want a live view without a browser or SSH tunnel, use
-`traceml run train.py --mode=cli`. Use `traceml run train.py --mode=summary`
-for headless jobs, CI, DDP, FSDP, Slurm, or multi-node runs.
+`traceml run train.py --mode=cli`. Use
+`traceml run train.py --mode=dashboard` for the browser view. Summary mode is
+the default for local, headless, CI, DDP, FSDP, Slurm, and multi-node runs.
 
 To try the same flow with a checked-in example first:
 
