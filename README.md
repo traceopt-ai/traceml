@@ -80,7 +80,7 @@ uv add traceml-ai
 ### 2. Instrument the training step
 
 ```diff
-    import traceml_ai as traceml
++   import traceml_ai as traceml
 
 +   traceml.init(mode="auto")
 
@@ -128,13 +128,15 @@ diagnosis rules, evidence fields, and recommended next actions.
 
 Send the compact diagnosis to an existing W&B run:
 
-```python
-import traceml_ai as traceml
-import wandb
+```diff
+    import traceml_ai as traceml
+    import wandb
 
-summary = traceml.summary(print_text=True)
-if summary is not None:
-    wandb.log(summary)
+    ...
+
+    summary = traceml.summary(print_text=True)
+    if summary is not None:
+        wandb.log(summary)
 ```
 
 The same result can be stored in MLflow. See
