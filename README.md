@@ -60,9 +60,6 @@ profiler. It complements experiment trackers such as W&B and MLflow.
 +----------------------------------------------------------------------------+
 ```
 
-TraceML turns full-run telemetry into a diagnosis, supporting evidence, and
-the next action to take.
-
 ## Quickstart
 
 ### 1. Install
