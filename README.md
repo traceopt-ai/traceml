@@ -128,15 +128,15 @@ diagnosis rules, evidence fields, and recommended next actions.
 
 Send the compact diagnosis to an existing W&B run:
 
-```diff
-    import traceml_ai as traceml
-    import wandb
+```python
+import traceml_ai as traceml
+import wandb
 
-    ...
+...
 
-    summary = traceml.summary(print_text=True)
-    if summary is not None:
-        wandb.log(summary)
+summary = traceml.summary(print_text=True)
+if summary is not None:
+    wandb.log(summary)
 ```
 
 The same result can be stored in MLflow. See
