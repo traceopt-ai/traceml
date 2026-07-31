@@ -4,491 +4,178 @@
 
 **Find out why your PyTorch training is slow—before it wastes GPU hours.**
 
-
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/traceml-ai?period=total&units=INTERNATIONAL_SYSTEM&left_color=grey&right_color=blue&left_text=downloads)](https://pepy.tech/projects/traceml-ai)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
 [![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml/stargazers)
-[![Discord](https://img.shields.io/badge/Discord-Join%20chat-5865F2?logo=discord&logoColor=white)](https://discord.gg/rY3EQguZAN)
 
 [**Quickstart**](#quickstart) •
-[**Integrations**](docs/user_guide/integrations.md) •
-[**Compare Runs**](docs/user_guide/compare.md) •
-[**Distributed Training**](docs/user_guide/distributed-training.md) •
 [**Documentation**](docs/user_guide/quickstart.md) •
+[**Integrations**](docs/user_guide/integrations.md) •
+[**Distributed Training**](docs/user_guide/distributed-training.md) •
 [**Discord**](https://discord.gg/rY3EQguZAN)
 
 </div>
 
+TraceML is an open-source tool that diagnoses performance bottlenecks in
+PyTorch training. It shows what is slow, the evidence behind the diagnosis,
+and what to investigate next.
+
+Use TraceML as a first pass before opening an operator- or kernel-level
+profiler. It complements experiment trackers such as W&B and MLflow.
+
 <div align="center">
 
-![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
+![TraceML end-of-run diagnosis](docs/assets/end-of-run-summary.png)
 
-<sub>Optional live dashboard for single-node PyTorch training. Summary mode is the default for every topology.</sub>
+<sub>The default summary: an end-of-run diagnosis backed by timing, system, process, and memory evidence.</sub>
 
 </div>
-TraceML is open-source performance observability for PyTorch training.
-It runs alongside your training loop and identifies where training time is
-going across the full job—not just a small window of profiled steps.
-
-It helps you answer:
-
-- Is the GPU computing or waiting for the input pipeline?
-- Which phase is making each training step slower?
-- Is one distributed rank holding back the others?
-- Is memory usage silently growing?
-- Did a code, data, or infrastructure change make the run slower?
-
-TraceML produces actionable diagnostics with under 1% overhead in current benchmarks.
-
----
 
 ## Quickstart
 
-### 1. Install TraceML
-
-Install with pip:
+### 1. Install
 
 ```bash
 pip install traceml-ai
 ```
 
-Or install with [uv](https://docs.astral.sh/uv/):
-
-```bash
-uv pip install traceml-ai
-```
-
-For a uv-managed project, add TraceML to the project's dependencies instead:
+Or, in a project managed by [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv add traceml-ai
 ```
 
-Extras use the same syntax with pip and uv. For example:
-
-```bash
-pip install "traceml-ai[dashboard]"
-uv add "traceml-ai[dashboard]"
-uv add "traceml-ai[torch]"
-```
-
-To try TraceML immediately in an environment managed by uv, install the
-`torch` extra required by the example:
-
-```bash
-uv pip install "traceml-ai[torch]"
-traceml run examples/quickstart.py
-```
-
-Using Hugging Face Trainer, PyTorch Lightning, Ray Train, W&B, or MLflow?
-Start with the native integration path in
-[Use With Your Stack](docs/user_guide/integrations.md).
-
 ### 2. Instrument the training step
 
-Add TraceML around the core training step. You do not need to change your model,
-optimizer, loss function, or dataloader.
+```diff
+    import traceml_ai as traceml
 
-```python
-import traceml_ai as traceml
++   traceml.init(mode="auto")
 
-traceml.init(mode="auto")
-
-for batch in dataloader:
-    with traceml.trace_step(model):
-        optimizer.zero_grad(set_to_none=True)
-        outputs = model(batch["x"])
-        loss = criterion(outputs, batch["y"])
-        loss.backward()
-        optimizer.step()
+    for batch in dataloader:
++       with traceml.trace_step(model):
+            optimizer.zero_grad(set_to_none=True)
+            outputs = model(batch["x"])
+            loss = criterion(outputs, batch["y"])
+            loss.backward()
+            optimizer.step()
 ```
 
-### 3. Run your training
-
-Run your training:
+### 3. Run
 
 ```bash
 traceml run train.py
 ```
 
-By default, TraceML runs without a live UI, prints a compact final diagnosis
-when training ends, and writes `final_summary.json` and `final_summary.txt`.
-
-Or try the self-contained example first:
-
-```bash
-traceml run examples/quickstart.py
-```
-
-### Try a real GPU demo in Colab
-
-- Any PyTorch loop: data-loading bottleneck before/after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb)
-- Hugging Face Trainer: data-loading bottleneck before/after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/huggingface_dataloading_bottleneck.ipynb)
-
-<details>
-<summary>Want the browser dashboard on a remote server?</summary>
-
-SSH into the server and start TraceML in dashboard mode:
-
-```bash
-traceml run train.py --mode=dashboard
-```
-
-TraceML prints a tunnel command like this:
-
-```bash
-ssh -L 8765:127.0.0.1:8765 user@remote-host
-```
-
-Copy that tunnel command into a local terminal on your laptop. Leave the
-training command running on the server, then open `http://127.0.0.1:8765`
-locally.
-
-</details>
-
-If you want a live view without a browser or SSH tunnel, use terminal mode:
-
-```bash
-traceml run train.py --mode=cli
-```
-
-Summary mode is the default for local, headless, CI, DDP, FSDP, Slurm, and
-multi-node runs. You can also select it explicitly:
-
-```bash
-traceml run train.py --mode=summary
-```
-
-For DDP, FSDP, Slurm, and multi-node runs, see
-[Distributed Training](docs/user_guide/distributed-training.md).
-
-### Or launch your script directly
-
-Prefer to launch training yourself with `python` or `torchrun`? Start the
-TraceML aggregator once with `traceml serve`, then run your script directly.
-`traceml.init(...)` connects to the aggregator over TCP:
-
-```bash
-# terminal 1: start the TraceML aggregator
-traceml serve --aggregator-host 127.0.0.1 --aggregator-port 29765
-
-# terminal 2: run your script directly
-python train.py
-```
-
-For torchrun and multi-node, bind the aggregator so workers on other nodes can
-reach it:
-
-```bash
-# on the aggregator node (--nnodes x --nproc-per-node = total workers, so the
-# aggregator waits for every rank before finalizing)
-traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
-  --aggregator-port 29765 --nnodes <N> --nproc-per-node <M>
-
-# on each training node: point workers at node 0's aggregator, then launch
-TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
-  torchrun ... train.py
-```
-
-`traceml.init(...)` takes runtime settings as arguments (for example
-`traceml.init(mode="auto", logs_dir="logs", aggregator_port=29765)`), and falls
-back to `TRACEML_*` environment variables and `traceml.yaml`. The aggregator
-endpoint is configured with `traceml serve` flags. See
-[Public API](docs/user_guide/public-api.md#direct-launch-with-traceml-serve).
-
-### Try it in Docker
-
-Build the image from the repository checkout, then run the default CPU demo:
-
-```bash
-docker build -t traceml-demo .
-docker run --rm traceml-demo
-```
-
-The image installs TraceML from the checkout with PyTorch support and runs the
-slow DataLoader diagnosis demo in summary mode. The final report should identify
-the run as input-bound; no external dataset or GPU is required.
-
-If the host has the NVIDIA Container Toolkit configured and the installed
-PyTorch build supports CUDA, the same demo can optionally access the GPU:
-
-```bash
-docker run --rm --gpus all traceml-demo
-```
-
----
-
-## Example Diagnosis
-
-Instead of showing only utilization charts, TraceML explains what is slowing
-the job, presents the supporting evidence, and tells you where to investigate.
-
-> **INPUT STRAGGLER / CRITICAL**
->
-> Rank 0 spent 254.5 ms waiting for input versus 3.8 ms on the median rank.
->
-> **Next:** inspect the dataloader, preprocessing, `collate_fn`, storage, and
-> worker configuration on rank 0.
-
-<details>
-<summary>View the complete terminal report</summary>
-
-```text
-+----------------------------------------------------------------------------+
-|  TraceML Run Summary | duration 40.1s                                      |
-+----------------------------------------------------------------------------+
-|                                                                            |
-|  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
-|  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
-|  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
-|  slow rank.                                                                |
-|                                                                            |
-|  Section Status                                                            |
-|  Section       Status                  Severity                            |
-|  ------------------------------------------------                          |
-|  Step Time     INPUT STRAGGLER         CRITICAL                            |
-|  System        LOW GPU UTIL            INFO                                |
-|  Process       NORMAL                  INFO                                |
-|  Step Memory   BALANCED                INFO                                |
-|                                                                            |
-|  System Evidence                                                           |
-|  Metric          Median        Worst         Skew        Scope             |
-|  --------------------------------------------------------------------------|
-|  CPU Util        18.4%         71.2%         52.8pp      node=n1           |
-|  GPU Util        14.0%         0.0%          14.0pp      node=n0           |
-|  GPU Memory      6.20GB        8.90GB        43.5%       node=n1           |
-|  GPU Temp        42C           58C           16C         node=n1           |
-|                                                                            |
-|  Step Time Evidence                                                        |
-|  Phase           Median        Worst         Skew        Scope             |
-|  --------------------------------------------------------------------------|
-|  Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
-|  Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
-|  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
-+----------------------------------------------------------------------------+
-```
-
-</details>
-
-In this example, rank 0 is the slow input rank and can hold back the aligned
-distributed step.
-
-Want to reproduce a specific bottleneck? See [examples/](examples/) for
-self-contained demos covering dataloader bottlenecks, H2D timing, DDP rank
-stragglers, Lightning, Hugging Face, Ray, and tracker-friendly summary logging.
-
----
-
-## What TraceML Helps You Triage
-
-Use TraceML as the first check before opening a heavier profiler. It surfaces
-the likely bottleneck category so you know where to look next.
-
-| Area | What TraceML surfaces | What to inspect next |
-|---|---|---|
-| Input pipeline | High input time or a slow input rank | `num_workers`, `pin_memory`, transforms, tokenization, `collate_fn`, dataset and storage latency |
-| GPU utilization | Step time split across input, compute, and residual time | input pipeline, CPU/GPU handoff, synchronization, distributed coordination |
-| Distributed skew | Rank timing skew in DDP/FSDP runs; FSDP forward time may include parameter all-gather wait | rank-local dataloading, data imbalance, node variance, storage, and network differences |
-| Memory creep | Memory usage growing during the run | retained tensors, logging references, loss accumulation, cached activations |
-| Run regression | Changed metrics versus a known-good run | code, data, batch size, container, driver, hardware, and infrastructure changes |
-| Compute-heavy runs | Most time is spent in compute | `torch.profiler`, Kineto, or Nsight for operator- and kernel-level detail |
-
----
-
-## Display Modes
-
-Choose the interface that fits the environment without changing the saved
-end-of-run artifacts.
-
-| Mode | Experience during training | Supported topology |
-|---|---|---|
-| `--mode=summary` (default) | No live view; final report is printed and saved | Single-node and multi-node multi-GPU |
-| `--mode=cli` | Live terminal diagnostics | Single-node, including multi-GPU |
-| `--mode=dashboard` | Live browser dashboard | Single-node; requires `pip install "traceml-ai[dashboard]"` |
-
-`traceml.init(mode="auto")` controls instrumentation, not the display mode.
-Use `ui_mode` when configuring the display through the SDK directly.
-
-> **Headless, CI, or capturing stdout?** The default summary mode writes
-> `.json` and `.txt` artifacts and prints the final report at the end.
-
-<div align="center">
-
-![TraceML live terminal view](docs/assets/cli_demo.gif)
-
-<sub>`--mode=cli` — live terminal diagnostics for local and SSH workflows.</sub>
-
-</div>
-
----
-
-## Saved Run Artifacts
-
-TraceML writes two end-of-run artifacts:
+Summary mode is the default. TraceML prints the final diagnosis and writes:
 
 ```text
 logs/<run_name>/final_summary.json
 logs/<run_name>/final_summary.txt
 ```
 
-Reprint a saved summary without rerunning training:
+See the
+[full quickstart](docs/user_guide/quickstart.md) for Colab, Docker, direct
+`python`/`torchrun` launches, HTML reports, and advanced options.
 
-```bash
-traceml view logs/<run_name>/final_summary.json
+## What TraceML Diagnoses
+
+| Diagnosis | Where to investigate |
+|---|---|
+| Input-bound | DataLoader workers, transforms, tokenization, collation, or storage |
+| Compute-bound | Model compute, mixed precision, batch size, or deeper profiling |
+| Residual-heavy | Work outside traced phases, CPU stalls, logging, checkpointing, validation, or unobserved transfers |
+| Rank straggler | Rank-local input, data imbalance, node variance, or networking |
+| Memory creep | Retained tensors, logging references, or cached activations |
+| Run regression | Code, data, environment, hardware, or infrastructure changes |
+
+Read [How to Read TraceML Output](docs/user_guide/reading-output.md) for the
+diagnosis rules, evidence fields, and recommended next actions.
+
+## Use the Result
+
+Send the compact diagnosis to an existing W&B run:
+
+```python
+import traceml_ai as traceml
+import wandb
+
+summary = traceml.summary(print_text=True)
+if summary is not None:
+    wandb.log(summary)
 ```
 
-Create a self-contained HTML report during the run:
-
-```bash
-traceml run train.py --html-report
-```
-
-Or render one later from a saved summary:
-
-```bash
-traceml view logs/<run_name>/final_summary.json --html
-```
-
-For experiment trackers, call `traceml.summary()` near the end of your script
-to get a flat dictionary of diagnosis statuses and average metrics. Keep
-`final_summary.json` when you want the complete run artifact or an input for
-`traceml compare`.
-
----
-
-## Compare Runs and Catch Regressions
-
-Compare a slow run against a known-good baseline:
-
-```bash
-traceml compare input_slow/final_summary.json input_fixed/final_summary.json
-```
-
-```text
-+--------------------------------------------------------------------------------------+
-|  TraceML Compare                                                                     |
-+--------------------------------------------------------------------------------------+
-|  Verdict: IMPROVEMENT                                                                |
-|  Why: Step time decreased by 95.6%.                                                  |
-|                                                                                      |
-|  Metric                         A                B                Delta              |
-|  Total step                     294.0 ms         13.0 ms          -280.9 ms (-95.6%) |
-|  Input                          66.4 ms          2.7 ms           -63.7 ms (-95.9%)  |
-+--------------------------------------------------------------------------------------+
-```
-
-See [Compare Runs](docs/user_guide/compare.md) for the full report format.
-
----
-
-## Use With Your Stack
-
-TraceML supports:
-
-- Custom PyTorch training loops
-- Hugging Face Trainer
-- PyTorch Lightning
-- Ray Train
-- W&B and MLflow summary logging
-- DDP and FSDP
-- Slurm and multi-node summary reports
-
-See [Use With Your Stack](docs/user_guide/integrations.md) for integration
+The same result can be stored in MLflow. See
+[W&B and MLflow](docs/user_guide/integrations/wandb-mlflow.md) for complete
 examples.
 
----
+Compare a run with a known-good baseline:
 
-## Where TraceML Fits
+```bash
+traceml compare old_run/final_summary.json new_run/final_summary.json
+```
 
-| Tool | Use it for | Not for |
-|---|---|---|
-| TraceML | Full-run bottlenecks, runtime diagnostics, rank skew, and run regressions | Kernel- or operator-level timelines |
-| `torch.profiler` / Kineto | Operator and CUDA traces for selected steps | Always-on full-run summaries |
-| Nsight Systems | Deep GPU and kernel timeline debugging | Everyday training triage |
-| Holistic Trace Analysis | Analyzing collected profiler traces | Live or full-run collection |
-| W&B / MLflow | Experiment tracking, metrics, and run history | Runtime bottleneck diagnosis |
+See [Compare Runs](docs/user_guide/compare.md) for the report format.
 
-Start with TraceML to identify the bottleneck category. Open a deeper profiler
-when you need operator- or kernel-level detail.
+<details>
+<summary><strong>Want live diagnostics during training?</strong></summary>
 
----
+Use the live terminal view locally or over SSH:
 
-## Current Support
+```bash
+traceml run train.py --mode=cli
+```
 
-**Works today:**
+![TraceML live terminal view](docs/assets/cli_demo.gif)
 
-- Single-GPU training
-- Single-node multi-GPU DDP and FSDP
-- Multi-node DDP summary reports
-- Multi-node runs on Slurm
-- Run-to-run comparison from `final_summary.json`
-- Custom PyTorch loops, Hugging Face, PyTorch Lightning, and Ray Train
+Use the browser dashboard on a single node:
 
-Validated on single-process and DDP. Runs on FSDP; under-reports due to
-collective masking.
+```bash
+traceml run train.py --mode=dashboard
+```
 
-**On the roadmap:**
+![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
 
-- Multi-node live CLI and browser dashboard
-- Explicit collective and NCCL timing
+For remote browser access and SSH tunneling, see the
+[full quickstart](docs/user_guide/quickstart.md).
 
----
+</details>
 
+## Distributed Training and Integrations
 
-## Troubleshooting Guides
+- **Distributed:** [DDP, FSDP, and multi-node](docs/user_guide/distributed-training.md)
+  or [Slurm](docs/user_guide/slurm.md)
+- **Frameworks:** [Hugging Face](docs/user_guide/integrations/huggingface.md),
+  [PyTorch Lightning](docs/user_guide/integrations/lightning.md),
+  [Ray Train](docs/user_guide/integrations/ray.md), and
+  [DeepSpeed](docs/user_guide/integrations/deepspeed.md)
+- **Trackers:** [W&B and MLflow](docs/user_guide/integrations/wandb-mlflow.md)
 
-- [Find why PyTorch training is slow](docs/guides/slow-pytorch-training.md)
-- [Find input pipeline bottlenecks](docs/guides/pytorch-input-pipeline-bottleneck.md)
-- [Debug low GPU utilization](docs/guides/low-gpu-utilization-pytorch.md)
-- [Debug DDP rank stragglers](docs/guides/ddp-slow-training-rank-straggler.md)
-- [Find PyTorch memory creep](docs/guides/pytorch-memory-creep.md)
-- [Distributed training](docs/user_guide/distributed-training.md)
-- [Running on Slurm](docs/user_guide/slurm.md)
-- [Use With Your Stack](docs/user_guide/integrations.md)
-- [Compare Runs](docs/user_guide/compare.md)
-- [How to Read Output](docs/user_guide/reading-output.md)
+Summary mode supports single-node and multi-node runs. Live terminal and
+dashboard modes are explicit single-node options. See the
+[FAQ](docs/user_guide/faq.md) for current support and limitations.
+
+## Learn More
+
+- [Complete quickstart](docs/user_guide/quickstart.md)
+- [Examples](examples/README.md)
+- [Troubleshoot slow training](docs/guides/slow-pytorch-training.md)
+- [Public API](docs/user_guide/public-api.md)
 - [FAQ](docs/user_guide/faq.md)
 
----
+## Community
 
-## Feedback
+If TraceML helps you find a bottleneck, consider
+[starring the repository](https://github.com/traceopt-ai/traceml).
+Contributions and real-world slowdown reports are welcome:
 
-For bugs, unexpected results, or feature requests, open a GitHub issue using
-the matching issue template.
-
-The templates ask for the information needed to reproduce
-training-environment problems, including hardware, topology, launch command,
-TraceML version, PyTorch and CUDA versions, and redacted summary output.
-
-- [Open a GitHub issue](https://github.com/traceopt-ai/traceml/issues)
+- [Contributing guide](CONTRIBUTING.md)
+- [Open an issue](https://github.com/traceopt-ai/traceml/issues)
 - [Security policy](SECURITY.md)
-- [support@traceopt.ai](mailto:support@traceopt.ai)
-
-If TraceML helped you find a real bottleneck, use the **I found a bottleneck**
-issue template. These reports help other training teams recognize similar
-problems.
-
----
-
-## Contributing
-
-Contributions are welcome, especially:
-
-- Real slowdown examples and reproductions
-- Distributed training edge cases
-- Documentation improvements
-- Framework integrations
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution
-guidelines.
-
----
+- [Discord](https://discord.gg/rY3EQguZAN)
 
 ## License
 
 Apache 2.0. See [LICENSE](LICENSE).
-
-TraceOpt is a trademark of OptAI UG (haftungsbeschränkt).
