@@ -214,22 +214,130 @@ def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
 
     update_model_combined_section(panel, payload)
 
-    # h2d AND optimizer_step are occurrence-driven, so their absence is
-    # measured-zero, not a coverage gap -- matching the diagnosis engine's
-    # OCCURRENCE_METRICS. Only the required-every-step phases are partial.
+    # Only h2d is exempt. Occurrence-driven governs INTERMITTENT presence
+    # (seen once, gaps zero-filled); a phase never seen at all is
+    # unavailable even when occurrence-driven, which is what
+    # `_rank_metric_availability` does by only considering metrics it
+    # actually observed. So a wholly absent optimizer_step IS partial.
     assert (
-        panel["win"].text == "5 aligned steps · partial: IW,FWD,BWD,RESIDUAL"
+        panel["win"].text
+        == "5 aligned steps · partial: IW,FWD,BWD,OPT,RESIDUAL"
     )
     keys = [key for _, key, _ in theme.PHASES]
     by_key = dict(zip(keys, panel["seg_divs"]))
-    for occurrence in ("h2d", "optimizer_step"):
-        assert by_key[occurrence].width == "0.000%"
-        assert not by_key[occurrence].hatched
-    for key in ("input_wait", "forward", "backward", "residual_proxy"):
+    assert by_key["h2d"].width == "0.000%"
+    assert not by_key["h2d"].hatched
+    for key in (
+        "input_wait",
+        "forward",
+        "backward",
+        "optimizer_step",
+        "residual_proxy",
+    ):
         assert by_key[key].width == f"{_UNMEASURED_SLIVER_PCT:.1f}%"
         assert by_key[key].hatched
     assert "n/a" in panel["kpis"]["residual"].content
     assert panel["kpis"]["median"].content.startswith("100")
+
+
+def test_absent_optimizer_step_is_not_a_measured_zero() -> None:
+    # Narrow guard for the predicate itself. optimizer_step is
+    # occurrence-driven, but "never observed in the whole window" is
+    # absence, not an occurrence of zero: the canonical availability rule
+    # drops a never-seen optimizer entirely, so the card must not render
+    # it as a confident 0%.
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("input_wait", 10.0),
+            _metric("h2d", 10.0),
+            _metric("forward", 20.0),
+            _metric("backward", 30.0),
+            _metric("residual_proxy", 20.0),
+            _metric("step_time", 100.0),
+        ],
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+    update_model_combined_section(panel, payload)
+
+    keys = [key for _, key, _ in theme.PHASES]
+    by_key = dict(zip(keys, panel["seg_divs"]))
+    assert by_key["optimizer_step"].hatched
+    assert panel["win"].text == "5 aligned steps · partial: OPT"
+
+
+def test_residual_share_is_na_when_input_wait_is_unavailable() -> None:
+    # residual_proxy derives from step_time and the compute phases, so it
+    # survives an unmeasured input_wait -- but the DENOMINATOR does not.
+    # The envelope substitutes zero for the missing wait, so any share
+    # computed against it is a confident percentage of an unknown total.
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("h2d", 10.0),
+            _metric("forward", 20.0),
+            _metric("backward", 30.0),
+            _metric("optimizer_step", 20.0),
+            _metric("residual_proxy", 10.0),
+            _metric("step_time", 100.0),
+        ],
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+    update_model_combined_section(panel, payload)
+
+    assert "n/a" in panel["kpis"]["residual"].content
+
+    # Control twin: with input_wait measured the denominator is whole, so
+    # the same residual reports a real share.
+    with_wait = StepCombinedTimeResult(
+        diagnosis_metrics=list(payload.diagnosis_metrics)
+        + [_metric("input_wait", 10.0)],
+        diagnosis_clock="cpu",
+    )
+    control = _panel()
+    update_model_combined_section(control, with_wait)
+    assert "n/a" not in control["kpis"]["residual"].content
+
+
+def test_partial_rank_coverage_includes_step_time() -> None:
+    # step_time is not a ribbon phase, but it is the envelope every share
+    # is computed against, so a rank missing it makes the window
+    # incomplete exactly as the engine reports it.
+    payload = StepCombinedTimeResult(
+        diagnosis_metrics=[
+            _metric("input_wait", 10.0),
+            _metric("h2d", 10.0),
+            _metric("forward", 20.0),
+            _metric("backward", 30.0),
+            _metric("optimizer_step", 20.0),
+            _metric("residual_proxy", 20.0),
+            _metric("step_time", 100.0),
+        ],
+        per_rank_timing={
+            0: {
+                "input_wait": 10.0,
+                "h2d": 10.0,
+                "forward": 20.0,
+                "backward": 30.0,
+                "optimizer_step": 20.0,
+                "step_time": 100.0,
+                "total_step": 110.0,
+            },
+            1: {
+                "input_wait": 10.0,
+                "h2d": 10.0,
+                "forward": 20.0,
+                "backward": 30.0,
+                "optimizer_step": 20.0,
+                "total_step": 110.0,
+            },
+        },
+        diagnosis_clock="cpu",
+    )
+    panel = _panel()
+    update_model_combined_section(panel, payload)
+
+    assert panel["win"].text == "5 aligned steps · partial: STEP"
 
 
 def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (

@@ -23,7 +23,6 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeResult,
 )
-from traceml_ai.utils.step_time_window import OCCURRENCE_METRICS
 
 from . import theme
 
@@ -36,6 +35,11 @@ _UNMEASURED_SLIVER_PCT = 6.0
 # the aggregate window (the engine emits it only when derivable), so the
 # per-rank coverage check below does not apply to it.
 _DERIVED_METRICS = frozenset(("residual_proxy",))
+
+# step_time is the envelope, not a ribbon phase, so it has no entry in
+# theme.PHASES. It still needs a name when it is the incomplete signal.
+# Matches the CLI table's abbreviation.
+_STEP_TIME_LABEL = "STEP"
 
 
 def build_model_combined_section() -> Dict[str, Any]:
@@ -124,18 +128,25 @@ def _partially_covered(
     per_rank_timing: Dict[int, Dict[str, float]],
     keys: List[str],
 ) -> List[str]:
-    """Return phases measured on some observed ranks but not all.
+    """Return signals measured on some observed ranks but not all.
 
     Mirrors the diagnosis engine's rule (a signal counts as measured only
-    when every observed rank measured it). Occurrence-driven metrics are
-    exempt, derived remainders are never carried per-rank, and with no
-    per-rank rows availability is unknowable, so nothing is reported.
+    when every observed rank measured it). Only h2d is exempt, matching
+    ``_missing_signal_report``: occurrence-driven means an absent event is
+    no observed transfer, and that is true per rank too. Derived
+    remainders are never carried per-rank, and with fewer than two ranks
+    there is nothing to compare, so nothing is reported.
+
+    ``step_time`` is checked alongside the ribbon phases even though it is
+    not one: it is the envelope every share is computed against, so a rank
+    missing it makes the window incomplete in exactly the way the engine
+    reports.
     """
     if len(per_rank_timing) < 2:
         return []
     thin: List[str] = []
     for key in keys:
-        if key in OCCURRENCE_METRICS or key in _DERIVED_METRICS:
+        if key == "h2d" or key in _DERIVED_METRICS:
             continue
         seen = sum(1 for vals in per_rank_timing.values() if key in vals)
         if 0 < seen < len(per_rank_timing):
@@ -203,9 +214,14 @@ def update_model_combined_section(
     # engine is calling incomplete.
     thin = _partially_covered(
         getattr(payload, "per_rank_timing", None) or {},
-        [key for _, key, _ in theme.PHASES],
+        [key for _, key, _ in theme.PHASES] + ["step_time"],
     )
-    unmeasured = [key for key in missing if key not in OCCURRENCE_METRICS]
+    # Only h2d is exempt. Occurrence-driven governs INTERMITTENT presence
+    # (seen at least once, gaps zero-filled); a phase never seen at all is
+    # unavailable even when it is occurrence-driven, which is what
+    # `_rank_metric_availability` does by only considering metrics it
+    # actually observed.
+    unmeasured = [key for key in missing if key != "h2d"]
     partial = bool(unmeasured or thin)
     # Denominator: at least the median iteration envelope (input wait +
     # step envelope), so unmeasured time shows as empty ribbon space
@@ -284,8 +300,15 @@ def update_model_combined_section(
     )
     k["worst"].content = theme.kval(f"{float(st.worst_total or 0):.0f}", "ms")
     k["gap"].content = theme.kval(f"{float(st.skew_pct or 0):.0f}", "%")
+    # A share needs BOTH a numerator and a trustworthy denominator.
+    # residual_proxy derives from step_time and the compute phases, so it
+    # survives an unmeasured input_wait -- but the envelope does not: it
+    # substitutes zero for the missing wait and is then short by an
+    # unknown amount. Reporting a share against it would state a confident
+    # percentage of a total we do not know.
+    denominator_is_whole = vals.get("input_wait") is not None
     residual_value = vals.get("residual_proxy")
-    if residual_value is not None and tot > 0:
+    if residual_value is not None and tot > 0 and denominator_is_whole:
         k["residual"].content = theme.kval(
             f"{residual_value / tot * 100.0:.0f}", "%"
         )
@@ -297,10 +320,14 @@ def update_model_combined_section(
     steps_text = f"{int(st.steps_used or 0)} aligned steps"
     if partial:
         incomplete = set(unmeasured) | set(thin)
-        labels = ",".join(
-            lab for lab, key, _c in theme.PHASES if key in incomplete
-        )
-        steps_text += f" · partial: {labels}"
+        names = [lab for lab, key, _c in theme.PHASES if key in incomplete]
+        # step_time has no ribbon segment, so it is not in PHASES, but it
+        # can still be the thing that is incomplete. Name it with the same
+        # abbreviation the CLI table uses rather than dropping it and
+        # printing a bare "partial:".
+        if "step_time" in incomplete:
+            names.append(_STEP_TIME_LABEL)
+        steps_text += f" · partial: {','.join(names)}"
     panel["win"].text = steps_text
 
 
