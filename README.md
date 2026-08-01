@@ -11,19 +11,64 @@
 [![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml/stargazers)
 
 [**Quickstart**](#quickstart) •
-[**Documentation**](docs/user_guide/quickstart.md) •
+[**Try in Colab**](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb) •
 [**Integrations**](docs/user_guide/integrations.md) •
-[**Distributed Training**](docs/user_guide/distributed-training.md) •
+[**Documentation**](https://traceopt-ai.github.io/traceml/) •
 [**Discord**](https://discord.gg/rY3EQguZAN)
 
 </div>
 
-TraceML is an open-source tool that diagnoses performance bottlenecks in
-PyTorch training. It shows what is slow, the evidence behind the diagnosis,
-and what to investigate next.
+**TraceML is an open-source tool that explains why PyTorch training is slow.**
+It analyzes the full training run and gives you:
 
-Use TraceML as a first pass before opening an operator- or kernel-level
-profiler. It complements experiment trackers such as W&B and MLflow.
+- **A diagnosis:** data loading, GPU compute, waiting, memory growth, or a slow
+  distributed worker.
+- **The evidence:** timing, CPU/GPU usage, memory, and per-worker measurements.
+- **The next step:** what part of your training setup to investigate first.
+
+Here is an example where TraceML finds that a slow DataLoader is leaving the
+GPU waiting:
+
+```text
++----------------------------------------------------------------------------+
+|  TraceML Run Summary | duration 52.4s                                      |
++----------------------------------------------------------------------------+
+|                                                                            |
+|  TraceML Verdict: INPUT-BOUND / CRITICAL                                   |
+|  Why: Input wait is 64.0% of the typical GPU iteration time.               |
+|  Next: Increase workers, prefetch, or storage throughput.                  |
+|                                                                            |
+|  Section Status                                                            |
+|  Section       Status                  Severity                            |
+|  ------------------------------------------------                          |
+|  Step Time     INPUT-BOUND             CRITICAL                            |
+|  System        LOW GPU UTIL            INFO                                |
+|  Process       NORMAL                  INFO                                |
+|  Step Memory   BALANCED                INFO                                |
+|                                                                            |
+|  System Evidence                                                           |
+|  Metric            Average                                                 |
+|  ----------------------------------                                        |
+|  CPU Util          18.4%                                                   |
+|  GPU Util          24.0%                                                   |
+|  GPU Memory        3.33GB                                                  |
+|  GPU Temp          42C                                                     |
+|                                                                            |
+|  Step Time Evidence                                                        |
+|  Phase             Average           Share                                 |
+|  ------------------------------------------------                          |
+|  Total             200.4ms           compat                                |
+|  Dataloader        130.4ms           compat                                |
+|  Input Wait        128.0ms           64.0%                                 |
+|  Step Time         72.0ms            36.0%                                 |
+|  Compute           68.0ms            34.0%                                 |
+|  Residual          3.6ms             1.8%                                  |
+|  H2D               0.4ms             0.2%                                  |
++----------------------------------------------------------------------------+
+```
+
+<details>
+<summary><strong>Running distributed training? See a rank-straggler diagnosis</strong></summary>
 
 ```text
 +----------------------------------------------------------------------------+
@@ -59,6 +104,8 @@ profiler. It complements experiment trackers such as W&B and MLflow.
 |  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
 +----------------------------------------------------------------------------+
 ```
+
+</details>
 
 ## Quickstart
 
@@ -121,7 +168,86 @@ See the
 Read [How to Read TraceML Output](docs/user_guide/reading-output.md) for the
 diagnosis rules, evidence fields, and recommended next actions.
 
-## Use the Result
+## Compare Runs
+
+After fixing a bottleneck, compare two summaries to see whether training
+improved and what changed:
+
+```bash
+traceml compare before/final_summary.json after/final_summary.json
+```
+
+For example, reducing the DataLoader bottleneck shown above changes the
+diagnosis and cuts step time:
+
+```text
++--------------------------------------------------------------------------------------+
+|  TraceML Compare                                                                     |
++--------------------------------------------------------------------------------------+
+|                                                                                      |
+|  A: before_dataloader_fix                                                            |
+|  B: after_dataloader_fix                                                             |
+|  Delta: B - A                                                                        |
+|  Primary diagnosis: INPUT-BOUND -> COMPUTE-BOUND (changed)                           |
+|                                                                                      |
+|  Verdict: IMPROVEMENT                                                                |
+|  Why: Step time decreased by 59.9%.                                                  |
++--------------------------------------------------------------------------------------+
+```
+
+<details>
+<summary><strong>See the full comparison</strong></summary>
+
+```text
++--------------------------------------------------------------------------------------+
+|  TraceML Compare                                                                     |
++--------------------------------------------------------------------------------------+
+|                                                                                      |
+|  A: before_dataloader_fix                                                            |
+|  B: after_dataloader_fix                                                             |
+|  Delta: B - A                                                                        |
+|  Primary diagnosis: INPUT-BOUND -> COMPUTE-BOUND (changed)                           |
+|                                                                                      |
+|  Verdict: IMPROVEMENT                                                                |
+|  Why: Step time decreased by 59.9%.                                                  |
+|                                                                                      |
+|  Step Time                                                                           |
+|  Metric                       A                 B                 Delta              |
+|  Step time diagnosis          INPUT-BOUND       COMPUTE-BOUND     changed            |
+|  Total step                   200.4 ms          80.4 ms           -120.0 ms (-59.9%) |
+|  Input                        128.0 ms          8.0 ms            -120.0 ms (-93.8%) |
+|  H2D                          0.4 ms            0.4 ms            +0.0 ms (+0.0%)    |
+|  Compute                      68.0 ms           68.0 ms           +0.0 ms (+0.0%)    |
+|  Residual                     3.6 ms            3.6 ms            +0.0 ms (+0.0%)    |
+|                                                                                      |
+|  Step Memory                                                                         |
+|  Metric                       A                 B                 Delta              |
+|  Step memory diagnosis        BALANCED          BALANCED          same               |
+|  Peak reserved                3.1 GB            3.1 GB            0 B (+0.0%)        |
+|  Memory skew                  0.0%              0.0%              +0.0 pp            |
+|                                                                                      |
+|  Process                                                                             |
+|  Metric                       A                 B                 Delta              |
+|  Process diagnosis            NORMAL            NORMAL            same               |
+|  Process CPU avg              95.0%             110.0%            +15.0 pp           |
+|  Process RSS avg              1.4 GB            1.6 GB            +0.2 GB (+14.3%)   |
+|                                                                                      |
+|  System                                                                              |
+|  Metric                       A                 B                 Delta              |
+|  System diagnosis             LOW GPU UTIL      NORMAL            changed            |
+|  System CPU avg               18.4%             32.0%             +13.6 pp           |
+|  System RAM avg               12.0 GB           13.5 GB           +1.5 GB (+12.5%)   |
+|  GPU util avg                 24.0%             88.0%             +64.0 pp           |
+|  GPU memory avg               18.0%             18.0%             +0.0 pp            |
++--------------------------------------------------------------------------------------+
+```
+
+</details>
+
+See [Compare Runs](docs/user_guide/compare.md) for the complete workflow and
+artifact format.
+
+## Save the Result
 
 Send the compact diagnosis to an existing W&B run:
 
@@ -139,14 +265,6 @@ if summary is not None:
 The same result can be stored in MLflow. See
 [W&B and MLflow](docs/user_guide/integrations/wandb-mlflow.md) for complete
 examples.
-
-Compare a run with a known-good baseline:
-
-```bash
-traceml compare old_run/final_summary.json new_run/final_summary.json
-```
-
-See [Compare Runs](docs/user_guide/compare.md) for the report format.
 
 <details>
 <summary><strong>Want live diagnostics during training?</strong></summary>
