@@ -82,6 +82,7 @@ class StepTimeWindow:
 
     clock: DiagnosisClock = "cpu"
     steps: list[int] = field(default_factory=list)
+    expected_ranks: tuple[int, ...] = ()
     coverage: StepCombinedTimeCoverage = field(
         default_factory=lambda: StepCombinedTimeCoverage(
             expected_steps=0,
@@ -97,6 +98,38 @@ class StepTimeWindow:
     )
     per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
     metrics: list[StepCombinedTimeMetric] = field(default_factory=list)
+
+    @property
+    def rank_universe(self) -> tuple[int, ...]:
+        """Return expected ranks, or observed ranks for direct fixtures."""
+        if self.expected_ranks:
+            return self.expected_ranks
+        return tuple(sorted(int(rank) for rank in self.per_rank_timing))
+
+    def ranks_for(self, metric: str) -> tuple[int, ...]:
+        """Return expected ranks carrying one canonical sparse metric."""
+        key = str(metric)
+        return tuple(
+            rank
+            for rank in self.rank_universe
+            if key in self.per_rank_timing.get(rank, {})
+        )
+
+    def eligible_ranks(self, metrics: Sequence[str]) -> tuple[int, ...]:
+        """Return ranks carrying every requested metric in this window."""
+        keys = tuple(str(metric) for metric in metrics)
+        if not keys:
+            return self.rank_universe
+        return tuple(
+            rank
+            for rank in self.rank_universe
+            if all(key in self.per_rank_timing.get(rank, {}) for key in keys)
+        )
+
+    def is_complete(self, metric: str) -> bool:
+        """Return whether every expected rank measured one metric."""
+        ranks = self.rank_universe
+        return bool(ranks) and self.ranks_for(metric) == ranks
 
     def to_json(self) -> Dict[str, Any]:
         """Return the aligned step-window block used by final_summary."""
@@ -213,6 +246,50 @@ _COMPUTE_KEYS: tuple[str, ...] = ("forward", "backward", "optimizer_step")
 # other selected metric must occur on every bracketed step, so partial
 # presence there means lost instrumentation, not measured zeros.
 _OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
+
+
+def median_iteration_component_share(
+    per_rank_timing: Mapping[int, Mapping[str, float]],
+    component: str,
+) -> Optional[float]:
+    """Return one component's median share of complete rank iterations.
+
+    Only ranks carrying the component, input wait, and the step envelope are
+    eligible. ``compute`` is derived only when all three compute phases exist.
+    No eligible rank returns ``None``; an eligible measured zero returns
+    ``0.0``.
+    """
+    shares: list[float] = []
+    for values in per_rank_timing.values():
+        if INPUT_WAIT_KEY not in values or "step_time" not in values:
+            continue
+        if component == "compute":
+            if not all(key in values for key in _COMPUTE_KEYS):
+                continue
+            components = [
+                _safe_non_negative_float(values[key]) for key in _COMPUTE_KEYS
+            ]
+            if any(value is None for value in components):
+                continue
+            numerator = sum(float(value) for value in components)
+        else:
+            if component not in values:
+                continue
+            numerator = _safe_non_negative_float(values[component])
+            if numerator is None:
+                continue
+
+        input_wait = _safe_non_negative_float(values[INPUT_WAIT_KEY])
+        step_time = _safe_non_negative_float(values["step_time"])
+        if input_wait is None or step_time is None:
+            continue
+        iteration = input_wait + step_time
+        if iteration > 0.0:
+            shares.append(float(numerator) / iteration)
+
+    if not shares:
+        return None
+    return float(np.median(np.asarray(shares, dtype=np.float64)))
 
 
 def _rank_metric_availability(
@@ -395,9 +472,9 @@ def _metric_values(
     for rank, values in per_rank_timing.items():
         if metric_key not in values:
             continue
-        out[int(rank)] = (
-            _safe_non_negative_float(values.get(metric_key)) or 0.0
-        )
+        value = _safe_non_negative_float(values.get(metric_key))
+        if value is not None:
+            out[int(rank)] = value
     return out
 
 
@@ -450,16 +527,21 @@ def build_step_time_metrics(
         worst_total = float(arr[worst_idx])
         worst_rank = int(metric_ranks[worst_idx])
 
-        if coverage.ranks_present <= 1 or len(metric_ranks) <= 1:
+        if len(metric_ranks) <= 1:
             median_total = worst_total
-            skew_ratio = 0.0
-            skew_pct = 0.0
+            skew_ratio = None
+            skew_pct = None
         elif median_total > 0.0:
             skew_ratio = worst_total / median_total
             skew_pct = (worst_total - median_total) / median_total
-        else:
+        elif worst_total <= 0.0:
             skew_ratio = 0.0
             skew_pct = 0.0
+        else:
+            # Relative skew is undefined when the median is zero but at
+            # least one rank is non-zero. Reporting 0% would claim equality.
+            skew_ratio = None
+            skew_pct = None
 
         series = None
         step_ids = [int(step) for step in (series_steps or ())]
@@ -507,8 +589,12 @@ def build_step_time_metrics(
                     median_total=float(median_total),
                     worst_total=float(worst_total),
                     worst_rank=int(worst_rank),
-                    skew_ratio=float(skew_ratio),
-                    skew_pct=float(skew_pct),
+                    skew_ratio=(
+                        float(skew_ratio) if skew_ratio is not None else None
+                    ),
+                    skew_pct=(
+                        float(skew_pct) if skew_pct is not None else None
+                    ),
                 ),
                 coverage=coverage,
             )
@@ -525,9 +611,11 @@ def build_step_time_window_from_events(
     completed_step: Optional[int] = None,
 ) -> StepTimeWindow:
     """Build one selected-clock window directly from raw event payloads."""
-    expected = [
-        int(rank) for rank in (expected_ranks or per_rank_steps.keys())
-    ]
+    expected = tuple(
+        sorted(
+            {int(rank) for rank in (expected_ranks or per_rank_steps.keys())}
+        )
+    )
     observed_steps = {
         int(rank): {int(step): events for step, events in step_map.items()}
         for rank, step_map in per_rank_steps.items()
@@ -548,12 +636,13 @@ def build_step_time_window_from_events(
     steps = common_suffix_steps(observed_steps, max_rows)
     if not observed_steps or not steps:
         return StepTimeWindow(
+            expected_ranks=expected,
             coverage=_empty_coverage(
                 max_rows=max_rows,
                 completed_step=latest_step,
                 world_size=len(expected),
                 ranks_present=len(observed_steps),
-            )
+            ),
         )
 
     clock = _select_clock_from_events(observed_steps, steps)
@@ -581,6 +670,7 @@ def build_step_time_window_from_events(
     return StepTimeWindow(
         clock=clock,
         steps=[int(step) for step in steps],
+        expected_ranks=expected,
         coverage=coverage,
         per_rank_step_timing=per_rank_step_timing,
         per_rank_timing=per_rank_timing,
@@ -605,6 +695,7 @@ def diagnose_step_time_window(
         window.metrics,
         thresholds=policy.thresholds,
         per_rank_timing=window.per_rank_timing,
+        expected_ranks=window.rank_universe,
         diagnosis_clock=window.clock,
         training_strategy=training_strategy,
     )
@@ -672,6 +763,7 @@ __all__ = [
     "build_step_time_metrics",
     "build_step_time_window_from_events",
     "diagnose_step_time_window",
+    "median_iteration_component_share",
     "public_step_time_metric_values",
     "worst_rank_by_total_step",
 ]

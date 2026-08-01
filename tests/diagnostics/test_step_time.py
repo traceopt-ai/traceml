@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Literal
 
 import pytest
@@ -28,6 +29,7 @@ from traceml_ai.diagnostics.step_time.rules import (
     RankStragglerRule,
     ResidualHeavyRule,
 )
+from traceml_ai.diagnostics.step_time.trend import build_step_trend_note
 from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeCoverage,
     StepCombinedTimeMetric,
@@ -1598,3 +1600,70 @@ def test_summary_input_bound_trend_uses_selected_input_wait_series() -> None:
     assert result.primary.note is not None
     assert result.primary.note.startswith("Trend: input wait is ")
     assert "dataloader" not in result.primary.note
+
+
+@pytest.mark.parametrize(
+    ("kind", "residual_share", "input_share"),
+    [
+        ("RESIDUAL_HEAVY", None, 0.0),
+        ("INPUT_BOUND", 0.0, None),
+    ],
+)
+def test_trend_abstains_when_required_share_is_unavailable(
+    kind: str,
+    residual_share: float | None,
+    input_share: float | None,
+) -> None:
+    metric = _time_metric("trend", median=10.0, worst=10.0, steps=120)
+    rising = [1.0] * 60 + [10.0] * 60
+    metric = replace(
+        metric,
+        series=StepCombinedTimeSeries(
+            steps=list(range(120)),
+            median=rising,
+            worst=rising,
+            sum=rising,
+        ),
+    )
+
+    note = build_step_trend_note(
+        diagnosis_kind=kind,
+        steps_used=120,
+        single_rank=False,
+        step_metric=metric,
+        residual_metric=metric,
+        input_wait_metric=metric,
+        residual_share=residual_share,
+        input_bound_share=input_share,
+        residual_warn_threshold=0.1,
+        input_warn_threshold=0.1,
+    )
+
+    assert note is None
+
+
+def test_largest_compute_phase_uses_one_eligible_rank_cohort() -> None:
+    context = _time_context(
+        _time_metric("input_wait", median=0.0, worst=0.0),
+        _time_metric("forward", median=55.0, worst=100.0),
+        _time_metric("backward", median=20.0, worst=20.0),
+        _time_metric("optimizer_step", median=10.0, worst=10.0),
+        _time_metric("step_time", median=100.0, worst=100.0),
+        per_rank_timing={
+            0: {
+                "input_wait": 0.0,
+                "forward": 10.0,
+                "backward": 20.0,
+                "optimizer_step": 10.0,
+                "step_time": 100.0,
+            },
+            1: {
+                "input_wait": 0.0,
+                "forward": 100.0,
+                "step_time": 100.0,
+            },
+        },
+    )
+
+    assert context.largest_compute is not None
+    assert context.largest_compute.label == "Backward"

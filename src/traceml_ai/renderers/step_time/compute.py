@@ -1,5 +1,6 @@
 import sqlite3
 import time
+from dataclasses import replace
 from typing import Dict, Optional, Sequence
 
 from traceml_ai.loggers.error_log import get_error_logger
@@ -14,8 +15,8 @@ class StepCombinedComputer:
     Compute selected-clock Step Time diagnosis payloads from SQLite.
 
     Live delegates global-rank SQLite loading to the shared Step Time window
-    loader, then adds CLI/dashboard-specific stale handling and status text.
-    The output remains rank-shaped for existing UI and diagnosis consumers.
+    loader, then adds CLI/dashboard-specific empty-read bridging and status
+    text. Consumers receive that canonical window without copied metrics.
     """
 
     def __init__(
@@ -52,6 +53,16 @@ class StepCombinedComputer:
     def compute_dashboard(self) -> StepCombinedTimeResult:
         return self._compute()
 
+    @property
+    def had_ok(self) -> bool:
+        """Whether any compute ever produced diagnosis metrics.
+
+        Lets renderers distinguish "no data yet" from an expired last-good
+        bridge after repeated empty computes. It does not claim process
+        liveness.
+        """
+        return self._last_ok is not None
+
     def _compute(self) -> StepCombinedTimeResult:
         try:
             with self._connect() as conn:
@@ -62,12 +73,13 @@ class StepCombinedComputer:
                 f"STALE (exception: {type(exc).__name__})"
             )
 
-        if not result.diagnosis_metrics:
+        if result.window is None or not result.window.metrics:
             return self._stale_or_empty("STALE (no metrics this tick)")
 
+        now = time.time()
         self._last_ok = result
-        self._last_ok_ts = time.time()
-        return result
+        self._last_ok_ts = now
+        return replace(result, had_ok=True)
 
     # ------------------------------------------------------------------
     # Core compute
@@ -111,10 +123,8 @@ class StepCombinedComputer:
 
         return StepCombinedTimeResult(
             status_message=status,
-            per_rank_timing=window.per_rank_timing,
-            diagnosis_clock=window.clock,
+            window=window,
             training_strategy=loaded.training_strategy,
-            diagnosis_metrics=window.metrics,
         )
 
     # ------------------------------------------------------------------
@@ -137,7 +147,9 @@ class StepCombinedComputer:
     # ------------------------------------------------------------------
 
     def _stale_or_empty(self, msg: str) -> StepCombinedTimeResult:
+        """Bridge transient empty reads without inferring producer liveness."""
         now = time.time()
+        had_ok = self._last_ok is not None
         if self._last_ok is not None:
             if (
                 self._stale_ttl_s is None
@@ -145,16 +157,13 @@ class StepCombinedComputer:
             ):
                 return StepCombinedTimeResult(
                     status_message=msg,
-                    per_rank_timing=self._last_ok.per_rank_timing,
-                    diagnosis_clock=self._last_ok.diagnosis_clock,
+                    window=self._last_ok.window,
                     training_strategy=self._last_ok.training_strategy,
-                    diagnosis_metrics=self._last_ok.diagnosis_metrics,
+                    had_ok=True,
                 )
         return StepCombinedTimeResult(
             status_message="No fresh step-combined data",
-            per_rank_timing={},
-            diagnosis_clock="cpu",
-            diagnosis_metrics=[],
+            had_ok=had_ok,
         )
 
 

@@ -303,6 +303,22 @@ _BALANCED_RANK = dict(
 )
 
 
+def test_expected_rank_without_window_rows_is_incomplete() -> None:
+    window = build_step_time_window_from_events(
+        {0: _step_events(**_BALANCED_RANK)},
+        max_rows=30,
+        expected_ranks=(0, 1),
+    )
+
+    result = diagnose_step_time_window(
+        window,
+        policy=SUMMARY_STEP_TIME_POLICY,
+    )
+
+    assert result.primary.kind == "INCOMPLETE_DATA"
+    assert result.issues[0].evidence["signal_coverage"]["backward"] == "1/2"
+
+
 def test_missing_backward_blocks_ddp_straggler() -> None:
     result = _diagnose(
         {
@@ -619,7 +635,9 @@ def test_partial_metric_stats_use_measuring_ranks() -> None:
     assert h2d_metric.summary.worst_rank == 1
     assert h2d_metric.summary.worst_total == pytest.approx(9.0)
     assert h2d_metric.summary.median_total == pytest.approx(9.0)
-    assert h2d_metric.summary.skew_pct == pytest.approx(0.0)
+    # One eligible rank has no cross-rank population from which to compute
+    # skew; unavailable is distinct from a measured zero gap.
+    assert h2d_metric.summary.skew_pct is None
 
 
 # ---------------------------------------------------------------------------

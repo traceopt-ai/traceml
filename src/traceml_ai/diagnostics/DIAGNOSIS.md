@@ -103,7 +103,15 @@ zero to derived metrics, and is never reported as a missing signal. Derived
 metrics exist only when their inputs are available: `compute` needs forward,
 backward, and optimizer; `total_step` needs input wait plus the step
 envelope; `residual_proxy` needs the step envelope plus every compute
-phase. The public final-summary projection preserves absence rather than
+phase.
+
+The canonical `StepTimeWindow` carries the expected rank universe and sparse
+per-rank metrics. A metric's measured-rank population and any multi-metric
+eligible cohort are derived directly from those facts. Diagnosis, reporting,
+and presentation layers must not reconstruct a separate availability policy
+from aggregate values.
+
+The public final-summary projection preserves absence rather than
 re-deriving declined values. Each rule abstains when
 its required signals are unavailable: input needs input wait + step time;
 H2D needs GPU-clock H2D + input wait + step time; compute and residual need

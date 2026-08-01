@@ -14,6 +14,7 @@ from traceml_ai.diagnostics.step_memory import (
     build_step_memory_diagnosis,
 )
 from traceml_ai.diagnostics.step_time import build_step_diagnosis
+from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -21,6 +22,11 @@ from traceml_ai.diagnostics.trends import (
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.utils.step_time_window import (
+    StepTimeWindow,
+    diagnose_step_time_window,
+    median_iteration_component_share,
+)
 
 Severity = str  # "info" | "warn" | "crit"
 
@@ -83,9 +89,9 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
     """
     Log domain failures without breaking dashboard/runtime rendering.
 
-    Model diagnostics are advisory and run on the aggregator/UI side. A broken
-    domain should produce a fallback item and be visible in TraceML's error log,
-    but it must not blank the dashboard or interrupt the user's training job.
+    Model diagnostics are advisory and run on the aggregator/UI side. A
+    broken domain should produce a fallback item and be visible in TraceML's
+    error log, but it must not blank the dashboard or interrupt training.
     """
     try:
         get_error_logger("ModelDiagnostics").exception("[TraceML] %s", message)
@@ -95,11 +101,7 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
 
 def build_model_diagnostics_payload(
     *,
-    step_time_diagnosis_metrics: Optional[
-        Sequence[StepCombinedTimeMetric]
-    ] = None,
-    step_time_per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
-    step_time_diagnosis_clock: str = "cpu",
+    step_time_window: Optional[StepTimeWindow] = None,
     step_time_training_strategy: str = "ddp",
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
@@ -115,9 +117,7 @@ def build_model_diagnostics_payload(
     """
     items: List[ModelDiagnosisItem] = []
     context = ModelDiagnosticContext(
-        step_time_diagnosis_metrics=tuple(step_time_diagnosis_metrics or ()),
-        step_time_per_rank_timing=dict(step_time_per_rank_timing or {}),
-        step_time_diagnosis_clock=str(step_time_diagnosis_clock or "cpu"),
+        step_time_window=step_time_window,
         step_time_training_strategy=str(step_time_training_strategy or "ddp"),
         step_memory_metrics=step_memory_metrics,
         step_memory_status_message=step_memory_status_message,
@@ -155,11 +155,15 @@ def _build_step_time_item(
     context: ModelDiagnosticContext,
 ) -> ModelDiagnosisItem:
     """Build the registered step-time model diagnostic item."""
-    step_time_diag = build_step_diagnosis(
-        context.step_time_diagnosis_metrics,
-        per_rank_timing=context.step_time_per_rank_timing,
-        diagnosis_clock=context.step_time_diagnosis_clock,
-        training_strategy=context.step_time_training_strategy,
+    window = context.step_time_window
+    step_time_diag = (
+        diagnose_step_time_window(
+            window,
+            policy=LIVE_STEP_TIME_POLICY,
+            training_strategy=context.step_time_training_strategy,
+        ).primary
+        if window is not None
+        else build_step_diagnosis([])
     )
     return ModelDiagnosisItem(
         source="step_time",
@@ -176,9 +180,7 @@ def _build_step_time_item(
         ),
         steps_used=getattr(step_time_diag, "steps_used", None),
         worst_rank=getattr(step_time_diag, "worst_rank", None),
-        evidence=_build_step_time_evidence(
-            context.step_time_diagnosis_metrics
-        ),
+        evidence=_build_step_time_evidence(window),
     )
 
 
@@ -198,7 +200,8 @@ def _build_step_memory_item(
             severity="info",
             status="NO GPU",
             reason=(
-                "No GPU found. Step memory uses torch-based GPU memory telemetry."
+                "No GPU found. Step memory uses torch-based GPU memory "
+                "telemetry."
             ),
             action="",
         )
@@ -266,14 +269,15 @@ DEFAULT_MODEL_DIAGNOSTIC_REGISTRY = DiagnosticDomainRegistry(
 
 
 def _build_step_time_evidence(
-    metrics: Sequence[StepCombinedTimeMetric],
+    window: Optional[StepTimeWindow],
 ) -> Dict[str, str]:
     """
     Build compact evidence fields for the step-time diagnosis card.
     """
-    by_key = {metric.metric: metric for metric in metrics}
+    if window is None:
+        return {}
+    by_key = {metric.metric: metric for metric in window.metrics}
     step = by_key.get("step_time")
-    residual = by_key.get("residual_proxy")
 
     if step is None:
         return {}
@@ -292,21 +296,23 @@ def _build_step_time_evidence(
         pass
 
     try:
-        evidence["gap"] = f"{float(step.summary.skew_pct or 0.0) * 100.0:.1f}%"
+        skew = step.summary.skew_pct
+        evidence["gap"] = (
+            "n/a" if skew is None else f"{float(skew) * 100.0:.1f}%"
+        )
     except Exception:
         pass
 
     try:
-        median_total = float(step.summary.median_total or 0.0)
-        residual_total = (
-            float(residual.summary.median_total or 0.0)
-            if residual is not None
-            else 0.0
+        residual_share = median_iteration_component_share(
+            window.per_rank_timing,
+            "residual_proxy",
         )
-        if median_total > 0.0:
-            evidence["residual"] = (
-                f"{(residual_total / median_total) * 100.0:.1f}%"
-            )
+        evidence["residual"] = (
+            "n/a"
+            if residual_share is None
+            else f"{residual_share * 100.0:.1f}%"
+        )
     except Exception:
         pass
 

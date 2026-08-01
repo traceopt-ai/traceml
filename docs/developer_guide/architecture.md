@@ -102,6 +102,7 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | H2D | Host-to-device copy (CPU to GPU), timed by patching `Tensor.to`. |
 | Phase | A timed part of a step: input wait, H2D, forward, backward, or optimizer. |
 | Step / trace_step | A training iteration; `with trace_step(model)` marks the boundary that phase timing is computed against. |
+| Step Time availability | `StepTimeWindow` carries the expected rank universe and sparse per-rank metrics. Measured-rank populations and multi-metric eligibility are derived from those facts; consumers do not maintain a second coverage model. |
 | Residual (residual_proxy) | Residual step time, `max(0, step - h2d - forward - backward - optimizer)`. |
 | INPUT_BOUND / COMPUTE_BOUND | Input wait is material, or compute reaches 90% of typical selected-clock iteration time. |
 | INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / STRAGGLER | Visible rank skew exists; the label names the culprit's material input, DDP-forward, or H2D excess, or `STRAGGLER` when the skew is sync-bound or unattributed. |

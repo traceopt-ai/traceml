@@ -87,7 +87,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[torch]"
+          pip install -e ".[torch,dashboard]"
           pip install pytest
       - name: Run integration tests
         run: |
@@ -97,6 +97,8 @@ jobs:
             tests/reporting/compare \
             tests/reporting/html \
             tests/reporting/summary \
+            tests/renderers \
+            tests/display \
             -q
 
   test-latest-deps:
