@@ -21,9 +21,8 @@ from traceml_ai.diagnostics.trends import (
 )
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepCombinedTimeMetric, StepTimeWindow
 from traceml_ai.utils.step_time_window import (
-    StepTimeWindow,
     diagnose_step_time_window,
     median_iteration_component_share,
 )

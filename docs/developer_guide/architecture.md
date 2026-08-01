@@ -32,6 +32,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Samplers | `src/traceml_ai/samplers/` | Periodic telemetry collection (timing, memory, system) |
 | Database | `src/traceml_ai/database/` | Bounded in-memory tables and SQLite-backed history |
 | Transport | `src/traceml_ai/transport/` | TCP bidirectional + DDP rank detection |
+| Step Time domain | `src/traceml_ai/step_time/` | Presentation-independent Step Time data contracts |
 | Renderers | `src/traceml_ai/renderers/` | Transform stored data into Rich/Plotly output |
 | Display drivers | `src/traceml_ai/aggregator/display_drivers/` | CLI vs NiceGUI output medium |
 | Public API | `src/traceml_ai/api.py` | Top-level instrumentation entry points |
@@ -47,6 +48,8 @@ Contributors changing Step Time should begin with the
 [Step Time pipeline contract](step-time-pipeline-contract.md), which maps its
 canonical window, diagnosis, live surfaces, final-summary projection, and
 cross-surface fixtures without requiring a full source-tree traversal.
+Shared Step Time types belong in `traceml_ai.step_time.model`; that module must
+not import SQLite, diagnosis, reporting, or UI code.
 
 ## Design principles
 

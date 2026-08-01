@@ -25,6 +25,11 @@ For Step Time specifically, start with the
 map and six SQLite scenarios show which layer owns each calculation and how to
 verify CLI, dashboard, and final-summary behavior together.
 
+Import shared Step Time contracts from `traceml_ai.step_time.model`. The old
+`renderers.step_time.schema` and `utils.step_time_window.StepTimeWindow` paths
+are compatibility re-exports for downstream users, not ownership locations
+for new types.
+
 ## TraceML Lifecycle
 
 TraceML has two runtime pieces:

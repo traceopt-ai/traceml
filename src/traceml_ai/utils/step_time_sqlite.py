@@ -13,8 +13,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
 
+from traceml_ai.step_time.model import StepTimeWindow
 from traceml_ai.utils.step_time_window import (
-    StepTimeWindow,
     build_step_time_window_from_events,
 )
 from traceml_ai.utils.training_strategy import (

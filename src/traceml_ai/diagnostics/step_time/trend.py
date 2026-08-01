@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepCombinedTimeMetric
 
 from ..trends import (
     DEFAULT_TREND_CONFIG,

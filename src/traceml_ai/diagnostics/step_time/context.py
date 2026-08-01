@@ -15,7 +15,7 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, Mapping, Optional, Sequence, Tuple
 
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepCombinedTimeMetric
 from traceml_ai.utils.step_time_window import (
     median_iteration_component_share,
     worst_rank_by_total_step,

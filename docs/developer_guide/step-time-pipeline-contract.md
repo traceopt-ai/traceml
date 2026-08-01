@@ -2,7 +2,7 @@
 
 This page is the contributor map for Step Time. It describes the current
 behavior that CLI, dashboard, and final-summary changes must preserve. It does
-not prescribe the internal classes planned for later refactoring.
+not prescribe presentation details or future query consolidation.
 
 For diagnosis thresholds and issue semantics, see
 [`diagnostics/DIAGNOSIS.md`](https://github.com/traceopt-ai/traceml/blob/main/src/traceml_ai/diagnostics/DIAGNOSIS.md).
@@ -48,6 +48,7 @@ other. PR1 measures this duplication; it does not change it.
 
 | Concern | Source of truth | Change here when... |
 |---|---|---|
+| Shared data contracts | `step_time/model.py` | the canonical window, metric, series, or coverage shape changes |
 | Event-to-metric names | `utils/step_time_window.py` | persisted event names or clock extraction change |
 | Common-step alignment and availability | `utils/step_time_window.py` | window, sparse-signal, or derived-metric semantics change |
 | SQLite rank loading and strategy context | `utils/step_time_sqlite.py` | persisted Step Time reads change |
@@ -59,6 +60,15 @@ other. PR1 measures this duplication; it does not change it.
 
 Start with the contract scenarios before following a surface-specific call
 path. They present the entire persisted-input-to-output behavior in one place.
+
+### Model dependency boundary
+
+`traceml_ai.step_time.model` is the lowest Step Time layer. It owns immutable
+data contracts and imports only the Python standard library. SQLite loading,
+diagnosis, reporting, Rich, NiceGUI, and Plotly depend on these contracts;
+the model never depends on them. New code should import from this central
+module. Historical renderer-schema and window-utility imports remain thin
+re-exports while external integrations migrate.
 
 ## Canonical window invariants
 

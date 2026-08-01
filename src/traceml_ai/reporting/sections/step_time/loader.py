@@ -19,8 +19,8 @@ from traceml_ai.reporting.sections.step_time.model import (
     RankStepSummary,
     rank_summaries_from_window,
 )
+from traceml_ai.step_time.model import StepTimeWindow
 from traceml_ai.utils.step_time_sqlite import load_step_time_window_from_sqlite
-from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 @dataclass(frozen=True)

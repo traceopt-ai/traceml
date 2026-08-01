@@ -9,24 +9,18 @@ by diagnosis and presentation layers.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Literal,
-    Mapping,
-    Optional,
-    Sequence,
-)
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Sequence
 
 import numpy as np
 
-from traceml_ai.renderers.step_time.schema import (
+from traceml_ai.step_time.model import (
+    DIAGNOSIS_CLOCK_KEY,
+    DiagnosisClock,
     StepCombinedTimeCoverage,
     StepCombinedTimeMetric,
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
+    StepTimeWindow,
 )
 from traceml_ai.utils.step_windows import common_suffix_steps
 
@@ -35,13 +29,10 @@ if TYPE_CHECKING:
     from traceml_ai.diagnostics.step_time.api import StepDiagnosis
     from traceml_ai.diagnostics.step_time.policy import StepTimeDiagnosisPolicy
 
-DiagnosisClock = Literal["cpu", "gpu"]
-
 DATALOADER_EVENT_NAME = "_traceml_internal:dataloader_next"
 STEP_TIME_EVENT_NAME = "_traceml_internal:step_time"
 
 INPUT_WAIT_KEY = "input_wait"
-DIAGNOSIS_CLOCK_KEY = "diagnosis_clock"
 DATALOADER_FETCH_KEY = "dataloader_fetch"
 STEP_TIME_CPU_KEY = "step_time_cpu"
 
@@ -74,73 +65,6 @@ DISPLAY_METRICS: tuple[str, ...] = (
 )
 
 REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
-
-
-@dataclass(frozen=True)
-class StepTimeWindow:
-    """Aligned selected-clock Step Time data for one analysis window."""
-
-    clock: DiagnosisClock = "cpu"
-    steps: list[int] = field(default_factory=list)
-    expected_ranks: tuple[int, ...] = ()
-    coverage: StepCombinedTimeCoverage = field(
-        default_factory=lambda: StepCombinedTimeCoverage(
-            expected_steps=0,
-            steps_used=0,
-            completed_step=0,
-            world_size=0,
-            ranks_present=0,
-            incomplete=False,
-        )
-    )
-    per_rank_step_timing: Dict[int, Dict[int, Dict[str, float]]] = field(
-        default_factory=dict
-    )
-    per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
-    metrics: list[StepCombinedTimeMetric] = field(default_factory=list)
-
-    @property
-    def rank_universe(self) -> tuple[int, ...]:
-        """Return expected ranks, or observed ranks for direct fixtures."""
-        if self.expected_ranks:
-            return self.expected_ranks
-        return tuple(sorted(int(rank) for rank in self.per_rank_timing))
-
-    def ranks_for(self, metric: str) -> tuple[int, ...]:
-        """Return expected ranks carrying one canonical sparse metric."""
-        key = str(metric)
-        return tuple(
-            rank
-            for rank in self.rank_universe
-            if key in self.per_rank_timing.get(rank, {})
-        )
-
-    def eligible_ranks(self, metrics: Sequence[str]) -> tuple[int, ...]:
-        """Return ranks carrying every requested metric in this window."""
-        keys = tuple(str(metric) for metric in metrics)
-        if not keys:
-            return self.rank_universe
-        return tuple(
-            rank
-            for rank in self.rank_universe
-            if all(key in self.per_rank_timing.get(rank, {}) for key in keys)
-        )
-
-    def is_complete(self, metric: str) -> bool:
-        """Return whether every expected rank measured one metric."""
-        ranks = self.rank_universe
-        return bool(ranks) and self.ranks_for(metric) == ranks
-
-    def to_json(self) -> Dict[str, Any]:
-        """Return the aligned step-window block used by final_summary."""
-        return {
-            "alignment": "common_steps",
-            "aligned_steps_analyzed": int(self.coverage.steps_used),
-            "start_step": self.steps[0] if self.steps else None,
-            "end_step": self.steps[-1] if self.steps else None,
-            "window_size": int(self.coverage.expected_steps),
-            DIAGNOSIS_CLOCK_KEY: self.clock,
-        }
 
 
 def _safe_non_negative_float(value: Any) -> Optional[float]:
