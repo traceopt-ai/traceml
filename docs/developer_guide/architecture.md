@@ -43,6 +43,11 @@ paths. New implementation work should go under `src/traceml_ai/`.
 
 For the user-facing API surface (`trace_step`, `TraceMLTrainer`, `TraceMLCallback`, CLI usage), see the [Public API](../user_guide/public-api.md). The source tree above is the canonical reference for internals — start from the entry points and follow the imports.
 
+Contributors changing Step Time should begin with the
+[Step Time pipeline contract](step-time-pipeline-contract.md), which maps its
+canonical window, diagnosis, live surfaces, final-summary projection, and
+cross-surface fixtures without requiring a full source-tree traversal.
+
 ## Design principles
 
 - **Fail-open** — training must never crash because telemetry broke. Sampler/transport errors are logged, execution continues.

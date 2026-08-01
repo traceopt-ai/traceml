@@ -95,6 +95,8 @@ nav:
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
+      - Step Time Pipeline Contract: developer_guide/step-time-pipeline-contract.md
+      - Step Time Pipeline Baseline: developer_guide/step-time-pipeline-baseline.md
       - Rank Straggler Policy: developer_guide/rank-straggler-policy.md
       - Extending TraceML: developer_guide/extending.md
       - Contributing: developer_guide/contributing.md

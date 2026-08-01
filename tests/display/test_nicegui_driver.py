@@ -19,6 +19,21 @@ pytest.importorskip("nicegui")
 from traceml_ai.aggregator.display_drivers.nicegui import (  # noqa: E402
     NiceGUIDisplayDriver,
 )
+from traceml_ai.renderers.model_diagnostics.renderer import (  # noqa: E402
+    ModelDiagnosticsRenderer,
+)
+from traceml_ai.renderers.step_memory.schema import (  # noqa: E402
+    StepMemoryCombinedResult,
+)
+from traceml_ai.renderers.step_time.compute import (  # noqa: E402
+    StepCombinedComputer,
+)
+from traceml_ai.renderers.step_time.renderer import (  # noqa: E402
+    StepCombinedRenderer,
+)
+from traceml_ai.renderers.step_time.schema import (  # noqa: E402
+    StepCombinedTimeResult,
+)
 from traceml_ai.runtime.settings import TraceMLSettings  # noqa: E402
 
 
@@ -158,3 +173,50 @@ def test_dashboard_sections_build_without_error() -> None:
     build_process_section()
     build_step_memory_section()
     build_model_diagnostics_section()
+
+
+def test_dashboard_tick_currently_invokes_two_step_time_providers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Characterize the duplicate production providers before consolidation.
+
+    The Step Time hero and diagnostics rail currently own independent
+    computers. A later pipeline PR should change this test to one shared
+    provider; PR1 records the existing two-call behavior without changing it.
+    """
+    calls: list[StepCombinedComputer] = []
+
+    def record_compute(
+        computer: StepCombinedComputer,
+    ) -> StepCombinedTimeResult:
+        calls.append(computer)
+        return StepCombinedTimeResult()
+
+    monkeypatch.setattr(
+        StepCombinedComputer,
+        "compute_dashboard",
+        record_compute,
+    )
+    driver = _driver()
+    for renderer in driver._renderers:
+        if isinstance(renderer, ModelDiagnosticsRenderer):
+            monkeypatch.setattr(
+                renderer._step_memory,
+                "compute_dashboard",
+                lambda: StepMemoryCombinedResult(
+                    metrics=[],
+                    status_message="No GPU detected",
+                ),
+            )
+        elif not isinstance(renderer, StepCombinedRenderer):
+            monkeypatch.setattr(
+                renderer,
+                "get_dashboard_renderable",
+                lambda: {},
+            )
+
+    driver._ui_ready = True
+    driver.tick()
+
+    assert len(calls) == 2
+    assert calls[0] is not calls[1]
