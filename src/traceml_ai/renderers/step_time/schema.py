@@ -1,5 +1,10 @@
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 @dataclass(frozen=True)
@@ -17,8 +22,8 @@ class StepCombinedTimeSummary:
     median_total: float
     worst_total: float
     worst_rank: Optional[int]
-    skew_ratio: float
-    skew_pct: float
+    skew_ratio: Optional[float]
+    skew_pct: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -42,14 +47,9 @@ class StepCombinedTimeMetric:
 
 @dataclass(frozen=True)
 class StepCombinedTimeResult:
+    """Live Step Time state wrapping one canonical analyzed window."""
+
     status_message: str = "OK"
-    per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
-    diagnosis_clock: str = "cpu"
+    window: Optional[StepTimeWindow] = None
     training_strategy: str = "ddp"
-    diagnosis_metrics: List[StepCombinedTimeMetric] = field(
-        default_factory=list
-    )
-    # Whether the producing computer ever had diagnosis metrics before
-    # this tick. Lets a consumer distinguish "no data yet" from "had
-    # data, now expired" without a side-channel to the computer.
     had_ok: bool = False

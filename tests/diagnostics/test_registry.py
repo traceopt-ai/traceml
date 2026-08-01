@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from traceml_ai.diagnostics import model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
     ModelDiagnosisItem,
@@ -22,6 +23,7 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeSummary,
 )
+from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def _step_memory_metric() -> StepMemoryCombinedMetric:
@@ -89,7 +91,7 @@ def test_model_diagnostics_payload_uses_registered_domains():
     def build_custom_item(
         context: ModelDiagnosticContext,
     ) -> ModelDiagnosisItem:
-        assert context.step_time_per_rank_timing == {}
+        assert context.step_time_window is None
         assert context.step_memory_metrics == ()
         return ModelDiagnosisItem(
             source="custom_domain",
@@ -124,40 +126,47 @@ def test_model_diagnostics_payload_uses_registered_domains():
     assert payload.items[0].status == "BALANCED"
 
 
-def test_model_step_time_diagnostics_receive_per_rank_timing(monkeypatch):
+def test_model_step_time_diagnostics_receive_canonical_window(monkeypatch):
     per_rank_timing = {
         0: {"input_wait": 1.0, "total_step": 10.0},
         1: {"input_wait": 2.0, "total_step": 11.0},
     }
     captured = {}
 
-    def fake_diagnosis(metrics, *, per_rank_timing=None, **kwargs):
-        captured["metrics"] = metrics
-        captured["per_rank_timing"] = per_rank_timing
+    window = StepTimeWindow(
+        expected_ranks=(0, 1),
+        per_rank_timing=per_rank_timing,
+        metrics=[_step_time_metric("step_time", 10.0)],
+    )
+
+    def fake_diagnosis(received_window, **kwargs):
+        captured["window"] = received_window
         return SimpleNamespace(
-            kind="BALANCED",
-            severity="info",
-            status="BALANCED",
-            reason="No timing issue.",
-            action="Keep monitoring.",
-            note=None,
-            confidence=0.75,
-            steps_used=3,
-            worst_rank=1,
+            primary=SimpleNamespace(
+                kind="BALANCED",
+                severity="info",
+                status="BALANCED",
+                reason="No timing issue.",
+                action="Keep monitoring.",
+                note=None,
+                confidence=0.75,
+                steps_used=3,
+                worst_rank=1,
+            )
         )
 
     monkeypatch.setattr(
         model_diagnostics,
-        "build_step_diagnosis",
+        "diagnose_step_time_window",
         fake_diagnosis,
     )
 
     payload = build_model_diagnostics_payload(
-        step_time_per_rank_timing=per_rank_timing,
+        step_time_window=window,
         step_memory_metrics=(),
     )
 
-    assert captured["per_rank_timing"] == per_rank_timing
+    assert captured["window"] is window
     assert payload.items[0].source == "step_time"
     assert payload.items[0].status == "BALANCED"
 
@@ -170,37 +179,49 @@ def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
     )
     captured = {}
 
-    def fake_diagnosis(metrics, **kwargs):
-        captured["metrics"] = metrics
-        captured["diagnosis_clock"] = kwargs.get("diagnosis_clock")
+    window = StepTimeWindow(
+        clock="gpu",
+        expected_ranks=(0,),
+        per_rank_timing={
+            0: {
+                "input_wait": 40.0,
+                "step_time": 100.0,
+                "residual_proxy": 0.0,
+            }
+        },
+        metrics=list(diagnosis_metrics),
+    )
+
+    def fake_diagnosis(received_window, **kwargs):
+        captured["window"] = received_window
         captured["training_strategy"] = kwargs.get("training_strategy")
         return SimpleNamespace(
-            kind="INPUT_BOUND",
-            severity="warn",
-            status="INPUT-BOUND",
-            reason="Input wait is high.",
-            action="Increase workers.",
-            note=None,
-            confidence=0.75,
-            steps_used=1,
-            worst_rank=0,
+            primary=SimpleNamespace(
+                kind="INPUT_BOUND",
+                severity="warn",
+                status="INPUT-BOUND",
+                reason="Input wait is high.",
+                action="Increase workers.",
+                note=None,
+                confidence=0.75,
+                steps_used=1,
+                worst_rank=0,
+            )
         )
 
     monkeypatch.setattr(
         model_diagnostics,
-        "build_step_diagnosis",
+        "diagnose_step_time_window",
         fake_diagnosis,
     )
 
     payload = build_model_diagnostics_payload(
-        step_time_diagnosis_metrics=diagnosis_metrics,
-        step_time_diagnosis_clock="gpu",
+        step_time_window=window,
         step_time_training_strategy="fsdp",
         step_memory_metrics=(),
     )
 
-    assert captured["metrics"] == diagnosis_metrics
-    assert captured["diagnosis_clock"] == "gpu"
+    assert captured["window"] is window
     assert captured["training_strategy"] == "fsdp"
     assert payload.items[0].status == "INPUT-BOUND"
     assert payload.items[0].evidence["dominant"] == "input wait"
@@ -232,11 +253,10 @@ def test_model_step_time_diagnostics_do_not_fallback_to_public_metrics(
     )
 
     payload = build_model_diagnostics_payload(
-        step_time_diagnosis_metrics=(),
         step_memory_metrics=(),
     )
 
-    assert captured["metrics"] == ()
+    assert captured["metrics"] == []
     assert payload.items[0].evidence == {}
 
 

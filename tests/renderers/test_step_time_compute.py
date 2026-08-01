@@ -2,6 +2,7 @@ import json
 import sqlite3
 
 from traceml_ai.renderers.step_time.compute import StepCombinedComputer
+from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
@@ -84,17 +85,18 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
         window_size=2,
     ).compute_cli()
 
-    metrics = {metric.metric: metric for metric in result.diagnosis_metrics}
+    assert result.window is not None
+    metrics = {metric.metric: metric for metric in result.window.metrics}
     assert "dataloader_fetch" not in metrics
     assert metrics["input_wait"].summary.worst_total == 5.0
     assert metrics["step_time"].summary.worst_total == 30.0
     assert metrics["input_wait"].series is not None
     assert metrics["input_wait"].series.worst == [4.0, 6.0]
     assert metrics["input_wait"].series.sum == [4.0, 6.0]
-    assert result.diagnosis_clock == "gpu"
+    assert result.window.clock == "gpu"
     assert result.training_strategy == "ddp"
 
-    per_rank = result.per_rank_timing[0]
+    per_rank = result.window.per_rank_timing[0]
     assert per_rank["input_wait"] == 5.0
     assert per_rank["step_time"] == 30.0
 
@@ -163,9 +165,11 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     )
     good = StepCombinedTimeResult(
         status_message="OK",
-        per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
-        diagnosis_clock="cpu",
-        diagnosis_metrics=[metric],
+        window=StepTimeWindow(
+            expected_ranks=(0,),
+            per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
+            metrics=[metric],
+        ),
     )
     empty = StepCombinedTimeResult(status_message="no rows")
 
@@ -176,7 +180,7 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     monkeypatch.setattr(computer, "_compute_impl", lambda conn: next(results))
 
     first = computer.compute_cli()
-    assert first.diagnosis_metrics == [metric]
+    assert first.window is not None and first.window.metrics == [metric]
     assert computer.had_ok is True
     # The payload itself carries had_ok too (dashboard subscribers only
     # ever see the payload, never the computer instance directly).
@@ -184,7 +188,7 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
 
     # Within the TTL a transient gap re-serves the last good metrics.
     bridged = computer.compute_cli()
-    assert bridged.diagnosis_metrics == [metric]
+    assert bridged.window is not None and bridged.window.metrics == [metric]
     assert bridged.status_message.startswith("STALE")
     assert bridged.had_ok is True
 
@@ -195,23 +199,16 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
         lambda: computer._last_ok_ts + 31.0,
     )
     expired = computer.compute_cli()
-    assert expired.diagnosis_metrics == []
+    assert expired.window is None
     assert expired.status_message == "No fresh step-combined data"
     assert computer.had_ok is True
     assert expired.had_ok is True
 
 
-def test_dead_run_expires_even_though_sqlite_rows_persist(
+def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
     monkeypatch,
 ) -> None:
-    """The dead-run tripwire must actually trip.
-
-    SQLite rows outlive the process that wrote them, so a stopped run
-    keeps recomputing the SAME window successfully forever. Before source
-    -freshness tracking, that reset the stale timer on every tick and the
-    advertised expiry never fired in a real run, only in tests that
-    forced an empty compute.
-    """
+    """Persisted rows cannot establish whether their producer is alive."""
     from traceml_ai.renderers.step_time import compute as compute_module
     from traceml_ai.renderers.step_time.schema import (
         StepCombinedTimeCoverage,
@@ -245,9 +242,11 @@ def test_dead_run_expires_even_though_sqlite_rows_persist(
         )
         return StepCombinedTimeResult(
             status_message="OK",
-            per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
-            diagnosis_clock="cpu",
-            diagnosis_metrics=[metric],
+            window=StepTimeWindow(
+                expected_ranks=(0,),
+                per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
+                metrics=[metric],
+            ),
         )
 
     computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
@@ -260,31 +259,31 @@ def test_dead_run_expires_even_though_sqlite_rows_persist(
     monkeypatch.setattr(
         computer, "_compute_impl", lambda conn: _result(step[0])
     )
-    assert computer.compute_cli().diagnosis_metrics != []
+    assert computer.compute_cli().window is not None
     now[0] += 60.0
     step[0] = 2
-    assert computer.compute_cli().diagnosis_metrics != []
+    assert computer.compute_cli().window is not None
 
-    # Producer stops. Rows remain, so _compute_impl keeps succeeding with
-    # the SAME completed_step. Within the TTL the view is still served.
+    # The same persisted window remains a valid snapshot. Its unchanged
+    # completed-step cursor is not a process-liveness signal.
     now[0] += 10.0
-    assert computer.compute_cli().diagnosis_metrics != []
+    assert computer.compute_cli().window is not None
 
-    # Past the TTL with no advance, the view must expire.
+    # Even past the empty-read bridge TTL, a non-empty snapshot is retained.
     now[0] += 31.0
-    expired = computer.compute_cli()
-    assert expired.diagnosis_metrics == []
-    assert expired.had_ok is True
-    assert expired.status_message == "No fresh step-combined data"
+    persisted = computer.compute_cli()
+    assert persisted.window is not None
+    assert persisted.had_ok is True
+    assert persisted.status_message.startswith("OK")
 
     # And it recovers if the producer comes back.
     step[0] = 3
-    assert computer.compute_cli().diagnosis_metrics != []
+    assert computer.compute_cli().window is not None
 
 
 def test_computer_had_ok_stays_false_on_cold_start(monkeypatch) -> None:
     """A payload that never had good data reports had_ok=False on itself,
-    not just on the computer -- distinguishes cold start from a dead run
+    not just on the computer -- distinguishes cold start from an expired bridge
     for any consumer that only sees the payload (issue #259)."""
     from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
 
@@ -296,6 +295,6 @@ def test_computer_had_ok_stays_false_on_cold_start(monkeypatch) -> None:
     )
 
     result = computer.compute_cli()
-    assert result.diagnosis_metrics == []
+    assert result.window is None
     assert result.had_ok is False
     assert computer.had_ok is False

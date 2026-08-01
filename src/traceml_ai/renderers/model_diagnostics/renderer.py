@@ -64,9 +64,7 @@ class ModelDiagnosticsRenderer(BaseRenderer):
             step_memory = self._step_memory.compute_dashboard()
 
             payload: ModelDiagnosticsPayload = build_model_diagnostics_payload(
-                step_time_diagnosis_metrics=step_time.diagnosis_metrics,
-                step_time_per_rank_timing=step_time.per_rank_timing,
-                step_time_diagnosis_clock=step_time.diagnosis_clock,
+                step_time_window=step_time.window,
                 step_time_training_strategy=step_time.training_strategy,
                 step_memory_metrics=step_memory.metrics,
                 step_memory_status_message=step_memory.status_message,

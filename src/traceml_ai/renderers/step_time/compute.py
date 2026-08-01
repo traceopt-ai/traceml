@@ -15,8 +15,8 @@ class StepCombinedComputer:
     Compute selected-clock Step Time diagnosis payloads from SQLite.
 
     Live delegates global-rank SQLite loading to the shared Step Time window
-    loader, then adds CLI/dashboard-specific stale handling and status text.
-    The output remains rank-shaped for existing UI and diagnosis consumers.
+    loader, then adds CLI/dashboard-specific empty-read bridging and status
+    text. Consumers receive that canonical window without copied metrics.
     """
 
     def __init__(
@@ -42,13 +42,6 @@ class StepCombinedComputer:
         self._stale_ttl_s = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
         )
-        # Source-freshness cursor. SQLite rows outlive the process that
-        # wrote them, so a successful recompute proves only that rows
-        # exist, never that the run is alive. Liveness is an ADVANCING
-        # cursor; without this, a dead run recomputes the same window
-        # forever and the stale path never fires.
-        self._last_cursor: Optional[int] = None
-        self._last_advance_ts = time.time()
 
     # ------------------------------------------------------------------
     # Public API
@@ -64,9 +57,9 @@ class StepCombinedComputer:
     def had_ok(self) -> bool:
         """Whether any compute ever produced diagnosis metrics.
 
-        Lets renderers distinguish "no data yet" (calm waiting state)
-        from "had data, now expired" (the run died) when a compute
-        returns empty metrics.
+        Lets renderers distinguish "no data yet" from an expired last-good
+        bridge after repeated empty computes. It does not claim process
+        liveness.
         """
         return self._last_ok is not None
 
@@ -80,30 +73,10 @@ class StepCombinedComputer:
                 f"STALE (exception: {type(exc).__name__})"
             )
 
-        if not result.diagnosis_metrics:
+        if result.window is None or not result.window.metrics:
             return self._stale_or_empty("STALE (no metrics this tick)")
 
         now = time.time()
-        cursor = _window_cursor(result)
-        if cursor is not None and cursor == self._last_cursor:
-            # Rows are present but the window has not advanced: the
-            # producer may have stopped. Recomputing the same rows is not
-            # liveness, so age the view against the last real advance.
-            if (
-                self._stale_ttl_s is not None
-                and (now - self._last_advance_ts) > self._stale_ttl_s
-            ):
-                return StepCombinedTimeResult(
-                    status_message="No fresh step-combined data",
-                    per_rank_timing={},
-                    diagnosis_clock="cpu",
-                    diagnosis_metrics=[],
-                    had_ok=True,
-                )
-        elif cursor is not None:
-            self._last_cursor = cursor
-            self._last_advance_ts = now
-
         self._last_ok = result
         self._last_ok_ts = now
         return replace(result, had_ok=True)
@@ -150,10 +123,8 @@ class StepCombinedComputer:
 
         return StepCombinedTimeResult(
             status_message=status,
-            per_rank_timing=window.per_rank_timing,
-            diagnosis_clock=window.clock,
+            window=window,
             training_strategy=loaded.training_strategy,
-            diagnosis_metrics=window.metrics,
         )
 
     # ------------------------------------------------------------------
@@ -176,6 +147,7 @@ class StepCombinedComputer:
     # ------------------------------------------------------------------
 
     def _stale_or_empty(self, msg: str) -> StepCombinedTimeResult:
+        """Bridge transient empty reads without inferring producer liveness."""
         now = time.time()
         had_ok = self._last_ok is not None
         if self._last_ok is not None:
@@ -185,34 +157,14 @@ class StepCombinedComputer:
             ):
                 return StepCombinedTimeResult(
                     status_message=msg,
-                    per_rank_timing=self._last_ok.per_rank_timing,
-                    diagnosis_clock=self._last_ok.diagnosis_clock,
+                    window=self._last_ok.window,
                     training_strategy=self._last_ok.training_strategy,
-                    diagnosis_metrics=self._last_ok.diagnosis_metrics,
                     had_ok=True,
                 )
         return StepCombinedTimeResult(
             status_message="No fresh step-combined data",
-            per_rank_timing={},
-            diagnosis_clock="cpu",
-            diagnosis_metrics=[],
             had_ok=had_ok,
         )
-
-
-def _window_cursor(result: StepCombinedTimeResult) -> Optional[int]:
-    """Highest completed step in this window, or None if unknowable.
-
-    Monotonic marker of how far the producer has actually got. Used to
-    tell "the run is alive" from "the rows it already wrote are still on
-    disk", which a successful recompute alone cannot distinguish.
-    """
-    steps = [
-        int(metric.coverage.completed_step)
-        for metric in result.diagnosis_metrics
-        if metric.coverage is not None
-    ]
-    return max(steps) if steps else None
 
 
 def _worst_rank_from_window(

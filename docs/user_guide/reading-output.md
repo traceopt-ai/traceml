@@ -103,14 +103,20 @@ Phases that were never measured in the current window are omitted from the
 live step-time table rather than shown as `0.0 ms`, and the diagnosis block
 shows `INCOMPLETE DATA` with the missing signal names when no reliable
 conclusion is possible. The local UI's step-time hero card behaves the same
-way: an unmeasured phase renders as a hatched sliver on the ribbon, never as
-an empty (zero-width) segment, so a dark stream can never be mistaken for a
-confirmed-fast one; the window label adds `partial: <names>`, and an
-underivable residual shows `n/a`. If a run stops reporting entirely, both
-surfaces show the last window has expired instead of freezing on a dead
-run's numbers. H2D is the exception throughout: its events only occur when
-host-to-device copies happen, so an absent H2D means no observed transfers
-and never counts as partial coverage.
+way. The ribbon is one real representative rank from the common eligible
+cohort, named in the window label; it never combines phases from unrelated
+ranks. An unmeasured phase renders as a hatched sliver rather than a measured
+zero, while unavailable shares and cross-rank gaps render as `n/a`. If no rank
+has a coherent composition, the ribbon clears and independently valid KPIs
+continue updating. H2D is the exception throughout: its events only occur
+when host-to-device copies happen, so an absent H2D means no observed
+transfers and never counts as partial coverage.
+
+The live reader bridges short empty or failed reads using its last good
+window, then expires that bridge. Persisted SQLite rows remain a valid saved
+snapshot; an unchanged step number is not treated as proof that the producer
+stopped. Detecting producer liveness requires a separate heartbeat or source
+timestamp.
 
 ### Local UI
 

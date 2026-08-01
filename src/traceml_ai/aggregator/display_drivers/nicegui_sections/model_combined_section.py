@@ -4,8 +4,9 @@ Signature element: a phase RIBBON (selected-clock average phase proportions)
 plus a VERDICT, then a compact step-KPI strip. The ribbon recomposes as the
 bottleneck shifts.
 
-The ribbon and KPI strip are driven by StepCombinedTimeResult diagnosis
-metrics (``update_model_combined_section``). The VERDICT is NOT computed here:
+The ribbon and KPI strip are driven by the canonical StepTimeWindow carried by
+StepCombinedTimeResult (``update_model_combined_section``). The VERDICT is NOT
+computed here:
 it is taken verbatim from the diagnosis engine's step-time ``status`` via
 ``update_step_verdict`` (fed the model-diagnostics payload), so it is identical
 to the Diagnostics rail, the CLI, and final_summary, and tracks any future
@@ -15,6 +16,7 @@ own classification — interpretation belongs to the engine.
 
 from __future__ import annotations
 
+import statistics
 from typing import Any, Dict, List, Optional
 
 from nicegui import ui
@@ -23,6 +25,10 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeMetric,
     StepCombinedTimeResult,
 )
+from traceml_ai.utils.step_time_window import (
+    StepTimeWindow,
+    median_iteration_component_share,
+)
 
 from . import theme
 
@@ -30,11 +36,6 @@ from . import theme
 # large enough to read as a deliberate marker, not a rounding artifact of
 # a real proportional segment.
 _UNMEASURED_SLIVER_PCT = 6.0
-
-# Derived remainder, never carried per-rank: its availability comes from
-# the aggregate window (the engine emits it only when derivable), so the
-# per-rank coverage check below does not apply to it.
-_DERIVED_METRICS = frozenset(("residual_proxy",))
 
 # step_time is the envelope, not a ribbon phase, so it has no entry in
 # theme.PHASES. It still needs a name when it is the incomplete signal.
@@ -124,38 +125,33 @@ def _index(
     return {m.metric: m for m in metrics}
 
 
-def _partially_covered(
-    per_rank_timing: Dict[int, Dict[str, float]],
-    keys: List[str],
-) -> List[str]:
-    """Return signals measured on some observed ranks but not all.
+def _representative_rank(window: StepTimeWindow) -> Optional[int]:
+    """Choose a real median-iteration rank with a coherent phase row."""
+    present_phases = [
+        key
+        for _label, key, _color in theme.PHASES
+        if key != "h2d" and window.ranks_for(key)
+    ]
+    eligible = window.eligible_ranks(("step_time", *present_phases))
+    if not eligible:
+        return None
 
-    Mirrors the diagnosis engine's rule (a signal counts as measured only
-    when every observed rank measured it). Only h2d is exempt, matching
-    ``_missing_signal_report``: occurrence-driven means an absent event is
-    no observed transfer, and that is true per rank too. Derived
-    remainders are never carried per-rank, and with fewer than two ranks
-    there is nothing to compare, so nothing is reported.
-
-    ``step_time`` is checked alongside the ribbon phases even though it is
-    not one: it is the envelope every share is computed against, so a rank
-    missing it makes the window incomplete in exactly the way the engine
-    reports.
-    """
-    if len(per_rank_timing) < 2:
-        return []
-    thin: List[str] = []
-    for key in keys:
-        if key == "h2d" or key in _DERIVED_METRICS:
-            continue
-        seen = sum(1 for vals in per_rank_timing.values() if key in vals)
-        if 0 < seen < len(per_rank_timing):
-            thin.append(key)
-    return thin
+    anchors = {
+        rank: float(
+            window.per_rank_timing[rank].get(
+                "total_step",
+                window.per_rank_timing[rank]["step_time"],
+            )
+        )
+        for rank in eligible
+    }
+    middle = float(statistics.median(anchors.values()))
+    return min(eligible, key=lambda rank: (abs(anchors[rank] - middle), rank))
 
 
 _EXPIRED_SIG = "__expired__"
 _NO_ENVELOPE_SIG = "__no_envelope__"
+_NO_COHORT_SIG = "__no_cohort__"
 
 
 def _clear_view(panel: Dict[str, Any], sig: str, label: str) -> None:
@@ -176,58 +172,93 @@ def _clear_view(panel: Dict[str, Any], sig: str, label: str) -> None:
     panel["win"].text = label
 
 
+def _clear_ribbon(panel: Dict[str, Any], sig: str, label: str) -> None:
+    """Clear an untrustworthy composition while retaining valid KPIs."""
+    if panel.get("_last_sig") == sig:
+        return
+    panel["_last_sig"] = sig
+    for seg, sl in zip(panel["seg_divs"], panel["seg_labs"]):
+        seg.style("width:0%; background:transparent;")
+        sl.text = ""
+    panel["win"].text = label
+
+
+def _update_kpis(
+    panel: Dict[str, Any],
+    window: StepTimeWindow,
+    step_metric: StepCombinedTimeMetric,
+) -> None:
+    """Update independently valid Step Time KPI values."""
+    st = step_metric.summary
+    kpis = panel["kpis"]
+    kpis["median"].content = theme.kval(f"{st.median_total:.0f}", "ms")
+    kpis["worst"].content = theme.kval(f"{st.worst_total:.0f}", "ms")
+    kpis["gap"].content = (
+        theme.kval("n/a")
+        if st.skew_pct is None
+        else theme.kval(f"{st.skew_pct * 100.0:.0f}", "%")
+    )
+    residual_share = median_iteration_component_share(
+        window.per_rank_timing,
+        "residual_proxy",
+    )
+    kpis["residual"].content = (
+        theme.kval("n/a")
+        if residual_share is None
+        else theme.kval(f"{residual_share * 100.0:.0f}", "%")
+    )
+    kpis["rank"].content = theme.kval(
+        f"r{int(st.worst_rank)}" if st.worst_rank is not None else "—"
+    )
+
+
 def update_model_combined_section(
     panel: Dict[str, Any], payload: Optional[StepCombinedTimeResult]
 ) -> None:
-    if not payload or not getattr(payload, "diagnosis_metrics", None):
+    window = payload.window if payload is not None else None
+    if window is None or not window.metrics:
         if payload is not None and getattr(payload, "had_ok", False):
-            # Had data before, none now: the run stopped reporting and the
-            # computer's stale window expired (the CLI sibling does the
-            # same).
             _clear_view(panel, _EXPIRED_SIG, "window expired")
         return
-    m = _index(payload.diagnosis_metrics)
+    m = _index(window.metrics)
     if "step_time" not in m:
-        # No step envelope means no denominator, so every phase share
-        # would be invented. Clear rather than leave the previous ribbon
-        # and KPIs standing as if they described this window.
         _clear_view(panel, _NO_ENVELOPE_SIG, "step envelope unavailable")
         return
 
-    # A metric absent from the payload was never measured this window: it
-    # renders as an empty segment instead of freezing the whole card on
-    # the last complete view. Measured zeros stay zero-width but count as
-    # measured. H2D events are occurrence-driven (no transfers, no
-    # events), so an absent H2D counts as measured-zero, not as partial
-    # coverage.
-    vals: Dict[str, Optional[float]] = {
-        k: (float(m[k].summary.median_total or 0.0) if k in m else None)
-        for _, k, _ in theme.PHASES
-    }
-    measured = {k: v for k, v in vals.items() if v is not None}
-    st = m["step_time"].summary
-    missing = [key for key, value in vals.items() if value is None]
-    # Aggregate presence is not coverage: a metric measured on rank 0 and
-    # absent on rank 1 still appears in the aggregate window, while the
-    # canonical diagnosis reports INCOMPLETE DATA for it. Re-derive
-    # coverage per rank so this card cannot claim complete data the
-    # engine is calling incomplete.
-    thin = _partially_covered(
-        getattr(payload, "per_rank_timing", None) or {},
-        [key for _, key, _ in theme.PHASES] + ["step_time"],
-    )
-    # Only h2d is exempt. Occurrence-driven governs INTERMITTENT presence
-    # (seen at least once, gaps zero-filled); a phase never seen at all is
-    # unavailable even when it is occurrence-driven, which is what
-    # `_rank_metric_availability` does by only considering metrics it
-    # actually observed.
-    unmeasured = [key for key in missing if key != "h2d"]
-    partial = bool(unmeasured or thin)
-    # Denominator: at least the median iteration envelope (input wait +
-    # step envelope), so unmeasured time shows as empty ribbon space
-    # instead of stretching the measured phases to fill 100%.
+    step_metric = m["step_time"]
+    st = step_metric.summary
+    _update_kpis(panel, window, step_metric)
+    representative = _representative_rank(window)
+    if representative is None:
+        _clear_ribbon(
+            panel,
+            _NO_COHORT_SIG,
+            f"{int(st.steps_used)} aligned steps · no coherent phase cohort",
+        )
+        return
+
+    rank_values = window.per_rank_timing[representative]
+    vals: Dict[str, Optional[float]] = {}
+    for _label, key, _color in theme.PHASES:
+        if key == "h2d":
+            vals[key] = float(rank_values.get(key, 0.0))
+        else:
+            value = rank_values.get(key)
+            vals[key] = float(value) if value is not None else None
+
+    measured = {key: value for key, value in vals.items() if value is not None}
+    unmeasured = [
+        key for key, value in vals.items() if value is None and key != "h2d"
+    ]
+    universe_size = len(window.rank_universe)
+    partial_metrics = [
+        key
+        for key in [phase[1] for phase in theme.PHASES] + ["step_time"]
+        if key != "h2d" and 0 < len(window.ranks_for(key)) < universe_size
+    ]
+
     input_wait_value = vals.get("input_wait")
-    envelope = float(st.median_total or 0.0) + (
+    envelope = float(rank_values["step_time"]) + (
         input_wait_value if input_wait_value is not None else 0.0
     )
     tot = max(sum(measured.values()), envelope) or 1.0
@@ -247,11 +278,12 @@ def update_model_combined_section(
             round(vals[k], 3) if vals[k] is not None else None
             for _, k, _ in theme.PHASES
         )
-        + tuple(sorted(thin))
+        + tuple(sorted(partial_metrics))
         + (
-            round(float(st.median_total or 0), 3),
-            round(float(st.worst_total or 0), 3),
-            int(st.steps_used or 0),
+            representative,
+            round(float(st.median_total), 3),
+            round(float(st.worst_total), 3),
+            int(st.steps_used),
             int(st.worst_rank if st.worst_rank is not None else -1),
         )
     )
@@ -293,33 +325,10 @@ def update_model_combined_section(
     # engine and set via update_step_verdict (fed the model-diagnostics
     # payload), so the card never asserts a classification of its own.
 
-    k = panel["kpis"]
-    # Step Time metrics are already selected-clock per-step averages.
-    k["median"].content = theme.kval(
-        f"{float(st.median_total or 0):.0f}", "ms"
-    )
-    k["worst"].content = theme.kval(f"{float(st.worst_total or 0):.0f}", "ms")
-    k["gap"].content = theme.kval(f"{float(st.skew_pct or 0):.0f}", "%")
-    # A share needs BOTH a numerator and a trustworthy denominator.
-    # residual_proxy derives from step_time and the compute phases, so it
-    # survives an unmeasured input_wait -- but the envelope does not: it
-    # substitutes zero for the missing wait and is then short by an
-    # unknown amount. Reporting a share against it would state a confident
-    # percentage of a total we do not know.
-    denominator_is_whole = vals.get("input_wait") is not None
-    residual_value = vals.get("residual_proxy")
-    if residual_value is not None and tot > 0 and denominator_is_whole:
-        k["residual"].content = theme.kval(
-            f"{residual_value / tot * 100.0:.0f}", "%"
-        )
-    else:
-        k["residual"].content = theme.kval("n/a")
-    k["rank"].content = theme.kval(
-        f"r{int(st.worst_rank)}" if st.worst_rank is not None else "—"
-    )
-    steps_text = f"{int(st.steps_used or 0)} aligned steps"
-    if partial:
-        incomplete = set(unmeasured) | set(thin)
+    steps_text = f"{int(st.steps_used)} aligned steps"
+    steps_text += f" · representative r{representative}"
+    if unmeasured or partial_metrics:
+        incomplete = set(unmeasured) | set(partial_metrics)
         names = [lab for lab, key, _c in theme.PHASES if key in incomplete]
         # step_time has no ribbon segment, so it is not in PHASES, but it
         # can still be the thing that is incomplete. Name it with the same

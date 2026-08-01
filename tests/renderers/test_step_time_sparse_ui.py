@@ -22,6 +22,7 @@ from traceml_ai.renderers.step_time.schema import (
     StepCombinedTimeResult,
     StepCombinedTimeSummary,
 )
+from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def _metric(name: str, value: float) -> StepCombinedTimeMetric:
@@ -58,25 +59,28 @@ def _render_text(renderable) -> str:
 def _sparse_payload() -> StepCombinedTimeResult:
     # forward was never measured: no forward metric, no residual, and the
     # per-rank timing carries no forward key.
+    per_rank_timing = {
+        0: {
+            "input_wait": 2.0,
+            "h2d": 0.0,
+            "backward": 60.0,
+            "optimizer_step": 10.0,
+            "step_time": 90.0,
+            "total_step": 92.0,
+        }
+    }
     return StepCombinedTimeResult(
-        per_rank_timing={
-            0: {
-                "input_wait": 2.0,
-                "h2d": 0.0,
-                "backward": 60.0,
-                "optimizer_step": 10.0,
-                "step_time": 90.0,
-                "total_step": 92.0,
-            }
-        },
-        diagnosis_clock="cpu",
-        diagnosis_metrics=[
-            _metric("input_wait", 2.0),
-            _metric("h2d", 0.0),
-            _metric("backward", 60.0),
-            _metric("optimizer_step", 10.0),
-            _metric("step_time", 90.0),
-        ],
+        window=StepTimeWindow(
+            expected_ranks=(0,),
+            per_rank_timing=per_rank_timing,
+            metrics=[
+                _metric("input_wait", 2.0),
+                _metric("h2d", 0.0),
+                _metric("backward", 60.0),
+                _metric("optimizer_step", 10.0),
+                _metric("step_time", 90.0),
+            ],
+        )
     )
 
 
@@ -120,9 +124,6 @@ def test_cli_drops_dead_view_when_computer_window_expires(
     # is exhausted; the renderer must not re-serve the old table.
     expired = StepCombinedTimeResult(
         status_message="No fresh step-combined data",
-        per_rank_timing={},
-        diagnosis_clock="cpu",
-        diagnosis_metrics=[],
     )
     monkeypatch.setattr(renderer._computer, "compute_cli", lambda: expired)
     stale_text = _render_text(renderer.get_panel_renderable())
@@ -170,30 +171,33 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
             coverage=coverage,
         )
 
-    payload = StepCombinedTimeResult(
-        per_rank_timing={
-            0: {
-                "input_wait": 2.0,
-                "backward": 60.0,
-                "optimizer_step": 10.0,
-                "step_time": 90.0,
-                "total_step": 92.0,
-            },
-            1: {
-                "input_wait": 2.0,
-                "backward": 120.0,
-                "optimizer_step": 10.0,
-                "step_time": 180.0,
-                "total_step": 182.0,
-            },
+    per_rank_timing = {
+        0: {
+            "input_wait": 2.0,
+            "backward": 60.0,
+            "optimizer_step": 10.0,
+            "step_time": 90.0,
+            "total_step": 92.0,
         },
-        diagnosis_clock="cpu",
-        diagnosis_metrics=[
-            _multi_metric("input_wait", 2.0),
-            _multi_metric("backward", 60.0),
-            _multi_metric("optimizer_step", 10.0),
-            _multi_metric("step_time", 90.0),
-        ],
+        1: {
+            "input_wait": 2.0,
+            "backward": 120.0,
+            "optimizer_step": 10.0,
+            "step_time": 180.0,
+            "total_step": 182.0,
+        },
+    }
+    payload = StepCombinedTimeResult(
+        window=StepTimeWindow(
+            expected_ranks=(0, 1),
+            per_rank_timing=per_rank_timing,
+            metrics=[
+                _multi_metric("input_wait", 2.0),
+                _multi_metric("backward", 60.0),
+                _multi_metric("optimizer_step", 10.0),
+                _multi_metric("step_time", 90.0),
+            ],
+        )
     )
     renderer = StepCombinedRenderer(db_path=":memory:")
     monkeypatch.setattr(renderer, "_payload", lambda: payload)

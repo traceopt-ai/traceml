@@ -29,6 +29,10 @@ from traceml_ai.diagnostics.trends import (
 )
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.utils import fmt_time_run
+from traceml_ai.utils.step_time_window import (
+    diagnose_step_time_window,
+    median_iteration_component_share,
+)
 
 from .compute import StepCombinedComputer
 from .schema import StepCombinedTimeMetric, StepCombinedTimeResult
@@ -70,16 +74,18 @@ class StepCombinedRenderer(BaseRenderer):
         """
         CLI compute is summary-only (cheap).
 
-        The computer already bridges transient gaps from its own last-ok
-        window; once that expires the empty result is rendered as-is so a
-        dead run can never keep showing its last complete table.
+        The computer bridges transient empty reads from its own last-ok
+        window. Persisted rows are not treated as proof of producer liveness.
         """
         return self._computer.compute_cli()
 
     def get_panel_renderable(self) -> Panel:
         payload = self._payload()
 
-        if not payload.diagnosis_metrics and not self._computer.had_ok:
+        window = payload.window
+        if (
+            window is None or not window.metrics
+        ) and not self._computer.had_ok:
             # Never had data: normal warm-up, keep the calm waiting state
             # instead of alarming with a NO DATA diagnosis.
             return Panel(
@@ -87,19 +93,21 @@ class StepCombinedRenderer(BaseRenderer):
                 title="Model Step Summary",
             )
 
-        diag = build_step_diagnosis(
-            payload.diagnosis_metrics,
-            thresholds=LIVE_STEP_TIME_POLICY.thresholds,
-            per_rank_timing=payload.per_rank_timing,
-            diagnosis_clock=payload.diagnosis_clock,
-            training_strategy=payload.training_strategy,
+        diag = (
+            diagnose_step_time_window(
+                window,
+                policy=LIVE_STEP_TIME_POLICY,
+                training_strategy=payload.training_strategy,
+            ).primary
+            if window is not None
+            else build_step_diagnosis([])
         )
         diag_text = format_cli_diagnosis(diag)
-        metrics = _table_metrics(payload.diagnosis_metrics)
+        metrics = _table_metrics(window.metrics if window is not None else [])
 
         if not metrics:
-            # Had data before, none now: the run stopped reporting and
-            # the computer's stale window expired.
+            # Had data before, none now: the last-good empty-read bridge
+            # expired.
             return Panel(
                 Group(
                     diag_text,
@@ -177,7 +185,7 @@ class StepCombinedRenderer(BaseRenderer):
             )
             table.add_row(
                 "Skew (%)",
-                *[f"+{m.summary.skew_pct * 100:.1f}%" for m in metrics],
+                *[_format_skew(m.summary.skew_pct) for m in metrics],
             )
 
         table.add_row("")
@@ -191,27 +199,20 @@ class StepCombinedRenderer(BaseRenderer):
             table.add_row("")
 
         # Optional residual share line (still meaningful in both modes)
-        if (
-            step_metric
-            and residual_metric
-            and step_metric.summary.worst_total > 0
-        ):
-            denom = (
-                step_metric.summary.median_total
-                if not single_rank
-                else step_metric.summary.worst_total
+        if step_metric and residual_metric and window is not None:
+            residual_share = median_iteration_component_share(
+                window.per_rank_timing,
+                "residual_proxy",
             )
-            residual_share = (
-                residual_metric.summary.median_total / denom
-                if denom > 0
-                else 0.0
-            )
-
             table.add_row(
                 "Residual Share (%)",
                 *[
                     (
-                        f"[red]{residual_share * 100:.1f}%[/red]"
+                        (
+                            f"[red]{residual_share * 100:.1f}%[/red]"
+                            if residual_share is not None
+                            else "n/a"
+                        )
                         if m.metric == "residual_proxy"
                         else ""
                     )
@@ -224,7 +225,8 @@ class StepCombinedRenderer(BaseRenderer):
 
         footer = (
             "\n\n[dim]"
-            f"Clock={payload.diagnosis_clock.upper()} | "
+            "Clock="
+            f"{(window.clock if window is not None else 'cpu').upper()} | "
             "IW=input wait | H2D=host-to-device | FWD=forward | "
             "BWD=backward | OPT=optimizer | STEP=traced step | "
             "RESIDUAL=STEP−H2D−FWD−BWD−OPT"
@@ -258,6 +260,11 @@ def _table_metrics(
         metric for metric in metrics if metric.metric not in TABLE_METRIC_ORDER
     ]
     return ordered + extras
+
+
+def _format_skew(value: float | None) -> str:
+    """Format a skew ratio without turning unavailable into zero."""
+    return "n/a" if value is None else f"+{value * 100:.1f}%"
 
 
 def _metric_trend_label(metric, single_rank: bool) -> str:

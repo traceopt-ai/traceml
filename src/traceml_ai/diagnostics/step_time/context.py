@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, Mapping, Optional, Sequence, Tuple
 
 from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
-from traceml_ai.utils.step_time_window import worst_rank_by_total_step
+from traceml_ai.utils.step_time_window import (
+    median_iteration_component_share,
+    worst_rank_by_total_step,
+)
 from traceml_ai.utils.training_strategy import normalize_training_strategy
 
 if TYPE_CHECKING:
@@ -32,7 +35,7 @@ class ComputeSignal:
 
     label: str
     share: float
-    skew: float
+    skew: Optional[float]
     median_ms: float
     worst_ms: float
     excess_ms: float
@@ -118,8 +121,8 @@ class StepTimeAnalysisContext:
     input_bound_share: Optional[float]
     h2d_share: Optional[float]
 
-    input_bound_skew: float
-    compute_skew: float
+    input_bound_skew: Optional[float]
+    compute_skew: Optional[float]
     input_bound_worst_rank: Optional[int]
     diagnosis_clock: str
     input_wait_total: float
@@ -131,7 +134,8 @@ class StepTimeAnalysisContext:
     rank_values: Dict[str, Dict[int, float]]
     rank_straggler: Optional[_RankStragglerEvidence]
 
-    ranks_observed: int = 0
+    rank_population_size: int = 0
+    ranks_with_rows: int = 0
     signal_rank_counts: Dict[str, int] = field(default_factory=dict)
     straggler_eligible_ranks: int = 0
 
@@ -230,12 +234,14 @@ def metric_skew(
     metric: Optional[StepCombinedTimeMetric],
     *,
     single_rank: bool,
-) -> float:
+) -> Optional[float]:
     """
-    Return cross-rank skew for multi-rank runs, else 0.
+    Return cross-rank skew, or ``None`` without two measured ranks.
     """
     if metric is None or single_rank:
-        return 0.0
+        return None
+    if metric.summary.skew_pct is None:
+        return None
     return non_negative_finite(metric.summary.skew_pct)
 
 
@@ -492,11 +498,65 @@ def largest_compute_phase(
     optimizer: Optional[StepCombinedTimeMetric],
     step_total: float,
     single_rank: bool,
+    per_rank_timing: Optional[Mapping[int, Mapping[str, float]]] = None,
 ) -> Optional[ComputeSignal]:
     """
-    Pick the compute component with the largest typical share.
+    Pick the largest compute component from one coherent rank cohort.
+
+    When per-rank timing is available, every compared phase uses the same
+    ranks carrying all compute components plus the iteration envelope. The
+    aggregate-metric fallback exists only for legacy callers without rank rows.
     """
     candidates: list[ComputeSignal] = []
+
+    if per_rank_timing is not None:
+        required = {
+            "input_wait",
+            "step_time",
+            "forward",
+            "backward",
+            "optimizer_step",
+        }
+        cohort = {
+            int(rank): values
+            for rank, values in per_rank_timing.items()
+            if required.issubset(values)
+        }
+        if not cohort:
+            return None
+        iteration_total = _median(
+            tuple(
+                non_negative_finite(values["input_wait"])
+                + non_negative_finite(values["step_time"])
+                for values in cohort.values()
+            )
+        )
+        for label, key in (
+            ("Forward", "forward"),
+            ("Backward", "backward"),
+            ("Optimizer", "optimizer_step"),
+        ):
+            phase_values = {
+                rank: non_negative_finite(values[key])
+                for rank, values in cohort.items()
+            }
+            median, worst, worst_rank, excess = _rank_stats(phase_values)
+            if median <= 0.0:
+                continue
+            candidates.append(
+                ComputeSignal(
+                    label=label,
+                    share=share(median, iteration_total),
+                    skew=(excess / median if len(phase_values) >= 2 else None),
+                    median_ms=median,
+                    worst_ms=worst,
+                    excess_ms=excess,
+                    worst_rank=worst_rank,
+                )
+            )
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.median_ms)
 
     for label, metric in (
         ("Forward", forward),
@@ -569,41 +629,12 @@ def compute_rank_values_from_components(
     return out
 
 
-def _median_iteration_component_share(
-    per_rank_timing: Dict[int, Dict[str, float]],
-    component: str,
-) -> Optional[float]:
-    """Return the median selected-clock iteration share for one component.
-
-    Returns ``None`` when no rank measured the component together with
-    its iteration anchors; a measured-zero share stays ``0.0`` so rules
-    can distinguish "signal absent" from "signal present and small".
-    """
-    shares = []
-    for values in per_rank_timing.values():
-        if not {
-            "input_wait",
-            "step_time",
-            component,
-        }.issubset(values):
-            continue
-        iteration = non_negative_finite(
-            values["input_wait"]
-        ) + non_negative_finite(values["step_time"])
-        if iteration > 0.0:
-            shares.append(
-                share(non_negative_finite(values[component]), iteration)
-            )
-    if not shares:
-        return None
-    return _median(shares)
-
-
 def build_step_time_context(
     *,
     metrics: Sequence[StepCombinedTimeMetric],
     thresholds: "DiagnosisThresholds",
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    expected_ranks: Optional[Sequence[int]] = None,
     diagnosis_clock: str = "cpu",
     training_strategy: str = "ddp",
 ) -> StepTimeAnalysisContext:
@@ -646,6 +677,7 @@ def build_step_time_context(
         optimizer=optimizer_metric,
         step_total=step_total,
         single_rank=single_rank,
+        per_rank_timing=per_rank_timing,
     )
 
     rank_values = {
@@ -712,11 +744,12 @@ def build_step_time_context(
         input_step_worst if single_rank else input_step_median
     )
     iteration_time_total = input_wait_total + input_bound_step_total
-    input_bound_skew = (
-        0.0
-        if single_rank or input_wait_median <= 0.0
-        else input_slack / input_wait_median
-    )
+    input_bound_skew = None
+    if len(input_wait_rank_values) >= 2:
+        if input_wait_median > 0.0:
+            input_bound_skew = input_slack / input_wait_median
+        elif input_wait_worst <= 0.0:
+            input_bound_skew = 0.0
     rank_straggler, straggler_eligible_ranks = _build_rank_straggler_evidence(
         per_rank_timing=local_per_rank_timing,
         score_threshold=thresholds.straggler_score_warn,
@@ -740,9 +773,12 @@ def build_step_time_context(
     }
     compute_rank_values = compute_rank_values_from_components(rank_values)
     _compute_median, _, _, _compute_slack = _rank_stats(compute_rank_values)
-    compute_skew_value = (
-        (_compute_slack / _compute_median) if _compute_median > 0.0 else 0.0
-    )
+    compute_skew_value = None
+    if len(compute_rank_values) >= 2:
+        if _compute_median > 0.0:
+            compute_skew_value = _compute_slack / _compute_median
+        elif max(compute_rank_values.values(), default=0.0) <= 0.0:
+            compute_skew_value = 0.0
 
     return StepTimeAnalysisContext(
         thresholds=thresholds,
@@ -760,19 +796,19 @@ def build_step_time_context(
         step_total=step_total,
         residual_total=residual_total,
         compute_total=compute_total_value,
-        residual_share=_median_iteration_component_share(
+        residual_share=median_iteration_component_share(
             local_per_rank_timing,
             "residual_proxy",
         ),
-        compute_share=_median_iteration_component_share(
+        compute_share=median_iteration_component_share(
             local_per_rank_timing,
             "compute",
         ),
-        input_bound_share=_median_iteration_component_share(
+        input_bound_share=median_iteration_component_share(
             local_per_rank_timing,
             "input_wait",
         ),
-        h2d_share=_median_iteration_component_share(
+        h2d_share=median_iteration_component_share(
             local_per_rank_timing,
             "h2d",
         ),
@@ -788,7 +824,12 @@ def build_step_time_context(
         largest_compute=largest_compute,
         rank_values=rank_values,
         rank_straggler=rank_straggler,
-        ranks_observed=len(local_per_rank_timing),
+        rank_population_size=(
+            len({int(rank) for rank in expected_ranks})
+            if expected_ranks is not None
+            else len(local_per_rank_timing)
+        ),
+        ranks_with_rows=len(local_per_rank_timing),
         signal_rank_counts=signal_rank_counts,
         straggler_eligible_ranks=straggler_eligible_ranks,
     )
