@@ -40,8 +40,7 @@ def _add_launch_args(parser: argparse.ArgumentParser) -> None:
             "'summary': end-of-run report, supports single-node and "
             "multi-node multi-GPU. "
             "'cli' and 'dashboard': live views, intended for single-node "
-            "runs, including single-node multi-GPU. Default: dashboard on "
-            "single-node runs, summary on multi-node runs."
+            "runs, including single-node multi-GPU. Default: summary."
         ),
     )
     parser.add_argument(

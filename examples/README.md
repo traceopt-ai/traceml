@@ -28,9 +28,9 @@ If you only try one example first, use:
 traceml run examples/quickstart.py
 ```
 
-Single-node runs open the dashboard by default at
-`http://127.0.0.1:8765`. Keep the TraceML final summary JSON if you want to
-compare runs later with `traceml compare`.
+Summary mode is the default, so this prints the final diagnosis and writes the
+JSON/TXT artifacts without opening a live UI. Keep the final summary JSON if
+you want to compare runs later with `traceml compare`.
 
 ---
 
@@ -94,17 +94,23 @@ traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --summar
 
 ## How to run examples
 
-Standard run with the dashboard:
+Standard run with the default summary:
 
 ```bash
 traceml run examples/quickstart.py
 ```
 
-The dashboard listens on `http://127.0.0.1:8765` by default. Choose another
-local browser port with `--dashboard-port`:
+For the live browser dashboard, select dashboard mode explicitly. It listens
+on `http://127.0.0.1:8765` by default:
 
 ```bash
-traceml run examples/quickstart.py --dashboard-port=9000
+traceml run examples/quickstart.py --mode=dashboard
+```
+
+Choose another local browser port with `--dashboard-port`:
+
+```bash
+traceml run examples/quickstart.py --mode=dashboard --dashboard-port=9000
 ```
 
 On a remote machine, forward that dashboard port before opening the browser on

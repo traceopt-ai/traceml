@@ -2,14 +2,26 @@
 
 Get from install to your first TraceML diagnosis in a few minutes.
 
+TraceML diagnoses input, compute, waiting, memory, and distributed-rank
+bottlenecks in PyTorch training. It complements experiment trackers and deeper
+operator- or kernel-level profilers by showing you where to investigate first.
+
 TraceML runs with your existing PyTorch script and writes a structured
 `final_summary.json` plus a human-readable `final_summary.txt` at the end of
 the run.
 
 ## 1. Install
 
+With pip:
+
 ```bash
 pip install traceml-ai
+```
+
+Or in a project managed by [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv add traceml-ai
 ```
 
 Using Hugging Face, Lightning, Ray, W&B, or MLflow? See
@@ -41,34 +53,8 @@ Wrap the work from `zero_grad(...)` through `optimizer.step()`.
 traceml run train.py
 ```
 
-This starts the live browser dashboard and prints the local URL, usually
-`http://127.0.0.1:8765`. Open it to see live bottleneck diagnostics while the
-job runs.
-
-<details>
-<summary>Running on a remote server?</summary>
-
-SSH into the server and start TraceML there:
-
-```bash
-traceml run train.py
-```
-
-TraceML prints a tunnel command like this:
-
-```bash
-ssh -L 8765:127.0.0.1:8765 user@remote-host
-```
-
-Copy that tunnel command into a local terminal on your laptop. Leave the
-training command running on the server, then open `http://127.0.0.1:8765`
-locally.
-
-</details>
-
-If you want a live view without a browser or SSH tunnel, use
-`traceml run train.py --mode=cli`. Use `traceml run train.py --mode=summary`
-for headless jobs, CI, DDP, FSDP, Slurm, or multi-node runs.
+By default, TraceML runs without a live UI, prints a compact final diagnosis
+when training ends, and writes `final_summary.json` and `final_summary.txt`.
 
 To try the same flow with a checked-in example first:
 
@@ -83,28 +69,67 @@ logs/<run_name>/final_summary.json
 logs/<run_name>/final_summary.txt
 ```
 
-Add `--html-report` (`traceml run train.py --html-report`) to also write a
-shareable `final_summary.html`. See
-[Reading the output](reading-output.md#shareable-html-report).
+<details>
+<summary><strong>Want live diagnostics during training?</strong></summary>
 
-TraceML finalizes summaries after training by settling late telemetry, closing
-SQLite cleanly, and checkpointing WAL. Large distributed jobs can raise that
-end-of-run budget with `--finalize-timeout-sec <seconds>`.
+Use terminal mode for a live view over a local shell or SSH session:
 
-In `--mode=summary`, if training finishes but TraceML cannot produce
-`final_summary.json`, `traceml run` exits non-zero, so a silently missing
-summary fails loudly instead of passing. (Reused history databases keep any
-rows written by older releases; new runs only write the structured projection
-tables.)
+```bash
+traceml run train.py --mode=cli
+```
 
-For DDP, FSDP, and multi-node launches, see
-[Distributed Training](distributed-training.md).
+Use dashboard mode for the live browser view:
 
-### Alternative: launch your script directly
+```bash
+traceml run train.py --mode=dashboard
+```
 
-If you would rather launch training yourself with `python` or `torchrun`, start
-the TraceML aggregator once, then run your script directly. `traceml.init(...)`
-connects to the running aggregator:
+When training runs on a remote server, TraceML prints an SSH tunnel command
+like this:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Run that command on your local machine, leave training running remotely, and
+open `http://127.0.0.1:8765`. Live views do not change the saved end-of-run
+artifacts. See [How to Read TraceML Output](reading-output.md#what-the-summary-cli-and-local-ui-show).
+
+</details>
+
+<details>
+<summary><strong>Try TraceML in Colab</strong></summary>
+
+- Any PyTorch loop: data-loading bottleneck before and after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb)
+- Hugging Face Trainer: data-loading bottleneck before and after [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/huggingface_dataloading_bottleneck.ipynb)
+
+</details>
+
+<details>
+<summary><strong>Try TraceML with Docker</strong></summary>
+
+From a repository checkout, build the image and run the default CPU demo:
+
+```bash
+docker build -t traceml-demo .
+docker run --rm traceml-demo
+```
+
+The self-contained slow-DataLoader demo requires no external dataset or GPU
+and should finish with an input-bound diagnosis. If the host has the NVIDIA
+Container Toolkit and a CUDA-compatible PyTorch build, optionally expose the
+GPU:
+
+```bash
+docker run --rm --gpus all traceml-demo
+```
+
+</details>
+
+<details>
+<summary><strong>Launching with <code>python</code> or <code>torchrun</code> directly?</strong></summary>
+
+Start one TraceML aggregator, then launch the instrumented script yourself:
 
 ```bash
 # terminal 1
@@ -114,28 +139,31 @@ traceml serve --aggregator-host 127.0.0.1 --aggregator-port 29765
 python train.py
 ```
 
-For torchrun and multi-node, bind the aggregator so other nodes can connect:
+See [Direct launch with `traceml serve`](public-api.md#direct-launch-with-traceml-serve)
+for `torchrun`, multi-node networking, configuration precedence, and behavior
+when the aggregator cannot be reached.
 
-```bash
-# aggregator node: --nnodes x --nproc-per-node = total workers, so the
-# aggregator waits for every rank before finalizing
-traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
-  --aggregator-port 29765 --nnodes <N> --nproc-per-node <M>
+</details>
 
-# each training node: point workers at node 0's aggregator, then launch
-TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
-  torchrun ... train.py
-```
+Summary mode is also the default for DDP, FSDP, Slurm, and multi-node runs.
+Follow [Distributed Training](distributed-training.md) or the
+[Slurm guide](slurm.md) for the supported launch patterns and current
+limitations.
 
-In the direct-launch path you cannot pass `traceml run` flags, so runtime
-settings come from `traceml.init(...)` arguments, then `TRACEML_*` environment
-variables, then `traceml.yaml`, then built-in defaults. The aggregator endpoint
-is set with `traceml serve` flags. If the aggregator is not reachable,
-`traceml.init(...)` prints one warning and continues without tracing (a no-op),
-so instrumentation never crashes your training run. Pass
-`traceml.init(on_missing_aggregator="raise")` to fail hard instead, or
-`traceml.init(disabled=True)` to silence it entirely. See
-[Public API](public-api.md#direct-launch-with-traceml-serve).
+<details>
+<summary><strong>Advanced finalization behavior</strong></summary>
+
+TraceML waits for late telemetry before writing the final artifacts. Large
+distributed jobs can raise that end-of-run budget with
+`--finalize-timeout-sec <seconds>`.
+
+In `--mode=summary`, if training finishes but TraceML cannot produce
+`final_summary.json`, `traceml run` exits non-zero, so a silently missing
+summary fails loudly instead of passing. The
+[Distributed Training guide](distributed-training.md) explains timeout tuning
+for larger jobs.
+
+</details>
 
 ## 4. Read Your Diagnosis
 
@@ -177,18 +205,24 @@ so instrumentation never crashes your training run. Pass
 In this example, rank 0 is the slow input rank, which can hold back the aligned
 distributed step.
 
+TraceML also triages input-pipeline delays, compute-heavy steps, waiting and
+residual time, memory growth, and run regressions. Start with
+[How to Read TraceML Output](reading-output.md), then choose the matching
+troubleshooting guide below when you need a focused investigation.
+
 ## Useful Next Commands
 
-Live terminal view:
+Reprint a saved summary:
 
 ```bash
-traceml run train.py --mode=cli
+traceml view logs/<run_name>/final_summary.json
 ```
 
-Browser view, explicit:
+Create a self-contained HTML report during the run or from a saved summary:
 
 ```bash
-traceml run train.py --mode=dashboard
+traceml run train.py --html-report
+traceml view logs/<run_name>/final_summary.json --html
 ```
 
 Compare two runs:
@@ -199,8 +233,16 @@ traceml compare run_a/final_summary.json run_b/final_summary.json
 
 ## Next Steps
 
-- [How to Read Output](reading-output.md)
-- [Compare Runs](compare.md)
-- [Distributed Training](distributed-training.md)
-- [Use With Your Stack](integrations.md)
-- [FAQ](faq.md)
+- **Understand the result:** [How to Read Output](reading-output.md) and
+  [Compare Runs](compare.md).
+- **Investigate a bottleneck:** [slow training](../guides/slow-pytorch-training.md),
+  [input pipeline](../guides/pytorch-input-pipeline-bottleneck.md),
+  [low GPU utilization](../guides/low-gpu-utilization-pytorch.md),
+  [DDP rank stragglers](../guides/ddp-slow-training-rank-straggler.md), or
+  [memory creep](../guides/pytorch-memory-creep.md).
+- **Use your training stack:** [Hugging Face, Lightning, Ray, DeepSpeed,
+  W&B, and MLflow](integrations.md).
+- **Run at scale:** [Distributed Training](distributed-training.md) and
+  [Slurm](slurm.md).
+- **Check behavior and limitations:** [FAQ](faq.md) and
+  [Public API](public-api.md).

@@ -229,7 +229,7 @@ Yes.
 Run:
 
 ```bash
-traceml run train.py
+traceml run train.py --mode=dashboard
 ```
 
 The local UI is intended for single-node runs, including single-node
@@ -260,19 +260,18 @@ command running on the server, then open `http://127.0.0.1:8765` locally.
 
 ## What is the default run mode?
 
-`traceml run train.py` uses live dashboard mode on single-node runs. The
-dashboard listens on `http://127.0.0.1:8765` by default. When launched with
-`--nnodes > 1`, TraceML uses summary mode by default.
+`traceml run train.py` uses summary mode for single-node and multi-node runs.
+It skips the live UI, prints the final diagnosis, and writes
+`final_summary.json` plus `final_summary.txt`.
 
-You can make summary mode explicit:
+Select the browser dashboard explicitly on a single-node run:
 
 ```bash
-traceml run train.py --mode=summary
+traceml run train.py --mode=dashboard
 ```
 
-Summary mode skips live UI and focuses on the final end-of-run summary. It is
-a good fit when you want lower terminal noise or want to forward TraceML
-summary fields into W&B or MLflow.
+The dashboard listens on `http://127.0.0.1:8765` by default. Use
+`--mode=cli` instead when you want live diagnostics in the terminal.
 
 ---
 

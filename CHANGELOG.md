@@ -7,6 +7,9 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
+- Summary mode is now the default for `traceml run`, `traceml watch`,
+  `traceml serve`, and direct SDK launches. To retain the previous single-node
+  behavior, add `--mode=dashboard`; use `--mode=cli` for a live terminal view.
 - Package version is now derived from the git tag (`setuptools-scm`)
   instead of a hand-edited string in `pyproject.toml`.
 - Releases publish to PyPI automatically on a `v*` tag push, via PyPI

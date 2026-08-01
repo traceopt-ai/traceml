@@ -17,7 +17,9 @@ from traceml_ai.launcher.cli import build_parser
 from traceml_ai.launcher.commands import (
     _dashboard_access_box,
     _launch_defaults_for_topology,
+    _require_dashboard_dependencies,
     _resolve_serve_settings,
+    launch_process,
     resolve_existing_script_path,
     run_view,
     validate_launch_args,
@@ -102,6 +104,16 @@ def test_serve_maps_flags_into_aggregator_settings(monkeypatch) -> None:
     assert settings.aggregator.connect_host == "10.0.0.9"
     assert settings.aggregator.bind_host == "0.0.0.0"
     assert settings.aggregator.port == 40000
+
+
+def test_serve_defaults_to_summary(monkeypatch, tmp_path) -> None:
+    for var in ("TRACEML_UI_MODE", "TRACEML_MODE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    args = build_parser().parse_args(["serve"])
+
+    assert _resolve_serve_settings(args).mode == "summary"
 
 
 def test_serve_threads_expected_world_size(monkeypatch) -> None:
@@ -266,12 +278,11 @@ def test_build_parser_accepts_disable_traceml_aliases() -> None:
     assert underscored.disable_traceml is True
 
 
-def test_launch_defaults_use_dashboard_for_single_node_topologies() -> None:
-    defaults = {"mode": "summary", "interval": 2.0}
+def test_launch_defaults_use_summary_for_single_node_topologies() -> None:
+    defaults = {"mode": "dashboard", "interval": 2.0}
 
     assert (
-        _launch_defaults_for_topology(defaults, nnodes=1)["mode"]
-        == "dashboard"
+        _launch_defaults_for_topology(defaults, nnodes=1)["mode"] == "summary"
     )
 
 
@@ -357,6 +368,29 @@ def test_summary_mode_requires_history() -> None:
 
     with pytest.raises(SystemExit):
         validate_launch_args(args)
+
+
+@pytest.mark.parametrize("command", ["run", "watch"])
+def test_implicit_summary_mode_requires_history(
+    command, monkeypatch, tmp_path
+) -> None:
+    for var in ("TRACEML_UI_MODE", "TRACEML_MODE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.chdir(tmp_path)
+    script = tmp_path / "train.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+    args = build_parser().parse_args([command, str(script), "--no-history"])
+
+    with pytest.raises(SystemExit, match="mode=summary requires history"):
+        launch_process(str(script), args)
+
+
+def test_explicit_live_mode_allows_no_history() -> None:
+    args = build_parser().parse_args(
+        ["run", "train.py", "--mode=cli", "--no-history"]
+    )
+
+    validate_launch_args(args)
 
 
 def test_disabled_launch_validation_skips_traceml_only_checks(
@@ -587,6 +621,17 @@ def test_dashboard_mode_requires_dashboard_dependencies(monkeypatch) -> None:
 
     with pytest.raises(SystemExit, match="pip install -U traceml-ai"):
         validate_launch_args(args)
+
+
+def test_summary_mode_does_not_require_dashboard_dependencies(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "traceml_ai.launcher.commands.importlib.util.find_spec",
+        lambda package: None,
+    )
+
+    _require_dashboard_dependencies("summary")
 
 
 def test_implicit_mode_defers_dashboard_dependency_check_until_config_resolution(
