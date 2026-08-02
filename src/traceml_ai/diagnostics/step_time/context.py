@@ -1,24 +1,21 @@
-"""
-Prepared analysis context for step-time diagnostics.
+"""Prepared facts consumed by Step Time diagnosis rules.
 
-This module centralizes all metric normalization and derived timing signals so
-individual diagnosis rules can stay small and focused. The intent is:
-
-- build one context from one analyzed window
-- let multiple rules evaluate that same context
-- avoid re-computing totals, shares, skew, and rank attribution in each rule
+The analyzer owns timing semantics and reusable statistics. This module adds
+only diagnosis-specific interpretation, such as thresholded rank-straggler
+evidence. It reads the typed :class:`StepTimeWindow` directly and never
+reconstructs the historical rank/metric dictionary.
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, Mapping, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
-from traceml_ai.step_time.model import StepTimeMetric
-from traceml_ai.utils.step_time_window import (
-    median_iteration_component_share,
-    worst_rank_by_total_step,
+from traceml_ai.step_time.model import (
+    StepTimeMetric,
+    StepTimeRankFacts,
+    StepTimeWindow,
 )
 from traceml_ai.utils.training_strategy import normalize_training_strategy
 
@@ -28,10 +25,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ComputeSignal:
-    """
-    Dominant compute-phase signal used for attribution and bound
-    classification.
-    """
+    """Dominant compute phase for diagnosis attribution."""
 
     label: str
     share: float
@@ -44,14 +38,7 @@ class ComputeSignal:
 
 @dataclass(frozen=True)
 class _RankStragglerPair:
-    """
-    Culprit/victim pair for visible distributed rank skew.
-
-    The culprit is the rank with the smallest visible synchronization phase:
-    it likely arrived late and therefore waited least. The victim is the upper
-    actual median rank by that same visible phase, representing a real rank
-    that paid typical waiting cost.
-    """
+    """Real culprit/victim ranks ordered by visible synchronization cost."""
 
     culprit_rank: int
     victim_rank: int
@@ -62,14 +49,7 @@ class _RankStragglerPair:
 
 @dataclass(frozen=True)
 class _RankStragglerEvidence:
-    """
-    Culprit-first rank straggler evidence.
-
-    The score is visible wait cost paid by the victim rank, normalized by that
-    victim's selected-clock iteration time. Component attribution compares the
-    culprit's own input/H2D/forward values against the victim rank and names a
-    cause only when it covers enough of the visible cost.
-    """
+    """Thresholded distributed-rank evidence shared by the rule set."""
 
     kind: str
     status: str
@@ -90,15 +70,10 @@ class _RankStragglerEvidence:
 
 @dataclass(frozen=True)
 class StepTimeAnalysisContext:
-    """
-    Normalized step-time analysis state shared by all step-time diagnosis
-    rules.
-
-    `training_strategy` is advisory run context from runtime metadata. It is
-    not a public metric; rules may use it to choose attribution logic.
-    """
+    """Diagnosis-ready view over one canonical analyzed window."""
 
     thresholds: "DiagnosisThresholds"
+    window: StepTimeWindow
     single_rank: bool
     steps_used: int
     overall_worst_rank: Optional[int]
@@ -130,23 +105,16 @@ class StepTimeAnalysisContext:
     iteration_time_total: float
 
     largest_compute: Optional[ComputeSignal]
-
-    rank_values: Dict[str, Dict[int, float]]
     rank_straggler: Optional[_RankStragglerEvidence]
-
-    rank_population_size: int = 0
-    ranks_with_rows: int = 0
-    signal_rank_counts: Dict[str, int] = field(default_factory=dict)
-    straggler_eligible_ranks: int = 0
+    missing_signals: tuple[str, ...] = ()
+    signal_coverage: tuple[tuple[str, str], ...] = ()
 
 
 def non_negative_finite(value: float) -> float:
-    """
-    Return a safe non-negative finite float.
-    """
+    """Return a finite non-negative float, or zero for unusable input."""
     try:
         out = float(value)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
         return 0.0
     if not math.isfinite(out):
         return 0.0
@@ -154,9 +122,7 @@ def non_negative_finite(value: float) -> float:
 
 
 def share(value: float, total: float) -> float:
-    """
-    Return a safe non-negative share in `[0, 1]`.
-    """
+    """Return a safe non-negative share."""
     total_safe = non_negative_finite(total)
     if total_safe <= 0.0:
         return 0.0
@@ -164,49 +130,41 @@ def share(value: float, total: float) -> float:
 
 
 def _median(values: Sequence[float]) -> float:
-    """Return the median of safe non-negative finite values."""
     clean = sorted(non_negative_finite(value) for value in values)
-    n = len(clean)
-    if n == 0:
+    if not clean:
         return 0.0
-    mid = n // 2
-    if n % 2:
-        return float(clean[mid])
-    return float((clean[mid - 1] + clean[mid]) / 2.0)
+    middle = len(clean) // 2
+    if len(clean) % 2:
+        return float(clean[middle])
+    return float((clean[middle - 1] + clean[middle]) / 2.0)
 
 
 def _rank_stats(
-    rank_values: Dict[int, float],
+    values: Sequence[tuple[int, float]],
 ) -> tuple[float, float, Optional[int], float]:
-    """Return median, worst value, worst rank, and worst-minus-median."""
-    if not rank_values:
+    """Return median, worst, worst rank, and worst-minus-median."""
+    if not values:
         return 0.0, 0.0, None, 0.0
-    clean = {
-        int(rank): non_negative_finite(value)
-        for rank, value in rank_values.items()
-    }
-    median = _median(tuple(clean.values()))
-    worst_rank = max(clean, key=lambda rank: (clean[rank], -int(rank)))
-    worst = clean[worst_rank]
-    return median, worst, int(worst_rank), max(0.0, worst - median)
+    clean = tuple(
+        (int(rank), non_negative_finite(value)) for rank, value in values
+    )
+    median = _median(tuple(value for _rank, value in clean))
+    worst_rank, worst = max(clean, key=lambda item: (item[1], -item[0]))
+    return median, worst, worst_rank, max(0.0, worst - median)
 
 
 def metric_median_total(metric: Optional[StepTimeMetric]) -> float:
-    """
-    Return the median-rank total for one metric.
-    """
+    """Return the mathematical median for one metric."""
     if metric is None:
         return 0.0
-    return non_negative_finite(metric.summary.median_total)
+    return non_negative_finite(metric.median_total)
 
 
 def metric_worst_total(metric: Optional[StepTimeMetric]) -> float:
-    """
-    Return the worst-rank total for one metric.
-    """
+    """Return the largest measured-rank value for one metric."""
     if metric is None:
         return 0.0
-    return non_negative_finite(metric.summary.worst_total)
+    return non_negative_finite(metric.worst_total)
 
 
 def metric_total(
@@ -214,20 +172,12 @@ def metric_total(
     *,
     single_rank: bool,
 ) -> float:
-    """
-    Return the visible total used for diagnosis.
-
-    - single-rank: use worst_total
-    - multi-rank: use median_total
-    """
-    if metric is None:
-        return 0.0
-    raw = (
-        metric.summary.worst_total
+    """Return the single-rank value or multi-rank mathematical median."""
+    return (
+        metric_worst_total(metric)
         if single_rank
-        else metric.summary.median_total
+        else metric_median_total(metric)
     )
-    return non_negative_finite(raw)
 
 
 def metric_skew(
@@ -235,27 +185,21 @@ def metric_skew(
     *,
     single_rank: bool,
 ) -> Optional[float]:
-    """
-    Return cross-rank skew, or ``None`` without two measured ranks.
-    """
-    if metric is None or single_rank:
+    """Return cross-rank skew when at least two ranks measured a metric."""
+    if metric is None or single_rank or metric.skew_pct is None:
         return None
-    if metric.summary.skew_pct is None:
-        return None
-    return non_negative_finite(metric.summary.skew_pct)
+    return non_negative_finite(metric.skew_pct)
 
 
 def metric_worst_rank(
     metric: Optional[StepTimeMetric],
 ) -> Optional[int]:
-    """
-    Return the metric's worst rank, if available.
-    """
-    if metric is None or metric.summary.worst_rank is None:
+    """Return the rank carrying one metric's worst value."""
+    if metric is None or metric.worst_rank is None:
         return None
     try:
-        return int(metric.summary.worst_rank)
-    except Exception:
+        return int(metric.worst_rank)
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -266,48 +210,32 @@ def compute_total(
     optimizer: Optional[StepTimeMetric],
     single_rank: bool,
 ) -> float:
-    """
-    Return typical compute total for the step.
-    """
-    return (
-        metric_total(forward, single_rank=single_rank)
-        + metric_total(backward, single_rank=single_rank)
-        + metric_total(optimizer, single_rank=single_rank)
+    """Return the visible aggregate compute total used by diagnosis."""
+    return sum(
+        metric_total(metric, single_rank=single_rank)
+        for metric in (forward, backward, optimizer)
     )
 
 
 def metric_excess(metric: Optional[StepTimeMetric]) -> float:
-    """
-    Return worst-vs-median excess for one timing metric.
-    """
+    """Return one metric's worst-minus-median excess."""
     return max(0.0, metric_worst_total(metric) - metric_median_total(metric))
 
 
 def _rank_straggler_pair(
-    visible_values: Dict[int, float],
+    visible_values: Sequence[tuple[int, float]],
 ) -> Optional[_RankStragglerPair]:
-    """
-    Return the culprit and victim ranks for visible synchronization skew.
-
-    The culprit is the rank with the smallest visible phase. The victim is the
-    upper actual median rank by that same phase. Both are real observed ranks,
-    which keeps two-rank and even-world-size comparisons easy to explain.
-    """
     if len(visible_values) <= 1:
         return None
-
-    clean = {
-        int(rank): non_negative_finite(value)
-        for rank, value in visible_values.items()
-    }
-    ordered = sorted(clean, key=lambda rank: (clean[rank], int(rank)))
-    if len(ordered) <= 1:
-        return None
-
-    culprit_rank = int(ordered[0])
-    victim_rank = int(ordered[len(ordered) // 2])
-    culprit_value = clean[culprit_rank]
-    victim_value = clean[victim_rank]
+    ordered = sorted(
+        (
+            (int(rank), non_negative_finite(value))
+            for rank, value in visible_values
+        ),
+        key=lambda item: (item[1], item[0]),
+    )
+    culprit_rank, culprit_value = ordered[0]
+    victim_rank, victim_value = ordered[len(ordered) // 2]
     return _RankStragglerPair(
         culprit_rank=culprit_rank,
         victim_rank=victim_rank,
@@ -317,259 +245,214 @@ def _rank_straggler_pair(
     )
 
 
-def _rank_metric_value(
-    per_rank_timing: Dict[int, Dict[str, float]],
-    rank: int,
-    metric: str,
-) -> float:
-    """Return a safe metric value for one rank."""
-    return non_negative_finite(
-        per_rank_timing.get(int(rank), {}).get(str(metric), 0.0)
-    )
+def _rank_value(facts: StepTimeRankFacts, metric: str) -> float:
+    return non_negative_finite(facts.average.value(metric) or 0.0)
+
+
+def _measured(facts: StepTimeRankFacts, metric: str) -> bool:
+    return facts.average.value(metric) is not None
 
 
 def _build_rank_straggler_evidence(
+    window: StepTimeWindow,
     *,
-    per_rank_timing: Dict[int, Dict[str, float]],
     score_threshold: float,
     cause_coverage_threshold: float,
     training_strategy: str,
-) -> Tuple[Optional[_RankStragglerEvidence], int]:
-    """
-    Build culprit/victim rank straggler evidence for distributed runs.
+) -> tuple[Optional[_RankStragglerEvidence], int]:
+    """Build diagnosis-specific evidence from the analyzer's rank cohort."""
+    eligible = tuple(
+        facts
+        for rank in window.straggler_ranks
+        if (facts := window.rank(rank)) is not None
+    )
+    if len(eligible) <= 1:
+        return None, len(eligible)
 
-    DDP/default uses backward as the visible synchronization phase. FSDP uses
-    forward + backward because FSDP can communicate on both sides of module
-    execution. Only ranks with measured visible-phase anchors, a measured
-    step envelope, and a measured input wait are eligible. Component
-    attribution compares the culprit rank directly to the victim rank,
-    considers only components measured on both ranks, and emits a subtype
-    only when one component explains enough of the visible cost.
-
-    Returns the evidence (or ``None``) plus the eligible-rank count so
-    callers can distinguish a healthy abstention from a missing-signal
-    abstention.
-    """
-    if len(per_rank_timing) <= 1:
-        return None, len(per_rank_timing)
-
-    strategy = normalize_training_strategy(training_strategy)
-    visible_metric = "forward_backward" if strategy == "fsdp" else "backward"
-    eligible_ranks = []
-    for rank in sorted(int(rank) for rank in per_rank_timing):
-        values = per_rank_timing.get(int(rank), {})
-        if "input_wait" not in values:
-            continue
-        forward = _rank_metric_value(per_rank_timing, rank, "forward")
-        backward = _rank_metric_value(per_rank_timing, rank, "backward")
-        step_time = _rank_metric_value(per_rank_timing, rank, "step_time")
-        if step_time <= 0.0 or backward <= 0.0:
-            continue
-        if strategy == "fsdp" and forward <= 0.0:
-            continue
-        eligible_ranks.append(rank)
-    if len(eligible_ranks) <= 1:
-        return None, len(eligible_ranks)
-
-    visible_values = {
-        int(rank): (
-            _rank_metric_value(per_rank_timing, rank, "forward")
-            + _rank_metric_value(per_rank_timing, rank, "backward")
-            if strategy == "fsdp"
-            else _rank_metric_value(per_rank_timing, rank, "backward")
+    fsdp = training_strategy == "fsdp"
+    pair = _rank_straggler_pair(
+        tuple(
+            (
+                facts.global_rank,
+                (
+                    _rank_value(facts, "forward")
+                    + _rank_value(facts, "backward")
+                    if fsdp
+                    else _rank_value(facts, "backward")
+                ),
+            )
+            for facts in eligible
         )
-        for rank in eligible_ranks
-    }
-    pair = _rank_straggler_pair(visible_values)
+    )
     if pair is None:
-        return None, len(eligible_ranks)
+        return None, len(eligible)
 
-    culprit = pair.culprit_rank
-    victim = pair.victim_rank
-    iteration_time = _rank_metric_value(
-        per_rank_timing, victim, "input_wait"
-    ) + _rank_metric_value(per_rank_timing, victim, "step_time")
-
+    by_rank = {facts.global_rank: facts for facts in eligible}
+    culprit = by_rank[pair.culprit_rank]
+    victim = by_rank[pair.victim_rank]
+    iteration_time = _rank_value(victim, "input_wait") + _rank_value(
+        victim,
+        "step_time",
+    )
     score = pair.cost_ms / iteration_time
-    threshold = non_negative_finite(score_threshold)
-    if score < threshold:
-        return None, len(eligible_ranks)
+    if score < non_negative_finite(score_threshold):
+        return None, len(eligible)
 
-    def _measured_on_both(metric: str) -> bool:
-        return metric in per_rank_timing.get(
-            culprit, {}
-        ) and metric in per_rank_timing.get(victim, {})
-
-    # Eligibility guarantees input_wait on both ranks; H2D joins the
-    # candidate set only when measured on both, so an unmeasured
-    # transfer phase can never name the cause.
     component_excesses = {
         "input": max(
             0.0,
-            _rank_metric_value(per_rank_timing, culprit, "input_wait")
-            - _rank_metric_value(per_rank_timing, victim, "input_wait"),
+            _rank_value(culprit, "input_wait")
+            - _rank_value(victim, "input_wait"),
         )
     }
-    if _measured_on_both("h2d"):
+    if _measured(culprit, "h2d") and _measured(victim, "h2d"):
         component_excesses["h2d"] = max(
             0.0,
-            _rank_metric_value(per_rank_timing, culprit, "h2d")
-            - _rank_metric_value(per_rank_timing, victim, "h2d"),
+            _rank_value(culprit, "h2d") - _rank_value(victim, "h2d"),
         )
-    if strategy == "fsdp":
-        # FSDP interleaves collectives with forward/backward, so without
-        # explicit collective timing this rule never attributes compute
-        # from forward excess; the zero entry keeps the evidence shape.
+    if fsdp:
         component_excesses["compute"] = 0.0
-    elif _measured_on_both("forward"):
-        # A measured-zero forward stays in the maps with zero excess
-        # (matching the base attribution); only a forward that was never
-        # measured on either rank is excluded from attribution entirely.
-        culprit_forward = _rank_metric_value(
-            per_rank_timing, culprit, "forward"
+    elif _measured(culprit, "forward") and _measured(victim, "forward"):
+        culprit_forward = _rank_value(culprit, "forward")
+        victim_forward = _rank_value(victim, "forward")
+        component_excesses["compute"] = (
+            max(0.0, culprit_forward - victim_forward)
+            if culprit_forward > 0.0 and victim_forward > 0.0
+            else 0.0
         )
-        victim_forward = _rank_metric_value(per_rank_timing, victim, "forward")
-        if culprit_forward > 0.0 and victim_forward > 0.0:
-            component_excesses["compute"] = max(
-                0.0, culprit_forward - victim_forward
-            )
-        else:
-            component_excesses["compute"] = 0.0
 
-    component_coverage = {
+    coverage = {
         component: min(1.0, excess / pair.cost_ms)
         for component, excess in component_excesses.items()
+        if pair.cost_ms > 0.0
     }
-    components = {
-        "input": ("INPUT_STRAGGLER", "INPUT STRAGGLER", "input_wait", "input"),
-        "h2d": ("H2D_STRAGGLER", "H2D STRAGGLER", "h2d", "h2d"),
-        "compute": (
+    ordered = sorted(
+        coverage,
+        key=lambda component: (
+            -coverage[component],
+            ("input", "h2d", "compute").index(component),
+        ),
+    )
+    cause = ordered[0]
+    cause_coverage = coverage[cause]
+    attributed = cause_coverage > 0.0 and cause_coverage >= (
+        non_negative_finite(cause_coverage_threshold)
+    )
+
+    if attributed and cause == "input":
+        kind, status, metric, phase = (
+            "INPUT_STRAGGLER",
+            "INPUT STRAGGLER",
+            "input_wait",
+            "input",
+        )
+    elif attributed and cause == "h2d":
+        kind, status, metric, phase = (
+            "H2D_STRAGGLER",
+            "H2D STRAGGLER",
+            "h2d",
+            "h2d",
+        )
+    elif attributed and cause == "compute":
+        kind, status, metric, phase = (
             "COMPUTE_STRAGGLER",
             "COMPUTE STRAGGLER",
             "forward",
             "forward",
-        ),
-    }
-    ordered = sorted(
-        component_coverage.items(),
-        key=lambda item: (
-            -item[1],
-            ("input", "h2d", "compute").index(item[0]),
-        ),
-    )
-    top_component, top_coverage = ordered[0]
-    if top_coverage > 0.0 and top_coverage >= non_negative_finite(
-        cause_coverage_threshold
-    ):
-        kind, status, metric, phase = components[top_component]
-        component = top_component
+        )
     else:
+        cause = "sync_or_unattributed"
         kind, status, metric, phase = (
             "STRAGGLER",
             "STRAGGLER",
-            visible_metric,
+            "forward_backward" if fsdp else "backward",
             "sync",
         )
-        component = "sync_or_unattributed"
 
     return _RankStragglerEvidence(
         kind=kind,
         status=status,
-        component=component,
+        component=cause,
         metric=metric,
         phase=phase,
         score=score,
-        culprit_rank=culprit,
-        victim_rank=victim,
-        visible_metric=visible_metric,
+        culprit_rank=pair.culprit_rank,
+        victim_rank=pair.victim_rank,
+        visible_metric="forward_backward" if fsdp else "backward",
         visible_culprit_ms=pair.culprit_value_ms,
         visible_victim_ms=pair.victim_value_ms,
         visible_cost_ms=pair.cost_ms,
         iteration_time_ms=iteration_time,
         component_excesses_ms=component_excesses,
-        component_coverage=component_coverage,
-    ), len(eligible_ranks)
+        component_coverage=coverage,
+    ), len(eligible)
 
 
 def largest_compute_phase(
     *,
+    window: StepTimeWindow,
     forward: Optional[StepTimeMetric],
     backward: Optional[StepTimeMetric],
     optimizer: Optional[StepTimeMetric],
     step_total: float,
     single_rank: bool,
-    per_rank_timing: Optional[Mapping[int, Mapping[str, float]]] = None,
 ) -> Optional[ComputeSignal]:
-    """
-    Pick the largest compute component from one coherent rank cohort.
-
-    When per-rank timing is available, every compared phase uses the same
-    ranks carrying all compute components plus the iteration envelope. The
-    aggregate-metric fallback exists only for legacy callers without rank rows.
-    """
-    candidates: list[ComputeSignal] = []
-
-    if per_rank_timing is not None:
-        required = {
-            "input_wait",
-            "step_time",
-            "forward",
-            "backward",
-            "optimizer_step",
-        }
-        cohort = {
-            int(rank): values
-            for rank, values in per_rank_timing.items()
-            if required.issubset(values)
-        }
+    """Pick the largest phase using the analyzer's coherent compute cohort."""
+    cohort = tuple(
+        facts
+        for rank in window.compute_ranks
+        if (facts := window.rank(rank)) is not None
+    )
+    if window.rank_facts:
         if not cohort:
             return None
         iteration_total = _median(
             tuple(
-                non_negative_finite(values["input_wait"])
-                + non_negative_finite(values["step_time"])
-                for values in cohort.values()
+                _rank_value(facts, "input_wait")
+                + _rank_value(facts, "step_time")
+                for facts in cohort
             )
         )
+        candidates: list[ComputeSignal] = []
         for label, key in (
             ("Forward", "forward"),
             ("Backward", "backward"),
             ("Optimizer", "optimizer_step"),
         ):
-            phase_values = {
-                rank: non_negative_finite(values[key])
-                for rank, values in cohort.items()
-            }
-            median, worst, worst_rank, excess = _rank_stats(phase_values)
+            median, worst, worst_rank, excess = _rank_stats(
+                tuple(
+                    (facts.global_rank, _rank_value(facts, key))
+                    for facts in cohort
+                )
+            )
             if median <= 0.0:
                 continue
             candidates.append(
                 ComputeSignal(
                     label=label,
                     share=share(median, iteration_total),
-                    skew=(excess / median if len(phase_values) >= 2 else None),
+                    skew=(excess / median if len(cohort) >= 2 else None),
                     median_ms=median,
                     worst_ms=worst,
                     excess_ms=excess,
                     worst_rank=worst_rank,
                 )
             )
-        if not candidates:
-            return None
-        return max(candidates, key=lambda item: item.median_ms)
+        return (
+            max(candidates, key=lambda item: item.median_ms)
+            if candidates
+            else None
+        )
 
+    candidates = []
     for label, metric in (
         ("Forward", forward),
         ("Backward", backward),
         ("Optimizer", optimizer),
     ):
-        if metric is None:
-            continue
-
         total = metric_total(metric, single_rank=single_rank)
-        if total <= 0.0:
+        if metric is None or total <= 0.0:
             continue
-
         candidates.append(
             ComputeSignal(
                 label=label,
@@ -581,211 +464,158 @@ def largest_compute_phase(
                 worst_rank=metric_worst_rank(metric),
             )
         )
-
-    if not candidates:
-        return None
-    return max(candidates, key=lambda item: item.share)
+    return max(candidates, key=lambda item: item.share) if candidates else None
 
 
-def rank_values_from_metric(
-    metric: Optional[StepTimeMetric],
-) -> Dict[int, float]:
-    """
-    Best-effort rank -> value extraction for one metric.
-
-    Live renderer metrics do not carry the full per-rank map, so this falls
-    back to a single worst-rank entry. Summary-mode callers can provide richer
-    `per_rank_timing` and that information will be used instead.
-    """
-    if metric is None:
-        return {}
-
-    rank = metric_worst_rank(metric)
-    if rank is None:
-        return {}
-
-    return {int(rank): metric_worst_total(metric)}
+_MISSING_SIGNAL_ORDER: tuple[str, ...] = (
+    "input_wait",
+    "forward",
+    "backward",
+    "optimizer_step",
+    "step_time",
+)
 
 
-def compute_rank_values_from_components(
-    rank_values: Dict[str, Dict[int, float]],
-) -> Dict[int, float]:
-    """
-    Return rank -> forward + backward + optimizer_step from rank-value maps.
-
-    Only ranks with all three compute phases measured are included, so a
-    missing phase cannot understate a rank's compute as a partial sum.
-    """
-    forward = rank_values.get("forward", {})
-    backward = rank_values.get("backward", {})
-    optimizer = rank_values.get("optimizer_step", {})
-    out: Dict[int, float] = {}
-    for rank in sorted(set(forward) & set(backward) & set(optimizer)):
-        out[int(rank)] = (
-            non_negative_finite(forward.get(rank, 0.0))
-            + non_negative_finite(backward.get(rank, 0.0))
-            + non_negative_finite(optimizer.get(rank, 0.0))
+def _missing_signal_facts(
+    window: StepTimeWindow,
+    *,
+    input_share: Optional[float],
+    compute_share: Optional[float],
+    residual_share: Optional[float],
+    rank_straggler: Optional[_RankStragglerEvidence],
+    straggler_eligible_ranks: int,
+    training_strategy: str,
+) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...]]:
+    ranks = len(window.rank_universe)
+    if ranks == 0:
+        return (), ()
+    counts = {
+        metric: len(window.ranks_for(metric))
+        for metric in _MISSING_SIGNAL_ORDER
+    }
+    needed: set[str] = set()
+    if len(window.rank_facts) < ranks:
+        needed.update(_MISSING_SIGNAL_ORDER)
+    if input_share is None:
+        needed.update(("input_wait", "step_time"))
+    if compute_share is None or residual_share is None:
+        needed.update(
+            (
+                "forward",
+                "backward",
+                "optimizer_step",
+                "input_wait",
+                "step_time",
+            )
         )
-    return out
+    if ranks > 1 and rank_straggler is None and straggler_eligible_ranks < 2:
+        needed.update(("backward", "input_wait", "step_time"))
+        if training_strategy == "fsdp":
+            needed.add("forward")
+
+    missing = tuple(
+        metric
+        for metric in _MISSING_SIGNAL_ORDER
+        if metric in needed and counts[metric] < ranks
+    )
+    return missing, tuple(
+        (metric, f"{counts[metric]}/{ranks}") for metric in missing
+    )
 
 
 def build_step_time_context(
     *,
-    metrics: Sequence[StepTimeMetric],
+    window: StepTimeWindow,
     thresholds: "DiagnosisThresholds",
-    per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
-    expected_ranks: Optional[Sequence[int]] = None,
-    diagnosis_clock: str = "cpu",
-    training_strategy: str = "ddp",
+    training_strategy: Optional[str] = None,
 ) -> StepTimeAnalysisContext:
-    """
-    Build one normalized context shared by all step-time diagnosis rules.
-    """
-    by_key = {metric.metric: metric for metric in metrics}
+    """Build diagnosis-specific facts from one canonical window."""
+    metrics = {metric.metric: metric for metric in window.metrics}
+    step_metric = metrics["step_time"]
+    input_wait_metric = metrics.get("input_wait")
+    h2d_metric = metrics.get("h2d")
+    residual_metric = metrics.get("residual_proxy")
+    forward_metric = metrics.get("forward")
+    backward_metric = metrics.get("backward")
+    optimizer_metric = metrics.get("optimizer_step")
 
-    step_metric = by_key["step_time"]
-    input_wait_metric = by_key.get("input_wait")
-    h2d_metric = by_key.get("h2d")
-    residual_metric = by_key.get("residual_proxy")
-    forward_metric = by_key.get("forward")
-    backward_metric = by_key.get("backward")
-    optimizer_metric = by_key.get("optimizer_step")
-
-    coverage = step_metric.coverage
-    single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
-    steps_used = int(step_metric.summary.steps_used)
-    # The run-level worst rank is ranked by full iteration time
-    # (total_step), kept distinct from the step-time metric's own
-    # self-coherent worst rank; metrics-only callers fall back to it.
-    overall_worst_rank = (
-        worst_rank_by_total_step(per_rank_timing)
-        if per_rank_timing
-        else metric_worst_rank(step_metric)
+    coverage = window.coverage
+    single_rank = coverage.world_size <= 1 or coverage.ranks_present <= 1
+    strategy = normalize_training_strategy(
+        training_strategy or window.training_strategy
     )
-
     step_total = metric_total(step_metric, single_rank=single_rank)
-    residual_total = metric_total(residual_metric, single_rank=single_rank)
-    compute_total_value = compute_total(
-        forward=forward_metric,
-        backward=backward_metric,
-        optimizer=optimizer_metric,
-        single_rank=single_rank,
-    )
-    largest_compute = largest_compute_phase(
-        forward=forward_metric,
-        backward=backward_metric,
-        optimizer=optimizer_metric,
-        step_total=step_total,
-        single_rank=single_rank,
-        per_rank_timing=per_rank_timing,
-    )
 
-    rank_values = {
-        "input_wait": rank_values_from_metric(input_wait_metric),
-        "h2d": rank_values_from_metric(h2d_metric),
-        "forward": rank_values_from_metric(forward_metric),
-        "backward": rank_values_from_metric(backward_metric),
-        "optimizer_step": rank_values_from_metric(optimizer_metric),
-        "step_time": rank_values_from_metric(step_metric),
-        "residual_proxy": rank_values_from_metric(residual_metric),
-    }
-
-    local_per_rank_timing = {
-        int(rank): {str(k): non_negative_finite(v) for k, v in values.items()}
-        for rank, values in (per_rank_timing or {}).items()
-    }
-    for values in local_per_rank_timing.values():
-        if {"forward", "backward", "optimizer_step"}.issubset(values):
-            values["compute"] = (
-                values["forward"]
-                + values["backward"]
-                + values["optimizer_step"]
-            )
-    if local_per_rank_timing:
-        rank_values = {
-            metric_key: {
-                rank: non_negative_finite(values[metric_key])
-                for rank, values in local_per_rank_timing.items()
-                if metric_key in values
-            }
-            for metric_key in (
-                "input_wait",
-                "h2d",
-                "forward",
-                "backward",
-                "optimizer_step",
-                "step_time",
-                "residual_proxy",
-            )
-        }
-
-    input_candidates = {
-        rank: values
-        for rank, values in local_per_rank_timing.items()
-        if "input_wait" in values and "step_time" in values
-    }
-
-    input_wait_rank_values = {
-        rank: non_negative_finite(values.get("input_wait", 0.0))
-        for rank, values in input_candidates.items()
-    }
-    input_step_rank_values = {
-        rank: non_negative_finite(values.get("step_time", 0.0))
-        for rank, values in input_candidates.items()
-    }
-    input_wait_median, input_wait_worst, input_wait_worst_rank, input_slack = (
-        _rank_stats(input_wait_rank_values)
+    iteration_cohort = tuple(
+        facts
+        for rank in window.iteration_ranks
+        if (facts := window.rank(rank)) is not None
     )
-    input_step_median, input_step_worst, _, _ = _rank_stats(
-        input_step_rank_values
+    input_median, input_worst, input_worst_rank, input_excess = _rank_stats(
+        tuple(
+            (facts.global_rank, _rank_value(facts, "input_wait"))
+            for facts in iteration_cohort
+        )
     )
-    input_wait_total = input_wait_worst if single_rank else input_wait_median
-    input_bound_step_total = (
-        input_step_worst if single_rank else input_step_median
+    step_median, step_worst, _rank, _excess = _rank_stats(
+        tuple(
+            (facts.global_rank, _rank_value(facts, "step_time"))
+            for facts in iteration_cohort
+        )
     )
-    iteration_time_total = input_wait_total + input_bound_step_total
-    input_bound_skew = None
-    if len(input_wait_rank_values) >= 2:
-        if input_wait_median > 0.0:
-            input_bound_skew = input_slack / input_wait_median
-        elif input_wait_worst <= 0.0:
-            input_bound_skew = 0.0
-    rank_straggler, straggler_eligible_ranks = _build_rank_straggler_evidence(
-        per_rank_timing=local_per_rank_timing,
+    input_total = input_worst if single_rank else input_median
+    input_step_total = step_worst if single_rank else step_median
+    input_skew = None
+    if len(iteration_cohort) >= 2:
+        if input_median > 0.0:
+            input_skew = input_excess / input_median
+        elif input_worst <= 0.0:
+            input_skew = 0.0
+
+    rank_straggler, eligible_count = _build_rank_straggler_evidence(
+        window,
         score_threshold=thresholds.straggler_score_warn,
         cause_coverage_threshold=thresholds.straggler_cause_coverage_min,
-        training_strategy=training_strategy,
+        training_strategy=strategy,
     )
-    signal_rank_counts = {
-        metric_key: sum(
-            1
-            for values in local_per_rank_timing.values()
-            if metric_key in values
+    compute_cohort = tuple(
+        facts
+        for rank in window.compute_ranks
+        if (facts := window.rank(rank)) is not None
+    )
+    compute_median, compute_worst, _rank, compute_excess = _rank_stats(
+        tuple(
+            (facts.global_rank, _rank_value(facts, "compute"))
+            for facts in compute_cohort
         )
-        for metric_key in (
-            "input_wait",
-            "h2d",
-            "forward",
-            "backward",
-            "optimizer_step",
-            "step_time",
-        )
-    }
-    compute_rank_values = compute_rank_values_from_components(rank_values)
-    _compute_median, _, _, _compute_slack = _rank_stats(compute_rank_values)
-    compute_skew_value = None
-    if len(compute_rank_values) >= 2:
-        if _compute_median > 0.0:
-            compute_skew_value = _compute_slack / _compute_median
-        elif max(compute_rank_values.values(), default=0.0) <= 0.0:
-            compute_skew_value = 0.0
+    )
+    compute_skew = None
+    if len(compute_cohort) >= 2:
+        if compute_median > 0.0:
+            compute_skew = compute_excess / compute_median
+        elif compute_worst <= 0.0:
+            compute_skew = 0.0
 
+    missing, signal_coverage = _missing_signal_facts(
+        window,
+        input_share=window.input_wait_share,
+        compute_share=window.compute_share,
+        residual_share=window.residual_share,
+        rank_straggler=rank_straggler,
+        straggler_eligible_ranks=eligible_count,
+        training_strategy=strategy,
+    )
     return StepTimeAnalysisContext(
         thresholds=thresholds,
+        window=window,
         single_rank=single_rank,
-        steps_used=steps_used,
-        overall_worst_rank=overall_worst_rank,
-        training_strategy=normalize_training_strategy(training_strategy),
+        steps_used=int(coverage.steps_used),
+        overall_worst_rank=(
+            window.worst_rank
+            if window.worst_rank is not None
+            else metric_worst_rank(step_metric)
+        ),
+        training_strategy=strategy,
         step_metric=step_metric,
         input_wait_metric=input_wait_metric,
         h2d_metric=h2d_metric,
@@ -794,44 +624,38 @@ def build_step_time_context(
         backward_metric=backward_metric,
         optimizer_metric=optimizer_metric,
         step_total=step_total,
-        residual_total=residual_total,
-        compute_total=compute_total_value,
-        residual_share=median_iteration_component_share(
-            local_per_rank_timing,
-            "residual_proxy",
+        residual_total=metric_total(
+            residual_metric,
+            single_rank=single_rank,
         ),
-        compute_share=median_iteration_component_share(
-            local_per_rank_timing,
-            "compute",
+        compute_total=compute_total(
+            forward=forward_metric,
+            backward=backward_metric,
+            optimizer=optimizer_metric,
+            single_rank=single_rank,
         ),
-        input_bound_share=median_iteration_component_share(
-            local_per_rank_timing,
-            "input_wait",
+        residual_share=window.residual_share,
+        compute_share=window.compute_share,
+        input_bound_share=window.input_wait_share,
+        h2d_share=window.h2d_share,
+        input_bound_skew=input_skew,
+        compute_skew=compute_skew,
+        input_bound_worst_rank=input_worst_rank,
+        diagnosis_clock=window.clock,
+        input_wait_total=input_total,
+        input_bound_step_total=input_step_total,
+        iteration_time_total=input_total + input_step_total,
+        largest_compute=largest_compute_phase(
+            window=window,
+            forward=forward_metric,
+            backward=backward_metric,
+            optimizer=optimizer_metric,
+            step_total=step_total,
+            single_rank=single_rank,
         ),
-        h2d_share=median_iteration_component_share(
-            local_per_rank_timing,
-            "h2d",
-        ),
-        input_bound_skew=input_bound_skew,
-        compute_skew=compute_skew_value,
-        input_bound_worst_rank=input_wait_worst_rank,
-        diagnosis_clock=(
-            "gpu" if str(diagnosis_clock).lower() == "gpu" else "cpu"
-        ),
-        input_wait_total=input_wait_total,
-        input_bound_step_total=input_bound_step_total,
-        iteration_time_total=iteration_time_total,
-        largest_compute=largest_compute,
-        rank_values=rank_values,
         rank_straggler=rank_straggler,
-        rank_population_size=(
-            len({int(rank) for rank in expected_ranks})
-            if expected_ranks is not None
-            else len(local_per_rank_timing)
-        ),
-        ranks_with_rows=len(local_per_rank_timing),
-        signal_rank_counts=signal_rank_counts,
-        straggler_eligible_ranks=straggler_eligible_ranks,
+        missing_signals=missing,
+        signal_coverage=signal_coverage,
     )
 
 
@@ -840,16 +664,14 @@ __all__ = [
     "StepTimeAnalysisContext",
     "build_step_time_context",
     "compute_total",
-    "compute_rank_values_from_components",
     "largest_compute_phase",
-    "metric_median_total",
     "metric_excess",
+    "metric_median_total",
     "metric_skew",
     "metric_total",
     "metric_worst_rank",
     "metric_worst_total",
     "non_negative_finite",
     "normalize_training_strategy",
-    "rank_values_from_metric",
     "share",
 ]

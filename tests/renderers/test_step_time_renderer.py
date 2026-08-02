@@ -9,10 +9,8 @@ from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.renderers.step_time import renderer as renderer_module
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.step_time.model import (
-    StepTimeCoverage,
     StepTimeMetric,
     StepTimeResult,
-    StepTimeSummary,
     StepTimeWindow,
 )
 
@@ -20,30 +18,18 @@ from traceml_ai.step_time.model import (
 def _metric(
     name: str,
     value: float,
-    *,
-    clock: str = "cpu",
 ) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
-        clock=clock,
         series=None,
-        summary=StepTimeSummary(
-            window_size=1,
-            steps_used=1,
-            median_total=value,
-            worst_total=value,
-            worst_rank=0,
-            skew_ratio=0.0,
-            skew_pct=0.0,
-        ),
-        coverage=StepTimeCoverage(
-            expected_steps=1,
-            steps_used=1,
-            completed_step=1,
-            world_size=1,
-            ranks_present=1,
-            incomplete=False,
-        ),
+        window_size=1,
+        steps_used=1,
+        median_total=value,
+        worst_total=value,
+        worst_rank=0,
+        skew_ratio=0.0,
+        skew_pct=0.0,
+        measured_ranks=(0,),
     )
 
 

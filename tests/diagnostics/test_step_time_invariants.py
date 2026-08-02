@@ -98,7 +98,7 @@ def _all_steps() -> dict[str, set[int]]:
 def assert_metric_worst_is_self_consistent(window) -> None:
     """F2: every metric's worst value and worst rank share one ordering."""
     for metric in window.metrics:
-        worst_rank = metric.summary.worst_rank
+        worst_rank = metric.worst_rank
         if worst_rank is None:
             continue
         rank_row = window.per_rank_timing.get(worst_rank)
@@ -108,10 +108,8 @@ def assert_metric_worst_is_self_consistent(window) -> None:
         assert (
             metric.metric in rank_row
         ), f"{metric.metric}: worst_rank {worst_rank} never measured it"
-        assert rank_row[metric.metric] == pytest.approx(
-            metric.summary.worst_total
-        ), (
-            f"{metric.metric}: reported worst {metric.summary.worst_total} "
+        assert rank_row[metric.metric] == pytest.approx(metric.worst_total), (
+            f"{metric.metric}: reported worst {metric.worst_total} "
             f"but rank {worst_rank} has {rank_row[metric.metric]}"
         )
 
@@ -173,8 +171,8 @@ def test_empty_window_keeps_expected_rank_universe() -> None:
 def test_skew_requires_two_measured_ranks_but_zero_remains_measured() -> None:
     single = _window_from_presence(_all_steps())
     single_step = next(m for m in single.metrics if m.metric == "step_time")
-    assert single_step.summary.skew_pct is None
-    assert single_step.summary.skew_ratio is None
+    assert single_step.skew_pct is None
+    assert single_step.skew_ratio is None
 
     presence_by_rank = {0: _all_steps(), 1: _all_steps()}
     per_rank = {0: {}, 1: {}}
@@ -195,7 +193,7 @@ def test_skew_requires_two_measured_ranks_but_zero_remains_measured() -> None:
         expected_ranks=(0, 1),
     )
     backward = next(m for m in window.metrics if m.metric == "backward")
-    assert backward.summary.skew_pct == pytest.approx(0.0)
+    assert backward.skew_pct == pytest.approx(0.0)
 
 
 def test_skew_is_unavailable_when_zero_median_hides_a_nonzero_rank() -> None:
@@ -217,10 +215,10 @@ def test_skew_is_unavailable_when_zero_median_hides_a_nonzero_rank() -> None:
         expected_ranks=(0, 1, 2),
     )
     backward = next(m for m in window.metrics if m.metric == "backward")
-    assert backward.summary.median_total == pytest.approx(0.0)
-    assert backward.summary.worst_total == pytest.approx(10.0)
-    assert backward.summary.skew_pct is None
-    assert backward.summary.skew_ratio is None
+    assert backward.median_total == pytest.approx(0.0)
+    assert backward.worst_total == pytest.approx(10.0)
+    assert backward.skew_pct is None
+    assert backward.skew_ratio is None
 
 
 def test_iteration_share_preserves_unavailable_and_measured_zero() -> None:
@@ -320,8 +318,8 @@ def test_worst_value_and_rank_are_self_consistent(
 
     assert_metric_worst_is_self_consistent(window)
     step_metric = next(m for m in window.metrics if m.metric == "step_time")
-    assert step_metric.summary.worst_total == pytest.approx(400.0)
-    assert step_metric.summary.worst_rank == 1
+    assert step_metric.worst_total == pytest.approx(400.0)
+    assert step_metric.worst_rank == 1
 
 
 def test_self_consistency_holds_across_many_presence_patterns() -> None:

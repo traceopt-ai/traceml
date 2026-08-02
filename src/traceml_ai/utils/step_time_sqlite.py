@@ -42,7 +42,6 @@ class StepTimeSQLiteWindow:
     identities: Mapping[int, StepTimeRankIdentity] = field(
         default_factory=dict
     )
-    latest_step_observed: Optional[int] = None
     cursor: StepTimeSourceCursor = field(default_factory=StepTimeSourceCursor)
 
 
@@ -61,7 +60,6 @@ def _analyze_snapshot(
         global_ranks=snapshot.global_ranks,
         training_strategy=snapshot.training_strategy,
         identities=snapshot.identities,
-        latest_step_observed=snapshot.latest_step_observed,
         cursor=snapshot.cursor,
     )
 

@@ -12,6 +12,7 @@ from typing import Mapping, Optional, Sequence
 
 from traceml_ai.step_time.model import (
     DiagnosisClock,
+    StepTimeCoverage,
     StepTimeMetric,
     StepTimeRankFacts,
     StepTimeValues,
@@ -69,6 +70,7 @@ def window_from_rank_averages(
     metrics: Sequence[StepTimeMetric] = (),
     clock: DiagnosisClock = "cpu",
     expected_ranks: Optional[Sequence[int]] = None,
+    training_strategy: str = "ddp",
 ) -> StepTimeWindow:
     """Build a typed aggregate-only window for a renderer unit test."""
     rank_facts = tuple(
@@ -108,6 +110,15 @@ def window_from_rank_averages(
         if any(facts.average.value(name) is not None for facts in rank_facts)
     )
     composition = carrying("step_time", *composition_names)
+    strategy = str(training_strategy).strip().lower()
+    straggler = tuple(
+        facts.global_rank
+        for facts in rank_facts
+        if facts.average.input_wait_ms is not None
+        and (facts.average.step_time_ms or 0.0) > 0.0
+        and (facts.average.backward_ms or 0.0) > 0.0
+        and (strategy != "fsdp" or (facts.average.forward_ms or 0.0) > 0.0)
+    )
     totals = {
         facts.global_rank: facts.average.total_step_ms
         for facts in rank_facts
@@ -133,13 +144,42 @@ def window_from_rank_averages(
         if totals
         else None
     )
+    step_metric = next(
+        (metric for metric in metrics if metric.metric == "step_time"),
+        None,
+    )
     composition_representative = _composition_representative(
         rank_facts,
         composition,
     )
     return StepTimeWindow(
         clock=clock,
+        training_strategy=strategy,
         expected_ranks=expected,
+        coverage=(
+            StepTimeCoverage(
+                expected_steps=step_metric.window_size,
+                steps_used=step_metric.steps_used,
+                completed_step=(
+                    int(step_metric.series.steps[-1])
+                    if step_metric.series is not None
+                    and step_metric.series.steps
+                    else step_metric.steps_used
+                ),
+                world_size=len(expected),
+                ranks_present=len(rank_facts),
+                incomplete=len(rank_facts) < len(expected),
+            )
+            if step_metric is not None
+            else StepTimeCoverage(
+                expected_steps=0,
+                steps_used=0,
+                completed_step=0,
+                world_size=len(expected),
+                ranks_present=len(rank_facts),
+                incomplete=False,
+            )
+        ),
         rank_facts=rank_facts,
         metrics=metrics if isinstance(metrics, list) else list(metrics),
         iteration_ranks=carrying("input_wait", "step_time"),
@@ -151,6 +191,7 @@ def window_from_rank_averages(
             "optimizer_step",
         ),
         composition_ranks=composition,
+        straggler_ranks=straggler,
         median_total_step_ms=median_total,
         representative_rank=representative,
         representative_total_step_ms=(

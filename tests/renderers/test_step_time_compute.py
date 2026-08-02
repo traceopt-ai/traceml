@@ -88,8 +88,8 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
     assert result.window is not None
     metrics = {metric.metric: metric for metric in result.window.metrics}
     assert "dataloader_fetch" not in metrics
-    assert metrics["input_wait"].summary.worst_total == 5.0
-    assert metrics["step_time"].summary.worst_total == 30.0
+    assert metrics["input_wait"].worst_total == 5.0
+    assert metrics["step_time"].worst_total == 30.0
     assert metrics["input_wait"].series is not None
     assert metrics["input_wait"].series.worst == [4.0, 6.0]
     assert metrics["input_wait"].series.sum == [4.0, 6.0]
@@ -133,33 +133,21 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     """
     from traceml_ai.renderers.step_time import compute as compute_module
     from traceml_ai.step_time.model import (
-        StepTimeCoverage,
         StepTimeMetric,
         StepTimeResult,
-        StepTimeSummary,
     )
 
     metric = StepTimeMetric(
         metric="step_time",
-        clock="cpu",
         series=None,
-        summary=StepTimeSummary(
-            window_size=1,
-            steps_used=1,
-            median_total=10.0,
-            worst_total=10.0,
-            worst_rank=0,
-            skew_ratio=0.0,
-            skew_pct=0.0,
-        ),
-        coverage=StepTimeCoverage(
-            expected_steps=1,
-            steps_used=1,
-            completed_step=1,
-            world_size=1,
-            ranks_present=1,
-            incomplete=False,
-        ),
+        window_size=1,
+        steps_used=1,
+        median_total=10.0,
+        worst_total=10.0,
+        worst_rank=0,
+        skew_ratio=0.0,
+        skew_pct=0.0,
+        measured_ranks=(0,),
     )
     good = StepTimeResult(
         status_message="OK",
@@ -209,34 +197,22 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
     """Persisted rows cannot establish whether their producer is alive."""
     from traceml_ai.renderers.step_time import compute as compute_module
     from traceml_ai.step_time.model import (
-        StepTimeCoverage,
         StepTimeMetric,
         StepTimeResult,
-        StepTimeSummary,
     )
 
     def _result(completed_step: int) -> StepTimeResult:
         metric = StepTimeMetric(
             metric="step_time",
-            clock="cpu",
             series=None,
-            summary=StepTimeSummary(
-                window_size=1,
-                steps_used=1,
-                median_total=10.0,
-                worst_total=10.0,
-                worst_rank=0,
-                skew_ratio=0.0,
-                skew_pct=0.0,
-            ),
-            coverage=StepTimeCoverage(
-                expected_steps=1,
-                steps_used=1,
-                completed_step=completed_step,
-                world_size=1,
-                ranks_present=1,
-                incomplete=False,
-            ),
+            window_size=1,
+            steps_used=1,
+            median_total=10.0,
+            worst_total=10.0,
+            worst_rank=0,
+            skew_ratio=0.0,
+            skew_pct=0.0,
+            measured_ranks=(0,),
         )
         return StepTimeResult(
             status_message="OK",

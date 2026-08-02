@@ -111,8 +111,8 @@ class StepTimeRepositorySnapshot:
 
     The repository does not align steps, choose a clock, derive metrics, or
     diagnose. Those responsibilities remain in later pipeline layers. Live
-    snapshots intentionally leave summary-only identity, progress, and cursor
-    fields empty.
+    snapshots omit summary-only identities but retain their selected source
+    cursor so the later live-session cache can detect unchanged input.
     """
 
     rows: tuple[StepTimeSourceRow, ...] = ()
@@ -120,7 +120,6 @@ class StepTimeRepositorySnapshot:
     identities: Mapping[int, StepTimeRankIdentity] = field(
         default_factory=dict
     )
-    latest_step_observed: Optional[int] = None
     cursor: StepTimeSourceCursor = field(default_factory=StepTimeSourceCursor)
     training_strategy: str = "ddp"
 
@@ -209,21 +208,6 @@ class StepTimeSeries:
 
 
 @dataclass(frozen=True)
-class StepTimeSummary:
-    """Window-level statistics for one measured Step Time metric."""
-
-    window_size: int
-    steps_used: int
-    median_total: float
-    worst_total: float
-    worst_rank: Optional[int]
-    skew_ratio: Optional[float]
-    skew_pct: Optional[float]
-    representative_rank: Optional[int] = None
-    representative_total: Optional[float] = None
-
-
-@dataclass(frozen=True)
 class StepTimeCoverage:
     """Completeness metadata for an aligned Step Time window."""
 
@@ -237,13 +221,19 @@ class StepTimeCoverage:
 
 @dataclass(frozen=True)
 class StepTimeMetric:
-    """One canonical metric with optional series and aggregate statistics."""
+    """Series and window statistics for one measured Step Time signal."""
 
     metric: str
-    clock: DiagnosisClock
     series: Optional[StepTimeSeries]
-    summary: StepTimeSummary
-    coverage: StepTimeCoverage
+    window_size: int
+    steps_used: int
+    median_total: float
+    worst_total: float
+    worst_rank: Optional[int]
+    skew_ratio: Optional[float]
+    skew_pct: Optional[float]
+    representative_rank: Optional[int] = None
+    representative_total: Optional[float] = None
     measured_ranks: tuple[int, ...] = ()
 
 
@@ -259,6 +249,7 @@ class StepTimeWindow:
     """
 
     clock: DiagnosisClock = "cpu"
+    training_strategy: str = "ddp"
     steps: list[int] = field(default_factory=list)
     expected_ranks: tuple[int, ...] = ()
     coverage: StepTimeCoverage = field(
@@ -292,8 +283,8 @@ class StepTimeWindow:
     def per_rank_timing(self) -> Mapping[int, Mapping[str, float]]:
         """Return the temporary rank-average compatibility projection.
 
-        TODO(PR5-PR8): Remove this projection after diagnosis and all three
-        presenters consume typed rank facts directly.
+        TODO(PR9): Remove after PR6-PR8 migrate all three presenters to typed
+        rank facts.
         """
         return MappingProxyType(
             {
@@ -382,7 +373,6 @@ __all__ = [
     "StepTimeSourceCursor",
     "StepTimeSourceRow",
     "StepTimeStepFacts",
-    "StepTimeSummary",
     "StepTimeValues",
     "StepTimeWindow",
 ]

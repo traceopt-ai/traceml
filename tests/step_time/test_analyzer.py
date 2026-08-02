@@ -161,9 +161,9 @@ def test_missing_and_measured_zero_keep_distinct_metric_cohorts() -> None:
 
     forward = _metric(window, "forward")
     assert forward.measured_ranks == (0,)
-    assert forward.summary.median_total == 0.0
-    assert forward.summary.representative_rank == 0
-    assert forward.summary.representative_total == 0.0
+    assert forward.median_total == 0.0
+    assert forward.representative_rank == 0
+    assert forward.representative_total == 0.0
     assert forward.series is not None
     assert forward.series.steps == [1, 2]
     assert forward.series.median == [0.0, 0.0]

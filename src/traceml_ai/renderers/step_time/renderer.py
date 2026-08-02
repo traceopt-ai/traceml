@@ -123,9 +123,11 @@ class StepCombinedRenderer(BaseRenderer):
         )
 
         # All metrics share the same window size by construction
-        K = metrics[0].summary.steps_used
-        world_size = metrics[0].coverage.world_size
-        ranks_present = metrics[0].coverage.ranks_present
+        K = window.coverage.steps_used if window is not None else 0
+        world_size = window.coverage.world_size if window is not None else 0
+        ranks_present = (
+            window.coverage.ranks_present if window is not None else 0
+        )
         single_rank = (world_size <= 1) or (ranks_present <= 1)
 
         table = Table(
@@ -149,40 +151,27 @@ class StepCombinedRenderer(BaseRenderer):
         if single_rank:
             table.add_row(
                 f"Average ({K} steps)",
-                *[
-                    _format_step_time_value(m.summary.worst_total)
-                    for m in metrics
-                ],
+                *[_format_step_time_value(m.worst_total) for m in metrics],
             )
         else:
             table.add_row(
                 f"Median avg ({K} steps)",
-                *[
-                    _format_step_time_value(m.summary.median_total)
-                    for m in metrics
-                ],
+                *[_format_step_time_value(m.median_total) for m in metrics],
             )
             table.add_row(
                 f"Worst avg ({K} steps)",
-                *[
-                    _format_step_time_value(m.summary.worst_total)
-                    for m in metrics
-                ],
+                *[_format_step_time_value(m.worst_total) for m in metrics],
             )
             table.add_row(
                 "Worst Rank",
                 *[
-                    (
-                        f"r{m.summary.worst_rank}"
-                        if m.summary.worst_rank is not None
-                        else "—"
-                    )
+                    (f"r{m.worst_rank}" if m.worst_rank is not None else "—")
                     for m in metrics
                 ],
             )
             table.add_row(
                 "Skew (%)",
-                *[_format_skew(m.summary.skew_pct) for m in metrics],
+                *[_format_skew(m.skew_pct) for m in metrics],
             )
 
         table.add_row("")

@@ -27,7 +27,11 @@ from traceml_ai.step_time.model import (
     DIAGNOSIS_CLOCK_KEY,
     STEP_TIME_EVENT_NAMES,
     DiagnosisClock,
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeRankFacts,
     StepTimeRepositorySnapshot,
+    StepTimeSourceCursor,
     StepTimeSourceRow,
     StepTimeValues,
     StepTimeWindow,
@@ -62,6 +66,7 @@ def build_step_time_window_from_events(
     max_rows: int,
     expected_ranks: Optional[Sequence[int]] = None,
     completed_step: Optional[int] = None,
+    training_strategy: str = "ddp",
 ) -> StepTimeWindow:
     """Analyze historical raw-event fixtures through the canonical analyzer.
 
@@ -91,8 +96,11 @@ def build_step_time_window_from_events(
         StepTimeRepositorySnapshot(
             rows=tuple(rows),
             global_ranks=expected,
-            latest_step_observed=(
-                int(completed_step) if completed_step is not None else None
+            training_strategy=str(training_strategy),
+            cursor=StepTimeSourceCursor(
+                latest_step=(
+                    int(completed_step) if completed_step is not None else None
+                )
             ),
         ),
         window_size=max_rows,
@@ -112,22 +120,23 @@ def diagnose_step_time_window(
     window: StepTimeWindow,
     *,
     policy: "StepTimeDiagnosisPolicy",
-    training_strategy: str = "ddp",
+    training_strategy: Optional[str] = None,
+    include_attribution: bool = False,
 ) -> "DiagnosticResult[StepDiagnosis]":
-    """Run shared Step Time diagnosis over one selected-clock window."""
+    """Delegate the historical import path to canonical window diagnosis.
+
+    Rich per-metric attribution is opt-in because no current runtime surface
+    consumes it. The released mapping-based API still requests it explicitly.
+    """
     from traceml_ai.diagnostics.step_time.api import (
-        build_step_diagnosis_result,
+        diagnose_step_time_window as diagnose,
     )
 
-    if not window.metrics:
-        return build_step_diagnosis_result([], thresholds=policy.thresholds)
-    return build_step_diagnosis_result(
-        window.metrics,
-        thresholds=policy.thresholds,
-        per_rank_timing=window.per_rank_timing,
-        expected_ranks=window.rank_universe,
-        diagnosis_clock=window.clock,
+    return diagnose(
+        window,
+        policy=policy,
         training_strategy=training_strategy,
+        include_attribution=include_attribution,
     )
 
 
@@ -175,20 +184,199 @@ def median_iteration_component_share(
     return float(np.median(np.asarray(shares, dtype=np.float64)))
 
 
-def worst_rank_by_total_step(
-    per_rank_timing: Mapping[int, Mapping[str, float]],
-) -> Optional[int]:
-    """Return the slowest rank carrying a selected-clock total step."""
-    candidates: dict[int, float] = {}
-    for rank, values in per_rank_timing.items():
-        if "total_step" not in values:
-            continue
-        value = _safe_non_negative_float(values["total_step"])
-        if value is not None:
-            candidates[int(rank)] = value
-    if not candidates:
-        return None
-    return max(candidates, key=lambda rank: (candidates[rank], -rank))
+def _values_from_legacy_mapping(
+    values: Mapping[str, float],
+) -> StepTimeValues:
+    """Translate one released sparse rank row into canonical typed values."""
+
+    def optional(key: str) -> Optional[float]:
+        return float(values[key]) if key in values else None
+
+    forward = optional("forward")
+    backward = optional("backward")
+    optimizer = optional("optimizer_step")
+    compute = optional("compute")
+    if compute is None and None not in (forward, backward, optimizer):
+        compute = float(forward + backward + optimizer)
+
+    input_wait = optional("input_wait")
+    step_time = optional("step_time")
+    total_step = optional("total_step")
+    if total_step is None and input_wait is not None and step_time is not None:
+        total_step = input_wait + step_time
+
+    dataloader_cpu = optional("dataloader_fetch")
+    step_time_cpu = optional("step_time_cpu")
+    total_step_cpu = (
+        dataloader_cpu + step_time_cpu
+        if dataloader_cpu is not None and step_time_cpu is not None
+        else None
+    )
+    return StepTimeValues(
+        input_wait_ms=input_wait,
+        h2d_ms=optional("h2d"),
+        forward_ms=forward,
+        backward_ms=backward,
+        optimizer_step_ms=optimizer,
+        step_time_ms=step_time,
+        compute_ms=compute,
+        residual_ms=optional("residual_proxy"),
+        total_step_ms=total_step,
+        dataloader_cpu_ms=dataloader_cpu,
+        step_time_cpu_ms=step_time_cpu,
+        total_step_cpu_ms=total_step_cpu,
+    )
+
+
+def build_step_time_window_from_rank_averages(
+    metrics: Sequence[StepTimeMetric],
+    *,
+    per_rank_timing: Optional[Mapping[int, Mapping[str, float]]] = None,
+    expected_ranks: Optional[Sequence[int]] = None,
+    diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
+) -> StepTimeWindow:
+    """Adapt the released rank-mapping diagnosis input to typed facts.
+
+    TODO(PR9): Remove after external callers migrate to window diagnosis.
+    This is the only production conversion from legacy rank averages.
+    """
+    timing = per_rank_timing or {}
+    rank_facts = tuple(
+        StepTimeRankFacts(
+            global_rank=int(rank),
+            average=_values_from_legacy_mapping(values),
+        )
+        for rank, values in sorted(timing.items())
+    )
+    step_metric = next(
+        (metric for metric in metrics if metric.metric == "step_time"),
+        None,
+    )
+    measured = {rank for metric in metrics for rank in metric.measured_ranks}
+    expected = tuple(
+        sorted(
+            int(rank)
+            for rank in (
+                expected_ranks if expected_ranks is not None else timing.keys()
+            )
+        )
+    )
+    ranks_present = len(rank_facts) if rank_facts else len(measured)
+    series_steps = (
+        list(step_metric.series.steps)
+        if step_metric is not None and step_metric.series is not None
+        else []
+    )
+    population_size = len(expected) if expected else len(measured)
+    coverage = StepTimeCoverage(
+        expected_steps=(step_metric.window_size if step_metric else 0),
+        steps_used=(step_metric.steps_used if step_metric else 0),
+        completed_step=(
+            int(series_steps[-1])
+            if series_steps
+            else (step_metric.steps_used if step_metric else 0)
+        ),
+        world_size=population_size,
+        ranks_present=ranks_present,
+        incomplete=ranks_present < population_size,
+    )
+
+    def carrying(*names: str) -> tuple[int, ...]:
+        return tuple(
+            facts.global_rank
+            for facts in rank_facts
+            if all(facts.average.value(name) is not None for name in names)
+        )
+
+    composition_names = tuple(
+        name
+        for name in (
+            "input_wait",
+            "forward",
+            "backward",
+            "optimizer_step",
+            "residual_proxy",
+        )
+        if any(facts.average.value(name) is not None for facts in rank_facts)
+    )
+    composition = carrying("step_time", *composition_names)
+    strategy = str(training_strategy).strip().lower()
+    straggler = tuple(
+        facts.global_rank
+        for facts in rank_facts
+        if facts.average.input_wait_ms is not None
+        and (facts.average.step_time_ms or 0.0) > 0.0
+        and (facts.average.backward_ms or 0.0) > 0.0
+        and (strategy != "fsdp" or (facts.average.forward_ms or 0.0) > 0.0)
+    )
+    totals = {
+        facts.global_rank: facts.average.total_step_ms
+        for facts in rank_facts
+        if facts.average.total_step_ms is not None
+    }
+    median_total = (
+        float(np.median(np.asarray(tuple(totals.values()))))
+        if totals
+        else None
+    )
+    representative = (
+        min(
+            totals,
+            key=lambda rank: (
+                abs(float(totals[rank]) - float(median_total)),
+                float(totals[rank]),
+                rank,
+            ),
+        )
+        if totals and median_total is not None
+        else None
+    )
+    worst = (
+        max(totals, key=lambda rank: (float(totals[rank]), -rank))
+        if totals
+        else None
+    )
+    return StepTimeWindow(
+        clock=("gpu" if str(diagnosis_clock).lower() == "gpu" else "cpu"),
+        training_strategy=strategy,
+        steps=series_steps,
+        expected_ranks=expected,
+        coverage=coverage,
+        rank_facts=rank_facts,
+        metrics=list(metrics),
+        iteration_ranks=carrying("input_wait", "step_time"),
+        compute_ranks=carrying(
+            "input_wait",
+            "step_time",
+            "forward",
+            "backward",
+            "optimizer_step",
+        ),
+        composition_ranks=composition,
+        straggler_ranks=straggler,
+        median_total_step_ms=median_total,
+        representative_rank=representative,
+        representative_total_step_ms=(
+            float(totals[representative])
+            if representative is not None
+            else None
+        ),
+        worst_rank=worst,
+        worst_total_step_ms=(
+            float(totals[worst]) if worst is not None else None
+        ),
+        input_wait_share=median_iteration_component_share(
+            timing,
+            "input_wait",
+        ),
+        h2d_share=median_iteration_component_share(timing, "h2d"),
+        compute_share=median_iteration_component_share(timing, "compute"),
+        residual_share=median_iteration_component_share(
+            timing,
+            "residual_proxy",
+        ),
+    )
 
 
 def public_step_time_metric_values(
@@ -262,8 +450,8 @@ __all__ = [
     "STEP_TIME_CPU_KEY",
     "StepTimeWindow",
     "build_step_time_window_from_events",
+    "build_step_time_window_from_rank_averages",
     "diagnose_step_time_window",
     "median_iteration_component_share",
     "public_step_time_metric_values",
-    "worst_rank_by_total_step",
 ]

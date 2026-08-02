@@ -116,6 +116,8 @@ def test_repository_decodes_each_selected_row_once(
 
     assert len(snapshot.rows) == 6
     assert loads.call_count == len(snapshot.rows)
+    assert snapshot.cursor.latest_step == 4
+    assert snapshot.cursor.last_row_id == 8
 
 
 def test_live_and_summary_profiles_feed_the_same_analysis(
@@ -267,7 +269,6 @@ def test_repository_returns_filtered_progress_identity_and_context(
 
     assert snapshot.global_ranks == (1,)
     assert [row.step for row in snapshot.rows] == [4, 5]
-    assert snapshot.latest_step_observed == 99
     assert snapshot.cursor.latest_step == 99
     assert snapshot.cursor.last_row_id == 7
     assert snapshot.training_strategy == "fsdp"
@@ -293,7 +294,7 @@ def test_empty_rank_filter_reads_no_source_rows(tmp_path: Path) -> None:
 
     assert snapshot.rows == ()
     assert snapshot.global_ranks == ()
-    assert snapshot.latest_step_observed is None
+    assert snapshot.cursor.latest_step is None
     assert snapshot.cursor.last_row_id is None
 
 
@@ -315,7 +316,7 @@ def test_minimal_schema_and_malformed_json_remain_fail_open(
 
     assert snapshot.rows == ()
     assert snapshot.global_ranks == (0,)
-    assert snapshot.latest_step_observed == 7
+    assert snapshot.cursor.latest_step == 7
     assert snapshot.cursor.last_row_id == 1
     assert snapshot.training_strategy == "ddp"
     assert snapshot.identities[0].local_rank is None

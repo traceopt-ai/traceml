@@ -281,18 +281,18 @@ def _build_step_time_evidence(
     evidence: Dict[str, str] = {}
 
     try:
-        evidence["window"] = str(int(step.summary.steps_used))
+        evidence["window"] = str(int(window.coverage.steps_used))
     except Exception:
         pass
 
     try:
-        if step.summary.worst_rank is not None:
-            evidence["worst"] = f"r{int(step.summary.worst_rank)}"
+        if step.worst_rank is not None:
+            evidence["worst"] = f"r{int(step.worst_rank)}"
     except Exception:
         pass
 
     try:
-        skew = step.summary.skew_pct
+        skew = step.skew_pct
         evidence["gap"] = (
             "n/a" if skew is None else f"{float(skew) * 100.0:.1f}%"
         )
@@ -390,7 +390,7 @@ def _dominant_step_component(
         if metric is None:
             continue
         try:
-            value = float(metric.summary.median_total or 0.0)
+            value = float(metric.median_total or 0.0)
         except Exception:
             value = 0.0
         if value > best_value:

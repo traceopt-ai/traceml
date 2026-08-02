@@ -9,11 +9,13 @@
 from __future__ import annotations
 
 import ast
+import inspect
+from dataclasses import fields
 from pathlib import Path
 from typing import Iterator
 
 import traceml_ai.step_time as step_time_package
-from traceml_ai.renderers.step_time import schema as legacy_schema
+from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.step_time import model
 from traceml_ai.utils import step_time_window as legacy_window
 
@@ -84,25 +86,7 @@ def test_typed_analysis_facts_are_exported_without_loading_analyzer() -> None:
 
     dependencies = set(_imports(_PACKAGE_ROOT / "__init__.py"))
     assert "traceml_ai.step_time.analysis" not in dependencies
-
-
-def test_renderer_schema_reexports_canonical_type_objects() -> None:
-    """Preserve historical renderer imports while consumers migrate."""
-    aliases = {
-        "StepCombinedTimeCoverage": "StepTimeCoverage",
-        "StepCombinedTimeMetric": "StepTimeMetric",
-        "StepCombinedTimeResult": "StepTimeResult",
-        "StepCombinedTimeSeries": "StepTimeSeries",
-        "StepCombinedTimeSummary": "StepTimeSummary",
-    }
-
-    for old_name, canonical_name in aliases.items():
-        assert getattr(legacy_schema, old_name) is getattr(
-            model,
-            canonical_name,
-        )
-        assert not hasattr(model, old_name)
-        assert not hasattr(step_time_package, old_name)
+    assert "traceml_ai.step_time.pipeline" not in dependencies
 
 
 def test_window_utility_reexports_canonical_contracts() -> None:
@@ -110,3 +94,68 @@ def test_window_utility_reexports_canonical_contracts() -> None:
     assert legacy_window.StepTimeWindow is model.StepTimeWindow
     assert legacy_window.DiagnosisClock is model.DiagnosisClock
     assert legacy_window.DIAGNOSIS_CLOCK_KEY == model.DIAGNOSIS_CLOCK_KEY
+
+
+def test_diagnosis_context_accepts_only_the_canonical_window() -> None:
+    """Do not reintroduce the nested rank map into canonical diagnosis."""
+    assert tuple(inspect.signature(build_step_time_context).parameters) == (
+        "window",
+        "thresholds",
+        "training_strategy",
+    )
+    context_source = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "diagnostics"
+        / "step_time"
+        / "context.py"
+    ).read_text(encoding="utf-8")
+    rules_source = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "diagnostics"
+        / "step_time"
+        / "rules.py"
+    ).read_text(encoding="utf-8")
+
+    assert "per_rank_timing" not in context_source
+    assert "per_rank_timing" not in rules_source
+
+
+def test_repository_progress_has_one_stored_source() -> None:
+    """Keep latest-step progress only in the source cursor."""
+    field_names = {
+        field.name for field in fields(model.StepTimeRepositorySnapshot)
+    }
+
+    assert "latest_step_observed" not in field_names
+    snapshot = model.StepTimeRepositorySnapshot(
+        cursor=model.StepTimeSourceCursor(latest_step=42)
+    )
+    assert snapshot.cursor.latest_step == 42
+    assert not hasattr(snapshot, "latest_step_observed")
+
+
+def test_metric_shape_has_no_repeated_window_wrappers() -> None:
+    """Keep metric statistics flat and window metadata on the window."""
+    metric_fields = {field.name for field in fields(model.StepTimeMetric)}
+
+    assert "clock" not in metric_fields
+    assert "coverage" not in metric_fields
+    assert "summary" not in metric_fields
+    assert not hasattr(model, "StepTimeSummary")
+    assert not hasattr(step_time_package, "StepTimeSummary")
+
+
+def test_removed_renderer_schema_does_not_return() -> None:
+    """The historical renderer-owned domain shim was intentionally retired."""
+    assert not (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "renderers"
+        / "step_time"
+        / "schema.py"
+    ).exists()

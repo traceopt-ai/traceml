@@ -21,10 +21,8 @@ from traceml_ai.diagnostics.step_time import LIVE_STEP_TIME_POLICY
 from traceml_ai.renderers.step_time.compute import StepCombinedComputer
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.step_time.model import (
-    StepTimeCoverage,
     StepTimeMetric,
     StepTimeResult,
-    StepTimeSummary,
     StepTimeWindow,
 )
 from traceml_ai.reporting.sections.step_time.loader import (
@@ -87,25 +85,15 @@ def _metric(
 ) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
-        clock="gpu",
         series=None,
-        summary=StepTimeSummary(
-            window_size=5,
-            steps_used=5,
-            median_total=value,
-            worst_total=worst if worst is not None else value,
-            worst_rank=0,
-            skew_ratio=0.0,
-            skew_pct=0.0,
-        ),
-        coverage=StepTimeCoverage(
-            expected_steps=5,
-            steps_used=5,
-            completed_step=5,
-            world_size=1,
-            ranks_present=1,
-            incomplete=False,
-        ),
+        window_size=5,
+        steps_used=5,
+        median_total=value,
+        worst_total=worst if worst is not None else value,
+        worst_rank=0,
+        skew_ratio=0.0,
+        skew_pct=0.0,
+        measured_ranks=(0,),
     )
 
 
@@ -118,10 +106,7 @@ def _payload(
 ) -> StepTimeResult:
     """Build a live result around one canonical Step Time window."""
     if per_rank_timing is None:
-        row = {
-            metric.metric: float(metric.summary.median_total)
-            for metric in metrics
-        }
+        row = {metric.metric: float(metric.median_total) for metric in metrics}
         if "input_wait" in row and "step_time" in row:
             row["total_step"] = row["input_wait"] + row["step_time"]
         per_rank_timing = {0: row}
@@ -832,6 +817,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     diagnosis = diagnose_step_time_window(
         result.window,
         policy=LIVE_STEP_TIME_POLICY,
+        include_attribution=True,
     )
     assert diagnosis.metric_attribution["residual_proxy"][
         "share_pct"

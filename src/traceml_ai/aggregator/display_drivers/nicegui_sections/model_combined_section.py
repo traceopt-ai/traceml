@@ -25,7 +25,6 @@ from traceml_ai.step_time.model import (
     StepTimeResult,
     StepTimeWindow,
 )
-from traceml_ai.utils.step_time_window import median_iteration_component_share
 
 from . import theme
 
@@ -162,14 +161,15 @@ def _update_kpis(
     step_metric: StepTimeMetric,
 ) -> None:
     """Update independently valid Step Time KPI values."""
-    st = step_metric.summary
     kpis = panel["kpis"]
-    kpis["median"].content = theme.kval(f"{st.median_total:.0f}", "ms")
-    kpis["worst"].content = theme.kval(f"{st.worst_total:.0f}", "ms")
+    kpis["median"].content = theme.kval(
+        f"{step_metric.median_total:.0f}", "ms"
+    )
+    kpis["worst"].content = theme.kval(f"{step_metric.worst_total:.0f}", "ms")
     kpis["gap"].content = (
         theme.kval("n/a")
-        if st.skew_pct is None
-        else theme.kval(f"{st.skew_pct * 100.0:.0f}", "%")
+        if step_metric.skew_pct is None
+        else theme.kval(f"{step_metric.skew_pct * 100.0:.0f}", "%")
     )
     residual_share = window.residual_share
     kpis["residual"].content = (
@@ -178,7 +178,11 @@ def _update_kpis(
         else theme.kval(f"{residual_share * 100.0:.0f}", "%")
     )
     kpis["rank"].content = theme.kval(
-        f"r{int(st.worst_rank)}" if st.worst_rank is not None else "—"
+        (
+            f"r{int(step_metric.worst_rank)}"
+            if step_metric.worst_rank is not None
+            else "—"
+        )
     )
 
 
@@ -196,7 +200,7 @@ def update_model_combined_section(
         return
 
     step_metric = m["step_time"]
-    st = step_metric.summary
+    st = step_metric
     _update_kpis(panel, window, step_metric)
     representative = window.composition_representative_rank
     if representative is None:

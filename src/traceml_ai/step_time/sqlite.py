@@ -462,11 +462,21 @@ class SQLiteStepTimeRepository:
                 )
             )
 
+        if latest_step is None:
+            latest_step = max(
+                (row.step for row in source_rows),
+                default=None,
+            )
+        if last_row_id is None:
+            last_row_id = max(
+                (row.source_id for row in source_rows),
+                default=None,
+            )
+
         return StepTimeRepositorySnapshot(
             rows=tuple(source_rows),
             global_ranks=tuple(global_ranks),
             identities=identities or {},
-            latest_step_observed=latest_step,
             cursor=StepTimeSourceCursor(
                 last_row_id=last_row_id,
                 latest_step=latest_step,
