@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -23,7 +23,7 @@ from traceml_ai.step_time.model import (
     StepTimeRepositorySnapshot,
     StepTimeWindow,
 )
-from traceml_ai.step_time.pipeline import StepTimePipeline
+from traceml_ai.step_time.pipeline import StepTimeAnalysis, StepTimePipeline
 from traceml_ai.step_time.sqlite import SQLiteStepTimeRepository
 
 
@@ -70,6 +70,7 @@ def test_run_calls_each_pipeline_stage_once(
     assert result.snapshot is snapshot
     assert result.window is window
     assert result.diagnosis is diagnosis
+    assert result.request is request
 
 
 def test_run_honors_an_explicit_diagnosis_policy() -> None:
@@ -99,3 +100,61 @@ def test_invalid_data_profile_is_rejected_at_construction() -> None:
 
     with pytest.raises(ValueError, match="profile"):
         StepTimePipeline(repository=repository, profile="dashboard")
+
+
+def test_live_run_reuses_the_exact_previous_analysis() -> None:
+    request = StepTimeLoadRequest(window_size=100, lookback_factor=4)
+    snapshot = StepTimeRepositorySnapshot()
+    window = StepTimeWindow()
+    repository = Mock(spec=SQLiteStepTimeRepository)
+    analyzer = Mock(spec=StepTimeAnalyzer)
+    repository.load_live.return_value = snapshot
+    analyzer.analyze.return_value = window
+    pipeline = StepTimePipeline(repository=repository, analyzer=analyzer)
+
+    with patch(
+        "traceml_ai.step_time.pipeline.diagnose_step_time_window"
+    ) as diagnose:
+        first = pipeline.run(request)
+        second = pipeline.run(request, previous=first)
+
+    assert second is first
+    assert repository.load_live.call_args_list == [
+        call(request),
+        call(request, previous=snapshot),
+    ]
+    assert analyzer.analyze.call_count == 1
+    assert diagnose.call_count == 1
+
+
+def test_live_run_does_not_reuse_an_analysis_for_another_request() -> None:
+    first_request = StepTimeLoadRequest(window_size=100, lookback_factor=4)
+    second_request = StepTimeLoadRequest(window_size=20, lookback_factor=2)
+    first_snapshot = StepTimeRepositorySnapshot()
+    second_snapshot = StepTimeRepositorySnapshot()
+    repository = Mock(spec=SQLiteStepTimeRepository)
+    analyzer = Mock(spec=StepTimeAnalyzer)
+    repository.load_live.side_effect = (first_snapshot, second_snapshot)
+    analyzer.analyze.return_value = StepTimeWindow()
+    pipeline = StepTimePipeline(repository=repository, analyzer=analyzer)
+
+    first = pipeline.run(first_request)
+    pipeline.run(second_request, previous=first)
+
+    assert repository.load_live.call_args_list == [
+        call(first_request),
+        call(second_request),
+    ]
+    assert analyzer.analyze.call_count == 2
+
+
+def test_summary_rejects_live_cache_input() -> None:
+    request = StepTimeLoadRequest(window_size=10)
+    previous = Mock(spec=StepTimeAnalysis)
+    repository = Mock(spec=SQLiteStepTimeRepository)
+
+    with pytest.raises(ValueError, match="only for live"):
+        StepTimePipeline(repository, profile="summary").run(
+            request,
+            previous=previous,
+        )

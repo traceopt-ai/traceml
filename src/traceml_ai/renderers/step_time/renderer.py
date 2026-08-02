@@ -17,11 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml_ai.aggregator.display_drivers.layout import MODEL_COMBINED_LAYOUT
-from traceml_ai.diagnostics.step_time import (
-    LIVE_STEP_TIME_POLICY,
-    build_step_diagnosis,
-    format_cli_diagnosis,
-)
+from traceml_ai.diagnostics.step_time import format_cli_diagnosis
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -29,10 +25,11 @@ from traceml_ai.diagnostics.trends import (
 )
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.utils import fmt_time_run
-from traceml_ai.step_time.model import StepTimeMetric, StepTimeResult
-from traceml_ai.utils.step_time_window import diagnose_step_time_window
-
-from .compute import StepCombinedComputer
+from traceml_ai.step_time.model import StepTimeMetric
+from traceml_ai.step_time.pipeline import (
+    LiveStepTimeResult,
+    LiveStepTimeSession,
+)
 
 METRIC_LABELS = {
     "input_wait": "IW",
@@ -56,33 +53,23 @@ TABLE_METRIC_ORDER = (
 
 
 class StepCombinedRenderer(BaseRenderer):
-    """
-    CLI renderer for the selected-clock step-time diagnosis summary.
-    """
+    """Pure Rich presenter for one canonical live Step Time result."""
 
-    def __init__(self, db_path):
+    def __init__(self, session: LiveStepTimeSession) -> None:
         super().__init__(
             name="Model Step Summary",
             layout_section_name=MODEL_COMBINED_LAYOUT,
         )
-        self._computer = StepCombinedComputer(db_path=db_path)
-
-    def _payload(self) -> StepTimeResult:
-        """
-        CLI compute is summary-only (cheap).
-
-        The computer bridges transient empty reads from its own last-ok
-        window. Persisted rows are not treated as proof of producer liveness.
-        """
-        return self._computer.compute_cli()
+        self._session = session
 
     def get_panel_renderable(self) -> Panel:
-        payload = self._payload()
+        """Refresh once and render the session's immutable result."""
+        return self.render(self._session.refresh())
 
-        window = payload.window
-        if (
-            window is None or not window.metrics
-        ) and not self._computer.had_ok:
+    def render(self, payload: LiveStepTimeResult) -> Panel:
+        """Format one live result without loading or diagnosing telemetry."""
+        window = payload.analysis.window
+        if payload.freshness == "cold":
             # Never had data: normal warm-up, keep the calm waiting state
             # instead of alarming with a NO DATA diagnosis.
             return Panel(
@@ -90,17 +77,8 @@ class StepCombinedRenderer(BaseRenderer):
                 title="Model Step Summary",
             )
 
-        diag = (
-            diagnose_step_time_window(
-                window,
-                policy=LIVE_STEP_TIME_POLICY,
-                training_strategy=payload.training_strategy,
-            ).primary
-            if window is not None
-            else build_step_diagnosis([])
-        )
-        diag_text = format_cli_diagnosis(diag)
-        metrics = _table_metrics(window.metrics if window is not None else [])
+        diag_text = format_cli_diagnosis(payload.analysis.diagnosis.primary)
+        metrics = _table_metrics(window.metrics)
 
         if not metrics:
             # Had data before, none now: the last-good empty-read bridge
@@ -123,11 +101,9 @@ class StepCombinedRenderer(BaseRenderer):
         )
 
         # All metrics share the same window size by construction
-        K = window.coverage.steps_used if window is not None else 0
-        world_size = window.coverage.world_size if window is not None else 0
-        ranks_present = (
-            window.coverage.ranks_present if window is not None else 0
-        )
+        K = window.coverage.steps_used
+        world_size = window.coverage.world_size
+        ranks_present = window.coverage.ranks_present
         single_rank = (world_size <= 1) or (ranks_present <= 1)
 
         table = Table(
@@ -185,7 +161,7 @@ class StepCombinedRenderer(BaseRenderer):
             table.add_row("")
 
         # Optional residual share line (still meaningful in both modes)
-        if step_metric and residual_metric and window is not None:
+        if step_metric and residual_metric:
             residual_share = window.residual_share
             table.add_row(
                 "Residual Share (%)",
@@ -209,7 +185,7 @@ class StepCombinedRenderer(BaseRenderer):
         footer = (
             "\n\n[dim]"
             "Clock="
-            f"{(window.clock if window is not None else 'cpu').upper()} | "
+            f"{window.clock.upper()} | "
             "IW=input wait | H2D=host-to-device | FWD=forward | "
             "BWD=backward | OPT=optimizer | STEP=traced step | "
             "RESIDUAL=STEP−H2D−FWD−BWD−OPT"
@@ -221,12 +197,6 @@ class StepCombinedRenderer(BaseRenderer):
             border_style="cyan",
             width=width,
         )
-
-    def get_dashboard_renderable(self) -> StepTimeResult:
-        """
-        Dashboard uses the same selected-clock Step Time payload as the CLI.
-        """
-        return self._computer.compute_dashboard()
 
 
 def _table_metrics(

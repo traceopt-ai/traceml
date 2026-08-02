@@ -50,6 +50,8 @@ from traceml_ai.renderers.step_time.compute import (  # noqa: E402
 from traceml_ai.reporting.sections.step_time import (  # noqa: E402
     StepTimeSummarySection,
 )
+from traceml_ai.step_time.model import StepTimeLoadRequest  # noqa: E402
+from traceml_ai.step_time.pipeline import LiveStepTimeSession  # noqa: E402
 from traceml_ai.utils.step_time_sqlite import (  # noqa: E402
     load_step_time_window_from_sqlite,
 )
@@ -128,7 +130,13 @@ def _benchmark_rank_count(
             )
 
     loaded = load_window()
-    live = StepCombinedComputer(str(db_path), window_size=window_size)
+    live = LiveStepTimeSession(
+        str(db_path),
+        request=StepTimeLoadRequest(
+            window_size=window_size,
+            lookback_factor=4,
+        ),
+    )
     dashboard_hero = StepCombinedComputer(
         str(db_path),
         window_size=window_size,
@@ -138,6 +146,10 @@ def _benchmark_rank_count(
         window_size=window_size,
     )
     summary = StepTimeSummarySection(max_rows=window_size)
+
+    def live_cache_miss():
+        live._last_observed = None
+        return live.refresh()
 
     calls = (
         ("load + decode + analyze", load_window),
@@ -149,7 +161,8 @@ def _benchmark_rank_count(
                 training_strategy=loaded.training_strategy,
             ),
         ),
-        ("one live provider", live.compute_cli),
+        ("one live provider", live_cache_miss),
+        ("unchanged live cache hit", live.refresh),
         (
             "dashboard Step Time refresh",
             lambda: (

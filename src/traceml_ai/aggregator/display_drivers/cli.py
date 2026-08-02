@@ -31,6 +31,7 @@ from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.renderers.system.renderer import SystemRenderer
 from traceml_ai.runtime.settings import TraceMLSettings
 from traceml_ai.runtime.stdout_stderr_capture import StreamCapture
+from traceml_ai.step_time.pipeline import LiveStepTimeSession
 
 
 def _safe(logger: Any, label: str, fn: Callable[[], Any]) -> Any:
@@ -92,7 +93,9 @@ class CLIDisplayDriver(BaseDisplayDriver):
         # Run profile
         if not self._watch_profile:
             self._renderers += [
-                StepCombinedRenderer(db_path=self._settings.db_path),
+                StepCombinedRenderer(
+                    LiveStepTimeSession(db_path=self._settings.db_path)
+                ),
                 StepMemoryRenderer(db_path=self._settings.db_path),
             ]
 

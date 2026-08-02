@@ -27,9 +27,7 @@ from traceml_ai.renderers.step_memory.schema import (  # noqa: E402
 )
 from traceml_ai.renderers.step_time.compute import (  # noqa: E402
     StepCombinedComputer,
-)
-from traceml_ai.renderers.step_time.renderer import (  # noqa: E402
-    StepCombinedRenderer,
+    StepTimeDashboardAdapter,
 )
 from traceml_ai.step_time.model import (  # noqa: E402
     StepTimeResult,
@@ -182,7 +180,7 @@ def test_dashboard_tick_currently_invokes_two_step_time_providers(
 
     The Step Time hero and diagnostics rail currently own independent
     computers. A later pipeline PR should change this test to one shared
-    provider; PR1 records the existing two-call behavior without changing it.
+    provider; PR6 keeps this boundary explicit for the PR7 consolidation.
     """
     calls: list[StepCombinedComputer] = []
 
@@ -208,7 +206,7 @@ def test_dashboard_tick_currently_invokes_two_step_time_providers(
                     status_message="No GPU detected",
                 ),
             )
-        elif not isinstance(renderer, StepCombinedRenderer):
+        elif not isinstance(renderer, StepTimeDashboardAdapter):
             monkeypatch.setattr(
                 renderer,
                 "get_dashboard_renderable",

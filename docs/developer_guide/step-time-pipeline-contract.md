@@ -14,30 +14,20 @@ For the public final-summary shape, see
 ```mermaid
 flowchart LR
     DB[(step_time_samples)]
-    A["Live provider A<br/>StepCombinedRenderer"]
-    B["Live provider B<br/>ModelDiagnosticsRenderer"]
-    L["SQLite repository<br/>live or summary profile"]
-    ANALYZE["StepTimeAnalyzer<br/>one typed fact set"]
-    W["Canonical live StepTimeWindow"]
-    D["Live Step Time diagnosis"]
-    CLI["Live CLI"]
-    HERO["Dashboard hero"]
-    RAIL["Dashboard diagnostics rail"]
-    S["Final-summary loader"]
-    SW["Canonical summary StepTimeWindow"]
-    SD["Summary Step Time diagnosis"]
+    CLS["CLI LiveStepTimeSession<br/>calls StepTimePipeline"]
+    HLS["Dashboard hero session<br/>compatibility adapter"]
+    RLS["Dashboard rail session<br/>compatibility adapter"]
+    RESULT["Immutable StepTimeAnalysis<br/>window + diagnosis"]
+    CLI["Pure Rich CLI presenter"]
+    HERO["Dashboard hero adapter"]
+    RAIL["Dashboard rail adapter"]
+    SUM["Final-summary adapter"]
     OUT["JSON and text"]
 
-    DB --> A --> L --> ANALYZE --> W
-    DB -. "second independent read" .-> B
-    B --> L
-    W --> D
-    W --> CLI
-    W --> HERO
-    D --> CLI
-    D --> RAIL
-    RAIL --> HERO
-    DB --> S --> L --> ANALYZE --> SW --> SD --> OUT
+    DB --> CLS --> RESULT --> CLI
+    DB -. "independent refresh" .-> HLS --> HERO
+    DB -. "second independent refresh" .-> RLS --> RAIL
+    DB --> SUM --> OUT
 ```
 
 The repository has two SQL selection profiles, not three surface pipelines.
@@ -47,14 +37,17 @@ the same `StepTimeAnalyzer`.
 
 `StepTimePipeline.run(request)` is the application facade for that shared
 path. It selects one of the two data profiles, invokes the analyzer once, and
-passes the resulting `StepTimeWindow` directly to diagnosis. Existing surface
-wrappers remain in place until PR6 through PR8, so adding the facade does not
-mix presenter rewiring into this diagnosis-focused change.
+passes the resulting `StepTimeWindow` directly to diagnosis.
+
+`LiveStepTimeSession` is the sole live orchestration boundary. It owns
+last-good state, monotonic expiry, and cursor-based analysis reuse. The CLI
+injects one session into a pure Rich presenter. Dashboard and final summary
+remain on compatibility adapters until PR7 and PR8.
 
 The diagram shows remaining technical debt deliberately: a dashboard refresh
-owns two independent Step Time computers. Each now performs one constant-size
-query sequence, but the hero and diagnostics rail still load independently.
-A later consumer-migration PR will fan out one analysis snapshot.
+owns two independent live sessions. Each performs one constant-size query
+sequence, but the hero and diagnostics rail still load independently. PR7
+will inject one session result into both presenters.
 
 ## Where each decision belongs
 
@@ -65,6 +58,7 @@ A later consumer-migration PR will fan out one analysis snapshot.
 | Common-step alignment and analysis | `step_time/analysis.py` | clock, sparse-signal, derivation, cohort, or statistics semantics change |
 | SQLite selection and row decoding | `step_time/sqlite.py` | live-tail or summary selection, identity, progress, or clock normalization changes |
 | Load/analyze/diagnose orchestration | `step_time/pipeline.py` | application flow or live/summary data-profile selection changes |
+| Live caching and freshness | `step_time/pipeline.py` | cursor reuse, last-good bridging, or monotonic expiry changes |
 | Analyzed-window compatibility adapter | `utils/step_time_sqlite.py` | an existing loader caller needs migration support |
 | Diagnosis thresholds and priority | `diagnostics/step_time/` | a rule, policy, attribution, or issue order changes |
 | Live CLI presentation | `renderers/step_time/renderer.py` | terminal labels or layout change |
@@ -73,11 +67,11 @@ A later consumer-migration PR will fan out one analysis snapshot.
 | Cross-surface contract scenarios | `tests/step_time/` | any item above changes intentionally |
 
 Start with the contract scenarios before following a surface-specific call
-path. Read the short `step_time/pipeline.py` facade for orchestration, then
-`step_time/sqlite.py`, `step_time/analysis.py`, and `step_time/model.py` for
-the complete source-to-facts path. Diagnosis continues in
-`diagnostics/step_time/api.py`, then `context.py` and `rules.py`; none of those
-files rebuilds the historical rank map.
+path. For live behavior, read `step_time/pipeline.py` and then the pure CLI
+presenter in `renderers/step_time/renderer.py`. For domain facts, read
+`step_time/sqlite.py`, `step_time/analysis.py`, and `step_time/model.py`.
+Diagnosis continues in `diagnostics/step_time/api.py`, then `context.py` and
+`rules.py`; none of those files rebuilds the historical rank map.
 
 ## Data-shape budget
 
@@ -100,9 +94,10 @@ returns exactly one typed fact graph.
 
 `StepTimeWindow.rank_facts` replaces the former triple nested
 rank/step/metric dictionary. `per_rank_timing` remains a cached, read-only
-projection only for presenters that migrate in PR6 through PR8 and for the
-released mapping adapter. Canonical diagnosis reads `rank_facts` and
-precomputed window shares directly. No per-step legacy projection exists.
+projection only for dashboard/final-summary consumers that migrate in PR7
+and PR8 and for the released mapping adapter. Canonical diagnosis and the CLI
+read typed facts and precomputed window shares directly. No per-step legacy
+projection exists.
 
 ### Model dependency boundary
 
@@ -159,13 +154,38 @@ the selected diagnosis clock.
 
 | Surface | Loads | Diagnoses | Presents |
 |---|---|---|---|
-| Live CLI | One repository snapshot; recent aligned window with lookback | Live policy | Rich diagnosis and metric table |
-| Dashboard hero | One repository snapshot today | Verdict comes from diagnostics payload | Phase ribbon and compact KPIs |
-| Dashboard diagnostics rail | A second repository snapshot today | Live policy | Structured finding and evidence |
+| Live CLI | One `LiveStepTimeSession` refresh | Diagnosis is precomputed once by the live pipeline | Pure Rich diagnosis and metric table |
+| Dashboard hero | One compatibility-session refresh today | Verdict comes from diagnostics payload | Phase ribbon and compact KPIs |
+| Dashboard diagnostics rail | A second compatibility-session refresh today | Live policy | Structured finding and evidence |
 | Final summary | One repository snapshot with identity and progress | Summary policy | Stable JSON projection and text card |
 
 Built-in live and summary policies currently use the same thresholds. Their
 window sizes and presentation responsibilities differ.
+
+## Live-session contract
+
+One `LiveStepTimeSession` owns the state for one live consumer. Every refresh
+opens a short-lived SQLite connection, runs the two-statement live repository
+read in one snapshot, and closes the connection. A lock serializes concurrent
+refreshes of the same session.
+
+| Freshness | Meaning | Analysis exposed |
+|---|---|---|
+| `cold` | No usable window has ever been read. | Canonical empty analysis. |
+| `live` | The current read produced a usable window. | Current immutable analysis. |
+| `bridged` | A read was empty or failed within the last-good TTL. | Last good analysis. |
+| `expired` | A previous good window exists, but its bridge TTL elapsed. | Canonical empty analysis. |
+
+Expiry uses `time.monotonic()`, so wall-clock corrections cannot shorten or
+extend the bridge. An unchanged persisted window remains `live`; freshness is
+about read usability, not proof that the training process is still running.
+
+Before decoding, the live repository compares the selected source cursor and
+rank universe with the previous snapshot. If they are unchanged and the run
+strategy is unchanged, the exact prior `StepTimeAnalysis` object is returned.
+The persisted JSON is not parsed again, and analysis and diagnosis are not
+called. A strategy or rank-universe change invalidates reuse even if timing
+row ids are unchanged.
 
 ## Contract scenarios
 
@@ -194,11 +214,15 @@ Rich/NiceGUI markup, or dictionary ordering.
 
 ## Temporary compatibility seams
 
+- `StepCombinedComputer.compute_dashboard()` projects a live-session result
+  into the historical dashboard payload; PR7 removes this adapter.
+- `StepTimeDashboardAdapter` supplies that historical payload to the current
+  NiceGUI driver; PR7 replaces it with shared-session fan-out.
 - `utils/step_time_window.py` accepts historical raw-event fixtures and
   delegates to `StepTimeAnalyzer`; PR9 removes that input adapter.
 - `StepTimeWindow.per_rank_timing` lazily projects typed rank averages for
-  current presenters; PR6 through PR8 remove those consumers and PR9 removes
-  the projection.
+  remaining dashboard and final-summary consumers; PR7 and PR8 remove those
+  consumers and PR9 removes the projection.
 - The released mapping-based diagnosis functions adapt one sparse rank map to
   a typed window. Canonical diagnosis and rules accept only `StepTimeWindow`;
   PR9 removes the mapping adapter.
@@ -238,5 +262,6 @@ PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider tests/step_time -q
 | Rank universe | Expected global ranks retained by the canonical window. |
 | Measured rank | A rank carrying a particular sparse metric. |
 | Eligible cohort | Ranks carrying every signal required by one calculation or rule. |
-| Provider | A stateful live computer that reads SQLite and owns last-good behavior. |
+| Live session | Stateful orchestration that reads through the pipeline and owns cursor reuse, last-good bridging, and expiry. |
+| Presenter | Stateless surface formatting over an analyzed result; it never reads SQLite or diagnoses. |
 | Projection | A surface-specific view derived from the canonical window or diagnosis. |

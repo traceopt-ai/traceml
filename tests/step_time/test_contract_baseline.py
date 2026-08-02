@@ -37,6 +37,8 @@ from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.reporting.sections.step_time.model import (
     STEP_TIME_METRIC_NAMES,
 )
+from traceml_ai.step_time.model import StepTimeLoadRequest
+from traceml_ai.step_time.pipeline import LiveStepTimeSession
 from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 _WINDOW_KEYS = {
@@ -247,14 +249,17 @@ def test_canonical_window_matches_golden(
 ) -> None:
     """Freeze alignment, clock, sparsity, metrics, and diagnosis semantics."""
     scenario, db_path = scenario_db
-    result = StepCombinedComputer(
+    result = LiveStepTimeSession(
         str(db_path),
-        window_size=len(scenario.steps),
-    ).compute_cli()
+        request=StepTimeLoadRequest(
+            window_size=len(scenario.steps),
+            lookback_factor=4,
+        ),
+    ).refresh()
 
-    assert result.window is not None
-    window = result.window
-    assert result.training_strategy == scenario.training_strategy
+    window = result.analysis.window
+    assert result.freshness == "live"
+    assert window.training_strategy == scenario.training_strategy
     assert window.clock == scenario.clock
     assert window.steps == list(scenario.steps)
     assert window.rank_universe == tuple(sorted(scenario.profiles))
@@ -301,7 +306,7 @@ def test_canonical_window_matches_golden(
     diagnosis = diagnose_step_time_window(
         window,
         policy=LIVE_STEP_TIME_POLICY,
-        training_strategy=result.training_strategy,
+        training_strategy=window.training_strategy,
     )
     expected = EXPECTED_DIAGNOSIS[scenario.name]
     assert diagnosis.primary.kind == expected.kind
@@ -332,10 +337,14 @@ def test_cli_dashboard_summary_diagnosis_parity(
         "format_cli_diagnosis",
         capture_cli,
     )
-    cli_renderer = StepCombinedRenderer(str(db_path))
-    cli_renderer._computer = StepCombinedComputer(
-        str(db_path),
-        window_size=len(scenario.steps),
+    cli_renderer = StepCombinedRenderer(
+        LiveStepTimeSession(
+            str(db_path),
+            request=StepTimeLoadRequest(
+                window_size=len(scenario.steps),
+                lookback_factor=4,
+            ),
+        )
     )
     cli_renderer.get_panel_renderable()
     cli_diagnosis = captured["diagnosis"]

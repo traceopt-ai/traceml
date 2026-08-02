@@ -120,6 +120,103 @@ def test_repository_decodes_each_selected_row_once(
     assert snapshot.cursor.last_row_id == 8
 
 
+def test_live_reuses_unchanged_snapshot_without_decoding_json(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "unchanged.db"
+    create_step_time_database(
+        db_path,
+        StepTimeScenario(
+            name="unchanged",
+            profiles={0: BALANCED_PROFILE, 1: BALANCED_PROFILE},
+            steps=(1, 2, 3, 4),
+        ),
+    )
+    request = StepTimeLoadRequest(window_size=3)
+
+    with sqlite3.connect(db_path) as conn:
+        repository = SQLiteStepTimeRepository(conn)
+        first = repository.load_live(request)
+        with patch(
+            "traceml_ai.step_time.sqlite.json.loads",
+            wraps=json.loads,
+        ) as loads:
+            second = repository.load_live(request, previous=first)
+
+    assert second is first
+    assert loads.call_count == 0
+
+
+def test_live_strategy_change_reuses_rows_but_invalidates_analysis(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "strategy-change.db"
+    create_step_time_database(
+        db_path,
+        StepTimeScenario(
+            name="strategy_change",
+            profiles={0: BALANCED_PROFILE},
+            steps=(1, 2),
+            training_strategy="ddp",
+        ),
+    )
+    request = StepTimeLoadRequest(window_size=2)
+
+    with sqlite3.connect(db_path) as conn:
+        repository = SQLiteStepTimeRepository(conn)
+        first = repository.load_live(request)
+        conn.execute(
+            "INSERT INTO runtime_environment(training_strategy) "
+            "VALUES ('fsdp');"
+        )
+        conn.commit()
+        with patch(
+            "traceml_ai.step_time.sqlite.json.loads",
+            wraps=json.loads,
+        ) as loads:
+            second = repository.load_live(request, previous=first)
+
+    assert second is not first
+    assert second.rows is first.rows
+    assert second.cursor == first.cursor
+    assert second.training_strategy == "fsdp"
+    assert loads.call_count == 0
+
+
+def test_live_rank_universe_change_invalidates_cached_snapshot(
+    tmp_path: Path,
+) -> None:
+    """A newly observed rank matters even before it has valid timings."""
+    db_path = tmp_path / "rank-universe-change.db"
+    create_step_time_database(
+        db_path,
+        StepTimeScenario(
+            name="rank_universe_change",
+            profiles={0: BALANCED_PROFILE},
+            steps=(1,),
+        ),
+    )
+    request = StepTimeLoadRequest(window_size=1)
+
+    with sqlite3.connect(db_path) as conn:
+        repository = SQLiteStepTimeRepository(conn)
+        first = repository.load_live(request)
+        conn.execute(
+            """
+            INSERT INTO step_time_samples(
+                recv_ts_ns, rank, global_rank, step, events_json
+            ) VALUES (2, 1, 1, NULL, '');
+            """
+        )
+        conn.commit()
+        second = repository.load_live(request, previous=first)
+
+    assert second is not first
+    assert first.global_ranks == (0,)
+    assert second.global_ranks == (0, 1)
+    assert second.cursor == first.cursor
+
+
 def test_live_and_summary_profiles_feed_the_same_analysis(
     tmp_path: Path,
 ) -> None:

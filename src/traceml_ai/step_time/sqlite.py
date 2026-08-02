@@ -13,6 +13,7 @@ import math
 import re
 import sqlite3
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any, Iterator, Optional
 
 from traceml_ai.step_time.model import (
@@ -168,18 +169,36 @@ class SQLiteStepTimeRepository:
     def load_live(
         self,
         request: StepTimeLoadRequest,
+        *,
+        previous: Optional[StepTimeRepositorySnapshot] = None,
     ) -> StepTimeRepositorySnapshot:
         """Load the bounded tail needed by terminal and dashboard refreshes.
 
         The query performs an index-ordered, early-stopping scan for each rank.
         It intentionally omits rank identities and run progress, which live
         diagnosis does not read. Cost therefore follows the requested lookback
-        instead of the total number of persisted training steps.
+        instead of the total number of persisted training steps. When the
+        selected row cursor is unchanged, persisted JSON is not decoded again.
         """
         with self._read_snapshot():
             rows = self._load_live_rows(request)
+            cursor = self._live_cursor(rows)
+            global_ranks = tuple(dict.fromkeys(int(row[0]) for row in rows))
             strategy = load_training_strategy_from_sqlite(self._conn)
-            return self._snapshot_from_rows(rows, strategy=strategy)
+            if (
+                previous is not None
+                and cursor == previous.cursor
+                and global_ranks == previous.global_ranks
+            ):
+                if strategy == previous.training_strategy:
+                    return previous
+                return replace(previous, training_strategy=strategy)
+            return self._snapshot_from_rows(
+                rows,
+                strategy=strategy,
+                latest_step=cursor.latest_step,
+                last_row_id=cursor.last_row_id,
+            )
 
     def load_summary(
         self,
@@ -314,6 +333,24 @@ class SQLiteStepTimeRepository:
         """
         parameters.append(lookback)
         return self._conn.execute(query, parameters).fetchall()
+
+    @staticmethod
+    def _live_cursor(
+        rows: list[sqlite3.Row | tuple[Any, ...]],
+    ) -> StepTimeSourceCursor:
+        """Build the cache key from selected rows before JSON decoding."""
+        source_ids = [_optional_int(row[1]) for row in rows]
+        steps = [_optional_int(row[2]) for row in rows]
+        return StepTimeSourceCursor(
+            last_row_id=max(
+                (value for value in source_ids if value is not None),
+                default=None,
+            ),
+            latest_step=max(
+                (value for value in steps if value is not None),
+                default=None,
+            ),
+        )
 
     def _load_summary_rows(
         self,

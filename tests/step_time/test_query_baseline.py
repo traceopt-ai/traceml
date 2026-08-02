@@ -28,9 +28,10 @@ from tests.step_time.scenarios import (
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
-from traceml_ai.renderers.step_time.compute import StepCombinedComputer
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.renderers.step_time.compute import StepTimeDashboardAdapter
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
+from traceml_ai.step_time.model import StepTimeLoadRequest
+from traceml_ai.step_time.pipeline import LiveStepTimeSession
 
 
 @pytest.fixture(params=(1, 8, 32), ids=lambda ranks: f"{ranks}-ranks")
@@ -63,11 +64,32 @@ def test_live_query_count_is_constant_two(
 ) -> None:
     """One set-based source read plus one strategy read serves all ranks."""
     _, db_path = ranked_db
-    computer = StepCombinedComputer(str(db_path), window_size=4)
+    session = LiveStepTimeSession(
+        str(db_path),
+        request=StepTimeLoadRequest(window_size=4, lookback_factor=4),
+    )
 
-    recorder = _record_selects(computer.compute_cli)
+    recorder = _record_selects(session.refresh)
 
     assert recorder.count == 2
+
+
+def test_unchanged_live_query_count_remains_constant_two(
+    ranked_db: tuple[int, Path],
+) -> None:
+    """Cursor reuse avoids payload work without adding a polling query."""
+    _, db_path = ranked_db
+    session = LiveStepTimeSession(
+        str(db_path),
+        request=StepTimeLoadRequest(window_size=4, lookback_factor=4),
+    )
+    first = session.refresh()
+
+    recorder = _record_selects(session.refresh)
+    second = session.refresh()
+
+    assert recorder.count == 2
+    assert second.analysis is first.analysis
 
 
 def test_dashboard_query_count_is_constant_four(
@@ -75,7 +97,7 @@ def test_dashboard_query_count_is_constant_four(
 ) -> None:
     """The two current providers each perform one constant-cost load."""
     _, db_path = ranked_db
-    hero = StepCombinedRenderer(str(db_path))
+    hero = StepTimeDashboardAdapter(str(db_path))
     diagnostics = ModelDiagnosticsRenderer(str(db_path))
 
     recorder = _record_selects(

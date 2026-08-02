@@ -21,10 +21,12 @@ from traceml_ai.diagnostics.step_time import LIVE_STEP_TIME_POLICY
 from traceml_ai.renderers.step_time.compute import StepCombinedComputer
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.step_time.model import (
+    StepTimeLoadRequest,
     StepTimeMetric,
     StepTimeResult,
     StepTimeWindow,
 )
+from traceml_ai.step_time.pipeline import LiveStepTimeSession
 from traceml_ai.reporting.sections.step_time.loader import (
     load_step_time_section_data,
 )
@@ -416,7 +418,7 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
 
 def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     # The CLI sibling distinguishes "no data yet" from "had data, now
-    # expired" via StepCombinedComputer.had_ok; the dashboard hero must
+    # expired" via live-session freshness; the compatibility projection must
     # do the same instead of freezing on the last complete view forever.
     good = _payload(
         [
@@ -809,7 +811,10 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     finally:
         conn.close()
 
-    result = StepCombinedComputer(str(db_path), window_size=30).compute_cli()
+    result = StepCombinedComputer(
+        str(db_path),
+        window_size=30,
+    ).compute_dashboard()
     assert result.window is not None
     assert result.window.per_rank_timing[0]["residual_proxy"] == pytest.approx(
         10.0
@@ -829,8 +834,15 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     )
     assert summary.per_global_rank_summary[0].avg_h2d_ms is None
 
-    renderer = StepCombinedRenderer(str(db_path))
-    monkeypatch.setattr(renderer, "_payload", lambda: result)
+    renderer = StepCombinedRenderer(
+        LiveStepTimeSession(
+            str(db_path),
+            request=StepTimeLoadRequest(
+                window_size=30,
+                lookback_factor=4,
+            ),
+        )
+    )
     console = Console(record=True, width=140, color_system=None)
     console.print(renderer.get_panel_renderable())
     assert "5.0%" in console.export_text()

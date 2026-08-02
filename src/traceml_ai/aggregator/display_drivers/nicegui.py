@@ -66,7 +66,7 @@ from traceml_ai.renderers.model_diagnostics.renderer import (
 )
 from traceml_ai.renderers.process.renderer import ProcessRenderer
 from traceml_ai.renderers.step_memory.renderer import StepMemoryRenderer
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.renderers.step_time.compute import StepTimeDashboardAdapter
 from traceml_ai.renderers.system.renderer import SystemRenderer
 from traceml_ai.runtime.settings import TraceMLSettings
 
@@ -154,7 +154,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._renderers: List[DashboardRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
-            StepCombinedRenderer(db_path=self._settings.db_path),
+            StepTimeDashboardAdapter(db_path=self._settings.db_path),
             StepMemoryRenderer(db_path=self._settings.db_path),
             ModelDiagnosticsRenderer(db_path=self._settings.db_path),
         ]

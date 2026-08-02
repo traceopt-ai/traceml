@@ -8,19 +8,25 @@
 
 An unavailable phase is omitted (never rendered as a measured zero), the
 canonical INCOMPLETE_DATA diagnosis reaches the terminal, and a stale
-complete view is never re-served once the computer's own window expires.
+complete view is never re-served once the live session expires its bridge.
 """
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from rich.console import Console
 
-from tests.step_time.factories import window_from_rank_averages
+from tests.step_time.factories import (
+    live_result_from_window,
+    window_from_rank_averages,
+)
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.step_time.model import (
     StepTimeMetric,
-    StepTimeResult,
+    StepTimeWindow,
 )
+from traceml_ai.step_time.pipeline import LiveStepTimeResult
 
 
 def _metric(name: str, value: float) -> StepTimeMetric:
@@ -44,7 +50,7 @@ def _render_text(renderable) -> str:
     return console.export_text()
 
 
-def _sparse_payload() -> StepTimeResult:
+def _sparse_payload() -> LiveStepTimeResult:
     # forward was never measured: no forward metric, no residual, and the
     # per-rank timing carries no forward key.
     per_rank_timing = {
@@ -57,8 +63,8 @@ def _sparse_payload() -> StepTimeResult:
             "total_step": 92.0,
         }
     }
-    return StepTimeResult(
-        window=window_from_rank_averages(
+    return live_result_from_window(
+        window_from_rank_averages(
             per_rank_timing,
             expected_ranks=(0,),
             metrics=[
@@ -72,12 +78,9 @@ def _sparse_payload() -> StepTimeResult:
     )
 
 
-def test_cli_omits_missing_phase_and_shows_incomplete_data(
-    monkeypatch,
-) -> None:
-    renderer = StepCombinedRenderer(db_path=":memory:")
-    monkeypatch.setattr(renderer, "_payload", _sparse_payload)
-    text = _render_text(renderer.get_panel_renderable())
+def test_cli_omits_missing_phase_and_shows_incomplete_data() -> None:
+    renderer = StepCombinedRenderer(session=Mock())
+    text = _render_text(renderer.render(_sparse_payload()))
 
     # The canonical diagnosis for the sparse window reaches the terminal.
     assert "INCOMPLETE DATA" in text
@@ -94,27 +97,21 @@ def test_cli_omits_missing_phase_and_shows_incomplete_data(
     assert "60.0 ms" in text
 
 
-def test_cli_drops_dead_view_when_computer_window_expires(
-    monkeypatch,
-) -> None:
-    renderer = StepCombinedRenderer(db_path=":memory:")
+def test_cli_drops_dead_view_when_session_window_expires() -> None:
+    renderer = StepCombinedRenderer(session=Mock())
 
     live_payload = _sparse_payload()
-    monkeypatch.setattr(
-        renderer._computer, "compute_cli", lambda: live_payload
-    )
-    # Mirror the computer's own bookkeeping for a successful compute.
-    renderer._computer._last_ok = live_payload
-    live_text = _render_text(renderer.get_panel_renderable())
+    live_text = _render_text(renderer.render(live_payload))
     assert "60.0 ms" in live_text
 
-    # The computer only returns an empty result once its own stale window
+    # The session only returns an expired result once its last-good window
     # is exhausted; the renderer must not re-serve the old table.
-    expired = StepTimeResult(
+    expired = live_result_from_window(
+        StepTimeWindow(),
+        freshness="expired",
         status_message="No fresh step-combined data",
     )
-    monkeypatch.setattr(renderer._computer, "compute_cli", lambda: expired)
-    stale_text = _render_text(renderer.get_panel_renderable())
+    stale_text = _render_text(renderer.render(expired))
 
     assert "60.0 ms" not in stale_text
     assert "NO DATA" in stale_text
@@ -122,16 +119,23 @@ def test_cli_drops_dead_view_when_computer_window_expires(
 
 
 def test_cli_startup_shows_calm_waiting_panel() -> None:
-    renderer = StepCombinedRenderer(db_path=":memory:")
+    renderer = StepCombinedRenderer(session=Mock())
 
-    text = _render_text(renderer.get_panel_renderable())
+    text = _render_text(
+        renderer.render(
+            live_result_from_window(
+                StepTimeWindow(),
+                freshness="cold",
+            )
+        )
+    )
 
     # Never had data: normal warm-up must not alarm with NO DATA.
     assert "Waiting for first fully completed step" in text
     assert "NO DATA" not in text
 
 
-def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
+def test_cli_renders_multi_rank_sparse_table() -> None:
     def _multi_metric(name: str, value: float) -> StepTimeMetric:
         metric = _metric(name, value)
         return StepTimeMetric(
@@ -163,8 +167,8 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
             "total_step": 182.0,
         },
     }
-    payload = StepTimeResult(
-        window=window_from_rank_averages(
+    payload = live_result_from_window(
+        window_from_rank_averages(
             per_rank_timing,
             expected_ranks=(0, 1),
             metrics=[
@@ -175,9 +179,8 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
             ],
         )
     )
-    renderer = StepCombinedRenderer(db_path=":memory:")
-    monkeypatch.setattr(renderer, "_payload", lambda: payload)
-    text = _render_text(renderer.get_panel_renderable())
+    renderer = StepCombinedRenderer(session=Mock())
+    text = _render_text(renderer.render(payload))
 
     header = next(line for line in text.splitlines() if "Metric" in line)
     assert "FWD" not in header

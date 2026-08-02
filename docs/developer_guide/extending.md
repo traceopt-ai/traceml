@@ -38,6 +38,14 @@ run progress. Both accept `StepTimeLoadRequest`, return the same snapshot
 type, and feed the same analysis. Do not add rank-by-rank reads in renderers
 or reporting sections.
 
+Live Step Time orchestration belongs to `LiveStepTimeSession` in
+`traceml_ai.step_time.pipeline`. The session owns cursor reuse, last-good
+bridging, and monotonic expiry; a presenter receives `LiveStepTimeResult` and
+formats it. Do not open SQLite, call the analyzer, diagnose, or keep freshness
+state in a Rich or NiceGUI presenter. The CLI renderer's public `render()`
+method is the smallest example of this boundary and can be tested without a
+database.
+
 ## TraceML Lifecycle
 
 TraceML has two runtime pieces:
