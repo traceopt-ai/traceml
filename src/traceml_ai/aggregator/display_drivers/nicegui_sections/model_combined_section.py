@@ -5,7 +5,7 @@ plus a VERDICT, then a compact step-KPI strip. The ribbon recomposes as the
 bottleneck shifts.
 
 The ribbon and KPI strip are driven by the canonical StepTimeWindow carried by
-StepCombinedTimeResult (``update_model_combined_section``). The VERDICT is NOT
+StepTimeResult (``update_model_combined_section``). The VERDICT is NOT
 computed here:
 it is taken verbatim from the diagnosis engine's step-time ``status`` via
 ``update_step_verdict`` (fed the model-diagnostics payload), so it is identical
@@ -22,8 +22,8 @@ from typing import Any, Dict, List, Optional
 from nicegui import ui
 
 from traceml_ai.step_time.model import (
-    StepCombinedTimeMetric,
-    StepCombinedTimeResult,
+    StepTimeMetric,
+    StepTimeResult,
     StepTimeWindow,
 )
 from traceml_ai.utils.step_time_window import median_iteration_component_share
@@ -118,8 +118,8 @@ def build_model_combined_section() -> Dict[str, Any]:
 
 
 def _index(
-    metrics: List[StepCombinedTimeMetric],
-) -> Dict[str, StepCombinedTimeMetric]:
+    metrics: List[StepTimeMetric],
+) -> Dict[str, StepTimeMetric]:
     return {m.metric: m for m in metrics}
 
 
@@ -184,7 +184,7 @@ def _clear_ribbon(panel: Dict[str, Any], sig: str, label: str) -> None:
 def _update_kpis(
     panel: Dict[str, Any],
     window: StepTimeWindow,
-    step_metric: StepCombinedTimeMetric,
+    step_metric: StepTimeMetric,
 ) -> None:
     """Update independently valid Step Time KPI values."""
     st = step_metric.summary
@@ -211,7 +211,7 @@ def _update_kpis(
 
 
 def update_model_combined_section(
-    panel: Dict[str, Any], payload: Optional[StepCombinedTimeResult]
+    panel: Dict[str, Any], payload: Optional[StepTimeResult]
 ) -> None:
     window = payload.window if payload is not None else None
     if window is None or not window.metrics:

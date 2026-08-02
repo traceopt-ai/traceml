@@ -17,11 +17,11 @@ from traceml_ai.step_time.model import (
     DIAGNOSIS_CLOCK_KEY,
     STEP_TIME_EVENT_NAMES,
     DiagnosisClock,
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeSeries,
-    StepCombinedTimeSummary,
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeSeries,
     StepTimeSourceRow,
+    StepTimeSummary,
     StepTimeWindow,
 )
 from traceml_ai.utils.step_windows import common_suffix_steps
@@ -377,8 +377,8 @@ def _empty_coverage(
     completed_step: int,
     world_size: int,
     ranks_present: int,
-) -> StepCombinedTimeCoverage:
-    return StepCombinedTimeCoverage(
+) -> StepTimeCoverage:
+    return StepTimeCoverage(
         expected_steps=max(1, int(max_rows)),
         steps_used=0,
         completed_step=int(completed_step),
@@ -422,13 +422,13 @@ def worst_rank_by_total_step(
 def build_step_time_metrics(
     per_rank_timing: Mapping[int, Mapping[str, float]],
     *,
-    coverage: StepCombinedTimeCoverage,
+    coverage: StepTimeCoverage,
     clock: DiagnosisClock,
     series_steps: Optional[Sequence[int]] = None,
     per_rank_step_timing: Optional[
         Mapping[int, Mapping[int, Mapping[str, float]]]
     ] = None,
-) -> list[StepCombinedTimeMetric]:
+) -> list[StepTimeMetric]:
     """Build selected-clock average metrics for diagnosis and display.
 
     A metric measured by no rank emits no entry at all; a metric
@@ -441,7 +441,7 @@ def build_step_time_metrics(
     if not ranks:
         return []
 
-    metrics: list[StepCombinedTimeMetric] = []
+    metrics: list[StepTimeMetric] = []
     for metric_key in DISPLAY_METRICS:
         values = _metric_values(per_rank_timing, metric_key)
         if not values:
@@ -500,7 +500,7 @@ def build_step_time_metrics(
                 sum_y.append(
                     float(np.sum(step_values)) if step_values.size else 0.0
                 )
-            series = StepCombinedTimeSeries(
+            series = StepTimeSeries(
                 steps=step_ids,
                 median=median_y,
                 worst=worst_y,
@@ -508,11 +508,11 @@ def build_step_time_metrics(
             )
 
         metrics.append(
-            StepCombinedTimeMetric(
+            StepTimeMetric(
                 metric=metric_key,
                 clock=clock,
                 series=series,
-                summary=StepCombinedTimeSummary(
+                summary=StepTimeSummary(
                     window_size=int(coverage.expected_steps),
                     steps_used=int(coverage.steps_used),
                     median_total=float(median_total),
@@ -581,7 +581,7 @@ def build_step_time_window_from_events(
         clock=clock,
     )
     per_rank_timing = _average_rank_timing(per_rank_step_timing, steps)
-    coverage = StepCombinedTimeCoverage(
+    coverage = StepTimeCoverage(
         expected_steps=max(1, int(max_rows)),
         steps_used=len(steps),
         completed_step=int(steps[-1]),

@@ -110,7 +110,7 @@ class StepTimeRepositorySnapshot:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeSeries:
+class StepTimeSeries:
     """Per-step aggregate values for one metric across participating ranks.
 
     Attributes:
@@ -127,7 +127,7 @@ class StepCombinedTimeSeries:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeSummary:
+class StepTimeSummary:
     """Window-level statistics for one measured Step Time metric."""
 
     window_size: int
@@ -140,7 +140,7 @@ class StepCombinedTimeSummary:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeCoverage:
+class StepTimeCoverage:
     """Completeness metadata for an aligned Step Time window."""
 
     expected_steps: int
@@ -152,14 +152,14 @@ class StepCombinedTimeCoverage:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeMetric:
+class StepTimeMetric:
     """One canonical metric with optional series and aggregate statistics."""
 
     metric: str
     clock: str  # "cpu" | "gpu" | "mixed"
-    series: Optional[StepCombinedTimeSeries]
-    summary: StepCombinedTimeSummary
-    coverage: StepCombinedTimeCoverage
+    series: Optional[StepTimeSeries]
+    summary: StepTimeSummary
+    coverage: StepTimeCoverage
 
 
 @dataclass(frozen=True)
@@ -175,8 +175,8 @@ class StepTimeWindow:
     clock: DiagnosisClock = "cpu"
     steps: list[int] = field(default_factory=list)
     expected_ranks: tuple[int, ...] = ()
-    coverage: StepCombinedTimeCoverage = field(
-        default_factory=lambda: StepCombinedTimeCoverage(
+    coverage: StepTimeCoverage = field(
+        default_factory=lambda: StepTimeCoverage(
             expected_steps=0,
             steps_used=0,
             completed_step=0,
@@ -189,7 +189,7 @@ class StepTimeWindow:
         default_factory=dict
     )
     per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
-    metrics: list[StepCombinedTimeMetric] = field(default_factory=list)
+    metrics: list[StepTimeMetric] = field(default_factory=list)
 
     @property
     def rank_universe(self) -> tuple[int, ...]:
@@ -236,7 +236,7 @@ class StepTimeWindow:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeResult:
+class StepTimeResult:
     """Live Step Time state wrapping one canonical analyzed window."""
 
     status_message: str = "OK"
@@ -249,16 +249,16 @@ __all__ = [
     "DIAGNOSIS_CLOCK_KEY",
     "DiagnosisClock",
     "STEP_TIME_EVENT_NAMES",
-    "StepCombinedTimeCoverage",
-    "StepCombinedTimeMetric",
-    "StepCombinedTimeResult",
-    "StepCombinedTimeSeries",
-    "StepCombinedTimeSummary",
     "StepTimeClockValues",
+    "StepTimeCoverage",
     "StepTimeLoadRequest",
+    "StepTimeMetric",
     "StepTimeRankIdentity",
     "StepTimeRepositorySnapshot",
+    "StepTimeResult",
+    "StepTimeSeries",
     "StepTimeSourceCursor",
     "StepTimeSourceRow",
+    "StepTimeSummary",
     "StepTimeWindow",
 ]

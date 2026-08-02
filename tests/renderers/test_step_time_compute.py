@@ -134,18 +134,18 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     and had_ok records that data existed before.
     """
     from traceml_ai.renderers.step_time import compute as compute_module
-    from traceml_ai.renderers.step_time.schema import (
-        StepCombinedTimeCoverage,
-        StepCombinedTimeMetric,
-        StepCombinedTimeResult,
-        StepCombinedTimeSummary,
+    from traceml_ai.step_time.model import (
+        StepTimeCoverage,
+        StepTimeMetric,
+        StepTimeResult,
+        StepTimeSummary,
     )
 
-    metric = StepCombinedTimeMetric(
+    metric = StepTimeMetric(
         metric="step_time",
         clock="cpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=1,
             steps_used=1,
             median_total=10.0,
@@ -154,7 +154,7 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=1,
             steps_used=1,
             completed_step=1,
@@ -163,7 +163,7 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
             incomplete=False,
         ),
     )
-    good = StepCombinedTimeResult(
+    good = StepTimeResult(
         status_message="OK",
         window=StepTimeWindow(
             expected_ranks=(0,),
@@ -171,7 +171,7 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
             metrics=[metric],
         ),
     )
-    empty = StepCombinedTimeResult(status_message="no rows")
+    empty = StepTimeResult(status_message="no rows")
 
     computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
     assert computer.had_ok is False
@@ -210,19 +210,19 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
 ) -> None:
     """Persisted rows cannot establish whether their producer is alive."""
     from traceml_ai.renderers.step_time import compute as compute_module
-    from traceml_ai.renderers.step_time.schema import (
-        StepCombinedTimeCoverage,
-        StepCombinedTimeMetric,
-        StepCombinedTimeResult,
-        StepCombinedTimeSummary,
+    from traceml_ai.step_time.model import (
+        StepTimeCoverage,
+        StepTimeMetric,
+        StepTimeResult,
+        StepTimeSummary,
     )
 
-    def _result(completed_step: int) -> StepCombinedTimeResult:
-        metric = StepCombinedTimeMetric(
+    def _result(completed_step: int) -> StepTimeResult:
+        metric = StepTimeMetric(
             metric="step_time",
             clock="cpu",
             series=None,
-            summary=StepCombinedTimeSummary(
+            summary=StepTimeSummary(
                 window_size=1,
                 steps_used=1,
                 median_total=10.0,
@@ -231,7 +231,7 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
                 skew_ratio=0.0,
                 skew_pct=0.0,
             ),
-            coverage=StepCombinedTimeCoverage(
+            coverage=StepTimeCoverage(
                 expected_steps=1,
                 steps_used=1,
                 completed_step=completed_step,
@@ -240,7 +240,7 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
                 incomplete=False,
             ),
         )
-        return StepCombinedTimeResult(
+        return StepTimeResult(
             status_message="OK",
             window=StepTimeWindow(
                 expected_ranks=(0,),
@@ -285,13 +285,13 @@ def test_computer_had_ok_stays_false_on_cold_start(monkeypatch) -> None:
     """A payload that never had good data reports had_ok=False on itself,
     not just on the computer -- distinguishes cold start from an expired bridge
     for any consumer that only sees the payload (issue #259)."""
-    from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
+    from traceml_ai.step_time.model import StepTimeResult
 
     computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
     monkeypatch.setattr(
         computer,
         "_compute_impl",
-        lambda conn: StepCombinedTimeResult(status_message="no rows"),
+        lambda conn: StepTimeResult(status_message="no rows"),
     )
 
     result = computer.compute_cli()

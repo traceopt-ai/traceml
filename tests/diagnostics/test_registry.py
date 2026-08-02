@@ -18,10 +18,10 @@ from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedSeries,
     StepMemoryCombinedSummary,
 )
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeSummary,
 )
 from traceml_ai.utils.step_time_window import StepTimeWindow
 
@@ -55,12 +55,12 @@ def _step_memory_metric() -> StepMemoryCombinedMetric:
     )
 
 
-def _step_time_metric(name: str, value: float) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+def _step_time_metric(name: str, value: float) -> StepTimeMetric:
+    return StepTimeMetric(
         metric=name,
         clock="gpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=1,
             steps_used=1,
             median_total=value,
@@ -69,7 +69,7 @@ def _step_time_metric(name: str, value: float) -> StepCombinedTimeMetric:
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=1,
             steps_used=1,
             completed_step=1,

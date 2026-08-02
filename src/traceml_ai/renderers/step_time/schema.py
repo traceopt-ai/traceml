@@ -6,11 +6,13 @@ an abrupt import-path break.
 """
 
 from traceml_ai.step_time.model import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeResult,
-    StepCombinedTimeSeries,
-    StepCombinedTimeSummary,
+    StepTimeCoverage as StepCombinedTimeCoverage,
+)
+from traceml_ai.step_time.model import StepTimeMetric as StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeResult as StepCombinedTimeResult
+from traceml_ai.step_time.model import StepTimeSeries as StepCombinedTimeSeries
+from traceml_ai.step_time.model import (
+    StepTimeSummary as StepCombinedTimeSummary,
 )
 
 __all__ = [

@@ -30,11 +30,11 @@ from traceml_ai.diagnostics.step_time.rules import (
     ResidualHeavyRule,
 )
 from traceml_ai.diagnostics.step_time.trend import build_step_trend_note
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeSeries,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeSeries,
+    StepTimeSummary,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
@@ -54,17 +54,17 @@ def _time_metric(
     skew: float = 0.0,
     world_size: int = 2,
     steps: int = 64,
-) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+) -> StepTimeMetric:
+    return StepTimeMetric(
         metric=name,
         clock="mixed",
-        series=StepCombinedTimeSeries(
+        series=StepTimeSeries(
             steps=list(range(steps)),
             median=[median] * steps,
             worst=[worst] * steps,
             sum=[median * world_size] * steps,
         ),
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=steps,
             steps_used=steps,
             median_total=median,
@@ -73,7 +73,7 @@ def _time_metric(
             skew_ratio=skew,
             skew_pct=skew,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=steps,
             steps_used=steps,
             completed_step=steps,
@@ -85,7 +85,7 @@ def _time_metric(
 
 
 def _time_context(
-    *metrics: StepCombinedTimeMetric,
+    *metrics: StepTimeMetric,
     per_rank_timing: dict[int, dict[str, float]] | None = None,
     diagnosis_clock: str = "cpu",
 ):
@@ -149,8 +149,8 @@ def _metrics_from_per_rank_timing(
     per_rank_timing: dict[int, dict[str, float]],
     *,
     steps: int = 64,
-) -> tuple[StepCombinedTimeMetric, ...]:
-    metrics: list[StepCombinedTimeMetric] = []
+) -> tuple[StepTimeMetric, ...]:
+    metrics: list[StepTimeMetric] = []
     world_size = len(per_rank_timing)
     for key in (
         "input_wait",
@@ -222,7 +222,7 @@ def _single_rank_step_metrics(
     optimizer: float = 10.0,
     residual: float = 5.0,
     steps: int = 64,
-) -> tuple[StepCombinedTimeMetric, ...]:
+) -> tuple[StepTimeMetric, ...]:
     return (
         _time_metric(
             "step_time",
@@ -1618,7 +1618,7 @@ def test_trend_abstains_when_required_share_is_unavailable(
     rising = [1.0] * 60 + [10.0] * 60
     metric = replace(
         metric,
-        series=StepCombinedTimeSeries(
+        series=StepTimeSeries(
             steps=list(range(120)),
             median=rising,
             worst=rising,

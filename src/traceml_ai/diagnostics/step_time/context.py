@@ -15,7 +15,7 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, Mapping, Optional, Sequence, Tuple
 
-from traceml_ai.step_time.model import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeMetric
 from traceml_ai.utils.step_time_window import (
     median_iteration_component_share,
     worst_rank_by_total_step,
@@ -104,13 +104,13 @@ class StepTimeAnalysisContext:
     overall_worst_rank: Optional[int]
     training_strategy: str
 
-    step_metric: StepCombinedTimeMetric
-    input_wait_metric: Optional[StepCombinedTimeMetric]
-    h2d_metric: Optional[StepCombinedTimeMetric]
-    residual_metric: Optional[StepCombinedTimeMetric]
-    forward_metric: Optional[StepCombinedTimeMetric]
-    backward_metric: Optional[StepCombinedTimeMetric]
-    optimizer_metric: Optional[StepCombinedTimeMetric]
+    step_metric: StepTimeMetric
+    input_wait_metric: Optional[StepTimeMetric]
+    h2d_metric: Optional[StepTimeMetric]
+    residual_metric: Optional[StepTimeMetric]
+    forward_metric: Optional[StepTimeMetric]
+    backward_metric: Optional[StepTimeMetric]
+    optimizer_metric: Optional[StepTimeMetric]
 
     step_total: float
     residual_total: float
@@ -191,7 +191,7 @@ def _rank_stats(
     return median, worst, int(worst_rank), max(0.0, worst - median)
 
 
-def metric_median_total(metric: Optional[StepCombinedTimeMetric]) -> float:
+def metric_median_total(metric: Optional[StepTimeMetric]) -> float:
     """
     Return the median-rank total for one metric.
     """
@@ -200,7 +200,7 @@ def metric_median_total(metric: Optional[StepCombinedTimeMetric]) -> float:
     return non_negative_finite(metric.summary.median_total)
 
 
-def metric_worst_total(metric: Optional[StepCombinedTimeMetric]) -> float:
+def metric_worst_total(metric: Optional[StepTimeMetric]) -> float:
     """
     Return the worst-rank total for one metric.
     """
@@ -210,7 +210,7 @@ def metric_worst_total(metric: Optional[StepCombinedTimeMetric]) -> float:
 
 
 def metric_total(
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
     *,
     single_rank: bool,
 ) -> float:
@@ -231,7 +231,7 @@ def metric_total(
 
 
 def metric_skew(
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
     *,
     single_rank: bool,
 ) -> Optional[float]:
@@ -246,7 +246,7 @@ def metric_skew(
 
 
 def metric_worst_rank(
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
 ) -> Optional[int]:
     """
     Return the metric's worst rank, if available.
@@ -261,9 +261,9 @@ def metric_worst_rank(
 
 def compute_total(
     *,
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
+    forward: Optional[StepTimeMetric],
+    backward: Optional[StepTimeMetric],
+    optimizer: Optional[StepTimeMetric],
     single_rank: bool,
 ) -> float:
     """
@@ -276,7 +276,7 @@ def compute_total(
     )
 
 
-def metric_excess(metric: Optional[StepCombinedTimeMetric]) -> float:
+def metric_excess(metric: Optional[StepTimeMetric]) -> float:
     """
     Return worst-vs-median excess for one timing metric.
     """
@@ -493,9 +493,9 @@ def _build_rank_straggler_evidence(
 
 def largest_compute_phase(
     *,
-    forward: Optional[StepCombinedTimeMetric],
-    backward: Optional[StepCombinedTimeMetric],
-    optimizer: Optional[StepCombinedTimeMetric],
+    forward: Optional[StepTimeMetric],
+    backward: Optional[StepTimeMetric],
+    optimizer: Optional[StepTimeMetric],
     step_total: float,
     single_rank: bool,
     per_rank_timing: Optional[Mapping[int, Mapping[str, float]]] = None,
@@ -588,7 +588,7 @@ def largest_compute_phase(
 
 
 def rank_values_from_metric(
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
 ) -> Dict[int, float]:
     """
     Best-effort rank -> value extraction for one metric.
@@ -631,7 +631,7 @@ def compute_rank_values_from_components(
 
 def build_step_time_context(
     *,
-    metrics: Sequence[StepCombinedTimeMetric],
+    metrics: Sequence[StepTimeMetric],
     thresholds: "DiagnosisThresholds",
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
     expected_ranks: Optional[Sequence[int]] = None,

@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
 
-from traceml_ai.step_time.model import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeMetric
 from traceml_ai.utils.step_time_window import median_iteration_component_share
 
 if TYPE_CHECKING:
@@ -42,7 +42,7 @@ from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
 def _overall_worst_rank(
     per_rank_timing: Optional[Dict[int, Dict[str, float]]],
-    step_metric: StepCombinedTimeMetric,
+    step_metric: StepTimeMetric,
 ) -> Optional[int]:
     """Return the run-level slowest rank by full iteration time.
 
@@ -298,7 +298,7 @@ def _rank_summary_values(
 
 def _metric_attribution_entry(
     *,
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
     metric_key: str,
     rank_values: Dict[int, float],
     component_share: Optional[float],
@@ -323,9 +323,9 @@ def _metric_attribution_entry(
 def _apply_trend_note(
     diagnosis: StepDiagnosis,
     *,
-    step_metric: Optional[StepCombinedTimeMetric],
-    residual_metric: Optional[StepCombinedTimeMetric],
-    input_wait_metric: Optional[StepCombinedTimeMetric],
+    step_metric: Optional[StepTimeMetric],
+    residual_metric: Optional[StepTimeMetric],
+    input_wait_metric: Optional[StepTimeMetric],
     single_rank: bool,
     residual_share: Optional[float],
     input_bound_share: Optional[float],
@@ -430,7 +430,7 @@ def _missing_signal_report(
 
 
 def build_step_diagnosis_result(
-    metrics: Sequence[StepCombinedTimeMetric],
+    metrics: Sequence[StepTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
@@ -751,7 +751,7 @@ def build_step_diagnosis_result(
 
 
 def build_step_diagnosis(
-    metrics: Sequence[StepCombinedTimeMetric],
+    metrics: Sequence[StepTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,

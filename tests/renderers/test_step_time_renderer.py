@@ -7,11 +7,11 @@ from rich.console import Console
 from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.renderers.step_time import renderer as renderer_module
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeResult,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeResult,
+    StepTimeSummary,
 )
 from traceml_ai.utils.step_time_window import StepTimeWindow
 
@@ -21,12 +21,12 @@ def _metric(
     value: float,
     *,
     clock: str = "cpu",
-) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+) -> StepTimeMetric:
+    return StepTimeMetric(
         metric=name,
         clock=clock,
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=1,
             steps_used=1,
             median_total=value,
@@ -35,7 +35,7 @@ def _metric(
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=1,
             steps_used=1,
             completed_step=1,
@@ -58,7 +58,7 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
         _metric("step_time", 100.0),
         _metric("residual_proxy", 0.0),
     ]
-    payload = StepCombinedTimeResult(
+    payload = StepTimeResult(
         window=StepTimeWindow(
             clock="gpu",
             expected_ranks=(0,),
@@ -115,7 +115,7 @@ def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
         _metric("step_time", 31.2),
         _metric("residual_proxy", 6.0),
     ]
-    payload = StepCombinedTimeResult(
+    payload = StepTimeResult(
         window=StepTimeWindow(
             expected_ranks=(0,),
             per_rank_timing={

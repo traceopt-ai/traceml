@@ -19,11 +19,11 @@ from traceml_ai.diagnostics.model_diagnostics import (
 from traceml_ai.diagnostics.step_time import LIVE_STEP_TIME_POLICY
 from traceml_ai.renderers.step_time.compute import StepCombinedComputer
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeResult,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeResult,
+    StepTimeSummary,
 )
 from traceml_ai.reporting.sections.step_time.loader import (
     load_step_time_section_data,
@@ -85,12 +85,12 @@ def _metric(
     name: str,
     value: float,
     worst: float | None = None,
-) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+) -> StepTimeMetric:
+    return StepTimeMetric(
         metric=name,
         clock="gpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=5,
             steps_used=5,
             median_total=value,
@@ -99,7 +99,7 @@ def _metric(
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=5,
             steps_used=5,
             completed_step=5,
@@ -111,12 +111,12 @@ def _metric(
 
 
 def _payload(
-    metrics: list[StepCombinedTimeMetric],
+    metrics: list[StepTimeMetric],
     *,
     per_rank_timing: dict[int, dict[str, float]] | None = None,
     clock: str = "cpu",
     had_ok: bool = False,
-) -> StepCombinedTimeResult:
+) -> StepTimeResult:
     """Build a live result around one canonical Step Time window."""
     if per_rank_timing is None:
         row = {
@@ -126,7 +126,7 @@ def _payload(
         if "input_wait" in row and "step_time" in row:
             row["total_step"] = row["input_wait"] + row["step_time"]
         per_rank_timing = {0: row}
-    return StepCombinedTimeResult(
+    return StepTimeResult(
         window=StepTimeWindow(
             clock="gpu" if clock == "gpu" else "cpu",
             expected_ranks=tuple(sorted(per_rank_timing)),
@@ -453,14 +453,14 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
 
     # A never-had-data payload (cold start) must NOT clear the panel --
     # there is nothing to clear yet.
-    cold_start = StepCombinedTimeResult(had_ok=False)
+    cold_start = StepTimeResult(had_ok=False)
     cold_panel = _panel()
     update_model_combined_section(cold_panel, cold_start)
     assert cold_panel["win"].text == ""
 
     # TTL expired: the computer reports had_ok=True with empty metrics.
     # The dashboard must visibly clear rather than keep showing "good".
-    expired = StepCombinedTimeResult(had_ok=True)
+    expired = StepTimeResult(had_ok=True)
     update_model_combined_section(panel, expired)
 
     assert panel["win"].text == "window expired"

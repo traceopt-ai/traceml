@@ -27,10 +27,10 @@ from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.rules import RankStragglerRule
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeSummary,
 )
 from traceml_ai.reporting.compare.policy import (
     _STEP_TIME_STATUS_RANK,
@@ -113,12 +113,12 @@ def _diagnose(
     )
 
 
-def _step_metric(*, world_size: int = 2) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+def _step_metric(*, world_size: int = 2) -> StepTimeMetric:
+    return StepTimeMetric(
         metric="step_time",
         clock="cpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=30,
             steps_used=30,
             median_total=100.0,
@@ -127,7 +127,7 @@ def _step_metric(*, world_size: int = 2) -> StepCombinedTimeMetric:
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=30,
             steps_used=30,
             completed_step=30,

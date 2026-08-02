@@ -29,10 +29,7 @@ from traceml_ai.diagnostics.trends import (
 )
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.utils import fmt_time_run
-from traceml_ai.step_time.model import (
-    StepCombinedTimeMetric,
-    StepCombinedTimeResult,
-)
+from traceml_ai.step_time.model import StepTimeMetric, StepTimeResult
 from traceml_ai.utils.step_time_window import (
     diagnose_step_time_window,
     median_iteration_component_share,
@@ -73,7 +70,7 @@ class StepCombinedRenderer(BaseRenderer):
         )
         self._computer = StepCombinedComputer(db_path=db_path)
 
-    def _payload(self) -> StepCombinedTimeResult:
+    def _payload(self) -> StepTimeResult:
         """
         CLI compute is summary-only (cheap).
 
@@ -242,7 +239,7 @@ class StepCombinedRenderer(BaseRenderer):
             width=width,
         )
 
-    def get_dashboard_renderable(self) -> StepCombinedTimeResult:
+    def get_dashboard_renderable(self) -> StepTimeResult:
         """
         Dashboard uses the same selected-clock Step Time payload as the CLI.
         """
@@ -250,8 +247,8 @@ class StepCombinedRenderer(BaseRenderer):
 
 
 def _table_metrics(
-    metrics: list[StepCombinedTimeMetric],
-) -> list[StepCombinedTimeMetric]:
+    metrics: list[StepTimeMetric],
+) -> list[StepTimeMetric]:
     """
     Return selected-clock metrics in the CLI column order.
 
