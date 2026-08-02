@@ -15,18 +15,18 @@ For the public final-summary shape, see
 flowchart LR
     DB[(step_time_samples)]
     CLS["CLI LiveStepTimeSession<br/>calls StepTimePipeline"]
-    HLS["Dashboard hero session<br/>compatibility adapter"]
-    RLS["Dashboard rail session<br/>compatibility adapter"]
+    DLS["Dashboard LiveStepTimeSession<br/>one refresh per tick"]
     RESULT["Immutable StepTimeAnalysis<br/>window + diagnosis"]
     CLI["Pure Rich CLI presenter"]
-    HERO["Dashboard hero adapter"]
-    RAIL["Dashboard rail adapter"]
+    HERO["Dashboard hero presenter"]
+    RAIL["Dashboard diagnostics composer"]
     SUM["Final-summary adapter"]
     OUT["JSON and text"]
 
     DB --> CLS --> RESULT --> CLI
-    DB -. "independent refresh" .-> HLS --> HERO
-    DB -. "second independent refresh" .-> RLS --> RAIL
+    DB --> DLS --> RESULT
+    RESULT -. "same object" .-> HERO
+    RESULT -. "same diagnosis" .-> RAIL
     DB --> SUM --> OUT
 ```
 
@@ -41,13 +41,13 @@ passes the resulting `StepTimeWindow` directly to diagnosis.
 
 `LiveStepTimeSession` is the sole live orchestration boundary. It owns
 last-good state, monotonic expiry, and cursor-based analysis reuse. The CLI
-injects one session into a pure Rich presenter. Dashboard and final summary
-remain on compatibility adapters until PR7 and PR8.
+injects one session into a pure Rich presenter. The dashboard driver owns one
+session and fans its immutable result to the hero and diagnostics composer.
+Final summary remains on its compatibility adapter until PR8.
 
-The diagram shows remaining technical debt deliberately: a dashboard refresh
-owns two independent live sessions. Each performs one constant-size query
-sequence, but the hero and diagnostics rail still load independently. PR7
-will inject one session result into both presenters.
+The dashboard presenters never load or diagnose Step Time. One driver method
+performs the refresh and explicit fan-out, keeping the production reading path
+short: driver, live session, then the two local presenters.
 
 ## Where each decision belongs
 
@@ -93,11 +93,11 @@ canonical-facts path therefore has exactly two conversions and the analyzer
 returns exactly one typed fact graph.
 
 `StepTimeWindow.rank_facts` replaces the former triple nested
-rank/step/metric dictionary. `per_rank_timing` remains a cached, read-only
-projection only for dashboard/final-summary consumers that migrate in PR7
-and PR8 and for the released mapping adapter. Canonical diagnosis and the CLI
-read typed facts and precomputed window shares directly. No per-step legacy
-projection exists.
+rank/step/metric dictionary. Dashboard, canonical diagnosis, and the CLI read
+typed facts and precomputed window shares directly. `per_rank_timing` remains
+a cached, read-only projection only for released mapping adapters; PR9 removes
+that compatibility surface. No presenter and no per-step production path uses
+the legacy projection.
 
 ### Model dependency boundary
 
@@ -155,8 +155,8 @@ the selected diagnosis clock.
 | Surface | Loads | Diagnoses | Presents |
 |---|---|---|---|
 | Live CLI | One `LiveStepTimeSession` refresh | Diagnosis is precomputed once by the live pipeline | Pure Rich diagnosis and metric table |
-| Dashboard hero | One compatibility-session refresh today | Verdict comes from diagnostics payload | Phase ribbon and compact KPIs |
-| Dashboard diagnostics rail | A second compatibility-session refresh today | Live policy | Structured finding and evidence |
+| Dashboard hero | Shared result | Precomputed verdict | Ribbon and KPIs |
+| Dashboard diagnostics rail | Same result | Precomputed diagnosis | Finding and evidence |
 | Final summary | One repository snapshot with identity and progress | Summary policy | Stable JSON projection and text card |
 
 Built-in live and summary policies currently use the same thresholds. Their
@@ -214,15 +214,13 @@ Rich/NiceGUI markup, or dictionary ordering.
 
 ## Temporary compatibility seams
 
-- `StepCombinedComputer.compute_dashboard()` projects a live-session result
-  into the historical dashboard payload; PR7 removes this adapter.
-- `StepTimeDashboardAdapter` supplies that historical payload to the current
-  NiceGUI driver; PR7 replaces it with shared-session fan-out.
+- The dashboard computer, dashboard adapter, renderer-owned cache, and legacy
+  `StepTimeResult` projection have been removed. Dashboard code consumes
+  `LiveStepTimeResult` directly.
 - `utils/step_time_window.py` accepts historical raw-event fixtures and
   delegates to `StepTimeAnalyzer`; PR9 removes that input adapter.
-- `StepTimeWindow.per_rank_timing` lazily projects typed rank averages for
-  remaining dashboard and final-summary consumers; PR7 and PR8 remove those
-  consumers and PR9 removes the projection.
+- `StepTimeWindow.per_rank_timing` lazily projects typed rank averages only for
+  released compatibility consumers; PR9 removes the projection.
 - The released mapping-based diagnosis functions adapt one sparse rank map to
   a typed window. Canonical diagnosis and rules accept only `StepTimeWindow`;
   PR9 removes the mapping adapter.

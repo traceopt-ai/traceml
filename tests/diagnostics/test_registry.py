@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.diagnostics import model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
@@ -212,6 +213,45 @@ def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
     assert captured["training_strategy"] == "fsdp"
     assert payload.items[0].status == "INPUT-BOUND"
     assert payload.items[0].evidence["dominant"] == "input wait"
+
+
+def test_model_diagnostics_reuses_precomputed_step_time_diagnosis(
+    monkeypatch,
+):
+    window = window_from_rank_averages(
+        {0: {"step_time": 100.0, "total_step": 100.0}},
+        expected_ranks=(0,),
+        metrics=[_step_time_metric("step_time", 100.0)],
+    )
+    diagnosis = SimpleNamespace(
+        kind="BALANCED",
+        severity="info",
+        status="BALANCED",
+        reason="No timing issue.",
+        action="Keep monitoring.",
+        note=None,
+        confidence=0.75,
+        steps_used=1,
+        worst_rank=0,
+    )
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Step Time diagnosis was recomputed")
+
+    monkeypatch.setattr(
+        model_diagnostics,
+        "diagnose_step_time_window",
+        fail_if_called,
+    )
+
+    payload = build_model_diagnostics_payload(
+        step_time_window=window,
+        step_time_diagnosis=diagnosis,
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].status == "BALANCED"
+    assert payload.items[0].reason == "No timing issue."
 
 
 def test_model_step_time_diagnostics_do_not_fallback_to_public_metrics(

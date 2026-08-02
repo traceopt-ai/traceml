@@ -31,7 +31,6 @@ from traceml_ai.renderers.model_diagnostics.renderer import (
 )
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedResult
 from traceml_ai.renderers.step_time import renderer as cli_renderer_module
-from traceml_ai.renderers.step_time.compute import StepCombinedComputer
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.reporting.sections.step_time.model import (
@@ -349,11 +348,14 @@ def test_cli_dashboard_summary_diagnosis_parity(
     cli_renderer.get_panel_renderable()
     cli_diagnosis = captured["diagnosis"]
 
-    dashboard_renderer = ModelDiagnosticsRenderer(str(db_path))
-    dashboard_renderer._step_time = StepCombinedComputer(
+    dashboard_result = LiveStepTimeSession(
         str(db_path),
-        window_size=len(scenario.steps),
-    )
+        request=StepTimeLoadRequest(
+            window_size=len(scenario.steps),
+            lookback_factor=4,
+        ),
+    ).refresh()
+    dashboard_renderer = ModelDiagnosticsRenderer(str(db_path))
     monkeypatch.setattr(
         dashboard_renderer._step_memory,
         "compute_dashboard",
@@ -362,7 +364,7 @@ def test_cli_dashboard_summary_diagnosis_parity(
             status_message="No GPU detected",
         ),
     )
-    dashboard = dashboard_renderer.get_dashboard_renderable()
+    dashboard = dashboard_renderer.get_dashboard_renderable(dashboard_result)
     dashboard_diagnosis = next(
         item for item in dashboard["items"] if item["source"] == "step_time"
     )

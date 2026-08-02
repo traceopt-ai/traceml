@@ -4,9 +4,8 @@ Signature element: a phase RIBBON (selected-clock average phase proportions)
 plus a VERDICT, then a compact step-KPI strip. The ribbon recomposes as the
 bottleneck shifts.
 
-The ribbon and KPI strip are driven by the canonical StepTimeWindow carried by
-StepTimeResult (``update_model_combined_section``). The VERDICT is NOT
-computed here:
+The ribbon and KPI strip read the canonical window from
+``LiveStepTimeResult``. The VERDICT is NOT computed here:
 it is taken verbatim from the diagnosis engine's step-time ``status`` via
 ``update_step_verdict`` (fed the model-diagnostics payload), so it is identical
 to the Diagnostics rail, the CLI, and final_summary, and tracks any future
@@ -20,11 +19,8 @@ from typing import Any, Dict, List, Optional
 
 from nicegui import ui
 
-from traceml_ai.step_time.model import (
-    StepTimeMetric,
-    StepTimeResult,
-    StepTimeWindow,
-)
+from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
+from traceml_ai.step_time.pipeline import LiveStepTimeResult
 
 from . import theme
 
@@ -187,12 +183,13 @@ def _update_kpis(
 
 
 def update_model_combined_section(
-    panel: Dict[str, Any], payload: Optional[StepTimeResult]
+    panel: Dict[str, Any], payload: Optional[LiveStepTimeResult]
 ) -> None:
-    window = payload.window if payload is not None else None
-    if window is None or not window.metrics:
-        if payload is not None and getattr(payload, "had_ok", False):
-            _clear_view(panel, _EXPIRED_SIG, "window expired")
+    if payload is None or payload.freshness == "cold":
+        return
+    window = payload.analysis.window
+    if payload.freshness == "expired" or not window.metrics:
+        _clear_view(panel, _EXPIRED_SIG, "window expired")
         return
     m = _index(window.metrics)
     if "step_time" not in m:
@@ -326,13 +323,14 @@ def update_step_verdict(panel: Dict[str, Any], diag_payload: Any) -> None:
     Diagnostics rail, the CLI, and final_summary. The card derives no
     classification of its own, so it tracks any change to the diagnosis
     vocabulary automatically. Fed the model-diagnostics payload (the same
-    payload the Diagnostics rail consumes); missing/empty ticks leave the
-    previous verdict untouched rather than blanking it.
+    payload the Diagnostics rail consumes); an unavailable item renders
+    ``NO DATA`` instead of preserving a stale verdict.
     """
     items = (
         diag_payload.get("items") if isinstance(diag_payload, dict) else None
     )
     if not isinstance(items, list):
+        panel["verdict"].text = "NO DATA"
         return
     for it in items:
         if isinstance(it, dict) and it.get("source") == "step_time":
@@ -340,3 +338,4 @@ def update_step_verdict(panel: Dict[str, Any], diag_payload: Any) -> None:
             if status:
                 panel["verdict"].text = status
             return
+    panel["verdict"].text = "NO DATA"

@@ -46,6 +46,12 @@ state in a Rich or NiceGUI presenter. The CLI renderer's public `render()`
 method is the smallest example of this boundary and can be tested without a
 database.
 
+The NiceGUI driver also owns exactly one live session. Each dashboard tick
+refreshes it once and passes the same immutable result to the Step Time hero
+and model-diagnostics composer. Add a new Step Time dashboard view by
+consuming that result; do not register another provider or add a presenter
+cache.
+
 ## TraceML Lifecycle
 
 TraceML has two runtime pieces:

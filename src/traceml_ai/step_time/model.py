@@ -347,16 +347,6 @@ class StepTimeWindow:
         }
 
 
-@dataclass(frozen=True)
-class StepTimeResult:
-    """Live Step Time state wrapping one canonical analyzed window."""
-
-    status_message: str = "OK"
-    window: Optional[StepTimeWindow] = None
-    training_strategy: str = "ddp"
-    had_ok: bool = False
-
-
 __all__ = [
     "DIAGNOSIS_CLOCK_KEY",
     "DiagnosisClock",
@@ -368,7 +358,6 @@ __all__ = [
     "StepTimeRankIdentity",
     "StepTimeRankFacts",
     "StepTimeRepositorySnapshot",
-    "StepTimeResult",
     "StepTimeSeries",
     "StepTimeSourceCursor",
     "StepTimeSourceRow",

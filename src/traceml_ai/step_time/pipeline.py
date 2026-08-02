@@ -46,7 +46,7 @@ LiveStepTimeFreshness = Literal["cold", "live", "bridged", "expired"]
 
 @dataclass(frozen=True, slots=True)
 class StepTimeAnalysis:
-    """Immutable result shared by future Step Time presenters."""
+    """Immutable facts and diagnosis shared by Step Time presenters."""
 
     request: StepTimeLoadRequest
     snapshot: StepTimeRepositorySnapshot

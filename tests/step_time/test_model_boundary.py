@@ -184,21 +184,61 @@ def test_cli_presenter_has_no_data_or_diagnosis_dependencies() -> None:
     assert "StepTimeDashboardAdapter" not in source
 
 
-def test_dashboard_computer_is_only_a_compatibility_projection() -> None:
-    """Do not let SQL, clocks, or freshness return to the PR7 adapter."""
-    computer = (
+def test_dashboard_compatibility_types_are_removed() -> None:
+    """Keep dashboard consumers on the canonical live result."""
+    assert not (
         _PROJECT_ROOT
         / "src"
         / "traceml_ai"
         / "renderers"
         / "step_time"
         / "compute.py"
-    )
-    dependencies = set(_imports(computer))
-    source = computer.read_text(encoding="utf-8")
+    ).exists()
+    assert not hasattr(model, "StepTimeResult")
+    assert not hasattr(step_time_package, "StepTimeResult")
 
-    assert "sqlite3" not in dependencies
-    assert "time" not in dependencies
-    assert "traceml_ai.utils.step_time_sqlite" not in dependencies
-    assert "def compute_cli(" not in source
-    assert "def _stale_or_empty(" not in source
+
+def test_dashboard_diagnostics_has_no_provider_or_stale_cache() -> None:
+    """Keep live state in the one session owned by the dashboard driver."""
+    renderer = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "renderers"
+        / "model_diagnostics"
+        / "renderer.py"
+    )
+    source = renderer.read_text(encoding="utf-8")
+
+    assert "StepCombinedComputer" not in source
+    names = {
+        node.id
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Name)
+    }
+    assert "LiveStepTimeSession" not in names
+    assert "_cached" not in source
+
+
+def test_dashboard_sections_do_not_cache_semantic_step_time_payloads() -> None:
+    """Allow render signatures, but never retain a last-good domain result."""
+    sections = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "aggregator"
+        / "display_drivers"
+        / "nicegui_sections"
+    )
+    hero = (sections / "model_combined_section.py").read_text(encoding="utf-8")
+    diagnostics = (sections / "model_diagnostics_section.py").read_text(
+        encoding="utf-8"
+    )
+
+    hero_names = {
+        node.id
+        for node in ast.walk(ast.parse(hero))
+        if isinstance(node, ast.Name)
+    }
+    assert "StepTimeResult" not in hero_names
+    assert '"_last"' not in diagnostics

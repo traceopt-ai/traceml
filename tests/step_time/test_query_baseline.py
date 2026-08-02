@@ -28,7 +28,7 @@ from tests.step_time.scenarios import (
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
-from traceml_ai.renderers.step_time.compute import StepTimeDashboardAdapter
+from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedResult
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.step_time.model import StepTimeLoadRequest
 from traceml_ai.step_time.pipeline import LiveStepTimeSession
@@ -92,22 +92,30 @@ def test_unchanged_live_query_count_remains_constant_two(
     assert second.analysis is first.analysis
 
 
-def test_dashboard_query_count_is_constant_four(
+def test_dashboard_query_count_is_constant_two(
     ranked_db: tuple[int, Path],
 ) -> None:
-    """The two current providers each perform one constant-cost load."""
+    """One live result serves both Step Time dashboard presentations."""
     _, db_path = ranked_db
-    hero = StepTimeDashboardAdapter(str(db_path))
+    session = LiveStepTimeSession(
+        str(db_path),
+        request=StepTimeLoadRequest(window_size=4, lookback_factor=4),
+    )
     diagnostics = ModelDiagnosticsRenderer(str(db_path))
-
-    recorder = _record_selects(
-        lambda: (
-            hero.get_dashboard_renderable(),
-            diagnostics._step_time.compute_dashboard(),
+    diagnostics._step_memory.compute_dashboard = lambda: (
+        StepMemoryCombinedResult(
+            metrics=[],
+            status_message="No GPU detected",
         )
     )
 
-    assert recorder.count == 4
+    def refresh_dashboard() -> None:
+        step_time = session.refresh()
+        diagnostics.get_dashboard_renderable(step_time)
+
+    recorder = _record_selects(refresh_dashboard)
+
+    assert recorder.count == 2
 
 
 def test_summary_query_count_is_constant_two(

@@ -212,6 +212,42 @@ decode persisted JSON or rebuild semantic facts. Dashboard still owns two
 sessions until PR7; the improvement here is reuse within each session, not
 cross-presenter consolidation.
 
+## PR7 shared-dashboard comparison
+
+PR7 removes the two dashboard compatibility providers. The NiceGUI driver now
+refreshes one `LiveStepTimeSession` and fans the same immutable result to the
+hero and diagnostics composer. The composer reuses the diagnosis already in
+that result; neither dashboard presenter owns data access, diagnosis, or
+last-good state.
+
+Recorded on 2026-08-02 with the same environment and command as PR6:
+
+| Ranks | Stage | SELECTs | Median (ms) | Change from PR6 |
+|---:|---|---:|---:|---:|
+| 1 | one live provider (cache miss) | 2 | 8.154 | -4.5% |
+| 1 | unchanged live cache hit | 2 | 0.443 | +0.2% |
+| 1 | shared dashboard refresh | 2 | 0.430 | -51.3% |
+| 1 | final summary | 2 | 6.504 | -2.3% |
+| 8 | one live provider (cache miss) | 2 | 32.897 | -2.2% |
+| 8 | unchanged live cache hit | 2 | 3.147 | +1.0% |
+| 8 | shared dashboard refresh | 2 | 3.044 | -50.7% |
+| 8 | final summary | 2 | 15.933 | -2.1% |
+| 32 | one live provider (cache miss) | 2 | 117.048 | -3.0% |
+| 32 | unchanged live cache hit | 2 | 12.884 | -2.9% |
+| 32 | shared dashboard refresh | 2 | 12.985 | -51.4% |
+| 32 | final summary | 2 | 48.162 | -0.8% |
+
+The dashboard row is an unchanged-source refresh after warm-up. Its roughly
+50% reduction is the direct result of replacing two live-session refreshes
+with one; it is not a claim about the entire dashboard tick. When the source
+cursor changes, dashboard Step Time has the same cost as the single
+cache-miss row because it uses that same session path. Cache-miss and summary
+medians do not regress against PR6. Query topology is now 2/2/2 for one live
+provider, the dashboard, and final summary.
+
+These fixtures contain 1, 8, or 32 logical rank streams in SQLite. They do not
+use that number of GPUs or measure training throughput.
+
 ## Reproduce
 
 From the repository root:
