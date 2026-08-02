@@ -25,6 +25,7 @@ from traceml_ai.step_time.model import (
     StepTimeResult,
     StepTimeWindow,
 )
+from traceml_ai.utils.step_time_window import median_iteration_component_share
 
 from . import theme
 
