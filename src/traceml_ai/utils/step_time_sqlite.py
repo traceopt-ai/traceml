@@ -5,6 +5,9 @@ This module preserves the existing analyzed-window API while callers migrate
 to the repository boundary.
 """
 
+# TODO(PR9): Remove this compatibility adapter after all consumers call the
+# repository and analyzer boundaries directly.
+
 from __future__ import annotations
 
 import sqlite3
@@ -46,6 +49,7 @@ class StepTimeSQLiteWindow:
     cursor: StepTimeSourceCursor = field(default_factory=StepTimeSourceCursor)
 
 
+# TODO(PR4): Remove regrouping when StepTimeAnalyzer consumes flat source rows.
 def _group_source_rows(
     rows: Sequence[StepTimeSourceRow],
 ) -> dict[int, dict[int, StepTimeSourceRow]]:

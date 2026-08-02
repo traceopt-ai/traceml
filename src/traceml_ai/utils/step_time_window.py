@@ -100,6 +100,8 @@ def _event_payload(events: Any, metric_key: str) -> Any:
     return events.get(EVENT_ALIASES.get(metric_key, metric_key))
 
 
+# TODO(PR4): Make StepTimeSourceRow the sole analyzer input and remove the
+# raw-mapping branches retained for pre-analyzer fixtures.
 def _event_is_present(events: Any, metric_key: str) -> bool:
     if isinstance(events, StepTimeSourceRow):
         return metric_key in events.metrics
