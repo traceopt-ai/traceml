@@ -10,13 +10,103 @@ the same facts without making core analysis depend on a renderer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Sequence
+from typing import (
+    Any,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    NamedTuple,
+    Optional,
+    Sequence,
+)
 
 DiagnosisClock = Literal["cpu", "gpu"]
 """Clock selected consistently across one analysis window."""
 
 DIAGNOSIS_CLOCK_KEY = "diagnosis_clock"
 """Stable final-summary key that records the selected diagnosis clock."""
+
+STEP_TIME_EVENT_NAMES: Mapping[str, str] = {
+    "input_wait": "_traceml_internal:dataloader_next",
+    "h2d": "_traceml_internal:h2d_time",
+    "forward": "_traceml_internal:forward_time",
+    "backward": "_traceml_internal:backward_time",
+    "optimizer_step": "_traceml_internal:optimizer_step",
+    "step_time": "_traceml_internal:step_time",
+}
+"""Persisted event names keyed by their canonical Step Time metric."""
+
+
+@dataclass(frozen=True, slots=True)
+class StepTimeLoadRequest:
+    """Selection parameters for one bounded Step Time repository read.
+
+    ``window_size`` is the final analysis window. ``lookback_factor`` expands
+    the distinct per-rank steps returned to the alignment layer without
+    changing that final size. ``rank_filter=None`` selects every global rank;
+    an empty tuple deliberately selects none.
+    """
+
+    window_size: int
+    lookback_factor: int = 1
+    rank_filter: Optional[tuple[int, ...]] = None
+
+
+class StepTimeClockValues(NamedTuple):
+    """Normalized CPU and GPU durations for one metric occurrence."""
+
+    cpu_ms: Optional[float] = None
+    gpu_ms: Optional[float] = None
+
+
+class StepTimeSourceRow(NamedTuple):
+    """One decoded, deduplicated global-rank step from persisted telemetry."""
+
+    source_id: int
+    global_rank: int
+    step: int
+    metrics: Mapping[str, StepTimeClockValues]
+
+
+@dataclass(frozen=True, slots=True)
+class StepTimeSourceCursor:
+    """Append-oriented source position returned with a repository snapshot."""
+
+    last_row_id: Optional[int] = None
+    latest_step: Optional[int] = None
+
+
+@dataclass(frozen=True, slots=True)
+class StepTimeRankIdentity:
+    """Latest persisted distributed identity for one global rank."""
+
+    global_rank: int
+    local_rank: Optional[int] = None
+    node_rank: Optional[int] = None
+    hostname: Optional[str] = None
+    local_world_size: Optional[int] = None
+    world_size: Optional[int] = None
+
+
+@dataclass(frozen=True, slots=True)
+class StepTimeRepositorySnapshot:
+    """Consistent source facts returned by one repository load.
+
+    The repository does not align steps, choose a clock, derive metrics, or
+    diagnose. Those responsibilities remain in later pipeline layers. Live
+    snapshots intentionally leave summary-only identity, progress, and cursor
+    fields empty.
+    """
+
+    rows: tuple[StepTimeSourceRow, ...] = ()
+    global_ranks: tuple[int, ...] = ()
+    identities: Mapping[int, StepTimeRankIdentity] = field(
+        default_factory=dict
+    )
+    latest_step_observed: Optional[int] = None
+    cursor: StepTimeSourceCursor = field(default_factory=StepTimeSourceCursor)
+    training_strategy: str = "ddp"
 
 
 @dataclass(frozen=True)
@@ -158,10 +248,17 @@ class StepCombinedTimeResult:
 __all__ = [
     "DIAGNOSIS_CLOCK_KEY",
     "DiagnosisClock",
+    "STEP_TIME_EVENT_NAMES",
     "StepCombinedTimeCoverage",
     "StepCombinedTimeMetric",
     "StepCombinedTimeResult",
     "StepCombinedTimeSeries",
     "StepCombinedTimeSummary",
+    "StepTimeClockValues",
+    "StepTimeLoadRequest",
+    "StepTimeRankIdentity",
+    "StepTimeRepositorySnapshot",
+    "StepTimeSourceCursor",
+    "StepTimeSourceRow",
     "StepTimeWindow",
 ]

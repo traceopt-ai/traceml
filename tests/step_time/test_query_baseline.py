@@ -4,10 +4,10 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Current SQLite query topology for Step Time consumers.
+"""SQLite query topology for Step Time consumers.
 
-These assertions are characterization baselines, not performance budgets.
-Query-consolidation PRs are expected to update them deliberately.
+These assertions enforce rank-independent repository statement counts. They
+are architecture contracts, not wall-clock performance budgets.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 
 
-@pytest.fixture(params=(1, 8), ids=lambda ranks: f"{ranks}-ranks")
+@pytest.fixture(params=(1, 8, 32), ids=lambda ranks: f"{ranks}-ranks")
 def ranked_db(
     request: pytest.FixtureRequest,
     tmp_path: Path,
@@ -58,23 +58,23 @@ def _record_selects(call: Callable[[], object]) -> SQLiteSelectRecorder:
     return recorder
 
 
-def test_live_query_count_baseline_is_rank_plus_two(
+def test_live_query_count_is_constant_two(
     ranked_db: tuple[int, Path],
 ) -> None:
-    """Record rank discovery, per-rank reads, and strategy context."""
-    rank_count, db_path = ranked_db
+    """One set-based source read plus one strategy read serves all ranks."""
+    _, db_path = ranked_db
     computer = StepCombinedComputer(str(db_path), window_size=4)
 
     recorder = _record_selects(computer.compute_cli)
 
-    assert recorder.count == rank_count + 2
+    assert recorder.count == 2
 
 
-def test_dashboard_query_count_baseline_is_two_rank_plus_four(
+def test_dashboard_query_count_is_constant_four(
     ranked_db: tuple[int, Path],
 ) -> None:
-    """The two current dashboard providers independently read Step Time."""
-    rank_count, db_path = ranked_db
+    """The two current providers each perform one constant-cost load."""
+    _, db_path = ranked_db
     hero = StepCombinedRenderer(str(db_path))
     diagnostics = ModelDiagnosticsRenderer(str(db_path))
 
@@ -85,16 +85,16 @@ def test_dashboard_query_count_baseline_is_two_rank_plus_four(
         )
     )
 
-    assert recorder.count == (2 * rank_count) + 4
+    assert recorder.count == 4
 
 
-def test_summary_query_count_baseline_is_two_rank_plus_three(
+def test_summary_query_count_is_constant_two(
     ranked_db: tuple[int, Path],
 ) -> None:
-    """Summary adds one max-step read and one identity read for every rank."""
-    rank_count, db_path = ranked_db
+    """Summary receives progress and identities with its source snapshot."""
+    _, db_path = ranked_db
     section = StepTimeSummarySection(max_rows=4)
 
     recorder = _record_selects(lambda: section.build(str(db_path)))
 
-    assert recorder.count == (2 * rank_count) + 3
+    assert recorder.count == 2

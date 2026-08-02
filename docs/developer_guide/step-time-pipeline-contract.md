@@ -16,7 +16,7 @@ flowchart LR
     DB[(step_time_samples)]
     A["Live provider A<br/>StepCombinedRenderer"]
     B["Live provider B<br/>ModelDiagnosticsRenderer"]
-    L["Shared live SQLite loader"]
+    L["SQLite repository<br/>live or summary profile"]
     W["Canonical live StepTimeWindow"]
     D["Live Step Time diagnosis"]
     CLI["Live CLI"]
@@ -39,10 +39,15 @@ flowchart LR
     DB --> S --> SW --> SD --> OUT
 ```
 
-The diagram shows current technical debt deliberately: a dashboard refresh
-owns two independent Step Time computers. The hero receives timing data from
-one, while the diagnostics rail and hero verdict receive diagnosis from the
-other. PR1 measures this duplication; it does not change it.
+The repository has two SQL selection profiles, not three surface pipelines.
+Terminal and dashboard share an index-bounded live tail. Final summary uses a
+metadata-complete query. Both return one `StepTimeRepositorySnapshot` and feed
+the same alignment and analysis code.
+
+The diagram shows remaining technical debt deliberately: a dashboard refresh
+owns two independent Step Time computers. Each now performs one constant-size
+query sequence, but the hero and diagnostics rail still load independently.
+A later consumer-migration PR will fan out one analysis snapshot.
 
 ## Where each decision belongs
 
@@ -51,7 +56,8 @@ other. PR1 measures this duplication; it does not change it.
 | Shared data contracts | `step_time/model.py` | the canonical window, metric, series, or coverage shape changes |
 | Event-to-metric names | `utils/step_time_window.py` | persisted event names or clock extraction change |
 | Common-step alignment and availability | `utils/step_time_window.py` | window, sparse-signal, or derived-metric semantics change |
-| SQLite rank loading and strategy context | `utils/step_time_sqlite.py` | persisted Step Time reads change |
+| SQLite selection and row decoding | `step_time/sqlite.py` | live-tail or summary selection, identity, progress, or clock normalization changes |
+| Analyzed-window compatibility adapter | `utils/step_time_sqlite.py` | an existing loader caller needs migration support |
 | Diagnosis thresholds and priority | `diagnostics/step_time/` | a rule, policy, attribution, or issue order changes |
 | Live CLI presentation | `renderers/step_time/renderer.py` | terminal labels or layout change |
 | Dashboard Step Time presentation | `aggregator/display_drivers/nicegui_sections/` | hero or diagnostics cards change |
@@ -94,10 +100,10 @@ the selected diagnosis clock.
 
 | Surface | Loads | Diagnoses | Presents |
 |---|---|---|---|
-| Live CLI | Recent aligned window with lookback | Live policy | Rich diagnosis and metric table |
-| Dashboard hero | Recent aligned window with lookback | Verdict comes from diagnostics payload | Phase ribbon and compact KPIs |
-| Dashboard diagnostics rail | A second recent aligned window today | Live policy | Structured finding and evidence |
-| Final summary | Larger bounded final window plus rank identity | Summary policy | Stable JSON projection and text card |
+| Live CLI | One repository snapshot; recent aligned window with lookback | Live policy | Rich diagnosis and metric table |
+| Dashboard hero | One repository snapshot today | Verdict comes from diagnostics payload | Phase ribbon and compact KPIs |
+| Dashboard diagnostics rail | A second repository snapshot today | Live policy | Structured finding and evidence |
+| Final summary | One repository snapshot with identity and progress | Summary policy | Stable JSON projection and text card |
 
 Built-in live and summary policies currently use the same thresholds. Their
 window sizes and presentation responsibilities differ.

@@ -38,6 +38,9 @@ from tests.step_time.scenarios import (  # noqa: E402
     StepTimeScenario,
     create_step_time_database,
 )
+from traceml_ai.aggregator.sqlite_writers.step_time import (  # noqa: E402
+    init_schema as init_step_time_schema,
+)
 from traceml_ai.diagnostics.step_time.policy import (  # noqa: E402
     LIVE_STEP_TIME_POLICY,
 )
@@ -110,6 +113,11 @@ def _benchmark_rank_count(
     )
     db_path = root / f"step-time-{rank_count}-ranks.db"
     create_step_time_database(db_path, scenario)
+    with sqlite3.connect(db_path) as conn:
+        # Contract fixtures intentionally use a minimal schema. Performance
+        # measurements must include the indexes installed in production.
+        init_step_time_schema(conn)
+        conn.commit()
 
     def load_window():
         with sqlite3.connect(db_path) as conn:

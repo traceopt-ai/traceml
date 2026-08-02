@@ -32,7 +32,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Samplers | `src/traceml_ai/samplers/` | Periodic telemetry collection (timing, memory, system) |
 | Database | `src/traceml_ai/database/` | Bounded in-memory tables and SQLite-backed history |
 | Transport | `src/traceml_ai/transport/` | TCP bidirectional + DDP rank detection |
-| Step Time domain | `src/traceml_ai/step_time/` | Presentation-independent Step Time data contracts |
+| Step Time domain | `src/traceml_ai/step_time/` | Shared contracts and set-based SQLite source repository |
 | Renderers | `src/traceml_ai/renderers/` | Transform stored data into Rich/Plotly output |
 | Display drivers | `src/traceml_ai/aggregator/display_drivers/` | CLI vs NiceGUI output medium |
 | Public API | `src/traceml_ai/api.py` | Top-level instrumentation entry points |

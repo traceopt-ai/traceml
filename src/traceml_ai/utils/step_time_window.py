@@ -15,11 +15,13 @@ import numpy as np
 
 from traceml_ai.step_time.model import (
     DIAGNOSIS_CLOCK_KEY,
+    STEP_TIME_EVENT_NAMES,
     DiagnosisClock,
     StepCombinedTimeCoverage,
     StepCombinedTimeMetric,
     StepCombinedTimeSeries,
     StepCombinedTimeSummary,
+    StepTimeSourceRow,
     StepTimeWindow,
 )
 from traceml_ai.utils.step_windows import common_suffix_steps
@@ -29,21 +31,14 @@ if TYPE_CHECKING:
     from traceml_ai.diagnostics.step_time.api import StepDiagnosis
     from traceml_ai.diagnostics.step_time.policy import StepTimeDiagnosisPolicy
 
-DATALOADER_EVENT_NAME = "_traceml_internal:dataloader_next"
-STEP_TIME_EVENT_NAME = "_traceml_internal:step_time"
+DATALOADER_EVENT_NAME = STEP_TIME_EVENT_NAMES["input_wait"]
+STEP_TIME_EVENT_NAME = STEP_TIME_EVENT_NAMES["step_time"]
 
 INPUT_WAIT_KEY = "input_wait"
 DATALOADER_FETCH_KEY = "dataloader_fetch"
 STEP_TIME_CPU_KEY = "step_time_cpu"
 
-EVENT_ALIASES: Dict[str, str] = {
-    INPUT_WAIT_KEY: DATALOADER_EVENT_NAME,
-    "h2d": "_traceml_internal:h2d_time",
-    "forward": "_traceml_internal:forward_time",
-    "backward": "_traceml_internal:backward_time",
-    "optimizer_step": "_traceml_internal:optimizer_step",
-    "step_time": STEP_TIME_EVENT_NAME,
-}
+EVENT_ALIASES: Dict[str, str] = dict(STEP_TIME_EVENT_NAMES)
 
 SELECTED_METRICS: tuple[str, ...] = (
     INPUT_WAIT_KEY,
@@ -105,16 +100,26 @@ def _event_payload(events: Any, metric_key: str) -> Any:
     return events.get(EVENT_ALIASES.get(metric_key, metric_key))
 
 
+# TODO(PR4): Make StepTimeSourceRow the sole analyzer input and remove the
+# raw-mapping branches retained for pre-analyzer fixtures.
 def _event_is_present(events: Any, metric_key: str) -> bool:
+    if isinstance(events, StepTimeSourceRow):
+        return metric_key in events.metrics
     payload = _event_payload(events, metric_key)
     return isinstance(payload, Mapping) and bool(payload)
 
 
 def _event_cpu_ms(events: Any, metric_key: str) -> Optional[float]:
+    if isinstance(events, StepTimeSourceRow):
+        values = events.metrics.get(metric_key)
+        return values.cpu_ms if values is not None else None
     return _sum_clock(_event_payload(events, metric_key), "cpu_ms")
 
 
 def _event_gpu_ms(events: Any, metric_key: str) -> Optional[float]:
+    if isinstance(events, StepTimeSourceRow):
+        values = events.metrics.get(metric_key)
+        return values.gpu_ms if values is not None else None
     return _sum_clock(_event_payload(events, metric_key), "gpu_ms")
 
 
@@ -135,7 +140,7 @@ def _event_has_required_gpu(events: Any) -> bool:
 
 
 def _select_clock_from_events(
-    per_rank_steps: Mapping[int, Mapping[int, Mapping[str, Any]]],
+    per_rank_steps: Mapping[int, Mapping[int, Any]],
     steps: Sequence[int],
 ) -> DiagnosisClock:
     if not per_rank_steps or not steps:
@@ -217,7 +222,7 @@ def median_iteration_component_share(
 
 
 def _rank_metric_availability(
-    step_map: Mapping[int, Mapping[str, Any]],
+    step_map: Mapping[int, Any],
     steps: Sequence[int],
     *,
     clock: DiagnosisClock,
@@ -330,7 +335,7 @@ def _average_rank_timing(
 
 
 def _selected_step_timing_from_events(
-    per_rank_steps: Mapping[int, Mapping[int, Mapping[str, Any]]],
+    per_rank_steps: Mapping[int, Mapping[int, Any]],
     steps: Sequence[int],
     *,
     clock: DiagnosisClock,
@@ -528,13 +533,13 @@ def build_step_time_metrics(
 
 
 def build_step_time_window_from_events(
-    per_rank_steps: Mapping[int, Mapping[int, Mapping[str, Any]]],
+    per_rank_steps: Mapping[int, Mapping[int, Any]],
     *,
     max_rows: int,
     expected_ranks: Optional[Sequence[int]] = None,
     completed_step: Optional[int] = None,
 ) -> StepTimeWindow:
-    """Build one selected-clock window directly from raw event payloads."""
+    """Build a selected-clock window from raw or repository-decoded rows."""
     expected = tuple(
         sorted(
             {int(rank) for rank in (expected_ranks or per_rank_steps.keys())}

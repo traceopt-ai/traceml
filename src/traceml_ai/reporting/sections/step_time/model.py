@@ -14,7 +14,7 @@ import numpy as np
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.summaries.summary_formatting import safe_float
-from traceml_ai.step_time.model import StepTimeWindow
+from traceml_ai.step_time.model import StepTimeRankIdentity, StepTimeWindow
 from traceml_ai.utils.step_time_window import public_step_time_metric_values
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
@@ -107,16 +107,8 @@ class RankStepSummary:
     avg_total_step_ms: Optional[float]
 
 
-@dataclass(frozen=True)
-class GlobalRankIdentity:
-    """Runtime identity observed for one global rank."""
-
-    global_rank: int
-    local_rank: Optional[int]
-    node_rank: Optional[int]
-    hostname: Optional[str]
-    local_world_size: Optional[int]
-    world_size: Optional[int]
+GlobalRankIdentity = StepTimeRankIdentity
+"""Compatibility name for the central Step Time rank identity contract."""
 
 
 def rank_summary_from_timing(

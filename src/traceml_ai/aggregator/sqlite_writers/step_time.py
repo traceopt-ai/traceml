@@ -211,6 +211,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
+        CREATE INDEX IF NOT EXISTS idx_step_time_samples_global_rank_step_id
+        ON step_time_samples(global_rank, step DESC, id DESC);
+        """
+    )
+    conn.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_step_time_samples_step_rank
         ON step_time_samples(step, rank, id);
         """

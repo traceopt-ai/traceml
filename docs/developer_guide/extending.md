@@ -30,6 +30,14 @@ Import shared Step Time contracts from `traceml_ai.step_time.model`. The old
 are compatibility re-exports for downstream users, not ownership locations
 for new types.
 
+Step Time SQLite selection and JSON normalization belong in
+`traceml_ai.step_time.sqlite`. Terminal and dashboard consumers use
+`SQLiteStepTimeRepository.load_live()` for an index-bounded tail. Final
+summary uses `load_summary()` for the same timing facts plus identities and
+run progress. Both accept `StepTimeLoadRequest`, return the same snapshot
+type, and feed the same analysis. Do not add rank-by-rank reads in renderers
+or reporting sections.
+
 ## TraceML Lifecycle
 
 TraceML has two runtime pieces:
