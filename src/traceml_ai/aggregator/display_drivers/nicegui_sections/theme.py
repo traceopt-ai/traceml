@@ -44,6 +44,18 @@ PHASES: List[Tuple[str, str, str]] = [
     ("OPT", "optimizer_step", "#2e7d32"),
     ("RESIDUAL", "residual_proxy", "#f9a825"),
 ]
+
+# Readable names for the legend. The ribbon keeps the compact abbreviations
+# above so an inline segment label never overflows a narrow slice; the
+# legend spells them out (esp. "IW", which is not self-evident).
+PHASE_LEGEND_LABELS: Dict[str, str] = {
+    "input_wait": "Input wait",
+    "h2d": "H2D",
+    "forward": "Forward",
+    "backward": "Backward",
+    "optimizer_step": "Optimizer",
+    "residual_proxy": "Residual",
+}
 SEV = {
     "crit": "#c62828",
     "warn": "#ef6c00",

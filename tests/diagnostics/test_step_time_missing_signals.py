@@ -27,10 +27,10 @@ from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.rules import RankStragglerRule
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeSummary,
 )
 from traceml_ai.reporting.compare.policy import (
     _STEP_TIME_STATUS_RANK,
@@ -113,12 +113,12 @@ def _diagnose(
     )
 
 
-def _step_metric(*, world_size: int = 2) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+def _step_metric(*, world_size: int = 2) -> StepTimeMetric:
+    return StepTimeMetric(
         metric="step_time",
         clock="cpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=30,
             steps_used=30,
             median_total=100.0,
@@ -127,7 +127,7 @@ def _step_metric(*, world_size: int = 2) -> StepCombinedTimeMetric:
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=30,
             steps_used=30,
             completed_step=30,
@@ -301,6 +301,22 @@ _BALANCED_RANK = dict(
     optimizer_step=10.0,
     step_time=76.0,
 )
+
+
+def test_expected_rank_without_window_rows_is_incomplete() -> None:
+    window = build_step_time_window_from_events(
+        {0: _step_events(**_BALANCED_RANK)},
+        max_rows=30,
+        expected_ranks=(0, 1),
+    )
+
+    result = diagnose_step_time_window(
+        window,
+        policy=SUMMARY_STEP_TIME_POLICY,
+    )
+
+    assert result.primary.kind == "INCOMPLETE_DATA"
+    assert result.issues[0].evidence["signal_coverage"]["backward"] == "1/2"
 
 
 def test_missing_backward_blocks_ddp_straggler() -> None:
@@ -619,7 +635,9 @@ def test_partial_metric_stats_use_measuring_ranks() -> None:
     assert h2d_metric.summary.worst_rank == 1
     assert h2d_metric.summary.worst_total == pytest.approx(9.0)
     assert h2d_metric.summary.median_total == pytest.approx(9.0)
-    assert h2d_metric.summary.skew_pct == pytest.approx(0.0)
+    # One eligible rank has no cross-rank population from which to compute
+    # skew; unavailable is distinct from a measured zero gap.
+    assert h2d_metric.summary.skew_pct is None
 
 
 # ---------------------------------------------------------------------------

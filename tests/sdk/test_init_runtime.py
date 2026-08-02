@@ -89,6 +89,26 @@ def test_init_disabled_via_env(initialization, monkeypatch):
     assert started == []
 
 
+def test_direct_runtime_settings_default_to_summary(
+    initialization, monkeypatch, tmp_path
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_UI_MODE", raising=False)
+    monkeypatch.delenv("TRACEML_MODE", raising=False)
+
+    settings = initialization._resolve_runtime_settings(
+        ui_mode=None,
+        interval=None,
+        logs_dir=None,
+        enable_logging=None,
+        session_id="direct-default",
+        aggregator_host=None,
+        aggregator_port=None,
+    )
+
+    assert settings.mode == "summary"
+
+
 def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     import torch.nn as nn
 

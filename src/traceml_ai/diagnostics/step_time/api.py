@@ -11,7 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
 
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeMetric
+from traceml_ai.utils.step_time_window import median_iteration_component_share
 
 if TYPE_CHECKING:
     from .context import StepTimeAnalysisContext
@@ -33,7 +34,6 @@ from .context import (
     metric_worst_rank,
     metric_worst_total,
     non_negative_finite,
-    share,
 )
 from .policy import DEFAULT_THRESHOLDS, DiagnosisThresholds
 from .rules import run_step_time_rules
@@ -42,7 +42,7 @@ from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
 def _overall_worst_rank(
     per_rank_timing: Optional[Dict[int, Dict[str, float]]],
-    step_metric: StepCombinedTimeMetric,
+    step_metric: StepTimeMetric,
 ) -> Optional[int]:
     """Return the run-level slowest rank by full iteration time.
 
@@ -262,12 +262,12 @@ def _top_rank_entries(
 
 def _rank_summary_values(
     rank_values: Dict[int, float],
-) -> tuple[float, float, Optional[int], float]:
+) -> tuple[float, float, Optional[int], Optional[float]]:
     """
     Return median, worst value, worst rank, and skew for rank values.
     """
     if not rank_values:
-        return 0.0, 0.0, None, 0.0
+        return 0.0, 0.0, None, None
     clean = {
         int(rank): non_negative_finite(value)
         for rank, value in rank_values.items()
@@ -280,16 +280,28 @@ def _rank_summary_values(
         median = float((ordered[mid - 1] + ordered[mid]) / 2.0)
     worst_rank = max(clean, key=lambda rank: (clean[rank], -int(rank)))
     worst = clean[worst_rank]
-    skew = ((worst - median) / median) if median > 0.0 else 0.0
-    return median, worst, int(worst_rank), max(0.0, skew)
+    if len(clean) < 2:
+        skew = None
+    elif median > 0.0:
+        skew = (worst - median) / median
+    elif worst <= 0.0:
+        skew = 0.0
+    else:
+        skew = None
+    return (
+        median,
+        worst,
+        int(worst_rank),
+        max(0.0, skew) if skew is not None else None,
+    )
 
 
 def _metric_attribution_entry(
     *,
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
     metric_key: str,
     rank_values: Dict[int, float],
-    step_total: float,
+    component_share: Optional[float],
     single_rank: bool,
     phase: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -303,9 +315,7 @@ def _metric_attribution_entry(
         "worst_total_ms": metric_worst_total(metric),
         "worst_rank": metric_worst_rank(metric),
         "skew_pct": metric_skew(metric, single_rank=single_rank),
-        "share_pct": share(
-            metric_total(metric, single_rank=single_rank), step_total
-        ),
+        "share_pct": component_share,
         "top_ranks": _top_rank_entries(rank_values),
     }
 
@@ -313,12 +323,12 @@ def _metric_attribution_entry(
 def _apply_trend_note(
     diagnosis: StepDiagnosis,
     *,
-    step_metric: Optional[StepCombinedTimeMetric],
-    residual_metric: Optional[StepCombinedTimeMetric],
-    input_wait_metric: Optional[StepCombinedTimeMetric],
+    step_metric: Optional[StepTimeMetric],
+    residual_metric: Optional[StepTimeMetric],
+    input_wait_metric: Optional[StepTimeMetric],
     single_rank: bool,
-    residual_share: float,
-    input_bound_share: float,
+    residual_share: Optional[float],
+    input_bound_share: Optional[float],
     thresholds: DiagnosisThresholds,
 ) -> StepDiagnosis:
     """
@@ -360,13 +370,14 @@ def _missing_signal_report(
     """Return missing-signal names plus per-signal rank coverage.
 
     A signal is reported when an abstaining rule required it and it was
-    not measured on every observed rank. H2D is never reported missing:
+    not measured on every expected rank. A rank with no aligned timing row
+    is missing every required signal. H2D is never reported missing:
     its events are occurrence-driven (a fully instrumented run with no
     host-to-device copies emits none), so absence means no observed
     transfers, not missing instrumentation. Without per-rank rows,
     availability is unknowable, so nothing is reported missing either.
     """
-    ranks = max(0, int(context.ranks_observed))
+    ranks = max(0, int(context.rank_population_size))
     if ranks == 0:
         return [], {}
     counts = context.signal_rank_counts or {}
@@ -374,6 +385,9 @@ def _missing_signal_report(
 
     def _require(signals: Sequence[str]) -> None:
         needed.update(signals)
+
+    if context.ranks_with_rows < ranks:
+        _require(_MISSING_SIGNAL_ORDER)
 
     if context.input_bound_share is None:
         _require(("input_wait", "step_time"))
@@ -416,10 +430,11 @@ def _missing_signal_report(
 
 
 def build_step_diagnosis_result(
-    metrics: Sequence[StepCombinedTimeMetric],
+    metrics: Sequence[StepTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    expected_ranks: Optional[Sequence[int]] = None,
     diagnosis_clock: str = "cpu",
     training_strategy: str = "ddp",
 ) -> DiagnosticResult[StepDiagnosis]:
@@ -484,6 +499,7 @@ def build_step_diagnosis_result(
         metrics=metrics,
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
+        expected_ranks=expected_ranks,
         diagnosis_clock=diagnosis_clock,
         training_strategy=training_strategy,
     )
@@ -609,8 +625,8 @@ def build_step_diagnosis_result(
         residual_metric=context.residual_metric,
         input_wait_metric=context.input_wait_metric,
         single_rank=context.single_rank,
-        residual_share=context.residual_share or 0.0,
-        input_bound_share=context.input_bound_share or 0.0,
+        residual_share=context.residual_share,
+        input_bound_share=context.input_bound_share,
         thresholds=thresholds,
     )
 
@@ -644,13 +660,26 @@ def build_step_diagnosis_result(
         compute_worst_rank,
         compute_skew,
     ) = _rank_summary_values(compute_rank_values)
+    timing = per_rank_timing or {}
+    attribution_shares = {
+        key: median_iteration_component_share(timing, key)
+        for key in (
+            "input_wait",
+            "h2d",
+            "forward",
+            "backward",
+            "optimizer_step",
+            "residual_proxy",
+            "step_time",
+        )
+    }
 
     metric_attribution = {
         "input_wait": _metric_attribution_entry(
             metric=context.input_wait_metric,
             metric_key="input_wait",
             rank_values=context.rank_values.get("input_wait", {}),
-            step_total=context.step_total,
+            component_share=attribution_shares["input_wait"],
             single_rank=context.single_rank,
             phase="input",
         ),
@@ -658,7 +687,7 @@ def build_step_diagnosis_result(
             metric=context.h2d_metric,
             metric_key="h2d",
             rank_values=context.rank_values.get("h2d", {}),
-            step_total=context.step_total,
+            component_share=attribution_shares["h2d"],
             single_rank=context.single_rank,
             phase="h2d",
         ),
@@ -666,7 +695,7 @@ def build_step_diagnosis_result(
             metric=context.forward_metric,
             metric_key="forward",
             rank_values=context.rank_values.get("forward", {}),
-            step_total=context.step_total,
+            component_share=attribution_shares["forward"],
             single_rank=context.single_rank,
             phase="forward",
         ),
@@ -674,7 +703,7 @@ def build_step_diagnosis_result(
             metric=context.backward_metric,
             metric_key="backward",
             rank_values=context.rank_values.get("backward", {}),
-            step_total=context.step_total,
+            component_share=attribution_shares["backward"],
             single_rank=context.single_rank,
             phase="backward",
         ),
@@ -682,7 +711,7 @@ def build_step_diagnosis_result(
             metric=context.optimizer_metric,
             metric_key="optimizer_step",
             rank_values=context.rank_values.get("optimizer_step", {}),
-            step_total=context.step_total,
+            component_share=attribution_shares["optimizer_step"],
             single_rank=context.single_rank,
             phase="optimizer",
         ),
@@ -690,7 +719,7 @@ def build_step_diagnosis_result(
             metric=context.residual_metric,
             metric_key="residual_proxy",
             rank_values=context.rank_values.get("residual_proxy", {}),
-            step_total=context.step_total,
+            component_share=attribution_shares["residual_proxy"],
             single_rank=context.single_rank,
             phase="residual",
         ),
@@ -698,7 +727,7 @@ def build_step_diagnosis_result(
             metric=context.step_metric,
             metric_key="step_time",
             rank_values=context.rank_values.get("step_time", {}),
-            step_total=context.step_total,
+            component_share=attribution_shares["step_time"],
             single_rank=context.single_rank,
             phase="step",
         ),
@@ -709,7 +738,7 @@ def build_step_diagnosis_result(
             "worst_total_ms": compute_worst_ms,
             "worst_rank": compute_worst_rank,
             "skew_pct": compute_skew,
-            "share_pct": share(compute_median_ms, context.step_total),
+            "share_pct": context.compute_share,
             "top_ranks": _top_rank_entries(compute_rank_values),
         },
     }
@@ -722,10 +751,11 @@ def build_step_diagnosis_result(
 
 
 def build_step_diagnosis(
-    metrics: Sequence[StepCombinedTimeMetric],
+    metrics: Sequence[StepTimeMetric],
     thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
     *,
     per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    expected_ranks: Optional[Sequence[int]] = None,
     diagnosis_clock: str = "cpu",
     training_strategy: str = "ddp",
 ) -> StepDiagnosis:
@@ -739,12 +769,14 @@ def build_step_diagnosis(
         metrics,
         thresholds=thresholds,
         per_rank_timing=per_rank_timing,
+        expected_ranks=expected_ranks,
         diagnosis_clock=diagnosis_clock,
         training_strategy=training_strategy,
     ).primary
     if not isinstance(primary, StepDiagnosis):
         raise TypeError(
-            "build_step_diagnosis_result() must return StepDiagnosis as primary"
+            "build_step_diagnosis_result() must return StepDiagnosis "
+            "as primary"
         )
     return primary
 

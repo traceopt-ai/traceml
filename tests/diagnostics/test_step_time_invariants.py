@@ -27,10 +27,13 @@ import itertools
 
 import pytest
 
-from traceml_ai.utils.step_time_window import (
-    _OCCURRENCE_METRICS,
+from traceml_ai.step_time.analysis import (
+    OCCURRENCE_METRICS,
     SELECTED_METRICS,
+)
+from traceml_ai.utils.step_time_window import (
     build_step_time_window_from_events,
+    median_iteration_component_share,
     public_step_time_metric_values,
 )
 
@@ -55,7 +58,7 @@ _BASE_MS = {
 # Every metric that is not occurrence-driven must be measured on every
 # aligned step to stay available.
 _REQUIRED_METRICS = tuple(
-    m for m in SELECTED_METRICS if m not in _OCCURRENCE_METRICS
+    m for m in SELECTED_METRICS if m not in OCCURRENCE_METRICS
 )
 
 _WINDOW = 6
@@ -118,6 +121,138 @@ def assert_metric_worst_is_self_consistent(window) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_window_carries_canonical_metric_rank_availability() -> None:
+    presence_by_rank = {
+        0: _all_steps(),
+        1: _all_steps(),
+    }
+    del presence_by_rank[1]["forward"]
+    del presence_by_rank[0]["input_wait"]
+    del presence_by_rank[1]["input_wait"]
+
+    per_rank = {0: {}, 1: {}}
+    for rank, presence in presence_by_rank.items():
+        for step in range(_WINDOW):
+            events = {}
+            for metric, present_steps in presence.items():
+                if step in present_steps:
+                    value = (
+                        0.0
+                        if rank == 0 and metric == "backward"
+                        else _BASE_MS[metric]
+                    )
+                    events[_EVENT_NAMES[metric]] = _stat(value)
+            per_rank[rank][step] = events
+
+    window = build_step_time_window_from_events(
+        per_rank,
+        max_rows=_WINDOW,
+        expected_ranks=(0, 1),
+    )
+    assert window.rank_universe == (0, 1)
+    assert window.ranks_for("input_wait") == ()
+    assert window.ranks_for("forward") == (0,)
+    assert window.ranks_for("backward") == (0, 1)
+    assert window.per_rank_timing[0]["backward"] == pytest.approx(0.0)
+    assert window.is_complete("input_wait") is False
+    assert window.is_complete("forward") is False
+    assert window.is_complete("backward") is True
+    assert window.eligible_ranks(("forward", "backward")) == (0,)
+
+
+def test_empty_window_keeps_expected_rank_universe() -> None:
+    window = build_step_time_window_from_events(
+        {},
+        max_rows=_WINDOW,
+        expected_ranks=(0, 1),
+    )
+    assert window.rank_universe == (0, 1)
+    assert all(window.ranks_for(metric) == () for metric in SELECTED_METRICS)
+
+
+def test_skew_requires_two_measured_ranks_but_zero_remains_measured() -> None:
+    single = _window_from_presence(_all_steps())
+    single_step = next(m for m in single.metrics if m.metric == "step_time")
+    assert single_step.summary.skew_pct is None
+    assert single_step.summary.skew_ratio is None
+
+    presence_by_rank = {0: _all_steps(), 1: _all_steps()}
+    per_rank = {0: {}, 1: {}}
+    for rank, presence in presence_by_rank.items():
+        for step in range(_WINDOW):
+            events = {
+                _EVENT_NAMES[metric]: _stat(
+                    0.0 if metric == "backward" else _BASE_MS[metric]
+                )
+                for metric, present_steps in presence.items()
+                if step in present_steps
+            }
+            per_rank[rank][step] = events
+
+    window = build_step_time_window_from_events(
+        per_rank,
+        max_rows=_WINDOW,
+        expected_ranks=(0, 1),
+    )
+    backward = next(m for m in window.metrics if m.metric == "backward")
+    assert backward.summary.skew_pct == pytest.approx(0.0)
+
+
+def test_skew_is_unavailable_when_zero_median_hides_a_nonzero_rank() -> None:
+    per_rank = {rank: {} for rank in range(3)}
+    for rank in per_rank:
+        for step in range(_WINDOW):
+            per_rank[rank][step] = {
+                _EVENT_NAMES[metric]: _stat(
+                    10.0
+                    if metric == "backward" and rank == 2
+                    else (0.0 if metric == "backward" else _BASE_MS[metric])
+                )
+                for metric in _EVENT_NAMES
+            }
+
+    window = build_step_time_window_from_events(
+        per_rank,
+        max_rows=_WINDOW,
+        expected_ranks=(0, 1, 2),
+    )
+    backward = next(m for m in window.metrics if m.metric == "backward")
+    assert backward.summary.median_total == pytest.approx(0.0)
+    assert backward.summary.worst_total == pytest.approx(10.0)
+    assert backward.summary.skew_pct is None
+    assert backward.summary.skew_ratio is None
+
+
+def test_iteration_share_preserves_unavailable_and_measured_zero() -> None:
+    rows = {
+        0: {
+            "input_wait": 100.0,
+            "step_time": 100.0,
+            "residual_proxy": 10.0,
+        }
+    }
+    assert median_iteration_component_share(
+        rows, "residual_proxy"
+    ) == pytest.approx(0.05)
+    rows[0]["residual_proxy"] = 0.0
+    assert median_iteration_component_share(
+        rows, "residual_proxy"
+    ) == pytest.approx(0.0)
+    del rows[0]["residual_proxy"]
+    assert median_iteration_component_share(rows, "residual_proxy") is None
+
+    invalid_compute = {
+        0: {
+            "input_wait": 10.0,
+            "step_time": 100.0,
+            "forward": None,
+            "backward": 20.0,
+            "optimizer_step": 10.0,
+        }
+    }
+    assert median_iteration_component_share(invalid_compute, "compute") is None
+
+
 @pytest.mark.parametrize("metric", _REQUIRED_METRICS)
 @pytest.mark.parametrize("present_count", [1, _WINDOW // 2, _WINDOW - 1])
 def test_required_metric_partial_presence_drops_availability(
@@ -134,7 +269,7 @@ def test_required_metric_partial_presence_drops_availability(
     assert metric not in {m.metric for m in window.metrics}
 
 
-@pytest.mark.parametrize("metric", sorted(_OCCURRENCE_METRICS))
+@pytest.mark.parametrize("metric", sorted(OCCURRENCE_METRICS))
 @pytest.mark.parametrize("present_count", [1, _WINDOW // 2, _WINDOW - 1])
 def test_occurrence_metric_partial_presence_stays_available(
     metric: str, present_count: int
@@ -264,11 +399,9 @@ def test_metric_partition_is_exhaustive_and_intended() -> None:
     # Every selected metric is classified exactly once. Occurrence-driven
     # metrics are the closed set below; adding a new selected metric
     # without deciding its class fails here (the single-source guard).
-    assert _OCCURRENCE_METRICS <= set(SELECTED_METRICS)
-    assert _OCCURRENCE_METRICS == {"optimizer_step", "h2d"}
-    assert (
-        set(_REQUIRED_METRICS) == set(SELECTED_METRICS) - _OCCURRENCE_METRICS
-    )
+    assert OCCURRENCE_METRICS <= set(SELECTED_METRICS)
+    assert OCCURRENCE_METRICS == {"optimizer_step", "h2d"}
+    assert set(_REQUIRED_METRICS) == set(SELECTED_METRICS) - OCCURRENCE_METRICS
     # Every required metric has a partial-presence test above via
     # parametrization over _REQUIRED_METRICS, so a new required metric is
     # automatically covered by test_required_metric_partial_presence.

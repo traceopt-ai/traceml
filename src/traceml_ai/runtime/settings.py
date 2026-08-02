@@ -24,6 +24,9 @@ DEFAULT_FINALIZE_TIMEOUT_SEC = 300.0
 # The public ``interval`` setting uses this value unless explicitly overridden
 # through the CLI, environment, YAML, or an integration-specific config.
 DEFAULT_INTERVAL_SEC = 2.0
+# Summary is the safe, topology-independent display default. Live CLI and
+# dashboard rendering remain explicit opt-ins.
+DEFAULT_UI_MODE = "summary"
 
 
 @dataclass(frozen=True)
@@ -68,7 +71,7 @@ class TraceMLSettings:
     """
 
     profile: str = "run"
-    mode: str = "cli"
+    mode: str = DEFAULT_UI_MODE
     sampler_interval_sec: float = DEFAULT_INTERVAL_SEC
     render_interval_sec: float = DEFAULT_INTERVAL_SEC
     logs_dir: str = "./logs"

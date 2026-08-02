@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeMetric
 
 from ..trends import (
     DEFAULT_TREND_CONFIG,
@@ -32,7 +32,7 @@ DEFAULT_STEP_TREND_HEURISTICS = StepTrendHeuristicConfig()
 
 
 def _safe_metric_trend_pct(
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
     *,
     single_rank: bool,
     cfg: StepTrendHeuristicConfig,
@@ -69,11 +69,11 @@ def build_step_trend_note(
     diagnosis_kind: str,
     steps_used: int,
     single_rank: bool,
-    step_metric: Optional[StepCombinedTimeMetric],
-    residual_metric: Optional[StepCombinedTimeMetric],
-    input_wait_metric: Optional[StepCombinedTimeMetric],
-    residual_share: float,
-    input_bound_share: float,
+    step_metric: Optional[StepTimeMetric],
+    residual_metric: Optional[StepTimeMetric],
+    input_wait_metric: Optional[StepTimeMetric],
+    residual_share: Optional[float],
+    input_bound_share: Optional[float],
     residual_warn_threshold: float,
     input_warn_threshold: float,
     cfg: StepTrendHeuristicConfig = DEFAULT_STEP_TREND_HEURISTICS,
@@ -99,15 +99,21 @@ def build_step_trend_note(
         residual_state = _trend_state(residual_tr, cfg=cfg)
         input_wait_state = _trend_state(input_wait_tr, cfg=cfg)
 
+        if diagnosis_kind in {"INPUT_BOUND", "INPUT_STRAGGLER"}:
+            if input_bound_share is None:
+                return None
+        if diagnosis_kind == "RESIDUAL_HEAVY" and residual_share is None:
+            return None
+
         if (
             diagnosis_kind in {"INPUT_BOUND", "INPUT_STRAGGLER"}
             and input_wait_state
         ):
-            return (
-                "Trend: input wait is "
-                f"{input_wait_state} "
-                f"({format_trend_pct(input_wait_tr, deadband_pct=cfg.deadband_pct)})."
+            formatted = format_trend_pct(
+                input_wait_tr,
+                deadband_pct=cfg.deadband_pct,
             )
+            return "Trend: input wait is " f"{input_wait_state} ({formatted})."
 
         if (
             diagnosis_kind
@@ -119,22 +125,28 @@ def build_step_trend_note(
             }
             and step_state
         ):
-            return (
-                "Trend: step time is "
-                f"{step_state} ({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
+            formatted = format_trend_pct(
+                step_tr,
+                deadband_pct=cfg.deadband_pct,
             )
+            return f"Trend: step time is {step_state} ({formatted})."
 
         if diagnosis_kind == "RESIDUAL_HEAVY" and residual_state:
+            formatted = format_trend_pct(
+                residual_tr,
+                deadband_pct=cfg.deadband_pct,
+            )
             return (
-                "Trend: residual time is "
-                f"{residual_state} ({format_trend_pct(residual_tr, deadband_pct=cfg.deadband_pct)})."
+                "Trend: residual time is " f"{residual_state} ({formatted})."
             )
 
-        near_residual_warn = residual_share >= (
+        near_residual_warn = residual_share is not None and residual_share >= (
             residual_warn_threshold * cfg.near_warn_fraction
         )
-        near_input_warn = input_bound_share >= (
-            input_warn_threshold * cfg.near_warn_fraction
+        near_input_warn = (
+            input_bound_share is not None
+            and input_bound_share
+            >= input_warn_threshold * cfg.near_warn_fraction
         )
 
         if (
@@ -142,10 +154,11 @@ def build_step_trend_note(
             and step_state == "worsening"
             and (near_residual_warn or near_input_warn)
         ):
-            return (
-                "Trend: step time is rising "
-                f"({format_trend_pct(step_tr, deadband_pct=cfg.deadband_pct)})."
+            formatted = format_trend_pct(
+                step_tr,
+                deadband_pct=cfg.deadband_pct,
             )
+            return f"Trend: step time is rising ({formatted})."
 
         return None
     except Exception:

@@ -1,4 +1,9 @@
-from traceml_ai.aggregator.sqlite_writers.step_time import _normalize_events
+import sqlite3
+
+from traceml_ai.aggregator.sqlite_writers.step_time import (
+    _normalize_events,
+    init_schema,
+)
 
 
 def test_step_time_normalize_events_preserves_cpu_and_gpu_ms() -> None:
@@ -64,3 +69,16 @@ def test_step_time_normalize_events_keeps_old_rows_valid() -> None:
         "gpu_ms": None,
         "n_calls": 1,
     }
+
+
+def test_step_time_schema_indexes_set_based_rank_step_selection() -> None:
+    with sqlite3.connect(":memory:") as conn:
+        init_schema(conn)
+        indexes = {
+            str(row[1])
+            for row in conn.execute(
+                "PRAGMA index_list(step_time_samples);"
+            ).fetchall()
+        }
+
+    assert "idx_step_time_samples_global_rank_step_id" in indexes

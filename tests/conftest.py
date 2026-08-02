@@ -8,8 +8,11 @@ install first.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -18,39 +21,18 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 
-import pytest  # noqa: E402
-
-
 @pytest.fixture(autouse=True)
-def _reset_traceml_global_state_between_tests():
-    """
-    Reset process-global TraceML state after every test.
+def _contain_traceml_disabled_env():
+    """Keep TRACEML_DISABLED from leaking out of the test that set it.
 
-    1. Optimizer-hook state: ``trace_step`` installs process-global
-       optimizer-step hooks (via ``ensure_optimizer_timing_installed``) and
-       the installed-flag is never cleared, so a later test calling
-       ``wrap_optimizer()`` is refused purely because of test order.
-    2. Recording state (#143): a test that leaks
-       ``configure_trace_recording(max_steps=N)`` after flushing past step N
-       silences ALL telemetry process-wide, which would make unrelated
-       emission tests (e.g. the StreamContract conformance gate) report
-       streams dark. Upstream tests reset this only inline, which is not
-       exception-safe.
-
-    Both resets are best-effort and never fail a test.
+    `init()` writes this variable straight to os.environ on its fail-open path
+    (`sdk/initial.py::_noop_config`), so one unreachable-aggregator call would
+    otherwise turn every later test, and every subprocess they spawn, into a
+    disabled no-op run.
     """
+    original = os.environ.get("TRACEML_DISABLED")
     yield
-    try:
-        from traceml_ai.instrumentation.hooks.optimizer_hooks import (
-            reset_optimizer_timing,
-        )
-
-        reset_optimizer_timing()
-    except Exception:
-        pass
-    try:
-        from traceml_ai.runtime.state import configure_trace_recording
-
-        configure_trace_recording()
-    except Exception:
-        pass
+    if original is None:
+        os.environ.pop("TRACEML_DISABLED", None)
+    else:
+        os.environ["TRACEML_DISABLED"] = original

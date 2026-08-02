@@ -7,17 +7,19 @@
 """Step-time domain objects and pure helpers for the final-report section."""
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 import numpy as np
 
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.summaries.summary_formatting import safe_float
-from traceml_ai.utils.step_time_window import (
+from traceml_ai.step_time.model import (
+    StepTimeRankIdentity,
+    StepTimeValues,
     StepTimeWindow,
-    public_step_time_metric_values,
 )
+from traceml_ai.utils.step_time_window import public_step_time_metric_values
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [
@@ -109,20 +111,12 @@ class RankStepSummary:
     avg_total_step_ms: Optional[float]
 
 
-@dataclass(frozen=True)
-class GlobalRankIdentity:
-    """Runtime identity observed for one global rank."""
-
-    global_rank: int
-    local_rank: Optional[int]
-    node_rank: Optional[int]
-    hostname: Optional[str]
-    local_world_size: Optional[int]
-    world_size: Optional[int]
+GlobalRankIdentity = StepTimeRankIdentity
+"""Compatibility name for the central Step Time rank identity contract."""
 
 
 def rank_summary_from_timing(
-    timing: Dict[str, float],
+    timing: Mapping[str, float] | StepTimeValues,
     *,
     steps_analyzed: int,
 ) -> RankStepSummary:
@@ -137,7 +131,7 @@ def rank_summary_from_timing(
         avg_forward_ms=finite_float_or_none(public["forward_ms"]),
         avg_backward_ms=finite_float_or_none(public["backward_ms"]),
         avg_optimizer_ms=finite_float_or_none(public["optimizer_ms"]),
-        avg_traced_step_ms=finite_float_or_none(timing.get("step_time")),
+        avg_traced_step_ms=finite_float_or_none(public["step_time_ms"]),
         avg_compute_ms=finite_float_or_none(public["compute_ms"]),
         avg_residual_ms=finite_float_or_none(public["residual_ms"]),
         avg_total_step_ms=finite_float_or_none(public["total_step_ms"]),
@@ -149,11 +143,11 @@ def rank_summaries_from_window(
 ) -> Dict[int, RankStepSummary]:
     """Return final-summary rank rows from one canonical Step Time window."""
     return {
-        int(rank): rank_summary_from_timing(
-            dict(timing),
+        facts.global_rank: rank_summary_from_timing(
+            facts.average,
             steps_analyzed=int(window.coverage.steps_used),
         )
-        for rank, timing in window.per_rank_timing.items()
+        for facts in window.rank_facts
     }
 
 

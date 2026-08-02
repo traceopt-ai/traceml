@@ -103,7 +103,6 @@ def test_final_summary_json_smoke(tmp_path):
         "from traceml_ai.launcher.cli import main; main()",
         "run",
         str(script_path),
-        "--mode=summary",
         "--run-name",
         RUN_NAME,
         "--logs-dir",

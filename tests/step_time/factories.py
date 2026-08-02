@@ -1,0 +1,219 @@
+"""Small typed Step Time factories for presentation-unit tests.
+
+Production-path tests should prefer repository snapshots and
+``StepTimeAnalyzer``. These factories exist for renderer tests that already
+provide aggregate metric objects and only need a typed rank-fact window.
+"""
+
+from __future__ import annotations
+
+import statistics
+from typing import Mapping, Optional, Sequence
+
+from traceml_ai.step_time.model import (
+    DiagnosisClock,
+    StepTimeMetric,
+    StepTimeRankFacts,
+    StepTimeValues,
+    StepTimeWindow,
+)
+
+
+def values_from_legacy(
+    values: Mapping[str, float],
+) -> StepTimeValues:
+    """Translate one concise test row into the canonical value type."""
+
+    def optional(key: str) -> Optional[float]:
+        return float(values[key]) if key in values else None
+
+    forward = optional("forward")
+    backward = optional("backward")
+    optimizer = optional("optimizer_step")
+    compute = optional("compute")
+    if compute is None and None not in (forward, backward, optimizer):
+        compute = float(forward + backward + optimizer)
+
+    input_wait = optional("input_wait")
+    step_time = optional("step_time")
+    total_step = optional("total_step")
+    if total_step is None and input_wait is not None and step_time is not None:
+        total_step = input_wait + step_time
+
+    dataloader_cpu = optional("dataloader_fetch")
+    step_time_cpu = optional("step_time_cpu")
+    total_step_cpu = (
+        dataloader_cpu + step_time_cpu
+        if dataloader_cpu is not None and step_time_cpu is not None
+        else None
+    )
+    return StepTimeValues(
+        input_wait_ms=input_wait,
+        h2d_ms=optional("h2d"),
+        forward_ms=forward,
+        backward_ms=backward,
+        optimizer_step_ms=optimizer,
+        step_time_ms=step_time,
+        compute_ms=compute,
+        residual_ms=optional("residual_proxy"),
+        total_step_ms=total_step,
+        dataloader_cpu_ms=dataloader_cpu,
+        step_time_cpu_ms=step_time_cpu,
+        total_step_cpu_ms=total_step_cpu,
+    )
+
+
+def window_from_rank_averages(
+    per_rank_timing: Mapping[int, Mapping[str, float]],
+    *,
+    metrics: Sequence[StepTimeMetric] = (),
+    clock: DiagnosisClock = "cpu",
+    expected_ranks: Optional[Sequence[int]] = None,
+) -> StepTimeWindow:
+    """Build a typed aggregate-only window for a renderer unit test."""
+    rank_facts = tuple(
+        StepTimeRankFacts(
+            global_rank=int(rank),
+            average=values_from_legacy(values),
+        )
+        for rank, values in sorted(per_rank_timing.items())
+    )
+    expected = tuple(
+        sorted(
+            int(rank)
+            for rank in (
+                expected_ranks
+                if expected_ranks is not None
+                else per_rank_timing.keys()
+            )
+        )
+    )
+
+    def carrying(*names: str) -> tuple[int, ...]:
+        return tuple(
+            facts.global_rank
+            for facts in rank_facts
+            if all(facts.average.value(name) is not None for name in names)
+        )
+
+    composition_names = tuple(
+        name
+        for name in (
+            "input_wait",
+            "forward",
+            "backward",
+            "optimizer_step",
+            "residual_proxy",
+        )
+        if any(facts.average.value(name) is not None for facts in rank_facts)
+    )
+    composition = carrying("step_time", *composition_names)
+    totals = {
+        facts.global_rank: facts.average.total_step_ms
+        for facts in rank_facts
+        if facts.average.total_step_ms is not None
+    }
+    median_total = (
+        float(statistics.median(totals.values())) if totals else None
+    )
+    representative = (
+        min(
+            totals,
+            key=lambda rank: (
+                abs(float(totals[rank]) - float(median_total)),
+                float(totals[rank]),
+                rank,
+            ),
+        )
+        if totals and median_total is not None
+        else None
+    )
+    worst = (
+        max(totals, key=lambda rank: (float(totals[rank]), -rank))
+        if totals
+        else None
+    )
+    composition_representative = _composition_representative(
+        rank_facts,
+        composition,
+    )
+    return StepTimeWindow(
+        clock=clock,
+        expected_ranks=expected,
+        rank_facts=rank_facts,
+        metrics=metrics if isinstance(metrics, list) else list(metrics),
+        iteration_ranks=carrying("input_wait", "step_time"),
+        compute_ranks=carrying(
+            "input_wait",
+            "step_time",
+            "forward",
+            "backward",
+            "optimizer_step",
+        ),
+        composition_ranks=composition,
+        median_total_step_ms=median_total,
+        representative_rank=representative,
+        representative_total_step_ms=(
+            float(totals[representative])
+            if representative is not None
+            else None
+        ),
+        composition_representative_rank=composition_representative,
+        worst_rank=worst,
+        worst_total_step_ms=(
+            float(totals[worst]) if worst is not None else None
+        ),
+        input_wait_share=_component_share(rank_facts, "input_wait"),
+        h2d_share=_component_share(rank_facts, "h2d"),
+        compute_share=_component_share(rank_facts, "compute"),
+        residual_share=_component_share(rank_facts, "residual_proxy"),
+    )
+
+
+def _composition_representative(
+    rank_facts: Sequence[StepTimeRankFacts],
+    cohort: Sequence[int],
+) -> Optional[int]:
+    ranks = set(cohort)
+    anchors = {
+        facts.global_rank: (
+            facts.average.total_step_ms
+            if facts.average.total_step_ms is not None
+            else facts.average.step_time_ms
+        )
+        for facts in rank_facts
+        if facts.global_rank in ranks
+    }
+    clean = {
+        rank: value for rank, value in anchors.items() if value is not None
+    }
+    if not clean:
+        return None
+    middle = float(statistics.median(clean.values()))
+    return min(
+        clean,
+        key=lambda rank: (abs(float(clean[rank]) - middle), rank),
+    )
+
+
+def _component_share(
+    rank_facts: Sequence[StepTimeRankFacts],
+    component: str,
+) -> Optional[float]:
+    shares = []
+    for facts in rank_facts:
+        values = facts.average
+        numerator = values.value(component)
+        if (
+            numerator is None
+            or values.input_wait_ms is None
+            or values.step_time_ms is None
+        ):
+            continue
+        total = values.input_wait_ms + values.step_time_ms
+        if total > 0.0:
+            shares.append(float(numerator) / total)
+    return float(statistics.median(shares)) if shares else None
+
+
+__all__ = ["values_from_legacy", "window_from_rank_averages"]

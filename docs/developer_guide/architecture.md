@@ -32,6 +32,7 @@ Samplers maintain an incremental append counter per rank per table. The sender s
 | Samplers | `src/traceml_ai/samplers/` | Periodic telemetry collection (timing, memory, system) |
 | Database | `src/traceml_ai/database/` | Bounded in-memory tables and SQLite-backed history |
 | Transport | `src/traceml_ai/transport/` | TCP bidirectional + DDP rank detection |
+| Step Time domain | `src/traceml_ai/step_time/` | Shared contracts and set-based SQLite source repository |
 | Renderers | `src/traceml_ai/renderers/` | Transform stored data into Rich/Plotly output |
 | Display drivers | `src/traceml_ai/aggregator/display_drivers/` | CLI vs NiceGUI output medium |
 | Public API | `src/traceml_ai/api.py` | Top-level instrumentation entry points |
@@ -42,6 +43,13 @@ The `src/traceml/` package is a deprecated compatibility alias for older import
 paths. New implementation work should go under `src/traceml_ai/`.
 
 For the user-facing API surface (`trace_step`, `TraceMLTrainer`, `TraceMLCallback`, CLI usage), see the [Public API](../user_guide/public-api.md). The source tree above is the canonical reference for internals — start from the entry points and follow the imports.
+
+Contributors changing Step Time should begin with the
+[Step Time pipeline contract](step-time-pipeline-contract.md), which maps its
+canonical window, diagnosis, live surfaces, final-summary projection, and
+cross-surface fixtures without requiring a full source-tree traversal.
+Shared Step Time types belong in `traceml_ai.step_time.model`; that module must
+not import SQLite, diagnosis, reporting, or UI code.
 
 ## Design principles
 
@@ -63,7 +71,7 @@ The load-bearing calls that shape the system, with the rationale and the main al
 | Bounded in-memory deque tables for the live view, SQLite (WAL) for history | Cap per-rank memory yet keep a queryable history; renderers read from SQLite (rejected: unbounded in-memory retention) | Oldest in-memory rows evict at `maxlen`; SQLite retention is windowed and is the source of truth for renderers |
 | Rule-based diagnosis: stateless per-window thresholds, min-step damping, no hysteresis | Verdicts must be explainable, deterministic, and cheap, with no training data required (rejected: a learned/ML classifier) | Thresholds are hand-tuned and documented; verdicts are named (`INPUT_BOUND`, `COMPUTE_STRAGGLER`, `CREEP_CONFIRMED`, and so on) |
 | Report residual time as a derived bucket: `residual = max(0, step - h2d - forward - backward - optimizer)` | No portable, in-process, cross-backend hook for collective/NCCL time exists today (rejected: backend-specific collective instrumentation) | Residual time can absorb legitimate non-collective gaps; explicit collective timing is on the roadmap and flagged in the user docs |
-| Lazy imports for UI and integrations | `import traceml` should stay fast and avoid importing torch, NiceGUI, Plotly, or framework stacks until a feature needs them (rejected: eager imports of the UI/integration stack) | Dashboard dependencies ship with the default install because dashboard is the single-node default, but UI/framework modules are still imported lazily; torch, transformers, lightning, and ray stay behind extras or integration-specific installs |
+| Lazy imports for UI and integrations | `import traceml` should stay fast and avoid importing torch, NiceGUI, Plotly, or framework stacks until a feature needs them (rejected: eager imports of the UI/integration stack) | Summary is the default display mode. Dashboard dependencies currently ship with the default install, but UI/framework modules are imported lazily; torch, transformers, lightning, and ray stay behind extras or integration-specific installs |
 
 ## Quality requirements
 
@@ -102,6 +110,7 @@ Architectural risks and known structural debt. Day-to-day bugs live in the issue
 | H2D | Host-to-device copy (CPU to GPU), timed by patching `Tensor.to`. |
 | Phase | A timed part of a step: input wait, H2D, forward, backward, or optimizer. |
 | Step / trace_step | A training iteration; `with trace_step(model)` marks the boundary that phase timing is computed against. |
+| Step Time availability | `StepTimeWindow` carries the expected rank universe and sparse per-rank metrics. Measured-rank populations and multi-metric eligibility are derived from those facts; consumers do not maintain a second coverage model. |
 | Residual (residual_proxy) | Residual step time, `max(0, step - h2d - forward - backward - optimizer)`. |
 | INPUT_BOUND / COMPUTE_BOUND | Input wait is material, or compute reaches 90% of typical selected-clock iteration time. |
 | INPUT_STRAGGLER / COMPUTE_STRAGGLER / H2D_STRAGGLER / STRAGGLER | Visible rank skew exists; the label names the culprit's material input, DDP-forward, or H2D excess, or `STRAGGLER` when the skew is sync-bound or unattributed. |

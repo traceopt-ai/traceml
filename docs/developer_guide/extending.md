@@ -20,6 +20,24 @@ Live UI and final summaries are separate paths. They can share diagnostics, but
 they should pass explicit policies such as `LIVE_STEP_TIME_POLICY` or
 `SUMMARY_STEP_TIME_POLICY` when thresholds differ.
 
+For Step Time specifically, start with the
+[Step Time pipeline contract](step-time-pipeline-contract.md). Its ownership
+map and six SQLite scenarios show which layer owns each calculation and how to
+verify CLI, dashboard, and final-summary behavior together.
+
+Import shared Step Time contracts from `traceml_ai.step_time.model`. The old
+`renderers.step_time.schema` and `utils.step_time_window.StepTimeWindow` paths
+are compatibility re-exports for downstream users, not ownership locations
+for new types.
+
+Step Time SQLite selection and JSON normalization belong in
+`traceml_ai.step_time.sqlite`. Terminal and dashboard consumers use
+`SQLiteStepTimeRepository.load_live()` for an index-bounded tail. Final
+summary uses `load_summary()` for the same timing facts plus identities and
+run progress. Both accept `StepTimeLoadRequest`, return the same snapshot
+type, and feed the same analysis. Do not add rank-by-rank reads in renderers
+or reporting sections.
+
 ## TraceML Lifecycle
 
 TraceML has two runtime pieces:
@@ -197,6 +215,7 @@ tests/sdk/
 tests/telemetry/
 tests/display/
 tests/integrations/
+tests/step_time/       cross-surface Step Time contracts
 ```
 
 Keep tests close to the behavior they protect. The most valuable tests are

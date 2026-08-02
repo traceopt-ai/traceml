@@ -1,9 +1,10 @@
 import sqlite3
 import time
-from typing import Dict, Optional, Sequence
+from dataclasses import replace
+from typing import Optional, Sequence
 
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
+from traceml_ai.step_time.model import StepTimeResult
 from traceml_ai.utils.step_time_sqlite import load_step_time_window_from_sqlite
 
 STEP_TIME_TABLE = "step_time_samples"
@@ -14,8 +15,8 @@ class StepCombinedComputer:
     Compute selected-clock Step Time diagnosis payloads from SQLite.
 
     Live delegates global-rank SQLite loading to the shared Step Time window
-    loader, then adds CLI/dashboard-specific stale handling and status text.
-    The output remains rank-shaped for existing UI and diagnosis consumers.
+    loader, then adds CLI/dashboard-specific empty-read bridging and status
+    text. Consumers receive that canonical window without copied metrics.
     """
 
     def __init__(
@@ -36,7 +37,7 @@ class StepCombinedComputer:
         )
 
         self.logger = get_error_logger("StepCombinedComputer")
-        self._last_ok: Optional[StepCombinedTimeResult] = None
+        self._last_ok: Optional[StepTimeResult] = None
         self._last_ok_ts = 0.0
         self._stale_ttl_s = (
             float(stale_ttl_s) if stale_ttl_s is not None else None
@@ -46,13 +47,23 @@ class StepCombinedComputer:
     # Public API
     # ------------------------------------------------------------------
 
-    def compute_cli(self) -> StepCombinedTimeResult:
+    def compute_cli(self) -> StepTimeResult:
         return self._compute()
 
-    def compute_dashboard(self) -> StepCombinedTimeResult:
+    def compute_dashboard(self) -> StepTimeResult:
         return self._compute()
 
-    def _compute(self) -> StepCombinedTimeResult:
+    @property
+    def had_ok(self) -> bool:
+        """Whether any compute ever produced diagnosis metrics.
+
+        Lets renderers distinguish "no data yet" from an expired last-good
+        bridge after repeated empty computes. It does not claim process
+        liveness.
+        """
+        return self._last_ok is not None
+
+    def _compute(self) -> StepTimeResult:
         try:
             with self._connect() as conn:
                 result = self._compute_impl(conn)
@@ -62,12 +73,13 @@ class StepCombinedComputer:
                 f"STALE (exception: {type(exc).__name__})"
             )
 
-        if not result.diagnosis_metrics:
+        if result.window is None or not result.window.metrics:
             return self._stale_or_empty("STALE (no metrics this tick)")
 
+        now = time.time()
         self._last_ok = result
-        self._last_ok_ts = time.time()
-        return result
+        self._last_ok_ts = now
+        return replace(result, had_ok=True)
 
     # ------------------------------------------------------------------
     # Core compute
@@ -76,7 +88,7 @@ class StepCombinedComputer:
     def _compute_impl(
         self,
         conn: sqlite3.Connection,
-    ) -> StepCombinedTimeResult:
+    ) -> StepTimeResult:
         loaded = load_step_time_window_from_sqlite(
             conn,
             max_rows=self.window_size,
@@ -90,31 +102,29 @@ class StepCombinedComputer:
         )
         ranks = loaded.global_ranks
         if not ranks:
-            return StepCombinedTimeResult(
+            return StepTimeResult(
                 status_message="No ranks available",
             )
 
         window = loaded.window
         if window.coverage.ranks_present <= 0:
-            return StepCombinedTimeResult(
+            return StepTimeResult(
                 status_message="No StepTime data available",
             )
         if not window.metrics:
-            return StepCombinedTimeResult(
+            return StepTimeResult(
                 status_message="No common step window yet",
             )
 
         status = "OK"
-        diagnosis_worst_rank = _worst_rank_from_window(window.per_rank_timing)
+        diagnosis_worst_rank = window.worst_rank
         if diagnosis_worst_rank is not None:
             status += f" | diagnosis_worst_rank=r{diagnosis_worst_rank}"
 
-        return StepCombinedTimeResult(
+        return StepTimeResult(
             status_message=status,
-            per_rank_timing=window.per_rank_timing,
-            diagnosis_clock=window.clock,
+            window=window,
             training_strategy=loaded.training_strategy,
-            diagnosis_metrics=window.metrics,
         )
 
     # ------------------------------------------------------------------
@@ -136,45 +146,22 @@ class StepCombinedComputer:
     # Stale handling
     # ------------------------------------------------------------------
 
-    def _stale_or_empty(self, msg: str) -> StepCombinedTimeResult:
+    def _stale_or_empty(self, msg: str) -> StepTimeResult:
+        """Bridge transient empty reads without inferring producer liveness."""
         now = time.time()
+        had_ok = self._last_ok is not None
         if self._last_ok is not None:
             if (
                 self._stale_ttl_s is None
                 or (now - self._last_ok_ts) <= self._stale_ttl_s
             ):
-                return StepCombinedTimeResult(
+                return StepTimeResult(
                     status_message=msg,
-                    per_rank_timing=self._last_ok.per_rank_timing,
-                    diagnosis_clock=self._last_ok.diagnosis_clock,
+                    window=self._last_ok.window,
                     training_strategy=self._last_ok.training_strategy,
-                    diagnosis_metrics=self._last_ok.diagnosis_metrics,
+                    had_ok=True,
                 )
-        return StepCombinedTimeResult(
+        return StepTimeResult(
             status_message="No fresh step-combined data",
-            per_rank_timing={},
-            diagnosis_clock="cpu",
-            diagnosis_metrics=[],
+            had_ok=had_ok,
         )
-
-
-def _worst_rank_from_window(
-    per_rank_timing: Dict[int, Dict[str, float]],
-) -> Optional[int]:
-    """Return the slowest rank by selected average total step.
-
-    Only ranks whose total step is measured compete; when none is (the
-    input wait was never measured anywhere), no rank is named rather
-    than defaulting every rank to a fake zero.
-    """
-    candidates = {
-        int(rank): float(values["total_step"])
-        for rank, values in per_rank_timing.items()
-        if "total_step" in values
-    }
-    if not candidates:
-        return None
-    return max(
-        candidates,
-        key=lambda rank: (candidates[rank], -rank),
-    )

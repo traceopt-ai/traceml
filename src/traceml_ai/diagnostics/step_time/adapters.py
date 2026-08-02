@@ -14,17 +14,15 @@ from traceml_ai.diagnostics.step_time.policy import (
     SUMMARY_STEP_TIME_POLICY,
     StepTimeDiagnosisPolicy,
 )
-from traceml_ai.utils.step_time_window import (
-    StepTimeWindow,
-    diagnose_step_time_window,
-)
+from traceml_ai.step_time.model import StepTimeWindow
+from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 DEFAULT_SUMMARY_DIAG_CONFIG = SUMMARY_STEP_TIME_POLICY
 
 
 @dataclass(frozen=True)
 class StepTimeDiagnosisInput:
-    """Canonical Step Time window and advisory context for summary diagnosis."""
+    """Canonical window and advisory context for summary diagnosis."""
 
     window: StepTimeWindow
     policy: StepTimeDiagnosisPolicy = DEFAULT_SUMMARY_DIAG_CONFIG
