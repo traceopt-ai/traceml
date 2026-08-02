@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.diagnostics import model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,

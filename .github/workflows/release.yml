@@ -37,8 +37,8 @@ jobs:
 
       - name: Validate version format
         run: |
-          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || {
-            echo "::error::Version must be X.Y.Z, e.g. 0.3.5 (no leading v, no suffix)"
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$' || {
+            echo "::error::Version must be X.Y.Z or X.Y.Z.W, e.g. 0.3.5 or 0.3.5.1 (no leading v, no suffix)"
             exit 1
           }
 
@@ -56,6 +56,38 @@ jobs:
           git tag -a "v$VERSION" -m "Release v$VERSION"
           git push origin "v$VERSION"
 
+      - name: Warn when runtime dependencies changed since the last release
+        # The conda-forge autotick bot only bumps version and sha256 in its
+        # feedstock PR; dependency changes must be applied there by hand.
+        # This step makes that need visible in the run summary at the exact
+        # moment a release is cut, instead of relying on someone remembering.
+        run: |
+          PREV_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -vx "v$VERSION" | head -1)
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found; skipping dependency-change check."
+            exit 0
+          fi
+          extract_deps() {
+            git show "$1:pyproject.toml" | sed -n '/^dependencies = \[/,/^\]/p'
+          }
+          if ! diff <(extract_deps "$PREV_TAG") <(extract_deps HEAD) > /tmp/dep_diff.txt; then
+            {
+              echo "## Runtime dependencies changed since $PREV_TAG"
+              echo ""
+              echo "The conda-forge autotick bot only bumps version and sha256."
+              echo "It will NOT apply these dependency changes. Edit the recipe"
+              echo "by hand in the bot's bump PR on the traceml-ai feedstock"
+              echo "before it merges. See CONTRIBUTING.md, Releasing (maintainers)."
+              echo ""
+              echo '```diff'
+              cat /tmp/dep_diff.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Runtime dependencies changed since $PREV_TAG. The conda-forge bump PR needs a manual recipe edit; see the run summary."
+          else
+            echo "No runtime dependency changes since $PREV_TAG."
+          fi
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -67,3 +99,12 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "v$VERSION" \
+            --generate-notes

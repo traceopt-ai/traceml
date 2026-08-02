@@ -165,6 +165,40 @@ To keep the project focused, we are currently **not** accepting:
 
 ---
 
+## Dependency Policy
+
+Dependency constraints affect downstream package resolution and can create
+installation issues that are not visible in the project's regular CI. Please
+follow these rules when adding or updating dependencies.
+
+1. **Document runtime upper bounds.** Add an upper bound only for a verified,
+   current incompatibility. Record the dependency and rationale in
+   `ALLOWED_UPPER_BOUNDS` in `tests/core/test_packaging_constraints.py`; the
+   test rejects undocumented upper bounds. A possible future incompatibility
+   alone is not sufficient reason to add a cap.
+
+2. **Set lower bounds from required APIs.** If TraceML uses an API introduced
+   in a particular dependency version, set that version as the minimum and
+   add a short comment in `pyproject.toml` explaining the requirement. This
+   prevents dependency resolution from selecting a version that imports
+   successfully but lacks an API used at runtime.
+
+3. **Use extras for optional functionality.** Dependencies not required by the
+   core import path belong in an optional extra. The current dashboard
+   dependency arrangement is a documented exception; its possible migration
+   to an extra is tracked in #268.
+
+4. **Test against current dependency releases.** Scheduled CI resolves the
+   newest published dependency versions and runs the core suite so ecosystem
+   compatibility issues are detected early.
+
+For background, see #263 and
+[Should You Use Upper Bound Version Constraints?](https://iscinumpy.dev/post/bound-version-constraints/)
+by Henry Schreiner, along with
+[Scientific Python SPEC 0](https://scientific-python.org/specs/spec-0000/).
+
+---
+
 ## Releasing (maintainers)
 
 There is no version to edit anywhere in the repo. The package version comes

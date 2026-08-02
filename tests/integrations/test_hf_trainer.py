@@ -215,7 +215,7 @@ def test_hf_trainer_callback_integration():
 
 
 @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
-def test_hf_trainer_callback_grad_accum_folds_microbatches():
+def test_hf_trainer_callback_grad_accum_folds_microbatches(monkeypatch):
     """
     With gradient_accumulation_steps=2 and max_steps=3, the callback should
     advance the TraceML step counter exactly 3 times (one TraceML step per
@@ -228,6 +228,17 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches():
     # path and idempotent, so the test passes regardless of test order.
     init()
     _reset_traceml_state()
+
+    # This test verifies callback step semantics, not runtime startup. Stub
+    # the bootstrap so init() installs its patches without reaching an
+    # aggregator. Otherwise the connect times out, init() fails open to a
+    # disabled no-op, and TRACEML_DISABLED=1 leaks to every later test.
+    import traceml_ai.sdk.initial as initialization
+
+    monkeypatch.setattr(
+        initialization, "_start_runtime_for_init", lambda **kwargs: None
+    )
+
     # Auto-timers trace_step arms are no-ops until init() installs the patches.
     init()
     max_steps = 3

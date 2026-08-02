@@ -7,9 +7,32 @@ which carry the full historical notes for versions predating this file.
 
 ## [Unreleased]
 
-- Summary mode is now the default for `traceml run`, `traceml watch`,
-  `traceml serve`, and direct SDK launches. To retain the previous single-node
-  behavior, add `--mode=dashboard`; use `--mode=cli` for a live terminal view.
+- NumPy 2 is supported: the `numpy<2` cap is removed, so installing
+  TraceML no longer downgrades NumPy in a modern environment and
+  resolvers no longer fall back to old TraceML releases.
+- The aggregator starts on Windows: `SO_REUSEPORT` is applied only on
+  platforms that have it.
+- `plotly` is no longer a dependency; nothing imported it, and its
+  absence no longer blocks dashboard mode.
+- `nicegui` carries a version floor covering the dashboard's API use,
+  so resolvers can no longer select a version that breaks at runtime.
+- Runtime dependencies are guarded against undocumented upper bounds,
+  and a scheduled CI leg resolves the newest published dependencies.
+- CONTRIBUTING documents the dependency policy behind these changes.
+- Cutting a release now also creates the GitHub Release entry, so a
+  published version is never missing its release notes.
+- The release workflow accepts four-component patch versions
+  (for example 0.3.5.1).
+
+## [0.3.5] - 2026-07-26
+
+- DeepSpeed training is supported alongside DDP and FSDP.
+- Telemetry export moved to a dedicated exporter thread, keeping TCP
+  sends off the training thread's critical path.
+- Runtime metadata (training strategy, environment) is captured and
+  carried into the final summary.
+- Step Time diagnosis refinements across straggler, input-bound, and
+  H2D paths, including FSDP warm-step filtering.
 - Package version is now derived from the git tag (`setuptools-scm`)
   instead of a hand-edited string in `pyproject.toml`.
 - Releases publish to PyPI automatically on a `v*` tag push, via PyPI

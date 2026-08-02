@@ -51,9 +51,9 @@ from traceml_ai.runtime.settings import (
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 DASHBOARD_DEPENDENCY_INSTALL_HINT = (
-    "Dashboard mode requires nicegui and plotly. They are included in the "
-    "default TraceML install; if they are missing, run "
-    "`pip install -U traceml-ai` or `pip install nicegui plotly`."
+    "Dashboard mode requires nicegui. It is included in the "
+    "default TraceML install; if it is missing, run "
+    "`pip install -U traceml-ai` or `pip install nicegui`."
 )
 
 SINGLE_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
@@ -82,7 +82,7 @@ def _require_dashboard_dependencies(mode: str) -> None:
 
     missing = [
         package
-        for package in ("nicegui", "plotly")
+        for package in ("nicegui",)
         if importlib.util.find_spec(package) is None
     ]
     if missing:
@@ -710,7 +710,7 @@ def run_serve(args: argparse.Namespace) -> None:
     if getattr(args, "mode", None) == "dashboard":
         missing = [
             package
-            for package in ("nicegui", "plotly")
+            for package in ("nicegui",)
             if importlib.util.find_spec(package) is None
         ]
         if missing:

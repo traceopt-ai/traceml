@@ -48,7 +48,20 @@ class TCPServer:
     def start(self) -> None:
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        # SO_REUSEPORT is best-effort: it is absent on Windows, and even
+        # where the constant exists the kernel can still reject it (Python
+        # picks it up from build-time headers). Only SO_REUSEADDR above is
+        # required, so never fail startup over it.
+        reuseport = getattr(socket, "SO_REUSEPORT", None)
+        if reuseport is not None:
+            try:
+                self._sock.setsockopt(socket.SOL_SOCKET, reuseport, 1)
+            except OSError as exc:
+                self.logger.warning(
+                    "[TraceML] SO_REUSEPORT unavailable (%s); "
+                    "continuing without it.",
+                    exc,
+                )
         self._sock.bind((self.cfg.host, self.cfg.port))
         self._port = int(self._sock.getsockname()[1])
         self._sock.listen(self.cfg.backlog)

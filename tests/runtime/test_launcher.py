@@ -151,9 +151,7 @@ def test_serve_dashboard_missing_deps_reports_hint_not_nameerror(
         importlib_util,
         "find_spec",
         lambda name, *a, **k: (
-            None
-            if name in ("nicegui", "plotly")
-            else real_find_spec(name, *a, **k)
+            None if name == "nicegui" else real_find_spec(name, *a, **k)
         ),
     )
     from traceml_ai.launcher.commands import run_serve
@@ -163,8 +161,28 @@ def test_serve_dashboard_missing_deps_reports_hint_not_nameerror(
         run_serve(args)
 
     message = str(excinfo.value)
-    assert "nicegui" in message and "plotly" in message
+    assert "nicegui" in message
     assert "Missing:" in message
+
+
+def test_dashboard_dep_check_passes_without_plotly(monkeypatch) -> None:
+    # Acceptance for the plotly removal: plotly is not imported anywhere,
+    # so its absence must not block dashboard mode (previously the guard
+    # tuples refused to start the dashboard over a package nothing used).
+    import importlib.util as importlib_util
+
+    real_find_spec = importlib_util.find_spec
+    monkeypatch.setattr(
+        importlib_util,
+        "find_spec",
+        lambda name, *a, **k: (
+            None if name == "plotly" else real_find_spec(name, *a, **k)
+        ),
+    )
+    from traceml_ai.launcher.commands import _require_dashboard_dependencies
+
+    # Must not raise: nicegui present, plotly absent.
+    _require_dashboard_dependencies("dashboard")
 
 
 def test_serve_configures_logging_without_preset_env(
