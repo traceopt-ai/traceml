@@ -3,29 +3,25 @@ from pathlib import Path
 
 import pytest
 
-from traceml_ai.integrations.huggingface import (
+torch = pytest.importorskip("torch")
+pytest.importorskip("transformers")
+pytest.importorskip("accelerate")
+
+from transformers import (  # noqa: E402
+    BertConfig,
+    BertForSequenceClassification,
+    Trainer,
+    TrainingArguments,
+)
+
+from traceml_ai.integrations.huggingface import (  # noqa: E402
     TraceMLTrainer,
     TraceMLTrainerCallback,
     init,
 )
 
-try:
-    import torch
-    from transformers import (
-        BertConfig,
-        BertForSequenceClassification,
-        Trainer,
-        TrainingArguments,
-    )
 
-    HAS_TRANSFORMERS = True
-except ImportError:
-    HAS_TRANSFORMERS = False
-
-
-class _TinyTokenizedDataset(
-    torch.utils.data.Dataset if HAS_TRANSFORMERS else object
-):
+class _TinyTokenizedDataset(torch.utils.data.Dataset):
     """
     Small synthetic dataset for Trainer integration tests.
 
@@ -149,7 +145,6 @@ def _reset_traceml_state() -> None:
             break
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_integration():
     """
     Test that TraceMLTrainer (legacy thin-wrapper path) runs a few steps with
@@ -175,7 +170,6 @@ def test_hf_trainer_integration():
         assert TraceState.step >= 5, "TraceState.step should have incremented"
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_callback_integration():
     """
     Vanilla transformers.Trainer with TraceMLTrainerCallback should emit
@@ -313,7 +307,6 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches(monkeypatch):
         )
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_wrapper_equivalent_to_direct_callback():
     """
     TraceMLTrainer is now a thin wrapper that auto-installs
@@ -367,7 +360,6 @@ def test_hf_trainer_wrapper_equivalent_to_direct_callback():
     assert wrapper_samples == max_steps
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_wrapper_dedups_user_supplied_callback():
     """
     If a user passes their own TraceMLTrainerCallback in callbacks=[...] and
@@ -413,7 +405,6 @@ def test_hf_trainer_wrapper_dedups_user_supplied_callback():
         )
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
     """
     With TRACEML_DISABLED=1 set after import, the callback must be a complete
@@ -457,7 +448,6 @@ def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
         ), f"Expected no StepMemoryEvents when disabled, got {len(drained)}."
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_init_enables_dataloader_and_h2d_patches(monkeypatch):
     """
     init() must enable the process-wide patches the callback cannot install on
@@ -496,7 +486,6 @@ def test_hf_init_enables_dataloader_and_h2d_patches(monkeypatch):
 DATALOADER_STREAM = "_traceml_internal:dataloader_next"
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_callback_run_emits_dataloader_fetch_events():
     """
     COMPLETENESS guard: with huggingface.init() called, a vanilla Trainer +
