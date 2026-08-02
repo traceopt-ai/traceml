@@ -14,10 +14,8 @@ import numpy as np
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.schema import BaseGlobal, GlobalWindow
 from traceml_ai.reporting.summaries.summary_formatting import safe_float
-from traceml_ai.utils.step_time_window import (
-    StepTimeWindow,
-    public_step_time_metric_values,
-)
+from traceml_ai.step_time.model import StepTimeWindow
+from traceml_ai.utils.step_time_window import public_step_time_metric_values
 
 MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
 STEP_TIME_METRIC_NAMES = [

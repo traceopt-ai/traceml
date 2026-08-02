@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional, Sequence
 
 from traceml_ai.core.registry import Registry
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
-from traceml_ai.utils.step_time_window import StepTimeWindow
+from traceml_ai.step_time.model import StepTimeWindow
 
 
 @dataclass(frozen=True)

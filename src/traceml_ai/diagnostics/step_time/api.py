@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
 
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepCombinedTimeMetric
 from traceml_ai.utils.step_time_window import median_iteration_component_share
 
 if TYPE_CHECKING:

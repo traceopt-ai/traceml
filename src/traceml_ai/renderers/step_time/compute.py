@@ -4,7 +4,7 @@ from dataclasses import replace
 from typing import Dict, Optional, Sequence
 
 from traceml_ai.loggers.error_log import get_error_logger
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
+from traceml_ai.step_time.model import StepCombinedTimeResult
 from traceml_ai.utils.step_time_sqlite import load_step_time_window_from_sqlite
 
 STEP_TIME_TABLE = "step_time_samples"

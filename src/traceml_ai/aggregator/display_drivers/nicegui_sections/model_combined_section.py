@@ -21,14 +21,12 @@ from typing import Any, Dict, List, Optional
 
 from nicegui import ui
 
-from traceml_ai.renderers.step_time.schema import (
+from traceml_ai.step_time.model import (
     StepCombinedTimeMetric,
     StepCombinedTimeResult,
-)
-from traceml_ai.utils.step_time_window import (
     StepTimeWindow,
-    median_iteration_component_share,
 )
+from traceml_ai.utils.step_time_window import median_iteration_component_share
 
 from . import theme
 

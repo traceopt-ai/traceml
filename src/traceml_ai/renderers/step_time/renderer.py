@@ -29,13 +29,16 @@ from traceml_ai.diagnostics.trends import (
 )
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.utils import fmt_time_run
+from traceml_ai.step_time.model import (
+    StepCombinedTimeMetric,
+    StepCombinedTimeResult,
+)
 from traceml_ai.utils.step_time_window import (
     diagnose_step_time_window,
     median_iteration_component_share,
 )
 
 from .compute import StepCombinedComputer
-from .schema import StepCombinedTimeMetric, StepCombinedTimeResult
 
 METRIC_LABELS = {
     "input_wait": "IW",
