@@ -25,10 +25,10 @@ For Step Time specifically, start with the
 map and six SQLite scenarios show which layer owns each calculation and how to
 verify CLI, dashboard, and final-summary behavior together.
 
-Import shared Step Time contracts from `traceml_ai.step_time.model`. The old
-`renderers.step_time.schema` and `utils.step_time_window.StepTimeWindow` paths
-are compatibility re-exports for downstream users, not ownership locations
-for new types.
+Import shared Step Time contracts from `traceml_ai.step_time.model`. The
+renderer-owned schema compatibility path has been retired. The remaining
+`utils.step_time_window.StepTimeWindow` path exists only for downstream
+compatibility and is not an ownership location for new types.
 
 Step Time SQLite selection and JSON normalization belong in
 `traceml_ai.step_time.sqlite`. Terminal and dashboard consumers use

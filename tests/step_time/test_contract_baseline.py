@@ -292,11 +292,11 @@ def test_canonical_window_matches_golden(
         scenario.name
     ].items():
         median, worst, worst_rank, skew = expected
-        summary = metrics[metric_name].summary
-        assert summary.median_total == pytest.approx(median)
-        assert summary.worst_total == pytest.approx(worst)
-        assert summary.worst_rank == worst_rank
-        _assert_optional_float(summary.skew_pct, skew)
+        metric = metrics[metric_name]
+        assert metric.median_total == pytest.approx(median)
+        assert metric.worst_total == pytest.approx(worst)
+        assert metric.worst_rank == worst_rank
+        _assert_optional_float(metric.skew_pct, skew)
 
     diagnosis = diagnose_step_time_window(
         window,

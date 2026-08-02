@@ -22,7 +22,6 @@ from traceml_ai.step_time.model import (
     StepTimeSeries,
     StepTimeSourceRow,
     StepTimeStepFacts,
-    StepTimeSummary,
     StepTimeValues,
     StepTimeWindow,
 )
@@ -117,6 +116,7 @@ class StepTimeAnalyzer:
         if not steps:
             return StepTimeWindow(
                 expected_ranks=expected_ranks,
+                training_strategy=snapshot.training_strategy,
                 coverage=_empty_coverage(
                     window_size=limit,
                     completed_step=latest_step,
@@ -163,7 +163,6 @@ class StepTimeAnalyzer:
             rank_facts,
             steps,
             coverage=coverage,
-            clock=clock,
         )
         cohorts = _build_cohorts(
             rank_facts,
@@ -173,6 +172,7 @@ class StepTimeAnalyzer:
 
         return StepTimeWindow(
             clock=clock,
+            training_strategy=snapshot.training_strategy,
             steps=[int(step) for step in steps],
             expected_ranks=expected_ranks,
             coverage=coverage,
@@ -466,7 +466,6 @@ def _build_metrics(
     steps: Sequence[int],
     *,
     coverage: StepTimeCoverage,
-    clock: DiagnosisClock,
 ) -> list[StepTimeMetric]:
     metrics: list[StepTimeMetric] = []
     for metric in DISPLAY_METRICS:
@@ -502,25 +501,21 @@ def _build_metrics(
         metrics.append(
             StepTimeMetric(
                 metric=metric,
-                clock=clock,
                 series=_build_series(
                     metric,
                     rank_facts,
                     measured_ranks,
                     steps,
                 ),
-                summary=StepTimeSummary(
-                    window_size=int(coverage.expected_steps),
-                    steps_used=int(coverage.steps_used),
-                    median_total=median,
-                    worst_total=worst,
-                    worst_rank=int(worst_rank),
-                    skew_ratio=skew_ratio,
-                    skew_pct=skew_pct,
-                    representative_rank=int(representative_rank),
-                    representative_total=float(values[representative_rank]),
-                ),
-                coverage=coverage,
+                window_size=int(coverage.expected_steps),
+                steps_used=int(coverage.steps_used),
+                median_total=median,
+                worst_total=worst,
+                worst_rank=int(worst_rank),
+                skew_ratio=skew_ratio,
+                skew_pct=skew_pct,
+                representative_rank=int(representative_rank),
+                representative_total=float(values[representative_rank]),
                 measured_ranks=measured_ranks,
             )
         )

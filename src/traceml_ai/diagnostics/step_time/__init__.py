@@ -18,6 +18,7 @@ from .api import (
     StepDiagnosis,
     build_step_diagnosis,
     build_step_diagnosis_result,
+    diagnose_step_time_window,
 )
 from .formatters import format_cli_diagnosis, format_dashboard_diagnosis
 from .policy import (
@@ -39,6 +40,7 @@ __all__ = [
     "StepDiagnosis",
     "build_step_diagnosis",
     "build_step_diagnosis_result",
+    "diagnose_step_time_window",
     "format_cli_diagnosis",
     "format_dashboard_diagnosis",
 ]

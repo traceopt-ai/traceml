@@ -144,6 +144,37 @@ The dashboard row measures only its two Step Time reads, not unrelated System,
 Process, or Step Memory work. A production-path characterization test also
 proves that one real dashboard tick invokes two distinct Step Time computers.
 
+## PR5 typed-diagnosis comparison
+
+PR5 makes diagnosis consume `StepTimeWindow` and typed rank facts directly.
+It no longer projects a nested rank mapping, rebuilds analyzer-owned shares,
+or constructs unused rich attribution on normal runtime calls. The new
+`StepTimePipeline` facade performs repository load, analysis, and diagnosis
+once; PR6 through PR8 will migrate existing surfaces onto it.
+
+Recorded on 2026-08-02 with the same environment and command as PR4:
+
+| Ranks | Stage | SELECTs | Median (ms) | Change from PR4 |
+|---:|---|---:|---:|---:|
+| 1 | diagnose | 0 | 0.031 | n/a (not recorded in PR4 table) |
+| 1 | one live provider | 2 | 8.183 | -3.0% |
+| 1 | dashboard Step Time refresh | 4 | 16.452 | -3.6% |
+| 1 | final summary | 2 | 6.598 | -4.6% |
+| 8 | diagnose | 0 | 0.059 | n/a (not recorded in PR4 table) |
+| 8 | one live provider | 2 | 32.015 | -4.3% |
+| 8 | dashboard Step Time refresh | 4 | 64.481 | -4.5% |
+| 8 | final summary | 2 | 15.955 | -6.3% |
+| 32 | diagnose | 0 | 0.161 | n/a (not recorded in PR4 table) |
+| 32 | one live provider | 2 | 116.096 | -1.1% |
+| 32 | dashboard Step Time refresh | 4 | 240.431 | -0.6% |
+| 32 | final summary | 2 | 48.110 | -3.2% |
+
+No end-to-end median regressed; the measured paths are 0.6-6.3% faster than
+PR4. Against the PR3 diagnosis reference, diagnosis itself is 63-72% faster
+because ordinary calls no longer allocate the compatibility rank map or the
+unconsumed attribution payload. Query topology remains 2/4/2 for one live
+provider, the current two-provider dashboard, and final summary.
+
 ## Reproduce
 
 From the repository root:

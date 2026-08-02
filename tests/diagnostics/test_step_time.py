@@ -31,10 +31,8 @@ from traceml_ai.diagnostics.step_time.rules import (
 )
 from traceml_ai.diagnostics.step_time.trend import build_step_trend_note
 from traceml_ai.step_time.model import (
-    StepTimeCoverage,
     StepTimeMetric,
     StepTimeSeries,
-    StepTimeSummary,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
@@ -43,6 +41,7 @@ from traceml_ai.utils.step_time_window import (
     build_step_time_window_from_events,
     diagnose_step_time_window,
 )
+from tests.step_time.factories import window_from_rank_averages
 
 
 def _time_metric(
@@ -57,30 +56,20 @@ def _time_metric(
 ) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
-        clock="mixed",
         series=StepTimeSeries(
             steps=list(range(steps)),
             median=[median] * steps,
             worst=[worst] * steps,
             sum=[median * world_size] * steps,
         ),
-        summary=StepTimeSummary(
-            window_size=steps,
-            steps_used=steps,
-            median_total=median,
-            worst_total=worst,
-            worst_rank=worst_rank,
-            skew_ratio=skew,
-            skew_pct=skew,
-        ),
-        coverage=StepTimeCoverage(
-            expected_steps=steps,
-            steps_used=steps,
-            completed_step=steps,
-            world_size=world_size,
-            ranks_present=world_size,
-            incomplete=False,
-        ),
+        window_size=steps,
+        steps_used=steps,
+        median_total=median,
+        worst_total=worst,
+        worst_rank=worst_rank,
+        skew_ratio=skew,
+        skew_pct=skew,
+        measured_ranks=tuple(range(world_size)),
     )
 
 
@@ -89,11 +78,14 @@ def _time_context(
     per_rank_timing: dict[int, dict[str, float]] | None = None,
     diagnosis_clock: str = "cpu",
 ):
-    return build_step_time_context(
+    window = window_from_rank_averages(
+        per_rank_timing or {},
         metrics=metrics,
+        clock="gpu" if diagnosis_clock == "gpu" else "cpu",
+    )
+    return build_step_time_context(
+        window=window,
         thresholds=DEFAULT_THRESHOLDS,
-        per_rank_timing=per_rank_timing,
-        diagnosis_clock=diagnosis_clock,
     )
 
 
@@ -192,12 +184,16 @@ def _rank_context(
     training_strategy: str = "ddp",
     diagnosis_clock: str = "cpu",
 ):
-    return build_step_time_context(
+    window = window_from_rank_averages(
+        per_rank_timing,
         metrics=_metrics_from_per_rank_timing(per_rank_timing),
-        thresholds=DEFAULT_THRESHOLDS,
-        per_rank_timing=per_rank_timing,
+        clock="gpu" if diagnosis_clock == "gpu" else "cpu",
         training_strategy=training_strategy,
-        diagnosis_clock=diagnosis_clock,
+    )
+    return build_step_time_context(
+        window=window,
+        thresholds=DEFAULT_THRESHOLDS,
+        training_strategy=training_strategy,
     )
 
 

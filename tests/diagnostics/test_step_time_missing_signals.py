@@ -28,9 +28,7 @@ from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.rules import RankStragglerRule
 from traceml_ai.step_time.model import (
-    StepTimeCoverage,
     StepTimeMetric,
-    StepTimeSummary,
 )
 from traceml_ai.reporting.compare.policy import (
     _STEP_TIME_STATUS_RANK,
@@ -44,6 +42,7 @@ from traceml_ai.utils.step_time_window import (
     build_step_time_window_from_events,
     diagnose_step_time_window,
 )
+from tests.step_time.factories import window_from_rank_averages
 
 _EVENT_NAMES = {
     "input_wait": "_traceml_internal:dataloader_next",
@@ -105,6 +104,7 @@ def _diagnose(
     window = build_step_time_window_from_events(
         per_rank_steps,
         max_rows=max_rows,
+        training_strategy=training_strategy,
     )
     return diagnose_step_time_window(
         window,
@@ -116,25 +116,15 @@ def _diagnose(
 def _step_metric(*, world_size: int = 2) -> StepTimeMetric:
     return StepTimeMetric(
         metric="step_time",
-        clock="cpu",
         series=None,
-        summary=StepTimeSummary(
-            window_size=30,
-            steps_used=30,
-            median_total=100.0,
-            worst_total=100.0,
-            worst_rank=1,
-            skew_ratio=0.0,
-            skew_pct=0.0,
-        ),
-        coverage=StepTimeCoverage(
-            expected_steps=30,
-            steps_used=30,
-            completed_step=30,
-            world_size=world_size,
-            ranks_present=world_size,
-            incomplete=False,
-        ),
+        window_size=30,
+        steps_used=30,
+        median_total=100.0,
+        worst_total=100.0,
+        worst_rank=1,
+        skew_ratio=0.0,
+        skew_pct=0.0,
+        measured_ranks=tuple(range(world_size)),
     )
 
 
@@ -386,10 +376,14 @@ def _straggler_issue(
     *,
     training_strategy: str = "ddp",
 ):
-    context = build_step_time_context(
+    window = window_from_rank_averages(
+        per_rank_timing,
         metrics=(_step_metric(),),
+        training_strategy=training_strategy,
+    )
+    context = build_step_time_context(
+        window=window,
         thresholds=SUMMARY_STEP_TIME_POLICY.thresholds,
-        per_rank_timing=per_rank_timing,
         training_strategy=training_strategy,
     )
     return RankStragglerRule().evaluate(context)
@@ -632,12 +626,12 @@ def test_partial_metric_stats_use_measuring_ranks() -> None:
 
     h2d_metric = next(m for m in window.metrics if m.metric == "h2d")
     # Rank 0 never measured h2d: it cannot appear in the statistics.
-    assert h2d_metric.summary.worst_rank == 1
-    assert h2d_metric.summary.worst_total == pytest.approx(9.0)
-    assert h2d_metric.summary.median_total == pytest.approx(9.0)
+    assert h2d_metric.worst_rank == 1
+    assert h2d_metric.worst_total == pytest.approx(9.0)
+    assert h2d_metric.median_total == pytest.approx(9.0)
     # One eligible rank has no cross-rank population from which to compute
     # skew; unavailable is distinct from a measured zero gap.
-    assert h2d_metric.summary.skew_pct is None
+    assert h2d_metric.skew_pct is None
 
 
 # ---------------------------------------------------------------------------
@@ -739,8 +733,8 @@ def test_worst_value_and_rank_come_from_one_candidate_set() -> None:
     )
 
     step_metric = next(m for m in window.metrics if m.metric == "step_time")
-    assert step_metric.summary.worst_total == pytest.approx(400.0)
-    assert step_metric.summary.worst_rank == 1
+    assert step_metric.worst_total == pytest.approx(400.0)
+    assert step_metric.worst_rank == 1
 
 
 def test_public_projection_preserves_absence() -> None:

@@ -11,8 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, Literal, Optional, Sequence, cast
 
-from traceml_ai.step_time.model import StepTimeMetric
-from traceml_ai.utils.step_time_window import median_iteration_component_share
+from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
 
 if TYPE_CHECKING:
     from .context import StepTimeAnalysisContext
@@ -27,7 +26,6 @@ from ..common import (
 )
 from .context import (
     build_step_time_context,
-    compute_rank_values_from_components,
     metric_median_total,
     metric_skew,
     metric_total,
@@ -35,29 +33,13 @@ from .context import (
     metric_worst_total,
     non_negative_finite,
 )
-from .policy import DEFAULT_THRESHOLDS, DiagnosisThresholds
+from .policy import (
+    DEFAULT_THRESHOLDS,
+    DiagnosisThresholds,
+    StepTimeDiagnosisPolicy,
+)
 from .rules import run_step_time_rules
 from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
-
-
-def _overall_worst_rank(
-    per_rank_timing: Optional[Dict[int, Dict[str, float]]],
-    step_metric: StepTimeMetric,
-) -> Optional[int]:
-    """Return the run-level slowest rank by full iteration time.
-
-    The run-level worst rank is ranked by ``total_step`` (input wait +
-    step envelope), a separate value from any single metric's own worst
-    rank, so the step-time metric summary stays self-coherent. Callers
-    without per-rank timing fall back to the step-time metric's own
-    worst rank.
-    """
-    from traceml_ai.utils.step_time_window import worst_rank_by_total_step
-
-    if per_rank_timing:
-        return worst_rank_by_total_step(per_rank_timing)
-    return metric_worst_rank(step_metric)
-
 
 DiagnosisKind = Literal[
     "NO_DATA",
@@ -320,6 +302,94 @@ def _metric_attribution_entry(
     }
 
 
+def _rank_values(window: StepTimeWindow, metric: str) -> Dict[int, float]:
+    """Return an on-demand rank lookup for optional rich attribution."""
+    return {
+        facts.global_rank: float(value)
+        for facts in window.rank_facts
+        if (value := facts.average.value(metric)) is not None
+    }
+
+
+def _component_share(window: StepTimeWindow, metric: str) -> Optional[float]:
+    """Calculate a presentation share for optional rich attribution."""
+    prepared = {
+        "input_wait": window.input_wait_share,
+        "h2d": window.h2d_share,
+        "compute": window.compute_share,
+        "residual_proxy": window.residual_share,
+    }
+    if metric in prepared:
+        return prepared[metric]
+
+    shares: list[float] = []
+    for facts in window.rank_facts:
+        numerator = facts.average.value(metric)
+        input_wait = facts.average.input_wait_ms
+        step_time = facts.average.step_time_ms
+        if numerator is None or input_wait is None or step_time is None:
+            continue
+        iteration = input_wait + step_time
+        if iteration > 0.0:
+            shares.append(float(numerator) / iteration)
+    if not shares:
+        return None
+    ordered = sorted(shares)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[middle])
+    return float((ordered[middle - 1] + ordered[middle]) / 2.0)
+
+
+def _build_metric_attribution(
+    context: "StepTimeAnalysisContext",
+) -> Dict[str, Any]:
+    """Build the optional detailed attribution payload from typed facts."""
+    window = context.window
+    metrics = {
+        "input_wait": context.input_wait_metric,
+        "h2d": context.h2d_metric,
+        "forward": context.forward_metric,
+        "backward": context.backward_metric,
+        "optimizer_step": context.optimizer_metric,
+        "residual_proxy": context.residual_metric,
+        "step_time": context.step_metric,
+    }
+    phases = {
+        "input_wait": "input",
+        "h2d": "h2d",
+        "forward": "forward",
+        "backward": "backward",
+        "optimizer_step": "optimizer",
+        "residual_proxy": "residual",
+        "step_time": "step",
+    }
+    attribution = {
+        metric: _metric_attribution_entry(
+            metric=metrics[metric],
+            metric_key=metric,
+            rank_values=_rank_values(window, metric),
+            component_share=_component_share(window, metric),
+            single_rank=context.single_rank,
+            phase=phases[metric],
+        )
+        for metric in metrics
+    }
+    compute_values = _rank_values(window, "compute")
+    median, worst, worst_rank, skew = _rank_summary_values(compute_values)
+    attribution["compute"] = {
+        "metric": "compute",
+        "phase": "compute",
+        "median_total_ms": median,
+        "worst_total_ms": worst,
+        "worst_rank": worst_rank,
+        "skew_pct": skew,
+        "share_pct": context.compute_share,
+        "top_ranks": _top_rank_entries(compute_values),
+    }
+    return attribution
+
+
 def _apply_trend_note(
     diagnosis: StepDiagnosis,
     *,
@@ -355,97 +425,20 @@ def _apply_trend_note(
         return diagnosis
 
 
-_MISSING_SIGNAL_ORDER: tuple[str, ...] = (
-    "input_wait",
-    "forward",
-    "backward",
-    "optimizer_step",
-    "step_time",
-)
-
-
-def _missing_signal_report(
-    context: "StepTimeAnalysisContext",
-) -> tuple[list[str], Dict[str, str]]:
-    """Return missing-signal names plus per-signal rank coverage.
-
-    A signal is reported when an abstaining rule required it and it was
-    not measured on every expected rank. A rank with no aligned timing row
-    is missing every required signal. H2D is never reported missing:
-    its events are occurrence-driven (a fully instrumented run with no
-    host-to-device copies emits none), so absence means no observed
-    transfers, not missing instrumentation. Without per-rank rows,
-    availability is unknowable, so nothing is reported missing either.
-    """
-    ranks = max(0, int(context.rank_population_size))
-    if ranks == 0:
-        return [], {}
-    counts = context.signal_rank_counts or {}
-    needed: set[str] = set()
-
-    def _require(signals: Sequence[str]) -> None:
-        needed.update(signals)
-
-    if context.ranks_with_rows < ranks:
-        _require(_MISSING_SIGNAL_ORDER)
-
-    if context.input_bound_share is None:
-        _require(("input_wait", "step_time"))
-    if context.compute_share is None:
-        _require(
-            (
-                "forward",
-                "backward",
-                "optimizer_step",
-                "input_wait",
-                "step_time",
-            )
-        )
-    if context.residual_share is None:
-        _require(
-            (
-                "forward",
-                "backward",
-                "optimizer_step",
-                "input_wait",
-                "step_time",
-            )
-        )
-    if (
-        not context.single_rank
-        and context.rank_straggler is None
-        and context.straggler_eligible_ranks < 2
-    ):
-        _require(("backward", "input_wait", "step_time"))
-        if context.training_strategy == "fsdp":
-            _require(("forward",))
-
-    missing = [
-        name
-        for name in _MISSING_SIGNAL_ORDER
-        if name in needed and counts.get(name, 0) < ranks
-    ]
-    coverage = {name: f"{counts.get(name, 0)}/{ranks}" for name in missing}
-    return missing, coverage
-
-
-def build_step_diagnosis_result(
-    metrics: Sequence[StepTimeMetric],
-    thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
+def diagnose_step_time_window(
+    window: StepTimeWindow,
     *,
-    per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
-    expected_ranks: Optional[Sequence[int]] = None,
-    diagnosis_clock: str = "cpu",
-    training_strategy: str = "ddp",
+    policy: StepTimeDiagnosisPolicy,
+    training_strategy: Optional[str] = None,
+    include_attribution: bool = False,
 ) -> DiagnosticResult[StepDiagnosis]:
-    """
-    Build a rich step-time diagnosis result from one analyzed window.
+    """Diagnose one canonical window without rebuilding analyzer facts.
 
-    Runtime consumers should typically use `result.primary`. Final-summary and
-    dashboard consumers can additionally use:
-    - `result.issues`
-    - `result.metric_attribution`
+    Detailed per-metric attribution is presentation-only and opt-in. Runtime
+    pipeline calls therefore avoid building rank maps they do not consume.
     """
+    metrics = window.metrics
+    thresholds = policy.thresholds
     metric_names = [metric.metric for metric in metrics]
     if len(metric_names) != len(set(metric_names)):
         primary = _mk_diag(
@@ -469,10 +462,14 @@ def build_step_diagnosis_result(
         )
         return DiagnosticResult(primary=primary)
 
-    coverage = step_metric.coverage
+    coverage = window.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
-    steps_used = int(step_metric.summary.steps_used)
-    overall_worst_rank = _overall_worst_rank(per_rank_timing, step_metric)
+    steps_used = int(coverage.steps_used)
+    overall_worst_rank = (
+        window.worst_rank
+        if window.worst_rank is not None
+        else metric_worst_rank(step_metric)
+    )
     step_total = metric_total(step_metric, single_rank=single_rank)
 
     if step_total <= 0.0:
@@ -496,11 +493,8 @@ def build_step_diagnosis_result(
         )
 
     context = build_step_time_context(
-        metrics=metrics,
+        window=window,
         thresholds=thresholds,
-        per_rank_timing=per_rank_timing,
-        expected_ranks=expected_ranks,
-        diagnosis_clock=diagnosis_clock,
         training_strategy=training_strategy,
     )
     raw_issues = run_step_time_rules(context)
@@ -582,7 +576,8 @@ def build_step_diagnosis_result(
             ),
         )
     else:
-        missing_signals, signal_coverage = _missing_signal_report(context)
+        missing_signals = context.missing_signals
+        signal_coverage = context.signal_coverage
         if missing_signals:
             primary = _mk_diag(
                 kind="INCOMPLETE_DATA",
@@ -651,102 +646,47 @@ def build_step_diagnosis_result(
             ),
         )
 
-    compute_rank_values = compute_rank_values_from_components(
-        context.rank_values
-    )
-    (
-        compute_median_ms,
-        compute_worst_ms,
-        compute_worst_rank,
-        compute_skew,
-    ) = _rank_summary_values(compute_rank_values)
-    timing = per_rank_timing or {}
-    attribution_shares = {
-        key: median_iteration_component_share(timing, key)
-        for key in (
-            "input_wait",
-            "h2d",
-            "forward",
-            "backward",
-            "optimizer_step",
-            "residual_proxy",
-            "step_time",
-        )
-    }
-
-    metric_attribution = {
-        "input_wait": _metric_attribution_entry(
-            metric=context.input_wait_metric,
-            metric_key="input_wait",
-            rank_values=context.rank_values.get("input_wait", {}),
-            component_share=attribution_shares["input_wait"],
-            single_rank=context.single_rank,
-            phase="input",
-        ),
-        "h2d": _metric_attribution_entry(
-            metric=context.h2d_metric,
-            metric_key="h2d",
-            rank_values=context.rank_values.get("h2d", {}),
-            component_share=attribution_shares["h2d"],
-            single_rank=context.single_rank,
-            phase="h2d",
-        ),
-        "forward": _metric_attribution_entry(
-            metric=context.forward_metric,
-            metric_key="forward",
-            rank_values=context.rank_values.get("forward", {}),
-            component_share=attribution_shares["forward"],
-            single_rank=context.single_rank,
-            phase="forward",
-        ),
-        "backward": _metric_attribution_entry(
-            metric=context.backward_metric,
-            metric_key="backward",
-            rank_values=context.rank_values.get("backward", {}),
-            component_share=attribution_shares["backward"],
-            single_rank=context.single_rank,
-            phase="backward",
-        ),
-        "optimizer_step": _metric_attribution_entry(
-            metric=context.optimizer_metric,
-            metric_key="optimizer_step",
-            rank_values=context.rank_values.get("optimizer_step", {}),
-            component_share=attribution_shares["optimizer_step"],
-            single_rank=context.single_rank,
-            phase="optimizer",
-        ),
-        "residual_proxy": _metric_attribution_entry(
-            metric=context.residual_metric,
-            metric_key="residual_proxy",
-            rank_values=context.rank_values.get("residual_proxy", {}),
-            component_share=attribution_shares["residual_proxy"],
-            single_rank=context.single_rank,
-            phase="residual",
-        ),
-        "step_time": _metric_attribution_entry(
-            metric=context.step_metric,
-            metric_key="step_time",
-            rank_values=context.rank_values.get("step_time", {}),
-            component_share=attribution_shares["step_time"],
-            single_rank=context.single_rank,
-            phase="step",
-        ),
-        "compute": {
-            "metric": "compute",
-            "phase": "compute",
-            "median_total_ms": compute_median_ms,
-            "worst_total_ms": compute_worst_ms,
-            "worst_rank": compute_worst_rank,
-            "skew_pct": compute_skew,
-            "share_pct": context.compute_share,
-            "top_ranks": _top_rank_entries(compute_rank_values),
-        },
-    }
-
     return DiagnosticResult(
         primary=primary,
         issues=tuple(issues),
-        metric_attribution=metric_attribution,
+        metric_attribution=(
+            _build_metric_attribution(context) if include_attribution else {}
+        ),
+    )
+
+
+def build_step_diagnosis_result(
+    metrics: Sequence[StepTimeMetric],
+    thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
+    *,
+    per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
+    expected_ranks: Optional[Sequence[int]] = None,
+    diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
+) -> DiagnosticResult[StepDiagnosis]:
+    """Preserve the released metric/rank-map diagnosis entry point.
+
+    TODO(PR9): Remove after external callers migrate to window diagnosis.
+    """
+    from traceml_ai.utils.step_time_window import (
+        build_step_time_window_from_rank_averages,
+    )
+
+    window = build_step_time_window_from_rank_averages(
+        metrics,
+        per_rank_timing=per_rank_timing,
+        expected_ranks=expected_ranks,
+        diagnosis_clock=diagnosis_clock,
+        training_strategy=training_strategy,
+    )
+    return diagnose_step_time_window(
+        window,
+        policy=StepTimeDiagnosisPolicy(
+            name="legacy",
+            thresholds=thresholds,
+        ),
+        training_strategy=training_strategy,
+        include_attribution=True,
     )
 
 
@@ -790,4 +730,5 @@ __all__ = [
     "build_step_warmup_diagnosis",
     "build_step_diagnosis",
     "build_step_diagnosis_result",
+    "diagnose_step_time_window",
 ]

@@ -73,7 +73,7 @@ def load_step_time_section_data(
             conn,
             max_rows=row_limit,
         )
-        latest_step_observed = loaded.latest_step_observed
+        latest_step_observed = loaded.cursor.latest_step
         training_steps = (
             latest_step_observed + 1 if latest_step_observed is not None else 0
         )

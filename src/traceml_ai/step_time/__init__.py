@@ -20,7 +20,6 @@ from .model import (
     StepTimeSourceCursor,
     StepTimeSourceRow,
     StepTimeStepFacts,
-    StepTimeSummary,
     StepTimeValues,
     StepTimeWindow,
 )
@@ -41,7 +40,6 @@ __all__ = [
     "StepTimeSourceCursor",
     "StepTimeSourceRow",
     "StepTimeStepFacts",
-    "StepTimeSummary",
     "StepTimeValues",
     "StepTimeWindow",
 ]

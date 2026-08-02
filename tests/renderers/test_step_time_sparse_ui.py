@@ -18,35 +18,23 @@ from rich.console import Console
 from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.step_time.model import (
-    StepTimeCoverage,
     StepTimeMetric,
     StepTimeResult,
-    StepTimeSummary,
 )
 
 
 def _metric(name: str, value: float) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
-        clock="cpu",
         series=None,
-        summary=StepTimeSummary(
-            window_size=30,
-            steps_used=30,
-            median_total=value,
-            worst_total=value,
-            worst_rank=0,
-            skew_ratio=0.0,
-            skew_pct=0.0,
-        ),
-        coverage=StepTimeCoverage(
-            expected_steps=30,
-            steps_used=30,
-            completed_step=30,
-            world_size=1,
-            ranks_present=1,
-            incomplete=False,
-        ),
+        window_size=30,
+        steps_used=30,
+        median_total=value,
+        worst_total=value,
+        worst_rank=0,
+        skew_ratio=0.0,
+        skew_pct=0.0,
+        measured_ranks=(0,),
     )
 
 
@@ -146,7 +134,9 @@ def test_cli_startup_shows_calm_waiting_panel() -> None:
 def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
     def _multi_metric(name: str, value: float) -> StepTimeMetric:
         metric = _metric(name, value)
-        summary = StepTimeSummary(
+        return StepTimeMetric(
+            metric=metric.metric,
+            series=None,
             window_size=30,
             steps_used=30,
             median_total=value,
@@ -154,21 +144,7 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
             worst_rank=1,
             skew_ratio=2.0,
             skew_pct=1.0,
-        )
-        coverage = StepTimeCoverage(
-            expected_steps=30,
-            steps_used=30,
-            completed_step=30,
-            world_size=2,
-            ranks_present=2,
-            incomplete=False,
-        )
-        return StepTimeMetric(
-            metric=metric.metric,
-            clock=metric.clock,
-            series=None,
-            summary=summary,
-            coverage=coverage,
+            measured_ranks=(0, 1),
         )
 
     per_rank_timing = {
