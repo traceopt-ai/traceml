@@ -5,6 +5,7 @@ import sqlite3
 
 import pytest
 from rich.console import Console
+from tests.step_time.factories import window_from_rank_averages
 
 pytest.importorskip("nicegui")
 
@@ -24,14 +25,12 @@ from traceml_ai.step_time.model import (
     StepTimeMetric,
     StepTimeResult,
     StepTimeSummary,
+    StepTimeWindow,
 )
 from traceml_ai.reporting.sections.step_time.loader import (
     load_step_time_section_data,
 )
-from traceml_ai.utils.step_time_window import (
-    StepTimeWindow,
-    diagnose_step_time_window,
-)
+from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 
 class _FakeSegment:
@@ -127,10 +126,10 @@ def _payload(
             row["total_step"] = row["input_wait"] + row["step_time"]
         per_rank_timing = {0: row}
     return StepTimeResult(
-        window=StepTimeWindow(
+        window=window_from_rank_averages(
+            per_rank_timing,
             clock="gpu" if clock == "gpu" else "cpu",
             expected_ranks=tuple(sorted(per_rank_timing)),
-            per_rank_timing=per_rank_timing,
             metrics=metrics,
         ),
         had_ok=had_ok,

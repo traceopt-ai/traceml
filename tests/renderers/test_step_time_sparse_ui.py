@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from rich.console import Console
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
 from traceml_ai.step_time.model import (
     StepTimeCoverage,
@@ -22,7 +23,6 @@ from traceml_ai.step_time.model import (
     StepTimeResult,
     StepTimeSummary,
 )
-from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def _metric(name: str, value: float) -> StepTimeMetric:
@@ -70,9 +70,9 @@ def _sparse_payload() -> StepTimeResult:
         }
     }
     return StepTimeResult(
-        window=StepTimeWindow(
+        window=window_from_rank_averages(
+            per_rank_timing,
             expected_ranks=(0,),
-            per_rank_timing=per_rank_timing,
             metrics=[
                 _metric("input_wait", 2.0),
                 _metric("h2d", 0.0),
@@ -188,9 +188,9 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
         },
     }
     payload = StepTimeResult(
-        window=StepTimeWindow(
+        window=window_from_rank_averages(
+            per_rank_timing,
             expected_ranks=(0, 1),
-            per_rank_timing=per_rank_timing,
             metrics=[
                 _multi_metric("input_wait", 2.0),
                 _multi_metric("backward", 60.0),

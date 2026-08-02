@@ -1,8 +1,8 @@
 import json
 import sqlite3
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.renderers.step_time.compute import StepCombinedComputer
-from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
@@ -102,26 +102,24 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
 
 
 def test_worst_rank_requires_measured_total_step() -> None:
-    from traceml_ai.renderers.step_time.compute import _worst_rank_from_window
-
     # Ranks without a measured total step (input wait never measured)
     # cannot win the status-line worst-rank pick with a fake zero.
     assert (
-        _worst_rank_from_window(
+        window_from_rank_averages(
             {
                 0: {"step_time": 100.0},
                 1: {"step_time": 400.0},
             }
-        )
+        ).worst_rank
         is None
     )
     assert (
-        _worst_rank_from_window(
+        window_from_rank_averages(
             {
                 0: {"step_time": 100.0, "total_step": 105.0},
                 1: {"step_time": 400.0},
             }
-        )
+        ).worst_rank
         == 0
     )
 
@@ -165,9 +163,9 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     )
     good = StepTimeResult(
         status_message="OK",
-        window=StepTimeWindow(
+        window=window_from_rank_averages(
+            {0: {"step_time": 10.0, "total_step": 10.0}},
             expected_ranks=(0,),
-            per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
             metrics=[metric],
         ),
     )
@@ -242,9 +240,9 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
         )
         return StepTimeResult(
             status_message="OK",
-            window=StepTimeWindow(
+            window=window_from_rank_averages(
+                {0: {"step_time": 10.0, "total_step": 10.0}},
                 expected_ranks=(0,),
-                per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
                 metrics=[metric],
             ),
         )

@@ -30,10 +30,7 @@ from traceml_ai.diagnostics.trends import (
 from traceml_ai.renderers.base_renderer import BaseRenderer
 from traceml_ai.renderers.utils import fmt_time_run
 from traceml_ai.step_time.model import StepTimeMetric, StepTimeResult
-from traceml_ai.utils.step_time_window import (
-    diagnose_step_time_window,
-    median_iteration_component_share,
-)
+from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 from .compute import StepCombinedComputer
 
@@ -200,10 +197,7 @@ class StepCombinedRenderer(BaseRenderer):
 
         # Optional residual share line (still meaningful in both modes)
         if step_metric and residual_metric and window is not None:
-            residual_share = median_iteration_component_share(
-                window.per_rank_timing,
-                "residual_proxy",
-            )
+            residual_share = window.residual_share
             table.add_row(
                 "Residual Share (%)",
                 *[

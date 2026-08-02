@@ -14,20 +14,17 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Mapping, Optional, Sequence
 
+from traceml_ai.step_time.analysis import StepTimeAnalyzer
 from traceml_ai.step_time.model import (
     StepTimeLoadRequest,
     StepTimeRankIdentity,
     StepTimeRepositorySnapshot,
     StepTimeSourceCursor,
-    StepTimeSourceRow,
     StepTimeWindow,
 )
 from traceml_ai.step_time.sqlite import (
     SQLiteStepTimeRepository,
     load_training_strategy_from_sqlite,
-)
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
 )
 from traceml_ai.utils.training_strategy import (
     DEFAULT_TRAINING_STRATEGY,
@@ -49,27 +46,15 @@ class StepTimeSQLiteWindow:
     cursor: StepTimeSourceCursor = field(default_factory=StepTimeSourceCursor)
 
 
-# TODO(PR4): Remove regrouping when StepTimeAnalyzer consumes flat source rows.
-def _group_source_rows(
-    rows: Sequence[StepTimeSourceRow],
-) -> dict[int, dict[int, StepTimeSourceRow]]:
-    """Group flat source rows for the unchanged window-analysis contract."""
-    grouped: dict[int, dict[int, StepTimeSourceRow]] = {}
-    for row in rows:
-        grouped.setdefault(row.global_rank, {})[row.step] = row
-    return grouped
-
-
 def _analyze_snapshot(
     snapshot: StepTimeRepositorySnapshot,
     *,
     max_rows: int,
 ) -> StepTimeSQLiteWindow:
     """Apply the shared analyzer to either repository data profile."""
-    window = build_step_time_window_from_events(
-        _group_source_rows(snapshot.rows),
-        max_rows=max_rows,
-        expected_ranks=snapshot.global_ranks,
+    window = StepTimeAnalyzer().analyze(
+        snapshot,
+        window_size=max_rows,
     )
     return StepTimeSQLiteWindow(
         window=window,

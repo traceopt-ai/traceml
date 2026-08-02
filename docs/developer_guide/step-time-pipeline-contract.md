@@ -17,6 +17,7 @@ flowchart LR
     A["Live provider A<br/>StepCombinedRenderer"]
     B["Live provider B<br/>ModelDiagnosticsRenderer"]
     L["SQLite repository<br/>live or summary profile"]
+    ANALYZE["StepTimeAnalyzer<br/>one typed fact set"]
     W["Canonical live StepTimeWindow"]
     D["Live Step Time diagnosis"]
     CLI["Live CLI"]
@@ -27,7 +28,7 @@ flowchart LR
     SD["Summary Step Time diagnosis"]
     OUT["JSON and text"]
 
-    DB --> A --> L --> W
+    DB --> A --> L --> ANALYZE --> W
     DB -. "second independent read" .-> B
     B --> L
     W --> D
@@ -36,13 +37,13 @@ flowchart LR
     D --> CLI
     D --> RAIL
     RAIL --> HERO
-    DB --> S --> SW --> SD --> OUT
+    DB --> S --> L --> ANALYZE --> SW --> SD --> OUT
 ```
 
 The repository has two SQL selection profiles, not three surface pipelines.
 Terminal and dashboard share an index-bounded live tail. Final summary uses a
 metadata-complete query. Both return one `StepTimeRepositorySnapshot` and feed
-the same alignment and analysis code.
+the same `StepTimeAnalyzer`.
 
 The diagram shows remaining technical debt deliberately: a dashboard refresh
 owns two independent Step Time computers. Each now performs one constant-size
@@ -54,8 +55,8 @@ A later consumer-migration PR will fan out one analysis snapshot.
 | Concern | Source of truth | Change here when... |
 |---|---|---|
 | Shared data contracts | `step_time/model.py` | the canonical window, metric, series, or coverage shape changes |
-| Event-to-metric names | `utils/step_time_window.py` | persisted event names or clock extraction change |
-| Common-step alignment and availability | `utils/step_time_window.py` | window, sparse-signal, or derived-metric semantics change |
+| Event-to-metric names | `step_time/model.py` | a persisted event receives a canonical metric name |
+| Common-step alignment and analysis | `step_time/analysis.py` | clock, sparse-signal, derivation, cohort, or statistics semantics change |
 | SQLite selection and row decoding | `step_time/sqlite.py` | live-tail or summary selection, identity, progress, or clock normalization changes |
 | Analyzed-window compatibility adapter | `utils/step_time_sqlite.py` | an existing loader caller needs migration support |
 | Diagnosis thresholds and priority | `diagnostics/step_time/` | a rule, policy, attribution, or issue order changes |
@@ -65,7 +66,33 @@ A later consumer-migration PR will fan out one analysis snapshot.
 | Cross-surface contract scenarios | `tests/step_time/` | any item above changes intentionally |
 
 Start with the contract scenarios before following a surface-specific call
-path. They present the entire persisted-input-to-output behavior in one place.
+path. For production ownership, read `step_time/sqlite.py`, then
+`step_time/analysis.py`, then `step_time/model.py`. Those three files cover the
+complete source-to-facts path.
+
+## Data-shape budget
+
+Step Time payloads previously crossed eight boundary-level representations
+between SQLite and a screen. The canonical path now permits at most five:
+
+```text
+SQLite row
+  -> StepTimeSourceRow
+  -> typed StepTimeWindow facts
+  -> optional legacy rank-average projection
+  -> surface output
+```
+
+Only representations crossing a production function or module boundary are
+counted. A temporary object returned by `json.loads()` and analyzer lookup
+indexes are implementation details, not new payload contracts. The storage to
+canonical-facts path therefore has exactly two conversions and the analyzer
+returns exactly one typed fact graph.
+
+`StepTimeWindow.rank_facts` replaces the former triple nested
+rank/step/metric dictionary. `per_rank_timing` remains a cached, read-only
+projection for diagnosis and presenters that migrate in PR5 through PR8. No
+per-step legacy projection exists.
 
 ### Model dependency boundary
 
@@ -75,6 +102,24 @@ diagnosis, reporting, Rich, NiceGUI, and Plotly depend on these contracts;
 the model never depends on them. New code should import from this central
 module. Historical renderer-schema and window-utility imports remain thin
 re-exports while external integrations migrate.
+
+`traceml_ai.step_time.analysis` depends only on the central model and NumPy.
+It does not import SQLite, diagnosis policies, reporting, Rich, or NiceGUI.
+The package root deliberately exports model types only, so importing a source
+contract does not load the analyzer or NumPy.
+
+### Typed fact glossary
+
+| Type or field | Meaning |
+|---|---|
+| `StepTimeSourceRow` | One decoded source row with CPU/GPU clock pairs; no alignment or derived meaning. |
+| `StepTimeValues` | Fixed optional phase, derived, and CPU-compatibility values for one step or rank average. |
+| `StepTimeStepFacts` | One aligned step id and its typed values. |
+| `StepTimeRankFacts` | Typed aligned steps and the corresponding rank-window average. |
+| `StepTimeMetric.measured_ranks` | Exact rank population used for that metric's statistics and series. |
+| `representative_rank` | A real rank closest to the mathematical median; it is not the median itself. |
+| `*_cpu_ms` | Historical CPU-clock compatibility values used only where the public summary requires them. |
+| Other `*_ms` fields | Values from the single clock selected for the complete analysis window. |
 
 ## Canonical window invariants
 
@@ -89,6 +134,7 @@ re-exports while external integrations migrate.
 | Derived metrics | Compute needs forward, backward, and optimizer. Residual needs the step envelope and every compute phase; absent H2D contributes zero. Total step needs input wait and the step envelope. |
 | Rank cohorts | A diagnosis uses only ranks carrying all metrics required by that rule. Consumers must not reconstruct another availability policy. |
 | Metric statistics | Median, worst value, worst rank, and skew are computed from ranks that measured that metric. The worst value and rank must describe the same rank. |
+| Representative rank | Choose the real rank nearest the mathematical median, then the lower value, then the lower rank id. |
 | Residual meaning | `max(0, step - h2d - forward - backward - optimizer)` is unattributed time, not proof of communication or NCCL overhead. |
 
 CPU compatibility fields in `final_summary.json` are intentionally different
@@ -132,6 +178,18 @@ The cross-surface goldens freeze:
 
 They intentionally do not snapshot timestamps, private cache state, complete
 Rich/NiceGUI markup, or dictionary ordering.
+
+## Temporary compatibility seams
+
+- `utils/step_time_window.py` accepts historical raw-event fixtures and
+  delegates to `StepTimeAnalyzer`; PR9 removes that input adapter.
+- `StepTimeWindow.per_rank_timing` lazily projects typed rank averages for
+  current rules and presenters; PR5 through PR8 remove those consumers.
+- `utils/step_time_sqlite.py` preserves historical loader signatures while
+  calling the repository and analyzer directly; PR9 removes it.
+
+New code must not add another analyzer input type, per-step dictionary, or
+surface-specific schema to the central package.
 
 ## Changing Step Time safely
 

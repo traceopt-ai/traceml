@@ -320,12 +320,11 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     # silently absorb them as zeros.
     assert "residual_proxy" not in selected.per_rank_timing[0]
     assert "optimizer_step" not in selected.per_rank_timing[0]
-    assert selected.per_rank_step_timing[0][1]["input_wait"] == pytest.approx(
-        4.0
-    )
-    assert selected.per_rank_step_timing[0][1]["step_time"] == pytest.approx(
-        20.0
-    )
+    rank_facts = selected.rank(0)
+    assert rank_facts is not None
+    step_values = rank_facts.steps[0].values
+    assert step_values.input_wait_ms == pytest.approx(4.0)
+    assert step_values.step_time_ms == pytest.approx(20.0)
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
     selected = build_step_time_window_from_events(

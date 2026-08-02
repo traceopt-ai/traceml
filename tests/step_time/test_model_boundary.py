@@ -64,7 +64,26 @@ def test_model_depends_only_on_the_standard_library() -> None:
     """Keep data contracts independently importable and inexpensive."""
     dependencies = set(_imports(_PACKAGE_ROOT / "model.py"))
 
-    assert dependencies <= {"__future__", "dataclasses", "typing"}
+    assert dependencies <= {
+        "__future__",
+        "dataclasses",
+        "functools",
+        "types",
+        "typing",
+    }
+
+
+def test_typed_analysis_facts_are_exported_without_loading_analyzer() -> None:
+    """Expose canonical facts while keeping the package root lightweight."""
+    for name in (
+        "StepTimeValues",
+        "StepTimeStepFacts",
+        "StepTimeRankFacts",
+    ):
+        assert getattr(step_time_package, name) is getattr(model, name)
+
+    dependencies = set(_imports(_PACKAGE_ROOT / "__init__.py"))
+    assert "traceml_ai.step_time.analysis" not in dependencies
 
 
 def test_renderer_schema_reexports_canonical_type_objects() -> None:

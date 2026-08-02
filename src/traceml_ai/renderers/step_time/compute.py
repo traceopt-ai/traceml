@@ -1,7 +1,7 @@
 import sqlite3
 import time
 from dataclasses import replace
-from typing import Dict, Optional, Sequence
+from typing import Optional, Sequence
 
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.step_time.model import StepTimeResult
@@ -117,7 +117,7 @@ class StepCombinedComputer:
             )
 
         status = "OK"
-        diagnosis_worst_rank = _worst_rank_from_window(window.per_rank_timing)
+        diagnosis_worst_rank = window.worst_rank
         if diagnosis_worst_rank is not None:
             status += f" | diagnosis_worst_rank=r{diagnosis_worst_rank}"
 
@@ -165,25 +165,3 @@ class StepCombinedComputer:
             status_message="No fresh step-combined data",
             had_ok=had_ok,
         )
-
-
-def _worst_rank_from_window(
-    per_rank_timing: Dict[int, Dict[str, float]],
-) -> Optional[int]:
-    """Return the slowest rank by selected average total step.
-
-    Only ranks whose total step is measured compete; when none is (the
-    input wait was never measured anywhere), no rank is named rather
-    than defaulting every rank to a fake zero.
-    """
-    candidates = {
-        int(rank): float(values["total_step"])
-        for rank, values in per_rank_timing.items()
-        if "total_step" in values
-    }
-    if not candidates:
-        return None
-    return max(
-        candidates,
-        key=lambda rank: (candidates[rank], -rank),
-    )

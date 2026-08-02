@@ -16,7 +16,6 @@ own classification — interpretation belongs to the engine.
 
 from __future__ import annotations
 
-import statistics
 from typing import Any, Dict, List, Optional
 
 from nicegui import ui
@@ -26,7 +25,6 @@ from traceml_ai.step_time.model import (
     StepTimeResult,
     StepTimeWindow,
 )
-from traceml_ai.utils.step_time_window import median_iteration_component_share
 
 from . import theme
 
@@ -123,30 +121,6 @@ def _index(
     return {m.metric: m for m in metrics}
 
 
-def _representative_rank(window: StepTimeWindow) -> Optional[int]:
-    """Choose a real median-iteration rank with a coherent phase row."""
-    present_phases = [
-        key
-        for _label, key, _color in theme.PHASES
-        if key != "h2d" and window.ranks_for(key)
-    ]
-    eligible = window.eligible_ranks(("step_time", *present_phases))
-    if not eligible:
-        return None
-
-    anchors = {
-        rank: float(
-            window.per_rank_timing[rank].get(
-                "total_step",
-                window.per_rank_timing[rank]["step_time"],
-            )
-        )
-        for rank in eligible
-    }
-    middle = float(statistics.median(anchors.values()))
-    return min(eligible, key=lambda rank: (abs(anchors[rank] - middle), rank))
-
-
 _EXPIRED_SIG = "__expired__"
 _NO_ENVELOPE_SIG = "__no_envelope__"
 _NO_COHORT_SIG = "__no_cohort__"
@@ -196,10 +170,7 @@ def _update_kpis(
         if st.skew_pct is None
         else theme.kval(f"{st.skew_pct * 100.0:.0f}", "%")
     )
-    residual_share = median_iteration_component_share(
-        window.per_rank_timing,
-        "residual_proxy",
-    )
+    residual_share = window.residual_share
     kpis["residual"].content = (
         theme.kval("n/a")
         if residual_share is None
@@ -226,7 +197,7 @@ def update_model_combined_section(
     step_metric = m["step_time"]
     st = step_metric.summary
     _update_kpis(panel, window, step_metric)
-    representative = _representative_rank(window)
+    representative = window.composition_representative_rank
     if representative is None:
         _clear_ribbon(
             panel,
@@ -235,13 +206,17 @@ def update_model_combined_section(
         )
         return
 
-    rank_values = window.per_rank_timing[representative]
+    rank_facts = window.rank(representative)
+    if rank_facts is None:
+        _clear_ribbon(panel, _NO_COHORT_SIG, "rank facts unavailable")
+        return
+    rank_values = rank_facts.average
     vals: Dict[str, Optional[float]] = {}
     for _label, key, _color in theme.PHASES:
         if key == "h2d":
-            vals[key] = float(rank_values.get(key, 0.0))
+            vals[key] = float(rank_values.value(key) or 0.0)
         else:
-            value = rank_values.get(key)
+            value = rank_values.value(key)
             vals[key] = float(value) if value is not None else None
 
     measured = {key: value for key, value in vals.items() if value is not None}
@@ -256,7 +231,7 @@ def update_model_combined_section(
     ]
 
     input_wait_value = vals.get("input_wait")
-    envelope = float(rank_values["step_time"]) + (
+    envelope = float(rank_values.step_time_ms or 0.0) + (
         input_wait_value if input_wait_value is not None else 0.0
     )
     tot = max(sum(measured.values()), envelope) or 1.0

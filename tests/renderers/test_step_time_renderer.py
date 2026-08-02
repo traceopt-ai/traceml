@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from rich.console import Console
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.renderers.step_time import renderer as renderer_module
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
@@ -12,8 +13,8 @@ from traceml_ai.step_time.model import (
     StepTimeMetric,
     StepTimeResult,
     StepTimeSummary,
+    StepTimeWindow,
 )
-from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def _metric(
@@ -59,10 +60,10 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
         _metric("residual_proxy", 0.0),
     ]
     payload = StepTimeResult(
-        window=StepTimeWindow(
+        window=window_from_rank_averages(
+            {0: {"input_wait": 40.0, "step_time": 100.0}},
             clock="gpu",
             expected_ranks=(0,),
-            per_rank_timing={0: {"input_wait": 40.0, "step_time": 100.0}},
             metrics=diagnosis_metrics,
         ),
         training_strategy="fsdp",
@@ -116,9 +117,8 @@ def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
         _metric("residual_proxy", 6.0),
     ]
     payload = StepTimeResult(
-        window=StepTimeWindow(
-            expected_ranks=(0,),
-            per_rank_timing={
+        window=window_from_rank_averages(
+            {
                 0: {
                     "input_wait": 0.0,
                     "h2d": 0.0,
@@ -129,6 +129,7 @@ def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
                     "residual_proxy": 6.0,
                 }
             },
+            expected_ranks=(0,),
             metrics=diagnosis_metrics,
         ),
     )
