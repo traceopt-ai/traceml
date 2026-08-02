@@ -175,6 +175,43 @@ because ordinary calls no longer allocate the compatibility rank map or the
 unconsumed attribution payload. Query topology remains 2/4/2 for one live
 provider, the current two-provider dashboard, and final summary.
 
+## PR6 live-session comparison
+
+PR6 moves live cache and freshness ownership into `LiveStepTimeSession` and
+makes the CLI a pure presenter. The repository retains PR5's proven bounded
+tail SQL. It compares the selected row cursor and rank universe before JSON
+decoding, so an unchanged refresh returns the exact prior immutable analysis
+without parsing, analysis, or diagnosis work.
+
+The `one live provider` row below deliberately invalidates the test session's
+cache before each repetition. It measures the changed/cold path and guards
+against hiding a regression behind reuse. The cache-hit and dashboard rows
+measure unchanged persisted windows after warm-up.
+
+Recorded on 2026-08-02 with the same environment and command as PR5:
+
+| Ranks | Stage | SELECTs | Median (ms) | Change from PR5 |
+|---:|---|---:|---:|---:|
+| 1 | one live provider (cache miss) | 2 | 8.540 | +4.4% |
+| 1 | unchanged live cache hit | 2 | 0.442 | -94.6% |
+| 1 | dashboard Step Time refresh | 4 | 0.883 | -94.6% |
+| 1 | final summary | 2 | 6.655 | +0.9% |
+| 8 | one live provider (cache miss) | 2 | 33.643 | +5.1% |
+| 8 | unchanged live cache hit | 2 | 3.117 | -90.3% |
+| 8 | dashboard Step Time refresh | 4 | 6.173 | -90.4% |
+| 8 | final summary | 2 | 16.268 | +2.0% |
+| 32 | one live provider (cache miss) | 2 | 120.724 | +4.0% |
+| 32 | unchanged live cache hit | 2 | 13.265 | -88.6% |
+| 32 | dashboard Step Time refresh | 4 | 26.716 | -88.9% |
+| 32 | final summary | 2 | 48.528 | +0.9% |
+
+Every cache-miss and summary median remains within 5.1% of PR5, below the 10%
+review threshold. Query topology remains 2/4/2. The unchanged path still reads
+the source cursor and run strategy in one SQLite snapshot, but it does not
+decode persisted JSON or rebuild semantic facts. Dashboard still owns two
+sessions until PR7; the improvement here is reuse within each session, not
+cross-presenter consolidation.
+
 ## Reproduce
 
 From the repository root:

@@ -10,13 +10,25 @@ from __future__ import annotations
 import statistics
 from typing import Mapping, Optional, Sequence
 
+from traceml_ai.diagnostics.step_time import (
+    LIVE_STEP_TIME_POLICY,
+    diagnose_step_time_window,
+)
 from traceml_ai.step_time.model import (
     DiagnosisClock,
     StepTimeCoverage,
+    StepTimeLoadRequest,
     StepTimeMetric,
     StepTimeRankFacts,
+    StepTimeRepositorySnapshot,
+    StepTimeSourceCursor,
     StepTimeValues,
     StepTimeWindow,
+)
+from traceml_ai.step_time.pipeline import (
+    LiveStepTimeFreshness,
+    LiveStepTimeResult,
+    StepTimeAnalysis,
 )
 
 
@@ -211,6 +223,40 @@ def window_from_rank_averages(
     )
 
 
+def live_result_from_window(
+    window: StepTimeWindow,
+    *,
+    freshness: LiveStepTimeFreshness = "live",
+    status_message: str = "OK",
+) -> LiveStepTimeResult:
+    """Wrap one typed fixture window in the canonical live result shape."""
+    request = StepTimeLoadRequest(
+        window_size=max(1, int(window.coverage.expected_steps)),
+        lookback_factor=4,
+    )
+    cursor_value = window.steps[-1] if window.steps else None
+    snapshot = StepTimeRepositorySnapshot(
+        cursor=StepTimeSourceCursor(
+            last_row_id=cursor_value,
+            latest_step=cursor_value,
+        ),
+        training_strategy=window.training_strategy,
+    )
+    return LiveStepTimeResult(
+        freshness=freshness,
+        analysis=StepTimeAnalysis(
+            request=request,
+            snapshot=snapshot,
+            window=window,
+            diagnosis=diagnose_step_time_window(
+                window,
+                policy=LIVE_STEP_TIME_POLICY,
+            ),
+        ),
+        status_message=status_message,
+    )
+
+
 def _composition_representative(
     rank_facts: Sequence[StepTimeRankFacts],
     cohort: Sequence[int],
@@ -257,4 +303,8 @@ def _component_share(
     return float(statistics.median(shares)) if shares else None
 
 
-__all__ = ["values_from_legacy", "window_from_rank_averages"]
+__all__ = [
+    "live_result_from_window",
+    "values_from_legacy",
+    "window_from_rank_averages",
+]

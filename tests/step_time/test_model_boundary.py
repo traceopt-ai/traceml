@@ -159,3 +159,46 @@ def test_removed_renderer_schema_does_not_return() -> None:
         / "step_time"
         / "schema.py"
     ).exists()
+
+
+def test_cli_presenter_has_no_data_or_diagnosis_dependencies() -> None:
+    """Keep Rich formatting downstream of the completed live analysis."""
+    renderer = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "renderers"
+        / "step_time"
+        / "renderer.py"
+    )
+    dependencies = set(_imports(renderer))
+    source = renderer.read_text(encoding="utf-8")
+
+    assert "sqlite3" not in dependencies
+    assert "traceml_ai.step_time.sqlite" not in dependencies
+    assert "traceml_ai.step_time.analysis" not in dependencies
+    assert "traceml_ai.diagnostics.step_time.policy" not in dependencies
+    assert "diagnose_step_time_window" not in source
+    assert "build_step_diagnosis" not in source
+    assert "StepCombinedComputer" not in source
+    assert "StepTimeDashboardAdapter" not in source
+
+
+def test_dashboard_computer_is_only_a_compatibility_projection() -> None:
+    """Do not let SQL, clocks, or freshness return to the PR7 adapter."""
+    computer = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "renderers"
+        / "step_time"
+        / "compute.py"
+    )
+    dependencies = set(_imports(computer))
+    source = computer.read_text(encoding="utf-8")
+
+    assert "sqlite3" not in dependencies
+    assert "time" not in dependencies
+    assert "traceml_ai.utils.step_time_sqlite" not in dependencies
+    assert "def compute_cli(" not in source
+    assert "def _stale_or_empty(" not in source

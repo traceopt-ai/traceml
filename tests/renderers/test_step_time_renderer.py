@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+from unittest.mock import Mock
 
 from rich.console import Console
 
-from tests.step_time.factories import window_from_rank_averages
-from traceml_ai.diagnostics.step_time.api import StepDiagnosis
-from traceml_ai.renderers.step_time import renderer as renderer_module
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
-from traceml_ai.step_time.model import (
-    StepTimeMetric,
-    StepTimeResult,
-    StepTimeWindow,
+from tests.step_time.factories import (
+    live_result_from_window,
+    window_from_rank_averages,
 )
+from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.step_time.model import StepTimeMetric
 
 
 def _metric(
@@ -39,51 +36,29 @@ def _render_text(renderable) -> str:
     return console.export_text()
 
 
-def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
+def test_step_time_cli_uses_the_precomputed_selected_clock_analysis() -> None:
     diagnosis_metrics = [
         _metric("input_wait", 40.0),
         _metric("step_time", 100.0),
         _metric("residual_proxy", 0.0),
     ]
-    payload = StepTimeResult(
-        window=window_from_rank_averages(
+    payload = live_result_from_window(
+        window_from_rank_averages(
             {0: {"input_wait": 40.0, "step_time": 100.0}},
             clock="gpu",
             expected_ranks=(0,),
             metrics=diagnosis_metrics,
+            training_strategy="fsdp",
         ),
-        training_strategy="fsdp",
-    )
-    seen = {}
-
-    def fake_diagnose(window, **kwargs):
-        seen["metrics"] = window.metrics
-        seen["diagnosis_clock"] = window.clock
-        seen["training_strategy"] = kwargs.get("training_strategy")
-        return SimpleNamespace(
-            primary=StepDiagnosis(
-                kind="INPUT_BOUND",
-                status="INPUT-BOUND",
-                severity="warn",
-                reason="Input wait is high.",
-                action="Increase workers.",
-                steps_used=1,
-            )
-        )
-
-    monkeypatch.setattr(
-        renderer_module,
-        "diagnose_step_time_window",
-        fake_diagnose,
     )
 
-    renderer = StepCombinedRenderer(db_path=":memory:")
-    monkeypatch.setattr(renderer, "_payload", lambda: payload)
-    text = _render_text(renderer.get_panel_renderable())
+    renderer = StepCombinedRenderer(session=Mock())
+    text = _render_text(renderer.render(payload))
 
-    assert seen["metrics"] is diagnosis_metrics
-    assert seen["diagnosis_clock"] == "gpu"
-    assert seen["training_strategy"] == "fsdp"
+    assert payload.analysis.window.metrics is diagnosis_metrics
+    assert payload.analysis.window.clock == "gpu"
+    assert payload.analysis.window.training_strategy == "fsdp"
+    assert "WARMUP" in text
     assert "IW" in text
     assert "DL" not in text
     assert "Average (1 steps)" in text
@@ -92,7 +67,7 @@ def test_step_time_cli_diagnosis_uses_selected_metrics(monkeypatch) -> None:
     assert "12.0 ms" not in text
 
 
-def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
+def test_step_time_cli_renders_zero_timings_as_zero() -> None:
     diagnosis_metrics = [
         _metric("input_wait", 0.0),
         _metric("h2d", 0.0),
@@ -102,8 +77,8 @@ def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
         _metric("step_time", 31.2),
         _metric("residual_proxy", 6.0),
     ]
-    payload = StepTimeResult(
-        window=window_from_rank_averages(
+    payload = live_result_from_window(
+        window_from_rank_averages(
             {
                 0: {
                     "input_wait": 0.0,
@@ -120,29 +95,28 @@ def test_step_time_cli_renders_zero_timings_as_zero(monkeypatch) -> None:
         ),
     )
 
-    def fake_diagnose(window, **kwargs):
-        return SimpleNamespace(
-            primary=StepDiagnosis(
-                kind="RESIDUAL_HEAVY",
-                status="RESIDUAL-HEAVY",
-                severity="warn",
-                reason="Residual time is high.",
-                action="Inspect work outside traced phases.",
-                steps_used=1,
-            )
-        )
-
-    monkeypatch.setattr(
-        renderer_module,
-        "diagnose_step_time_window",
-        fake_diagnose,
-    )
-
-    renderer = StepCombinedRenderer(db_path=":memory:")
-    monkeypatch.setattr(renderer, "_payload", lambda: payload)
-    text = _render_text(renderer.get_panel_renderable())
+    renderer = StepCombinedRenderer(session=Mock())
+    text = _render_text(renderer.render(payload))
 
     assert "IW" in text
     assert "H2D" in text
     assert text.count("0.0 ms") >= 2
     assert "4.5 ms" in text
+
+
+def test_step_time_cli_refreshes_its_injected_session_once() -> None:
+    payload = live_result_from_window(
+        window_from_rank_averages(
+            {0: {"step_time": 10.0}},
+            expected_ranks=(0,),
+            metrics=[_metric("step_time", 10.0)],
+        )
+    )
+    session = Mock()
+    session.refresh.return_value = payload
+
+    renderer = StepCombinedRenderer(session=session)
+    text = _render_text(renderer.get_panel_renderable())
+
+    session.refresh.assert_called_once_with()
+    assert "STEP" in text
