@@ -107,6 +107,34 @@ Final summary is faster because maximum-step and identity reads no longer run
 per rank. On the same indexed 32-rank fixture, its median moved from 71.253 ms
 on the PR2 reference to 49.011 ms in PR3.
 
+## PR4 canonical-analyzer comparison
+
+PR4 removes the flat-row regrouping and nested per-step timing dictionary.
+`StepTimeAnalyzer` now consumes `StepTimeSourceRow` objects directly and emits
+one typed fact graph. The repository queries and data profiles are unchanged.
+
+Recorded on 2026-08-02 in the same environment and with the same PR3 command:
+
+| Ranks | Stage | SELECTs | Median (ms) | Change from PR3 |
+|---:|---|---:|---:|---:|
+| 1 | load + decode + analyze | 2 | 8.360 | +3.9% |
+| 1 | one live provider | 2 | 8.435 | +3.0% |
+| 1 | dashboard Step Time refresh | 4 | 17.063 | +6.2% |
+| 1 | final summary | 2 | 6.913 | +6.4% |
+| 8 | load + decode + analyze | 2 | 32.318 | +3.1% |
+| 8 | one live provider | 2 | 33.440 | +6.3% |
+| 8 | dashboard Step Time refresh | 4 | 67.531 | +6.9% |
+| 8 | final summary | 2 | 17.031 | +5.9% |
+| 32 | load + decode + analyze | 2 | 116.024 | +2.9% |
+| 32 | one live provider | 2 | 117.410 | +2.7% |
+| 32 | dashboard Step Time refresh | 4 | 241.952 | +4.2% |
+| 32 | final summary | 2 | 49.686 | +1.4% |
+
+The largest median movement is 6.9%, below the PR4 review threshold of 10%
+and consistent with local run-to-run variation. At 32 logical ranks, live and
+summary remain effectively unchanged while the canonical path carries fewer
+payload representations.
+
 SQLite loading, JSON decoding, alignment, and window analysis are fused in the
 current loader. The benchmark therefore reports that span honestly as one
 stage. Diagnosis is measured separately because it already accepts a canonical

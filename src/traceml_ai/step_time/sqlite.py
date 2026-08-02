@@ -81,14 +81,14 @@ def _sum_clocks(by_device: Any) -> StepTimeClockValues:
     )
 
 
-def _decode_metrics(
-    events_json: str,
+def normalize_step_time_events(
+    events: Any,
 ) -> Optional[dict[str, StepTimeClockValues]]:
-    """Decode one JSON payload into semantic dual-clock metric values."""
-    try:
-        events = json.loads(events_json)
-    except (TypeError, ValueError):
-        return None
+    """Normalize one persisted event mapping into dual-clock source values.
+
+    The repository decoder and the temporary raw-fixture adapter share this
+    boundary so device summation and invalid-duration handling have one owner.
+    """
     if not isinstance(events, dict):
         return None
 
@@ -99,6 +99,17 @@ def _decode_metrics(
             continue
         metrics[metric] = _sum_clocks(payload)
     return metrics
+
+
+def _decode_metrics(
+    events_json: str,
+) -> Optional[dict[str, StepTimeClockValues]]:
+    """Decode one JSON payload into semantic dual-clock metric values."""
+    try:
+        events = json.loads(events_json)
+    except (TypeError, ValueError):
+        return None
+    return normalize_step_time_events(events)
 
 
 def _optional_int(value: Any) -> Optional[int]:
@@ -467,4 +478,5 @@ class SQLiteStepTimeRepository:
 __all__ = [
     "SQLiteStepTimeRepository",
     "load_training_strategy_from_sqlite",
+    "normalize_step_time_events",
 ]

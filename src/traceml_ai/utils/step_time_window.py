@@ -1,535 +1,59 @@
-"""Canonical selected-clock Step Time windows.
+"""Compatibility entry points for canonical Step Time analysis.
 
-This module is the shared Step Time pipeline used by live renderers and final
-summary reporting. It aligns completed steps, selects one timing clock for the
-whole window, builds per-rank average metrics, and exposes the metrics consumed
-by diagnosis and presentation layers.
+New production code should use
+:class:`traceml_ai.step_time.analysis.StepTimeAnalyzer` with normalized
+repository snapshots. This module keeps the historical raw fixture,
+diagnosis, and rank-mapping helpers while consumers migrate in PR5 through
+PR9; it does not own the canonical analysis algorithm.
 """
 
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Sequence
 
 import numpy as np
 
+from traceml_ai.step_time.analysis import (
+    DATALOADER_FETCH_KEY,
+    DISPLAY_METRICS,
+    INPUT_WAIT_KEY,
+    SELECTED_METRICS,
+    STEP_TIME_CPU_KEY,
+    StepTimeAnalyzer,
+)
 from traceml_ai.step_time.model import (
     DIAGNOSIS_CLOCK_KEY,
     STEP_TIME_EVENT_NAMES,
     DiagnosisClock,
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeSeries,
-    StepCombinedTimeSummary,
+    StepTimeRepositorySnapshot,
     StepTimeSourceRow,
+    StepTimeValues,
     StepTimeWindow,
 )
-from traceml_ai.utils.step_windows import common_suffix_steps
+from traceml_ai.step_time.sqlite import normalize_step_time_events
 
 if TYPE_CHECKING:
     from traceml_ai.diagnostics.common import DiagnosticResult
     from traceml_ai.diagnostics.step_time.api import StepDiagnosis
     from traceml_ai.diagnostics.step_time.policy import StepTimeDiagnosisPolicy
 
-DATALOADER_EVENT_NAME = STEP_TIME_EVENT_NAMES["input_wait"]
+DATALOADER_EVENT_NAME = STEP_TIME_EVENT_NAMES[INPUT_WAIT_KEY]
 STEP_TIME_EVENT_NAME = STEP_TIME_EVENT_NAMES["step_time"]
-
-INPUT_WAIT_KEY = "input_wait"
-DATALOADER_FETCH_KEY = "dataloader_fetch"
-STEP_TIME_CPU_KEY = "step_time_cpu"
-
 EVENT_ALIASES: Dict[str, str] = dict(STEP_TIME_EVENT_NAMES)
-
-SELECTED_METRICS: tuple[str, ...] = (
-    INPUT_WAIT_KEY,
-    "h2d",
-    "forward",
-    "backward",
-    "optimizer_step",
-    "step_time",
-)
-
-DISPLAY_METRICS: tuple[str, ...] = (
-    INPUT_WAIT_KEY,
-    "h2d",
-    "forward",
-    "backward",
-    "optimizer_step",
-    "step_time",
-    "residual_proxy",
-)
-
-REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
 
 
 def _safe_non_negative_float(value: Any) -> Optional[float]:
-    """Return a finite non-negative float, or ``None`` for missing values."""
-    if isinstance(value, bool):
+    if value is None or isinstance(value, bool):
         return None
     try:
-        out = float(value)
-    except Exception:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
         return None
-    if not math.isfinite(out):
+    if not math.isfinite(result):
         return None
-    return max(0.0, out)
-
-
-def _sum_clock(by_device: Any, field: str) -> Optional[float]:
-    """Sum one timing field across devices, preserving missing-vs-zero."""
-    if not isinstance(by_device, Mapping):
-        return None
-
-    total = 0.0
-    found = False
-    for stats in by_device.values():
-        if not isinstance(stats, Mapping):
-            continue
-        value = _safe_non_negative_float(stats.get(field))
-        if value is None:
-            continue
-        total += value
-        found = True
-
-    return total if found else None
-
-
-def _event_payload(events: Any, metric_key: str) -> Any:
-    if not isinstance(events, Mapping):
-        return None
-    return events.get(EVENT_ALIASES.get(metric_key, metric_key))
-
-
-# TODO(PR4): Make StepTimeSourceRow the sole analyzer input and remove the
-# raw-mapping branches retained for pre-analyzer fixtures.
-def _event_is_present(events: Any, metric_key: str) -> bool:
-    if isinstance(events, StepTimeSourceRow):
-        return metric_key in events.metrics
-    payload = _event_payload(events, metric_key)
-    return isinstance(payload, Mapping) and bool(payload)
-
-
-def _event_cpu_ms(events: Any, metric_key: str) -> Optional[float]:
-    if isinstance(events, StepTimeSourceRow):
-        values = events.metrics.get(metric_key)
-        return values.cpu_ms if values is not None else None
-    return _sum_clock(_event_payload(events, metric_key), "cpu_ms")
-
-
-def _event_gpu_ms(events: Any, metric_key: str) -> Optional[float]:
-    if isinstance(events, StepTimeSourceRow):
-        values = events.metrics.get(metric_key)
-        return values.gpu_ms if values is not None else None
-    return _sum_clock(_event_payload(events, metric_key), "gpu_ms")
-
-
-def _event_has_required_gpu(events: Any) -> bool:
-    for metric_key in REQUIRED_GPU_METRICS:
-        if _event_gpu_ms(events, metric_key) is None:
-            return False
-
-    for metric_key in SELECTED_METRICS:
-        if metric_key in REQUIRED_GPU_METRICS:
-            continue
-        if _event_is_present(events, metric_key) and (
-            _event_gpu_ms(events, metric_key) is None
-        ):
-            return False
-
-    return True
-
-
-def _select_clock_from_events(
-    per_rank_steps: Mapping[int, Mapping[int, Any]],
-    steps: Sequence[int],
-) -> DiagnosisClock:
-    if not per_rank_steps or not steps:
-        return "cpu"
-
-    for step_map in per_rank_steps.values():
-        for step in steps:
-            if not _event_has_required_gpu(step_map.get(int(step), {})):
-                return "cpu"
-    return "gpu"
-
-
-def _metric_from_events(
-    events: Any,
-    metric_key: str,
-    *,
-    clock: DiagnosisClock,
-) -> Optional[float]:
-    """Return the selected-clock value for one metric, or None if missing."""
-    value = (
-        _event_gpu_ms(events, metric_key)
-        if clock == "gpu"
-        else _event_cpu_ms(events, metric_key)
-    )
-    return float(value) if value is not None else None
-
-
-_COMPUTE_KEYS: tuple[str, ...] = ("forward", "backward", "optimizer_step")
-
-# Occurrence-driven metrics legitimately skip steps: the optimizer under
-# gradient accumulation and H2D when a step performs no transfers. Every
-# other selected metric must occur on every bracketed step, so partial
-# presence there means lost instrumentation, not measured zeros.
-_OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
-
-
-def median_iteration_component_share(
-    per_rank_timing: Mapping[int, Mapping[str, float]],
-    component: str,
-) -> Optional[float]:
-    """Return one component's median share of complete rank iterations.
-
-    Only ranks carrying the component, input wait, and the step envelope are
-    eligible. ``compute`` is derived only when all three compute phases exist.
-    No eligible rank returns ``None``; an eligible measured zero returns
-    ``0.0``.
-    """
-    shares: list[float] = []
-    for values in per_rank_timing.values():
-        if INPUT_WAIT_KEY not in values or "step_time" not in values:
-            continue
-        if component == "compute":
-            if not all(key in values for key in _COMPUTE_KEYS):
-                continue
-            components = [
-                _safe_non_negative_float(values[key]) for key in _COMPUTE_KEYS
-            ]
-            if any(value is None for value in components):
-                continue
-            numerator = sum(float(value) for value in components)
-        else:
-            if component not in values:
-                continue
-            numerator = _safe_non_negative_float(values[component])
-            if numerator is None:
-                continue
-
-        input_wait = _safe_non_negative_float(values[INPUT_WAIT_KEY])
-        step_time = _safe_non_negative_float(values["step_time"])
-        if input_wait is None or step_time is None:
-            continue
-        iteration = input_wait + step_time
-        if iteration > 0.0:
-            shares.append(float(numerator) / iteration)
-
-    if not shares:
-        return None
-    return float(np.median(np.asarray(shares, dtype=np.float64)))
-
-
-def _rank_metric_availability(
-    step_map: Mapping[int, Any],
-    steps: Sequence[int],
-    *,
-    clock: DiagnosisClock,
-) -> frozenset[str]:
-    """Return the metric keys considered measured for this rank's window.
-
-    Availability is metric-specific. Occurrence-driven metrics
-    (``optimizer_step``, ``h2d``) are available when measured in at
-    least one aligned step; their absent steps are true zeros. Every
-    other metric must be measured in every aligned step: intermittent
-    presence means the instrumentation dropped out mid-window, and
-    averaging the fragments would understate the phase and leak the
-    missing work into the residual.
-    """
-    if not steps:
-        return frozenset()
-    seen_counts: Dict[str, int] = {}
-    for step in steps:
-        events = step_map.get(int(step), {})
-        for metric_key in SELECTED_METRICS:
-            if (
-                _metric_from_events(events, metric_key, clock=clock)
-                is not None
-            ):
-                seen_counts[metric_key] = seen_counts.get(metric_key, 0) + 1
-        if _event_cpu_ms(events, INPUT_WAIT_KEY) is not None:
-            seen_counts[DATALOADER_FETCH_KEY] = (
-                seen_counts.get(DATALOADER_FETCH_KEY, 0) + 1
-            )
-        if _event_cpu_ms(events, "step_time") is not None:
-            seen_counts[STEP_TIME_CPU_KEY] = (
-                seen_counts.get(STEP_TIME_CPU_KEY, 0) + 1
-            )
-    total = len(steps)
-    available = {
-        metric_key
-        for metric_key, count in seen_counts.items()
-        if count == total or metric_key in _OCCURRENCE_METRICS
-    }
-    return frozenset(available)
-
-
-def _add_derived_step_metrics(
-    timing: Dict[str, float],
-    *,
-    available: frozenset[str],
-    clock: DiagnosisClock,
-) -> None:
-    """Attach derived metrics whose required inputs are available.
-
-    ``residual_proxy`` needs the step envelope plus every compute phase.
-    H2D events are occurrence-driven (a fully instrumented run with no
-    host-to-device copies emits none), so an unavailable H2D contributes
-    zero rather than blocking the residual. ``total_step`` needs the
-    input wait plus the step envelope.
-    """
-    del clock
-    compute_available = all(key in available for key in _COMPUTE_KEYS)
-    if "step_time" in available and compute_available:
-        timing["residual_proxy"] = max(
-            0.0,
-            timing["step_time"]
-            - timing.get("h2d", 0.0)
-            - timing["forward"]
-            - timing["backward"]
-            - timing["optimizer_step"],
-        )
-    if INPUT_WAIT_KEY in available and "step_time" in available:
-        timing["total_step"] = timing[INPUT_WAIT_KEY] + timing["step_time"]
-
-
-def _average_rank_timing(
-    per_rank_step_timing: Mapping[int, Mapping[int, Mapping[str, float]]],
-    steps: Sequence[int],
-) -> Dict[int, Dict[str, float]]:
-    """Average each rank's measured metrics over the aligned steps.
-
-    Only keys present in the rank's step rows are averaged, so a metric
-    missing from the whole window stays absent instead of averaging to a
-    fake zero. The divisor stays the full step count: an available
-    metric absent at one step did no work at that step.
-    """
-    out: Dict[int, Dict[str, float]] = {}
-    divisor = float(len(steps)) if steps else 1.0
-    for rank, step_map in per_rank_step_timing.items():
-        keys: set[str] = set()
-        for step in steps:
-            keys.update(step_map.get(int(step), {}).keys())
-        totals = {metric_key: 0.0 for metric_key in keys}
-        for step in steps:
-            metrics = step_map.get(int(step), {})
-            for metric_key in keys:
-                value = _safe_non_negative_float(metrics.get(metric_key))
-                totals[metric_key] += (
-                    float(value) if value is not None else 0.0
-                )
-        averaged = {
-            metric_key: float(value / divisor)
-            for metric_key, value in totals.items()
-        }
-        if "total_step" in averaged:
-            # Re-derive from the averaged components so complete-data
-            # output stays bit-identical to the historical
-            # avg(input_wait) + avg(step_time) formulation.
-            averaged["total_step"] = averaged.get(
-                INPUT_WAIT_KEY, 0.0
-            ) + averaged.get("step_time", 0.0)
-        out[int(rank)] = averaged
-    return out
-
-
-def _selected_step_timing_from_events(
-    per_rank_steps: Mapping[int, Mapping[int, Any]],
-    steps: Sequence[int],
-    *,
-    clock: DiagnosisClock,
-) -> Dict[int, Dict[int, Dict[str, float]]]:
-    """Build sparse per-step timing rows from raw event payloads.
-
-    A metric key appears only when it was measured somewhere in the
-    rank's window; a measured zero stays ``0.0``.
-    """
-    out: Dict[int, Dict[int, Dict[str, float]]] = {}
-    for rank, step_map in per_rank_steps.items():
-        available = _rank_metric_availability(step_map, steps, clock=clock)
-        rank_timing: Dict[int, Dict[str, float]] = {}
-        for step in steps:
-            events = step_map.get(int(step), {})
-            timing: Dict[str, float] = {}
-            for metric_key in SELECTED_METRICS:
-                if metric_key not in available:
-                    continue
-                value = _metric_from_events(events, metric_key, clock=clock)
-                timing[metric_key] = float(value) if value is not None else 0.0
-            if DATALOADER_FETCH_KEY in available:
-                timing[DATALOADER_FETCH_KEY] = (
-                    _event_cpu_ms(events, INPUT_WAIT_KEY) or 0.0
-                )
-            if STEP_TIME_CPU_KEY in available:
-                timing[STEP_TIME_CPU_KEY] = (
-                    _event_cpu_ms(events, "step_time") or 0.0
-                )
-            _add_derived_step_metrics(timing, available=available, clock=clock)
-            rank_timing[int(step)] = timing
-        out[int(rank)] = rank_timing
-    return out
-
-
-def _empty_coverage(
-    *,
-    max_rows: int,
-    completed_step: int,
-    world_size: int,
-    ranks_present: int,
-) -> StepCombinedTimeCoverage:
-    return StepCombinedTimeCoverage(
-        expected_steps=max(1, int(max_rows)),
-        steps_used=0,
-        completed_step=int(completed_step),
-        world_size=max(0, int(world_size)),
-        ranks_present=max(0, int(ranks_present)),
-        incomplete=False,
-    )
-
-
-def _metric_values(
-    per_rank_timing: Mapping[int, Mapping[str, float]],
-    metric_key: str,
-) -> Dict[int, float]:
-    """Return rank values for ranks that measured this metric.
-
-    Ranks without the key are excluded so a missing metric cannot enter
-    medians or worst-rank picks as a fake zero; a measured zero stays.
-    """
-    out: Dict[int, float] = {}
-    for rank, values in per_rank_timing.items():
-        if metric_key not in values:
-            continue
-        value = _safe_non_negative_float(values.get(metric_key))
-        if value is not None:
-            out[int(rank)] = value
-    return out
-
-
-def worst_rank_by_total_step(
-    per_rank_timing: Mapping[int, Mapping[str, float]],
-) -> Optional[int]:
-    candidates = _metric_values(per_rank_timing, "total_step")
-    if not candidates:
-        return None
-    return max(
-        candidates,
-        key=lambda rank: (candidates[rank], -rank),
-    )
-
-
-def build_step_time_metrics(
-    per_rank_timing: Mapping[int, Mapping[str, float]],
-    *,
-    coverage: StepCombinedTimeCoverage,
-    clock: DiagnosisClock,
-    series_steps: Optional[Sequence[int]] = None,
-    per_rank_step_timing: Optional[
-        Mapping[int, Mapping[int, Mapping[str, float]]]
-    ] = None,
-) -> list[StepCombinedTimeMetric]:
-    """Build selected-clock average metrics for diagnosis and display.
-
-    A metric measured by no rank emits no entry at all; a metric
-    measured by a subset of ranks builds its statistics over exactly
-    those ranks. Each summary's ``worst_total`` and ``worst_rank`` come
-    from one ordering: the rank named is always the rank that produced
-    the reported worst value for that same metric.
-    """
-    ranks = sorted(int(rank) for rank in per_rank_timing)
-    if not ranks:
-        return []
-
-    metrics: list[StepCombinedTimeMetric] = []
-    for metric_key in DISPLAY_METRICS:
-        values = _metric_values(per_rank_timing, metric_key)
-        if not values:
-            continue
-        metric_ranks = sorted(values)
-        arr = np.asarray(
-            [values[rank] for rank in metric_ranks], dtype=np.float64
-        )
-
-        median_total = float(np.median(arr))
-        worst_idx = int(np.argmax(arr))
-        worst_total = float(arr[worst_idx])
-        worst_rank = int(metric_ranks[worst_idx])
-
-        if len(metric_ranks) <= 1:
-            median_total = worst_total
-            skew_ratio = None
-            skew_pct = None
-        elif median_total > 0.0:
-            skew_ratio = worst_total / median_total
-            skew_pct = (worst_total - median_total) / median_total
-        elif worst_total <= 0.0:
-            skew_ratio = 0.0
-            skew_pct = 0.0
-        else:
-            # Relative skew is undefined when the median is zero but at
-            # least one rank is non-zero. Reporting 0% would claim equality.
-            skew_ratio = None
-            skew_pct = None
-
-        series = None
-        step_ids = [int(step) for step in (series_steps or ())]
-        if step_ids and per_rank_step_timing:
-            median_y: list[float] = []
-            worst_y: list[float] = []
-            sum_y: list[float] = []
-            for step in step_ids:
-                step_values = np.asarray(
-                    [
-                        _safe_non_negative_float(
-                            per_rank_step_timing.get(rank, {})
-                            .get(step, {})
-                            .get(metric_key)
-                        )
-                        or 0.0
-                        for rank in metric_ranks
-                    ],
-                    dtype=np.float64,
-                )
-                median_y.append(
-                    float(np.median(step_values)) if step_values.size else 0.0
-                )
-                worst_y.append(
-                    float(np.max(step_values)) if step_values.size else 0.0
-                )
-                sum_y.append(
-                    float(np.sum(step_values)) if step_values.size else 0.0
-                )
-            series = StepCombinedTimeSeries(
-                steps=step_ids,
-                median=median_y,
-                worst=worst_y,
-                sum=sum_y,
-            )
-
-        metrics.append(
-            StepCombinedTimeMetric(
-                metric=metric_key,
-                clock=clock,
-                series=series,
-                summary=StepCombinedTimeSummary(
-                    window_size=int(coverage.expected_steps),
-                    steps_used=int(coverage.steps_used),
-                    median_total=float(median_total),
-                    worst_total=float(worst_total),
-                    worst_rank=int(worst_rank),
-                    skew_ratio=(
-                        float(skew_ratio) if skew_ratio is not None else None
-                    ),
-                    skew_pct=(
-                        float(skew_pct) if skew_pct is not None else None
-                    ),
-                ),
-                coverage=coverage,
-            )
-        )
-
-    return metrics
+    return max(0.0, result)
 
 
 def build_step_time_window_from_events(
@@ -539,72 +63,49 @@ def build_step_time_window_from_events(
     expected_ranks: Optional[Sequence[int]] = None,
     completed_step: Optional[int] = None,
 ) -> StepTimeWindow:
-    """Build a selected-clock window from raw or repository-decoded rows."""
+    """Analyze historical raw-event fixtures through the canonical analyzer.
+
+    TODO(PR9): Remove this compatibility input after external fixtures and
+    callers construct normalized repository snapshots directly.
+    """
     expected = tuple(
         sorted(
             {int(rank) for rank in (expected_ranks or per_rank_steps.keys())}
         )
     )
-    observed_steps = {
-        int(rank): {int(step): events for step, events in step_map.items()}
-        for rank, step_map in per_rank_steps.items()
-        if step_map
-    }
-    latest_step = (
-        int(completed_step)
-        if completed_step is not None
-        else max(
-            (
-                max(step_map)
-                for step_map in observed_steps.values()
-                if step_map
-            ),
-            default=0,
-        )
-    )
-    steps = common_suffix_steps(observed_steps, max_rows)
-    if not observed_steps or not steps:
-        return StepTimeWindow(
-            expected_ranks=expected,
-            coverage=_empty_coverage(
-                max_rows=max_rows,
-                completed_step=latest_step,
-                world_size=len(expected),
-                ranks_present=len(observed_steps),
-            ),
-        )
+    rows: list[StepTimeSourceRow] = []
+    source_id = 0
+    for rank, step_map in per_rank_steps.items():
+        for step, events in step_map.items():
+            source_id += 1
+            rows.append(
+                StepTimeSourceRow(
+                    source_id=source_id,
+                    global_rank=int(rank),
+                    step=int(step),
+                    metrics=normalize_step_time_events(events) or {},
+                )
+            )
 
-    clock = _select_clock_from_events(observed_steps, steps)
-    per_rank_step_timing = _selected_step_timing_from_events(
-        observed_steps,
-        steps,
-        clock=clock,
+    window = StepTimeAnalyzer().analyze(
+        StepTimeRepositorySnapshot(
+            rows=tuple(rows),
+            global_ranks=expected,
+            latest_step_observed=(
+                int(completed_step) if completed_step is not None else None
+            ),
+        ),
+        window_size=max_rows,
     )
-    per_rank_timing = _average_rank_timing(per_rank_step_timing, steps)
-    coverage = StepCombinedTimeCoverage(
-        expected_steps=max(1, int(max_rows)),
-        steps_used=len(steps),
-        completed_step=int(steps[-1]),
-        world_size=len(expected),
-        ranks_present=len(per_rank_step_timing),
-        incomplete=(len(per_rank_step_timing) < len(expected)),
-    )
-    metrics = build_step_time_metrics(
-        per_rank_timing,
-        coverage=coverage,
-        clock=clock,
-        series_steps=steps,
-        per_rank_step_timing=per_rank_step_timing,
-    )
-    return StepTimeWindow(
-        clock=clock,
-        steps=[int(step) for step in steps],
-        expected_ranks=expected,
-        coverage=coverage,
-        per_rank_step_timing=per_rank_step_timing,
-        per_rank_timing=per_rank_timing,
-        metrics=metrics,
-    )
+    if completed_step is not None and not window.steps:
+        window = replace(
+            window,
+            coverage=replace(
+                window.coverage,
+                completed_step=int(completed_step),
+            ),
+        )
+    return window
 
 
 def diagnose_step_time_window(
@@ -630,47 +131,118 @@ def diagnose_step_time_window(
     )
 
 
+def median_iteration_component_share(
+    per_rank_timing: Mapping[int, Mapping[str, float]],
+    component: str,
+) -> Optional[float]:
+    """Return a legacy mapping's median component/iteration share.
+
+    Canonical windows already carry the four reusable shares. This adapter
+    remains for diagnosis-rule callers until PR5.
+    """
+    shares: list[float] = []
+    compute_keys = ("forward", "backward", "optimizer_step")
+    for values in per_rank_timing.values():
+        if INPUT_WAIT_KEY not in values or "step_time" not in values:
+            continue
+        if component == "compute":
+            if not all(key in values for key in compute_keys):
+                continue
+            components = tuple(
+                _safe_non_negative_float(values[key]) for key in compute_keys
+            )
+            if any(value is None for value in components):
+                continue
+            numerator = sum(float(value) for value in components)
+        else:
+            if component not in values:
+                continue
+            safe_component = _safe_non_negative_float(values[component])
+            if safe_component is None:
+                continue
+            numerator = safe_component
+
+        input_wait = _safe_non_negative_float(values[INPUT_WAIT_KEY])
+        step_time = _safe_non_negative_float(values["step_time"])
+        if input_wait is None or step_time is None:
+            continue
+        iteration = input_wait + step_time
+        if iteration > 0.0:
+            shares.append(max(0.0, numerator) / iteration)
+
+    if not shares:
+        return None
+    return float(np.median(np.asarray(shares, dtype=np.float64)))
+
+
+def worst_rank_by_total_step(
+    per_rank_timing: Mapping[int, Mapping[str, float]],
+) -> Optional[int]:
+    """Return the slowest rank carrying a selected-clock total step."""
+    candidates: dict[int, float] = {}
+    for rank, values in per_rank_timing.items():
+        if "total_step" not in values:
+            continue
+        value = _safe_non_negative_float(values["total_step"])
+        if value is not None:
+            candidates[int(rank)] = value
+    if not candidates:
+        return None
+    return max(candidates, key=lambda rank: (candidates[rank], -rank))
+
+
 def public_step_time_metric_values(
-    timing: Mapping[str, float],
+    timing: Mapping[str, float] | StepTimeValues,
 ) -> Dict[str, Optional[float]]:
-    """Map window timing to stable final_summary metric names.
+    """Map canonical timing facts to stable final-summary metric names.
 
     Selected-clock fields expose diagnosis timing. Dataloader and total-step
-    compatibility fields use explicit CPU timings retained by the window.
-    Every public key is always present; a metric whose signal was never
-    measured in the window is ``None``, while a measured zero stays ``0.0``.
+    compatibility fields use the retained CPU clock. Every public key is
+    present; unavailable stays ``None`` and measured zero stays ``0.0``.
     """
+    if isinstance(timing, StepTimeValues):
+        return {
+            "total_step_ms": timing.total_step_cpu_ms,
+            "dataloader_ms": timing.dataloader_cpu_ms,
+            "input_wait_ms": timing.input_wait_ms,
+            "step_time_ms": timing.step_time_ms,
+            "h2d_ms": timing.h2d_ms,
+            "compute_ms": timing.compute_ms,
+            "residual_ms": timing.residual_ms,
+            "forward_ms": timing.forward_ms,
+            "backward_ms": timing.backward_ms,
+            "optimizer_ms": timing.optimizer_step_ms,
+        }
 
-    def _value(key: str) -> Optional[float]:
-        if key not in timing:
-            return None
-        return float(timing[key])
+    def value(key: str) -> Optional[float]:
+        return float(timing[key]) if key in timing else None
 
-    forward = _value("forward")
-    backward = _value("backward")
-    optimizer = _value("optimizer_step")
+    forward = value("forward")
+    backward = value("backward")
+    optimizer = value("optimizer_step")
     compute = (
         forward + backward + optimizer
         if None not in (forward, backward, optimizer)
         else None
     )
-    dataloader_fetch = _value(DATALOADER_FETCH_KEY)
-    step_time_cpu = _value(STEP_TIME_CPU_KEY)
+    dataloader = value(DATALOADER_FETCH_KEY)
+    step_time_cpu = value(STEP_TIME_CPU_KEY)
     total_step = (
-        dataloader_fetch + step_time_cpu
-        if None not in (dataloader_fetch, step_time_cpu)
+        dataloader + step_time_cpu
+        if dataloader is not None and step_time_cpu is not None
         else None
     )
-    residual_value = _value("residual_proxy")
-    residual = max(0.0, residual_value) if residual_value is not None else None
+    residual_value = value("residual_proxy")
     return {
         "total_step_ms": total_step,
-        "dataloader_ms": dataloader_fetch,
-        "input_wait_ms": _value(INPUT_WAIT_KEY),
-        "step_time_ms": _value("step_time"),
-        "h2d_ms": _value("h2d"),
+        "dataloader_ms": dataloader,
+        "input_wait_ms": value(INPUT_WAIT_KEY),
+        "step_time_ms": value("step_time"),
+        "h2d_ms": value("h2d"),
         "compute_ms": compute,
-        "residual_ms": residual,
+        "residual_ms": (
+            max(0.0, residual_value) if residual_value is not None else None
+        ),
         "forward_ms": forward,
         "backward_ms": backward,
         "optimizer_ms": optimizer,
@@ -689,7 +261,6 @@ __all__ = [
     "STEP_TIME_EVENT_NAME",
     "STEP_TIME_CPU_KEY",
     "StepTimeWindow",
-    "build_step_time_metrics",
     "build_step_time_window_from_events",
     "diagnose_step_time_window",
     "median_iteration_component_share",

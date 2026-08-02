@@ -15,22 +15,22 @@ from __future__ import annotations
 
 from rich.console import Console
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeResult,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeResult,
+    StepTimeSummary,
 )
-from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
-def _metric(name: str, value: float) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+def _metric(name: str, value: float) -> StepTimeMetric:
+    return StepTimeMetric(
         metric=name,
         clock="cpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=30,
             steps_used=30,
             median_total=value,
@@ -39,7 +39,7 @@ def _metric(name: str, value: float) -> StepCombinedTimeMetric:
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=30,
             steps_used=30,
             completed_step=30,
@@ -56,7 +56,7 @@ def _render_text(renderable) -> str:
     return console.export_text()
 
 
-def _sparse_payload() -> StepCombinedTimeResult:
+def _sparse_payload() -> StepTimeResult:
     # forward was never measured: no forward metric, no residual, and the
     # per-rank timing carries no forward key.
     per_rank_timing = {
@@ -69,10 +69,10 @@ def _sparse_payload() -> StepCombinedTimeResult:
             "total_step": 92.0,
         }
     }
-    return StepCombinedTimeResult(
-        window=StepTimeWindow(
+    return StepTimeResult(
+        window=window_from_rank_averages(
+            per_rank_timing,
             expected_ranks=(0,),
-            per_rank_timing=per_rank_timing,
             metrics=[
                 _metric("input_wait", 2.0),
                 _metric("h2d", 0.0),
@@ -122,7 +122,7 @@ def test_cli_drops_dead_view_when_computer_window_expires(
 
     # The computer only returns an empty result once its own stale window
     # is exhausted; the renderer must not re-serve the old table.
-    expired = StepCombinedTimeResult(
+    expired = StepTimeResult(
         status_message="No fresh step-combined data",
     )
     monkeypatch.setattr(renderer._computer, "compute_cli", lambda: expired)
@@ -144,9 +144,9 @@ def test_cli_startup_shows_calm_waiting_panel() -> None:
 
 
 def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
-    def _multi_metric(name: str, value: float) -> StepCombinedTimeMetric:
+    def _multi_metric(name: str, value: float) -> StepTimeMetric:
         metric = _metric(name, value)
-        summary = StepCombinedTimeSummary(
+        summary = StepTimeSummary(
             window_size=30,
             steps_used=30,
             median_total=value,
@@ -155,7 +155,7 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
             skew_ratio=2.0,
             skew_pct=1.0,
         )
-        coverage = StepCombinedTimeCoverage(
+        coverage = StepTimeCoverage(
             expected_steps=30,
             steps_used=30,
             completed_step=30,
@@ -163,7 +163,7 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
             ranks_present=2,
             incomplete=False,
         )
-        return StepCombinedTimeMetric(
+        return StepTimeMetric(
             metric=metric.metric,
             clock=metric.clock,
             series=None,
@@ -187,10 +187,10 @@ def test_cli_renders_multi_rank_sparse_table(monkeypatch) -> None:
             "total_step": 182.0,
         },
     }
-    payload = StepCombinedTimeResult(
-        window=StepTimeWindow(
+    payload = StepTimeResult(
+        window=window_from_rank_averages(
+            per_rank_timing,
             expected_ranks=(0, 1),
-            per_rank_timing=per_rank_timing,
             metrics=[
                 _multi_metric("input_wait", 2.0),
                 _multi_metric("backward", 60.0),

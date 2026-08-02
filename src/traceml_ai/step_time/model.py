@@ -10,6 +10,8 @@ the same facts without making core analysis depend on a renderer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
+from types import MappingProxyType
 from typing import (
     Any,
     Dict,
@@ -36,6 +38,20 @@ STEP_TIME_EVENT_NAMES: Mapping[str, str] = {
     "step_time": "_traceml_internal:step_time",
 }
 """Persisted event names keyed by their canonical Step Time metric."""
+
+_VALUE_FIELDS: Mapping[str, str] = {
+    "input_wait": "input_wait_ms",
+    "h2d": "h2d_ms",
+    "forward": "forward_ms",
+    "backward": "backward_ms",
+    "optimizer_step": "optimizer_step_ms",
+    "step_time": "step_time_ms",
+    "compute": "compute_ms",
+    "residual_proxy": "residual_ms",
+    "total_step": "total_step_ms",
+    "dataloader_fetch": "dataloader_cpu_ms",
+    "step_time_cpu": "step_time_cpu_ms",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,8 +125,74 @@ class StepTimeRepositorySnapshot:
     training_strategy: str = "ddp"
 
 
+@dataclass(frozen=True, slots=True)
+class StepTimeValues:
+    """Typed timing values for one step or one rank-window average.
+
+    The phase fields use the clock selected for the complete analysis window.
+    ``None`` means the signal was unavailable; a measured zero remains
+    ``0.0``. The three ``*_cpu_ms`` fields retain the historical CPU-clock
+    values required by final-summary compatibility output.
+    """
+
+    input_wait_ms: Optional[float] = None
+    h2d_ms: Optional[float] = None
+    forward_ms: Optional[float] = None
+    backward_ms: Optional[float] = None
+    optimizer_step_ms: Optional[float] = None
+    step_time_ms: Optional[float] = None
+    compute_ms: Optional[float] = None
+    residual_ms: Optional[float] = None
+    total_step_ms: Optional[float] = None
+    dataloader_cpu_ms: Optional[float] = None
+    step_time_cpu_ms: Optional[float] = None
+    total_step_cpu_ms: Optional[float] = None
+
+    def value(self, metric: str) -> Optional[float]:
+        """Return one canonical value by its internal metric key."""
+        field_name = _VALUE_FIELDS.get(str(metric))
+        return getattr(self, field_name) if field_name is not None else None
+
+    def to_legacy_dict(self) -> Dict[str, float]:
+        """Project the temporary sparse rank-mapping compatibility shape."""
+        keys = (
+            "input_wait",
+            "h2d",
+            "forward",
+            "backward",
+            "optimizer_step",
+            "step_time",
+            "residual_proxy",
+            "total_step",
+            "dataloader_fetch",
+            "step_time_cpu",
+        )
+        return {
+            key: float(value)
+            for key in keys
+            if (value := self.value(key)) is not None
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class StepTimeStepFacts:
+    """Canonical selected-clock facts for one aligned training step."""
+
+    step: int
+    values: StepTimeValues
+
+
+@dataclass(frozen=True, slots=True)
+class StepTimeRankFacts:
+    """Canonical per-step and averaged facts for one global rank."""
+
+    global_rank: int
+    steps: tuple[StepTimeStepFacts, ...] = ()
+    average: StepTimeValues = field(default_factory=StepTimeValues)
+
+
 @dataclass(frozen=True)
-class StepCombinedTimeSeries:
+class StepTimeSeries:
     """Per-step aggregate values for one metric across participating ranks.
 
     Attributes:
@@ -127,7 +209,7 @@ class StepCombinedTimeSeries:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeSummary:
+class StepTimeSummary:
     """Window-level statistics for one measured Step Time metric."""
 
     window_size: int
@@ -137,10 +219,12 @@ class StepCombinedTimeSummary:
     worst_rank: Optional[int]
     skew_ratio: Optional[float]
     skew_pct: Optional[float]
+    representative_rank: Optional[int] = None
+    representative_total: Optional[float] = None
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeCoverage:
+class StepTimeCoverage:
     """Completeness metadata for an aligned Step Time window."""
 
     expected_steps: int
@@ -152,22 +236,24 @@ class StepCombinedTimeCoverage:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeMetric:
+class StepTimeMetric:
     """One canonical metric with optional series and aggregate statistics."""
 
     metric: str
-    clock: str  # "cpu" | "gpu" | "mixed"
-    series: Optional[StepCombinedTimeSeries]
-    summary: StepCombinedTimeSummary
-    coverage: StepCombinedTimeCoverage
+    clock: DiagnosisClock
+    series: Optional[StepTimeSeries]
+    summary: StepTimeSummary
+    coverage: StepTimeCoverage
+    measured_ranks: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
 class StepTimeWindow:
     """Aligned selected-clock facts for one Step Time analysis window.
 
-    Metric rows are intentionally sparse: a missing key means that the signal
-    was unavailable, while a present ``0.0`` means it was measured as zero.
+    ``rank_facts`` is the sole canonical rank representation. Missing fields
+    are unavailable and measured zeroes remain ``0.0``. The explicit cohorts,
+    rank statistics, and component shares are computed once by the analyzer.
     Consumers should use :meth:`ranks_for` or :meth:`eligible_ranks` instead
     of recreating availability rules.
     """
@@ -175,8 +261,8 @@ class StepTimeWindow:
     clock: DiagnosisClock = "cpu"
     steps: list[int] = field(default_factory=list)
     expected_ranks: tuple[int, ...] = ()
-    coverage: StepCombinedTimeCoverage = field(
-        default_factory=lambda: StepCombinedTimeCoverage(
+    coverage: StepTimeCoverage = field(
+        default_factory=lambda: StepTimeCoverage(
             expected_steps=0,
             steps_used=0,
             completed_step=0,
@@ -185,26 +271,61 @@ class StepTimeWindow:
             incomplete=False,
         )
     )
-    per_rank_step_timing: Dict[int, Dict[int, Dict[str, float]]] = field(
-        default_factory=dict
-    )
-    per_rank_timing: Dict[int, Dict[str, float]] = field(default_factory=dict)
-    metrics: list[StepCombinedTimeMetric] = field(default_factory=list)
+    rank_facts: tuple[StepTimeRankFacts, ...] = ()
+    metrics: list[StepTimeMetric] = field(default_factory=list)
+    iteration_ranks: tuple[int, ...] = ()
+    compute_ranks: tuple[int, ...] = ()
+    composition_ranks: tuple[int, ...] = ()
+    straggler_ranks: tuple[int, ...] = ()
+    median_total_step_ms: Optional[float] = None
+    representative_rank: Optional[int] = None
+    representative_total_step_ms: Optional[float] = None
+    composition_representative_rank: Optional[int] = None
+    worst_rank: Optional[int] = None
+    worst_total_step_ms: Optional[float] = None
+    input_wait_share: Optional[float] = None
+    h2d_share: Optional[float] = None
+    compute_share: Optional[float] = None
+    residual_share: Optional[float] = None
+
+    @cached_property
+    def per_rank_timing(self) -> Mapping[int, Mapping[str, float]]:
+        """Return the temporary rank-average compatibility projection.
+
+        TODO(PR5-PR8): Remove this projection after diagnosis and all three
+        presenters consume typed rank facts directly.
+        """
+        return MappingProxyType(
+            {
+                facts.global_rank: MappingProxyType(
+                    facts.average.to_legacy_dict()
+                )
+                for facts in self.rank_facts
+            }
+        )
 
     @property
     def rank_universe(self) -> tuple[int, ...]:
         """Return expected ranks, or observed ranks for direct fixtures."""
         if self.expected_ranks:
             return self.expected_ranks
-        return tuple(sorted(int(rank) for rank in self.per_rank_timing))
+        return tuple(sorted(facts.global_rank for facts in self.rank_facts))
+
+    def rank(self, global_rank: int) -> Optional[StepTimeRankFacts]:
+        """Return canonical facts for one global rank, when observed."""
+        rank = int(global_rank)
+        return next(
+            (facts for facts in self.rank_facts if facts.global_rank == rank),
+            None,
+        )
 
     def ranks_for(self, metric: str) -> tuple[int, ...]:
         """Return ranks carrying one canonical sparse metric."""
         key = str(metric)
         return tuple(
-            rank
-            for rank in self.rank_universe
-            if key in self.per_rank_timing.get(rank, {})
+            facts.global_rank
+            for facts in self.rank_facts
+            if facts.average.value(key) is not None
         )
 
     def eligible_ranks(self, metrics: Sequence[str]) -> tuple[int, ...]:
@@ -213,9 +334,9 @@ class StepTimeWindow:
         if not keys:
             return self.rank_universe
         return tuple(
-            rank
-            for rank in self.rank_universe
-            if all(key in self.per_rank_timing.get(rank, {}) for key in keys)
+            facts.global_rank
+            for facts in self.rank_facts
+            if all(facts.average.value(key) is not None for key in keys)
         )
 
     def is_complete(self, metric: str) -> bool:
@@ -236,7 +357,7 @@ class StepTimeWindow:
 
 
 @dataclass(frozen=True)
-class StepCombinedTimeResult:
+class StepTimeResult:
     """Live Step Time state wrapping one canonical analyzed window."""
 
     status_message: str = "OK"
@@ -249,16 +370,19 @@ __all__ = [
     "DIAGNOSIS_CLOCK_KEY",
     "DiagnosisClock",
     "STEP_TIME_EVENT_NAMES",
-    "StepCombinedTimeCoverage",
-    "StepCombinedTimeMetric",
-    "StepCombinedTimeResult",
-    "StepCombinedTimeSeries",
-    "StepCombinedTimeSummary",
     "StepTimeClockValues",
+    "StepTimeCoverage",
     "StepTimeLoadRequest",
+    "StepTimeMetric",
     "StepTimeRankIdentity",
+    "StepTimeRankFacts",
     "StepTimeRepositorySnapshot",
+    "StepTimeResult",
+    "StepTimeSeries",
     "StepTimeSourceCursor",
     "StepTimeSourceRow",
+    "StepTimeStepFacts",
+    "StepTimeSummary",
+    "StepTimeValues",
     "StepTimeWindow",
 ]

@@ -27,9 +27,11 @@ import itertools
 
 import pytest
 
-from traceml_ai.utils.step_time_window import (
-    _OCCURRENCE_METRICS,
+from traceml_ai.step_time.analysis import (
+    OCCURRENCE_METRICS,
     SELECTED_METRICS,
+)
+from traceml_ai.utils.step_time_window import (
     build_step_time_window_from_events,
     median_iteration_component_share,
     public_step_time_metric_values,
@@ -56,7 +58,7 @@ _BASE_MS = {
 # Every metric that is not occurrence-driven must be measured on every
 # aligned step to stay available.
 _REQUIRED_METRICS = tuple(
-    m for m in SELECTED_METRICS if m not in _OCCURRENCE_METRICS
+    m for m in SELECTED_METRICS if m not in OCCURRENCE_METRICS
 )
 
 _WINDOW = 6
@@ -267,7 +269,7 @@ def test_required_metric_partial_presence_drops_availability(
     assert metric not in {m.metric for m in window.metrics}
 
 
-@pytest.mark.parametrize("metric", sorted(_OCCURRENCE_METRICS))
+@pytest.mark.parametrize("metric", sorted(OCCURRENCE_METRICS))
 @pytest.mark.parametrize("present_count", [1, _WINDOW // 2, _WINDOW - 1])
 def test_occurrence_metric_partial_presence_stays_available(
     metric: str, present_count: int
@@ -397,11 +399,9 @@ def test_metric_partition_is_exhaustive_and_intended() -> None:
     # Every selected metric is classified exactly once. Occurrence-driven
     # metrics are the closed set below; adding a new selected metric
     # without deciding its class fails here (the single-source guard).
-    assert _OCCURRENCE_METRICS <= set(SELECTED_METRICS)
-    assert _OCCURRENCE_METRICS == {"optimizer_step", "h2d"}
-    assert (
-        set(_REQUIRED_METRICS) == set(SELECTED_METRICS) - _OCCURRENCE_METRICS
-    )
+    assert OCCURRENCE_METRICS <= set(SELECTED_METRICS)
+    assert OCCURRENCE_METRICS == {"optimizer_step", "h2d"}
+    assert set(_REQUIRED_METRICS) == set(SELECTED_METRICS) - OCCURRENCE_METRICS
     # Every required metric has a partial-presence test above via
     # parametrization over _REQUIRED_METRICS, so a new required metric is
     # automatically covered by test_required_metric_partial_presence.

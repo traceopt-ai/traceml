@@ -230,9 +230,12 @@ def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
     )
 
     assert window.clock == "gpu"
-    metrics = window.per_rank_step_timing[0][1]
-    assert metrics["input_wait"] == 4.0
-    assert metrics["step_time"] == 20.0
+    rank_facts = window.rank(0)
+    assert rank_facts is not None
+    assert rank_facts.steps[0].step == 1
+    values = rank_facts.steps[0].values
+    assert values.input_wait_ms == 4.0
+    assert values.step_time_ms == 20.0
     assert window.per_rank_timing[0]["input_wait"] == 4.0
     assert window.per_rank_timing[0]["step_time"] == 20.0
 

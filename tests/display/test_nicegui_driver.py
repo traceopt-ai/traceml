@@ -31,8 +31,8 @@ from traceml_ai.renderers.step_time.compute import (  # noqa: E402
 from traceml_ai.renderers.step_time.renderer import (  # noqa: E402
     StepCombinedRenderer,
 )
-from traceml_ai.renderers.step_time.schema import (  # noqa: E402
-    StepCombinedTimeResult,
+from traceml_ai.step_time.model import (  # noqa: E402
+    StepTimeResult,
 )
 from traceml_ai.runtime.settings import TraceMLSettings  # noqa: E402
 
@@ -188,9 +188,9 @@ def test_dashboard_tick_currently_invokes_two_step_time_providers(
 
     def record_compute(
         computer: StepCombinedComputer,
-    ) -> StepCombinedTimeResult:
+    ) -> StepTimeResult:
         calls.append(computer)
-        return StepCombinedTimeResult()
+        return StepTimeResult()
 
     monkeypatch.setattr(
         StepCombinedComputer,

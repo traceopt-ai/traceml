@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.diagnostics import model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
@@ -18,12 +19,11 @@ from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedSeries,
     StepMemoryCombinedSummary,
 )
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeCoverage,
-    StepCombinedTimeMetric,
-    StepCombinedTimeSummary,
+from traceml_ai.step_time.model import (
+    StepTimeCoverage,
+    StepTimeMetric,
+    StepTimeSummary,
 )
-from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def _step_memory_metric() -> StepMemoryCombinedMetric:
@@ -55,12 +55,12 @@ def _step_memory_metric() -> StepMemoryCombinedMetric:
     )
 
 
-def _step_time_metric(name: str, value: float) -> StepCombinedTimeMetric:
-    return StepCombinedTimeMetric(
+def _step_time_metric(name: str, value: float) -> StepTimeMetric:
+    return StepTimeMetric(
         metric=name,
         clock="gpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=1,
             steps_used=1,
             median_total=value,
@@ -69,7 +69,7 @@ def _step_time_metric(name: str, value: float) -> StepCombinedTimeMetric:
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=1,
             steps_used=1,
             completed_step=1,
@@ -133,9 +133,9 @@ def test_model_step_time_diagnostics_receive_canonical_window(monkeypatch):
     }
     captured = {}
 
-    window = StepTimeWindow(
+    window = window_from_rank_averages(
+        per_rank_timing,
         expected_ranks=(0, 1),
-        per_rank_timing=per_rank_timing,
         metrics=[_step_time_metric("step_time", 10.0)],
     )
 
@@ -179,16 +179,16 @@ def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
     )
     captured = {}
 
-    window = StepTimeWindow(
-        clock="gpu",
-        expected_ranks=(0,),
-        per_rank_timing={
+    window = window_from_rank_averages(
+        {
             0: {
                 "input_wait": 40.0,
                 "step_time": 100.0,
                 "residual_proxy": 0.0,
             }
         },
+        clock="gpu",
+        expected_ranks=(0,),
         metrics=list(diagnosis_metrics),
     )
 

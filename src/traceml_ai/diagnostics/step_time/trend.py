@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from traceml_ai.step_time.model import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeMetric
 
 from ..trends import (
     DEFAULT_TREND_CONFIG,
@@ -32,7 +32,7 @@ DEFAULT_STEP_TREND_HEURISTICS = StepTrendHeuristicConfig()
 
 
 def _safe_metric_trend_pct(
-    metric: Optional[StepCombinedTimeMetric],
+    metric: Optional[StepTimeMetric],
     *,
     single_rank: bool,
     cfg: StepTrendHeuristicConfig,
@@ -69,9 +69,9 @@ def build_step_trend_note(
     diagnosis_kind: str,
     steps_used: int,
     single_rank: bool,
-    step_metric: Optional[StepCombinedTimeMetric],
-    residual_metric: Optional[StepCombinedTimeMetric],
-    input_wait_metric: Optional[StepCombinedTimeMetric],
+    step_metric: Optional[StepTimeMetric],
+    residual_metric: Optional[StepTimeMetric],
+    input_wait_metric: Optional[StepTimeMetric],
     residual_share: Optional[float],
     input_bound_share: Optional[float],
     residual_warn_threshold: float,

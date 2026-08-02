@@ -1,8 +1,8 @@
 import json
 import sqlite3
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.renderers.step_time.compute import StepCombinedComputer
-from traceml_ai.utils.step_time_window import StepTimeWindow
 
 
 def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
@@ -102,26 +102,24 @@ def test_step_time_compute_uses_selected_gpu_diagnosis_clock(
 
 
 def test_worst_rank_requires_measured_total_step() -> None:
-    from traceml_ai.renderers.step_time.compute import _worst_rank_from_window
-
     # Ranks without a measured total step (input wait never measured)
     # cannot win the status-line worst-rank pick with a fake zero.
     assert (
-        _worst_rank_from_window(
+        window_from_rank_averages(
             {
                 0: {"step_time": 100.0},
                 1: {"step_time": 400.0},
             }
-        )
+        ).worst_rank
         is None
     )
     assert (
-        _worst_rank_from_window(
+        window_from_rank_averages(
             {
                 0: {"step_time": 100.0, "total_step": 105.0},
                 1: {"step_time": 400.0},
             }
-        )
+        ).worst_rank
         == 0
     )
 
@@ -134,18 +132,18 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
     and had_ok records that data existed before.
     """
     from traceml_ai.renderers.step_time import compute as compute_module
-    from traceml_ai.renderers.step_time.schema import (
-        StepCombinedTimeCoverage,
-        StepCombinedTimeMetric,
-        StepCombinedTimeResult,
-        StepCombinedTimeSummary,
+    from traceml_ai.step_time.model import (
+        StepTimeCoverage,
+        StepTimeMetric,
+        StepTimeResult,
+        StepTimeSummary,
     )
 
-    metric = StepCombinedTimeMetric(
+    metric = StepTimeMetric(
         metric="step_time",
         clock="cpu",
         series=None,
-        summary=StepCombinedTimeSummary(
+        summary=StepTimeSummary(
             window_size=1,
             steps_used=1,
             median_total=10.0,
@@ -154,7 +152,7 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
             skew_ratio=0.0,
             skew_pct=0.0,
         ),
-        coverage=StepCombinedTimeCoverage(
+        coverage=StepTimeCoverage(
             expected_steps=1,
             steps_used=1,
             completed_step=1,
@@ -163,15 +161,15 @@ def test_computer_bridges_transients_then_expires(monkeypatch) -> None:
             incomplete=False,
         ),
     )
-    good = StepCombinedTimeResult(
+    good = StepTimeResult(
         status_message="OK",
-        window=StepTimeWindow(
+        window=window_from_rank_averages(
+            {0: {"step_time": 10.0, "total_step": 10.0}},
             expected_ranks=(0,),
-            per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
             metrics=[metric],
         ),
     )
-    empty = StepCombinedTimeResult(status_message="no rows")
+    empty = StepTimeResult(status_message="no rows")
 
     computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
     assert computer.had_ok is False
@@ -210,19 +208,19 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
 ) -> None:
     """Persisted rows cannot establish whether their producer is alive."""
     from traceml_ai.renderers.step_time import compute as compute_module
-    from traceml_ai.renderers.step_time.schema import (
-        StepCombinedTimeCoverage,
-        StepCombinedTimeMetric,
-        StepCombinedTimeResult,
-        StepCombinedTimeSummary,
+    from traceml_ai.step_time.model import (
+        StepTimeCoverage,
+        StepTimeMetric,
+        StepTimeResult,
+        StepTimeSummary,
     )
 
-    def _result(completed_step: int) -> StepCombinedTimeResult:
-        metric = StepCombinedTimeMetric(
+    def _result(completed_step: int) -> StepTimeResult:
+        metric = StepTimeMetric(
             metric="step_time",
             clock="cpu",
             series=None,
-            summary=StepCombinedTimeSummary(
+            summary=StepTimeSummary(
                 window_size=1,
                 steps_used=1,
                 median_total=10.0,
@@ -231,7 +229,7 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
                 skew_ratio=0.0,
                 skew_pct=0.0,
             ),
-            coverage=StepCombinedTimeCoverage(
+            coverage=StepTimeCoverage(
                 expected_steps=1,
                 steps_used=1,
                 completed_step=completed_step,
@@ -240,11 +238,11 @@ def test_non_advancing_nonempty_window_does_not_claim_source_expiry(
                 incomplete=False,
             ),
         )
-        return StepCombinedTimeResult(
+        return StepTimeResult(
             status_message="OK",
-            window=StepTimeWindow(
+            window=window_from_rank_averages(
+                {0: {"step_time": 10.0, "total_step": 10.0}},
                 expected_ranks=(0,),
-                per_rank_timing={0: {"step_time": 10.0, "total_step": 10.0}},
                 metrics=[metric],
             ),
         )
@@ -285,13 +283,13 @@ def test_computer_had_ok_stays_false_on_cold_start(monkeypatch) -> None:
     """A payload that never had good data reports had_ok=False on itself,
     not just on the computer -- distinguishes cold start from an expired bridge
     for any consumer that only sees the payload (issue #259)."""
-    from traceml_ai.renderers.step_time.schema import StepCombinedTimeResult
+    from traceml_ai.step_time.model import StepTimeResult
 
     computer = StepCombinedComputer(db_path=":memory:", stale_ttl_s=30.0)
     monkeypatch.setattr(
         computer,
         "_compute_impl",
-        lambda conn: StepCombinedTimeResult(status_message="no rows"),
+        lambda conn: StepTimeResult(status_message="no rows"),
     )
 
     result = computer.compute_cli()

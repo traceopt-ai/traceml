@@ -21,11 +21,8 @@ from traceml_ai.diagnostics.trends import (
 )
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
-from traceml_ai.step_time.model import StepCombinedTimeMetric, StepTimeWindow
-from traceml_ai.utils.step_time_window import (
-    diagnose_step_time_window,
-    median_iteration_component_share,
-)
+from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
+from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 Severity = str  # "info" | "warn" | "crit"
 
@@ -303,10 +300,7 @@ def _build_step_time_evidence(
         pass
 
     try:
-        residual_share = median_iteration_component_share(
-            window.per_rank_timing,
-            "residual_proxy",
-        )
+        residual_share = window.residual_share
         evidence["residual"] = (
             "n/a"
             if residual_share is None
@@ -375,7 +369,7 @@ def _build_step_memory_evidence(
 
 
 def _dominant_step_component(
-    by_key: Dict[str, StepCombinedTimeMetric],
+    by_key: Dict[str, StepTimeMetric],
 ) -> Optional[str]:
     """
     Return the dominant non-total median split component for step time.
