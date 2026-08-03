@@ -96,7 +96,13 @@ class _WrappedDataLoaderIterator:
             scope=TimeScope.STEP,
             record_gpu_events=True,
         ):
-            return next(self._iterator)
+            batch = next(self._iterator)
+
+        n_bytes = tensor_bytes(batch)
+        if n_bytes > 0:
+            record_batch_size_bytes(n_bytes)
+
+        return batch
 
 
 class _WrappedDataLoaderFetch:
@@ -291,33 +297,19 @@ class _WrappedH2D:
     def to(self, *args: Any, **kwargs: Any) -> Any:
         # If the auto-patch was installed after this wrapper was created
         # (wrap-then-init race), defer to avoid double-counting: the patch
-        # will time this call if it qualifies as H2D. For Tensors the patch
-        # also records batch-size bytes; for non-Tensor containers the patch
-        # cannot inspect contained tensors, so we still emit the byte count
-        # from the wrapper.
+        # will time this call if it qualifies as H2D.
         if getattr(torch.Tensor, "_traceml_h2d_patched", False):
-            if not isinstance(self._obj, torch.Tensor):
-                n_bytes = tensor_bytes(self._obj)
-                if n_bytes > 0:
-                    record_batch_size_bytes(n_bytes)
             return self._obj.to(*args, **kwargs)
 
         if not should_time_h2d(self._obj, args, kwargs):
             return self._obj.to(*args, **kwargs)
-
-        n_bytes = tensor_bytes(self._obj)
 
         with timed_region(
             name="_traceml_internal:h2d_time",
             scope=TimeScope.STEP,
             record_gpu_events=True,
         ):
-            result = self._obj.to(*args, **kwargs)
-
-        if n_bytes > 0:
-            record_batch_size_bytes(n_bytes)
-
-        return result
+            return self._obj.to(*args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._obj, name)

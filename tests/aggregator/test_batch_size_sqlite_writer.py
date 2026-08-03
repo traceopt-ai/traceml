@@ -10,7 +10,7 @@ def _make_envelope(
     sampler: str = "BatchSizeSampler",
     step: int = 3,
     bytes_total: int = 2_105_344,
-    n_transfers: int = 4,
+    n_fetches: int = 4,
 ) -> TelemetryEnvelope:
     meta = TelemetryMeta.from_mapping(
         {
@@ -30,7 +30,7 @@ def _make_envelope(
         timestamp=1723.5,
         step=step,
         bytes_total=bytes_total,
-        n_transfers=n_transfers,
+        n_fetches=n_fetches,
     )
     return TelemetryEnvelope(
         meta=meta,
@@ -54,7 +54,7 @@ def test_build_rows_projects_envelope_into_batch_size_row() -> None:
         rows = conn.execute(
             """
             SELECT recv_ts_ns, rank, global_rank, hostname, runtime_pid,
-                   step, bytes_total, n_transfers
+                   step, bytes_total, n_fetches
             FROM batch_size_samples;
             """
         ).fetchall()

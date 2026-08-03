@@ -4,8 +4,8 @@ BatchSizeSampler
 Step-level batch-size sampler for TraceML.
 
 Reads BatchSizeBatch objects from the shared batch-size queue, aggregates
-all H2D transfer bytes observed within the same optimizer step using SUM
-(handling gradient accumulation naturally), and persists **one record
+all dataloader-fetch bytes observed within the same optimizer step using
+SUM (handling gradient accumulation naturally), and persists **one record
 per step, per rank**.
 """
 
@@ -27,7 +27,7 @@ class BatchSizeSampler(BaseSampler):
 
     Aggregation
     -----------
-    SUM across all H2D events within one step. One row per (step, rank).
+    SUM across all fetches within one step. One row per (step, rank).
     """
 
     def __init__(self) -> None:
@@ -56,7 +56,7 @@ class BatchSizeSampler(BaseSampler):
             timestamp=time.time(),
             step=int(batch.step),
             bytes_total=int(bytes_total),
-            n_transfers=int(len(batch.events)),
+            n_fetches=int(len(batch.events)),
         )
         self._add_record(sample.to_wire())
 

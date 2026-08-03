@@ -70,12 +70,10 @@ def find_db() -> str | None:
 
 def _expected_bytes_per_step() -> int:
     """
-    Expected per-step H2D bytes given the demo's batch shape and dtypes.
+    Expected per-step batch bytes given the demo's batch shape and dtypes.
 
-    Each step inside trace_step does:
-        batch_x = batch_x.to(device, non_blocking=True)  # float32
-        batch_y = batch_y.to(device, non_blocking=True)  # int64
-    repeated GRAD_ACCUM_STEPS times.
+    Each step fetches GRAD_ACCUM_STEPS batches from the dataloader, and
+    every batch is (batch_x float32, batch_y int64).
     """
     bx = BATCH_SIZE * INPUT_DIM * 4  # float32
     by = BATCH_SIZE * 8  # int64
@@ -83,7 +81,7 @@ def _expected_bytes_per_step() -> int:
 
 
 def print_batch_size_results(db_path: str) -> None:
-    """Query the DB and print batch_size + h2d timing per step, per rank."""
+    """Query the DB and print batch_size + fetch timing per step, per rank."""
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 
@@ -100,7 +98,7 @@ def print_batch_size_results(db_path: str) -> None:
 
     cur.execute(
         """
-        SELECT global_rank, step, bytes_total, n_transfers, sample_ts_s
+        SELECT global_rank, step, bytes_total, n_fetches, sample_ts_s
         FROM batch_size_samples
         ORDER BY global_rank, step;
         """
@@ -109,11 +107,11 @@ def print_batch_size_results(db_path: str) -> None:
 
     print(
         f"\n{'Rank':>5}  {'Step':>5}  {'Bytes':>14}  "
-        f"{'n_transfers':>11}  {'H2D (ms)':>10}"
+        f"{'n_fetches':>11}  {'Fetch (ms)':>10}"
     )
     print("-" * 60)
 
-    # Pull H2D timing alongside for sanity-checking
+    # Pull dataloader fetch timing alongside for sanity-checking
     cur.execute(
         """
         SELECT global_rank, step, events_json
@@ -123,21 +121,21 @@ def print_batch_size_results(db_path: str) -> None:
     timing_index = {}
     for global_rank, step, events_json in cur.fetchall():
         events = json.loads(events_json) if events_json else {}
-        h2d_entry = events.get("_traceml_internal:h2d_time", {})
+        fetch_entry = events.get("_traceml_internal:dataloader_next", {})
         ms_val = None
-        for device_stats in h2d_entry.values():
+        for device_stats in fetch_entry.values():
             d = device_stats.get("duration_ms")
             if d is not None:
                 ms_val = d
                 break
         timing_index[(global_rank, step)] = ms_val
 
-    for global_rank, step, bytes_total, n_transfers, _ts in rows:
+    for global_rank, step, bytes_total, n_fetches, _ts in rows:
         ms_val = timing_index.get((global_rank, step))
         ms_str = f"{ms_val:.2f}" if ms_val is not None else "—"
         print(
             f"{global_rank if global_rank is not None else '—':>5}  "
-            f"{step:>5}  {bytes_total:>14,}  {n_transfers:>11}  {ms_str:>10}"
+            f"{step:>5}  {bytes_total:>14,}  {n_fetches:>11}  {ms_str:>10}"
         )
 
     expected = _expected_bytes_per_step()
@@ -153,7 +151,8 @@ def main():
 
     traceml.init(mode="auto")
 
-    # Keep data on CPU so each step does a real H2D transfer
+    # Data stays on CPU; batches are sized as they leave the dataloader,
+    # so the metric records the same values with or without a GPU.
     x = torch.randn(NUM_SAMPLES, INPUT_DIM)
     y = torch.randint(0, NUM_CLASSES, (NUM_SAMPLES,))
     dataset = TensorDataset(x, y)
@@ -208,7 +207,7 @@ def main():
         print(f"[BatchSize demo] DB path: {db_path}", file=sys.stderr)
         print(
             f"[BatchSize demo] sqlite3 {db_path} "
-            '"SELECT global_rank, step, bytes_total, n_transfers '
+            '"SELECT global_rank, step, bytes_total, n_fetches '
             'FROM batch_size_samples ORDER BY global_rank, step;"',
             file=sys.stderr,
         )

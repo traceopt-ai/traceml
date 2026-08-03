@@ -104,7 +104,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             seq                INTEGER,
             step               INTEGER,
             bytes_total        INTEGER NOT NULL,
-            n_transfers        INTEGER NOT NULL
+            n_fetches          INTEGER NOT NULL
         );
         """
     )
@@ -165,7 +165,7 @@ def build_rows(
             ts_raw = row.get("timestamp")
             step_raw = row.get("step")
             bytes_raw = row.get("bytes_total")
-            n_raw = row.get("n_transfers")
+            n_raw = row.get("n_fetches")
 
             seq = int(seq_raw) if isinstance(seq_raw, int) else None
             sample_ts_s = (
@@ -175,7 +175,7 @@ def build_rows(
             bytes_total = (
                 int(bytes_raw) if isinstance(bytes_raw, (int, float)) else 0
             )
-            n_transfers = int(n_raw) if isinstance(n_raw, int) else 0
+            n_fetches = int(n_raw) if isinstance(n_raw, int) else 0
 
             out["batch_size_samples"].append(
                 (
@@ -192,7 +192,7 @@ def build_rows(
                     seq,
                     step,
                     bytes_total,
-                    n_transfers,
+                    n_fetches,
                 )
             )
 
@@ -221,7 +221,7 @@ def insert_rows(
                 seq,
                 step,
                 bytes_total,
-                n_transfers
+                n_fetches
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,

@@ -1,10 +1,14 @@
 """
 TraceML Batch Size (Bytes) Capture
 
-Buffers H2D byte counts per training step; flushed once per step as a
-BatchSizeBatch onto a shared queue. Producer = training thread (inside
-trace_step), consumer = sampling thread. Multiple transfers in a step
-are summed by the sampler.
+Buffers the tensor bytes of each dataloader fetch per training step;
+flushed once per step as a BatchSizeBatch onto a shared queue. Producer =
+training thread (the dataloader fetch path), consumer = sampling thread.
+Multiple fetches in a step (gradient accumulation) are summed by the
+sampler.
+
+Sizing at the dataloader keeps the metric device-agnostic: CPU-only
+training records the same batch bytes as GPU training.
 """
 
 from __future__ import annotations
@@ -16,12 +20,16 @@ from dataclasses import dataclass, field
 from queue import Full, Queue
 from typing import Deque, List
 
-TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
+from traceml_ai.runtime.state import should_record_trace_events
+
+
+def _traceml_disabled() -> bool:
+    return os.environ.get("TRACEML_DISABLED") == "1"
 
 
 @dataclass
 class BatchSizeEvent:
-    """A single host-to-device transfer observed inside a training step."""
+    """A single dataloader fetch observed inside a training step."""
 
     bytes_count: int
     step: int = -1
@@ -29,7 +37,7 @@ class BatchSizeEvent:
 
 @dataclass
 class BatchSizeBatch:
-    """One optimizer-step worth of H2D byte events."""
+    """One optimizer-step worth of dataloader-fetch byte events."""
 
     step: int
     events: List[BatchSizeEvent] = field(default_factory=list)
@@ -46,13 +54,15 @@ def get_batch_size_queue() -> Queue:
 
 def record_batch_size_bytes(bytes_count: int) -> None:
     """
-    Buffer one H2D byte observation for the current step.
+    Buffer one dataloader-fetch byte observation for the current step.
 
     The value is appended to the per-step buffer and flushed as part of a
     BatchSizeBatch at the next call to flush_batch_size_buffer(step).
+    Recording is gated on the trace recording state (mirroring
+    ``timed_region``) so fetches outside a recorded window are dropped.
     Best-effort: invalid values are ignored.
     """
-    if TRACEML_DISABLED:
+    if _traceml_disabled() or not should_record_trace_events():
         return
 
     try:
@@ -72,7 +82,7 @@ def flush_batch_size_buffer(step: int) -> None:
 
     Called once per optimizer step, after trace_step exits.
     """
-    if TRACEML_DISABLED:
+    if _traceml_disabled():
         return
     if not _BATCH_SIZE_BUFFER:
         return

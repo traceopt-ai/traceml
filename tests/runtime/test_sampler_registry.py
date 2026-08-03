@@ -250,6 +250,7 @@ def test_queue_backed_samplers_are_marked_for_final_recording_drain() -> None:
     assert specs["process"].drain_on_recording_stop is False
     assert specs["step_time"].drain_on_recording_stop is True
     assert specs["step_memory"].drain_on_recording_stop is True
+    assert specs["batch_size"].drain_on_recording_stop is True
 
 
 def test_runtime_final_recording_drain_skips_periodic_samplers() -> None:

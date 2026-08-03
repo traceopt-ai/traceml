@@ -7,15 +7,17 @@ persisted by the aggregator into SQLite.
 Concept
 -------
 BatchSizeSampler emits **one record per step, per rank** containing the
-total bytes of host-to-device transfers observed during that step.
-Gradient accumulation is handled naturally because all H2D transfers
-inside the same trace_step block are summed before emission.
+total tensor bytes fetched from the dataloader during that step.
+Gradient accumulation is handled naturally because all fetches inside
+the same step are summed before emission. Sizing at the dataloader keeps
+the metric device-agnostic: CPU-only training records the same batch
+bytes as GPU training.
 
 Units
 -----
-- bytes_total : int  (sum of element_size * numel across observed H2D
-                      transfers in the step)
-- n_transfers : int  (number of H2D transfer events summed; diagnostic)
+- bytes_total : int  (sum of element_size * numel across the batches
+                      fetched in the step)
+- n_fetches   : int  (number of dataloader fetches summed; diagnostic)
 
 Schema (per DB row)
 -------------------
@@ -23,8 +25,8 @@ Schema (per DB row)
     "seq": int,            # monotonically increasing sequence per rank
     "timestamp": float,    # step timestamp (seconds, CPU wall clock)
     "step": int,           # training step id
-    "bytes_total": int,    # summed H2D bytes for the step
-    "n_transfers": int     # how many transfers were summed
+    "bytes_total": int,    # summed batch bytes for the step
+    "n_fetches": int       # how many fetches were summed
 }
 """
 
@@ -40,7 +42,7 @@ class BatchSizeSample:
     timestamp: float
     step: int
     bytes_total: int
-    n_transfers: int
+    n_fetches: int
 
     def to_wire(self) -> Dict[str, Any]:
         """Convert to a wire-friendly dictionary (msgpack/JSON safe)."""
@@ -49,7 +51,7 @@ class BatchSizeSample:
             "timestamp": float(self.timestamp),
             "step": int(self.step),
             "bytes_total": int(self.bytes_total),
-            "n_transfers": int(self.n_transfers),
+            "n_fetches": int(self.n_fetches),
         }
 
     @staticmethod
@@ -60,5 +62,5 @@ class BatchSizeSample:
             timestamp=float(data["timestamp"]),
             step=int(data["step"]),
             bytes_total=int(data.get("bytes_total", 0)),
-            n_transfers=int(data.get("n_transfers", 0)),
+            n_fetches=int(data.get("n_fetches", 0)),
         )

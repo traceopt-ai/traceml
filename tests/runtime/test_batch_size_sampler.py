@@ -1,26 +1,23 @@
 from __future__ import annotations
 
 import sqlite3
-import sys
 from collections import deque
-from pathlib import Path
 
 import pytest
 import torch
-
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+from torch.utils.data import DataLoader, TensorDataset
 
 import traceml_ai.utils.batch_size as bs_module
+from traceml_ai.runtime.state import (
+    configure_trace_recording,
+    mark_trace_step_flushed,
+)
 from traceml_ai.aggregator.sqlite_writers import batch_size as bs_writer
 from traceml_ai.samplers.batch_size_sampler import BatchSizeSampler
 from traceml_ai.samplers.schema.batch_size_schema import BatchSizeSample
 from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
 from traceml_ai.utils.batch_size import (
     BatchSizeBatch,
-    BatchSizeEvent,
     flush_batch_size_buffer,
     get_batch_size_queue,
     record_batch_size_bytes,
@@ -128,7 +125,7 @@ class TestBatchSizeSampler:
     def test_sums_events_per_step(self):
         sampler = BatchSizeSampler()
 
-        # Two transfers in step 3, one in step 4
+        # Two fetches in step 3, one in step 4
         record_batch_size_bytes(100)
         record_batch_size_bytes(250)
         flush_batch_size_buffer(step=3)
@@ -142,10 +139,10 @@ class TestBatchSizeSampler:
         assert len(rows) == 2
         assert rows[0]["step"] == 3
         assert rows[0]["bytes_total"] == 350
-        assert rows[0]["n_transfers"] == 2
+        assert rows[0]["n_fetches"] == 2
         assert rows[1]["step"] == 4
         assert rows[1]["bytes_total"] == 50
-        assert rows[1]["n_transfers"] == 1
+        assert rows[1]["n_fetches"] == 1
 
     def test_empty_queue_no_records(self):
         sampler = BatchSizeSampler()
@@ -163,7 +160,7 @@ class TestBatchSizeSchema:
             timestamp=1234.5,
             step=9,
             bytes_total=4096,
-            n_transfers=3,
+            n_fetches=3,
         )
         wire = sample.to_wire()
         assert wire == {
@@ -171,7 +168,7 @@ class TestBatchSizeSchema:
             "timestamp": 1234.5,
             "step": 9,
             "bytes_total": 4096,
-            "n_transfers": 3,
+            "n_fetches": 3,
         }
         round_trip = BatchSizeSample.from_wire(wire)
         assert round_trip == sample
@@ -211,7 +208,7 @@ class TestBatchSizeSqlWriter:
                 "seq",
                 "step",
                 "bytes_total",
-                "n_transfers",
+                "n_fetches",
             ):
                 assert expected in cols
         finally:
@@ -241,7 +238,7 @@ class TestBatchSizeSqlWriter:
                             "timestamp": 1001.5,
                             "step": 3,
                             "bytes_total": 2048,
-                            "n_transfers": 2,
+                            "n_fetches": 2,
                         }
                     ]
                 }
@@ -253,7 +250,7 @@ class TestBatchSizeSqlWriter:
         row = rows[0]
         # (recv_ts_ns, rank, global_rank, local_rank, world_size,
         #  local_world_size, node_rank, hostname, runtime_pid,
-        #  sample_ts_s, seq, step, bytes_total, n_transfers)
+        #  sample_ts_s, seq, step, bytes_total, n_fetches)
         assert row[0] == 10**12
         assert row[1] == 1
         assert row[2] == 1
@@ -293,14 +290,14 @@ class TestBatchSizeSqlWriter:
                                 "timestamp": 100.0,
                                 "step": 1,
                                 "bytes_total": 64,
-                                "n_transfers": 1,
+                                "n_fetches": 1,
                             },
                             {
                                 "seq": 2,
                                 "timestamp": 101.0,
                                 "step": 2,
                                 "bytes_total": 128,
-                                "n_transfers": 4,
+                                "n_fetches": 4,
                             },
                         ]
                     }
@@ -309,7 +306,7 @@ class TestBatchSizeSqlWriter:
             rows = bs_writer.build_rows(envelope=envelope, recv_ts_ns=1)
             bs_writer.insert_rows(conn, rows)
             persisted = conn.execute(
-                "SELECT step, bytes_total, n_transfers FROM batch_size_samples "
+                "SELECT step, bytes_total, n_fetches FROM batch_size_samples "
                 "ORDER BY step;"
             ).fetchall()
             assert persisted == [(1, 64, 1), (2, 128, 4)]
@@ -317,103 +314,93 @@ class TestBatchSizeSqlWriter:
             conn.close()
 
 
-# H2D auto-patch -> bytes recording
+# Dataloader auto-patch -> bytes recording
 #
-# The patch internally calls _ORIG_TENSOR_TO which would actually move the
-# tensor to CUDA. To stay GPU-free we monkey-patch _ORIG_TENSOR_TO to a
-# pass-through stub. The patch's bytes-recording branch runs regardless of
-# what _ORIG_TENSOR_TO returns.
+# The batch is sized as it leaves the dataloader, so the metric works the
+# same on CPU-only and GPU training. _traceml_dataloader_iter is called
+# directly to avoid installing the global DataLoader patch in tests.
 
 
-class TestH2DAutoPatchRecordsBytes:
-    def test_records_when_target_is_cuda(self, monkeypatch):
-        import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
+class TestDataloaderPatchRecordsBytes:
+    def test_records_batch_bytes_per_fetch(self, monkeypatch):
+        import traceml_ai.instrumentation.patches.dataloader_patch as dl_patch
 
-        def _fake_to(_self, *args, **kwargs):
-            return _self
+        monkeypatch.setattr(dl_patch, "is_tracing_armed", lambda: True)
 
-        monkeypatch.setattr(h2d_patch, "_ORIG_TENSOR_TO", _fake_to)
+        ds = TensorDataset(torch.zeros(8, 4, dtype=torch.float32))
+        loader = DataLoader(ds, batch_size=4)
 
-        t = torch.zeros(4, 8, dtype=torch.float32)  # 128 bytes
-        h2d_patch._H2D_TLS._traceml_h2d_enabled = True
-        try:
-            h2d_patch._traceml_tensor_to(t, "cuda")
-        finally:
-            h2d_patch._H2D_TLS._traceml_h2d_enabled = False
+        batches = list(dl_patch._traceml_dataloader_iter(loader))
 
-        assert len(bs_module._BATCH_SIZE_BUFFER) == 1
-        assert bs_module._BATCH_SIZE_BUFFER[0].bytes_count == 128
+        # Two fetches of [tensor(4, 4) float32] = 64 bytes each.
+        assert len(batches) == 2
+        assert [
+            e.bytes_count for e in bs_module._BATCH_SIZE_BUFFER
+        ] == [64, 64]
 
-    def test_does_not_record_cpu_target(self):
-        import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
+    def test_does_not_record_when_not_armed(self, monkeypatch):
+        import traceml_ai.instrumentation.patches.dataloader_patch as dl_patch
 
-        t = torch.zeros(4, 8, dtype=torch.float32)
-        h2d_patch._H2D_TLS._traceml_h2d_enabled = True
-        try:
-            h2d_patch._traceml_tensor_to(t, "cpu")
-        finally:
-            h2d_patch._H2D_TLS._traceml_h2d_enabled = False
+        monkeypatch.setattr(dl_patch, "is_tracing_armed", lambda: False)
 
+        ds = TensorDataset(torch.zeros(4, 2, dtype=torch.float32))
+        loader = DataLoader(ds, batch_size=2)
+
+        batches = list(dl_patch._traceml_dataloader_iter(loader))
+
+        assert len(batches) == 2
         assert len(bs_module._BATCH_SIZE_BUFFER) == 0
 
-    def test_does_not_record_when_disabled(self, monkeypatch):
-        import traceml_ai.instrumentation.patches.h2d_auto_timer_patch as h2d_patch
+    def test_does_not_record_after_recording_stops(self, monkeypatch):
+        import traceml_ai.instrumentation.patches.dataloader_patch as dl_patch
 
-        def _fake_to(_self, *args, **kwargs):
-            return _self
+        monkeypatch.setattr(dl_patch, "is_tracing_armed", lambda: True)
 
-        monkeypatch.setattr(h2d_patch, "_ORIG_TENSOR_TO", _fake_to)
+        configure_trace_recording(max_steps=1)
+        mark_trace_step_flushed(1)
+        try:
+            ds = TensorDataset(torch.zeros(4, 2, dtype=torch.float32))
+            loader = DataLoader(ds, batch_size=2)
+            batches = list(dl_patch._traceml_dataloader_iter(loader))
 
-        t = torch.zeros(4, 8, dtype=torch.float32)
-        # TLS off (default)
-        h2d_patch._traceml_tensor_to(t, "cuda")
-        assert len(bs_module._BATCH_SIZE_BUFFER) == 0
+            assert len(batches) == 2
+            assert len(bs_module._BATCH_SIZE_BUFFER) == 0
+        finally:
+            configure_trace_recording()
 
 
-# wrap_h2d container traversal
+# Manual wrapper (wrap_dataloader_fetch) -> bytes recording
 
 
-class TestWrapH2DRecordsContainerBytes:
-    def test_dict_batch_records_total_tensor_bytes(self, monkeypatch):
-        # Avoid the global Tensor.to() patch path; this ensures the wrapper
-        # takes its own bytes recording branch.
-        monkeypatch.setattr(
-            torch.Tensor, "_traceml_h2d_patched", False, raising=False
-        )
+class TestWrapDataloaderFetchRecordsBytes:
+    def test_dict_batch_records_total_tensor_bytes(self):
+        from traceml_ai.sdk.wrappers import wrap_dataloader_fetch
 
-        from traceml_ai.sdk.wrappers import wrap_h2d
+        class DictLoader:
+            def __iter__(self):
+                yield {
+                    "x": torch.zeros(3, dtype=torch.float32),  # 12
+                    "y": torch.zeros(2, dtype=torch.int64),  # 16
+                }
 
-        # Subclass of dict: tensor_bytes() recognizes it as a dict container.
-        class DictBatch(dict):
-            def to(self, device):
-                return self
+        wrapped = wrap_dataloader_fetch(DictLoader())
+        batches = list(wrapped)
 
-        t1 = torch.zeros(3, dtype=torch.float32)  # 12
-        t2 = torch.zeros(2, dtype=torch.int64)  # 16
-        batch = DictBatch({"x": t1, "y": t2})
-        wrapped = wrap_h2d(batch)
-        wrapped.to("cuda")
+        assert len(batches) == 1
+        assert [e.bytes_count for e in bs_module._BATCH_SIZE_BUFFER] == [28]
 
-        # 28 bytes total (12 + 16)
-        assert len(bs_module._BATCH_SIZE_BUFFER) == 1
-        assert bs_module._BATCH_SIZE_BUFFER[0].bytes_count == 28
+    def test_opaque_batch_records_nothing(self):
+        # When a batch is not a tensor or dict/list/tuple of tensors,
+        # tensor_bytes cannot inspect it. No event is recorded (no spurious
+        # zero rows), which is the safe behavior.
+        from traceml_ai.sdk.wrappers import wrap_dataloader_fetch
 
-    def test_opaque_container_records_zero(self, monkeypatch):
-        # When a custom container doesn't subclass dict/list/tuple,
-        # tensor_bytes cannot inspect its contents. No event is recorded
-        # (no spurious zero rows), which is the safe behavior.
-        monkeypatch.setattr(
-            torch.Tensor, "_traceml_h2d_patched", False, raising=False
-        )
+        class OpaqueLoader:
+            def __iter__(self):
+                yield object()
 
-        from traceml_ai.sdk.wrappers import wrap_h2d
+        wrapped = wrap_dataloader_fetch(OpaqueLoader())
+        batches = list(wrapped)
 
-        class OpaqueBatch:
-            def to(self, device):
-                return self
-
-        batch = OpaqueBatch()
-        wrapped = wrap_h2d(batch)
-        wrapped.to("cuda")
-
+        assert len(batches) == 1
         assert len(bs_module._BATCH_SIZE_BUFFER) == 0
