@@ -52,10 +52,10 @@ STEP_TIME_METRIC_NAMES = [
 ]
 
 _PUBLIC_METRICS = {
-    "total_step_ms": ("total_step_cpu_ms", "total_step_cpu"),
-    "dataloader_ms": ("dataloader_cpu_ms", "dataloader_fetch"),
+    "total_step_ms": ("step_time_cpu_ms", "step_time_cpu"),
+    "dataloader_ms": ("dataloader_fetch_cpu_ms", "dataloader_fetch"),
     "input_wait_ms": ("input_wait_ms", "input_wait"),
-    "step_time_ms": ("step_time_ms", "step_time"),
+    "step_time_ms": ("traced_step_time_ms", "traced_step_time"),
     "h2d_ms": ("h2d_ms", "h2d"),
     "compute_ms": ("compute_ms", "compute"),
     "residual_ms": ("residual_ms", "residual_proxy"),
@@ -63,6 +63,13 @@ _PUBLIC_METRICS = {
     "backward_ms": ("backward_ms", "backward"),
     "optimizer_ms": ("optimizer_step_ms", "optimizer_step"),
 }
+"""Stable public fields projected from the canonical timing contract.
+
+The public summary schema predates the Step Time terminology migration:
+``step_time_ms`` still means the traced inner envelope and
+``total_step_ms`` still means CPU Step Time. Keep that compatibility at this
+projection boundary until the versioned public-schema migration.
+"""
 
 
 class _MetricProjection(NamedTuple):
@@ -95,6 +102,33 @@ def _public_metric_values(
         metric: _optional_float(getattr(values, field_name))
         for metric, (field_name, _statistic) in _PUBLIC_METRICS.items()
     }
+
+
+def _legacy_issue_json(issue: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project canonical diagnosis evidence to the stable summary schema."""
+    projected = dict(issue)
+    evidence = dict(projected.get("evidence") or {})
+    traced_step_time = evidence.pop("traced_step_time_ms", None)
+    step_time = evidence.pop("step_time_ms", None)
+
+    if traced_step_time is not None:
+        evidence["step_time_ms"] = traced_step_time
+    if step_time is not None:
+        evidence["iteration_time_ms"] = step_time
+
+    projected["evidence"] = evidence
+    return projected
+
+
+def _legacy_diagnosis_json(
+    diagnosis: Mapping[str, Any],
+    issues: list[Mapping[str, Any]],
+) -> tuple[Dict[str, Any], list[Dict[str, Any]]]:
+    """Return public diagnosis JSON without leaking new internal key names."""
+    projected_issues = [_legacy_issue_json(issue) for issue in issues]
+    if projected_issues:
+        return dict(projected_issues[0]), projected_issues
+    return _legacy_issue_json(diagnosis), projected_issues
 
 
 def _project_metric(
@@ -339,6 +373,10 @@ def project_step_time_summary(analysis: StepTimeAnalysis) -> Dict[str, Any]:
         {metric.metric: metric for metric in window.metrics},
     )
     diagnosis_json, issues_json = diagnostic_result_to_json(analysis.diagnosis)
+    diagnosis_json, issues_json = _legacy_diagnosis_json(
+        diagnosis_json,
+        issues_json,
+    )
     card = _build_card(
         analysis,
         metrics,

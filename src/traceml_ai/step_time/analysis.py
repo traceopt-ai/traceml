@@ -591,7 +591,11 @@ def _build_cohorts(
         for metric in _COMPOSITION_KEYS
         if any(facts.average.value(metric) is not None for facts in rank_facts)
     )
-    composition = carrying("step_time", *present_composition)
+    # The dashboard ribbon visualizes the traced envelope and can still show
+    # its measured phases when input wait is unavailable. Diagnosis shares
+    # remain anchored to outer Step Time above; this presentation cohort must
+    # not manufacture that unavailable denominator.
+    composition = carrying(TRACED_STEP_TIME_KEY, *present_composition)
 
     fsdp = str(training_strategy).strip().lower() == "fsdp"
     straggler = tuple(
@@ -616,7 +620,7 @@ def _composition_representative_rank(
 ) -> Optional[int]:
     cohort_set = set(int(rank) for rank in cohort)
     anchors = {
-        facts.global_rank: facts.average.step_time_ms
+        facts.global_rank: facts.average.traced_step_time_ms
         for facts in rank_facts
         if facts.global_rank in cohort_set
     }

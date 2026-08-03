@@ -270,7 +270,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
                 row_id=step,
                 rank=0,
                 step=step,
-                step_time=10.0,
+                traced_step_time=10.0,
             )
             _insert_step_memory_sample(
                 conn,
@@ -352,7 +352,7 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
                     row_id=row_id,
                     rank=rank,
                     step=step,
-                    step_time=10.0 + rank,
+                    traced_step_time=10.0 + rank,
                 )
                 _insert_step_memory_sample(
                     conn,

@@ -40,7 +40,7 @@ def _create_step_time_db(path: str) -> None:
                 forward=5.0,
                 backward=10.0,
                 optimizer=4.0,
-                step_time=30.0,
+                traced_step_time=30.0,
             )
 
 
@@ -99,9 +99,11 @@ def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
     assert rank_facts.steps[0].step == 1
     values = rank_facts.steps[0].values
     assert values.input_wait_ms == 4.0
-    assert values.step_time_ms == 20.0
+    assert values.traced_step_time_ms == 20.0
+    assert values.step_time_ms == 24.0
     assert rank_average(window, 0).input_wait_ms == 4.0
-    assert rank_average(window, 0).step_time_ms == 20.0
+    assert rank_average(window, 0).traced_step_time_ms == 20.0
+    assert rank_average(window, 0).step_time_ms == 24.0
 
 
 def test_step_time_section_uses_summary_pipeline_and_sqlite_fixture(

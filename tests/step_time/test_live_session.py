@@ -51,7 +51,13 @@ def _analysis(*, metrics: bool, cursor: int = 1) -> StepTimeAnalysis:
     )
     window = (
         window_from_rank_averages(
-            {0: {"step_time": 10.0, "total_step": 10.0}},
+            {
+                0: {
+                    "input_wait": 0.0,
+                    "traced_step_time": 10.0,
+                    "step_time": 10.0,
+                }
+            },
             expected_ranks=(0,),
             metrics=(metric,),
             steps_used=2,

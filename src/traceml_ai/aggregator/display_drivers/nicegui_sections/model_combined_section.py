@@ -192,14 +192,14 @@ def update_model_combined_section(
         _clear_view(panel, _EXPIRED_SIG, "window expired")
         return
     m = _index(window.metrics)
-    if "step_time" not in m:
+    if "traced_step_time" not in m:
         _clear_view(panel, _NO_ENVELOPE_SIG, "step envelope unavailable")
         return
 
-    step_metric = m["step_time"]
-    st = step_metric
+    traced_step_metric = m["traced_step_time"]
+    st = traced_step_metric
     steps_used = window.coverage.steps_used
-    _update_kpis(panel, window, step_metric)
+    _update_kpis(panel, window, traced_step_metric)
     representative = window.composition_representative_rank
     if representative is None:
         _clear_ribbon(
@@ -229,19 +229,19 @@ def update_model_combined_section(
     universe_size = len(window.rank_universe)
     partial_metrics = [
         key
-        for key in [phase[1] for phase in theme.PHASES] + ["step_time"]
+        for key in [phase[1] for phase in theme.PHASES] + ["traced_step_time"]
         if key != "h2d" and 0 < len(window.ranks_for(key)) < universe_size
     ]
 
     input_wait_value = vals.get("input_wait")
-    envelope = float(rank_values.step_time_ms or 0.0) + (
+    envelope = float(rank_values.traced_step_time_ms or 0.0) + (
         input_wait_value if input_wait_value is not None else 0.0
     )
     tot = max(sum(measured.values()), envelope) or 1.0
 
     # A measured-zero segment and a genuinely unmeasured one must never
     # render identically -- an absent input_wait would otherwise let the
-    # OTHER phases sum to exactly step_time (residual is a remainder), so
+    # OTHER phases sum to exactly traced Step Time (residual is a remainder), so
     # the ribbon fills to 100% and a dark dataloader stream reads as a
     # confirmed-fast one. Non-h2d unmeasured phases get a fixed hatched
     # sliver instead of a proportional width; measured phases give up
@@ -306,11 +306,11 @@ def update_model_combined_section(
     if unmeasured or partial_metrics:
         incomplete = set(unmeasured) | set(partial_metrics)
         names = [lab for lab, key, _c in theme.PHASES if key in incomplete]
-        # step_time has no ribbon segment, so it is not in PHASES, but it
+        # traced_step_time has no ribbon segment, so it is not in PHASES, but it
         # can still be the thing that is incomplete. Name it with the same
         # abbreviation the CLI table uses rather than dropping it and
         # printing a bare "partial:".
-        if "step_time" in incomplete:
+        if "traced_step_time" in incomplete:
             names.append(_STEP_TIME_LABEL)
         steps_text += f" · partial: {','.join(names)}"
     panel["win"].text = steps_text

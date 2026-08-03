@@ -47,9 +47,9 @@ _WINDOW_KEYS = {
     "forward",
     "backward",
     "optimizer_step",
+    "traced_step_time",
     "step_time",
     "residual_proxy",
-    "total_step",
 }
 
 
@@ -71,27 +71,27 @@ class DiagnosisGolden:
 # assertion table and keeps missing keys visible.
 EXPECTED_DERIVED_TIMING: dict[str, dict[int, dict[str, float]]] = {
     "complete_gpu": {
-        0: {"residual_proxy": 5.0, "total_step": 100.0},
-        1: {"residual_proxy": 5.0, "total_step": 100.0},
+        0: {"residual_proxy": 5.0, "step_time": 100.0},
+        1: {"residual_proxy": 5.0, "step_time": 100.0},
     },
     "sparse_missing_forward": {
-        0: {"residual_proxy": 5.0, "total_step": 100.0},
-        1: {"total_step": 100.0},
+        0: {"residual_proxy": 5.0, "step_time": 100.0},
+        1: {"step_time": 100.0},
     },
     "measured_zero_forward": {
-        0: {"residual_proxy": 5.0, "total_step": 100.0},
-        1: {"residual_proxy": 35.0, "total_step": 100.0},
+        0: {"residual_proxy": 5.0, "step_time": 100.0},
+        1: {"residual_proxy": 35.0, "step_time": 100.0},
     },
     "single_rank_cpu": {
-        0: {"residual_proxy": 5.0, "total_step": 100.0},
+        0: {"residual_proxy": 5.0, "step_time": 100.0},
     },
     "ddp_rank_straggler": {
-        0: {"residual_proxy": 0.0, "total_step": 140.0},
-        1: {"residual_proxy": 0.0, "total_step": 140.0},
+        0: {"residual_proxy": 0.0, "step_time": 140.0},
+        1: {"residual_proxy": 0.0, "step_time": 140.0},
     },
     "fsdp_rank_straggler": {
-        0: {"residual_proxy": 0.0, "total_step": 140.0},
-        1: {"residual_proxy": 0.0, "total_step": 160.0},
+        0: {"residual_proxy": 0.0, "step_time": 140.0},
+        1: {"residual_proxy": 0.0, "step_time": 160.0},
     },
 }
 
@@ -157,23 +157,35 @@ EXPECTED_METRIC_SUMMARIES: dict[
     str,
     dict[str, tuple[float, float, int, float | None]],
 ] = {
-    "complete_gpu": {"step_time": (95.0, 95.0, 0, 0.0)},
+    "complete_gpu": {
+        "traced_step_time": (95.0, 95.0, 0, 0.0),
+        "step_time": (100.0, 100.0, 0, 0.0),
+    },
     "sparse_missing_forward": {
         "forward": (30.0, 30.0, 0, None),
         "residual_proxy": (5.0, 5.0, 0, None),
+        "traced_step_time": (95.0, 95.0, 0, 0.0),
+        "step_time": (100.0, 100.0, 0, 0.0),
     },
     "measured_zero_forward": {
         "forward": (15.0, 30.0, 0, 1.0),
         "residual_proxy": (20.0, 35.0, 1, 0.75),
+        "traced_step_time": (95.0, 95.0, 0, 0.0),
+        "step_time": (100.0, 100.0, 0, 0.0),
     },
-    "single_rank_cpu": {"step_time": (95.0, 95.0, 0, None)},
+    "single_rank_cpu": {
+        "traced_step_time": (95.0, 95.0, 0, None),
+        "step_time": (100.0, 100.0, 0, None),
+    },
     "ddp_rank_straggler": {
         "input_wait": (50.0, 100.0, 0, 1.0),
-        "step_time": (90.0, 140.0, 1, 5.0 / 9.0),
+        "traced_step_time": (90.0, 140.0, 1, 5.0 / 9.0),
+        "step_time": (140.0, 140.0, 0, 0.0),
     },
     "fsdp_rank_straggler": {
         "input_wait": (50.0, 100.0, 0, 1.0),
-        "step_time": (100.0, 160.0, 1, 0.6),
+        "traced_step_time": (100.0, 160.0, 1, 0.6),
+        "step_time": (150.0, 160.0, 1, 1.0 / 15.0),
     },
 }
 
@@ -287,7 +299,7 @@ def test_canonical_window_matches_golden(
         }
         assert actual == pytest.approx(expected)
 
-    for metric in _WINDOW_KEYS - {"total_step"}:
+    for metric in _WINDOW_KEYS:
         expected_ranks = tuple(
             rank for rank, row in expected_rows.items() if metric in row
         )
