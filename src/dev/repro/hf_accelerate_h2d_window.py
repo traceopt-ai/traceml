@@ -172,7 +172,24 @@ def main() -> int:
     print(f"positive control (transfer inside window):  {control} ms")
     print(f"TraceML reported H2D (GA=2, pre-step move):  {reported} ms")
     print("-" * 60)
-    if control and control > 0.0 and (reported in (0.0, None)):
+    if control is None:
+        # A None control means the run could not MEASURE, not that the bug
+        # is absent: init() degrades to a disabled no-op when no aggregator
+        # is reachable, so neither the control nor the trainer run recorded
+        # anything. Saying "did not reproduce" here would be a false
+        # all-clear from a rig that never armed.
+        print(
+            "INCONCLUSIVE: the in-window positive control captured nothing, "
+            "which means TraceML tracing never armed in this process "
+            "(init() is a no-op without a reachable aggregator). Run this "
+            "script through the launcher instead:\n"
+            "    traceml run src/dev/repro/hf_accelerate_h2d_window.py "
+            "--mode=summary\n"
+            "and read h2d in the final summary: n/a for the GA run means "
+            "the transfer stayed outside the window."
+        )
+        return 1
+    if control > 0.0 and (reported in (0.0, None)):
         print(
             "REPRODUCED: the timer captures an in-window transfer but not "
             "the Accelerate pre-step transfer, so H2D reads as "
