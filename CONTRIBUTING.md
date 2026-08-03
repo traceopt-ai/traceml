@@ -49,6 +49,14 @@ Requirements:
 - PyTorch 2.5+ for Torch-backed examples and tests
 - CUDA enabled GPU for GPU/distributed changes. Many docs, reporting, CLI, and CPU smoke-test changes can be developed without a GPU.
 
+### Develop in a container
+
+If you use VS Code with the Dev Containers extension (or GitHub Codespaces),
+open the repository in the provided dev container. It installs an editable
+`.[dev,torch]` build and enables the pre-commit hooks for you, so the
+environment matches what CI expects. The container is CPU-only; GPU work still
+needs a local CUDA setup.
+
 ---
 
 ## Open tasks for first contributors
@@ -126,6 +134,9 @@ If in doubt, open an issue before implementing.
 
 For code extension points, see
 [`docs/developer_guide/extending.md`](docs/developer_guide/extending.md).
+For performance-sensitive Step Time changes, also read the
+[`Step Time pipeline contract`](docs/developer_guide/step-time-pipeline-contract.md)
+and run the feature-local `tests/step_time/` suite.
 
 ---
 
@@ -137,6 +148,10 @@ For code extension points, see
 - Run basic training loops to verify no regressions
 - Performance-sensitive changes should include a short explanation
 
+CodeRabbit reviews every pull request automatically and leaves inline comments.
+Treat it like a first-pass reviewer: worth reading, not a blocker. A maintainer
+still reviews and merges every PR.
+
 ---
 
 ## What We Are Not Looking For (Yet)
@@ -147,6 +162,65 @@ To keep the project focused, we are currently **not** accepting:
 - New heavy dependencies
 - Framework rewrites or abstraction layers
 - Features that significantly increase runtime overhead
+
+---
+
+## Dependency Policy
+
+Dependency constraints affect downstream package resolution and can create
+installation issues that are not visible in the project's regular CI. Please
+follow these rules when adding or updating dependencies.
+
+1. **Document runtime upper bounds.** Add an upper bound only for a verified,
+   current incompatibility. Record the dependency and rationale in
+   `ALLOWED_UPPER_BOUNDS` in `tests/core/test_packaging_constraints.py`; the
+   test rejects undocumented upper bounds. A possible future incompatibility
+   alone is not sufficient reason to add a cap.
+
+2. **Set lower bounds from required APIs.** If TraceML uses an API introduced
+   in a particular dependency version, set that version as the minimum and
+   add a short comment in `pyproject.toml` explaining the requirement. This
+   prevents dependency resolution from selecting a version that imports
+   successfully but lacks an API used at runtime.
+
+3. **Use extras for optional functionality.** Dependencies not required by the
+   core import path belong in an optional extra. The current dashboard
+   dependency arrangement is a documented exception; its possible migration
+   to an extra is tracked in #268.
+
+4. **Test against current dependency releases.** Scheduled CI resolves the
+   newest published dependency versions and runs the core suite so ecosystem
+   compatibility issues are detected early.
+
+For background, see #263 and
+[Should You Use Upper Bound Version Constraints?](https://iscinumpy.dev/post/bound-version-constraints/)
+by Henry Schreiner, along with
+[Scientific Python SPEC 0](https://scientific-python.org/specs/spec-0000/).
+
+---
+
+## Releasing (maintainers)
+
+There is no version to edit anywhere in the repo. The package version comes
+from the git tag (`setuptools-scm`), and a tag is what starts a release.
+
+**Cut a release from the Actions tab:** go to Actions -> "Cut a release" ->
+Run workflow, type the version (e.g. `0.3.5`, no leading `v`). This tags,
+builds, and publishes to PyPI in one run. No git commands to remember.
+
+Pushing a tag from a local checkout still works too, if you'd rather:
+
+```bash
+git tag v0.3.5
+git push upstream v0.3.5
+```
+
+Either path publishes to PyPI automatically. From there, conda-forge's own
+bot picks up the new PyPI release and opens a version-bump PR on the
+`traceml-ai` feedstock. If the release only changed the version, that PR
+merges itself. If it added, dropped, or repinned a runtime dependency,
+someone edits the recipe in that bot PR by hand before it merges, since the
+bot only knows how to bump a version number.
 
 ---
 

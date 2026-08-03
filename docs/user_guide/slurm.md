@@ -84,7 +84,7 @@ srun examples/slurm/launch.sh
 
 ```bash
 # launch.sh (runs once per node)
-exec traceml run examples/ddp_minimal.py \
+exec traceml run examples/distributed/ddp_minimal.py \
   --mode=summary \
   --run-name="${RUN_NAME}" \
   --nnodes="${SLURM_NNODES}" \
@@ -143,7 +143,7 @@ traceml run train.py ... --aggregator-bind-host=10.0.0.5
 A single node's launch (what the wrapper runs) looks like this:
 
 ```bash
-traceml run examples/ddp_minimal.py \
+traceml run examples/distributed/ddp_minimal.py \
   --mode=summary \
   --run-name=ddp-demo \
   --nnodes=2 \
@@ -153,7 +153,7 @@ traceml run examples/ddp_minimal.py \
   --master-port=29500
 ```
 
-`examples/ddp_minimal.py` is a runnable DDP script that already calls
+`examples/distributed/ddp_minimal.py` is a runnable DDP script that already calls
 `traceml.init(...)` and `traceml.trace_step(...)`.
 
 ## Full template
@@ -198,10 +198,19 @@ Node 0's aggregator writes the run report to:
 <logs-dir>/<run-name>/final_summary.txt
 ```
 
+`--html-report` adds `final_summary.html` in the same directory. As with the
+JSON/TXT artifacts, it is written only on the aggregator-owner node (node 0);
+passing the flag on every node in a symmetric launch command is harmless.
+
 `--logs-dir` defaults to `./logs` relative to the submit directory. Put it on a
 **shared filesystem** (for example your scratch space) so the summary is
 reachable after the job ends. You can compare two runs later with
 [`traceml compare`](compare.md).
+
+Large jobs can spend time flushing late telemetry and checkpointing SQLite at
+shutdown. If your cluster has slow scratch storage or delayed cross-node TCP
+delivery, pass `--finalize-timeout-sec <seconds>` in the shared launch command
+or set `TRACEML_FINALIZE_TIMEOUT_SEC`.
 
 ## Cluster-specific notes
 

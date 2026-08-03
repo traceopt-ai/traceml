@@ -169,8 +169,6 @@ def main() -> None:
     train_loader, train_sampler = prepare_data(rank, world_size)
     model = BaselineMLP().to(device)
 
-    traceml.trace_model_instance(model)
-
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(
             model,

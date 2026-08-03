@@ -1,5 +1,6 @@
 from torch.utils.data import DataLoader
 
+from traceml_ai.runtime.arming import is_tracing_armed
 from traceml_ai.utils.timing import timed_region
 
 _ORIG_DATALOADER_ITER = DataLoader.__iter__
@@ -8,12 +9,16 @@ _ORIG_DATALOADER_ITER = DataLoader.__iter__
 def _traceml_dataloader_iter(self):
     it = _ORIG_DATALOADER_ITER(self)
 
+    if not is_tracing_armed():
+        yield from it
+        return
+
     while True:
         try:
             with timed_region(
                 name="_traceml_internal:dataloader_next",
                 scope="step",
-                use_gpu=False,
+                record_gpu_events=True,
             ):
                 batch = next(it)
         except StopIteration:

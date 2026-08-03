@@ -9,10 +9,16 @@ primary diagnosis and building richer result payloads.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Sequence, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple
 
 from ..common import DiagnosticIssue, DiagnosticRule
-from .context import StepTimeAnalysisContext, non_negative_finite
+from .context import (
+    StepTimeAnalysisContext,
+    metric_skew,
+    metric_total,
+    metric_worst_rank,
+    non_negative_finite,
+)
 
 
 def _severity(value: float, crit_threshold: float) -> str:
@@ -58,8 +64,9 @@ class _BaseStepTimeRule(DiagnosticRule[StepTimeAnalysisContext]):
         share_pct: Optional[float] = None,
         skew_pct: Optional[float] = None,
         ranks: Sequence[Optional[int]] = (),
+        evidence: Optional[Dict[str, Any]] = None,
     ) -> DiagnosticIssue:
-        clean_ranks: Tuple[int, ...] = tuple(
+        issue_ranks: Tuple[int, ...] = tuple(
             int(rank) for rank in ranks if rank is not None
         )
         return DiagnosticIssue(
@@ -79,17 +86,18 @@ class _BaseStepTimeRule(DiagnosticRule[StepTimeAnalysisContext]):
             skew_pct=(
                 non_negative_finite(skew_pct) if skew_pct is not None else None
             ),
-            ranks=clean_ranks,
+            ranks=issue_ranks,
+            evidence=evidence or {},
         )
 
 
 @dataclass(frozen=True)
-class InputStragglerRule(_BaseStepTimeRule):
+class RankStragglerRule(_BaseStepTimeRule):
     """
-    Detect excess dataloader burden on one rank relative to a typical rank.
+    Detect visible rank stragglers and classify the likely culprit cause.
     """
 
-    name: str = "input_straggler"
+    name: str = "rank_straggler"
 
     def evaluate(
         self,
@@ -98,81 +106,75 @@ class InputStragglerRule(_BaseStepTimeRule):
         if context.single_rank:
             return None
 
-        score = context.input_straggler_score
-        if score < context.thresholds.input_straggler_score_warn:
+        evidence = context.rank_straggler
+        if evidence is None:
             return None
 
-        rank = context.dataloader_worst_rank
-        return self._issue(
-            kind="INPUT_STRAGGLER",
-            status="INPUT STRAGGLER",
-            severity=_severity(
-                score, context.thresholds.input_straggler_score_crit
-            ),
-            summary=(
-                f"{_rank_str(rank)} has excess dataloader burden "
-                f"(~{_pct(score)} of a typical local step)."
-            ),
-            action=f"Inspect input loading on {_rank_str(rank)}.",
-            metric="dataloader_fetch",
-            phase="dataloader",
-            score=score,
-            share_pct=context.dataloader_share,
-            skew_pct=context.dataloader_skew,
-            ranks=(rank,),
+        rank = evidence.culprit_rank
+        component_label = {
+            "input": "input wait",
+            "compute": "forward compute",
+            "h2d": "H2D",
+            "sync_or_unattributed": "sync or unattributed work",
+        }.get(evidence.component, evidence.component)
+        cause_coverage = non_negative_finite(
+            evidence.component_coverage.get(evidence.component, 0.0)
         )
+        if evidence.kind == "STRAGGLER":
+            summary = (
+                f"{_rank_str(rank)} is slower than victim "
+                f"{_rank_str(evidence.victim_rank)} "
+                f"(~{_pct(evidence.score)} impact); no measured component "
+                "explains "
+                f"{_pct(context.thresholds.straggler_cause_coverage_min)} "
+                "of visible wait cost."
+            )
+            action = (
+                "Inspect synchronization, collectives, and unattributed work "
+                f"around {_rank_str(rank)}."
+            )
+        else:
+            summary = (
+                f"{_rank_str(rank)} has excess {component_label} burden "
+                f"relative to victim {_rank_str(evidence.victim_rank)} "
+                f"(~{_pct(evidence.score)} impact; "
+                f"~{_pct(cause_coverage)} of visible wait cost)."
+            )
+            action = f"Inspect {component_label} on {_rank_str(rank)}."
 
-
-@dataclass(frozen=True)
-class ComputeStragglerRule(_BaseStepTimeRule):
-    """
-    Detect excess compute burden on one rank relative to a typical rank.
-    """
-
-    name: str = "compute_straggler"
-
-    def evaluate(
-        self,
-        context: StepTimeAnalysisContext,
-    ) -> Optional[DiagnosticIssue]:
-        if context.single_rank:
-            return None
-
-        score = context.compute_straggler_score
-        if score < context.thresholds.compute_straggler_score_warn:
-            return None
-
-        rank = context.compute_worst_rank
-        label = (
-            context.dominant_compute.label
-            if context.dominant_compute is not None
-            else "Compute"
-        )
         return self._issue(
-            kind="COMPUTE_STRAGGLER",
-            status="COMPUTE STRAGGLER",
+            kind=evidence.kind,
+            status=evidence.status,
             severity=_severity(
-                score,
-                context.thresholds.compute_straggler_score_crit,
+                evidence.score,
+                context.thresholds.straggler_score_crit,
             ),
-            summary=(
-                f"{_rank_str(rank)} {label.lower()} has excess compute "
-                f"burden (~{_pct(score)} of a typical observed step)."
-            ),
-            action=f"Inspect {label.lower()} on {_rank_str(rank)}.",
-            metric="compute",
-            phase=label.lower(),
-            score=score,
-            share_pct=context.compute_share,
-            skew_pct=context.compute_skew,
+            summary=summary,
+            action=action,
+            metric=evidence.metric,
+            phase=evidence.phase,
+            score=evidence.score,
+            skew_pct=evidence.score,
             ranks=(rank,),
+            evidence={
+                "component": evidence.component,
+                "culprit_rank": evidence.culprit_rank,
+                "victim_rank": evidence.victim_rank,
+                "visible_metric": evidence.visible_metric,
+                "visible_culprit_ms": evidence.visible_culprit_ms,
+                "visible_victim_ms": evidence.visible_victim_ms,
+                "visible_cost_ms": evidence.visible_cost_ms,
+                "iteration_time_ms": evidence.iteration_time_ms,
+                "component_excesses_ms": evidence.component_excesses_ms,
+                "component_coverage": evidence.component_coverage,
+            },
         )
 
 
 @dataclass(frozen=True)
 class InputBoundRule(_BaseStepTimeRule):
     """
-    Detect input-bound behavior when dataloader dominates and skew stays low.
+    Detect input-bound behavior from explicit input wait clocks.
     """
 
     name: str = "input_bound"
@@ -181,66 +183,133 @@ class InputBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.dataloader_share < context.thresholds.input_share_warn:
+        if context.input_bound_share is None:
+            # Input wait or the step envelope was never measured: abstain
+            # rather than diagnose from a fake zero.
             return None
-
-        if not context.single_rank and (
-            context.dataloader_skew > context.thresholds.input_bound_max_skew
-        ):
+        if context.input_bound_share < context.thresholds.overhead_share_warn:
             return None
 
         return self._issue(
             kind="INPUT_BOUND",
             status="INPUT-BOUND",
             severity=_severity(
-                context.dataloader_share,
-                context.thresholds.input_share_crit,
+                context.input_bound_share,
+                context.thresholds.overhead_share_crit,
             ),
             summary=(
-                f"Dataloader is {_pct(context.dataloader_share)} of the "
-                "typical step."
+                f"Input wait is {_pct(context.input_bound_share)} of the "
+                f"typical {context.diagnosis_clock} iteration time."
             ),
             action="Increase workers, prefetch, or storage throughput.",
-            metric="dataloader_fetch",
-            phase="dataloader",
-            share_pct=context.dataloader_share,
-            skew_pct=context.dataloader_skew,
-            ranks=(context.dataloader_worst_rank,),
+            metric="input_wait",
+            phase="input",
+            score=context.input_bound_share,
+            share_pct=context.input_bound_share,
+            skew_pct=context.input_bound_skew,
+            ranks=(context.input_bound_worst_rank,),
+            evidence={
+                "input_wait_ms": context.input_wait_total,
+                "step_time_ms": context.input_bound_step_total,
+                "iteration_time_ms": context.iteration_time_total,
+                "input_bound_share": context.input_bound_share,
+                "diagnosis_clock": context.diagnosis_clock,
+            },
         )
 
 
 @dataclass(frozen=True)
-class WaitHeavyRule(_BaseStepTimeRule):
-    """
-    Detect windows dominated by wait rather than local work.
-    """
+class H2DBoundRule(_BaseStepTimeRule):
+    """Detect broad H2D transfer cost from GPU-selected timing."""
 
-    name: str = "wait_heavy"
+    name: str = "h2d_bound"
 
     def evaluate(
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
-        if context.wait_share < context.thresholds.wait_share_warn:
+        if context.diagnosis_clock != "gpu":
+            return None
+        if context.h2d_share is None:
+            # H2D, input wait, or the step envelope was never measured.
+            return None
+        if context.h2d_share < context.thresholds.overhead_share_warn:
+            return None
+        worst_rank = metric_worst_rank(context.h2d_metric)
+
+        return self._issue(
+            kind="H2D_BOUND",
+            status="H2D-BOUND",
+            severity=_severity(
+                context.h2d_share,
+                context.thresholds.overhead_share_crit,
+            ),
+            summary=(
+                f"H2D transfer is {_pct(context.h2d_share)} of the "
+                "typical GPU iteration time."
+            ),
+            action=(
+                "Inspect pinned memory, batch transfer, and host-to-device "
+                "copies."
+            ),
+            metric="h2d",
+            phase="h2d",
+            score=context.h2d_share,
+            share_pct=context.h2d_share,
+            skew_pct=metric_skew(
+                context.h2d_metric,
+                single_rank=context.single_rank,
+            ),
+            ranks=(worst_rank,) if worst_rank is not None else (),
+            evidence={
+                "h2d_ms": metric_total(
+                    context.h2d_metric,
+                    single_rank=context.single_rank,
+                ),
+                "h2d_share": context.h2d_share,
+                "diagnosis_clock": context.diagnosis_clock,
+            },
+        )
+
+
+@dataclass(frozen=True)
+class ResidualHeavyRule(_BaseStepTimeRule):
+    """
+    Detect windows dominated by residual time rather than traced local work.
+    """
+
+    name: str = "residual_heavy"
+
+    def evaluate(
+        self,
+        context: StepTimeAnalysisContext,
+    ) -> Optional[DiagnosticIssue]:
+        if context.residual_share is None:
+            # The residual is underivable because a component phase was
+            # never measured: abstain instead of absorbing missing work.
+            return None
+        if context.residual_share < context.thresholds.overhead_share_warn:
             return None
 
         return self._issue(
-            kind="WAIT_HEAVY",
-            status="WAIT-HEAVY",
+            kind="RESIDUAL_HEAVY",
+            status="RESIDUAL-HEAVY",
             severity=_severity(
-                context.wait_share,
-                context.thresholds.wait_share_crit,
+                context.residual_share,
+                context.thresholds.overhead_share_crit,
             ),
             summary=(
-                f"WAIT* is {_pct(context.wait_share)} of the typical step."
+                f"Residual time is {_pct(context.residual_share)} of the "
+                f"typical {context.diagnosis_clock} iteration time."
             ),
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "
                 "checkpointing, validation, or unobserved transfers."
             ),
-            metric="wait_proxy",
-            phase="wait",
-            share_pct=context.wait_share,
+            metric="residual_proxy",
+            phase="residual",
+            score=context.residual_share,
+            share_pct=context.residual_share,
             ranks=(context.overall_worst_rank,),
         )
 
@@ -248,7 +317,7 @@ class WaitHeavyRule(_BaseStepTimeRule):
 @dataclass(frozen=True)
 class ComputeBoundRule(_BaseStepTimeRule):
     """
-    Detect windows dominated by compute without a strong cross-rank straggler.
+    Report dominant compute as informational context.
     """
 
     name: str = "compute_bound"
@@ -257,29 +326,36 @@ class ComputeBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
+        if context.compute_share is None:
+            # A compute phase, input wait, or the step envelope was never
+            # measured: dominance cannot be established.
+            return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
-        if context.dataloader_share >= context.thresholds.input_share_warn:
+        if (
+            context.input_bound_share is not None
+            and context.input_bound_share
+            >= context.thresholds.overhead_share_warn
+        ):
             return None
-        if context.wait_share >= context.thresholds.wait_share_warn:
+        if (
+            context.diagnosis_clock == "gpu"
+            and context.h2d_share is not None
+            and context.h2d_share >= context.thresholds.overhead_share_warn
+        ):
             return None
-        if not context.single_rank and (
-            context.compute_skew > context.thresholds.compute_bound_max_skew
+        if (
+            context.residual_share is not None
+            and context.residual_share
+            >= context.thresholds.overhead_share_warn
         ):
             return None
 
-        label = (
-            context.largest_compute.label
-            if context.largest_compute is not None
-            else "Compute"
-        )
+        label = context.largest_compute or "Compute"
         return self._issue(
             kind="COMPUTE_BOUND",
             status="COMPUTE-BOUND",
-            severity=_severity(
-                context.compute_share,
-                context.thresholds.compute_bound_share_crit,
-            ),
+            severity="info",
             summary=f"Compute-bound; {label.lower()} is the largest phase.",
             action="Optimize model compute or reduce step cost.",
             metric="compute",
@@ -293,10 +369,10 @@ class ComputeBoundRule(_BaseStepTimeRule):
 DEFAULT_STEP_TIME_RULES: Tuple[
     DiagnosticRule[StepTimeAnalysisContext], ...
 ] = (
-    InputStragglerRule(),
-    ComputeStragglerRule(),
+    RankStragglerRule(),
     InputBoundRule(),
-    WaitHeavyRule(),
+    H2DBoundRule(),
+    ResidualHeavyRule(),
     ComputeBoundRule(),
 )
 
@@ -322,9 +398,9 @@ def run_step_time_rules(
 __all__ = [
     "DEFAULT_STEP_TIME_RULES",
     "ComputeBoundRule",
-    "ComputeStragglerRule",
+    "H2DBoundRule",
     "InputBoundRule",
-    "InputStragglerRule",
-    "WaitHeavyRule",
+    "RankStragglerRule",
+    "ResidualHeavyRule",
     "run_step_time_rules",
 ]

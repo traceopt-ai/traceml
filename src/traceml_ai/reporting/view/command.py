@@ -24,8 +24,10 @@ def view_summary(
     """
     Print and return the stored terminal summary from a summary JSON artifact.
 
-    This is intentionally a read-only artifact view. It does not regenerate
-    diagnostics, read telemetry databases, or write derived reports.
+    This is read-only: it does not regenerate diagnostics or read telemetry
+    databases. Rendering a derived HTML report is opt-in and handled
+    separately by ``traceml view <summary.json> --html`` (see
+    ``reporting.html.render_html_report_from_file``).
     """
     payload = load_summary_artifact(summary_path)
     text = extract_summary_text(payload, path=summary_path)

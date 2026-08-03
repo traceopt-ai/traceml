@@ -1,6 +1,8 @@
 import functools
 import os
 import sys
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
 
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
@@ -18,16 +20,90 @@ from traceml_ai.utils.timing import (
     timed_region,
 )
 
-try:
-    from lightning.pytorch.callbacks import Callback
+if TYPE_CHECKING:
+    from lightning.pytorch.callbacks import Callback as _CallbackBase
+else:
+    _CallbackBase = object
 
+
+def _dedupe_callback_bases(bases: tuple[type, ...]) -> tuple[type, ...]:
+    """Return callback bases without duplicates while preserving order."""
+    out: list[type] = []
+    for base in bases:
+        if any(base is existing for existing in out):
+            continue
+        out.append(base)
+    return tuple(out)
+
+
+def _build_callback_base(bases: tuple[type, ...]) -> Any:
+    """Build one runtime callback base from available namespace bases."""
+    unique_bases = _dedupe_callback_bases(bases)
+    if not unique_bases:
+        return SimpleNamespace(base=object, available=False)
+
+    if len(unique_bases) == 1:
+        return SimpleNamespace(base=unique_bases[0], available=True)
+
+    try:
+        base = type(
+            "_TraceMLLightningCallbackBase",
+            unique_bases,
+            {},
+        )
+    except TypeError:
+        # If the namespaces expose incompatible callback classes, prefer the
+        # legacy package because that is the namespace most likely to hit the
+        # mixed-import error this compatibility path fixes.
+        base = unique_bases[-1]
+
+    return SimpleNamespace(base=base, available=True)
+
+
+def _resolve_callback_base() -> Any:
+    """
+    Build a callback base accepted by either Lightning namespace.
+
+    ``lightning.pytorch`` and ``pytorch_lightning`` can be installed side by
+    side, but their ``Callback`` classes are not always identical. Inheriting
+    from every available callback base lets the same TraceML callback work with
+    whichever Trainer namespace the user already has.
+    """
+    bases: list[type] = []
+
+    try:
+        from lightning.pytorch.callbacks import Callback as LightningCallback
+
+        bases.append(LightningCallback)
+    except ImportError:
+        pass
+
+    try:
+        from pytorch_lightning.callbacks import (
+            Callback as PyTorchLightningCallback,
+        )
+
+        bases.append(PyTorchLightningCallback)
+    except ImportError:
+        pass
+
+    return _build_callback_base(tuple(bases))
+
+
+if not TYPE_CHECKING:
+    _callback_resolution = _resolve_callback_base()
+    _CallbackBase = _callback_resolution.base
+    IS_LIGHTNING_AVAILABLE = bool(_callback_resolution.available)
+else:
     IS_LIGHTNING_AVAILABLE = True
-except ImportError:
-    Callback = object
-    IS_LIGHTNING_AVAILABLE = False
 
-TRACEML_DISABLED = os.environ.get("TRACEML_DISABLED") == "1"
+
 _MISSING = object()
+
+
+def _traceml_disabled() -> bool:
+    """Read the TraceML kill switch dynamically."""
+    return os.environ.get("TRACEML_DISABLED") == "1"
 
 
 def init():
@@ -86,7 +162,7 @@ def _lightning_uses_cuda(trainer, pl_module) -> bool:
     return _device_is_cuda(module_device)
 
 
-class TraceMLCallback(Callback):
+class TraceMLCallback(_CallbackBase):
     """
     Official TraceML Callback for PyTorch Lightning.
 
@@ -99,7 +175,8 @@ class TraceMLCallback(Callback):
     def __init__(self):
         if not IS_LIGHTNING_AVAILABLE:
             raise ImportError(
-                "Install traceml[lightning] to use Lightning integration"
+                "Install either 'lightning' or 'pytorch-lightning' to use "
+                "TraceML's Lightning integration."
             )
         super().__init__()
         self._traceml_step_ctx = None
@@ -126,6 +203,8 @@ class TraceMLCallback(Callback):
         setattr(self, ctx_attr, None)
 
     def setup(self, trainer, pl_module, stage=None):
+        if _traceml_disabled():
+            return
         self._wrap_forward(trainer, pl_module)
         self._wrap_batch_to_device(trainer, pl_module)
 
@@ -142,13 +221,13 @@ class TraceMLCallback(Callback):
 
         @functools.wraps(original_forward)
         def wrapped_forward(*args, **kwargs):
-            if TRACEML_DISABLED or not getattr(trainer, "training", False):
+            if _traceml_disabled() or not getattr(trainer, "training", False):
                 return original_forward(*args, **kwargs)
 
             with timed_region(
                 "_traceml_internal:forward_time",
                 scope=TimeScope.STEP,
-                use_gpu=True,
+                record_gpu_events=True,
             ):
                 return original_forward(*args, **kwargs)
 
@@ -175,7 +254,7 @@ class TraceMLCallback(Callback):
 
         def wrapped_batch_to_device(batch, *args, **kwargs):
             if (
-                TRACEML_DISABLED
+                _traceml_disabled()
                 or not getattr(trainer, "training", True)
                 or not _lightning_uses_cuda(trainer, pl_module)
             ):
@@ -235,10 +314,12 @@ class TraceMLCallback(Callback):
 
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
         # Start overall step timing
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         self._traceml_step_ctx = timed_region(
-            "_traceml_internal:step_time", scope="step", use_gpu=False
+            "_traceml_internal:step_time",
+            scope="step",
+            record_gpu_events=True,
         )
         self._traceml_step_ctx.__enter__()
 
@@ -255,7 +336,7 @@ class TraceMLCallback(Callback):
             self._mem_tracker = None
 
     def on_before_backward(self, trainer, pl_module, loss):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # Start backward timing
         self._backward_ctx = timed_region(
@@ -264,13 +345,13 @@ class TraceMLCallback(Callback):
         self._backward_ctx.__enter__()
 
     def on_after_backward(self, trainer, pl_module):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # End backward timing
         self._close_context("_backward_ctx")
 
     def on_before_optimizer_step(self, trainer, pl_module, optimizer):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         self._opt_step_occurred = True
 
@@ -281,7 +362,7 @@ class TraceMLCallback(Callback):
         self._optimizer_ctx.__enter__()
 
     def on_before_zero_grad(self, trainer, pl_module, optimizer):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # End optimizer step timing (zero_grad happens after step)
         self._close_context("_optimizer_ctx")
@@ -289,7 +370,7 @@ class TraceMLCallback(Callback):
     def on_train_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx
     ):
-        if TRACEML_DISABLED:
+        if _traceml_disabled():
             return
         # Safety: end any active context managers (edge cases)
         for ctx_attr in (

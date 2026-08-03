@@ -13,11 +13,9 @@ identically to the old identity/equality scan approach.
 """
 
 import struct
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from traceml_ai.database.database import Database
 from traceml_ai.runtime.sender import SenderIdentity

@@ -105,7 +105,7 @@ def get_error_logger(name: str) -> logging.Logger:
     Parameters
     ----------
     name : str
-        Sub-logger name (e.g., "RemoteDBStore", "Sampler").
+        Sub-logger name (e.g., "Aggregator", "Sampler").
 
     Returns
     -------

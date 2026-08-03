@@ -156,9 +156,6 @@ def main():
     # --------------------------------------------------------
     model = vit_b_16(num_classes=365).to(device)
 
-    # Attach TraceML hooks BEFORE DDP
-    # trace_model_instance(model)
-
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[local_rank]
     )

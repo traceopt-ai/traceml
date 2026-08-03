@@ -94,7 +94,7 @@ class _WrappedDataLoaderIterator:
         with timed_region(
             name="_traceml_internal:dataloader_next",
             scope=TimeScope.STEP,
-            use_gpu=False,
+            record_gpu_events=True,
         ):
             return next(self._iterator)
 
@@ -132,7 +132,7 @@ class _WrappedBackwardHandle:
         with timed_region(
             name="_traceml_internal:backward_time",
             scope=TimeScope.STEP,
-            use_gpu=True,
+            record_gpu_events=True,
         ):
             return self._loss.backward(*args, **kwargs)
 
@@ -193,7 +193,7 @@ def wrap_forward(model: nn.Module) -> nn.Module:
         with timed_region(
             name="_traceml_internal:forward_time",
             scope=TimeScope.STEP,
-            use_gpu=True,
+            record_gpu_events=True,
         ):
             return original_forward(*args, **kwargs)
 
@@ -250,7 +250,7 @@ def wrap_optimizer(optimizer: Any) -> Any:
         with timed_region(
             name="_traceml_internal:optimizer_step",
             scope=TimeScope.STEP,
-            use_gpu=True,
+            record_gpu_events=True,
         ):
             return step_fn(*args, **kwargs)
 
@@ -310,7 +310,7 @@ class _WrappedH2D:
         with timed_region(
             name="_traceml_internal:h2d_time",
             scope=TimeScope.STEP,
-            use_gpu=True,
+            record_gpu_events=True,
         ):
             result = self._obj.to(*args, **kwargs)
 

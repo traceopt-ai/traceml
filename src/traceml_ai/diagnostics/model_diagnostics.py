@@ -13,14 +13,14 @@ from traceml_ai.diagnostics.step_memory import (
     LIVE_STEP_MEMORY_POLICY,
     build_step_memory_diagnosis,
 )
-from traceml_ai.diagnostics.step_time import build_step_diagnosis
+from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
 )
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
 
 Severity = str  # "info" | "warn" | "crit"
 
@@ -83,9 +83,9 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
     """
     Log domain failures without breaking dashboard/runtime rendering.
 
-    Model diagnostics are advisory and run on the aggregator/UI side. A broken
-    domain should produce a fallback item and be visible in TraceML's error log,
-    but it must not blank the dashboard or interrupt the user's training job.
+    Model diagnostics are advisory and run on the aggregator/UI side. A
+    broken domain should produce a fallback item and be visible in TraceML's
+    error log, but it must not blank the dashboard or interrupt training.
     """
     try:
         get_error_logger("ModelDiagnostics").exception("[TraceML] %s", message)
@@ -95,7 +95,8 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
 
 def build_model_diagnostics_payload(
     *,
-    step_time_metrics: Sequence[StepCombinedTimeMetric],
+    step_time_window: Optional[StepTimeWindow] = None,
+    step_time_diagnosis: Optional[StepDiagnosis] = None,
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
@@ -110,7 +111,8 @@ def build_model_diagnostics_payload(
     """
     items: List[ModelDiagnosisItem] = []
     context = ModelDiagnosticContext(
-        step_time_metrics=step_time_metrics,
+        step_time_window=step_time_window,
+        step_time_diagnosis=step_time_diagnosis,
         step_memory_metrics=step_memory_metrics,
         step_memory_status_message=step_memory_status_message,
         gpu_total_bytes=gpu_total_bytes,
@@ -147,7 +149,18 @@ def _build_step_time_item(
     context: ModelDiagnosticContext,
 ) -> ModelDiagnosisItem:
     """Build the registered step-time model diagnostic item."""
-    step_time_diag = build_step_diagnosis(context.step_time_metrics)
+    window = context.step_time_window
+    step_time_diag = context.step_time_diagnosis
+    if step_time_diag is None:
+        return ModelDiagnosisItem(
+            source="step_time",
+            title="Step Time",
+            kind="NO_DATA",
+            severity="info",
+            status="NO DATA",
+            reason="Step Time diagnosis is unavailable on this tick.",
+            action="Wait for more complete samples.",
+        )
     return ModelDiagnosisItem(
         source="step_time",
         title="Step Time",
@@ -163,7 +176,7 @@ def _build_step_time_item(
         ),
         steps_used=getattr(step_time_diag, "steps_used", None),
         worst_rank=getattr(step_time_diag, "worst_rank", None),
-        evidence=_build_step_time_evidence(context.step_time_metrics),
+        evidence=_build_step_time_evidence(window),
     )
 
 
@@ -183,7 +196,8 @@ def _build_step_memory_item(
             severity="info",
             status="NO GPU",
             reason=(
-                "No GPU found. Step memory uses torch-based GPU memory telemetry."
+                "No GPU found. Step memory uses torch-based GPU memory "
+                "telemetry."
             ),
             action="",
         )
@@ -251,14 +265,15 @@ DEFAULT_MODEL_DIAGNOSTIC_REGISTRY = DiagnosticDomainRegistry(
 
 
 def _build_step_time_evidence(
-    metrics: Sequence[StepCombinedTimeMetric],
+    window: Optional[StepTimeWindow],
 ) -> Dict[str, str]:
     """
     Build compact evidence fields for the step-time diagnosis card.
     """
-    by_key = {metric.metric: metric for metric in metrics}
+    if window is None:
+        return {}
+    by_key = {metric.metric: metric for metric in window.metrics}
     step = by_key.get("step_time")
-    wait = by_key.get("wait_proxy")
 
     if step is None:
         return {}
@@ -266,30 +281,31 @@ def _build_step_time_evidence(
     evidence: Dict[str, str] = {}
 
     try:
-        evidence["window"] = str(int(step.summary.steps_used))
+        evidence["window"] = str(int(window.coverage.steps_used))
     except Exception:
         pass
 
     try:
-        if step.summary.worst_rank is not None:
-            evidence["worst"] = f"r{int(step.summary.worst_rank)}"
+        if step.worst_rank is not None:
+            evidence["worst"] = f"r{int(step.worst_rank)}"
     except Exception:
         pass
 
     try:
-        evidence["gap"] = f"{float(step.summary.skew_pct or 0.0) * 100.0:.1f}%"
-    except Exception:
-        pass
-
-    try:
-        median_total = float(step.summary.median_total or 0.0)
-        wait_total = (
-            float(wait.summary.median_total or 0.0)
-            if wait is not None
-            else 0.0
+        skew = step.skew_pct
+        evidence["gap"] = (
+            "n/a" if skew is None else f"{float(skew) * 100.0:.1f}%"
         )
-        if median_total > 0.0:
-            evidence["wait"] = f"{(wait_total / median_total) * 100.0:.1f}%"
+    except Exception:
+        pass
+
+    try:
+        residual_share = window.residual_share
+        evidence["residual"] = (
+            "n/a"
+            if residual_share is None
+            else f"{residual_share * 100.0:.1f}%"
+        )
     except Exception:
         pass
 
@@ -353,17 +369,17 @@ def _build_step_memory_evidence(
 
 
 def _dominant_step_component(
-    by_key: Dict[str, StepCombinedTimeMetric],
+    by_key: Dict[str, StepTimeMetric],
 ) -> Optional[str]:
     """
     Return the dominant non-total median split component for step time.
     """
     labels = {
-        "dataloader_fetch": "dataloader",
+        "input_wait": "input wait",
         "forward": "forward",
         "backward": "backward",
         "optimizer_step": "optimizer",
-        "wait_proxy": "wait",
+        "residual_proxy": "residual",
     }
 
     best_label: Optional[str] = None
@@ -374,7 +390,7 @@ def _dominant_step_component(
         if metric is None:
             continue
         try:
-            value = float(metric.summary.median_total or 0.0)
+            value = float(metric.median_total or 0.0)
         except Exception:
             value = 0.0
         if value > best_value:

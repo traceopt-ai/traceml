@@ -7,8 +7,8 @@
 """
 SQLite projection writer for ProcessSampler.
 
-This module projects TraceML ProcessSampler payloads into SQLite
-table while preserving the original sampler payload in `raw_messages`.
+This module projects TraceML ProcessSampler payloads into a query-friendly
+SQLite table.
 
 Design
 ------

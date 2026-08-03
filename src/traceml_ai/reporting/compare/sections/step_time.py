@@ -14,6 +14,7 @@ from traceml_ai.reporting.compare.model import CompareSection
 from traceml_ai.reporting.compare.sections.base import (
     as_float,
     global_average,
+    global_average_has_key,
     numeric_metric,
     section_available,
     section_diagnosis,
@@ -48,8 +49,8 @@ class StepTimeComparer:
                     key="input_ms",
                     label="Input",
                     unit="ms",
-                    lhs=self._value(lhs, "dataloader_ms"),
-                    rhs=self._value(rhs, "dataloader_ms"),
+                    lhs=self._input_value(lhs),
+                    rhs=self._input_value(rhs),
                     direction="higher_is_worse",
                 ),
                 "h2d_ms": numeric_metric(
@@ -68,12 +69,12 @@ class StepTimeComparer:
                     rhs=self._value(rhs, "compute_ms"),
                     direction="higher_is_worse",
                 ),
-                "wait_ms": numeric_metric(
-                    key="wait_ms",
-                    label="Wait",
+                "residual_ms": numeric_metric(
+                    key="residual_ms",
+                    label="Residual",
                     unit="ms",
-                    lhs=self._value(lhs, "wait_ms"),
-                    rhs=self._value(rhs, "wait_ms"),
+                    lhs=self._value(lhs, "residual_ms"),
+                    rhs=self._value(rhs, "residual_ms"),
                     direction="higher_is_worse",
                 ),
                 "forward_ms": numeric_metric(
@@ -112,9 +113,25 @@ class StepTimeComparer:
     def _value(self, section: Any, key: str) -> Any:
         return global_average(section, key)
 
+    def _input_value(self, section: Any) -> Any:
+        """Return selected-clock input wait.
+
+        Falls back to ``dataloader_ms`` only when ``input_wait_ms`` is
+        absent entirely (a pre-1.6 payload that never had the key). A
+        schema>=1.6 payload always carries the key; a present-but-null
+        value there means the signal was genuinely never measured this
+        window and must not be silently replaced by a different metric.
+        """
+        value = self._value(section, "input_wait_ms")
+        if value is not None:
+            return value
+        if global_average_has_key(section, "input_wait_ms"):
+            return None
+        return self._value(section, "dataloader_ms")
+
     def _dominant_phase(self, section: Any) -> Any:
         phases = {
-            "dataloader": as_float(self._value(section, "dataloader_ms")),
+            "input": as_float(self._input_value(section)),
             "h2d": as_float(self._value(section, "h2d_ms")),
             "forward": as_float(self._value(section, "forward_ms")),
             "backward": as_float(self._value(section, "backward_ms")),

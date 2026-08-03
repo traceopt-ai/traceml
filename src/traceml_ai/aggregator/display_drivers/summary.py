@@ -24,7 +24,6 @@ from __future__ import annotations
 from typing import Any
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
-from traceml_ai.database.remote_database_store import RemoteDBStore
 from traceml_ai.runtime.settings import TraceMLSettings
 
 
@@ -40,10 +39,9 @@ class SummaryDisplayDriver(BaseDisplayDriver):
     def __init__(
         self,
         logger: Any,
-        store: RemoteDBStore,
         settings: TraceMLSettings,
     ) -> None:
-        super().__init__(logger=logger, store=store, settings=settings)
+        super().__init__(logger=logger, settings=settings)
 
     def start(self) -> None:
         """

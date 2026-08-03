@@ -22,15 +22,21 @@ Each record contains:
 Aggregation rules (produced by sampler)
 ---------------------------------------
 - Events are grouped by (event_name, device).
-- duration_ms is SUM'ed across repeated occurrences within a step
-  (e.g., gradient accumulation regions).
+- cpu_ms is SUM'ed across repeated occurrences within a step.
+- gpu_ms is SUM'ed across repeated GPU-timed occurrences within a step; it is
+  null when no GPU event timing was recorded.
+- duration_ms remains the compatibility/effective duration and is SUM'ed across
+  repeated occurrences within a step (e.g., gradient accumulation regions).
 - n_calls counts how many occurrences were aggregated.
 
 Clocks
 ------
-- CPU events use CPU wall-clock time.
-- GPU events use CUDA event (stream) time.
-- Both are stored in `duration_ms` and disambiguated by `is_gpu`.
+- CPU wall-clock time is always stored in `cpu_ms`.
+- GPU events use CUDA event (stream) time and are stored in nullable `gpu_ms`.
+- `duration_ms` preserves the legacy effective clock: GPU time when available,
+  otherwise CPU wall time. `is_gpu` identifies which clock backs `duration_ms`.
+- Dataloader fetch and full step envelope events preserve CPU-wall
+  `duration_ms` for compatibility even when `gpu_ms` is recorded.
 
 Schema (per DB row)
 ------------------
@@ -43,6 +49,8 @@ Schema (per DB row)
             "<device>": {
                 "is_gpu": bool,
                 "duration_ms": float,
+                "cpu_ms": float,
+                "gpu_ms": float | null,
                 "n_calls": int
             },
             ...
@@ -56,7 +64,13 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping
 
 # Type alias for readability and to keep the contract explicit.
-# events[event_name][device] = {"is_gpu": bool, "duration_ms": float, "n_calls": int}
+# events[event_name][device] = {
+#     "is_gpu": bool,
+#     "duration_ms": float,
+#     "cpu_ms": float,
+#     "gpu_ms": float | None,
+#     "n_calls": int,
+# }
 StepEventMap = Dict[str, Dict[str, Dict[str, Any]]]
 
 

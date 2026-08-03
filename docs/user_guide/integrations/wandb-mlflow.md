@@ -32,7 +32,7 @@ Use TraceML for:
 - input bottlenecks
 - compute-bound steps
 - DDP stragglers
-- wait-heavy behavior
+- residual-heavy behavior
 - memory creep
 - step-aware bottleneck diagnosis
 - compact run-to-run comparison from saved TraceML summary JSON files
@@ -115,8 +115,7 @@ This gives you:
 
 ## Log the final TraceML summary to W&B
 
-TraceML runs in summary mode by default. If you want to make that explicit,
-launch with:
+For quiet tracker runs, launch TraceML in summary mode:
 
 ```bash
 traceml run train.py --mode=summary
@@ -257,18 +256,17 @@ Good ways to reduce that:
 
 - disable `tqdm` progress bars
 - reduce extra console logging
-- use the default summary mode if you only want the final TraceML summary
+- use `--mode=summary` if you only want the final TraceML summary
 - use the local UI on a single-node run if the terminal feels crowded
 
 Launch the local UI with:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
-Dashboard mode is intended for single-node runs. For multi-node runs, keep the
-default summary mode and log the final summary artifact.
+Dashboard mode is intended for single-node runs. Multi-node runs default to
+summary mode; log the final summary artifact from that run.
 
 This is often the cleanest option when you want:
 

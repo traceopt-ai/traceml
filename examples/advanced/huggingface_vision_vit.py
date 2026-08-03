@@ -83,19 +83,13 @@ def main():
     )
 
     # Initialize TraceMLTrainer
-    print("Initializing TraceMLTrainer with Deep-Dive...")
+    print("Initializing TraceMLTrainer...")
     trainer = TraceMLTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=DefaultDataCollator(),
         traceml_enabled=True,
-        traceml_kwargs={
-            "sample_layer_memory": True,
-            "trace_layer_forward_memory": True,
-            "trace_layer_forward_time": True,
-            "trace_layer_backward_time": True,
-        },
     )
 
     # Train

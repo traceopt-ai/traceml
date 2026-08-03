@@ -8,8 +8,7 @@
 SQLite projection writer for SystemSampler.
 
 This module projects TraceML SystemSampler payloads into query-friendly
-SQLite tables while preserving the original sampler payload in the main
-`raw_messages` table.
+SQLite tables.
 
 Storage units
 -------------

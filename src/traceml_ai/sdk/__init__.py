@@ -9,7 +9,6 @@ from traceml_ai.sdk.instrumentation import (
     TraceSessionState,
     TraceState,
     get_trace_session_state,
-    trace_model_instance,
     trace_step,
     trace_time,
 )
@@ -31,7 +30,6 @@ __all__ = [
     "TraceState",
     "get_trace_session_state",
     "trace_step",
-    "trace_model_instance",
     "trace_time",
     "summary",
     "final_summary",

@@ -4,6 +4,14 @@ TraceML emits a sorted list of `DiagnosticIssue` findings or states per final
 summary section. `issues[0]` is the primary diagnosis, and final-summary JSON
 also copies that same item to `diagnosis`.
 
+The final summary also includes a top-level `primary_diagnosis`. That field is
+a run-level performance finding promoted from existing section diagnoses. It is
+not a replacement for section diagnoses and it is not a health-warning rollup.
+In schema `1.6`, Step Time drives the top-level primary diagnosis; System GPU
+utilization can appear as supporting evidence or as an unexplained-utilization
+fallback. System, Process, and Step Memory resource findings remain canonical
+inside their sections.
+
 Use `kind` as the stable internal key for logic and comparisons. Use `status`
 as the user-facing display label. In many cases they are similar, but they are
 not required to match; System statuses intentionally use compact labels such as
@@ -31,7 +39,7 @@ Host/node pressure and GPU-utilization symptoms.
 
 `LOW_GPU_UTILIZATION` and `MODERATE_GPU_UTILIZATION` are observed System
 symptoms, not root-cause proof. Use Step Time to identify whether the likely
-cause is input loading, compute balance, waits, synchronization, or other
+cause is input loading, compute balance, residuals, synchronization, or other
 training behavior. Average GPU utilization above 70% does not emit a
 GPU-utilization issue and can remain `NORMAL` when no pressure rules fire.
 
@@ -55,31 +63,196 @@ Traced process pressure.
 Training-step timing.
 
 - `NO_DATA`: no usable step-time data.
-- `WARMUP`: some data exists, but not enough for a stable diagnosis.
+- `WARMUP`: some data exists, but not enough for diagnosis.
+- `INCOMPLETE_DATA` with status `INCOMPLETE DATA`: timing exists, but one or
+  more phase signals were not measured on every observed rank and no rule
+  could reach a reliable conclusion. The evidence lists `missing_signals`
+  (metric names) and per-signal `signal_coverage` (`measured ranks /
+  observed ranks`).
 - `BALANCED`: no clear timing bottleneck or rank straggler.
-- `STRAGGLER`: one rank has materially slower total step time.
-- `INPUT_STRAGGLER`: one rank has materially higher dataloader time.
-- `COMPUTE_STRAGGLER`: one rank has materially higher compute time.
-- `INPUT_BOUND`: dataloader time dominates the typical step.
-- `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step.
-- `WAIT_HEAVY`: unattributed residual time is a material share of the step.
+- `STRAGGLER`: visible rank skew exists, but input wait, H2D, and DDP forward
+  do not explain the likely culprit.
+- `INPUT_STRAGGLER`: the culprit rank has materially higher selected-clock
+  input wait than the victim rank.
+- `COMPUTE_STRAGGLER`: in DDP/default strategy, the culprit rank has
+  materially higher forward time than the victim rank.
+- `H2D_STRAGGLER`: the culprit rank has materially higher host-to-device
+  transfer time than the victim rank.
+- `INPUT_BOUND`: selected-clock input wait is a material typical iteration cost.
+- `H2D_BOUND`: selected-clock GPU H2D transfer is a material typical iteration
+  cost.
+- `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step;
+  this is informational when no material overhead is visible.
+- `RESIDUAL_HEAVY`: unattributed residual time is a material typical iteration
+  cost.
 
-`WAIT_HEAVY` is not a communication diagnosis. `wait_ms` is residual
-unattributed step time:
+Missing signals and measured zeros are different things. A timing event that
+was never observed in the window stays an absent metric (it is not converted
+to `0.0`), while a phase measured at `0.0` stays a valid zero. Availability
+is metric-specific. Occurrence-driven metrics (`optimizer_step`, `h2d`)
+legitimately skip steps: the optimizer under gradient accumulation, and H2D
+when a step performs no host-to-device copies. They are available for a rank
+when measured in at least one aligned step, and their absent steps count as
+zero work. Every other metric (`input_wait`, `forward`, `backward`,
+`step_time`) must occur on every bracketed step, so it is available only
+when measured in every aligned step of the rank's window; intermittent
+presence means the instrumentation dropped out mid-window and drops
+availability instead of synthesizing zeros that would leak the missing work
+into the residual. An absent H2D means "no observed transfers", contributes
+zero to derived metrics, and is never reported as a missing signal. Derived
+metrics exist only when their inputs are available: `compute` needs forward,
+backward, and optimizer; `total_step` needs input wait plus the step
+envelope; `residual_proxy` needs the step envelope plus every compute
+phase.
+
+The canonical `StepTimeWindow` carries the expected rank universe and sparse
+per-rank metrics. A metric's measured-rank population and any multi-metric
+eligible cohort are derived directly from those facts. Diagnosis, reporting,
+and presentation layers must not reconstruct a separate availability policy
+from aggregate values.
+
+The public final-summary projection preserves absence rather than
+re-deriving declined values. Each rule abstains when
+its required signals are unavailable: input needs input wait + step time;
+H2D needs GPU-clock H2D + input wait + step time; compute and residual need
+every compute phase + input wait + step time; rank stragglers need their
+visible-phase anchors + input wait + step time. Rules still fire from the
+ranks that measured their signals, so one dark rank does not silence an
+otherwise measured finding. When no rule fires and at least one abstained
+for missing signals, Step Time reports `INCOMPLETE_DATA` instead of
+`BALANCED`.
+
+Step-time diagnosis uses one selected clock for the analyzed window. It uses
+GPU event timing when every rank/step has GPU timing for the step envelope,
+input wait, and traced phase events present in the window. Otherwise it uses
+explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
+summary use the same global-rank SQLite loader and selected-clock window
+builder for diagnosis-facing timing; they differ only by row window sizing.
+Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
+The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
+`total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
+These compatibility fields are not selected-clock phase-share denominators.
+`duration_ms` stays stored compatibility timing and is not used for Step Time
+display or diagnosis. In the final text report, selected-clock phase shares
+are divided by `input_wait_ms + step_time_ms`; CPU compatibility rows are
+labeled separately. These report-table shares are observational and do not
+replace the median per-rank diagnosis score.
+
+Typical overhead diagnoses use selected-clock per-rank iteration shares:
+
+```text
+iteration_r = input_wait_r + step_time_r
+component_share_r = component_r / iteration_r
+typical_component_share = median(component_share_r across ranks)
+```
+
+`INPUT_BOUND` uses `input_wait`, `H2D_BOUND` uses H2D transfer, and
+`RESIDUAL_HEAVY` uses residual as the component. They warn at 10% and are
+critical at 20%. `H2D_BOUND` requires GPU-selected timing, so asynchronous CPU
+host-call duration is not reported as transfer cost. Cross-rank skew remains
+evidence in a typical-bottleneck finding, but does not suppress one. In
+contrast, `H2D_STRAGGLER` identifies one rank's excess H2D time.
+`COMPUTE_BOUND` remains an informational finding when the median per-rank
+compute share reaches 90% of selected-clock iteration time and no material
+input, H2D, or residual overhead is visible. Built-in live and summary policies
+use this same threshold; their analyzed window sizes differ.
+
+Step Time uses `DiagnosticIssue.score` as normalized iteration impact for
+`INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and all rank-straggler findings.
+Typical findings use the median per-rank share above; stragglers use the
+culprit/victim score below. `COMPUTE_BOUND` has no score because its
+informational context is excluded from impact-based primary ordering.
+
+When several Step Time findings qualify, TraceML orders them by severity, then
+score. A rank straggler wins only an exact severity-and-score tie with a
+typical finding; ties within the same scope preserve rule order. The primary
+diagnosis is always the first ordered issue.
+
+The Step Time summary card reuses the selected issue summary for its reason
+text. It does not recompute phase shares or rank-straggler attribution from
+display rollups.
+
+Shared Step Time diagnosis needs at least 2 steps to emit warning-only
+bottleneck diagnoses. Critical diagnoses are allowed once the window has at
+least 20 steps. Live and summary use the same diagnosis gates; they differ by
+the selected timing window size.
+
+When runtime environment metadata is available, Step Time diagnosis also
+receives an advisory training strategy such as `ddp` or `fsdp`. This context is
+used only to choose diagnosis attribution behavior; it is not a public Step
+Time metric. Missing or unrecognized strategy metadata defaults to `ddp` to
+preserve the DDP/default visible-backward straggler behavior. DDP remains
+eligible for critical Step Time diagnoses once thresholds and confidence gates
+are met. FSDP Step Time diagnoses are capped at warning because collective
+masking can make attribution under-confident.
+
+`RESIDUAL_HEAVY` is not a communication diagnosis. `residual_ms` is residual
+unattributed step time averaged from per-step clamped residuals:
 
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = max(raw_trace_step_wall_ms, known_step_ms)
-wait_ms = traced_step_ms - known_step_ms
-total_step_ms = dataloader_ms + traced_step_ms
+traced_step_ms = selected step envelope timing
+iteration_time_ms = selected input_wait_ms + selected traced_step_ms
+residual_ms = average(max(0, traced_step_ms - known_step_ms))
+total_step_ms = CPU dataloader_ms + CPU step envelope timing
 ```
 
-When input and compute straggler signals appear together, step-time diagnosis
-attributes the primary cause to `INPUT_STRAGGLER` if dataloader excess is within
-the configured tolerance of compute excess. Otherwise the primary diagnosis
-stays `STRAGGLER`, with both input and compute findings preserved as secondary
-issues.
+Rank stragglers use culprit/victim evidence from selected-clock timing. TraceML
+first chooses one visible synchronization phase:
+
+```text
+visible_r = backward_r              # DDP/default
+visible_r = forward_r + backward_r  # FSDP
+```
+
+Only ranks with measured visible-phase anchors, a measured step envelope, and
+a measured input wait are eligible:
+
+```text
+DDP/default: input_wait measured and backward_r > 0 and step_time_r > 0
+FSDP:        input_wait measured and forward_r > 0 and backward_r > 0
+             and step_time_r > 0
+```
+
+If fewer than two ranks are eligible, TraceML does not report a rank straggler.
+Missing visible instrumentation causes this rule to abstain instead of treating
+zero as a fast rank. `input_wait == 0` and `h2d == 0` remain valid component
+values.
+
+The culprit rank is the rank with the minimum visible value. This is the rank
+that likely arrived late and therefore waited least in the visible phase. The
+victim rank is the upper actual median rank by visible value.
+
+```text
+denom = input_wait_victim + step_time_victim
+score = (visible_victim - visible_culprit) / denom
+```
+
+If `score < 0.10`, TraceML does not report a rank straggler. At 10% it reports
+a warning; at 20% it reports critical severity when the existing confidence
+gates permit it. Otherwise it compares the culprit directly with the victim:
+
+```text
+input_excess = input_wait_culprit - input_wait_victim
+h2d_excess = h2d_culprit - h2d_victim
+forward_excess = forward_culprit - forward_victim  # DDP/default only
+```
+
+Every candidate component must be measured on both the culprit and victim
+ranks: DDP/default compute attribution requires measured forward time on
+both, and H2D attribution requires measured H2D time on both, so an
+unmeasured phase can never name the cause. A component names the cause only
+when it covers at least 80% of visible wait cost:
+
+```text
+component_coverage = min(1, component_excess / visible_cost)
+```
+
+The highest qualifying coverage becomes `INPUT_STRAGGLER`, `H2D_STRAGGLER`,
+or, for DDP/default only, `COMPUTE_STRAGGLER`. Otherwise the diagnosis stays
+`STRAGGLER` with a sync-or-unattributed component and coverage evidence.
+Coverage chooses the label; the score alone chooses severity.
 
 It can include validation, checkpointing, logging, framework orchestration, CPU
 stalls, unobserved transfer stalls, or other work inside the timed step but

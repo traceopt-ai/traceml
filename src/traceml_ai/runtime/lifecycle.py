@@ -9,14 +9,20 @@ lifecycle inside one process.
 from __future__ import annotations
 
 import os
+import socket
 import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.runtime.runtime import TraceMLRuntime
-from traceml_ai.runtime.settings import AggregatorEndpoint, TraceMLSettings
+from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
+    AggregatorEndpoint,
+    TraceMLSettings,
+)
 
 if TYPE_CHECKING:
     from traceml_ai.aggregator.trace_aggregator import TraceMLAggregator
@@ -30,6 +36,55 @@ class NoOpRuntime:
 
     def stop(self) -> None:
         return None
+
+
+_RUNTIME_STATE_LOCK = threading.Lock()
+_ACTIVE_RUNTIME_HANDLE: Optional["RuntimeHandle"] = None
+
+
+def get_active_runtime_handle() -> Optional["RuntimeHandle"]:
+    """Return the RuntimeHandle started in this process, or None.
+
+    Lets ``traceml.init()`` detect a runtime already started by the CLI
+    executor (the ``traceml run`` path) and avoid starting a second one.
+    """
+    return _ACTIVE_RUNTIME_HANDLE
+
+
+def _register_active_runtime_handle(handle: "RuntimeHandle") -> None:
+    """Record the runtime handle started in this process."""
+    global _ACTIVE_RUNTIME_HANDLE
+    with _RUNTIME_STATE_LOCK:
+        _ACTIVE_RUNTIME_HANDLE = handle
+
+
+def wait_for_aggregator(
+    host: str,
+    port: int,
+    *,
+    timeout_sec: float = 10.0,
+    poll_interval_sec: float = 0.25,
+) -> bool:
+    """Return True once ``(host, port)`` accepts a TCP connection.
+
+    Retries for a bounded period. Used by ``traceml.init()`` as a best-effort
+    reachability probe before starting the runtime.
+
+    Limitation: this is a bare TCP accept, not a TraceML protocol/session
+    handshake, so any listener on the port (a foreign process, a stale
+    aggregator, or one serving a different session) passes the check. A real
+    handshake is a wire-format change tracked as a follow-up; on a genuine
+    mismatch the runtime simply produces no telemetry for this session.
+    """
+    deadline = time.monotonic() + float(timeout_sec)
+    while True:
+        try:
+            with socket.create_connection((host, int(port)), timeout=0.5):
+                return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(float(poll_interval_sec))
 
 
 @dataclass
@@ -52,7 +107,7 @@ class AggregatorHandle:
             session_id=str(self.settings.session_id),
         )
 
-    def stop(self, timeout_sec: float = 5.0) -> None:
+    def stop(self, timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC) -> None:
         """Stop the aggregator once, flushing history and final summary."""
         if self._stopped:
             return
@@ -99,12 +154,17 @@ def _apply_settings_env(
         settings.aggregator.bind_host
     )
     os.environ["TRACEML_AGGREGATOR_PORT"] = str(settings.aggregator.port)
-    os.environ["TRACEML_REMOTE_MAX_ROWS"] = str(settings.remote_max_rows)
     os.environ["TRACEML_HISTORY_ENABLED"] = (
         "1" if settings.history_enabled else "0"
     )
     os.environ["TRACEML_SUMMARY_WINDOW_ROWS"] = str(
         settings.summary_window_rows
+    )
+    os.environ["TRACEML_FINALIZE_TIMEOUT_SEC"] = str(
+        settings.finalize_timeout_sec
+    )
+    os.environ["TRACEML_EXPECTED_WORLD_SIZE"] = str(
+        settings.expected_world_size
     )
 
 
@@ -192,24 +252,45 @@ def start_runtime(
     _apply_settings_env(normalized, disabled=disabled)
 
     if disabled:
-        return RuntimeHandle(NoOpRuntime())
+        handle = RuntimeHandle(NoOpRuntime())
+        _register_active_runtime_handle(handle)
+        return handle
 
     try:
         runtime = TraceMLRuntime(settings=normalized)
         runtime.start()
-        return RuntimeHandle(runtime)
+        handle = RuntimeHandle(runtime)
+        _register_active_runtime_handle(handle)
+        return handle
     except BaseException as exc:
         if on_error is not None:
             on_error(exc)
         if not fail_open:
             raise
-        return RuntimeHandle(NoOpRuntime())
+        # Fail-open ladder: the runtime lifecycle for this process has still
+        # been decided here, so register the no-op handle. A later
+        # traceml.init() sees an active handle and does not try to start the
+        # runtime again. Detach LOUDLY (one stderr warning) so a silently
+        # dark integration (e.g. a Ray worker whose aggregator is down) is
+        # never mistaken for a healthy run.
+        import sys
+
+        print(
+            f"[TraceML] Runtime failed to start ({exc}); continuing without "
+            "tracing (no-op). Telemetry for this process will be absent.",
+            file=sys.stderr,
+        )
+        handle = RuntimeHandle(NoOpRuntime())
+        _register_active_runtime_handle(handle)
+        return handle
 
 
 __all__ = [
     "AggregatorHandle",
     "NoOpRuntime",
     "RuntimeHandle",
+    "get_active_runtime_handle",
     "start_aggregator",
     "start_runtime",
+    "wait_for_aggregator",
 ]

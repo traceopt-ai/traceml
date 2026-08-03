@@ -170,8 +170,10 @@ class PartialDiagnosisChangeRule:
         context: CompareVerdictContext,
     ) -> Optional[CompareFinding]:
         step_diag = context.diagnosis("step_time")
-        wait_state = _metric_state(context.metric("step_time", "wait_ms"))
-        if step_diag.get("changed") and wait_state != "comparable":
+        residual_state = _metric_state(
+            context.metric("step_time", "residual_ms")
+        )
+        if step_diag.get("changed") and residual_state != "comparable":
             return CompareFinding(
                 status="INCONCLUSIVE",
                 severity="info",
@@ -441,7 +443,7 @@ def build_compare_verdict(
     }
     if (
         context.diagnosis("step_time").get("changed")
-        and _metric_state(context.metric("step_time", "wait_ms"))
+        and _metric_state(context.metric("step_time", "residual_ms"))
         != "comparable"
         and comparability["step_time"]["state"] == "comparable"
     ):

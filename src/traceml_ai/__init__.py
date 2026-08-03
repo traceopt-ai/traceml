@@ -10,12 +10,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.3.1"
+try:
+    from traceml_ai._version import __version__
+except ImportError:
+    # Editable/source installs without a git-derived _version.py (e.g. a
+    # shallow checkout with no tags reachable).
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "__version__",
     "trace_step",
-    "trace_model_instance",
     "summary",
     "final_summary",
     "start",
@@ -34,7 +38,6 @@ if TYPE_CHECKING:
         init,
         start,
         summary,
-        trace_model_instance,
         trace_step,
         wrap_backward,
         wrap_dataloader_fetch,

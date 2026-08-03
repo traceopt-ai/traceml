@@ -2,6 +2,9 @@
 
 TraceML uses launch flags similar to `torchrun` and writes the same
 `final_summary.json` artifact for single-node and multi-node summary runs.
+`--html-report` additionally writes `final_summary.html`; in multi-node runs it
+is produced only on the aggregator-owner node (node 0), like the JSON/TXT
+artifacts.
 
 ## Single-node DDP/FSDP
 
@@ -11,8 +14,8 @@ Use `--nproc-per-node` for a single machine with multiple local workers:
 traceml run train.py --nproc-per-node=4
 ```
 
-Live CLI and dashboard modes are intended for single-node runs. Summary mode is
-the default and works for both single-node and multi-node summary reports.
+Summary mode is the default for single-node and multi-node runs. Use
+`--mode=cli` or `--mode=dashboard` for an explicit single-node live view.
 
 ## Multi-node DDP
 
@@ -51,6 +54,12 @@ Override that only when needed with `--aggregator-bind-host=<bind-host>`.
 
 `--session-id` remains accepted as a backward-compatible alias for
 `--run-name`.
+
+At the end of a summary run, node 0 waits for rank-finished markers, drains
+late telemetry, checkpoints SQLite, and then writes `final_summary.*`. The
+default finalization budget is 300 seconds. On slow shared filesystems or
+congested networks, increase it with `--finalize-timeout-sec <seconds>` on each
+node, or set `TRACEML_FINALIZE_TIMEOUT_SEC`.
 
 ## Running on Slurm
 

@@ -16,15 +16,6 @@ def trace_step(*args: Any, **kwargs: Any) -> Any:
     return _trace_step(*args, **kwargs)
 
 
-def trace_model_instance(*args: Any, **kwargs: Any) -> Any:
-    """Attach TraceML model hooks."""
-    from traceml_ai.sdk.instrumentation import (
-        trace_model_instance as _trace_model_instance,
-    )
-
-    return _trace_model_instance(*args, **kwargs)
-
-
 def final_summary(
     *,
     timeout_sec: float = 30.0,
@@ -107,8 +98,26 @@ def init(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    disabled: Optional[bool] = None,
+    ui_mode: Optional[str] = None,
+    interval: Optional[float] = None,
+    logs_dir: Optional[str] = None,
+    enable_logging: Optional[bool] = None,
+    session_id: Optional[str] = None,
+    aggregator_host: Optional[str] = None,
+    aggregator_port: Optional[int] = None,
+    connect_timeout_sec: float = 10.0,
+    connect_retry_interval_sec: float = 0.25,
+    on_missing_aggregator: Optional[str] = None,
 ) -> TraceMLInitConfig:
-    """Initialize TraceML instrumentation for this process."""
+    """Initialize TraceML and start its runtime for this process.
+
+    ``on_missing_aggregator`` controls what happens when the aggregator is
+    unreachable (or the runtime fails to start): ``'warn'`` (default) emits one
+    stderr warning and continues as a no-op so tracing never crashes training;
+    ``'raise'`` fails hard. Defaults to ``TRACEML_ON_MISSING_AGGREGATOR`` then
+    ``'warn'``.
+    """
     from traceml_ai.sdk.initial import init as _init
 
     return _init(
@@ -117,6 +126,17 @@ def init(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        disabled=disabled,
+        ui_mode=ui_mode,
+        interval=interval,
+        logs_dir=logs_dir,
+        enable_logging=enable_logging,
+        session_id=session_id,
+        aggregator_host=aggregator_host,
+        aggregator_port=aggregator_port,
+        connect_timeout_sec=connect_timeout_sec,
+        connect_retry_interval_sec=connect_retry_interval_sec,
+        on_missing_aggregator=on_missing_aggregator,
     )
 
 
@@ -127,6 +147,16 @@ def start(
     patch_forward: Optional[bool] = None,
     patch_backward: Optional[bool] = None,
     patch_h2d: Optional[bool] = None,
+    disabled: Optional[bool] = None,
+    ui_mode: Optional[str] = None,
+    interval: Optional[float] = None,
+    logs_dir: Optional[str] = None,
+    enable_logging: Optional[bool] = None,
+    session_id: Optional[str] = None,
+    aggregator_host: Optional[str] = None,
+    aggregator_port: Optional[int] = None,
+    connect_timeout_sec: float = 10.0,
+    connect_retry_interval_sec: float = 0.25,
 ) -> TraceMLInitConfig:
     """Alias for `traceml.init(...)`."""
     from traceml_ai.sdk.initial import start as _start
@@ -137,12 +167,21 @@ def start(
         patch_forward=patch_forward,
         patch_backward=patch_backward,
         patch_h2d=patch_h2d,
+        disabled=disabled,
+        ui_mode=ui_mode,
+        interval=interval,
+        logs_dir=logs_dir,
+        enable_logging=enable_logging,
+        session_id=session_id,
+        aggregator_host=aggregator_host,
+        aggregator_port=aggregator_port,
+        connect_timeout_sec=connect_timeout_sec,
+        connect_retry_interval_sec=connect_retry_interval_sec,
     )
 
 
 __all__ = [
     "trace_step",
-    "trace_model_instance",
     "summary",
     "final_summary",
     "start",

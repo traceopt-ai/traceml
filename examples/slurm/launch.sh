@@ -32,7 +32,7 @@ cd "${SLURM_SUBMIT_DIR:-$PWD}"
 # environment per task. Uncomment if `traceml` is not found on the workers.
 # source ~/miniconda3/bin/activate myenv
 
-exec traceml run examples/ddp_minimal.py \
+exec traceml run examples/distributed/ddp_minimal.py \
   --mode=summary \
   --run-name="${RUN_NAME}" \
   --nnodes="${SLURM_NNODES}" \

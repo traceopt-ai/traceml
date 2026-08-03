@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "traceml-ai"
-version = "0.3.1"
+dynamic = ["version"]
 
 description = "TraceML: Lightweight runtime bottleneck diagnostics for PyTorch training."
 authors = [{ name = "OptAI UG (haftungsbeschränkt)", email = "support@traceopt.ai" }]
@@ -9,21 +13,50 @@ readme = "README.md"
 license = { text = "Apache 2.0" }
 requires-python = ">=3.10"
 
+keywords = [
+    "pytorch",
+    "profiler",
+    "gpu",
+    "training",
+    "bottleneck",
+    "cuda",
+    "dataloader",
+    "observability",
+    "machine-learning",
+    "deep-learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: GPU :: NVIDIA CUDA",
+]
+
 
 # Runtime dependencies
 dependencies = [
     "rich>=12.0.0",
     "psutil>=5.0.0",
     "nvidia-ml-py",
-    "numpy<2",
+    "numpy>=1.26",
     "msgspec",
+    "pyyaml>=6.0",
+    # Floor: the dashboard display driver calls ui.context, added in
+    # nicegui 1.4.23. Older nicegui imports fine and then raises
+    # AttributeError at runtime.
+    "nicegui>=1.4.23",
 ]
 
 [project.optional-dependencies]
 
 dashboard = [
-    "nicegui",
-    "plotly",
+    "nicegui>=1.4.23",
 ]
 
 torch = [
@@ -42,6 +75,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "datasets",
     "transformers",
+    'tomli; python_version < "3.11"',
 ]
 
 hf = [
@@ -55,6 +89,10 @@ lightning = [
 
 ray = [
     "ray[train]>=2.0.0",
+]
+
+deepspeed = [
+    "deepspeed>=0.10.0",
 ]
 
 docs = [
@@ -85,3 +123,14 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+# Offline-bundled dashboard fonts must ship in the wheel (served at runtime by
+# the NiceGUI driver); without this they fall back to the system font stack.
+traceml_ai = ["aggregator/display_drivers/assets/fonts/*.woff2"]
+
+[tool.setuptools_scm]
+# Version is derived from the nearest git tag (e.g. v0.3.4) instead of a
+# hand-maintained string, so a release tag and the built package can no
+# longer drift apart. Written to a generated file read by __init__.py.
+version_file = "src/traceml_ai/_version.py"

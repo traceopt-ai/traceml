@@ -6,7 +6,6 @@ from traceml_ai.diagnostics.common import (
     DiagnosticResult,
     diagnosis_to_issue,
     ensure_primary_issue,
-    sort_issues,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
@@ -137,39 +136,3 @@ def test_diagnostic_result_json_uses_first_issue_as_diagnosis() -> None:
 
     assert diagnosis == issues[0]
     assert diagnosis["kind"] == "HIGH_CPU"
-
-
-def test_sort_issues_orders_by_severity_score_and_rank_breadth() -> None:
-    low = DiagnosticIssue(
-        kind="LOW",
-        status="LOW",
-        severity="info",
-        summary="low",
-        action="none",
-        score=1.0,
-        ranks=(0, 1),
-    )
-    high_low_score = DiagnosticIssue(
-        kind="HIGH_LOW_SCORE",
-        status="HIGH LOW SCORE",
-        severity="crit",
-        summary="high",
-        action="none",
-        score=0.1,
-        ranks=(0,),
-    )
-    high_high_score = DiagnosticIssue(
-        kind="HIGH_HIGH_SCORE",
-        status="HIGH HIGH SCORE",
-        severity="crit",
-        summary="high",
-        action="none",
-        score=0.9,
-        ranks=(0,),
-    )
-
-    assert sort_issues((low, high_low_score, high_high_score)) == (
-        high_high_score,
-        high_low_score,
-        low,
-    )

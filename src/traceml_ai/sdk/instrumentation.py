@@ -20,22 +20,10 @@ import functools
 import os
 import sys
 from contextlib import contextmanager
-from typing import Callable, List, Optional
+from typing import Callable
 
 import torch.nn as nn
 
-from traceml_ai.instrumentation.hooks.layer_backward_memory_hooks import (
-    attach_layer_backward_memory_hooks,
-)
-from traceml_ai.instrumentation.hooks.layer_backward_time_hooks import (
-    attach_layer_backward_time_hooks,
-)
-from traceml_ai.instrumentation.hooks.layer_forward_memory_hooks import (
-    attach_layer_forward_memory_hooks,
-)
-from traceml_ai.instrumentation.hooks.layer_forward_time_hooks import (
-    attach_layer_forward_time_hooks,
-)
 from traceml_ai.instrumentation.hooks.optimizer_hooks import (
     ensure_optimizer_timing_installed,
 )
@@ -48,17 +36,17 @@ from traceml_ai.instrumentation.patches.forward_auto_timer_patch import (
 from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (
     h2d_auto_timer,
 )
+from traceml_ai.runtime.environment import detect_runtime_environment
+from traceml_ai.runtime.environment_state import (
+    has_runtime_environment_info,
+    publish_runtime_environment_once,
+)
 from traceml_ai.runtime.state import (
     TraceSessionState,
     get_trace_session_state,
     mark_trace_step_flushed,
 )
-from traceml_ai.utils.entry_hook import attach_execution_entry_hooks
 from traceml_ai.utils.flush_buffers import flush_step_events
-from traceml_ai.utils.layer_parameter_memory import (
-    collect_layer_parameter_memory,
-    model_queue,
-)
 from traceml_ai.utils.step_memory import StepMemoryTracker
 from traceml_ai.utils.timing import timed_region
 
@@ -86,10 +74,6 @@ def _log_instrumentation_error(message: str, exc: Exception) -> None:
 
 def _traceml_disabled() -> bool:
     return os.environ.get("TRACEML_DISABLED", "0") == "1"
-
-
-def _traceml_profile() -> str:
-    return (os.environ.get("TRACEML_PROFILE", "run") or "run").strip().lower()
 
 
 def _should_auto_install_optimizer_timing() -> bool:
@@ -120,6 +104,14 @@ def _should_auto_install_optimizer_timing() -> bool:
         return False
 
     return getattr(cfg, "mode", "auto") == "auto"
+
+
+def _publish_runtime_environment(model: nn.Module) -> None:
+    """Queue rank-scoped runtime environment info once, fail-open."""
+    if has_runtime_environment_info():
+        return
+    info = detect_runtime_environment(model)
+    publish_runtime_environment_once(info)
 
 
 class _TraceStateMeta(type):
@@ -165,6 +157,11 @@ def trace_step(model: nn.Module):
         yield
         return
 
+    try:
+        _publish_runtime_environment(model)
+    except Exception as exc:
+        _log_instrumentation_error("runtime environment detection failed", exc)
+
     trace_state = get_trace_session_state()
     mem_tracker = StepMemoryTracker(model)
     step_completed = False
@@ -176,7 +173,9 @@ def trace_step(model: nn.Module):
 
     try:
         with timed_region(
-            "_traceml_internal:step_time", scope="step", use_gpu=False
+            "_traceml_internal:step_time",
+            scope="step",
+            record_gpu_events=True,
         ):
             with (
                 forward_auto_timer(model),
@@ -210,85 +209,10 @@ def trace_step(model: nn.Module):
                 )
 
 
-def trace_model_instance(
-    model: nn.Module,
-    sample_layer_memory: bool = True,
-    trace_layer_forward_memory: bool = True,
-    trace_layer_backward_memory: bool = True,
-    trace_layer_forward_time: bool = True,
-    trace_layer_backward_time: bool = True,
-    trace_execution: bool = True,
-    include_names: Optional[List[str]] = None,
-    exclude_names: Optional[List[str]] = None,
-    leaf_only: bool = True,
-) -> None:
-    """
-    Manually trace a PyTorch model instance.
-
-    This is primarily used by the deep profile and integration layers for
-    model-level hook attachment. It is independent of the automatic patch
-    policy configured by `traceml.init(...)`.
-    """
-    if _traceml_disabled() or _traceml_profile() != "deep":
-        return
-
-    try:
-        if not isinstance(model, nn.Module):
-            raise TypeError("trace_model_instance expects an nn.Module.")
-
-        if sample_layer_memory:
-            model._traceml_include_names = include_names
-            model._traceml_exclude_names = exclude_names
-            model._traceml_leaf_only = leaf_only
-            layer_memory = collect_layer_parameter_memory(model)
-            model_queue.put(layer_memory)
-
-        if trace_layer_forward_memory:
-            attach_layer_forward_memory_hooks(
-                model,
-                include_names=include_names,
-                exclude_names=exclude_names,
-                leaf_only=leaf_only,
-            )
-
-        if trace_layer_backward_memory:
-            attach_layer_backward_memory_hooks(
-                model,
-                include_names=include_names,
-                exclude_names=exclude_names,
-                leaf_only=leaf_only,
-            )
-
-        if trace_layer_forward_time:
-            attach_layer_forward_time_hooks(
-                model,
-                include_names=include_names,
-                exclude_names=exclude_names,
-                leaf_only=leaf_only,
-            )
-
-        if trace_layer_backward_time:
-            attach_layer_backward_time_hooks(
-                model,
-                include_names=include_names,
-                exclude_names=exclude_names,
-                leaf_only=leaf_only,
-            )
-
-        if trace_execution:
-            attach_execution_entry_hooks(model)
-
-    except Exception as exc:
-        _log_instrumentation_error(
-            "Failed to trace model instance",
-            exc,
-        )
-
-
 def trace_time(
     name: str,
     scope: str = "global",
-    use_gpu: bool = True,
+    record_gpu_events: bool = True,
 ) -> Callable:
     """
     Decorator to time a function.
@@ -301,8 +225,8 @@ def trace_time(
         Semantic scope of this timing:
         - "step": attributed to the current training step
         - "global": not step-attributed
-    use_gpu:
-        If True, record CUDA timing when available.
+    record_gpu_events:
+        If True, record PyTorch CUDA stream events when available.
     """
     if _traceml_disabled():
         return lambda func: func
@@ -315,7 +239,11 @@ def trace_time(
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            with timed_region(name, scope=scope, use_gpu=use_gpu):
+            with timed_region(
+                name,
+                scope=scope,
+                record_gpu_events=record_gpu_events,
+            ):
                 return func(*args, **kwargs)
 
         return wrapper
@@ -328,6 +256,5 @@ __all__ = [
     "TraceSessionState",
     "get_trace_session_state",
     "trace_step",
-    "trace_model_instance",
     "trace_time",
 ]

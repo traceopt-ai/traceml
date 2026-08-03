@@ -27,7 +27,7 @@ TEXT_METRIC_ORDER_BY_SECTION: Dict[str, tuple[str, ...]] = {
         "input_ms",
         "h2d_ms",
         "compute_ms",
-        "wait_ms",
+        "residual_ms",
     ),
     "step_memory": (
         "peak_reserved_bytes",
@@ -196,6 +196,21 @@ def _append_wrapped_card_line(lines: List[str], text: str) -> None:
         _append_card_line(lines, wrapped)
 
 
+def _format_primary_diagnosis(overview: Dict[str, Any]) -> Optional[str]:
+    """Return the run-level primary diagnosis comparison line."""
+    primary = overview.get("primary_diagnosis")
+    if not isinstance(primary, dict):
+        return None
+    lhs_raw = primary.get("lhs")
+    rhs_raw = primary.get("rhs")
+    if lhs_raw is None and rhs_raw is None:
+        return None
+    lhs = lhs_raw or "n/a"
+    rhs = rhs_raw or "n/a"
+    delta = "changed" if primary.get("changed") else "same"
+    return f"Primary diagnosis: {lhs} -> {rhs} ({delta})"
+
+
 class CompareTextFormatter(Formatter[Dict[str, Any], str]):
     """Render compare JSON as a compact table."""
 
@@ -204,6 +219,7 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
     def format(self, payload: Dict[str, Any]) -> str:
         lhs = payload.get("lhs", {})
         rhs = payload.get("rhs", {})
+        overview = payload.get("overview", {})
         verdict = payload.get("verdict", {})
         sections = payload.get("sections", {})
 
@@ -217,6 +233,11 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
         _append_wrapped_card_line(lines, f"A: {lhs.get('label', 'A')}")
         _append_wrapped_card_line(lines, f"B: {rhs.get('label', 'B')}")
         _append_card_line(lines, "Delta: B - A")
+
+        primary_line = _format_primary_diagnosis(overview)
+        if primary_line:
+            _append_wrapped_card_line(lines, primary_line)
+
         _append_card_line(lines)
         _append_wrapped_card_line(
             lines,
@@ -251,16 +272,21 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
         return "\n".join(lines)
 
     def _notes(self, payload: Dict[str, Any]) -> list[str]:
+        notes = [
+            str(warning)
+            for warning in payload.get("warnings", ())
+            if str(warning).strip()
+        ]
         verdict = payload.get("verdict", {})
         comparability = verdict.get("comparability", {})
         overall = comparability.get("overall", {})
         state = overall.get("state")
         if state in {"partial", "insufficient"}:
-            return [
+            notes.append(
                 overall.get("reason")
                 or "Some primary compare signals are missing."
-            ]
-        return []
+            )
+        return notes
 
 
 __all__ = ["CompareTextFormatter"]

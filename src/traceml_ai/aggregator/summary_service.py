@@ -37,6 +37,7 @@ class FinalSummaryService:
         flush_history: Callable[[float], bool],
         settle_telemetry: Optional[Callable[[float], bool]] = None,
         summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS,
+        write_html: bool = False,
     ) -> None:
         self._logger = logger
         self._session_root = Path(session_root).resolve()
@@ -44,6 +45,7 @@ class FinalSummaryService:
         self._flush_history = flush_history
         self._settle_telemetry = settle_telemetry
         self._summary_window_rows = int(summary_window_rows)
+        self._write_html = bool(write_html)
         self._last_request_id: Optional[str] = None
 
     def poll(self) -> None:
@@ -84,6 +86,7 @@ class FinalSummaryService:
                 session_root=str(self._session_root),
                 print_to_stdout=False,
                 summary_window_rows=self._summary_window_rows,
+                write_html=self._write_html,
             )
 
             self._write_ok_response(response_path, request_id=request_id)

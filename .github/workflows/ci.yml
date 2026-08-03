@@ -2,18 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'version_*']
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - '.gitignore'
   pull_request:
-    branches: [main]
+    branches: [main, 'version_*']
     paths-ignore:
       - 'docs/**'
       - '*.md'
       - '.gitignore'
   workflow_dispatch:
+  schedule:
+    # Weekly early warning that the newest published dependencies still work.
+    - cron: '0 6 * * 1'
 
 concurrency:
   group: ci-${{ github.head_ref || github.run_id }}
@@ -57,17 +60,40 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pytest
+          # tomli backports tomllib to 3.10 for the packaging guard.
+          pip install pytest 'tomli; python_version < "3.11"'
       - name: Run core tests
         run: |
           pytest \
             tests/core \
+            tests/step_time \
             tests/diagnostics/test_bands.py \
             tests/diagnostics/test_common.py \
+            tests/diagnostics/test_step_time.py \
+            tests/diagnostics/test_step_time_missing_signals.py \
             tests/telemetry/test_distributed.py \
             tests/telemetry/test_msgpack.py \
             tests/telemetry/test_sender_sequence.py \
             -q
+
+  test-windows-teardown:
+    name: Windows Process Teardown
+    # The process-group teardown path is platform-specific and cannot be
+    # exercised on Linux, where the POSIX branch always wins. This is the
+    # only leg that proves a grandchild is actually reaped on Windows.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest
+      - name: Run process teardown tests
+        run: pytest tests/runtime/test_process_group_teardown.py -q
 
   test-integration:
     name: Integration Smoke Tests
@@ -81,7 +107,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[torch]"
+          pip install -e ".[torch,dashboard]"
           pip install pytest
       - name: Run integration tests
         run: |
@@ -89,4 +115,100 @@ jobs:
             tests/runtime/test_sampler_registry.py \
             tests/runtime/test_telemetry_publisher.py \
             tests/reporting/compare \
+            tests/reporting/html \
+            tests/reporting/summary \
+            tests/renderers \
+            tests/display \
             -q
+
+  test-latest-deps:
+    name: Latest Dependencies (early warning)
+    # Not a pull-request gate. A brand new release of a dependency must not
+    # block contributors, but we want to hear about it before users do.
+    #
+    # Deliberately runs without setup-python's pip cache. The cache once
+    # held a locally source-built numpy-1.26.4-cp313-cp313-linux_x86_64
+    # wheel, which kept the `numpy<2` cap green on Python 3.13 in CI long
+    # after it had become uninstallable for anyone starting from a clean
+    # environment (issue #263). A resolution check must resolve for real.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # This job resolves and builds dependency versions that did not exist
+    # when the commit was written, so it executes third-party build code by
+    # design. Give it read-only scope and keep the checkout token out of the
+    # git config that build code could read.
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install with the newest resolvable dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir --upgrade --upgrade-strategy eager \
+            -e ".[torch]"
+          # tomli backports tomllib to 3.10 for the packaging guard.
+          pip install pytest 'tomli; python_version < "3.11"'
+      - name: Report the resolved environment
+        run: pip list
+      - name: Run core tests
+        run: |
+          pytest \
+            tests/core \
+            tests/diagnostics/test_bands.py \
+            tests/diagnostics/test_common.py \
+            tests/telemetry/test_distributed.py \
+            tests/telemetry/test_msgpack.py \
+            tests/telemetry/test_sender_sequence.py \
+            -q
+
+  smoke-test-install:
+    name: Clean-install Smoke Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel
+      - name: Install the built wheel into a clean environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv smoke-env
+          # venv writes console scripts to Scripts/ on Windows, bin/ elsewhere.
+          bindir=smoke-env/Scripts
+          [ -d "$bindir" ] || bindir=smoke-env/bin
+          echo "SMOKE_BIN=$bindir" >> "$GITHUB_ENV"
+          "$bindir/python" -m pip install --upgrade pip
+          "$bindir/python" -m pip install dist/*.whl
+      - name: Assert documented CLI surface is installed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Redirect instead of piping into grep: grep -q closes the pipe on
+          # first match, which makes the launcher exit non-zero and would hide
+          # its real status. set -e then catches a launcher that cannot start.
+          "$SMOKE_BIN/traceml" --help > root-help.txt
+          "$SMOKE_BIN/traceml" run --help > run-help.txt
+          grep -q 'view' root-help.txt || \
+            (echo "::error::traceml --help is missing the documented 'view' subcommand" && exit 1)
+          grep -q 'html-report' run-help.txt || \
+            (echo "::error::traceml run --help is missing the documented '--html-report' flag" && exit 1)

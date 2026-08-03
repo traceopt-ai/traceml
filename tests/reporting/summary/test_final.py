@@ -19,9 +19,8 @@ class _StaticSection:
     duration_s: float | None = None
 
     def build(self, db_path: str) -> SummaryResult:
-        payload = {
-            "card": f"TraceML {self.name.replace('_', ' ').title()} Summary\n- Status: OK"
-        }
+        title = self.name.replace("_", " ").title()
+        payload = {"card": f"TraceML {title} Summary\n- Status: OK"}
         if self.duration_s is not None:
             payload["duration_s"] = self.duration_s
         return SummaryResult(
@@ -39,8 +38,71 @@ class _BrokenSection:
         raise RuntimeError("section failed")
 
 
+@dataclass(frozen=True)
+class _PayloadSection:
+    name: str
+    payload: dict
+
+    def build(self, db_path: str) -> SummaryResult:
+        return SummaryResult(
+            section=self.name,
+            payload=self.payload,
+            text=str(self.payload.get("card", "")),
+        )
+
+
 def _generator(*sections) -> FinalReportGenerator:
     return FinalReportGenerator(sections=sections)
+
+
+def _diagnosis(
+    kind: str,
+    status: str,
+    *,
+    severity: str = "info",
+    summary: str = "summary",
+    action: str = "action",
+    phase: str | None = None,
+) -> dict:
+    return {
+        "kind": kind,
+        "status": status,
+        "severity": severity,
+        "summary": summary,
+        "action": action,
+        "phase": phase,
+    }
+
+
+def _payload(
+    *,
+    metadata: dict,
+    diagnosis: dict,
+    global_summary: dict | None = None,
+    groups: dict | None = None,
+    card: str = "ORIGINAL SECTION CARD",
+) -> dict:
+    return {
+        "metadata": metadata,
+        "diagnosis": diagnosis,
+        "issues": [diagnosis],
+        "global": global_summary or {},
+        "groups": groups or {"by": "global_rank", "rows": {}},
+        "units": {},
+        "card": card,
+    }
+
+
+def _point(value: float, idx: int) -> dict:
+    return {"value": value, "idx": str(idx)}
+
+
+def _status_payload(status: str) -> dict:
+    return _payload(
+        metadata={},
+        diagnosis=_diagnosis(status, status),
+        card=f"{status} SECTION CARD",
+    )
 
 
 def test_final_report_generator_preserves_summary_schema_and_order():
@@ -54,13 +116,14 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.4
+    assert payload["schema_version"] == 1.7
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
         "generated_at",
         "duration_s",
         "meta",
+        "primary_diagnosis",
         "system",
         "process",
         "step_time",
@@ -74,9 +137,14 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         "nodes_observed": None,
         "gpus_observed": None,
     }
+    assert payload["primary_diagnosis"]["kind"] == (
+        "INSUFFICIENT_STEP_TIME_DATA"
+    )
     assert "TraceML Run Summary | duration 10.0s" in payload["text"]
-    assert "System" in payload["text"]
-    assert "Step Memory" in payload["text"]
+    assert "TraceML Verdict:" in payload["text"]
+    assert "Section Status" in payload["text"]
+    assert "System Evidence" in payload["text"]
+    assert "Step Time Evidence" in payload["text"]
 
 
 def test_final_report_generator_fails_open_for_one_section():
@@ -99,7 +167,320 @@ def test_final_report_generator_fails_open_for_one_section():
         "rows": {},
     }
     assert payload["process"]["units"] == {}
+    assert payload["primary_diagnosis"]["kind"] == (
+        "INSUFFICIENT_STEP_TIME_DATA"
+    )
     assert "Process" in payload["text"]
+
+
+def test_final_text_uses_single_process_average_layout():
+    step_diag = _diagnosis(
+        "INPUT_BOUND",
+        "INPUT-BOUND",
+        severity="crit",
+        summary="Input wait is 48.5% of the typical GPU iteration time.",
+        action="Increase workers, prefetch, or storage throughput.",
+    )
+    step_time = _payload(
+        metadata={"global_ranks_used": 1},
+        diagnosis=step_diag,
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
+            "average": {
+                "total_step_ms": 139.1,
+                "dataloader_ms": 120.0,
+                "input_wait_ms": 130.8,
+                "step_time_ms": 139.1,
+                "compute_ms": 6.9,
+                "residual_ms": 1.3,
+                "h2d_ms": 0.2,
+            },
+        },
+        card="STEP TIME ORIGINAL CARD",
+    )
+    system = _payload(
+        metadata={"mode": "single_node", "gpus_observed": 1},
+        diagnosis=_diagnosis("LOW_GPU_UTILIZATION", "LOW GPU UTIL"),
+        global_summary={
+            "average": {
+                "cpu_percent": 18.4,
+                "gpu_util_percent": 0.0,
+                "gpu_mem_bytes": 570_000_000.0,
+                "gpu_temp_c": 30.0,
+            }
+        },
+        groups={"by": "node_rank", "rows": {}},
+        card="SYSTEM ORIGINAL CARD",
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", system),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+    text = payload["text"]
+    assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
+    assert (
+        "Why: Input wait is 48.5% of the typical GPU iteration time." in text
+    )
+    assert "Next: Increase workers, prefetch, or storage throughput." in text
+    assert "System Evidence" in text
+    assert "Metric            Average" in text
+    assert "Step Time Evidence" in text
+    assert "Phase             Average           Share" in text
+    assert "Total             139.1ms           compat" in text
+    assert "Input Wait        130.8ms           48.5%" in text
+    assert "Dataloader        120.0ms           compat" in text
+    assert "Step Time         139.1ms           51.5%" in text
+    assert "Median" not in text
+    assert "Worst" not in text
+    assert "Skew" not in text
+    assert "rank=r" not in text
+    assert "node=n" not in text
+    assert payload["step_time"]["card"] == "STEP TIME ORIGINAL CARD"
+    assert payload["system"]["card"] == "SYSTEM ORIGINAL CARD"
+
+
+def test_final_text_renders_missing_step_metrics_as_na():
+    step_diag = _diagnosis(
+        "INCOMPLETE_DATA",
+        "INCOMPLETE DATA",
+        summary="Missing timing signals prevent a reliable diagnosis: h2d.",
+        action="Instrument the missing phases.",
+    )
+    step_time = _payload(
+        metadata={"global_ranks_used": 1},
+        diagnosis=step_diag,
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "cpu"},
+            "average": {
+                "total_step_ms": 139.1,
+                "dataloader_ms": 120.0,
+                "input_wait_ms": 130.8,
+                "step_time_ms": 139.1,
+                "compute_ms": None,
+                "residual_ms": None,
+                "h2d_ms": None,
+            },
+        },
+        card="STEP TIME ORIGINAL CARD",
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", _status_payload("NORMAL")),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+    text = payload["text"]
+    lines = text.splitlines()
+
+    def _evidence_row(label: str) -> str:
+        for line in lines:
+            if label in line:
+                return line
+        raise AssertionError(f"no evidence row for {label}")
+
+    # A never-measured metric renders n/a; measured metrics keep values.
+    assert "n/a" in _evidence_row("H2D")
+    assert "n/a" in _evidence_row("Compute")
+    assert "n/a" in _evidence_row("Residual")
+    assert "130.8ms" in _evidence_row("Input Wait")
+
+
+def test_final_text_uses_selected_step_time_for_phase_shares():
+    step_time = _payload(
+        metadata={"global_ranks_used": 1},
+        diagnosis=_diagnosis("COMPUTE_BOUND", "COMPUTE-BOUND"),
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
+            "average": {
+                "total_step_ms": 10.5,
+                "dataloader_ms": 0.5,
+                "input_wait_ms": 2.0,
+                "step_time_ms": 50.0,
+                "compute_ms": 48.0,
+                "residual_ms": 1.0,
+                "h2d_ms": 1.0,
+            },
+        },
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", _status_payload("NORMAL")),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+    text = payload["text"]
+    assert "Total             10.5ms            compat" in text
+    assert "Dataloader        0.5ms             compat" in text
+    assert "Step Time         50.0ms            96.2%" in text
+    assert "Compute           48.0ms            92.3%" in text
+    assert "457.1%" not in text
+    assert "476.2%" not in text
+
+
+def test_final_text_includes_h2d_bound_diagnosis():
+    step_time = _payload(
+        metadata={"global_ranks_used": 1},
+        diagnosis=_diagnosis(
+            "H2D_BOUND",
+            "H2D-BOUND",
+            severity="crit",
+            summary="H2D transfer is 14.3% of the typical GPU iteration time.",
+            action="Inspect pinned memory and batch transfers.",
+        ),
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
+            "average": {
+                "total_step_ms": 150.0,
+                "dataloader_ms": 40.0,
+                "input_wait_ms": 40.0,
+                "step_time_ms": 100.0,
+                "h2d_ms": 20.0,
+                "compute_ms": 70.0,
+                "residual_ms": 10.0,
+            },
+        },
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", _status_payload("NORMAL")),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+    assert "TraceML Verdict: H2D-BOUND / CRITICAL" in payload["text"]
+    assert "Why: H2D transfer is 14.3% of the typical GPU iteration time." in (
+        payload["text"]
+    )
+
+
+def test_final_text_uses_multi_process_comparison_layout():
+    step_diag = _diagnosis(
+        "INPUT_STRAGGLER",
+        "INPUT STRAGGLER",
+        severity="crit",
+        summary=(
+            "r0 has excess input wait burden relative to victim r1 "
+            "(~82.6% impact; ~100.0% of visible wait cost)."
+        ),
+        phase="input",
+        action=(
+            "Inspect input wait, collate_fn, preprocessing, and storage "
+            "on the slow rank."
+        ),
+    )
+    step_time = _payload(
+        metadata={"global_ranks_used": 2},
+        diagnosis=step_diag,
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
+            "median": {
+                "total_step_ms": _point(303.7, 1),
+                "dataloader_ms": _point(3.8, 1),
+                "input_wait_ms": _point(13.8, 1),
+                "step_time_ms": _point(299.9, 1),
+                "compute_ms": _point(259.5, 1),
+                "residual_ms": _point(40.5, 1),
+                "h2d_ms": _point(0.2, 1),
+            },
+            "worst": {
+                "total_step_ms": _point(304.1, 0),
+                "dataloader_ms": _point(254.5, 0),
+                "input_wait_ms": _point(264.5, 0),
+                "step_time_ms": _point(49.6, 0),
+                "compute_ms": _point(261.0, 0),
+                "residual_ms": _point(42.1, 0),
+                "h2d_ms": _point(0.4, 0),
+            },
+        },
+        groups={
+            "by": "global_rank",
+            "rows": {
+                "0": {
+                    "identity": {"global_rank": 0, "node_rank": 0},
+                    "metrics": {},
+                },
+                "1": {
+                    "identity": {"global_rank": 1, "node_rank": 1},
+                    "metrics": {},
+                },
+            },
+        },
+    )
+    system = _payload(
+        metadata={"mode": "multi_node", "nodes_observed": 2},
+        diagnosis=_diagnosis("LOW_GPU_UTILIZATION", "LOW GPU UTIL"),
+        global_summary={
+            "median": {
+                "cpu_percent": _point(18.4, 0),
+                "gpu_util_percent": _point(14.0, 0),
+                "gpu_mem_bytes": _point(6_200_000_000.0, 0),
+                "gpu_temp_c": _point(42.0, 0),
+            },
+            "worst": {
+                "cpu_percent": _point(71.2, 1),
+                "gpu_util_percent": _point(0.0, 0),
+                "gpu_mem_bytes": _point(8_900_000_000.0, 1),
+                "gpu_temp_c": _point(58.0, 1),
+            },
+        },
+        groups={
+            "by": "node_rank",
+            "rows": {
+                "0": {"identity": {"node_rank": 0}, "metrics": {}},
+                "1": {"identity": {"node_rank": 1}, "metrics": {}},
+            },
+        },
+    )
+
+    payload = build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", system),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+    text = payload["text"]
+    assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text
+    assert payload["primary_diagnosis"]["summary"] == (
+        "r0 has excess input wait burden relative to victim r1 "
+        "(~82.6% impact; ~100.0% of visible wait cost)."
+    )
+    assert "Why: r0 has excess input wait burden relative to victim r1" in text
+    assert (
+        "Metric          Median        Worst         Skew        Scope" in text
+    )
+    assert "GPU Util        14.0%         0.0%          14.0pp" in text
+    assert "node=n1" in text
+    assert (
+        "Phase           Median        Worst         Skew        Scope" in text
+    )
+    assert "Input Wait      13.8ms        264.5ms       1816.7%" in text
+    assert "rank=r0 node=n0" in text
+    assert "Average" not in text
 
 
 def test_reporting_final_is_the_summary_orchestration_owner():

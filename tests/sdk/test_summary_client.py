@@ -8,6 +8,7 @@ from traceml_ai.sdk.protocol import (
     get_final_summary_json_path,
     get_final_summary_request_path,
     get_final_summary_txt_path,
+    resolve_session_context_from_env,
 )
 
 
@@ -16,6 +17,14 @@ def _configure_session(monkeypatch, tmp_path):
     monkeypatch.setenv("TRACEML_LOGS_DIR", str(tmp_path))
     monkeypatch.setenv("TRACEML_HISTORY_ENABLED", "1")
     return tmp_path / "run-a"
+
+
+def test_session_context_defaults_to_summary(monkeypatch, tmp_path):
+    _configure_session(monkeypatch, tmp_path)
+    monkeypatch.delenv("TRACEML_UI_MODE", raising=False)
+    monkeypatch.delenv("TRACEML_MODE", raising=False)
+
+    assert resolve_session_context_from_env().mode == "summary"
 
 
 def test_final_summary_reuses_existing_artifact_without_request(
@@ -68,6 +77,12 @@ def test_summary_projects_existing_final_payload(monkeypatch, tmp_path):
             {
                 "schema_version": "1",
                 "duration_s": 3.0,
+                "primary_diagnosis": {
+                    "kind": "NO_CLEAR_PERFORMANCE_BOTTLENECK",
+                    "status": "NO CLEAR PERFORMANCE BOTTLENECK",
+                    "severity": "info",
+                    "section": "step_time",
+                },
                 "system": {
                     "diagnosis": {
                         "status": "NORMAL",
@@ -89,6 +104,10 @@ def test_summary_projects_existing_final_payload(monkeypatch, tmp_path):
     assert result == {
         "traceml/schema_version": "1",
         "traceml/duration_s": 3.0,
+        "traceml/primary/kind": "NO_CLEAR_PERFORMANCE_BOTTLENECK",
+        "traceml/primary/status": "NO CLEAR PERFORMANCE BOTTLENECK",
+        "traceml/primary/severity": "info",
+        "traceml/primary/section": "step_time",
         "traceml/system/status": "NORMAL",
         "traceml/system/severity": "ok",
         "traceml/system/cpu_percent": 22.0,

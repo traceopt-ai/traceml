@@ -1,0 +1,44 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: >-
+  TraceML instruments PyTorch training in-process. Flag anything that could
+  block the training thread, raise instead of degrading, or swallow a user
+  exception. Be direct and specific; skip generic praise.
+
+reviews:
+  profile: chill
+  high_level_summary: true
+  poem: false
+
+  path_filters:
+    - "!uv.lock"
+    - "!docs/assets/**"
+    - "!**/*.ipynb"
+
+  path_instructions:
+    - path: "src/**/*.py"
+      instructions: |
+        This is instrumentation code that runs inside a user's training loop.
+        Check that:
+        - Any code that touches torch internals or I/O is wrapped in
+          try/except, reports via sys.stderr with a "[TraceML]" prefix, and
+          never blocks or raises into the user's training process.
+        - Changes to the wire format or the final_summary schema keep
+          backward compatibility or come with a migration note.
+
+  tools:
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    markdownlint:
+      enabled: true
+    gitleaks:
+      enabled: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+chat:
+  auto_reply: true

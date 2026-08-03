@@ -205,11 +205,6 @@ def main():
     ).to(device)
 
     # --------------------------------------------------------
-    # TraceML: attach hooks to the *real* model
-    # --------------------------------------------------------
-    # Do this BEFORE wrapping with DistributedDataParallel
-    traceml.trace_model_instance(model)
-
     # Wrap model with DDP
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(

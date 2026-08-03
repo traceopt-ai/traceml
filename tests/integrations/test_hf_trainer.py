@@ -3,29 +3,25 @@ from pathlib import Path
 
 import pytest
 
-from traceml_ai.integrations.huggingface import (
+torch = pytest.importorskip("torch")
+pytest.importorskip("transformers")
+pytest.importorskip("accelerate")
+
+from transformers import (  # noqa: E402
+    BertConfig,
+    BertForSequenceClassification,
+    Trainer,
+    TrainingArguments,
+)
+
+from traceml_ai.integrations.huggingface import (  # noqa: E402
     TraceMLTrainer,
     TraceMLTrainerCallback,
     init,
 )
 
-try:
-    import torch
-    from transformers import (
-        BertConfig,
-        BertForSequenceClassification,
-        Trainer,
-        TrainingArguments,
-    )
 
-    HAS_TRANSFORMERS = True
-except ImportError:
-    HAS_TRANSFORMERS = False
-
-
-class _TinyTokenizedDataset(
-    torch.utils.data.Dataset if HAS_TRANSFORMERS else object
-):
+class _TinyTokenizedDataset(torch.utils.data.Dataset):
     """
     Small synthetic dataset for Trainer integration tests.
 
@@ -131,8 +127,11 @@ def _drain_step_time_queue() -> list:
 def _reset_traceml_state() -> None:
     """Reset TraceML's process-local step counter and drain shared queues."""
     from traceml_ai.runtime.state import reset_trace_session_state
+    from traceml_ai.utils import timing
 
     reset_trace_session_state()
+    # Unflushed step events from a previous test would land in our first batch.
+    timing._STEP_BUFFER.clear()
     _drain_step_time_queue()
     # Drain any leftover step-memory events. We don't filter by model_id here
     # because we want a clean slate; older tests' events would otherwise leak
@@ -146,7 +145,6 @@ def _reset_traceml_state() -> None:
             break
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_integration():
     """
     Test that TraceMLTrainer (legacy thin-wrapper path) runs a few steps with
@@ -172,7 +170,6 @@ def test_hf_trainer_integration():
         assert TraceState.step >= 5, "TraceState.step should have incremented"
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_callback_integration():
     """
     Vanilla transformers.Trainer with TraceMLTrainerCallback should emit
@@ -212,7 +209,7 @@ def test_hf_trainer_callback_integration():
 
 
 @pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
-def test_hf_trainer_callback_grad_accum_folds_microbatches():
+def test_hf_trainer_callback_grad_accum_folds_microbatches(monkeypatch):
     """
     With gradient_accumulation_steps=2 and max_steps=3, the callback should
     advance the TraceML step counter exactly 3 times (one TraceML step per
@@ -220,7 +217,24 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches():
     events, validating that sub-phase auto-timers stay armed across the
     accumulated micro-batches within a single trace_step bracket.
     """
+    # The forward/backward auto-timers this test counts are no-ops unless
+    # the process-wide patches are installed; init() is the documented
+    # path and idempotent, so the test passes regardless of test order.
+    init()
     _reset_traceml_state()
+
+    # This test verifies callback step semantics, not runtime startup. Stub
+    # the bootstrap so init() installs its patches without reaching an
+    # aggregator. Otherwise the connect times out, init() fails open to a
+    # disabled no-op, and TRACEML_DISABLED=1 leaks to every later test.
+    import traceml_ai.sdk.initial as initialization
+
+    monkeypatch.setattr(
+        initialization, "_start_runtime_for_init", lambda **kwargs: None
+    )
+
+    # Auto-timers trace_step arms are no-ops until init() installs the patches.
+    init()
     max_steps = 3
     grad_accum = 2
 
@@ -293,7 +307,6 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches():
         )
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_wrapper_equivalent_to_direct_callback():
     """
     TraceMLTrainer is now a thin wrapper that auto-installs
@@ -347,7 +360,6 @@ def test_hf_trainer_wrapper_equivalent_to_direct_callback():
     assert wrapper_samples == max_steps
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_wrapper_dedups_user_supplied_callback():
     """
     If a user passes their own TraceMLTrainerCallback in callbacks=[...] and
@@ -393,7 +405,6 @@ def test_hf_trainer_wrapper_dedups_user_supplied_callback():
         )
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
 def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
     """
     With TRACEML_DISABLED=1 set after import, the callback must be a complete
@@ -437,8 +448,7 @@ def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
         ), f"Expected no StepMemoryEvents when disabled, got {len(drained)}."
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
-def test_hf_init_enables_dataloader_and_h2d_patches():
+def test_hf_init_enables_dataloader_and_h2d_patches(monkeypatch):
     """
     init() must enable the process-wide patches the callback cannot install on
     its own. The DataLoader fetch patch in particular is what lets TraceML
@@ -446,6 +456,14 @@ def test_hf_init_enables_dataloader_and_h2d_patches():
     never installs it. The H2D Tensor.to patch is gated the same way: the
     auto-timer trace_step arms each step is a no-op unless the patch is on.
     """
+    # This test verifies patch policy, not runtime startup. Stub the runtime
+    # bootstrap so init() does not try to reach an aggregator over TCP.
+    import traceml_ai.sdk.initial as initialization
+
+    monkeypatch.setattr(
+        initialization, "_start_runtime_for_init", lambda **kwargs: None
+    )
+
     config = init()
 
     assert config.patch_dataloader, (
@@ -455,4 +473,63 @@ def test_hf_init_enables_dataloader_and_h2d_patches():
     assert config.patch_h2d, (
         "huggingface.init() must enable the H2D Tensor.to patch the "
         "per-step auto-timer relies on."
+    )
+
+
+# --- TraceML telemetry-completeness guard (instrumentation hardening) -------
+# test_hf_init_enables_dataloader_and_h2d_patches proves init() REQUESTS the
+# DataLoader patch (config flags). This guard goes one step further and
+# proves the stream actually EMITS during a real Trainer run. Absences (a
+# stream silently dark) are the costly failure mode; a config flag cannot
+# catch a broken patch, a renamed event, or a buffer that never flushes.
+
+DATALOADER_STREAM = "_traceml_internal:dataloader_next"
+
+
+def test_hf_callback_run_emits_dataloader_fetch_events():
+    """
+    COMPLETENESS guard: with huggingface.init() called, a vanilla Trainer +
+    TraceMLTrainerCallback run must land `_traceml_internal:dataloader_next`
+    TimeEvents in the flushed StepTimeBatches, not merely set the
+    patch_dataloader config flag. Gates the full path: patch install ->
+    fetch timing -> step-buffer fold -> per-step flush.
+    """
+    _reset_traceml_state()
+
+    # Drop STEP-scope events still sitting in the unflushed buffer from
+    # earlier tests; they would otherwise fold into this run's first batch
+    # and could fake a pass.
+    from traceml_ai.utils.timing import _STEP_BUFFER
+
+    _STEP_BUFFER.clear()
+
+    # Explicit init is the documented HF path; the DataLoader fetch patch
+    # is process-wide and only installed here, never by the callback.
+    # init() is idempotent for the same effective config, so this is safe
+    # whether or not the patch-flag test already ran.
+    init()
+
+    max_steps = 5
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        output_dir = Path(tmp_dir) / "results"
+        model = _build_tiny_model()
+        train_dataset = _TinyTokenizedDataset()
+        training_args = _build_training_args(
+            str(output_dir), max_steps=max_steps
+        )
+
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=train_dataset,
+            callbacks=[TraceMLTrainerCallback()],
+        )
+        trainer.train()
+
+    batches = _drain_step_time_queue()
+    names = sorted({evt.name for batch in batches for evt in batch.events})
+    assert DATALOADER_STREAM in names, (
+        "DataLoader-fetch telemetry is DARK: the HF run did not emit "
+        f"'{DATALOADER_STREAM}'. Streams seen: {names}"
     )

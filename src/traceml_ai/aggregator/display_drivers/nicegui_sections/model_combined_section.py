@@ -1,230 +1,342 @@
-"""
-Unified Step Time analysis section for the overview dashboard.
+"""Step Time analysis dashboard hero.
 
-This card is intentionally compact and space-efficient:
-- one grouped stacked bar chart comparing Median vs Worst
-- one dense KPI strip
+Signature element: a phase RIBBON (selected-clock average phase proportions)
+plus a VERDICT, then a compact step-KPI strip. The ribbon recomposes as the
+bottleneck shifts.
 
-It does not render diagnosis prose; interpretation belongs in the diagnostics rail.
+The ribbon and KPI strip read the canonical window from
+``LiveStepTimeResult``. The VERDICT is NOT computed here:
+it is taken verbatim from the diagnosis engine's step-time ``status`` via
+``update_step_verdict`` (fed the model-diagnostics payload), so it is identical
+to the Diagnostics rail, the CLI, and final_summary, and tracks any future
+change to the diagnosis vocabulary automatically. The card never derives its
+own classification — interpretation belongs to the engine.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import plotly.graph_objects as go
 from nicegui import ui
 
-from traceml_ai.renderers.step_time.schema import (
-    StepCombinedTimeMetric,
-    StepCombinedTimeResult,
-)
+from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
+from traceml_ai.step_time.pipeline import LiveStepTimeResult
 
-from .ui_shell import CARD_STYLE, compact_metric_html, safe_ms, safe_pct
+from . import theme
 
-_STACK_KEYS = [
-    ("DL", "dataloader_fetch", "#d32f2f"),
-    ("H2D", "h2d", "#00897b"),
-    ("FWD", "forward", "#1976d2"),
-    ("BWD", "backward", "#512da8"),
-    ("OPT", "optimizer_step", "#2e7d32"),
-    ("WAIT", "wait_proxy", "#f9a825"),
-]
+# Fixed ribbon width for a phase that was never measured this window --
+# large enough to read as a deliberate marker, not a rounding artifact of
+# a real proportional segment.
+_UNMEASURED_SLIVER_PCT = 6.0
 
-_REQUIRED_KEYS = {
-    "dataloader_fetch",
-    "h2d",
-    "forward",
-    "backward",
-    "optimizer_step",
-    "wait_proxy",
-    "step_time",
-}
+# step_time is the envelope, not a ribbon phase, so it has no entry in
+# theme.PHASES. It still needs a name when it is the incomplete signal.
+# Matches the CLI table's abbreviation.
+_STEP_TIME_LABEL = "STEP"
 
 
 def build_model_combined_section() -> Dict[str, Any]:
-    """Build the Step Time analysis card."""
-    card = ui.card().classes("w-full h-full p-3")
+    seg_divs: List[Any] = []
+    seg_labs: List[Any] = []
+    kpis: Dict[str, Any] = {}
+
+    card = ui.element("div").classes("glass reveal")
     card.style(
-        CARD_STYLE + "height: 100%; overflow-y: auto; overflow-x: hidden;"
+        "padding:22px 24px; width:100%; height:100%; "
+        "display:flex; flex-direction:column; overflow:hidden;"
     )
-
-    fig = _init_figure()
-
     with card:
-        with ui.row().classes("w-full items-center justify-between mb-1"):
-            ui.label("Step Time Analysis").classes("text-sm font-bold").style(
-                "color:#455a64;"
-            )
-            window_text = ui.html("window: -", sanitize=False).classes(
-                "text-[11px] text-gray-500"
-            )
+        with (
+            ui.row()
+            .classes("w-full items-center")
+            .style("margin-bottom:14px; gap:12px;")
+        ):
+            ui.label("Step time").classes("ctitle")
+            ui.element("div").style("flex:1;")
+            win = ui.label("waiting for steps").classes("cmeta")
 
-        plot = ui.plotly(fig).classes("w-full")
-        kpis = ui.html("", sanitize=False).classes("mt-2")
+        with ui.element("div").classes("ribbon"):
+            for lab, _key, col in theme.PHASES:
+                seg = (
+                    ui.element("div")
+                    .classes("pseg")
+                    .style(f"background:{col}; width:0%;")
+                )
+                with seg:
+                    seg_labs.append(ui.label("").classes("seglab"))
+                seg_divs.append(seg)
+
+        with (
+            ui.row()
+            .classes("w-full")
+            .style("gap:14px; margin-top:9px; flex-wrap:wrap;")
+        ):
+            for lab, _key, col in theme.PHASES:
+                with ui.element("div").classes("legchip"):
+                    ui.element("div").classes("legdot").style(
+                        f"background:{col};"
+                    )
+                    ui.label(theme.PHASE_LEGEND_LABELS.get(_key, lab))
+
+        with (
+            ui.row()
+            .classes("items-center")
+            .style("gap:12px; margin-top:16px;")
+        ):
+            verdict = ui.label("analyzing step composition").classes("verdict")
+
+        with (
+            ui.row()
+            .classes("w-full")
+            .style("gap:11px; margin-top:16px; flex-wrap:wrap;")
+        ):
+            for key, lab, acc in [
+                ("median", "MEDIAN STEP", theme.C_GPU),
+                ("worst", "WORST STEP", "#512da8"),
+                ("gap", "GAP", "#f9a825"),
+                ("residual", "RESIDUAL SHARE", theme.C_CPU),
+                ("rank", "WORST RANK", "#2e7d32"),
+            ]:
+                with ui.element("div").classes("kpi").style(f"--acc:{acc};"):
+                    ui.label(lab).classes("klab")
+                    kpis[key] = ui.html("—", sanitize=False).classes("kval")
 
     return {
-        "window_text": window_text,
-        "plot": plot,
+        "seg_divs": seg_divs,
+        "seg_labs": seg_labs,
+        "win": win,
+        "verdict": verdict,
         "kpis": kpis,
-        "_fig": fig,
-        "_last_kpis": None,
-        "_last_window_text": None,
-        "_last_signature": None,
+        "_last_sig": None,
     }
 
 
-def update_model_combined_section(
+def _index(
+    metrics: List[StepTimeMetric],
+) -> Dict[str, StepTimeMetric]:
+    return {m.metric: m for m in metrics}
+
+
+_EXPIRED_SIG = "__expired__"
+_NO_ENVELOPE_SIG = "__no_envelope__"
+_NO_COHORT_SIG = "__no_cohort__"
+
+
+def _clear_view(panel: Dict[str, Any], sig: str, label: str) -> None:
+    """Blank the ribbon and KPIs, then state why.
+
+    Any path that cannot draw a trustworthy ribbon must clear it rather
+    than return early: a stale complete view left on screen is read as
+    current, which is the failure this issue exists to remove.
+    """
+    if panel.get("_last_sig") == sig:
+        return
+    panel["_last_sig"] = sig
+    for seg, sl in zip(panel["seg_divs"], panel["seg_labs"]):
+        seg.style("width:0%; background:transparent;")
+        sl.text = ""
+    for kpi in panel["kpis"].values():
+        kpi.content = theme.kval("—")
+    panel["win"].text = label
+
+
+def _clear_ribbon(panel: Dict[str, Any], sig: str, label: str) -> None:
+    """Clear an untrustworthy composition while retaining valid KPIs."""
+    if panel.get("_last_sig") == sig:
+        return
+    panel["_last_sig"] = sig
+    for seg, sl in zip(panel["seg_divs"], panel["seg_labs"]):
+        seg.style("width:0%; background:transparent;")
+        sl.text = ""
+    panel["win"].text = label
+
+
+def _update_kpis(
     panel: Dict[str, Any],
-    payload: Optional[StepCombinedTimeResult],
+    window: StepTimeWindow,
+    step_metric: StepTimeMetric,
 ) -> None:
-    """Update the Step Time analysis card in place with cached signatures."""
-    if not payload or not payload.metrics:
+    """Update independently valid Step Time KPI values."""
+    kpis = panel["kpis"]
+    kpis["median"].content = theme.kval(
+        f"{step_metric.median_total:.0f}", "ms"
+    )
+    kpis["worst"].content = theme.kval(f"{step_metric.worst_total:.0f}", "ms")
+    kpis["gap"].content = (
+        theme.kval("n/a")
+        if step_metric.skew_pct is None
+        else theme.kval(f"{step_metric.skew_pct * 100.0:.0f}", "%")
+    )
+    residual_share = window.residual_share
+    kpis["residual"].content = (
+        theme.kval("n/a")
+        if residual_share is None
+        else theme.kval(f"{residual_share * 100.0:.0f}", "%")
+    )
+    kpis["rank"].content = theme.kval(
+        (
+            f"r{int(step_metric.worst_rank)}"
+            if step_metric.worst_rank is not None
+            else "—"
+        )
+    )
+
+
+def update_model_combined_section(
+    panel: Dict[str, Any], payload: Optional[LiveStepTimeResult]
+) -> None:
+    if payload is None or payload.freshness == "cold":
+        return
+    window = payload.analysis.window
+    if payload.freshness == "expired" or not window.metrics:
+        _clear_view(panel, _EXPIRED_SIG, "window expired")
+        return
+    m = _index(window.metrics)
+    if "step_time" not in m:
+        _clear_view(panel, _NO_ENVELOPE_SIG, "step envelope unavailable")
         return
 
-    metrics = _index_metrics(payload.metrics)
-    if not _REQUIRED_KEYS.issubset(metrics):
+    step_metric = m["step_time"]
+    st = step_metric
+    steps_used = window.coverage.steps_used
+    _update_kpis(panel, window, step_metric)
+    representative = window.composition_representative_rank
+    if representative is None:
+        _clear_ribbon(
+            panel,
+            _NO_COHORT_SIG,
+            f"{int(steps_used)} aligned steps · no coherent phase cohort",
+        )
         return
 
-    step = metrics["step_time"]
-    wait = metrics["wait_proxy"]
+    rank_facts = window.rank(representative)
+    if rank_facts is None:
+        _clear_ribbon(panel, _NO_COHORT_SIG, "rank facts unavailable")
+        return
+    rank_values = rank_facts.average
+    vals: Dict[str, Optional[float]] = {}
+    for _label, key, _color in theme.PHASES:
+        if key == "h2d":
+            vals[key] = float(rank_values.value(key) or 0.0)
+        else:
+            value = rank_values.value(key)
+            vals[key] = float(value) if value is not None else None
 
-    signature = (
-        tuple(
-            round(float(metrics[key].summary.median_total or 0.0), 4)
-            for _, key, _ in _STACK_KEYS
-        )
-        + tuple(
-            round(float(metrics[key].summary.worst_total or 0.0), 4)
-            for _, key, _ in _STACK_KEYS
-        )
-        + (
-            round(float(step.summary.median_total or 0.0), 4),
-            round(float(step.summary.worst_total or 0.0), 4),
-            int(step.summary.steps_used or 0),
-            int(step.summary.worst_rank or -1),
-        )
-    )
-
-    if panel.get("_last_signature") != signature:
-        _update_plot(panel, metrics)
-        panel["_last_signature"] = signature
-
-    window_text = f"window: {int(step.summary.steps_used or 0)} aligned steps"
-    if panel.get("_last_window_text") != window_text:
-        panel["window_text"].content = window_text
-        panel["_last_window_text"] = window_text
-
-    kpis_html = _render_kpis(metrics, step, wait)
-    if panel.get("_last_kpis") != kpis_html:
-        panel["kpis"].content = kpis_html
-        panel["_last_kpis"] = kpis_html
-
-
-def _init_figure() -> go.Figure:
-    fig = go.Figure()
-    for label, _metric_key, color in _STACK_KEYS:
-        fig.add_trace(
-            go.Bar(
-                x=["Median", "Worst"],
-                y=[0.0, 0.0],
-                name=label,
-                marker=dict(color=color),
-                hovertemplate="%{x}<br>"
-                + label
-                + ": %{y:.2f} ms<extra></extra>",
-            )
-        )
-
-    fig.update_layout(
-        barmode="stack",
-        height=235,
-        margin=dict(l=8, r=8, t=8, b=28),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0.05)",
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1.0,
-            font=dict(size=10),
-        ),
-        xaxis=dict(showgrid=False),
-        yaxis=dict(title="Time (ms)"),
-    )
-    return fig
-
-
-def _update_plot(
-    panel: Dict[str, Any], metrics: Dict[str, StepCombinedTimeMetric]
-) -> None:
-    fig = panel["_fig"]
-    for idx, (_label, key, _color) in enumerate(_STACK_KEYS):
-        metric = metrics[key]
-        fig.data[idx].y = [
-            float(metric.summary.median_total or 0.0),
-            float(metric.summary.worst_total or 0.0),
-        ]
-    panel["plot"].update_figure(fig)
-
-
-def _index_metrics(
-    metrics: List[StepCombinedTimeMetric],
-) -> Dict[str, StepCombinedTimeMetric]:
-    return {metric.metric: metric for metric in metrics}
-
-
-def _render_kpis(
-    metrics: Dict[str, StepCombinedTimeMetric],
-    step: StepCombinedTimeMetric,
-    wait: StepCombinedTimeMetric,
-) -> str:
-    median_total = float(step.summary.median_total or 0.0)
-    worst_total = float(step.summary.worst_total or 0.0)
-    wait_share = (
-        float(wait.summary.median_total or 0.0) / median_total
-        if median_total > 0.0
-        else 0.0
-    )
-
-    items = [
-        compact_metric_html("Median Total", safe_ms(median_total)),
-        compact_metric_html("Worst Total", safe_ms(worst_total)),
-        compact_metric_html("Gap", safe_pct(step.summary.skew_pct)),
-        compact_metric_html(
-            "Worst Rank",
-            (
-                f"r{int(step.summary.worst_rank)}"
-                if step.summary.worst_rank is not None
-                else "-"
-            ),
-        ),
-        compact_metric_html("WAIT Share", safe_pct(wait_share)),
-        compact_metric_html(
-            "Dominant Phase",
-            _dominant_metric(metrics, mode="worst_total"),
-        ),
+    measured = {key: value for key, value in vals.items() if value is not None}
+    unmeasured = [
+        key for key, value in vals.items() if value is None and key != "h2d"
+    ]
+    universe_size = len(window.rank_universe)
+    partial_metrics = [
+        key
+        for key in [phase[1] for phase in theme.PHASES] + ["step_time"]
+        if key != "h2d" and 0 < len(window.ranks_for(key)) < universe_size
     ]
 
-    return (
-        "<div style='display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); "
-        "gap:8px; padding-top:6px; border-top:1px solid #ececec;'>"
-        + "".join(items)
-        + "</div>"
+    input_wait_value = vals.get("input_wait")
+    envelope = float(rank_values.step_time_ms or 0.0) + (
+        input_wait_value if input_wait_value is not None else 0.0
     )
+    tot = max(sum(measured.values()), envelope) or 1.0
+
+    # A measured-zero segment and a genuinely unmeasured one must never
+    # render identically -- an absent input_wait would otherwise let the
+    # OTHER phases sum to exactly step_time (residual is a remainder), so
+    # the ribbon fills to 100% and a dark dataloader stream reads as a
+    # confirmed-fast one. Non-h2d unmeasured phases get a fixed hatched
+    # sliver instead of a proportional width; measured phases give up
+    # that width so the row still totals 100%.
+    reserved_pct = _UNMEASURED_SLIVER_PCT * len(unmeasured)
+    measured_scale = max(0.0, (100.0 - reserved_pct) / 100.0)
+
+    sig = (
+        tuple(
+            round(vals[k], 3) if vals[k] is not None else None
+            for _, k, _ in theme.PHASES
+        )
+        + tuple(sorted(partial_metrics))
+        + (
+            representative,
+            round(float(st.median_total), 3),
+            round(float(st.worst_total), 3),
+            int(steps_used),
+            int(st.worst_rank if st.worst_rank is not None else -1),
+        )
+    )
+    if panel.get("_last_sig") == sig:
+        return
+    panel["_last_sig"] = sig
+
+    for (lab, key, col), seg, sl in zip(
+        theme.PHASES, panel["seg_divs"], panel["seg_labs"]
+    ):
+        value = vals[key]
+        if key in unmeasured:
+            # Unmeasured phase: a hatched sliver in the PHASE'S OWN color
+            # marks "unknown, not zero" (a dark stream must never read as
+            # confirmed-fast). The color still identifies the phase (blue =
+            # forward, gold = residual, matching the legend); the diagonal
+            # hatch overlay is what says "unmeasured". No on-sliver text --
+            # it would overlap the hatch illegibly at this width, and the
+            # window meta already names the missing phases.
+            seg.style(
+                f"width:{_UNMEASURED_SLIVER_PCT:.1f}%; "
+                "background:repeating-linear-gradient(45deg, "
+                f"{col} 0 2px, transparent 2px 5px);"
+            )
+            sl.text = ""
+            continue
+        pct = (
+            (value / tot * 100.0 * measured_scale)
+            if value is not None
+            else 0.0
+        )
+        # Always restate the background. Style updates MERGE, so a phase
+        # that was hatched while unmeasured would keep the hatch forever
+        # once it recovers if this path only set the width.
+        seg.style(f"width:{pct:.3f}%; background:{col};")
+        sl.text = lab if pct >= 7.0 else ""
+
+    # The verdict is intentionally NOT set here. It is owned by the diagnosis
+    # engine and set via update_step_verdict (fed the model-diagnostics
+    # payload), so the card never asserts a classification of its own.
+
+    steps_text = f"{int(steps_used)} aligned steps"
+    steps_text += f" · representative r{representative}"
+    if unmeasured or partial_metrics:
+        incomplete = set(unmeasured) | set(partial_metrics)
+        names = [lab for lab, key, _c in theme.PHASES if key in incomplete]
+        # step_time has no ribbon segment, so it is not in PHASES, but it
+        # can still be the thing that is incomplete. Name it with the same
+        # abbreviation the CLI table uses rather than dropping it and
+        # printing a bare "partial:".
+        if "step_time" in incomplete:
+            names.append(_STEP_TIME_LABEL)
+        steps_text += f" · partial: {','.join(names)}"
+    panel["win"].text = steps_text
 
 
-def _dominant_metric(
-    metrics: Dict[str, StepCombinedTimeMetric], mode: str
-) -> str:
-    best_label = "-"
-    best_value = -1.0
+def update_step_verdict(panel: Dict[str, Any], diag_payload: Any) -> None:
+    """Set the hero verdict from the diagnosis engine's step-time status.
 
-    for label, key, _ in _STACK_KEYS:
-        value = float(getattr(metrics[key].summary, mode, 0.0) or 0.0)
-        if value > best_value:
-            best_value = value
-            best_label = label
-
-    return f"{best_label} ({best_value:.1f} ms)" if best_value >= 0.0 else "-"
+    Single source of truth: the verdict text is the engine's canonical
+    ``status`` string for the step-time domain — the exact value shown by the
+    Diagnostics rail, the CLI, and final_summary. The card derives no
+    classification of its own, so it tracks any change to the diagnosis
+    vocabulary automatically. Fed the model-diagnostics payload (the same
+    payload the Diagnostics rail consumes); an unavailable item renders
+    ``NO DATA`` instead of preserving a stale verdict.
+    """
+    items = (
+        diag_payload.get("items") if isinstance(diag_payload, dict) else None
+    )
+    if not isinstance(items, list):
+        panel["verdict"].text = "NO DATA"
+        return
+    for it in items:
+        if isinstance(it, dict) and it.get("source") == "step_time":
+            status = str(it.get("status") or "").strip()
+            if status:
+                panel["verdict"].text = status
+            return
+    panel["verdict"].text = "NO DATA"

@@ -27,7 +27,7 @@ Use TraceML for:
 
 - bottleneck diagnosis
 - stragglers
-- wait-heavy behavior
+- residual-heavy behavior
 - memory creep
 - run-to-run bottleneck comparison from saved TraceML summary JSON files
 
@@ -189,6 +189,10 @@ yet supported.
 
 Yes, for single-node FSDP. Multi-node FSDP summary reports use the same
 distributed launch path as DDP, but should be validated on your environment.
+TraceML currently surfaces FSDP timing and rank skew, but it does not yet split
+FSDP parameter all-gather or reduce-scatter wait into separate collective
+buckets. In FSDP, elevated forward time may be real compute or exposed
+all-gather wait.
 
 If you hit an issue on your setup, please open an issue with a minimal repro and environment details.
 
@@ -212,9 +216,9 @@ Not yet.
 
 Start with `run`.
 
-Deep/layer profiling has been removed from the public CLI for now. If TraceML
-shows you need lower-level detail, use PyTorch Profiler, Nsight, or another
-operator-level profiler for that follow-up.
+TraceML no longer ships layer-level/deep profiling. If TraceML shows you need
+lower-level detail, use PyTorch Profiler, Nsight, or another operator-level
+profiler for that follow-up.
 
 ---
 
@@ -225,7 +229,6 @@ Yes.
 Run:
 
 ```bash
-pip install "traceml-ai[dashboard]"
 traceml run train.py --mode=dashboard
 ```
 
@@ -235,24 +238,40 @@ multi-GPU. For multi-node runs, use summary mode.
 The local UI runs at:
 
 ```text
-http://localhost:8765
+http://127.0.0.1:8765
 ```
+
+<details>
+<summary>Running on a remote server?</summary>
+
+SSH into the server and start the dashboard there. TraceML prints a tunnel
+command like this:
+
+```bash
+ssh -L 8765:127.0.0.1:8765 user@remote-host
+```
+
+Copy that command into a local terminal on your laptop. Leave the training
+command running on the server, then open `http://127.0.0.1:8765` locally.
+
+</details>
 
 ---
 
 ## What is the default run mode?
 
-`traceml run train.py` uses summary mode by default.
+`traceml run train.py` uses summary mode for single-node and multi-node runs.
+It skips the live UI, prints the final diagnosis, and writes
+`final_summary.json` plus `final_summary.txt`.
 
-You can also make that explicit:
+Select the browser dashboard explicitly on a single-node run:
 
 ```bash
-traceml run train.py --mode=summary
+traceml run train.py --mode=dashboard
 ```
 
-Summary mode skips live UI and focuses on the final end-of-run summary. It is
-a good fit when you want lower terminal noise or want to forward TraceML
-summary fields into W&B or MLflow.
+The dashboard listens on `http://127.0.0.1:8765` by default. Use
+`--mode=cli` instead when you want live diagnostics in the terminal.
 
 ---
 
@@ -320,6 +339,21 @@ traceml run train.py --disable-traceml
 
 ---
 
+## How can I keep stderr from a native training crash?
+
+Enable the opt-in bounded stderr tail:
+
+```bash
+traceml run train.py --mode=summary --capture-stderr
+```
+
+You can also set `TRACEML_CAPTURE_STDERR=1`. TraceML continues to print the
+child process's stderr to the terminal and stores only its last 64 KiB in
+`logs/<run-name>/crash_stderr.log` when the child exits. The file remains local
+and stderr capture is disabled by default.
+
+---
+
 ## What does `MEMORY CREEP` usually mean?
 
 It usually means memory is rising over time instead of staying stable.
@@ -336,9 +370,10 @@ See:
 
 It means one rank is slower in the input path than the typical rank.
 
-In distributed runs, this can still be the primary diagnosis when backward or
-compute skew is also visible, because a slow input rank can push synchronization
-wait into peer ranks.
+In distributed runs, TraceML first finds visible wait cost. In DDP/default
+strategy that signal comes from backward time; in FSDP it comes from forward +
+backward time. `INPUT STRAGGLER` means the likely culprit rank has material
+input-wait excess compared with the victim rank.
 
 Common causes:
 
@@ -354,17 +389,19 @@ See:
 
 ## What does `COMPUTE STRAGGLER` mean?
 
-It means one rank is slower in compute than the typical rank.
+It means the likely culprit rank spends materially more time in DDP forward
+compute than the victim rank.
 
-If input and compute skew appear together, TraceML first checks whether the
-input excess is large enough to explain the compute skew. If yes, the primary
-diagnosis is `INPUT STRAGGLER`; otherwise the mixed case remains `STRAGGLER`.
+TraceML emits `COMPUTE STRAGGLER` from the rank-skew rule for DDP/default
+strategy only. For FSDP, forward and backward can include sharding
+communication, so unexplained rank skew remains `STRAGGLER` unless input wait
+or H2D explains it.
 
 Common causes:
 
 - uneven shapes or data
 - rank-local branching or extra work
-- compute imbalance in forward, backward, or optimizer
+- compute imbalance in forward
 
 See:
 
@@ -380,7 +417,7 @@ Use compare when you already have final summary JSON files and want to answer:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did memory or wait behavior regress?
+- did memory or residual behavior regress?
 
 Live output is for in-run diagnosis.
 

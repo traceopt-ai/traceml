@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from traceml_ai.reporting.compare.io import derive_compare_labels
+from traceml_ai.reporting.compare.model import CompareDiagnosis
 from traceml_ai.reporting.compare.sections import SECTION_COMPARERS
 from traceml_ai.reporting.compare.verdict import build_compare_verdict
 
@@ -29,6 +30,43 @@ def _as_float(value: Any) -> float | None:
 def _utc_now_iso() -> str:
     """Return a UTC timestamp without importing the training SDK."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _primary_diagnosis_status(payload: Dict[str, Any]) -> str | None:
+    """Return the top-level primary diagnosis status, if present."""
+    block = payload.get("primary_diagnosis")
+    if not isinstance(block, dict):
+        return None
+    value = block.get("status")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _schema_version(payload: Dict[str, Any]) -> Any:
+    """Return the input summary schema version as stored in the payload."""
+    return payload.get("schema_version")
+
+
+def _schema_warnings(
+    lhs_payload: Dict[str, Any],
+    rhs_payload: Dict[str, Any],
+) -> list[str]:
+    """Return compare warnings for known schema-semantic mismatches."""
+    lhs_version = _schema_version(lhs_payload)
+    rhs_version = _schema_version(rhs_payload)
+    if lhs_version == rhs_version:
+        return []
+    return [
+        (
+            "Summary schema versions differ: A uses "
+            f"{lhs_version}, B uses {rhs_version}. Step Time fields changed "
+            "in schema 1.6 and became nullable in schema 1.7, so Step "
+            "Time deltas may not be directly "
+            "comparable."
+        )
+    ]
 
 
 def build_compare_payload(
@@ -57,6 +95,7 @@ def build_compare_payload(
             "label": lhs_label,
             "file_name": lhs_path.name,
             "parent_name": lhs_path.parent.name,
+            "schema_version": _schema_version(lhs_payload),
             "duration_s": _as_float(lhs_payload.get("duration_s")),
         },
         "rhs": {
@@ -64,8 +103,10 @@ def build_compare_payload(
             "label": rhs_label,
             "file_name": rhs_path.name,
             "parent_name": rhs_path.parent.name,
+            "schema_version": _schema_version(rhs_payload),
             "duration_s": _as_float(rhs_payload.get("duration_s")),
         },
+        "warnings": _schema_warnings(lhs_payload, rhs_payload),
         "sections": sections,
         "availability": {
             name: section.get("available", False)
@@ -76,6 +117,10 @@ def build_compare_payload(
                 "lhs": _as_float(lhs_payload.get("duration_s")),
                 "rhs": _as_float(rhs_payload.get("duration_s")),
             },
+            "primary_diagnosis": CompareDiagnosis(
+                lhs=_primary_diagnosis_status(lhs_payload),
+                rhs=_primary_diagnosis_status(rhs_payload),
+            ).to_dict(),
         },
         "text": "",
     }

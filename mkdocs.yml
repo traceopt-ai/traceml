@@ -72,6 +72,12 @@ markdown_extensions:
   - toc: { permalink: true }
 
 nav:
+  - Guides:
+      - Slow PyTorch Training: guides/slow-pytorch-training.md
+      - Find Input Pipeline Bottlenecks: guides/pytorch-input-pipeline-bottleneck.md
+      - Low GPU Utilization: guides/low-gpu-utilization-pytorch.md
+      - DDP Rank Stragglers: guides/ddp-slow-training-rank-straggler.md
+      - Memory Creep: guides/pytorch-memory-creep.md
   - User Guide:
       - Quickstart: user_guide/quickstart.md
       - Distributed Training: user_guide/distributed-training.md
@@ -82,11 +88,14 @@ nav:
           - Hugging Face: user_guide/integrations/huggingface.md
           - PyTorch Lightning: user_guide/integrations/lightning.md
           - Ray Train: user_guide/integrations/ray.md
+          - DeepSpeed: user_guide/integrations/deepspeed.md
           - W&B / MLflow: user_guide/integrations/wandb-mlflow.md
       - FAQ: user_guide/faq.md
       - Compare Runs: user_guide/compare.md
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
+      - Step Time Pipeline Contract: developer_guide/step-time-pipeline-contract.md
+      - Rank Straggler Policy: developer_guide/rank-straggler-policy.md
       - Extending TraceML: developer_guide/extending.md
       - Contributing: developer_guide/contributing.md

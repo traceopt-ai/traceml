@@ -77,7 +77,9 @@ def test_renderer_can_support_both_cli_and_dashboard_contracts() -> None:
     assert renderer.get_dashboard_renderable() == {"payload": "dual"}
 
 
-def test_dashboard_driver_missing_extra_has_install_hint(monkeypatch) -> None:
+def test_dashboard_driver_missing_dependency_has_install_hint(
+    monkeypatch,
+) -> None:
     original_import = builtins.__import__
 
     def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
@@ -90,5 +92,5 @@ def test_dashboard_driver_missing_extra_has_install_hint(monkeypatch) -> None:
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
-    with pytest.raises(RuntimeError, match=r"traceml-ai\[dashboard\]"):
+    with pytest.raises(RuntimeError, match="pip install -U traceml-ai"):
         _resolve_display_driver("dashboard")

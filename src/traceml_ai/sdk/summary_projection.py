@@ -16,9 +16,11 @@ METRICS_BY_SECTION = {
     "step_time": (
         "total_step_ms",
         "dataloader_ms",
+        "input_wait_ms",
+        "step_time_ms",
         "h2d_ms",
         "compute_ms",
-        "wait_ms",
+        "residual_ms",
         "forward_ms",
         "backward_ms",
         "optimizer_ms",
@@ -68,6 +70,12 @@ def compact_summary(
     out: Dict[str, Any] = {}
     _set_scalar(out, "schema_version", payload.get("schema_version"))
     _set_scalar(out, "duration_s", payload.get("duration_s"))
+
+    primary = _mapping(payload.get("primary_diagnosis"))
+    _set_scalar(out, "primary/kind", primary.get("kind"))
+    _set_scalar(out, "primary/status", primary.get("status"))
+    _set_scalar(out, "primary/severity", primary.get("severity"))
+    _set_scalar(out, "primary/section", primary.get("section"))
 
     for section in SECTIONS:
         section_payload = _mapping(payload.get(section))

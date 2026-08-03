@@ -11,6 +11,7 @@ from typing import Any, Callable, List, Optional
 
 from traceml_ai.loggers.error_log import get_error_logger, setup_error_logger
 from traceml_ai.runtime.config import config
+from traceml_ai.runtime.exporter import TelemetryExporter
 from traceml_ai.runtime.identity import resolve_runtime_identity
 from traceml_ai.runtime.sampler_registry import build_samplers
 from traceml_ai.runtime.sender import SenderIdentity, TelemetryPublisher
@@ -22,6 +23,7 @@ from traceml_ai.runtime.state import (
 )
 from traceml_ai.runtime.stdout_stderr_capture import StreamCapture
 from traceml_ai.samplers.base_sampler import BaseSampler
+from traceml_ai.telemetry.control import build_rank_finished_payload
 from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig
 
 from .settings import TraceMLSettings
@@ -79,8 +81,14 @@ class TraceMLRuntime:
                 port=int(self._settings.aggregator.port),
             )
         )
-        self._publisher = TelemetryPublisher(
+        # Exporter owns all TCP send/connect work on its own thread. The
+        # publisher enqueues batches into it instead of sending inline.
+        self._exporter = TelemetryExporter(
             tcp_client=self._tcp_client,
+            logger=self._logger,
+        )
+        self._publisher = TelemetryPublisher(
+            tcp_client=self._exporter,
             identity=SenderIdentity(
                 global_rank=self.identity.global_rank,
                 local_rank=self.identity.local_rank,
@@ -188,7 +196,8 @@ class TraceMLRuntime:
 
         Start order:
         1) enable stdout/stderr capture (CLI mode only, dashboard no need)
-        2) start sampler thread
+        2) start exporter thread
+        3) start sampler thread
         """
         if self.mode == "cli":
             _safe(
@@ -196,6 +205,9 @@ class TraceMLRuntime:
                 "Stdout/stderr capture enable failed",
                 StreamCapture.redirect_to_capture,
             )
+
+        # Exporter must be running before samplers start enqueuing batches.
+        self._exporter.start()
 
         try:
             self._sampler_thread.start()
@@ -209,7 +221,8 @@ class TraceMLRuntime:
 
         - Signals the sampler thread to stop
         - Joins the sampler thread
-        - Closes TCP client
+        - Enqueues a final telemetry batch and a rank-finished control message
+        - Drains the export queue and closes the TCP client (bounded)
         - Restores stdout/stderr (CLI mode only)
         """
         self._stop_event.set()
@@ -224,8 +237,18 @@ class TraceMLRuntime:
                 "[TraceML] WARNING: sampler thread did not terminate"
             )
 
-        # close client last
-        self._publisher.close()
+        self._publisher.publish(self._samplers)
+        self._publisher.send_control(
+            build_rank_finished_payload(
+                global_rank=self.identity.global_rank,
+                world_size=self.identity.world_size,
+                node_rank=self.identity.node_rank,
+                hostname=self.identity.hostname,
+            )
+        )
+
+        # drain the export queue and close the client last
+        self._exporter.stop()
 
         # restore stdout/stderr
         if self.mode == "cli":

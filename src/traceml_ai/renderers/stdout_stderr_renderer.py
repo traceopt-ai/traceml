@@ -20,7 +20,7 @@ class StdoutStderrRenderer(BaseRenderer):
     Current behavior
     ----------------
     - Displays only rank 0 logs by default.
-    - Reads from SQLite-backed history instead of RemoteDBStore.
+    - Reads from SQLite-backed history.
     - Preserves the same user-visible CLI behavior as before.
     """
 

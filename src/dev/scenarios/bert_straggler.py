@@ -178,8 +178,6 @@ def main() -> None:
         num_labels=4,
     ).to(device)
 
-    traceml.trace_model_instance(model)
-
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(
             model,

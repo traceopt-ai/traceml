@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
-from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
+from tests.step_time.factories import window_from_rank_averages
+from traceml_ai.diagnostics import model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
     ModelDiagnosisItem,
@@ -11,11 +12,15 @@ from traceml_ai.diagnostics.registry import (
     DiagnosticDomainSpec,
     ModelDiagnosticContext,
 )
+from traceml_ai.diagnostics.step_memory import LIVE_STEP_MEMORY_POLICY
 from traceml_ai.renderers.step_memory.schema import (
     StepMemoryCombinedCoverage,
     StepMemoryCombinedMetric,
     StepMemoryCombinedSeries,
     StepMemoryCombinedSummary,
+)
+from traceml_ai.step_time.model import (
+    StepTimeMetric,
 )
 
 
@@ -48,6 +53,17 @@ def _step_memory_metric() -> StepMemoryCombinedMetric:
     )
 
 
+def _step_time_metric(name: str, value: float) -> StepTimeMetric:
+    return StepTimeMetric(
+        metric=name,
+        series=None,
+        median_total=value,
+        worst_total=value,
+        worst_rank=0,
+        skew_pct=0.0,
+    )
+
+
 def test_default_model_diagnostic_registry_contains_primary_domains():
     assert DEFAULT_MODEL_DIAGNOSTIC_REGISTRY.keys() == (
         "step_time",
@@ -59,7 +75,7 @@ def test_model_diagnostics_payload_uses_registered_domains():
     def build_custom_item(
         context: ModelDiagnosticContext,
     ) -> ModelDiagnosisItem:
-        assert context.step_time_metrics == ()
+        assert context.step_time_window is None
         assert context.step_memory_metrics == ()
         return ModelDiagnosisItem(
             source="custom_domain",
@@ -85,7 +101,6 @@ def test_model_diagnostics_payload_uses_registered_domains():
     )
 
     payload = build_model_diagnostics_payload(
-        step_time_metrics=(),
         step_memory_metrics=(),
         registry=registry,
     )
@@ -93,6 +108,135 @@ def test_model_diagnostics_payload_uses_registered_domains():
     assert payload.status_message == "OK"
     assert [item.source for item in payload.items] == ["custom_domain"]
     assert payload.items[0].status == "BALANCED"
+
+
+def test_model_step_time_diagnostics_receive_canonical_window():
+    per_rank_timing = {
+        0: {"input_wait": 1.0, "total_step": 10.0},
+        1: {"input_wait": 2.0, "total_step": 11.0},
+    }
+    window = window_from_rank_averages(
+        per_rank_timing,
+        expected_ranks=(0, 1),
+        metrics=[_step_time_metric("step_time", 10.0)],
+    )
+
+    diagnosis = SimpleNamespace(
+        kind="BALANCED",
+        severity="info",
+        status="BALANCED",
+        reason="No timing issue.",
+        action="Keep monitoring.",
+        note=None,
+        confidence=0.75,
+        steps_used=3,
+        worst_rank=1,
+    )
+
+    payload = build_model_diagnostics_payload(
+        step_time_window=window,
+        step_time_diagnosis=diagnosis,
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].source == "step_time"
+    assert payload.items[0].status == "BALANCED"
+    assert payload.items[0].evidence["window"] == "1"
+
+
+def test_model_step_time_diagnostics_use_selected_metrics():
+    diagnosis_metrics = (
+        _step_time_metric("input_wait", 40.0),
+        _step_time_metric("step_time", 100.0),
+        _step_time_metric("residual_proxy", 0.0),
+    )
+    window = window_from_rank_averages(
+        {
+            0: {
+                "input_wait": 40.0,
+                "step_time": 100.0,
+                "residual_proxy": 0.0,
+            }
+        },
+        clock="gpu",
+        expected_ranks=(0,),
+        metrics=list(diagnosis_metrics),
+    )
+
+    diagnosis = SimpleNamespace(
+        kind="INPUT_BOUND",
+        severity="warn",
+        status="INPUT-BOUND",
+        reason="Input wait is high.",
+        action="Increase workers.",
+        note=None,
+        confidence=0.75,
+        steps_used=1,
+        worst_rank=0,
+    )
+
+    payload = build_model_diagnostics_payload(
+        step_time_window=window,
+        step_time_diagnosis=diagnosis,
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].status == "INPUT-BOUND"
+    assert payload.items[0].evidence["dominant"] == "input wait"
+
+
+def test_model_diagnostics_uses_precomputed_step_time_diagnosis():
+    window = window_from_rank_averages(
+        {0: {"step_time": 100.0, "total_step": 100.0}},
+        expected_ranks=(0,),
+        metrics=[_step_time_metric("step_time", 100.0)],
+    )
+    diagnosis = SimpleNamespace(
+        kind="BALANCED",
+        severity="info",
+        status="BALANCED",
+        reason="No timing issue.",
+        action="Keep monitoring.",
+        note=None,
+        confidence=0.75,
+        steps_used=1,
+        worst_rank=0,
+    )
+
+    payload = build_model_diagnostics_payload(
+        step_time_window=window,
+        step_time_diagnosis=diagnosis,
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].status == "BALANCED"
+    assert payload.items[0].reason == "No timing issue."
+
+
+def test_model_diagnostics_requires_precomputed_step_time_diagnosis():
+    """The composer must not repeat analysis or diagnosis work."""
+    window = window_from_rank_averages(
+        {0: {"step_time": 100.0, "total_step": 100.0}},
+        expected_ranks=(0,),
+        metrics=[_step_time_metric("step_time", 100.0)],
+    )
+
+    payload = build_model_diagnostics_payload(
+        step_time_window=window,
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].status == "NO DATA"
+    assert payload.items[0].evidence == {}
+
+
+def test_model_step_time_diagnostics_use_no_data_without_an_analysis():
+    payload = build_model_diagnostics_payload(
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].status == "NO DATA"
+    assert payload.items[0].evidence == {}
 
 
 def test_model_diagnostics_domain_failures_are_fallback_items():
@@ -113,7 +257,6 @@ def test_model_diagnostics_domain_failures_are_fallback_items():
     )
 
     payload = build_model_diagnostics_payload(
-        step_time_metrics=(),
         step_memory_metrics=(),
         registry=registry,
     )
@@ -129,7 +272,6 @@ def test_model_diagnostics_domain_failures_are_fallback_items():
 
 def test_default_model_diagnostics_payload_keeps_existing_sources():
     payload = build_model_diagnostics_payload(
-        step_time_metrics=(),
         step_memory_metrics=(),
     )
 
@@ -141,8 +283,6 @@ def test_default_model_diagnostics_payload_keeps_existing_sources():
 
 
 def test_model_step_memory_diagnostics_use_live_policy(monkeypatch):
-    import traceml_ai.diagnostics.model_diagnostics as model_diagnostics
-
     captured = {}
 
     def fake_diagnosis(metrics, *, thresholds, **kwargs):
@@ -166,7 +306,6 @@ def test_model_step_memory_diagnostics_use_live_policy(monkeypatch):
     )
 
     payload = build_model_diagnostics_payload(
-        step_time_metrics=(),
         step_memory_metrics=(_step_memory_metric(),),
     )
 

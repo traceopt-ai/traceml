@@ -92,11 +92,7 @@ def main():
 
     train_loader, train_sampler = prepare_data(rank, world_size)
 
-    # Build the real model first
     base_model = TinyMLP().to(device)
-
-    # Attach TraceML hooks to the real model before FSDP wrapping
-    traceml.trace_model_instance(base_model)
 
     # Wrap with FSDP
     model = FSDP(

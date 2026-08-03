@@ -20,6 +20,14 @@ from typing import Optional
 
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 
+DEFAULT_FINALIZE_TIMEOUT_SEC = 300.0
+# The public ``interval`` setting uses this value unless explicitly overridden
+# through the CLI, environment, YAML, or an integration-specific config.
+DEFAULT_INTERVAL_SEC = 2.0
+# Summary is the safe, topology-independent display default. Live CLI and
+# dashboard rendering remain explicit opt-ins.
+DEFAULT_UI_MODE = "summary"
+
 
 @dataclass(frozen=True)
 class AggregatorEndpoint:
@@ -52,8 +60,9 @@ class TraceMLSettings:
     High-level TraceML settings shared across runtime and aggregator.
 
     Notes:
-    - `sampler_interval_sec` controls sampling cadence (all ranks).
-    - `render_interval_sec` controls UI cadence (aggregator only).
+    - `sampler_interval_sec` controls worker sampling cadence (all ranks).
+    - `render_interval_sec` controls aggregator UI cadence only; TCP telemetry
+      is drained as soon as data arrives.
     - `mode` selects display backend and capture behavior ("cli" | "summary" | "dashboard").
     - `summary` mode disables live rendering and prints only the final
       end-of-run summary.
@@ -61,17 +70,20 @@ class TraceMLSettings:
       loopback on local runs.
     """
 
-    profile: str = "run"  # "deep"
-    mode: str = "cli"
-    sampler_interval_sec: float = 1.0
-    render_interval_sec: float = 1.0
-    num_display_layers: int = 20
+    profile: str = "run"
+    mode: str = DEFAULT_UI_MODE
+    sampler_interval_sec: float = DEFAULT_INTERVAL_SEC
+    render_interval_sec: float = DEFAULT_INTERVAL_SEC
     logs_dir: str = "./logs"
     enable_logging: bool = False
-    remote_max_rows: int = 200
+    dashboard_port: int = 8765
+    dashboard_auto_open: bool = True
     aggregator: AggregatorTransportSettings = AggregatorTransportSettings()
     session_id: str = ""
     history_enabled: bool = True
     db_path: str = ""
     summary_window_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
     trace_max_steps: Optional[int] = None
+    html_report: bool = False
+    finalize_timeout_sec: float = DEFAULT_FINALIZE_TIMEOUT_SEC
+    expected_world_size: int = 1

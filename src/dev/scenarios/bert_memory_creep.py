@@ -138,8 +138,6 @@ def main() -> None:
         output_hidden_states=True,
     ).to(device)
 
-    traceml.trace_model_instance(model)
-
     if use_cuda:
         model = torch.nn.parallel.DistributedDataParallel(
             model,

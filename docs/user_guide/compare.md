@@ -6,7 +6,7 @@ This is the cleanest way to answer questions like:
 
 - did the run get slower or faster?
 - did the diagnosis change?
-- did wait time increase?
+- did residual time increase?
 - did memory pressure or skew get worse?
 
 `traceml compare` is designed for comparing finalized run summaries, not raw logs or raw SQLite databases.
@@ -20,11 +20,10 @@ You need two TraceML final summary JSON files.
 A common way to produce them is:
 
 ```bash
-traceml run train.py
+traceml run train.py --mode=summary
 ```
 
-`traceml run` uses summary mode by default and writes `final_summary.json` at
-the end of the run.
+Summary mode writes `final_summary.json` at the end of the run.
 
 If you are logging TraceML output into W&B or MLflow, you can also keep those summary JSON files as run artifacts and compare them later.
 
@@ -96,10 +95,11 @@ The compare report is designed to stay compact and useful.
 It typically focuses on:
 
 - overall duration
+- primary diagnosis changes
 - step-time diagnosis changes
 - average step time changes
-- wait-time changes
-- high-level step split shifts across input, H2D, compute, and wait time
+- residual-time changes
+- high-level step split shifts across input, H2D, compute, and residual time
 - memory changes when they are meaningful
 - process or system changes when they add useful context
 
@@ -143,7 +143,7 @@ traceml compare run_a.json run_b.json
 This is often enough to tell whether the slowdown is coming from:
 
 - more compute time
-- more wait time
+- more residual time
 - a phase split change
 - worse memory behavior
 - a diagnosis shift
@@ -188,8 +188,14 @@ That means:
 - if one summary has a field and the other does not, comparison still runs
 - if a section is missing, TraceML skips noisy output instead of failing when possible
 - if newer TraceML versions add more fields later, older comparisons should still remain usable for the shared fields
+- if the two summaries use different schema versions, compare emits a warning because some fields may have changed meaning
 
 This helps keep compare useful across incremental TraceML releases.
+For Step Time input timing, schema 1.6 compares selected-clock `input_wait_ms`
+when present and falls back to legacy `dataloader_ms` for older summaries.
+Since schema 1.7, a Step Time metric can be `null` when its timing signal was
+never measured in the analyzed window; compare treats a null side as
+unavailable (no delta) instead of reading it as zero.
 
 ---
 

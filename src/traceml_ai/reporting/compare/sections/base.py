@@ -66,6 +66,20 @@ def global_average(section: Any, metric_name: str) -> Any:
     return nested_get(section, "global", "average", metric_name)
 
 
+def global_average_has_key(section: Any, metric_name: str) -> bool:
+    """Return whether `global.average` carries `metric_name` as a key.
+
+    A schema>=1.6 payload always carries every public metric name, so a
+    present-but-null value means the signal was genuinely never measured
+    this window. A pre-1.6 payload never had the key at all. `.get()`
+    based reads (``global_average`` above) collapse both to ``None``;
+    this distinguishes them for callers that fall back on absence, not
+    on a null value.
+    """
+    average = nested_get(section, "global", "average")
+    return isinstance(average, dict) and metric_name in average
+
+
 def global_point_value(section: Any, kind: str, metric_name: str) -> Any:
     """Read the numeric value from `global.median/worst.<metric>`."""
     point = nested_get(section, "global", kind, metric_name)
