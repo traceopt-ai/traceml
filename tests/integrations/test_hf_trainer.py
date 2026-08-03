@@ -208,8 +208,7 @@ def test_hf_trainer_callback_integration():
         assert TraceState.step >= max_steps
 
 
-@pytest.mark.skipif(not HAS_TRANSFORMERS, reason="transformers not installed")
-def test_hf_trainer_callback_grad_accum_folds_microbatches(monkeypatch):
+def test_hf_trainer_callback_grad_accum_folds_microbatches():
     """
     With gradient_accumulation_steps=2 and max_steps=3, the callback should
     advance the TraceML step counter exactly 3 times (one TraceML step per
@@ -217,21 +216,7 @@ def test_hf_trainer_callback_grad_accum_folds_microbatches(monkeypatch):
     events, validating that sub-phase auto-timers stay armed across the
     accumulated micro-batches within a single trace_step bracket.
     """
-    # The forward/backward auto-timers this test counts are no-ops unless
-    # the process-wide patches are installed; init() is the documented
-    # path and idempotent, so the test passes regardless of test order.
-    init()
     _reset_traceml_state()
-
-    # This test verifies callback step semantics, not runtime startup. Stub
-    # the bootstrap so init() installs its patches without reaching an
-    # aggregator. Otherwise the connect times out, init() fails open to a
-    # disabled no-op, and TRACEML_DISABLED=1 leaks to every later test.
-    import traceml_ai.sdk.initial as initialization
-
-    monkeypatch.setattr(
-        initialization, "_start_runtime_for_init", lambda **kwargs: None
-    )
 
     # Auto-timers trace_step arms are no-ops until init() installs the patches.
     init()
@@ -448,7 +433,7 @@ def test_hf_trainer_callback_noop_when_disabled(monkeypatch):
         ), f"Expected no StepMemoryEvents when disabled, got {len(drained)}."
 
 
-def test_hf_init_enables_dataloader_and_h2d_patches(monkeypatch):
+def test_hf_init_enables_dataloader_and_h2d_patches():
     """
     init() must enable the process-wide patches the callback cannot install on
     its own. The DataLoader fetch patch in particular is what lets TraceML
@@ -456,14 +441,6 @@ def test_hf_init_enables_dataloader_and_h2d_patches(monkeypatch):
     never installs it. The H2D Tensor.to patch is gated the same way: the
     auto-timer trace_step arms each step is a no-op unless the patch is on.
     """
-    # This test verifies patch policy, not runtime startup. Stub the runtime
-    # bootstrap so init() does not try to reach an aggregator over TCP.
-    import traceml_ai.sdk.initial as initialization
-
-    monkeypatch.setattr(
-        initialization, "_start_runtime_for_init", lambda **kwargs: None
-    )
-
     config = init()
 
     assert config.patch_dataloader, (
