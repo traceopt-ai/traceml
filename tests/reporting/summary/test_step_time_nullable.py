@@ -202,6 +202,7 @@ def test_compare_treats_null_metric_as_unavailable(tmp_path) -> None:
                     "status": "INCOMPLETE DATA",
                 },
                 "global": {
+                    "window": {"diagnosis_clock": "cpu"},
                     "average": {
                         "total_step_ms": 31.0,
                         "input_wait_ms": 1.0,
@@ -211,7 +212,7 @@ def test_compare_treats_null_metric_as_unavailable(tmp_path) -> None:
                         "forward_ms": 5.0,
                         "backward_ms": 10.0,
                         "optimizer_ms": compute_ms,
-                    }
+                    },
                 },
             },
         }

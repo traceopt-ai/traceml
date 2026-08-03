@@ -193,8 +193,11 @@ That means:
 This helps keep compare useful across incremental TraceML releases.
 For Step Time input timing, schema 1.6 compares selected-clock `input_wait_ms`
 when present and falls back to legacy `dataloader_ms` for older summaries.
-Since schema 1.7, a Step Time metric can be `null` when its timing signal was
-never measured in the analyzed window; compare treats a null side as
+Schema 1.8 normalizes historical outer Step Time to canonical `step_time_ms`
+at the compare boundary. It compares Step Time and selected-clock phases only
+when both summaries use the same diagnosis clock; CPU and GPU values are never
+mixed. Since schema 1.7, a Step Time metric can be `null` when its timing
+signal was never measured in the analyzed window; compare treats a null side as
 unavailable (no delta) instead of reading it as zero.
 
 ---
