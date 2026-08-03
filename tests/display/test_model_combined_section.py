@@ -103,6 +103,44 @@ def _metric(
     )
 
 
+_COMPLETE_METRIC_VALUES = {
+    "input_wait": 10.0,
+    "h2d": 10.0,
+    "forward": 20.0,
+    "backward": 30.0,
+    "optimizer_step": 20.0,
+    "residual_proxy": 20.0,
+    "step_time": 100.0,
+}
+
+
+def _metrics(
+    *,
+    omit: tuple[str, ...] = (),
+    overrides: dict[str, float] | None = None,
+    worst: dict[str, float] | None = None,
+) -> list[StepTimeMetric]:
+    values = {**_COMPLETE_METRIC_VALUES, **(overrides or {})}
+    worst_values = worst or {}
+    return [
+        _metric(name, value, worst=worst_values.get(name))
+        for name, value in values.items()
+        if name not in omit
+    ]
+
+
+def _timing(
+    *,
+    omit: tuple[str, ...] = (),
+    **overrides: float,
+) -> dict[str, float]:
+    values = {**_COMPLETE_METRIC_VALUES, **overrides}
+    values["total_step"] = values.get("input_wait", 0.0) + values.get(
+        "step_time", 0.0
+    )
+    return {name: value for name, value in values.items() if name not in omit}
+
+
 def _payload(
     metrics: list[StepTimeMetric],
     *,
@@ -149,13 +187,7 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
     # h2d and residual_proxy were never measured: the hero must still
     # update from the fresh sparse window instead of freezing on the last
     # complete view (issue #259).
-    diagnosis_metrics = [
-        _metric("input_wait", 10.0),
-        _metric("forward", 20.0),
-        _metric("backward", 30.0),
-        _metric("optimizer_step", 20.0),
-        _metric("step_time", 100.0),
-    ]
+    diagnosis_metrics = _metrics(omit=("h2d", "residual_proxy"))
     payload = _payload(diagnosis_metrics)
     panel = _panel()
 
@@ -193,15 +225,9 @@ def test_step_time_dashboard_hero_renders_sparse_metrics() -> None:
 
 
 def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
-    diagnosis_metrics = [
-        _metric("input_wait", 10.0),
-        _metric("h2d", 0.0),
-        _metric("forward", 20.0),
-        _metric("backward", 30.0),
-        _metric("optimizer_step", 20.0),
-        _metric("residual_proxy", 30.0),
-        _metric("step_time", 100.0),
-    ]
+    diagnosis_metrics = _metrics(
+        overrides={"h2d": 0.0, "residual_proxy": 30.0}
+    )
     payload = _payload(diagnosis_metrics)
     panel = _panel()
 
@@ -215,14 +241,10 @@ def test_step_time_dashboard_hero_measured_zero_is_not_partial() -> None:
 def test_step_time_dashboard_hero_absent_h2d_is_not_partial() -> None:
     # H2D events are occurrence-driven: a run with no host-to-device
     # copies emits none, which is complete coverage, not partial.
-    diagnosis_metrics = [
-        _metric("input_wait", 10.0),
-        _metric("forward", 20.0),
-        _metric("backward", 30.0),
-        _metric("optimizer_step", 20.0),
-        _metric("residual_proxy", 30.0),
-        _metric("step_time", 100.0),
-    ]
+    diagnosis_metrics = _metrics(
+        omit=("h2d",),
+        overrides={"residual_proxy": 30.0},
+    )
     payload = _payload(diagnosis_metrics)
     panel = _panel()
 
@@ -272,16 +294,7 @@ def test_absent_optimizer_step_is_not_a_measured_zero() -> None:
     # absence, not an occurrence of zero: the canonical availability rule
     # drops a never-seen optimizer entirely, so the card must not render
     # it as a confident 0%.
-    payload = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ]
-    )
+    payload = _payload(_metrics(omit=("optimizer_step",)))
     panel = _panel()
     update_model_combined_section(panel, payload)
 
@@ -300,14 +313,7 @@ def test_residual_share_is_na_when_input_wait_is_unavailable() -> None:
     # The envelope substitutes zero for the missing wait, so any share
     # computed against it is a confident percentage of an unknown total.
     payload = _payload(
-        [
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 10.0),
-            _metric("step_time", 100.0),
-        ]
+        _metrics(omit=("input_wait",), overrides={"residual_proxy": 10.0})
     )
     panel = _panel()
     update_model_combined_section(panel, payload)
@@ -328,34 +334,10 @@ def test_partial_rank_coverage_includes_step_time() -> None:
     # is computed against, so a rank missing it makes the window
     # incomplete exactly as the engine reports it.
     payload = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ],
+        _metrics(),
         per_rank_timing={
-            0: {
-                "input_wait": 10.0,
-                "h2d": 10.0,
-                "forward": 20.0,
-                "backward": 30.0,
-                "optimizer_step": 20.0,
-                "residual_proxy": 20.0,
-                "step_time": 100.0,
-                "total_step": 110.0,
-            },
-            1: {
-                "input_wait": 10.0,
-                "h2d": 10.0,
-                "forward": 20.0,
-                "backward": 30.0,
-                "optimizer_step": 20.0,
-                "total_step": 110.0,
-            },
+            0: _timing(),
+            1: _timing(omit=("residual_proxy", "step_time")),
         },
     )
     panel = _panel()
@@ -376,16 +358,7 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
     # even though input_wait itself is unmeasured -- the ribbon must not
     # let the OTHER phases silently fill to 100% and read as "confirmed
     # no wait", which is exactly the class of bug this test pins.
-    dark_input_wait = _payload(
-        [
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ]
-    )
+    dark_input_wait = _payload(_metrics(omit=("input_wait",)))
     panel = _panel()
     update_model_combined_section(panel, dark_input_wait)
 
@@ -402,15 +375,7 @@ def test_step_time_dashboard_hero_dark_input_wait_is_not_measured_zero() -> (
     # Control twin: input_wait genuinely measured as 0ms must render as
     # a real 0%-width segment, distinct from the unmeasured case above.
     measured_zero_input_wait = _payload(
-        [
-            _metric("input_wait", 0.0),
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ]
+        _metrics(overrides={"input_wait": 0.0})
     )
     control_panel = _panel()
     update_model_combined_section(control_panel, measured_zero_input_wait)
@@ -423,17 +388,7 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
     # The CLI sibling distinguishes "no data yet" from "had data, now
     # expired" via live-session freshness; the compatibility projection must
     # do the same instead of freezing on the last complete view forever.
-    good = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ],
-    )
+    good = _payload(_metrics())
     panel = _panel()
     update_model_combined_section(panel, good)
     assert panel["win"].text == "5 aligned steps · representative r0"
@@ -496,16 +451,7 @@ def test_step_time_dashboard_hero_recovered_phase_drops_the_hatch() -> None:
     # was hatched while unmeasured must have its solid background
     # restored on recovery; otherwise it stays visually "unmeasured"
     # forever while reporting a real width.
-    sparse = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("h2d", 10.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ]
-    )
+    sparse = _payload(_metrics(omit=("forward",)))
     panel = _panel()
     update_model_combined_section(panel, sparse)
 
@@ -518,17 +464,7 @@ def test_step_time_dashboard_hero_recovered_phase_drops_the_hatch() -> None:
     )
 
     # Forward starts reporting again.
-    complete = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ]
-    )
+    complete = _payload(_metrics())
     update_model_combined_section(panel, complete)
 
     forward_color = dict((k, c) for _, k, c in theme.PHASES)["forward"]
@@ -544,33 +480,10 @@ def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
     # INCOMPLETE; the card must not report it as fully covered just
     # because the aggregate metric exists.
     payload = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ],
+        _metrics(),
         per_rank_timing={
-            0: {
-                "input_wait": 10.0,
-                "h2d": 10.0,
-                "forward": 20.0,
-                "backward": 30.0,
-                "optimizer_step": 20.0,
-                "step_time": 100.0,
-                "total_step": 110.0,
-            },
-            1: {
-                "input_wait": 10.0,
-                "h2d": 10.0,
-                "forward": 20.0,
-                "optimizer_step": 20.0,
-                "step_time": 100.0,
-                "total_step": 110.0,
-            },
+            0: _timing(omit=("residual_proxy",)),
+            1: _timing(omit=("backward", "residual_proxy")),
         },
     )
     panel = _panel()
@@ -585,19 +498,7 @@ def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
     window = payload.analysis.window
     symmetric = _payload(
         window.metrics,
-        per_rank_timing={
-            rank: {
-                "input_wait": 10.0,
-                "h2d": 10.0,
-                "forward": 20.0,
-                "backward": 30.0,
-                "optimizer_step": 20.0,
-                "residual_proxy": 20.0,
-                "step_time": 100.0,
-                "total_step": 110.0,
-            }
-            for rank in (0, 1)
-        },
+        per_rank_timing={rank: _timing() for rank in (0, 1)},
     )
     control = _panel()
     update_model_combined_section(control, symmetric)
@@ -609,27 +510,22 @@ def test_step_time_dashboard_hero_clears_when_step_envelope_missing() -> None:
     # with no step_time. Without the envelope there is no denominator, so
     # every share would be invented -- the card must clear rather than
     # leave the previous ribbon and KPIs standing as if they were current.
-    complete = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("h2d", 10.0),
-            _metric("forward", 20.0),
-            _metric("backward", 30.0),
-            _metric("optimizer_step", 20.0),
-            _metric("residual_proxy", 20.0),
-            _metric("step_time", 100.0),
-        ]
-    )
+    complete = _payload(_metrics())
     panel = _panel()
     update_model_combined_section(panel, complete)
     assert panel["win"].text == "5 aligned steps · representative r0"
     assert panel["kpis"]["median"].content.startswith("100")
 
     no_envelope = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("forward", 20.0),
-        ]
+        _metrics(
+            omit=(
+                "h2d",
+                "backward",
+                "optimizer_step",
+                "residual_proxy",
+                "step_time",
+            )
+        )
     )
     update_model_combined_section(panel, no_envelope)
 
@@ -644,15 +540,7 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert theme.PHASES[0][:2] == ("IW", "input_wait")
 
     # Self-consistent window shape: phases sum to input_wait + step.
-    diagnosis_metrics = [
-        _metric("input_wait", 10.0),
-        _metric("h2d", 10.0),
-        _metric("forward", 20.0),
-        _metric("backward", 30.0),
-        _metric("optimizer_step", 20.0),
-        _metric("residual_proxy", 20.0),
-        _metric("step_time", 100.0, worst=200.0),
-    ]
+    diagnosis_metrics = _metrics(worst={"step_time": 200.0})
     payload = _payload(diagnosis_metrics, clock="gpu")
     panel = _panel()
 
@@ -668,35 +556,35 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
 
 
 def test_ribbon_selects_one_real_representative_rank() -> None:
-    metrics = [
-        _metric("input_wait", 50.0),
-        _metric("forward", 45.0),
-        _metric("backward", 15.0),
-        _metric("optimizer_step", 7.5),
-        _metric("residual_proxy", 32.5),
-        _metric("step_time", 100.0),
-    ]
+    metrics = _metrics(
+        omit=("h2d",),
+        overrides={
+            "input_wait": 50.0,
+            "forward": 45.0,
+            "backward": 15.0,
+            "optimizer_step": 7.5,
+            "residual_proxy": 32.5,
+        },
+    )
     payload = _payload(
         metrics,
         per_rank_timing={
-            0: {
-                "input_wait": 0.0,
-                "forward": 10.0,
-                "backward": 20.0,
-                "optimizer_step": 10.0,
-                "residual_proxy": 60.0,
-                "step_time": 100.0,
-                "total_step": 100.0,
-            },
-            1: {
-                "input_wait": 100.0,
-                "forward": 80.0,
-                "backward": 10.0,
-                "optimizer_step": 5.0,
-                "residual_proxy": 5.0,
-                "step_time": 100.0,
-                "total_step": 200.0,
-            },
+            0: _timing(
+                omit=("h2d",),
+                input_wait=0.0,
+                forward=10.0,
+                backward=20.0,
+                optimizer_step=10.0,
+                residual_proxy=60.0,
+            ),
+            1: _timing(
+                omit=("h2d",),
+                input_wait=100.0,
+                forward=80.0,
+                backward=10.0,
+                optimizer_step=5.0,
+                residual_proxy=5.0,
+            ),
         },
     )
     panel = _panel()
@@ -712,25 +600,31 @@ def test_ribbon_selects_one_real_representative_rank() -> None:
 
 def test_disjoint_rank_populations_clear_only_the_ribbon() -> None:
     payload = _payload(
-        [
-            _metric("input_wait", 10.0),
-            _metric("forward", 40.0),
-            _metric("backward", 40.0),
-            _metric("optimizer_step", 10.0),
-            _metric("step_time", 100.0),
-        ],
-        per_rank_timing={
-            0: {
-                "input_wait": 10.0,
+        _metrics(
+            omit=("h2d", "residual_proxy"),
+            overrides={
                 "forward": 40.0,
-                "step_time": 100.0,
-                "total_step": 110.0,
-            },
-            1: {
                 "backward": 40.0,
                 "optimizer_step": 10.0,
-                "step_time": 120.0,
             },
+        ),
+        per_rank_timing={
+            0: _timing(
+                omit=("h2d", "backward", "optimizer_step", "residual_proxy"),
+                forward=40.0,
+            ),
+            1: _timing(
+                omit=(
+                    "input_wait",
+                    "h2d",
+                    "forward",
+                    "residual_proxy",
+                    "total_step",
+                ),
+                backward=40.0,
+                optimizer_step=10.0,
+                step_time=120.0,
+            ),
         },
     )
     panel = _panel()

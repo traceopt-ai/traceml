@@ -1,6 +1,13 @@
-import json
-import sqlite3
-
+from tests.sqlite_fixtures import (
+    insert_step_time_sample,
+    insert_training_strategy,
+    summary_database,
+)
+from tests.step_time.factories import (
+    event_stats,
+    rank_average,
+    window_from_events,
+)
 from traceml_ai.diagnostics.step_time import (
     SUMMARY_STEP_TIME_POLICY,
     diagnose_step_time_window,
@@ -18,149 +25,23 @@ from traceml_ai.step_time.pipeline import StepTimeAnalysis
 from traceml_ai.step_time.sqlite import (
     load_training_strategy_from_sqlite,
 )
-from tests.step_time.factories import (
-    rank_average,
-    window_from_events,
-)
 
 
 def _create_step_time_db(path: str) -> None:
-    conn = sqlite3.connect(path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE step_time_samples (
-                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                recv_ts_ns         INTEGER NOT NULL,
-                rank               INTEGER,
-                global_rank        INTEGER,
-                local_rank         INTEGER,
-                world_size         INTEGER,
-                local_world_size   INTEGER,
-                node_rank          INTEGER,
-                hostname           TEXT,
-                sample_ts_s        REAL,
-                seq                INTEGER,
-                step               INTEGER,
-                events_json        TEXT NOT NULL
-            );
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE runtime_environment (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                training_strategy TEXT
-            );
-            """
-        )
-        conn.executemany(
-            """
-            INSERT INTO runtime_environment(training_strategy)
-            VALUES (?);
-            """,
-            [("ddp",), ("fsdp",)],
-        )
-        events = {
-            "_traceml_internal:dataloader_next": {
-                "cpu": {
-                    "is_gpu": False,
-                    "duration_ms": 1.0,
-                    "cpu_ms": 1.0,
-                    "gpu_ms": None,
-                    "n_calls": 1,
-                }
-            },
-            "_traceml_internal:forward_time": {
-                "cpu": {
-                    "is_gpu": False,
-                    "duration_ms": 5.0,
-                    "cpu_ms": 5.0,
-                    "gpu_ms": None,
-                    "n_calls": 1,
-                }
-            },
-            "_traceml_internal:backward_time": {
-                "cpu": {
-                    "is_gpu": False,
-                    "duration_ms": 10.0,
-                    "cpu_ms": 10.0,
-                    "gpu_ms": None,
-                    "n_calls": 1,
-                }
-            },
-            "_traceml_internal:optimizer_step": {
-                "cpu": {
-                    "is_gpu": False,
-                    "duration_ms": 4.0,
-                    "cpu_ms": 4.0,
-                    "gpu_ms": None,
-                    "n_calls": 1,
-                }
-            },
-            "_traceml_internal:step_time": {
-                "cpu": {
-                    "is_gpu": False,
-                    "duration_ms": 30.0,
-                    "cpu_ms": 30.0,
-                    "gpu_ms": None,
-                    "n_calls": 1,
-                }
-            },
-        }
-        rows = [
-            (
-                1,
-                0,
-                0,
-                0,
-                1,
-                1,
-                0,
-                "worker-0",
-                1.0,
-                1,
-                1,
-                json.dumps(events),
-            ),
-            (
-                2,
-                0,
-                0,
-                0,
-                1,
-                1,
-                0,
-                "worker-0",
-                2.0,
-                2,
-                2,
-                json.dumps(events),
-            ),
-        ]
-        conn.executemany(
-            """
-            INSERT INTO step_time_samples(
-                recv_ts_ns,
-                rank,
-                global_rank,
-                local_rank,
-                world_size,
-                local_world_size,
-                node_rank,
-                hostname,
-                sample_ts_s,
-                seq,
-                step,
-                events_json
+    with summary_database(path) as conn:
+        insert_training_strategy(conn, "ddp", "fsdp")
+        for step in (1, 2):
+            insert_step_time_sample(
+                conn,
+                row_id=step,
+                rank=0,
+                step=step,
+                dataloader=1.0,
+                forward=5.0,
+                backward=10.0,
+                optimizer=4.0,
+                step_time=30.0,
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            rows,
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
@@ -177,23 +58,9 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
 
 def test_training_strategy_loader_uses_latest_available_row(tmp_path) -> None:
     db_path = tmp_path / "telemetry"
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE runtime_environment (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                training_strategy TEXT
-            );
-            """
-        )
-        conn.executemany(
-            "INSERT INTO runtime_environment(training_strategy) VALUES (?);",
-            [("fsdp",), ("ddp",)],
-        )
+    with summary_database(db_path) as conn:
+        insert_training_strategy(conn, "fsdp", "ddp")
         assert load_training_strategy_from_sqlite(conn) == "ddp"
-    finally:
-        conn.close()
 
 
 def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
@@ -274,17 +141,6 @@ def test_step_time_section_uses_summary_pipeline_and_sqlite_fixture(
 
 
 def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
-    def event_stats(cpu_ms: float) -> dict[str, dict[str, float | bool | int]]:
-        return {
-            "cpu": {
-                "is_gpu": False,
-                "duration_ms": cpu_ms,
-                "cpu_ms": cpu_ms,
-                "gpu_ms": None,
-                "n_calls": 1,
-            }
-        }
-
     per_rank_steps = {
         rank: {
             step: {
