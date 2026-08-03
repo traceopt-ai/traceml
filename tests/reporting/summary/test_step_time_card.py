@@ -76,17 +76,24 @@ def _assert_compact_card(card: str) -> None:
     assert "- Dominant:" not in card
 
 
-def _assert_public_step_metrics_keep_dataloader(payload) -> None:
+def _assert_public_step_metrics_are_canonical(payload) -> None:
     public_metric_keys = set(payload["global"]["median"])
-    assert "dataloader_ms" in public_metric_keys
-    assert "input_wait_ms" in public_metric_keys
-    assert "step_time_ms" in public_metric_keys
+    assert {
+        "input_wait_ms",
+        "step_time_ms",
+        "traced_step_time_ms",
+        "step_time_cpu_ms",
+        "step_time_gpu_ms",
+        "traced_step_time_cpu_ms",
+        "traced_step_time_gpu_ms",
+        "dataloader_fetch_cpu_ms",
+    } <= public_metric_keys
+    assert "total_step_ms" not in public_metric_keys
+    assert "dataloader_ms" not in public_metric_keys
 
     for row in payload["groups"]["rows"].values():
         row_metric_keys = set(row["metrics"])
-        assert "dataloader_ms" in row_metric_keys
-        assert "input_wait_ms" in row_metric_keys
-        assert "step_time_ms" in row_metric_keys
+        assert row_metric_keys == public_metric_keys
 
 
 def test_step_time_no_data_card_is_compact() -> None:
@@ -144,8 +151,8 @@ def test_card_median_and_json_representative_are_explicit() -> None:
         }
     )
 
-    assert "total 150.0/200.0ms" in payload["card"]
-    assert payload["global"]["median"]["total_step_ms"] == {
+    assert "Step Time 150.0/200.0ms" in payload["card"]
+    assert payload["global"]["median"]["step_time_ms"] == {
         "value": 100.0,
         "idx": "0",
     }
@@ -165,7 +172,7 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                 ),
                 "status": "COMPUTE-BOUND",
                 "card": (
-                    "- Stats: total 97.0ms | input 2.0ms | H2D 0.0ms | "
+                    "- Stats: Step Time 97.0ms | input 2.0ms | H2D 0.0ms | "
                     "compute 90.0ms",
                     "- Residual: 5.0ms",
                     "- Why: Compute-bound; backward is the largest phase.",
@@ -191,17 +198,21 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                 "diagnosis": {"metric": "input_wait", "phase": "input"},
                 "evidence": {
                     "input_wait_ms": 40.0,
-                    "step_time_ms": 100.0,
-                    "iteration_time_ms": 140.0,
+                    "step_time_ms": 140.0,
+                    "traced_step_time_ms": 100.0,
                     "diagnosis_clock": "gpu",
                 },
                 "average": {
-                    "dataloader_ms": 12.0,
+                    "dataloader_fetch_cpu_ms": 12.0,
                     "input_wait_ms": 40.0,
-                    "step_time_ms": 100.0,
-                    "total_step_ms": 102.0,
+                    "step_time_ms": 140.0,
+                    "traced_step_time_ms": 100.0,
+                    "step_time_cpu_ms": 102.0,
+                    "traced_step_time_cpu_ms": 90.0,
+                    "step_time_gpu_ms": 140.0,
+                    "traced_step_time_gpu_ms": 100.0,
                 },
-                "public_dataloader": True,
+                "public_metrics": True,
                 "card": (
                     "- Why: Input wait is 28.6% of the typical GPU Step "
                     "Time.",
@@ -270,9 +281,9 @@ def test_step_time_diagnosis_cards_use_short_reason(case: dict) -> None:
     for key, expected in case.get("average", {}).items():
         assert payload["global"]["average"][key] == expected
         assert payload["groups"]["rows"]["0"]["metrics"][key] == expected
-    if case.get("public_dataloader"):
+    if case.get("public_metrics"):
         assert payload["global"]["window"]["diagnosis_clock"] == "gpu"
-        _assert_public_step_metrics_keep_dataloader(payload)
+        _assert_public_step_metrics_are_canonical(payload)
     for expected in case["card"]:
         assert expected in payload["card"]
     _assert_compact_card(payload["card"])
@@ -357,7 +368,7 @@ def test_step_time_input_straggler_card_shows_rank_evidence() -> None:
     assert payload["diagnosis"]["status"] == "INPUT STRAGGLER"
     assert payload["diagnosis"]["metric"] == "input_wait"
     assert payload["diagnosis"]["phase"] == "input"
-    _assert_public_step_metrics_keep_dataloader(payload)
+    _assert_public_step_metrics_are_canonical(payload)
     assert "- Ranks: median/worst |" in payload["card"]
     assert (
         "- Why: r1 has excess input wait burden relative to victim r0 "

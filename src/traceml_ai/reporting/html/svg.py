@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .sections_helpers import sorted_rows
 from .textutils import esc, fmt_value
@@ -24,11 +24,52 @@ _PHASES = (
 )
 
 
-def phase_bar(step_time_section: Dict[str, Any]) -> str:
-    """Stacked horizontal bar of the average step's phase breakdown."""
+def _schema_number(value: Any) -> Optional[float]:
+    """Return a usable schema number from a final-summary payload value."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _phase_bar_denominator(
+    avg: Dict[str, Any],
+    *,
+    schema_version: Any,
+) -> Optional[float]:
+    """Return canonical Step Time, adapting only pre-1.8 report payloads."""
+    schema = _schema_number(schema_version)
+    if schema is not None and schema >= 1.8:
+        value = avg.get("step_time_ms")
+        return float(value) if isinstance(value, (int, float)) else None
+
+    # Compatibility reader for historical final summaries only: before 1.8,
+    # step_time_ms was the traced envelope and the outer duration was absent.
+    traced = avg.get("step_time_ms")
+    input_wait = avg.get("input_wait_ms")
+    if input_wait is None and "input_wait_ms" not in avg:
+        input_wait = avg.get("dataloader_ms")
+    if isinstance(traced, (int, float)) and isinstance(
+        input_wait, (int, float)
+    ):
+        return float(traced) + float(input_wait)
+    return None
+
+
+def phase_bar(
+    step_time_section: Dict[str, Any],
+    *,
+    schema_version: Any = 1.8,
+) -> str:
+    """Render phase widths against canonical Step Time without rescaling."""
     avg = (step_time_section.get("global") or {}).get("average") or {}
+    if not isinstance(avg, dict):
+        return ""
+    step_time = _phase_bar_denominator(avg, schema_version=schema_version)
+    if step_time is None or step_time <= 0.0:
+        return ""
+
     present: List[Tuple[str, str, float]] = []
-    total = 0.0
     for metric, label, color in _PHASES:
         value = avg.get(metric)
         if (
@@ -36,23 +77,22 @@ def phase_bar(step_time_section: Dict[str, Any]) -> str:
             and metric == "input_wait_ms"
             and "input_wait_ms" not in avg
         ):
-            # Back-compat: a pre-1.6 report never carried this key at
-            # all. A schema>=1.6 report always carries the key, so a
+            # Pre-1.6 reports never carried this key at all. A newer report
+            # always carries the key, so a
             # present-but-null value here means genuinely unmeasured,
             # not "borrow dataloader_ms" -- fall through to the isinstance
             # check below and drop this phase from the chart.
             value = avg.get("dataloader_ms")
         if isinstance(value, (int, float)) and value > 0:
             present.append((label, color, float(value)))
-            total += float(value)
-    if total <= 0:
+    if not present:
         return ""
 
     rects: List[str] = []
     legend: List[str] = []
     x = 0.0
     for label, color, value in present:
-        width = 100.0 * value / total
+        width = 100.0 * value / step_time
         rects.append(
             f'<rect x="{x:.2f}%" y="4" width="{width:.2f}%" height="18" '
             f'fill="{color}"/>'

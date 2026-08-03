@@ -150,15 +150,16 @@ contract does not load the analyzer or NumPy.
 | Required metrics | Input wait, forward, backward, and step envelope must be measured on every aligned step for a rank. Partial presence makes that metric unavailable for the rank. |
 | Occurrence-driven metrics | H2D and optimizer may legitimately occur on only some steps. Once observed, absent steps contribute zero work. An entirely absent H2D means no observed transfers, not incomplete instrumentation. |
 | Missing versus zero | An unavailable metric is absent from the sparse rank row and projects to `null`. A measured `0.0` remains present and projects to `0.0`. |
-| Derived metrics | Compute needs forward, backward, and optimizer. Residual needs the step envelope and every compute phase; absent H2D contributes zero. Total step needs input wait and the step envelope. |
+| Derived metrics | Compute needs forward, backward, and optimizer. Residual needs the traced envelope and every compute phase; absent H2D contributes zero. Step Time needs input wait and the traced envelope. |
 | Rank cohorts | A diagnosis uses only ranks carrying all metrics required by that rule. Consumers must not reconstruct another availability policy. |
 | Metric statistics | Median, worst value, worst rank, and skew are computed from ranks that measured that metric. The worst value and rank must describe the same rank. |
 | Representative rank | Choose the real rank nearest the mathematical median, then the lower value, then the lower rank id. |
 | Residual meaning | `max(0, step - h2d - forward - backward - optimizer)` is unattributed time, not proof of communication or NCCL overhead. |
 
-In `final_summary.json`, `dataloader_ms` and `total_step_ms` are CPU-clocked.
-`input_wait_ms`, `step_time_ms`, and phase metrics use the selected diagnosis
-clock.
+In `final_summary.json`, `step_time_ms`, `traced_step_time_ms`, and phase
+metrics use the selected diagnosis clock. The explicit CPU/GPU Step Time and
+Traced Step Time fields preserve both clocks, while `dataloader_fetch_cpu_ms`
+is supplemental CPU evidence.
 
 ## Surface responsibilities
 

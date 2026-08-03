@@ -14,10 +14,14 @@ TRACKER_PREFIX = "traceml"
 
 METRICS_BY_SECTION = {
     "step_time": (
-        "total_step_ms",
-        "dataloader_ms",
         "input_wait_ms",
         "step_time_ms",
+        "traced_step_time_ms",
+        "step_time_cpu_ms",
+        "step_time_gpu_ms",
+        "traced_step_time_cpu_ms",
+        "traced_step_time_gpu_ms",
+        "dataloader_fetch_cpu_ms",
         "h2d_ms",
         "compute_ms",
         "residual_ms",
@@ -87,6 +91,13 @@ def compact_summary(
         _set_scalar(out, f"{section}/severity", diagnosis.get("severity"))
 
         global_summary = _mapping(section_payload.get("global"))
+        window = _mapping(global_summary.get("window"))
+        if section == "step_time":
+            _set_scalar(
+                out,
+                "step_time/diagnosis_clock",
+                window.get("diagnosis_clock"),
+            )
         average = _mapping(global_summary.get("average"))
         for metric in METRICS_BY_SECTION.get(section, ()):
             _set_scalar(out, f"{section}/{metric}", average.get(metric))

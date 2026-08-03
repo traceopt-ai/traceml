@@ -23,7 +23,7 @@ COMPARE_INNER_WIDTH = COMPARE_WIDTH - 4
 
 TEXT_METRIC_ORDER_BY_SECTION: Dict[str, tuple[str, ...]] = {
     "step_time": (
-        "total_step_ms",
+        "step_time_ms",
         "input_ms",
         "h2d_ms",
         "compute_ms",

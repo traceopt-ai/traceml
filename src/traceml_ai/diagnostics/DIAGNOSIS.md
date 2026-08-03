@@ -130,16 +130,14 @@ explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
 summary use the same global-rank SQLite loader and selected-clock window
 builder for diagnosis-facing timing; they differ only by row window sizing.
 The canonical model exposes selected-clock `input_wait_ms`, outer
-`step_time_ms`, and inner `traced_step_time_ms`. Summary JSON retains its
-legacy compatibility names: public `step_time_ms` is the selected traced
-envelope, `dataloader_ms` remains CPU dataloader fetch time, and
-`total_step_ms` remains CPU Step Time.
-These compatibility fields are not selected-clock phase-share denominators.
+`step_time_ms`, and inner `traced_step_time_ms`. Summary JSON also publishes
+explicit CPU and GPU Step Time and Traced Step Time aggregates.
+`dataloader_fetch_cpu_ms` remains supplemental CPU fetch evidence and is not a
+selected-clock phase-share denominator.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
 display or diagnosis. In the final text report, selected-clock phase shares
-are divided by public `input_wait_ms + step_time_ms`; CPU compatibility rows are
-labeled separately. These report-table shares are observational and do not
-replace the median per-rank diagnosis score.
+are divided directly by public `step_time_ms`. These report-table shares are
+observational and do not replace the median per-rank diagnosis score.
 
 Typical overhead diagnoses use selected-clock per-rank Step Time shares:
 
@@ -198,7 +196,6 @@ known_step_ms = h2d_ms + compute_ms
 traced_step_time_ms = selected traced envelope timing
 step_time_ms = selected input_wait_ms + selected traced_step_time_ms
 residual_ms = average(max(0, traced_step_time_ms - known_step_ms))
-public total_step_ms = CPU Step Time (compatibility projection)
 ```
 
 Rank stragglers use culprit/victim evidence from selected-clock timing. TraceML

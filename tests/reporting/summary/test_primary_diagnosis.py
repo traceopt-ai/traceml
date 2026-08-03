@@ -58,16 +58,20 @@ def _step_time(
         "global": {
             "window": {"steps_analyzed": 256, "diagnosis_clock": "gpu"},
             "average": {
-                "total_step_ms": 200.0,
-                "dataloader_ms": 50.0,
+                "step_time_cpu_ms": 200.0,
+                "step_time_gpu_ms": 240.0,
+                "traced_step_time_cpu_ms": 120.0,
+                "traced_step_time_gpu_ms": 160.0,
+                "dataloader_fetch_cpu_ms": 50.0,
                 "input_wait_ms": 80.0,
-                "step_time_ms": 160.0,
+                "step_time_ms": 240.0,
+                "traced_step_time_ms": 160.0,
                 "h2d_ms": 10.0,
                 "compute_ms": 120.0,
                 "residual_ms": 20.0,
             },
             "median": {
-                "dataloader_ms": {"value": 5.0, "idx": "0"},
+                "dataloader_fetch_cpu_ms": {"value": 5.0, "idx": "0"},
                 "input_wait_ms": {"value": 8.0, "idx": "0"},
                 "h2d_ms": {"value": 10.0, "idx": "1"},
                 "compute_ms": {"value": 100.0, "idx": "1"},
@@ -75,7 +79,7 @@ def _step_time(
                 "residual_ms": {"value": 20.0, "idx": "0"},
             },
             "worst": {
-                "dataloader_ms": {"value": 80.0, "idx": "2"},
+                "dataloader_fetch_cpu_ms": {"value": 80.0, "idx": "2"},
                 "input_wait_ms": {"value": 120.0, "idx": "2"},
                 "h2d_ms": {"value": 40.0, "idx": "2"},
                 "compute_ms": {"value": 180.0, "idx": "2"},
@@ -100,7 +104,7 @@ def test_input_bound_uses_phase_share_evidence() -> None:
         _step_time(
             "INPUT_BOUND",
             status="INPUT-BOUND",
-            summary="Input wait is 33.3% of the typical GPU iteration time.",
+            summary="Input wait is 33.3% of the typical GPU Step Time.",
         ),
         _system(gpu_util=38.0),
     )
@@ -109,17 +113,16 @@ def test_input_bound_uses_phase_share_evidence() -> None:
     assert primary["section"] == "step_time"
     assert primary["scope"] == "performance"
     assert primary["summary"] == (
-        "Input wait is 33.3% of the typical GPU iteration time."
+        "Input wait is 33.3% of the typical GPU Step Time."
     )
     assert primary["evidence"] == {
         "type": "phase_share",
         "basis": "average",
         "steps_analyzed": 256,
-        "total_step_ms": 200.0,
-        "step_time_ms": 160.0,
-        "iteration_time_ms": 240.0,
+        "step_time_ms": 240.0,
+        "traced_step_time_ms": 160.0,
         "diagnosis_clock": "gpu",
-        "dataloader_ms": 50.0,
+        "dataloader_fetch_cpu_ms": 50.0,
         "input_wait_ms": 80.0,
         "h2d_ms": 10.0,
         "compute_ms": 120.0,
@@ -128,21 +131,21 @@ def test_input_bound_uses_phase_share_evidence() -> None:
     }
 
 
-def test_h2d_bound_uses_iteration_phase_share_evidence() -> None:
+def test_h2d_bound_uses_step_time_phase_share_evidence() -> None:
     primary = _primary(
         _step_time(
             "H2D_BOUND",
             status="H2D-BOUND",
-            summary="H2D transfer is 23.1% of the typical GPU iteration time.",
+            summary="H2D transfer is 23.1% of the typical GPU Step Time.",
         )
     )
 
     assert primary["kind"] == "H2D_BOUND"
     assert primary["summary"] == (
-        "H2D transfer is 23.1% of the typical GPU iteration time."
+        "H2D transfer is 23.1% of the typical GPU Step Time."
     )
     assert primary["evidence"]["type"] == "phase_share"
-    assert primary["evidence"]["iteration_time_ms"] == 240.0
+    assert primary["evidence"]["step_time_ms"] == 240.0
     assert "shares" not in primary["evidence"]
 
 
@@ -159,13 +162,13 @@ def test_phase_share_primary_keeps_the_diagnosis_impact_score() -> None:
 
     assert primary["evidence"]["score"] == 0.23125
     assert primary["evidence"]["h2d_ms"] == 10.0
-    assert primary["evidence"]["iteration_time_ms"] == 240.0
+    assert primary["evidence"]["step_time_ms"] == 240.0
     assert primary["evidence"]["score"] != pytest.approx(10.0 / 240.0)
     assert primary["evidence"]["score_basis"] == (
-        "median_per_rank_iteration_share"
+        "median_per_rank_step_time_share"
     )
     assert primary["evidence"]["score_denominator"] == (
-        "input_wait_ms + step_time_ms per rank"
+        "selected-clock Step Time per rank"
     )
     assert "shares" not in primary["evidence"]
 
@@ -177,7 +180,7 @@ def test_straggler_primary_keeps_the_diagnosis_impact_score() -> None:
             "score": 0.23,
             "evidence": {
                 "visible_cost_ms": 23.0,
-                "iteration_time_ms": 100.0,
+                "step_time_ms": 100.0,
             },
         }
     )
@@ -186,7 +189,7 @@ def test_straggler_primary_keeps_the_diagnosis_impact_score() -> None:
 
     assert primary["evidence"]["score"] == 0.23
     assert primary["evidence"]["score_basis"] == (
-        "visible_cost_ms / victim_iteration_time_ms"
+        "visible_cost_ms / victim_step_time_ms"
     )
     assert primary["evidence"]["score_numerator_ms"] == 23.0
     assert primary["evidence"]["score_denominator_ms"] == 100.0
@@ -197,15 +200,13 @@ def test_residual_heavy_uses_residual_phase_share() -> None:
         _step_time(
             "RESIDUAL_HEAVY",
             status="RESIDUAL-HEAVY",
-            summary=(
-                "Residual time is 21.0% of the typical GPU iteration time."
-            ),
+            summary=("Residual time is 21.0% of the typical GPU Step Time."),
         )
     )
 
     assert primary["kind"] == "RESIDUAL_HEAVY"
     assert primary["summary"] == (
-        "Residual time is 21.0% of the typical GPU iteration time."
+        "Residual time is 21.0% of the typical GPU Step Time."
     )
     assert primary["evidence"]["type"] == "phase_share"
     assert "shares" not in primary["evidence"]

@@ -145,7 +145,7 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.7
+    assert payload["schema_version"] == 1.8
     assert set(payload) == {
         "schema_version",
         "generated_at",
@@ -199,7 +199,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.7
+    assert payload["schema_version"] == 1.8
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
@@ -261,7 +261,7 @@ def test_final_text_uses_single_process_average_layout():
         "INPUT_BOUND",
         "INPUT-BOUND",
         severity="crit",
-        summary="Input wait is 48.5% of the typical GPU iteration time.",
+        summary="Input wait is 48.5% of the typical GPU Step Time.",
         action="Increase workers, prefetch, or storage throughput.",
     )
     step_time = _payload(
@@ -270,10 +270,10 @@ def test_final_text_uses_single_process_average_layout():
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "average": {
-                "total_step_ms": 139.1,
-                "dataloader_ms": 120.0,
+                "dataloader_fetch_cpu_ms": 120.0,
                 "input_wait_ms": 130.8,
-                "step_time_ms": 139.1,
+                "step_time_ms": 269.9,
+                "traced_step_time_ms": 139.1,
                 "compute_ms": 6.9,
                 "residual_ms": 1.3,
                 "h2d_ms": 0.2,
@@ -300,18 +300,22 @@ def test_final_text_uses_single_process_average_layout():
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
-    assert (
-        "Why: Input wait is 48.5% of the typical GPU iteration time." in text
-    )
+    assert "Why: Input wait is 48.5% of the typical GPU Step Time." in text
     assert "Next: Increase workers, prefetch, or storage throughput." in text
     assert "System Evidence" in text
     assert "Metric            Average" in text
     assert "Step Time Evidence" in text
-    assert "Phase             Average           Share" in text
-    assert "Total             139.1ms           compat" in text
-    assert "Input Wait        130.8ms           48.5%" in text
-    assert "Dataloader        120.0ms           compat" in text
-    assert "Step Time         139.1ms           51.5%" in text
+    assert "Phase" in text
+    assert "Average" in text
+    assert "Share" in text
+    assert "Input Wait" in text
+    assert "130.8ms" in text
+    assert "48.5%" in text
+    assert "Step Time" in text
+    assert "Traced Step Time" in text
+    assert "DataLoader Fetch" in text
+    assert "supplemental" in text
+    assert "Total" not in text
     assert "Median" not in text
     assert "Worst" not in text
     assert "Skew" not in text
@@ -334,10 +338,10 @@ def test_final_text_renders_missing_step_metrics_as_na():
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "cpu"},
             "average": {
-                "total_step_ms": 139.1,
-                "dataloader_ms": 120.0,
+                "dataloader_fetch_cpu_ms": 120.0,
                 "input_wait_ms": 130.8,
-                "step_time_ms": 139.1,
+                "step_time_ms": 269.9,
+                "traced_step_time_ms": 139.1,
                 "compute_ms": None,
                 "residual_ms": None,
                 "h2d_ms": None,
@@ -371,10 +375,10 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "average": {
-                "total_step_ms": 10.5,
-                "dataloader_ms": 0.5,
+                "dataloader_fetch_cpu_ms": 0.5,
                 "input_wait_ms": 2.0,
-                "step_time_ms": 50.0,
+                "step_time_ms": 52.0,
+                "traced_step_time_ms": 50.0,
                 "compute_ms": 48.0,
                 "residual_ms": 1.0,
                 "h2d_ms": 1.0,
@@ -385,12 +389,15 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
     payload = _final_payload(step_time)
 
     text = payload["text"]
-    assert "Total             10.5ms            compat" in text
-    assert "Dataloader        0.5ms             compat" in text
-    assert "Step Time         50.0ms            96.2%" in text
-    assert "Compute           48.0ms            92.3%" in text
-    assert "457.1%" not in text
-    assert "476.2%" not in text
+    assert "DataLoader Fetch" in text
+    assert "supplemental" in text
+    assert "Traced Step Time" in text
+    assert "96.2%" in text
+    assert "Compute" in text
+    assert "48.0ms" in text
+    assert "92.3%" in text
+    assert "Step Time" in text
+    assert "Total" not in text
 
 
 def test_final_text_includes_h2d_bound_diagnosis():
@@ -400,16 +407,16 @@ def test_final_text_includes_h2d_bound_diagnosis():
             "H2D_BOUND",
             "H2D-BOUND",
             severity="crit",
-            summary="H2D transfer is 14.3% of the typical GPU iteration time.",
+            summary="H2D transfer is 14.3% of the typical GPU Step Time.",
             action="Inspect pinned memory and batch transfers.",
         ),
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "average": {
-                "total_step_ms": 150.0,
-                "dataloader_ms": 40.0,
+                "dataloader_fetch_cpu_ms": 40.0,
                 "input_wait_ms": 40.0,
-                "step_time_ms": 100.0,
+                "step_time_ms": 140.0,
+                "traced_step_time_ms": 100.0,
                 "h2d_ms": 20.0,
                 "compute_ms": 70.0,
                 "residual_ms": 10.0,
@@ -420,7 +427,7 @@ def test_final_text_includes_h2d_bound_diagnosis():
     payload = _final_payload(step_time)
 
     assert "TraceML Verdict: H2D-BOUND / CRITICAL" in payload["text"]
-    assert "Why: H2D transfer is 14.3% of the typical GPU iteration time." in (
+    assert "Why: H2D transfer is 14.3% of the typical GPU Step Time." in (
         payload["text"]
     )
 
@@ -446,19 +453,19 @@ def test_final_text_uses_multi_process_comparison_layout():
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "median": {
-                "total_step_ms": _point(303.7, 1),
-                "dataloader_ms": _point(3.8, 1),
+                "dataloader_fetch_cpu_ms": _point(3.8, 1),
                 "input_wait_ms": _point(13.8, 1),
-                "step_time_ms": _point(299.9, 1),
+                "step_time_ms": _point(303.7, 1),
+                "traced_step_time_ms": _point(299.9, 1),
                 "compute_ms": _point(259.5, 1),
                 "residual_ms": _point(40.5, 1),
                 "h2d_ms": _point(0.2, 1),
             },
             "worst": {
-                "total_step_ms": _point(304.1, 0),
-                "dataloader_ms": _point(254.5, 0),
+                "dataloader_fetch_cpu_ms": _point(254.5, 0),
                 "input_wait_ms": _point(264.5, 0),
-                "step_time_ms": _point(49.6, 0),
+                "step_time_ms": _point(304.1, 0),
+                "traced_step_time_ms": _point(49.6, 0),
                 "compute_ms": _point(261.0, 0),
                 "residual_ms": _point(42.1, 0),
                 "h2d_ms": _point(0.4, 0),

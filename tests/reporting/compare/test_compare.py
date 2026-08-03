@@ -89,7 +89,35 @@ def _step_time_section(
             "reason": reason,
             "action": action,
         },
-        "global": {"average": average},
+        "global": {
+            "window": {"diagnosis_clock": "cpu"},
+            "average": average,
+        },
+    }
+
+
+def _canonical_step_time_section(
+    *,
+    step_time_ms: float,
+    diagnosis_clock: str,
+) -> dict:
+    """Build a minimal schema-1.8 Step Time section for compare coverage."""
+    return {
+        "diagnosis": {"status": "BALANCED"},
+        "global": {
+            "window": {"diagnosis_clock": diagnosis_clock},
+            "average": {
+                "step_time_ms": step_time_ms,
+                "traced_step_time_ms": step_time_ms - 10.0,
+                "input_wait_ms": 10.0,
+                "h2d_ms": 5.0,
+                "compute_ms": step_time_ms - 15.0,
+                "residual_ms": 0.0,
+                "forward_ms": step_time_ms - 15.0,
+                "backward_ms": 0.0,
+                "optimizer_ms": 0.0,
+            },
+        },
     }
 
 
@@ -232,7 +260,7 @@ def test_compare_render_shows_unavailable_in_a_for_missing_numeric_fields() -> (
     text = build_compare_text(compare_payload)
 
     assert "Verdict: INCONCLUSIVE" in text
-    assert "Total step" in text
+    assert "Step Time" in text
     assert "n/a" in text
     assert "296.5 ms" in text
     assert "Peak reserved" in text
@@ -466,7 +494,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
         "system",
     }
     step_time_metrics = compare_payload["sections"]["step_time"]["metrics"]
-    assert step_time_metrics["total_step_ms"]["pct_change"] is not None
+    assert step_time_metrics["step_time_ms"]["pct_change"] is not None
     assert "forward_ms" in step_time_metrics
     assert "backward_ms" in step_time_metrics
     assert "optimizer_ms" in step_time_metrics
@@ -474,7 +502,7 @@ def test_compare_payload_has_section_based_json_and_table_text() -> None:
     assert compare_payload["verdict"]["primary_domain"] == "step_time"
     assert "Metric" in text
     assert "Step time diagnosis" in text
-    assert "Total step" in text
+    assert "Step Time" in text
     assert "Input" in text
     assert "H2D" in text
     assert "Compute" in text
@@ -503,9 +531,9 @@ def test_compare_warns_when_summary_schema_versions_differ() -> None:
     assert compare_payload["warnings"] == [
         (
             "Summary schema versions differ: A uses 1.5, B uses 1.6. "
-            "Step Time fields changed in schema 1.6 and became nullable "
-            "in schema 1.7, so Step Time deltas may not be directly "
-            "comparable."
+            "Step Time fields changed in schema 1.6, became nullable in "
+            "schema 1.7, and were renamed in schema 1.8; Step Time deltas "
+            "require matching selected clocks."
         )
     ]
     assert "Notes" in text
@@ -691,3 +719,85 @@ def test_compare_verdict_uses_priority_for_mixed_primary_signals() -> None:
     assert verdict["status"] == "MIXED"
     assert verdict["outcome"] == "mixed"
     assert verdict["findings"][0]["status"] == "MIXED"
+
+
+def test_compare_normalizes_legacy_and_schema_1_8_step_time() -> None:
+    lhs = _payload_with_sections(
+        step_time=_step_time_section(total_step_ms=155.0),
+    )
+    rhs = _payload_with_sections(
+        step_time=_canonical_step_time_section(
+            step_time_ms=100.0,
+            diagnosis_clock="cpu",
+        ),
+    )
+    rhs["schema_version"] = 1.8
+
+    step_time = _build_compare(lhs, rhs)["sections"]["step_time"]
+
+    assert step_time["metrics"]["step_time_ms"] == {
+        "label": "Step Time",
+        "unit": "ms",
+        "lhs": 155.0,
+        "rhs": 100.0,
+        "delta": -55.0,
+        "pct_change": pytest.approx(-35.4838709677),
+        "delta_unit": None,
+        "direction": "higher_is_worse",
+    }
+
+
+def test_compare_uses_canonical_step_time_for_schema_1_8_artifacts() -> None:
+    lhs = _payload_with_sections(
+        step_time=_canonical_step_time_section(
+            step_time_ms=155.0,
+            diagnosis_clock="gpu",
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_time=_canonical_step_time_section(
+            step_time_ms=100.0,
+            diagnosis_clock="gpu",
+        ),
+    )
+    lhs["schema_version"] = 1.8
+    rhs["schema_version"] = 1.8
+
+    metric = _build_compare(lhs, rhs)["sections"]["step_time"]["metrics"][
+        "step_time_ms"
+    ]
+
+    assert metric["lhs"] == 155.0
+    assert metric["rhs"] == 100.0
+    assert metric["delta"] == -55.0
+    assert metric["pct_change"] == pytest.approx(-35.4838709677)
+
+
+def test_compare_rejects_selected_clock_mismatch() -> None:
+    lhs = _payload_with_sections(
+        step_time=_canonical_step_time_section(
+            step_time_ms=155.0,
+            diagnosis_clock="cpu",
+        ),
+    )
+    rhs = _payload_with_sections(
+        step_time=_canonical_step_time_section(
+            step_time_ms=100.0,
+            diagnosis_clock="gpu",
+        ),
+    )
+    lhs["schema_version"] = 1.8
+    rhs["schema_version"] = 1.8
+
+    step_time = _build_compare(lhs, rhs)["sections"]["step_time"]
+
+    assert step_time["metrics"]["step_time_ms"]["lhs"] is None
+    assert step_time["metrics"]["step_time_ms"]["rhs"] is None
+    assert step_time["metrics"]["compute_ms"]["lhs"] is None
+    assert step_time["metrics"]["compute_ms"]["rhs"] is None
+    assert step_time["notes"] == [
+        "Step Time metrics are unavailable because the selected clocks "
+        "differ or are missing (A: cpu, B: gpu).",
+        "Selected-clock phase metrics are unavailable because their clocks "
+        "differ or are missing (A: cpu, B: gpu).",
+    ]

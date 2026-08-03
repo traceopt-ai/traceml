@@ -52,7 +52,7 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
 
     assert summary["metadata"]["global_ranks_seen"] == 1
     assert summary["global"]["window"]["steps_analyzed"] == 2
-    assert summary["global"]["median"]["total_step_ms"]["value"] == 31.0
+    assert summary["global"]["median"]["step_time_ms"]["value"] == 31.0
     assert "Global: n/a" not in summary["card"]
 
 
@@ -130,7 +130,7 @@ def test_step_time_section_uses_summary_pipeline_and_sqlite_fixture(
     assert result.payload["metadata"]["training_total_steps"] == 3
     assert result.payload["metadata"]["training_latest_step"] == 2
     assert result.payload["metadata"]["global_ranks_seen"] == 1
-    assert result.payload["global"]["median"]["total_step_ms"]["value"] == 31.0
+    assert result.payload["global"]["median"]["step_time_ms"]["value"] == 31.0
     assert result.payload["groups"]["rows"]["0"]["identity"] == {
         "global_rank": 0,
         "local_rank": 0,

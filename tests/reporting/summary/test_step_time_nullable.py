@@ -144,7 +144,15 @@ def test_missing_h2d_is_null_and_measured_zero_stays_zero(tmp_path) -> None:
     }
     assert missing["groups"]["rows"]["0"]["metrics"]["h2d_ms"] is None
     # Measured metrics on the same row stay plain floats.
-    assert missing["groups"]["rows"]["0"]["metrics"]["step_time_ms"] == 30.0
+    assert missing["groups"]["rows"]["0"]["metrics"]["step_time_ms"] == 31.0
+    assert (
+        missing["groups"]["rows"]["0"]["metrics"]["traced_step_time_ms"]
+        == 30.0
+    )
+    assert missing["global"]["average"]["step_time_cpu_ms"] == 31.0
+    assert missing["global"]["average"]["traced_step_time_cpu_ms"] == 30.0
+    assert missing["global"]["average"]["step_time_gpu_ms"] is None
+    assert missing["global"]["average"]["traced_step_time_gpu_ms"] is None
     assert "H2D n/a" in missing["card"]
 
     assert zero["global"]["average"]["h2d_ms"] == 0.0
@@ -170,13 +178,13 @@ def test_h2d_only_rank_keeps_row_and_stays_out_of_rank_selection(
     # The H2D-only rank keeps its H2D observation and nulls elsewhere.
     assert rows["1"]["metrics"]["h2d_ms"] == 6.0
     assert rows["1"]["metrics"]["step_time_ms"] is None
-    assert rows["1"]["metrics"]["total_step_ms"] is None
+    assert rows["1"]["metrics"]["traced_step_time_ms"] is None
 
     # Null metrics stay out of averages and rank picks: the H2D average
-    # spans both ranks, total-step rollups only the measured rank.
+    # spans both ranks, Step Time rollups only the measured rank.
     assert summary["global"]["average"]["h2d_ms"] == 4.0
-    assert summary["global"]["average"]["total_step_ms"] == 31.0
-    assert summary["global"]["worst"]["total_step_ms"]["idx"] == "0"
+    assert summary["global"]["average"]["step_time_ms"] == 31.0
+    assert summary["global"]["worst"]["step_time_ms"]["idx"] == "0"
     assert summary["global"]["worst"]["h2d_ms"]["idx"] == "1"
 
 
@@ -194,6 +202,7 @@ def test_compare_treats_null_metric_as_unavailable(tmp_path) -> None:
                     "status": "INCOMPLETE DATA",
                 },
                 "global": {
+                    "window": {"diagnosis_clock": "cpu"},
                     "average": {
                         "total_step_ms": 31.0,
                         "input_wait_ms": 1.0,
@@ -203,7 +212,7 @@ def test_compare_treats_null_metric_as_unavailable(tmp_path) -> None:
                         "forward_ms": 5.0,
                         "backward_ms": 10.0,
                         "optimizer_ms": compute_ms,
-                    }
+                    },
                 },
             },
         }
@@ -236,19 +245,19 @@ def test_single_rank_scope_wording_survives_null_total(tmp_path) -> None:
     assert "across 1 global ranks" not in summary["card"]
 
 
-def test_all_ranks_without_total_step_null_the_rank_picks(tmp_path) -> None:
+def test_all_ranks_without_step_time_null_the_rank_picks(tmp_path) -> None:
     db = tmp_path / "telemetry"
     _create_db(str(db), {0: {"h2d": 2.0}, 1: {"h2d": 6.0}})
     summary = StepTimeSummarySection().build(str(db)).payload
 
-    assert summary["global"]["worst"]["total_step_ms"] == {
+    assert summary["global"]["worst"]["step_time_ms"] == {
         "value": None,
         "idx": None,
     }
-    assert summary["global"]["average"]["total_step_ms"] is None
+    assert summary["global"]["average"]["step_time_ms"] is None
     assert summary["global"]["average"]["h2d_ms"] == 4.0
     assert summary["global"]["worst"]["h2d_ms"]["idx"] == "1"
-    assert "total n/a" in summary["card"]
+    assert "Step Time n/a" in summary["card"]
 
 
 def test_partial_compute_triplet_nulls_only_derived_metrics(
@@ -267,4 +276,4 @@ def test_partial_compute_triplet_nulls_only_derived_metrics(
     assert metrics["optimizer_ms"] is None
     assert metrics["compute_ms"] is None
     assert metrics["residual_ms"] is None
-    assert metrics["total_step_ms"] == 31.0
+    assert metrics["step_time_ms"] == 31.0
