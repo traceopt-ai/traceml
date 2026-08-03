@@ -112,6 +112,8 @@ jobs:
       - name: Run integration tests
         run: |
           pytest \
+            tests/aggregator/test_batch_size_sqlite_writer.py \
+            tests/runtime/test_batch_size_sampler.py \
             tests/runtime/test_sampler_registry.py \
             tests/runtime/test_telemetry_publisher.py \
             tests/reporting/compare \
