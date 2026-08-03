@@ -86,6 +86,7 @@ nav:
       - Integrations:
           - Overview: user_guide/integrations.md
           - Hugging Face: user_guide/integrations/huggingface.md
+          - Hugging Face Accelerate: user_guide/integrations/accelerate.md
           - PyTorch Lightning: user_guide/integrations/lightning.md
           - Ray Train: user_guide/integrations/ray.md
           - DeepSpeed: user_guide/integrations/deepspeed.md

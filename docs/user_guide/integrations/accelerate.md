@@ -106,6 +106,13 @@ compute. Don't use this example's verdict as a reference point for
 interpreting a real training run — it's an artifact of the workload being
 deliberately tiny.
 
+In general, converting a loss tensor to a Python value (`float(loss)` or
+`loss.item()`) forces the host to wait for the device inside the traced
+region. Keep any running total on-device and convert it only when you
+actually print or log, outside `trace_step`, as this example does. On the
+GPU-selected clock this does not change reported residual time, since that
+comes from CUDA event timestamps rather than CPU wall time.
+
 ### Step Memory shows NO DATA
 
 Step memory is only populated when running on GPU. On a CPU-only run this
@@ -132,7 +139,7 @@ telemetry.
 ## Full Examples
 
 A complete, runnable version of the loop above lives at
-[`examples/integrations/accelerate_minimal.py`](../../../examples/integrations/accelerate_minimal.py).
+`examples/integrations/accelerate_minimal.py`.
 It trains a small MLP on synthetic data using the exact
 `Accelerator()` → `traceml.init()` → `accelerator.prepare()` →
 `accelerator.unwrap_model()` → `trace_step` sequence shown above, and

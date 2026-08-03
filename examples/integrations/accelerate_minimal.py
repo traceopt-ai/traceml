@@ -63,7 +63,7 @@ def main():
     global_step = 0
 
     for epoch in range(EPOCHS):
-        running_loss = 0.0
+        running_loss = torch.zeros((), device=accelerator.device)
 
         for batch_x, batch_y in dataloader:
             global_step += 1
@@ -75,14 +75,18 @@ def main():
                 accelerator.backward(loss)
                 optimizer.step()
 
-                running_loss += float(loss.detach())
+                # Stay on-device inside trace_step: accumulating a raw
+                # tensor avoids a per-step host sync. Only convert to a
+                # Python float in the print block below, which runs
+                # outside trace_step and on a fixed cadence.
+                running_loss += loss.detach()
 
             if global_step % 25 == 0:
                 accelerator.print(
                     f"Epoch {epoch + 1} | Step {global_step} | "
-                    f"loss: {running_loss / 25:.4f}"
+                    f"loss: {float(running_loss) / 25:.4f}"
                 )
-                running_loss = 0.0
+                running_loss.zero_()
 
     accelerator.print("Done.")
 

@@ -262,3 +262,66 @@ def test_accelerate_unwrap_model_is_noop_single_process():
         "launch; if this ever changes, the docs' claim that unwrap_model() "
         "is a no-op on CPU/single-GPU needs to be revisited too."
     )
+
+
+@pytest.mark.skipif(not HAS_ACCELERATE, reason="accelerate not installed")
+def test_accelerate_recipe_over_real_prepare_and_backward():
+    """Runs the documented recipe through the real Accelerate library.
+
+    The fake accelerator above pins the TraceML-facing contract cheaply;
+    this test instead exercises the real `Accelerator.prepare()` (dataloader
+    included) and the real `accelerator.backward()`, so a future Accelerate
+    release that changes either path would surface here.
+    """
+    from accelerate import Accelerator
+    from torch.utils.data import DataLoader, TensorDataset
+
+    _reset_traceml_state()
+    _install_auto_instrumentation()
+
+    num_steps = 3
+    dataset = TensorDataset(
+        torch.randn(num_steps * BATCH_SIZE, INPUT_DIM),
+        torch.randint(0, NUM_CLASSES, (num_steps * BATCH_SIZE,)),
+    )
+    loader = DataLoader(dataset, batch_size=BATCH_SIZE)
+
+    model = _TinyMLP()
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    criterion = nn.CrossEntropyLoss()
+    accelerator = Accelerator()
+
+    model, optimizer, loader = accelerator.prepare(model, optimizer, loader)
+    traced_model = accelerator.unwrap_model(model)
+
+    for batch_x, batch_y in loader:
+        with traceml.trace_step(traced_model):
+            optimizer.zero_grad(set_to_none=True)
+            logits = model(batch_x)
+            loss = criterion(logits, batch_y)
+            accelerator.backward(loss)
+            optimizer.step()
+
+    batches = _drain_step_time_queue()
+    assert len(batches) == num_steps, (
+        f"Expected one StepTimeBatch per step ({num_steps}), "
+        f"got {len(batches)}."
+    )
+
+    def _every_batch_has(event_name: str) -> bool:
+        return all(
+            any(evt.name == event_name for evt in batch.events)
+            for batch in batches
+        )
+
+    for event_name in (
+        "_traceml_internal:forward_time",
+        "_traceml_internal:backward_time",
+        "_traceml_internal:optimizer_step",
+        "_traceml_internal:step_time",
+        "_traceml_internal:dataloader_next",
+    ):
+        assert _every_batch_has(event_name), (
+            f"{event_name} should be captured for every step when running "
+            "the recipe through the real Accelerate prepare/backward path."
+        )
