@@ -50,7 +50,7 @@ _EVENT_NAMES = {
     "forward": "_traceml_internal:forward_time",
     "backward": "_traceml_internal:backward_time",
     "optimizer_step": "_traceml_internal:optimizer_step",
-    "step_time": "_traceml_internal:step_time",
+    "traced_step_time": "_traceml_internal:step_time",
 }
 
 _DEFAULT_MS = {
@@ -59,7 +59,7 @@ _DEFAULT_MS = {
     "forward": 20.0,
     "backward": 30.0,
     "optimizer_step": 10.0,
-    "step_time": 62.0,
+    "traced_step_time": 62.0,
 }
 
 
@@ -150,7 +150,7 @@ def test_missing_forward_blocks_compute_bound_and_reports_incomplete() -> None:
                 input_wait=2.0,
                 backward=60.0,
                 optimizer_step=10.0,
-                step_time=90.0,
+                traced_step_time=90.0,
             )
         }
     )
@@ -170,7 +170,7 @@ def test_complete_compute_dominance_still_reports_compute_bound() -> None:
                 forward=60.0,
                 backward=20.0,
                 optimizer_step=8.0,
-                step_time=90.0,
+                traced_step_time=90.0,
             )
         }
     )
@@ -186,7 +186,7 @@ def test_missing_optimizer_blocks_residual_heavy() -> None:
                 input_wait=2.0,
                 forward=40.0,
                 backward=30.0,
-                step_time=100.0,
+                traced_step_time=100.0,
             )
         }
     )
@@ -203,7 +203,7 @@ def test_measured_zero_optimizer_still_reports_residual_heavy() -> None:
                 forward=40.0,
                 backward=30.0,
                 optimizer_step=0.0,
-                step_time=100.0,
+                traced_step_time=100.0,
             )
         }
     )
@@ -224,7 +224,7 @@ def test_missing_input_wait_reports_incomplete_data() -> None:
                 forward=30.0,
                 backward=30.0,
                 optimizer_step=10.0,
-                step_time=80.0,
+                traced_step_time=80.0,
             )
         }
     )
@@ -243,7 +243,7 @@ def test_missing_h2d_still_emits_input_bound_on_gpu_clock() -> None:
                 forward=30.0,
                 backward=30.0,
                 optimizer_step=10.0,
-                step_time=80.0,
+                traced_step_time=80.0,
             )
         }
     )
@@ -263,7 +263,7 @@ _BALANCED_RANK = dict(
     forward=30.0,
     backward=30.0,
     optimizer_step=10.0,
-    step_time=76.0,
+    traced_step_time=76.0,
 )
 
 
@@ -304,7 +304,7 @@ def test_missing_backward_blocks_ddp_straggler() -> None:
 
 
 def test_visible_backward_skew_still_reports_straggler() -> None:
-    slow = dict(_BALANCED_RANK, backward=60.0, step_time=106.0)
+    slow = dict(_BALANCED_RANK, backward=60.0, traced_step_time=106.0)
     result = _diagnose(
         {
             0: _step_events(**_BALANCED_RANK),
@@ -321,7 +321,7 @@ def test_visible_backward_skew_still_reports_straggler() -> None:
 
 
 def test_missing_forward_blocks_fsdp_straggler() -> None:
-    slow = dict(_BALANCED_RANK, backward=60.0, step_time=106.0)
+    slow = dict(_BALANCED_RANK, backward=60.0, traced_step_time=106.0)
     result = _diagnose(
         {
             0: _step_events(
@@ -442,7 +442,7 @@ def test_incomplete_data_serializes_and_formats() -> None:
                 input_wait=2.0,
                 backward=60.0,
                 optimizer_step=10.0,
-                step_time=90.0,
+                traced_step_time=90.0,
             )
         }
     )
@@ -479,7 +479,7 @@ def test_incomplete_data_routes_to_insufficient_primary() -> None:
                 input_wait=2.0,
                 backward=60.0,
                 optimizer_step=10.0,
-                step_time=90.0,
+                traced_step_time=90.0,
             )
         }
     )
@@ -556,7 +556,7 @@ def test_gpu_missing_forward_reports_incomplete_data() -> None:
                 h2d=1.0,
                 backward=60.0,
                 optimizer_step=10.0,
-                step_time=90.0,
+                traced_step_time=90.0,
             )
         }
     )

@@ -44,7 +44,7 @@ _EVENT_NAMES = {
     "forward": "_traceml_internal:forward_time",
     "backward": "_traceml_internal:backward_time",
     "optimizer_step": "_traceml_internal:optimizer_step",
-    "step_time": "_traceml_internal:step_time",
+    "traced_step_time": "_traceml_internal:step_time",
 }
 
 _BASE_MS = {
@@ -53,7 +53,7 @@ _BASE_MS = {
     "forward": 20.0,
     "backward": 30.0,
     "optimizer_step": 10.0,
-    "step_time": 64.0,
+    "traced_step_time": 64.0,
 }
 
 # Every metric that is not occurrence-driven must be measured on every
@@ -226,11 +226,12 @@ def test_skew_is_unavailable_when_zero_median_hides_a_nonzero_rank() -> None:
     assert backward.skew_pct is None
 
 
-def test_iteration_share_preserves_unavailable_and_measured_zero() -> None:
+def test_step_time_share_preserves_unavailable_and_measured_zero() -> None:
     rows = {
         0: {
             "input_wait": 100.0,
-            "step_time": 100.0,
+            "traced_step_time": 100.0,
+            "step_time": 200.0,
             "residual_proxy": 10.0,
         }
     }
@@ -245,7 +246,8 @@ def test_iteration_share_preserves_unavailable_and_measured_zero() -> None:
     invalid_compute = {
         0: {
             "input_wait": 10.0,
-            "step_time": 100.0,
+            "traced_step_time": 100.0,
+            "step_time": 110.0,
             "backward": 20.0,
             "optimizer_step": 10.0,
         }
@@ -301,14 +303,18 @@ def test_worst_value_and_rank_are_self_consistent(
     slow_rank_lacks_input: bool,
 ) -> None:
     # Two ranks, the slower one optionally missing input wait so its
-    # total_step is underivable. The step-time summary must never pair a
+    # outer Step Time is underivable. Its metric summary must never pair a
     # value from one rank with a rank id from another.
-    def fill(target, rank, step_time, drop_input):
+    def fill(target, rank, traced_step_time, drop_input):
         row = {}
         for metric in _EVENT_NAMES:
             if drop_input and metric == "input_wait":
                 continue
-            value = step_time if metric == "step_time" else _BASE_MS[metric]
+            value = (
+                traced_step_time
+                if metric == "traced_step_time"
+                else _BASE_MS[metric]
+            )
             row[_EVENT_NAMES[metric]] = _stat(value)
         for step in range(_WINDOW):
             target[rank][step] = dict(row)
@@ -320,8 +326,10 @@ def test_worst_value_and_rank_are_self_consistent(
 
     assert_metric_worst_is_self_consistent(window)
     step_metric = next(m for m in window.metrics if m.metric == "step_time")
-    assert step_metric.worst_total == pytest.approx(400.0)
-    assert step_metric.worst_rank == 1
+    expected_worst = 104.0 if slow_rank_lacks_input else 404.0
+    expected_rank = 0 if slow_rank_lacks_input else 1
+    assert step_metric.worst_total == pytest.approx(expected_worst)
+    assert step_metric.worst_rank == expected_rank
 
 
 def test_self_consistency_holds_across_many_presence_patterns() -> None:
@@ -380,9 +388,16 @@ def test_typed_values_null_residual_when_compute_incomplete(
 
 def test_typed_values_keep_measured_zero_distinct_from_absent() -> None:
     measured_zero = values_from_mapping(
-        {"h2d": 0.0, "input_wait": 4.0, "step_time": 64.0}
+        {
+            "h2d": 0.0,
+            "input_wait": 4.0,
+            "traced_step_time": 60.0,
+            "step_time": 64.0,
+        }
     )
-    absent = values_from_mapping({"input_wait": 4.0, "step_time": 64.0})
+    absent = values_from_mapping(
+        {"input_wait": 4.0, "traced_step_time": 60.0, "step_time": 64.0}
+    )
 
     assert measured_zero.h2d_ms == 0.0
     assert absent.h2d_ms is None
@@ -407,5 +422,5 @@ def test_metric_partition_is_exhaustive_and_intended() -> None:
         "input_wait",
         "forward",
         "backward",
-        "step_time",
+        "traced_step_time",
     }

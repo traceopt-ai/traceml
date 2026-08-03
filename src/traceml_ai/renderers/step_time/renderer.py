@@ -34,7 +34,7 @@ METRIC_LABELS = {
     "forward": "FWD",
     "backward": "BWD",
     "optimizer_step": "OPT",
-    "step_time": "STEP",
+    "traced_step_time": "STEP",
     "residual_proxy": "RESIDUAL",
 }
 
@@ -44,7 +44,7 @@ TABLE_METRIC_ORDER = (
     "forward",
     "backward",
     "optimizer_step",
-    "step_time",
+    "traced_step_time",
     "residual_proxy",
 )
 
@@ -124,8 +124,8 @@ class StepTimeRenderer(BaseRenderer):
                 border_style="cyan",
             )
 
-        step_metric = next(
-            (m for m in metrics if m.metric == "step_time"), None
+        traced_step_metric = next(
+            (m for m in metrics if m.metric == "traced_step_time"), None
         )
         residual_metric = next(
             (m for m in metrics if m.metric == "residual_proxy"), None
@@ -192,7 +192,7 @@ class StepTimeRenderer(BaseRenderer):
             table.add_row("")
 
         # Optional residual share line (still meaningful in both modes)
-        if step_metric and residual_metric:
+        if traced_step_metric and residual_metric:
             residual_share = window.residual_share
             table.add_row(
                 "Residual Share (%)",

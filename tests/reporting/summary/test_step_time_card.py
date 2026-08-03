@@ -96,7 +96,7 @@ def test_step_time_no_data_card_is_compact() -> None:
     assert payload["diagnosis"]["kind"] == "NO_DATA"
     assert "- Diagnosis: NO DATA" in payload["card"]
     assert "- Stats: n/a" in payload["card"]
-    assert "- Why: step_time metric is missing." in payload["card"]
+    assert "- Why: Step Time metric is missing." in payload["card"]
     _assert_compact_card(payload["card"])
 
 
@@ -203,8 +203,8 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                 },
                 "public_dataloader": True,
                 "card": (
-                    "- Why: Input wait is 28.6% of the typical gpu "
-                    "iteration time.",
+                    "- Why: Input wait is 28.6% of the typical GPU Step "
+                    "Time.",
                 ),
             },
             id="input-bound",
@@ -230,8 +230,8 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                 "diagnosis": {"metric": "h2d", "phase": "h2d"},
                 "evidence": {"h2d_ms": 20.0, "diagnosis_clock": "gpu"},
                 "card": (
-                    "- Why: H2D transfer is 20.0% of the typical GPU "
-                    "iteration time.",
+                    "- Why: H2D transfer is 20.0% of the typical GPU Step "
+                    "Time.",
                 ),
             },
             id="h2d-bound",
@@ -247,8 +247,8 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                 ),
                 "status": "RESIDUAL-HEAVY",
                 "card": (
-                    "- Why: Residual time is 29.4% of the typical cpu "
-                    "iteration time.",
+                    "- Why: Residual time is 29.4% of the typical CPU Step "
+                    "Time.",
                 ),
             },
             id="residual-heavy",
@@ -305,7 +305,7 @@ def test_step_time_card_uses_h2d_diagnosis_score_not_worst_rollups() -> None:
     assert payload["diagnosis"]["status"] == "H2D-BOUND"
     assert payload["diagnosis"]["score"] == 0.425
     assert (
-        "- Why: H2D transfer is 42.5% of the typical GPU iteration time."
+        "- Why: H2D transfer is 42.5% of the typical GPU Step Time."
         in payload["card"]
     )
     assert "90.0ms/312.0ms" not in payload["card"]

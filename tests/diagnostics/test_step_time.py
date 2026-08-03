@@ -94,7 +94,8 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert selected.clock == "gpu"
     average = rank_average(selected, 0)
     assert average.input_wait_ms == pytest.approx(4.0)
-    assert average.step_time_ms == pytest.approx(20.0)
+    assert average.traced_step_time_ms == pytest.approx(20.0)
+    assert average.step_time_ms == pytest.approx(24.0)
     # optimizer_step and h2d were never measured: the residual must not
     # silently absorb them as zeros.
     assert average.residual_ms is None
@@ -103,7 +104,8 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert rank_facts is not None
     step_values = rank_facts.steps[0].values
     assert step_values.input_wait_ms == pytest.approx(4.0)
-    assert step_values.step_time_ms == pytest.approx(20.0)
+    assert step_values.traced_step_time_ms == pytest.approx(20.0)
+    assert step_values.step_time_ms == pytest.approx(24.0)
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
     selected = window_from_events(
@@ -115,7 +117,8 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert selected.clock == "cpu"
     average = rank_average(selected, 0)
     assert average.input_wait_ms == pytest.approx(12.0)
-    assert average.step_time_ms == pytest.approx(60.0)
+    assert average.traced_step_time_ms == pytest.approx(60.0)
+    assert average.step_time_ms == pytest.approx(72.0)
     # optimizer_step was never measured, so compute and residual stay
     # underivable on the cpu clock as well.
     assert average.residual_ms is None
@@ -163,8 +166,8 @@ def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
     assert issue.score == issue.share_pct
     assert issue.evidence["diagnosis_clock"] == "cpu"
     assert issue.evidence["input_wait_ms"] == pytest.approx(35.0)
-    assert issue.evidence["step_time_ms"] == pytest.approx(100.0)
-    assert issue.evidence["iteration_time_ms"] == pytest.approx(135.0)
+    assert issue.evidence["traced_step_time_ms"] == pytest.approx(100.0)
+    assert issue.evidence["step_time_ms"] == pytest.approx(135.0)
 
 
 def test_input_bound_rule_ignores_duration_without_explicit_clocks() -> None:
@@ -175,7 +178,7 @@ def test_input_bound_rule_ignores_duration_without_explicit_clocks() -> None:
     assert InputBoundRule().evaluate(ctx) is None
 
 
-def test_input_bound_uses_median_per_rank_iteration_share() -> None:
+def test_input_bound_uses_median_per_rank_step_time_share() -> None:
     ctx = _rank_context(
         {
             0: _timing_row(
@@ -206,7 +209,7 @@ def test_input_bound_uses_median_per_rank_iteration_share() -> None:
     ("input_wait", "step_time", "expected_severity"),
     [(10.0, 90.0, "warn"), (20.0, 80.0, "crit")],
 )
-def test_input_bound_uses_iteration_share_thresholds(
+def test_input_bound_uses_step_time_share_thresholds(
     input_wait: float,
     step_time: float,
     expected_severity: str,
@@ -276,7 +279,7 @@ def test_h2d_bound_conditions(
     ("residual", "expected_severity"),
     [(10.0, "warn"), (20.0, "crit")],
 )
-def test_residual_heavy_uses_iteration_share_thresholds(
+def test_residual_heavy_uses_step_time_share_thresholds(
     residual: float,
     expected_severity: str,
 ) -> None:
@@ -329,7 +332,7 @@ def test_compute_bound_is_informational_despite_compute_skew() -> None:
     ("compute", "expected"),
     [(89.9, False), (90.0, True)],
 )
-def test_compute_bound_uses_iteration_share_threshold(
+def test_compute_bound_uses_step_time_share_threshold(
     compute: float,
     expected: bool,
 ) -> None:
@@ -351,7 +354,7 @@ def test_compute_bound_uses_iteration_share_threshold(
         assert issue.score is None
 
 
-def test_compute_share_is_median_of_per_rank_iteration_shares() -> None:
+def test_compute_share_is_median_of_per_rank_step_time_shares() -> None:
     per_rank = {
         0: _timing_row(
             dataloader=0.0,
@@ -815,7 +818,7 @@ def test_fsdp_rank_straggler_uses_input_h2d_or_unattributed(
     ("visible_cost", "expected_severity"),
     [(5.0, None), (9.0, None), (10.0, "warn"), (20.0, "crit")],
 )
-def test_rank_straggler_uses_victim_iteration_impact_thresholds(
+def test_rank_straggler_uses_victim_step_time_impact_thresholds(
     visible_cost: float,
     expected_severity: str | None,
 ) -> None:
@@ -1009,7 +1012,7 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
                     step_time=140.0,
                 ),
             },
-            ("INPUT_STRAGGLER", 1, 2),
+            ("INPUT_STRAGGLER", 0, 1),
         ),
         (
             "fsdp",
@@ -1173,9 +1176,10 @@ def test_summary_input_bound_uses_explicit_input_clocks() -> None:
     assert high_wait.primary.kind == "INPUT_BOUND"
     assert high_wait.issues[0].evidence["diagnosis_clock"] == "gpu"
     assert high_wait.issues[0].evidence["input_wait_ms"] == pytest.approx(25.0)
-    assert high_wait.issues[0].evidence["iteration_time_ms"] == pytest.approx(
-        85.0
-    )
+    assert high_wait.issues[0].evidence[
+        "traced_step_time_ms"
+    ] == pytest.approx(60.0)
+    assert high_wait.issues[0].evidence["step_time_ms"] == pytest.approx(85.0)
 
 
 def test_summary_h2d_bound_uses_gpu_selected_h2d_timing() -> None:

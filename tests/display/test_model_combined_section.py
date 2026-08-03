@@ -110,7 +110,8 @@ _COMPLETE_METRIC_VALUES = {
     "backward": 30.0,
     "optimizer_step": 20.0,
     "residual_proxy": 20.0,
-    "step_time": 100.0,
+    "traced_step_time": 100.0,
+    "step_time": 110.0,
 }
 
 
@@ -135,10 +136,19 @@ def _timing(
     **overrides: float,
 ) -> dict[str, float]:
     values = {**_COMPLETE_METRIC_VALUES, **overrides}
-    values["total_step"] = values.get("input_wait", 0.0) + values.get(
-        "step_time", 0.0
+    return _canonical_timing(
+        {name: value for name, value in values.items() if name not in omit}
     )
-    return {name: value for name, value in values.items() if name not in omit}
+
+
+def _canonical_timing(values: dict[str, float]) -> dict[str, float]:
+    """Keep direct dashboard fixtures within the canonical timing contract."""
+    row = dict(values)
+    if "input_wait" not in row or "traced_step_time" not in row:
+        row.pop("step_time", None)
+    else:
+        row["step_time"] = row["input_wait"] + row["traced_step_time"]
+    return row
 
 
 def _payload(
@@ -151,9 +161,16 @@ def _payload(
     """Build a live result around one canonical Step Time window."""
     if per_rank_timing is None:
         row = {metric.metric: float(metric.median_total) for metric in metrics}
-        if "input_wait" in row and "step_time" in row:
-            row["total_step"] = row["input_wait"] + row["step_time"]
+        if "input_wait" not in row or "traced_step_time" not in row:
+            row.pop("step_time", None)
+        else:
+            row["step_time"] = row["input_wait"] + row["traced_step_time"]
         per_rank_timing = {0: row}
+    else:
+        per_rank_timing = {
+            rank: _canonical_timing(values)
+            for rank, values in per_rank_timing.items()
+        }
     return live_result_from_window(
         window_from_rank_averages(
             per_rank_timing,
@@ -257,7 +274,7 @@ def test_step_time_dashboard_hero_absent_h2d_is_not_partial() -> None:
 
 
 def test_step_time_dashboard_hero_step_time_only_extreme() -> None:
-    payload = _payload([_metric("step_time", 100.0)])
+    payload = _payload([_metric("traced_step_time", 100.0)])
     panel = _panel()
 
     update_model_combined_section(panel, payload)
@@ -337,7 +354,7 @@ def test_partial_rank_coverage_includes_step_time() -> None:
         _metrics(),
         per_rank_timing={
             0: _timing(),
-            1: _timing(omit=("residual_proxy", "step_time")),
+            1: _timing(omit=("residual_proxy", "traced_step_time")),
         },
     )
     panel = _panel()
@@ -523,7 +540,7 @@ def test_step_time_dashboard_hero_clears_when_step_envelope_missing() -> None:
                 "backward",
                 "optimizer_step",
                 "residual_proxy",
-                "step_time",
+                "traced_step_time",
             )
         )
     )
@@ -540,7 +557,7 @@ def test_step_time_dashboard_hero_uses_diagnosis_metrics() -> None:
     assert theme.PHASES[0][:2] == ("IW", "input_wait")
 
     # Self-consistent window shape: phases sum to input_wait + step.
-    diagnosis_metrics = _metrics(worst={"step_time": 200.0})
+    diagnosis_metrics = _metrics(worst={"traced_step_time": 200.0})
     payload = _payload(diagnosis_metrics, clock="gpu")
     panel = _panel()
 
@@ -619,11 +636,11 @@ def test_disjoint_rank_populations_clear_only_the_ribbon() -> None:
                     "h2d",
                     "forward",
                     "residual_proxy",
-                    "total_step",
+                    "traced_step_time",
                 ),
                 backward=40.0,
                 optimizer_step=10.0,
-                step_time=120.0,
+                traced_step_time=120.0,
             ),
         },
     )

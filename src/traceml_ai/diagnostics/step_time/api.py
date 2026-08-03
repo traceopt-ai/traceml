@@ -232,10 +232,45 @@ def diagnose_step_time_window(
     by_key = {metric.metric: metric for metric in metrics}
     step_metric = by_key.get("step_time")
     if step_metric is None:
+        context = build_step_time_context(
+            window=window,
+            thresholds=thresholds,
+        )
+        if context.missing_signals:
+            primary = _mk_diag(
+                kind="INCOMPLETE_DATA",
+                severity="info",
+                reason=(
+                    "Missing timing signals prevent a reliable diagnosis: "
+                    + ", ".join(context.missing_signals)
+                    + "."
+                ),
+                action=(
+                    "Instrument the missing phases (auto mode or the "
+                    "matching wrap_* helpers) to restore coverage."
+                ),
+                steps_used=int(window.coverage.steps_used),
+            )
+            return DiagnosticResult(
+                primary=primary,
+                issues=(
+                    DiagnosticIssue(
+                        kind=primary.kind,
+                        status=primary.status,
+                        severity=primary.severity,
+                        summary=primary.reason,
+                        action=primary.action,
+                        evidence={
+                            "missing_signals": list(context.missing_signals),
+                            "signal_coverage": dict(context.signal_coverage),
+                        },
+                    ),
+                ),
+            )
         primary = _mk_diag(
             kind="NO_DATA",
             severity="info",
-            reason="step_time metric is missing.",
+            reason="Step Time metric is missing.",
             action="Wait for the first complete window.",
             steps_used=0,
         )
@@ -244,9 +279,7 @@ def diagnose_step_time_window(
     coverage = window.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
     steps_used = int(coverage.steps_used)
-    overall_worst_rank = metric_worst_rank(
-        by_key.get("total_step") or step_metric
-    )
+    overall_worst_rank = metric_worst_rank(step_metric)
     step_total = metric_total(step_metric, single_rank=single_rank)
 
     if step_total <= 0.0:
@@ -337,7 +370,8 @@ def diagnose_step_time_window(
                 None if context.single_rank else context.overall_worst_rank
             ),
             note=(
-                "residual_ms = selected step_time_ms - h2d_ms - compute_ms."
+                "residual_ms = selected traced_step_time_ms - h2d_ms - "
+                "compute_ms."
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "COMPUTE_BOUND":

@@ -46,8 +46,8 @@ def _sparse_payload() -> LiveStepTimeResult:
                     "h2d": 0.0,
                     "backward": 60.0,
                     "optimizer_step": 10.0,
-                    "step_time": 90.0,
-                    "total_step": 92.0,
+                    "traced_step_time": 90.0,
+                    "step_time": 92.0,
                 }
             },
             expected_ranks=(0,),
@@ -56,7 +56,8 @@ def _sparse_payload() -> LiveStepTimeResult:
                 _metric("h2d", 0.0),
                 _metric("backward", 60.0),
                 _metric("optimizer_step", 10.0),
-                _metric("step_time", 90.0),
+                _metric("traced_step_time", 90.0),
+                _metric("step_time", 92.0),
             ],
             steps_used=30,
         )
@@ -65,26 +66,33 @@ def _sparse_payload() -> LiveStepTimeResult:
 
 def test_cli_columns_exclude_summary_only_statistics() -> None:
     metrics = [
-        _metric("step_time", 100.0),
+        _metric("traced_step_time", 100.0),
         _metric("compute", 80.0),
         _metric("dataloader_fetch", 10.0),
-        _metric("total_step_cpu", 120.0),
+        _metric("step_time_cpu", 120.0),
     ]
 
     assert [metric.metric for metric in _table_metrics(metrics)] == [
-        "step_time"
+        "traced_step_time"
     ]
 
 
 def test_step_time_cli_uses_the_precomputed_selected_clock_analysis() -> None:
     diagnosis_metrics = [
         _metric("input_wait", 40.0),
-        _metric("step_time", 100.0),
+        _metric("traced_step_time", 100.0),
+        _metric("step_time", 140.0),
         _metric("residual_proxy", 0.0),
     ]
     payload = live_result_from_window(
         window_from_rank_averages(
-            {0: {"input_wait": 40.0, "step_time": 100.0}},
+            {
+                0: {
+                    "input_wait": 40.0,
+                    "traced_step_time": 100.0,
+                    "step_time": 140.0,
+                }
+            },
             clock="gpu",
             expected_ranks=(0,),
             metrics=diagnosis_metrics,
@@ -114,6 +122,7 @@ def test_step_time_cli_renders_zero_timings_as_zero() -> None:
         _metric("forward", 4.5),
         _metric("backward", 8.7),
         _metric("optimizer_step", 12.0),
+        _metric("traced_step_time", 31.2),
         _metric("step_time", 31.2),
         _metric("residual_proxy", 6.0),
     ]
@@ -126,6 +135,7 @@ def test_step_time_cli_renders_zero_timings_as_zero() -> None:
                     "forward": 4.5,
                     "backward": 8.7,
                     "optimizer_step": 12.0,
+                    "traced_step_time": 31.2,
                     "step_time": 31.2,
                     "residual_proxy": 6.0,
                 }
@@ -147,9 +157,18 @@ def test_step_time_cli_renders_zero_timings_as_zero() -> None:
 def test_step_time_cli_refreshes_its_injected_session_once() -> None:
     payload = live_result_from_window(
         window_from_rank_averages(
-            {0: {"step_time": 10.0}},
+            {
+                0: {
+                    "input_wait": 0.0,
+                    "traced_step_time": 10.0,
+                    "step_time": 10.0,
+                }
+            },
             expected_ranks=(0,),
-            metrics=[_metric("step_time", 10.0)],
+            metrics=[
+                _metric("traced_step_time", 10.0),
+                _metric("step_time", 10.0),
+            ],
         )
     )
     session = Mock()
@@ -223,15 +242,15 @@ def test_cli_renders_multi_rank_sparse_table() -> None:
             "input_wait": 2.0,
             "backward": 60.0,
             "optimizer_step": 10.0,
-            "step_time": 90.0,
-            "total_step": 92.0,
+            "traced_step_time": 90.0,
+            "step_time": 92.0,
         },
         1: {
             "input_wait": 2.0,
             "backward": 120.0,
             "optimizer_step": 10.0,
-            "step_time": 180.0,
-            "total_step": 182.0,
+            "traced_step_time": 180.0,
+            "step_time": 182.0,
         },
     }
     payload = live_result_from_window(
@@ -242,7 +261,8 @@ def test_cli_renders_multi_rank_sparse_table() -> None:
                 _multi_metric("input_wait", 2.0),
                 _multi_metric("backward", 60.0),
                 _multi_metric("optimizer_step", 10.0),
-                _multi_metric("step_time", 90.0),
+                _multi_metric("traced_step_time", 90.0),
+                _multi_metric("step_time", 92.0),
             ],
             steps_used=30,
         )

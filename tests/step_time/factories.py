@@ -307,7 +307,7 @@ def window_from_rank_averages(
         )
         if any(facts.average.value(name) is not None for facts in rank_facts)
     )
-    composition = carrying("step_time", *composition_names)
+    composition = carrying("traced_step_time", *composition_names)
     strategy = str(training_strategy).strip().lower()
     straggler = tuple(
         facts.global_rank
@@ -649,7 +649,7 @@ def _composition_representative(
 ) -> Optional[int]:
     ranks = set(cohort)
     anchors = {
-        facts.global_rank: facts.average.step_time_ms
+        facts.global_rank: facts.average.traced_step_time_ms
         for facts in rank_facts
         if facts.global_rank in ranks
     }

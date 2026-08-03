@@ -50,7 +50,7 @@ class _RankStragglerEvidence:
     visible_culprit_ms: float
     visible_victim_ms: float
     visible_cost_ms: float
-    iteration_time_ms: float
+    step_time_ms: float
     component_excesses_ms: Dict[str, float]
     component_coverage: Dict[str, float]
 
@@ -65,7 +65,7 @@ class StepTimeAnalysisContext:
     overall_worst_rank: Optional[int]
     training_strategy: str
 
-    step_metric: StepTimeMetric
+    step_metric: Optional[StepTimeMetric]
     input_wait_metric: Optional[StepTimeMetric]
     h2d_metric: Optional[StepTimeMetric]
     residual_metric: Optional[StepTimeMetric]
@@ -80,8 +80,8 @@ class StepTimeAnalysisContext:
     input_bound_worst_rank: Optional[int]
     diagnosis_clock: str
     input_wait_total: float
-    input_bound_step_total: float
-    iteration_time_total: float
+    traced_step_time_total: float
+    step_time_total: float
 
     largest_compute: Optional[str]
     rank_straggler: Optional[_RankStragglerEvidence]
@@ -227,11 +227,10 @@ def _build_rank_straggler_evidence(
     by_rank = {facts.global_rank: facts for facts in eligible}
     culprit = by_rank[pair.culprit_rank]
     victim = by_rank[pair.victim_rank]
-    iteration_time = _rank_value(victim, "input_wait") + _rank_value(
-        victim,
-        "step_time",
-    )
-    score = pair.cost_ms / iteration_time
+    step_time = _rank_value(victim, "step_time")
+    if step_time <= 0.0:
+        return None, len(eligible)
+    score = pair.cost_ms / step_time
     if score < non_negative_finite(score_threshold):
         return None, len(eligible)
 
@@ -319,7 +318,7 @@ def _build_rank_straggler_evidence(
         visible_culprit_ms=pair.culprit_value_ms,
         visible_victim_ms=pair.victim_value_ms,
         visible_cost_ms=pair.cost_ms,
-        iteration_time_ms=iteration_time,
+        step_time_ms=step_time,
         component_excesses_ms=component_excesses,
         component_coverage=coverage,
     ), len(eligible)
@@ -353,7 +352,7 @@ _MISSING_SIGNAL_ORDER: tuple[str, ...] = (
     "forward",
     "backward",
     "optimizer_step",
-    "step_time",
+    "traced_step_time",
 )
 
 
@@ -378,7 +377,7 @@ def _missing_signal_facts(
     if len(window.rank_facts) < ranks:
         needed.update(_MISSING_SIGNAL_ORDER)
     if input_share is None:
-        needed.update(("input_wait", "step_time"))
+        needed.update(("input_wait", "traced_step_time"))
     if compute_share is None or residual_share is None:
         needed.update(
             (
@@ -386,11 +385,11 @@ def _missing_signal_facts(
                 "backward",
                 "optimizer_step",
                 "input_wait",
-                "step_time",
+                "traced_step_time",
             )
         )
     if ranks > 1 and rank_straggler is None and straggler_eligible_ranks < 2:
-        needed.update(("backward", "input_wait", "step_time"))
+        needed.update(("backward", "input_wait", "traced_step_time"))
         if training_strategy == "fsdp":
             needed.add("forward")
 
@@ -411,36 +410,44 @@ def build_step_time_context(
 ) -> StepTimeAnalysisContext:
     """Build diagnosis-specific facts from one canonical window."""
     metrics = {metric.metric: metric for metric in window.metrics}
-    step_metric = metrics["step_time"]
+    step_metric = metrics.get("step_time")
     input_wait_metric = metrics.get("input_wait")
     h2d_metric = metrics.get("h2d")
     residual_metric = metrics.get("residual_proxy")
-    total_step_metric = metrics.get("total_step")
 
     coverage = window.coverage
     single_rank = coverage.world_size <= 1 or coverage.ranks_present <= 1
     strategy = normalize_training_strategy(window.training_strategy)
-    iteration_cohort = tuple(
+    step_cohort = tuple(
         facts
-        for rank in window.iteration_ranks
+        for rank in window.step_ranks
         if (facts := window.rank(rank)) is not None
     )
     input_median, input_worst, input_worst_rank, input_excess = _rank_stats(
         tuple(
             (facts.global_rank, _rank_value(facts, "input_wait"))
-            for facts in iteration_cohort
+            for facts in step_cohort
+        )
+    )
+    traced_step_median, traced_step_worst, _rank, _excess = _rank_stats(
+        tuple(
+            (facts.global_rank, _rank_value(facts, "traced_step_time"))
+            for facts in step_cohort
         )
     )
     step_median, step_worst, _rank, _excess = _rank_stats(
         tuple(
             (facts.global_rank, _rank_value(facts, "step_time"))
-            for facts in iteration_cohort
+            for facts in step_cohort
         )
     )
     input_total = input_worst if single_rank else input_median
-    input_step_total = step_worst if single_rank else step_median
+    traced_step_total = (
+        traced_step_worst if single_rank else traced_step_median
+    )
+    step_total = step_worst if single_rank else step_median
     input_skew = None
-    if len(iteration_cohort) >= 2:
+    if len(step_cohort) >= 2:
         if input_median > 0.0:
             input_skew = input_excess / input_median
         elif input_worst <= 0.0:
@@ -483,7 +490,7 @@ def build_step_time_context(
         thresholds=thresholds,
         single_rank=single_rank,
         steps_used=int(coverage.steps_used),
-        overall_worst_rank=metric_worst_rank(total_step_metric or step_metric),
+        overall_worst_rank=metric_worst_rank(step_metric),
         training_strategy=strategy,
         step_metric=step_metric,
         input_wait_metric=input_wait_metric,
@@ -498,8 +505,8 @@ def build_step_time_context(
         input_bound_worst_rank=input_worst_rank,
         diagnosis_clock=window.clock,
         input_wait_total=input_total,
-        input_bound_step_total=input_step_total,
-        iteration_time_total=input_total + input_step_total,
+        traced_step_time_total=traced_step_total,
+        step_time_total=step_total,
         largest_compute=largest_compute_phase(window),
         rank_straggler=rank_straggler,
         missing_signals=missing,
