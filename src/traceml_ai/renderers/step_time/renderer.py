@@ -219,8 +219,8 @@ class StepTimeRenderer(BaseRenderer):
             f"{window.clock.upper()} | "
             "IW=input wait | H2D=host-to-device | FWD=forward | "
             "BWD=backward | OPT=optimizer | "
-            "Step Time=IW + inner trace envelope | "
-            "RESIDUAL=inner trace envelope−H2D−FWD−BWD−OPT"
+            "Step Time=IW + Traced Step Time | "
+            "RESIDUAL=Traced Step Time−H2D−FWD−BWD−OPT"
             "[/dim]"
         )
         return Panel(
