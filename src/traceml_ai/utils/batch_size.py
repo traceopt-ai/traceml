@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from queue import Full, Queue
@@ -25,6 +26,15 @@ from traceml_ai.runtime.state import should_record_trace_events
 
 def _traceml_disabled() -> bool:
     return os.environ.get("TRACEML_DISABLED") == "1"
+
+
+def should_record_batch_size() -> bool:
+    """
+    Cheap gate for the fetch-path call sites, checked BEFORE sizing a
+    batch (mirroring how ``timed_region`` checks its gate before doing
+    any work) so fetches outside a recorded window cost nothing.
+    """
+    return not _traceml_disabled() and should_record_trace_events()
 
 
 @dataclass
@@ -40,11 +50,14 @@ class BatchSizeBatch:
     """One optimizer-step worth of dataloader-fetch byte events."""
 
     step: int
+    timestamp: float = 0.0
     events: List[BatchSizeEvent] = field(default_factory=list)
 
 
 _BATCH_SIZE_QUEUE: Queue = Queue(maxsize=2048)
-_BATCH_SIZE_BUFFER: Deque[BatchSizeEvent] = deque()
+# Bounded like the queue: a loop that fetches without ever flushing
+# (no trace_step) must not grow memory without limit.
+_BATCH_SIZE_BUFFER: Deque[BatchSizeEvent] = deque(maxlen=2048)
 
 
 def get_batch_size_queue() -> Queue:
@@ -94,7 +107,11 @@ def flush_batch_size_buffer(step: int) -> None:
         events.append(evt)
 
     try:
-        _BATCH_SIZE_QUEUE.put_nowait(BatchSizeBatch(step=step, events=events))
+        # Stamped here, at step flush, so the persisted row carries the
+        # step-end time rather than the sampler thread's drain time.
+        _BATCH_SIZE_QUEUE.put_nowait(
+            BatchSizeBatch(step=step, timestamp=time.time(), events=events)
+        )
     except Full:
         print(
             f"[TraceML:BatchSize] Queue full, dropping step batch {step}",
@@ -104,42 +121,36 @@ def flush_batch_size_buffer(step: int) -> None:
 
 def tensor_bytes(obj: object) -> int:
     """
-    Best-effort byte sizing for an object passed to ``.to(device)``.
+    Best-effort byte sizing for a batch as it leaves the dataloader.
 
     Handles:
     - torch.Tensor: element_size() * numel()
     - dict / list / tuple of tensors (1 level deep): sum of contained tensors
     - everything else: 0 (caller decides whether to record)
+
+    Never raises: this runs on the user's fetch path, and container
+    subclasses can fail in arbitrary ways during iteration.
     """
     try:
         import torch  # local import: utils must be import-safe without torch
+
+        if isinstance(obj, torch.Tensor):
+            return int(obj.element_size()) * int(obj.numel())
+
+        if isinstance(obj, dict):
+            total = 0
+            for v in obj.values():
+                if isinstance(v, torch.Tensor):
+                    total += int(v.element_size()) * int(v.numel())
+            return total
+
+        if isinstance(obj, (list, tuple)):
+            total = 0
+            for v in obj:
+                if isinstance(v, torch.Tensor):
+                    total += int(v.element_size()) * int(v.numel())
+            return total
     except Exception:
         return 0
-
-    if isinstance(obj, torch.Tensor):
-        try:
-            return int(obj.element_size()) * int(obj.numel())
-        except Exception:
-            return 0
-
-    if isinstance(obj, dict):
-        total = 0
-        for v in obj.values():
-            if isinstance(v, torch.Tensor):
-                try:
-                    total += int(v.element_size()) * int(v.numel())
-                except Exception:
-                    pass
-        return total
-
-    if isinstance(obj, (list, tuple)):
-        total = 0
-        for v in obj:
-            if isinstance(v, torch.Tensor):
-                try:
-                    total += int(v.element_size()) * int(v.numel())
-                except Exception:
-                    pass
-        return total
 
     return 0

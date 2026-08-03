@@ -10,7 +10,11 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from traceml_ai.instrumentation.h2d import should_time_h2d
-from traceml_ai.utils.batch_size import record_batch_size_bytes, tensor_bytes
+from traceml_ai.utils.batch_size import (
+    record_batch_size_bytes,
+    should_record_batch_size,
+    tensor_bytes,
+)
 from traceml_ai.utils.timing import TimeScope, timed_region
 
 
@@ -78,7 +82,8 @@ def _ensure_optimizer_wrapper_allowed() -> None:
 
 class _WrappedDataLoaderIterator:
     """
-    Iterator proxy that times `next(...)` as TraceML dataloader fetch.
+    Iterator proxy that times `next(...)` as TraceML dataloader fetch and
+    records the batch's tensor bytes for the batch-size pipeline.
 
     This emits the same event name currently used by the automatic DataLoader
     patch path: `_traceml_internal:dataloader_next`.
@@ -86,6 +91,13 @@ class _WrappedDataLoaderIterator:
 
     def __init__(self, iterator: Iterator[Any]) -> None:
         self._iterator = iterator
+        # wrap-then-init race: if the wrapped iterator is the auto patch's
+        # own generator (the loader was wrapped before traceml.init
+        # installed the DataLoader patch), the patch already records batch
+        # bytes; recording here again would double-count every fetch.
+        self._records_bytes = (
+            getattr(iterator, "__name__", "") != "_traceml_dataloader_iter"
+        )
 
     def __iter__(self) -> "_WrappedDataLoaderIterator":
         return self
@@ -98,9 +110,10 @@ class _WrappedDataLoaderIterator:
         ):
             batch = next(self._iterator)
 
-        n_bytes = tensor_bytes(batch)
-        if n_bytes > 0:
-            record_batch_size_bytes(n_bytes)
+        if self._records_bytes and should_record_batch_size():
+            n_bytes = tensor_bytes(batch)
+            if n_bytes > 0:
+                record_batch_size_bytes(n_bytes)
 
         return batch
 
@@ -148,7 +161,8 @@ class _WrappedBackwardHandle:
 
 def wrap_dataloader_fetch(obj: Any) -> Any:
     """
-    Wrap a dataloader or iterator for step-scoped fetch timing.
+    Wrap a dataloader or iterator for step-scoped fetch timing and
+    per-step batch-size-in-bytes recording (`batch_size_samples`).
 
     Supported inputs
     ----------------

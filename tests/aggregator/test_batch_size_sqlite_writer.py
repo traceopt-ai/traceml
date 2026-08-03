@@ -68,3 +68,15 @@ def test_build_rows_ignores_other_samplers() -> None:
     rows_by_table = bs_writer.build_rows(envelope=envelope, recv_ts_ns=123)
 
     assert rows_by_table == {"batch_size_samples": []}
+
+
+def test_writer_is_registered_with_the_aggregator() -> None:
+    """
+    Pin the registration itself: without these entries the aggregator
+    never creates or fills batch_size_samples, while every module-level
+    writer test stays green.
+    """
+    from traceml_ai.aggregator import sqlite_writer
+
+    assert bs_writer in sqlite_writer._PROJECTION_WRITERS
+    assert "batch_size_samples" in sqlite_writer._RETENTION_PARTITION_SQL

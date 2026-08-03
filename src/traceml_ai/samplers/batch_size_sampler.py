@@ -53,12 +53,18 @@ class BatchSizeSampler(BaseSampler):
 
         sample = BatchSizeSample(
             seq=self.sample_idx,
-            timestamp=time.time(),
+            # The batch carries the step-flush time; the drain-time clock
+            # is only a fallback for batches from older producers.
+            timestamp=float(batch.timestamp) or time.time(),
             step=int(batch.step),
             bytes_total=int(bytes_total),
             n_fetches=int(len(batch.events)),
         )
         self._add_record(sample.to_wire())
+
+    def has_pending_recording_data(self) -> bool:
+        """Report buffered batches so the final drain retries until empty."""
+        return bool(self._pending)
 
     def sample(self) -> None:
         """Drain queue -> sum per step -> persist one record per step."""

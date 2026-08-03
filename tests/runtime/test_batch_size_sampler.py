@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections import deque
 
 import pytest
@@ -29,9 +30,15 @@ from traceml_ai.utils.batch_size import (
 def _isolate_batch_size_state():
     """
     Reset the module-level buffer and drain the queue so each test starts
-    from a clean slate, regardless of previous test ordering.
+    from a clean slate, regardless of previous test ordering. The step-time
+    buffer is cleared too: the dataloader tests iterate through the real
+    timed_region, which would otherwise leak fetch TimeEvents into later
+    step-time tests in the same process.
     """
+    import traceml_ai.utils.timing as timing_module
+
     bs_module._BATCH_SIZE_BUFFER.clear()
+    timing_module._STEP_BUFFER.clear()
     q = get_batch_size_queue()
     while not q.empty():
         try:
@@ -40,6 +47,7 @@ def _isolate_batch_size_state():
             break
     yield
     bs_module._BATCH_SIZE_BUFFER.clear()
+    timing_module._STEP_BUFFER.clear()
     while not q.empty():
         try:
             q.get_nowait()
@@ -72,6 +80,15 @@ class TestTensorBytes:
 
     def test_unknown_returns_zero(self):
         assert tensor_bytes(object()) == 0
+
+    def test_raising_container_returns_zero(self):
+        # Instrumentation must never crash user training: a container
+        # whose iteration raises is sized as 0, not propagated.
+        class ExplodingBatch(dict):
+            def values(self):
+                raise RuntimeError("lazy mapping not materialized")
+
+        assert tensor_bytes(ExplodingBatch({"x": 1})) == 0
 
 
 # record_batch_size_bytes
@@ -117,6 +134,18 @@ class TestFlushBatchSizeBuffer:
         assert [e.bytes_count for e in batch.events] == [100, 200]
         assert all(e.step == 7 for e in batch.events)
 
+    def test_flush_stamps_step_end_timestamp(self):
+        # The schema documents the row timestamp as the step timestamp,
+        # so the batch is stamped when the step flushes, not when the
+        # sampler thread later drains the queue.
+        record_batch_size_bytes(100)
+        before = time.time()
+        flush_batch_size_buffer(step=7)
+        after = time.time()
+
+        batch = get_batch_size_queue().get_nowait()
+        assert before <= batch.timestamp <= after
+
 
 # BatchSizeSampler
 
@@ -148,6 +177,27 @@ class TestBatchSizeSampler:
         sampler = BatchSizeSampler()
         sampler.sample()
         assert sampler.db.get_table("BatchSizeTable") in (None, deque())
+
+    def test_row_timestamp_comes_from_the_flush_not_the_drain(self):
+        sampler = BatchSizeSampler()
+
+        record_batch_size_bytes(100)
+        flush_batch_size_buffer(step=3)
+        flushed_at = get_batch_size_queue().queue[0].timestamp
+
+        sampler.sample()
+
+        rows = list(sampler.db.get_table("BatchSizeTable") or [])
+        assert rows[0]["timestamp"] == flushed_at
+
+    def test_has_pending_recording_data_reflects_pending_batches(self):
+        # Mirrors StepTimeSampler: the final-drain loop must keep
+        # retrying while batches remain buffered.
+        sampler = BatchSizeSampler()
+        assert sampler.has_pending_recording_data() is False
+
+        sampler._pending.append(BatchSizeBatch(step=1))
+        assert sampler.has_pending_recording_data() is True
 
 
 # Schema round trip
@@ -405,3 +455,47 @@ class TestWrapDataloaderFetchRecordsBytes:
 
         assert len(batches) == 1
         assert len(bs_module._BATCH_SIZE_BUFFER) == 0
+
+    def test_wrapper_defers_to_the_patched_iterator(self, monkeypatch):
+        # wrap-then-init race: when the wrapped iterator is the auto
+        # patch's own generator, the patch already records bytes, so the
+        # wrapper must not record a second time.
+        import traceml_ai.instrumentation.patches.dataloader_patch as dlp
+        from traceml_ai.sdk.wrappers import _WrappedDataLoaderIterator
+
+        monkeypatch.setattr(dlp, "is_tracing_armed", lambda: True)
+
+        ds = TensorDataset(torch.zeros(4, 2, dtype=torch.float32))
+        loader = DataLoader(ds, batch_size=2)
+
+        patched_it = dlp._traceml_dataloader_iter(loader)
+        wrapped = _WrappedDataLoaderIterator(patched_it)
+        batches = list(wrapped)
+
+        # Two fetches of [tensor(2, 2) float32] = 16 bytes each,
+        # recorded once each, not twice.
+        assert len(batches) == 2
+        assert [e.bytes_count for e in bs_module._BATCH_SIZE_BUFFER] == [
+            16,
+            16,
+        ]
+
+
+# flush_step_events -> flush_batch_size_buffer wiring
+#
+# This is the only production producer of the batch-size queue; pin it so
+# removing the call in utils/flush_buffers.py cannot stay green.
+
+
+class TestFlushStepEventsWiring:
+    def test_flush_step_events_flushes_batch_size_buffer(self):
+        import torch.nn as nn
+
+        from traceml_ai.utils.flush_buffers import flush_step_events
+
+        record_batch_size_bytes(100)
+        flush_step_events(nn.Linear(1, 1), step=5)
+
+        batch = get_batch_size_queue().get_nowait()
+        assert batch.step == 5
+        assert [e.bytes_count for e in batch.events] == [100]

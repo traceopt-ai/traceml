@@ -8,7 +8,10 @@
 SQLite projection writer for BatchSizeSampler.
 
 Projects per-step input batch-size-in-bytes samples into the
-``batch_size_samples`` table. One row per (global_rank, step).
+``batch_size_samples`` table. One row per flushed step batch; normally
+that is one row per (global_rank, step), but a step whose trace_step
+body raised flushes its fetches under the previous step id (matching
+step-time flush behavior), which can yield a second row for that step.
 Payload rows follow BatchSizeSample.to_wire().
 """
 

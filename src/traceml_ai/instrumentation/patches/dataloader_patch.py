@@ -1,7 +1,11 @@
 from torch.utils.data import DataLoader
 
 from traceml_ai.runtime.arming import is_tracing_armed
-from traceml_ai.utils.batch_size import record_batch_size_bytes, tensor_bytes
+from traceml_ai.utils.batch_size import (
+    record_batch_size_bytes,
+    should_record_batch_size,
+    tensor_bytes,
+)
 from traceml_ai.utils.timing import timed_region
 
 _ORIG_DATALOADER_ITER = DataLoader.__iter__
@@ -25,9 +29,10 @@ def _traceml_dataloader_iter(self):
         except StopIteration:
             break
 
-        n_bytes = tensor_bytes(batch)
-        if n_bytes > 0:
-            record_batch_size_bytes(n_bytes)
+        if should_record_batch_size():
+            n_bytes = tensor_bytes(batch)
+            if n_bytes > 0:
+                record_batch_size_bytes(n_bytes)
 
         yield batch
 

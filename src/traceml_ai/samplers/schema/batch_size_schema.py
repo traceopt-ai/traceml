@@ -19,6 +19,14 @@ Units
                       fetched in the step)
 - n_fetches   : int  (number of dataloader fetches summed; diagnostic)
 
+Known attribution limit (shared with dataloader fetch timing)
+-------------------------------------------------------------
+Fetches from ANY dataloader iterated inside the recording window are
+attributed to the next flushed step, exactly like the
+`_traceml_internal:dataloader_next` timing events. A validation or
+warmup loop running between training steps therefore inflates the next
+step's bytes_total and n_fetches.
+
 Schema (per DB row)
 -------------------
 {
