@@ -6,6 +6,7 @@
 
 import sqlite3
 
+from tests.sqlite_fixtures import sqlite_database
 from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.process.loader import (
     load_process_section_data,
@@ -136,12 +137,8 @@ def _create_process_tables(conn: sqlite3.Connection) -> None:
 
 def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "system.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_system_tables(conn)
-        conn.commit()
-    finally:
-        conn.close()
 
     data = load_system_section_data(str(db_path))
     result = SystemSummarySection().build(str(db_path))
@@ -185,8 +182,7 @@ def test_system_section_loader_and_builder_use_sqlite_fixture(tmp_path):
 
 def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
     db_path = tmp_path / "system_multinode.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_system_tables(conn)
         conn.execute(
             """
@@ -204,9 +200,6 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
             )
             """
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     payload = SystemSummarySection().build(str(db_path)).payload
 
@@ -228,8 +221,7 @@ def test_system_section_reports_scoped_multinode_primary_issue(tmp_path):
 
 def test_system_loader_uses_latest_bounded_window(tmp_path):
     db_path = tmp_path / "system_latest.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_system_tables(conn)
         conn.execute(
             """
@@ -247,9 +239,6 @@ def test_system_loader_uses_latest_bounded_window(tmp_path):
             )
             """
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     data = load_system_section_data(str(db_path), max_system_rows=1)
 
@@ -261,8 +250,7 @@ def test_system_loader_uses_latest_bounded_window(tmp_path):
 
 def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
     db_path = tmp_path / "system_latest_per_node.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_system_tables(conn)
         conn.execute("DELETE FROM system_gpu_samples")
         conn.execute("DELETE FROM system_samples")
@@ -305,9 +293,6 @@ def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
                     ),
                 )
                 row_id += 1
-        conn.commit()
-    finally:
-        conn.close()
 
     data = load_system_section_data(str(db_path), max_system_rows=1)
 
@@ -321,12 +306,8 @@ def test_system_loader_uses_latest_bounded_window_per_node(tmp_path):
 
 def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
     db_path = tmp_path / "process.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_process_tables(conn)
-        conn.commit()
-    finally:
-        conn.close()
 
     data = load_process_section_data(str(db_path))
     result = ProcessSummarySection().build(str(db_path))
@@ -376,12 +357,8 @@ def test_process_section_loader_and_builder_use_sqlite_fixture(tmp_path):
 
 def test_process_loader_uses_latest_bounded_window(tmp_path):
     db_path = tmp_path / "process_latest.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_process_tables(conn)
-        conn.commit()
-    finally:
-        conn.close()
 
     data = load_process_section_data(str(db_path), max_process_rows=1)
 
@@ -394,8 +371,7 @@ def test_process_loader_uses_latest_bounded_window(tmp_path):
 
 def test_process_loader_ignores_rows_without_global_rank(tmp_path):
     db_path = tmp_path / "process_legacy_rank.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_process_tables(conn)
         conn.execute(
             """
@@ -406,9 +382,6 @@ def test_process_loader_ignores_rows_without_global_rank(tmp_path):
             )
             """
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     data = load_process_section_data(str(db_path))
 
@@ -419,13 +392,9 @@ def test_process_loader_ignores_rows_without_global_rank(tmp_path):
 
 def test_summary_wrappers_delegate_to_section_paths(tmp_path):
     db_path = tmp_path / "combined.db"
-    conn = sqlite3.connect(db_path)
-    try:
+    with sqlite_database(db_path) as conn:
         _create_system_tables(conn)
         _create_process_tables(conn)
-        conn.commit()
-    finally:
-        conn.close()
 
     system = generate_system_summary_card(str(db_path), print_to_stdout=False)
     process = generate_process_summary_card(

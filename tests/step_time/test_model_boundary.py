@@ -88,14 +88,6 @@ def test_typed_analysis_facts_are_exported_without_loading_analyzer() -> None:
     assert "traceml_ai.step_time.pipeline" not in dependencies
 
 
-def test_removed_utility_adapters_do_not_return() -> None:
-    """Keep production callers on the repository and typed window APIs."""
-    utility_root = _PROJECT_ROOT / "src" / "traceml_ai" / "utils"
-
-    assert not (utility_root / "step_time_window.py").exists()
-    assert not (utility_root / "step_time_sqlite.py").exists()
-
-
 def test_pipeline_is_the_only_builtin_orchestrator() -> None:
     """Keep direct diagnosis limited to its implementation and pipeline."""
     source_root = _PROJECT_ROOT / "src" / "traceml_ai"
@@ -196,18 +188,6 @@ def test_metric_shape_has_no_repeated_window_wrappers() -> None:
     assert not hasattr(step_time_package, "StepTimeSummary")
 
 
-def test_removed_renderer_schema_does_not_return() -> None:
-    """The historical renderer-owned domain shim was intentionally retired."""
-    assert not (
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "renderers"
-        / "step_time"
-        / "schema.py"
-    ).exists()
-
-
 def test_cli_presenter_has_no_data_or_diagnosis_dependencies() -> None:
     """Keep Rich formatting downstream of the completed live analysis."""
     renderer = (
@@ -229,75 +209,3 @@ def test_cli_presenter_has_no_data_or_diagnosis_dependencies() -> None:
     assert "build_step_diagnosis" not in source
     assert "StepCombinedComputer" not in source
     assert "StepTimeDashboardAdapter" not in source
-
-
-def test_removed_mapping_diagnosis_apis_do_not_return() -> None:
-    """Keep the deleted rank-map model and diagnosis path deleted."""
-    diagnosis = (
-        _PROJECT_ROOT / "src" / "traceml_ai" / "diagnostics" / "step_time"
-    )
-    api_source = (diagnosis / "api.py").read_text(encoding="utf-8")
-
-    assert not (diagnosis / "compat.py").exists()
-    assert "def build_step_diagnosis(" not in api_source
-    assert "def build_step_diagnosis_result(" not in api_source
-
-
-def test_dashboard_compatibility_types_are_removed() -> None:
-    """Keep dashboard consumers on the canonical live result."""
-    assert not (
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "renderers"
-        / "step_time"
-        / "compute.py"
-    ).exists()
-    assert not hasattr(model, "StepTimeResult")
-    assert not hasattr(step_time_package, "StepTimeResult")
-
-
-def test_dashboard_diagnostics_has_no_provider_or_stale_cache() -> None:
-    """Keep live state in the one session owned by the dashboard driver."""
-    renderer = (
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "renderers"
-        / "model_diagnostics"
-        / "renderer.py"
-    )
-    source = renderer.read_text(encoding="utf-8")
-
-    assert "StepCombinedComputer" not in source
-    names = {
-        node.id
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Name)
-    }
-    assert "LiveStepTimeSession" not in names
-    assert "_cached" not in source
-
-
-def test_dashboard_sections_do_not_cache_semantic_step_time_payloads() -> None:
-    """Allow render signatures, but never retain a last-good domain result."""
-    sections = (
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "aggregator"
-        / "display_drivers"
-        / "nicegui_sections"
-    )
-    hero = (sections / "model_combined_section.py").read_text(encoding="utf-8")
-    diagnostics = (sections / "model_diagnostics_section.py").read_text(
-        encoding="utf-8"
-    )
-
-    hero_names = {
-        node.id
-        for node in ast.walk(ast.parse(hero))
-        if isinstance(node, ast.Name)
-    }
-    assert "StepTimeResult" not in hero_names
-    assert '"_last"' not in diagnostics

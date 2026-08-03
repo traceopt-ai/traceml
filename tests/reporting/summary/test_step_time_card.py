@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from traceml_ai.diagnostics.step_time import (
     SUMMARY_STEP_TIME_POLICY,
     diagnose_step_time_window,
@@ -262,135 +264,130 @@ def test_card_median_and_json_representative_are_explicit() -> None:
     }
 
 
-def test_step_time_compute_bound_card_uses_short_reason() -> None:
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            {
+                "rank": _rank(
+                    dataloader=2.0,
+                    forward=20.0,
+                    backward=65.0,
+                    optimizer=5.0,
+                    step_cpu=95.0,
+                ),
+                "status": "COMPUTE-BOUND",
+                "card": (
+                    "- Stats: total 97.0ms | input 2.0ms | H2D 0.0ms | "
+                    "compute 90.0ms",
+                    "- Residual: 5.0ms",
+                    "- Why: Compute-bound; backward is the largest phase.",
+                ),
+            },
+            id="compute-bound",
+        ),
+        pytest.param(
+            {
+                "rank": _rank(
+                    dataloader=40.0,
+                    forward=20.0,
+                    backward=35.0,
+                    optimizer=5.0,
+                    step_cpu=100.0,
+                ),
+                "steps": _input_bound_step_metrics(
+                    input_wait_gpu=40.0,
+                    step_time_gpu=100.0,
+                    compute_gpu=90.0,
+                ),
+                "status": "INPUT-BOUND",
+                "diagnosis": {"metric": "input_wait", "phase": "input"},
+                "evidence": {
+                    "input_wait_ms": 40.0,
+                    "step_time_ms": 100.0,
+                    "iteration_time_ms": 140.0,
+                    "diagnosis_clock": "gpu",
+                },
+                "average": {
+                    "dataloader_ms": 12.0,
+                    "input_wait_ms": 40.0,
+                    "step_time_ms": 100.0,
+                    "total_step_ms": 102.0,
+                },
+                "public_dataloader": True,
+                "card": (
+                    "- Why: Input wait is 28.6% of the typical gpu "
+                    "iteration time.",
+                ),
+            },
+            id="input-bound",
+        ),
+        pytest.param(
+            {
+                "rank": _rank(
+                    dataloader=12.0,
+                    h2d=20.0,
+                    forward=20.0,
+                    backward=35.0,
+                    optimizer=5.0,
+                    step_cpu=100.0,
+                ),
+                "steps": _input_bound_step_metrics(
+                    input_wait_gpu=0.0,
+                    h2d_gpu=20.0,
+                    compute_gpu=70.0,
+                    step_time_cpu=100.0,
+                    step_time_gpu=100.0,
+                ),
+                "status": "H2D-BOUND",
+                "diagnosis": {"metric": "h2d", "phase": "h2d"},
+                "evidence": {"h2d_ms": 20.0, "diagnosis_clock": "gpu"},
+                "card": (
+                    "- Why: H2D transfer is 20.0% of the typical GPU "
+                    "iteration time.",
+                ),
+            },
+            id="h2d-bound",
+        ),
+        pytest.param(
+            {
+                "rank": _rank(
+                    dataloader=2.0,
+                    forward=20.0,
+                    backward=45.0,
+                    optimizer=5.0,
+                    step_cpu=100.0,
+                ),
+                "status": "RESIDUAL-HEAVY",
+                "card": (
+                    "- Why: Residual time is 29.4% of the typical cpu "
+                    "iteration time.",
+                ),
+            },
+            id="residual-heavy",
+        ),
+    ],
+)
+def test_step_time_diagnosis_cards_use_short_reason(case: dict) -> None:
     payload = _summary(
-        {
-            0: _rank(
-                dataloader=2.0,
-                forward=20.0,
-                backward=65.0,
-                optimizer=5.0,
-                step_cpu=95.0,
-            )
-        }
+        {0: case["rank"]},
+        per_rank_steps=({0: case["steps"]} if "steps" in case else None),
     )
 
     assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "COMPUTE-BOUND"
-    assert (
-        "- Stats: total 97.0ms | input 2.0ms | H2D 0.0ms | compute 90.0ms"
-        in payload["card"]
-    )
-    assert "- Residual: 5.0ms" in payload["card"]
-    assert (
-        "- Why: Compute-bound; backward is the largest phase."
-        in payload["card"]
-    )
-    _assert_compact_card(payload["card"])
-
-
-def test_step_time_input_bound_card_uses_short_reason() -> None:
-    payload = _summary(
-        {
-            0: _rank(
-                dataloader=40.0,
-                forward=20.0,
-                backward=35.0,
-                optimizer=5.0,
-                step_cpu=100.0,
-            )
-        },
-        per_rank_steps={
-            0: _input_bound_step_metrics(
-                input_wait_gpu=40.0,
-                step_time_gpu=100.0,
-                compute_gpu=90.0,
-            )
-        },
-    )
-
-    assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "INPUT-BOUND"
-    assert payload["diagnosis"]["metric"] == "input_wait"
-    assert payload["diagnosis"]["phase"] == "input"
-    assert payload["diagnosis"]["evidence"]["input_wait_ms"] == 40.0
-    assert payload["diagnosis"]["evidence"]["step_time_ms"] == 100.0
-    assert payload["diagnosis"]["evidence"]["iteration_time_ms"] == 140.0
-    assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
-    assert payload["global"]["window"]["diagnosis_clock"] == "gpu"
-    average = payload["global"]["average"]
-    assert average["dataloader_ms"] == 12.0
-    assert average["input_wait_ms"] == 40.0
-    assert average["step_time_ms"] == 100.0
-    assert average["total_step_ms"] == 102.0
-    row_metrics = payload["groups"]["rows"]["0"]["metrics"]
-    assert row_metrics["dataloader_ms"] == 12.0
-    assert row_metrics["input_wait_ms"] == 40.0
-    assert row_metrics["step_time_ms"] == 100.0
-    assert row_metrics["total_step_ms"] == 102.0
-    _assert_public_step_metrics_keep_dataloader(payload)
-    assert (
-        "- Why: Input wait is 28.6% of the typical gpu iteration time."
-        in payload["card"]
-    )
-    _assert_compact_card(payload["card"])
-
-
-def test_step_time_h2d_bound_card_uses_short_reason() -> None:
-    payload = _summary(
-        {
-            0: _rank(
-                dataloader=12.0,
-                h2d=20.0,
-                forward=20.0,
-                backward=35.0,
-                optimizer=5.0,
-                step_cpu=100.0,
-            )
-        },
-        per_rank_steps={
-            0: _input_bound_step_metrics(
-                input_wait_gpu=0.0,
-                h2d_gpu=20.0,
-                compute_gpu=70.0,
-                step_time_cpu=100.0,
-                step_time_gpu=100.0,
-            )
-        },
-    )
-
-    assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "H2D-BOUND"
-    assert payload["diagnosis"]["metric"] == "h2d"
-    assert payload["diagnosis"]["phase"] == "h2d"
-    assert payload["diagnosis"]["evidence"]["h2d_ms"] == 20.0
-    assert payload["diagnosis"]["evidence"]["diagnosis_clock"] == "gpu"
-    assert (
-        "- Why: H2D transfer is 20.0% of the typical GPU iteration time."
-        in payload["card"]
-    )
-    _assert_compact_card(payload["card"])
-
-
-def test_step_time_residual_heavy_card_uses_short_reason() -> None:
-    payload = _summary(
-        {
-            0: _rank(
-                dataloader=2.0,
-                forward=20.0,
-                backward=45.0,
-                optimizer=5.0,
-                step_cpu=100.0,
-            )
-        }
-    )
-
-    assert payload["diagnosis"] == payload["issues"][0]
-    assert payload["diagnosis"]["status"] == "RESIDUAL-HEAVY"
-    assert (
-        "- Why: Residual time is 29.4% of the typical cpu iteration time."
-        in payload["card"]
-    )
+    assert payload["diagnosis"]["status"] == case["status"]
+    for key, expected in case.get("diagnosis", {}).items():
+        assert payload["diagnosis"][key] == expected
+    for key, expected in case.get("evidence", {}).items():
+        assert payload["diagnosis"]["evidence"][key] == expected
+    for key, expected in case.get("average", {}).items():
+        assert payload["global"]["average"][key] == expected
+        assert payload["groups"]["rows"]["0"]["metrics"][key] == expected
+    if case.get("public_dataloader"):
+        assert payload["global"]["window"]["diagnosis_clock"] == "gpu"
+        _assert_public_step_metrics_keep_dataloader(payload)
+    for expected in case["card"]:
+        assert expected in payload["card"]
     _assert_compact_card(payload["card"])
 
 

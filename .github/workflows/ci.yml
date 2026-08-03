@@ -65,15 +65,16 @@ jobs:
       - name: Run core tests
         run: |
           pytest \
+            tests/aggregator \
+            tests/config \
             tests/core \
             tests/step_time \
-            tests/diagnostics/test_bands.py \
-            tests/diagnostics/test_common.py \
-            tests/diagnostics/test_step_time.py \
-            tests/diagnostics/test_step_time_missing_signals.py \
-            tests/telemetry/test_distributed.py \
-            tests/telemetry/test_msgpack.py \
-            tests/telemetry/test_sender_sequence.py \
+            tests/diagnostics \
+            tests/reporting/test_view.py \
+            tests/runtime \
+            tests/sdk \
+            tests/telemetry \
+            tests/test_h2d_timing.py \
             -q
 
   test-windows-teardown:
@@ -112,6 +113,7 @@ jobs:
       - name: Run integration tests
         run: |
           pytest \
+            tests/integrations \
             tests/runtime/test_sampler_registry.py \
             tests/runtime/test_telemetry_publisher.py \
             tests/reporting/compare \

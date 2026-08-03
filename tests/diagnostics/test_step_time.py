@@ -454,15 +454,23 @@ def test_input_bound_uses_iteration_share_thresholds(
 
 
 @pytest.mark.parametrize(
-    ("h2d", "expected_severity"),
-    [(10.0, "warn"), (20.0, "crit")],
+    ("h2d_by_rank", "clock", "expected_severity", "expected_share"),
+    [
+        pytest.param((10.0,), "gpu", "warn", 0.10, id="warning"),
+        pytest.param((20.0,), "gpu", "crit", 0.20, id="critical"),
+        pytest.param((9.0,), "gpu", None, None, id="below-threshold"),
+        pytest.param((80.0,), "cpu", None, None, id="cpu-clock"),
+        pytest.param((10.0, 90.0), "gpu", "crit", 0.50, id="skew"),
+    ],
 )
-def test_h2d_bound_uses_gpu_iteration_share_thresholds(
-    h2d: float,
-    expected_severity: str,
+def test_h2d_bound_conditions(
+    h2d_by_rank: tuple[float, ...],
+    clock: str,
+    expected_severity: str | None,
+    expected_share: float | None,
 ) -> None:
     per_rank = {
-        0: _timing_row(
+        rank: _timing_row(
             dataloader=0.0,
             h2d=h2d,
             forward=0.0,
@@ -470,80 +478,26 @@ def test_h2d_bound_uses_gpu_iteration_share_thresholds(
             optimizer=0.0,
             step_time=100.0,
         )
+        for rank, h2d in enumerate(h2d_by_rank)
     }
 
     issue = H2DBoundRule().evaluate(
-        _rank_context(per_rank, diagnosis_clock="gpu")
+        _rank_context(per_rank, diagnosis_clock=clock)
     )
+
+    if expected_severity is None:
+        assert issue is None
+        return
 
     assert issue is not None
     assert issue.metric == "h2d"
     assert issue.phase == "h2d"
-    assert issue.share_pct == pytest.approx(h2d / 100.0)
+    assert issue.share_pct == pytest.approx(expected_share)
     assert issue.score == issue.share_pct
     assert issue.severity == expected_severity
-
-
-def test_h2d_bound_abstains_below_warning_threshold() -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=0.0,
-            h2d=9.0,
-            forward=0.0,
-            backward=0.0,
-            optimizer=0.0,
-            step_time=100.0,
-        )
-    }
-
-    assert (
-        H2DBoundRule().evaluate(_rank_context(per_rank, diagnosis_clock="gpu"))
-        is None
-    )
-
-
-def test_h2d_bound_requires_gpu_selected_timing() -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=0.0,
-            h2d=80.0,
-            forward=0.0,
-            backward=0.0,
-            optimizer=0.0,
-            step_time=100.0,
-        )
-    }
-
-    assert H2DBoundRule().evaluate(_rank_context(per_rank)) is None
-
-
-def test_h2d_bound_keeps_skew_as_evidence() -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=0.0,
-            h2d=10.0,
-            forward=0.0,
-            backward=0.0,
-            optimizer=0.0,
-            step_time=100.0,
-        ),
-        1: _timing_row(
-            dataloader=0.0,
-            h2d=90.0,
-            forward=0.0,
-            backward=0.0,
-            optimizer=0.0,
-            step_time=100.0,
-        ),
-    }
-
-    issue = H2DBoundRule().evaluate(
-        _rank_context(per_rank, diagnosis_clock="gpu")
-    )
-
-    assert issue is not None
-    assert issue.skew_pct is not None
-    assert issue.ranks == (1,)
+    if len(h2d_by_rank) > 1:
+        assert issue.skew_pct is not None
+        assert issue.ranks == (1,)
 
 
 @pytest.mark.parametrize(
@@ -650,63 +604,54 @@ def test_compute_share_is_median_of_per_rank_iteration_shares() -> None:
     assert context.compute_share != pytest.approx(aggregate_median_ratio)
 
 
-def test_compute_bound_requires_existing_dominance_threshold() -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=0.0,
-            h2d=20.0,
-            forward=80.0,
-            backward=0.0,
-            optimizer=0.0,
-            step_time=100.0,
-        )
-    }
-
-    assert ComputeBoundRule().evaluate(_rank_context(per_rank)) is None
-
-
-def test_compute_bound_abstains_for_material_h2d() -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=0.0,
-            h2d=10.0,
-            forward=90.0,
-            backward=0.0,
-            optimizer=0.0,
-            step_time=100.0,
-        )
-    }
-
-    assert (
-        ComputeBoundRule().evaluate(
-            _rank_context(per_rank, diagnosis_clock="gpu")
-        )
-        is None
-    )
-
-
 @pytest.mark.parametrize(
-    ("input_wait", "residual", "step_time"),
-    [(10.0, 0.0, 90.0), (0.0, 10.0, 100.0)],
+    ("overrides", "clock", "expected_share"),
+    [
+        pytest.param(
+            {"h2d": 20.0, "forward": 80.0},
+            "cpu",
+            None,
+            id="below-dominance-threshold",
+        ),
+        pytest.param(
+            {"h2d": 10.0, "forward": 90.0},
+            "gpu",
+            0.90,
+            id="material-h2d",
+        ),
+        pytest.param(
+            {"dataloader": 10.0, "forward": 90.0, "step_time": 90.0},
+            "cpu",
+            0.90,
+            id="material-input-wait",
+        ),
+        pytest.param(
+            {"forward": 90.0, "residual": 10.0, "step_time": 100.0},
+            "cpu",
+            0.90,
+            id="material-residual",
+        ),
+    ],
 )
-def test_compute_bound_abstains_for_material_iteration_overhead(
-    input_wait: float,
-    residual: float,
-    step_time: float,
+def test_compute_bound_abstains_for_competing_costs(
+    overrides: dict[str, float],
+    clock: str,
+    expected_share: float | None,
 ) -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=input_wait,
-            forward=90.0,
-            backward=0.0,
-            optimizer=0.0,
-            residual=residual,
-            step_time=step_time,
-        )
+    row = {
+        "dataloader": 0.0,
+        "h2d": 0.0,
+        "forward": 0.0,
+        "backward": 0.0,
+        "optimizer": 0.0,
+        "step_time": 100.0,
+        **overrides,
     }
-    context = _rank_context(per_rank)
+    per_rank = {0: _timing_row(**row)}
+    context = _rank_context(per_rank, diagnosis_clock=clock)
 
-    assert context.compute_share == pytest.approx(0.90)
+    if expected_share is not None:
+        assert context.compute_share == pytest.approx(expected_share)
     assert ComputeBoundRule().evaluate(context) is None
 
 
@@ -941,7 +886,7 @@ def test_compute_bound_is_secondary_to_rank_straggler() -> None:
 
 
 @pytest.mark.parametrize(
-    ("per_rank", "expected_kind", "expected_phase"),
+    ("per_rank", "expected_kind", "expected_phase", "expected_component"),
     [
         (
             {
@@ -958,6 +903,7 @@ def test_compute_bound_is_secondary_to_rank_straggler() -> None:
             },
             "INPUT_STRAGGLER",
             "input",
+            None,
         ),
         (
             {
@@ -966,6 +912,7 @@ def test_compute_bound_is_secondary_to_rank_straggler() -> None:
             },
             "H2D_STRAGGLER",
             "h2d",
+            None,
         ),
         (
             {
@@ -974,6 +921,7 @@ def test_compute_bound_is_secondary_to_rank_straggler() -> None:
             },
             "COMPUTE_STRAGGLER",
             "forward",
+            None,
         ),
         (
             {
@@ -982,6 +930,24 @@ def test_compute_bound_is_secondary_to_rank_straggler() -> None:
             },
             "STRAGGLER",
             "sync",
+            "sync_or_unattributed",
+        ),
+        (
+            {
+                0: _timing_row(
+                    forward=100.0,
+                    backward=20.0,
+                    optimizer=0.0,
+                ),
+                1: _timing_row(
+                    forward=0.0,
+                    backward=120.0,
+                    optimizer=0.0,
+                ),
+            },
+            "STRAGGLER",
+            "sync",
+            "sync_or_unattributed",
         ),
     ],
 )
@@ -989,6 +955,7 @@ def test_rank_straggler_classifies_culprit_excess(
     per_rank: dict[int, dict[str, float]],
     expected_kind: str,
     expected_phase: str,
+    expected_component: str | None,
 ) -> None:
     result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
@@ -1001,6 +968,8 @@ def test_rank_straggler_classifies_culprit_excess(
     assert result.issues[0].evidence["culprit_rank"] == 0
     assert result.issues[0].evidence["victim_rank"] == 1
     assert result.issues[0].evidence["visible_cost_ms"] > 0.0
+    if expected_component is not None:
+        assert result.issues[0].evidence["component"] == expected_component
 
 
 @pytest.mark.parametrize(
@@ -1070,20 +1039,9 @@ def test_fsdp_rank_straggler_uses_input_h2d_or_unattributed(
         assert result.issues[0].evidence["component"] == "sync_or_unattributed"
 
 
-def test_rank_straggler_not_emitted_below_visible_wait_threshold() -> None:
-    per_rank = {
-        0: _timing_row(backward=115.0),
-        1: _timing_row(backward=120.0),
-    }
-    ctx = _rank_context(per_rank)
-
-    assert ctx.rank_straggler is None
-    assert RankStragglerRule().evaluate(ctx) is None
-
-
 @pytest.mark.parametrize(
     ("visible_cost", "expected_severity"),
-    [(9.0, None), (10.0, "warn"), (20.0, "crit")],
+    [(5.0, None), (9.0, None), (10.0, "warn"), (20.0, "crit")],
 )
 def test_rank_straggler_uses_victim_iteration_impact_thresholds(
     visible_cost: float,
@@ -1115,20 +1073,22 @@ def test_rank_straggler_uses_victim_iteration_impact_thresholds(
 
 
 @pytest.mark.parametrize(
-    ("component", "excess", "expected_kind"),
+    ("component", "excess", "expected_kind", "expected_coverage"),
     [
-        ("input", 79.0, "STRAGGLER"),
-        ("input", 80.0, "INPUT_STRAGGLER"),
-        ("h2d", 79.0, "STRAGGLER"),
-        ("h2d", 80.0, "H2D_STRAGGLER"),
-        ("compute", 79.0, "STRAGGLER"),
-        ("compute", 80.0, "COMPUTE_STRAGGLER"),
+        ("input", 79.0, "STRAGGLER", 0.79),
+        ("input", 80.0, "INPUT_STRAGGLER", 0.80),
+        ("h2d", 79.0, "STRAGGLER", 0.79),
+        ("h2d", 80.0, "H2D_STRAGGLER", 0.80),
+        ("h2d", 140.0, "H2D_STRAGGLER", 1.00),
+        ("compute", 79.0, "STRAGGLER", 0.79),
+        ("compute", 80.0, "COMPUTE_STRAGGLER", 0.80),
     ],
 )
 def test_rank_straggler_requires_component_coverage_for_attribution(
     component: str,
     excess: float,
     expected_kind: str,
+    expected_coverage: float,
 ) -> None:
     culprit = _timing_row(
         dataloader=0.0,
@@ -1162,64 +1122,17 @@ def test_rank_straggler_requires_component_coverage_for_attribution(
         excess
     )
     assert issue.evidence["component_coverage"][component] == pytest.approx(
-        excess / 100.0
+        expected_coverage
     )
-
-
-def test_rank_straggler_coverage_changes_attribution_not_severity() -> None:
-    def _issue(input_excess: float):
-        culprit = _timing_row(
-            dataloader=input_excess,
-            backward=20.0,
-            step_time=100.0,
+    if component == "input":
+        expected_summary = (
+            "r0 has excess input wait burden relative to victim r1"
+            if expected_kind == "INPUT_STRAGGLER"
+            else "r0 is slower than victim r1"
         )
-        victim = _timing_row(
-            dataloader=0.0,
-            backward=120.0,
-            step_time=100.0,
-        )
-        issue = RankStragglerRule().evaluate(
-            _rank_context({0: culprit, 1: victim})
-        )
-        assert issue is not None
-        return issue
-
-    generic = _issue(79.0)
-    named = _issue(80.0)
-
-    assert generic.kind == "STRAGGLER"
-    assert named.kind == "INPUT_STRAGGLER"
-    assert generic.score == named.score == pytest.approx(1.0)
-    assert generic.severity == named.severity == "crit"
-    assert "r0 is slower than victim r1" in generic.summary
-    assert "r0 has excess input wait burden relative to victim r1" in (
-        named.summary
-    )
-    assert "~80.0% of visible wait cost" in named.summary
-
-
-def test_rank_straggler_component_coverage_is_bounded() -> None:
-    per_rank = {
-        0: _timing_row(
-            dataloader=0.0,
-            h2d=140.0,
-            backward=20.0,
-            step_time=100.0,
-        ),
-        1: _timing_row(
-            dataloader=0.0,
-            h2d=0.0,
-            backward=120.0,
-            step_time=100.0,
-        ),
-    }
-
-    issue = RankStragglerRule().evaluate(_rank_context(per_rank))
-
-    assert issue is not None
-    assert issue.kind == "H2D_STRAGGLER"
-    assert issue.evidence["component_excesses_ms"]["h2d"] == 140.0
-    assert issue.evidence["component_coverage"]["h2d"] == 1.0
+        assert expected_summary in issue.summary
+        if expected_kind == "INPUT_STRAGGLER":
+            assert "~80.0% of visible wait cost" in issue.summary
 
 
 def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
@@ -1357,21 +1270,6 @@ def test_rank_straggler_uses_only_valid_visible_ranks(
     assert ctx.rank_straggler.victim_rank == expected_victim
     assert issue is not None
     assert issue.kind == expected_kind
-
-
-def test_ddp_missing_forward_does_not_emit_compute_straggler() -> None:
-    per_rank = {
-        0: _timing_row(forward=100.0, backward=20.0, optimizer=0.0),
-        1: _timing_row(forward=0.0, backward=120.0, optimizer=0.0),
-    }
-    result = _diagnose_rank_map(
-        _metrics_from_per_rank_timing(per_rank),
-        per_rank_timing=per_rank,
-    )
-
-    assert result.primary.kind == "STRAGGLER"
-    assert result.issues[0].phase == "sync"
-    assert result.issues[0].evidence["component"] == "sync_or_unattributed"
 
 
 def test_rank_straggler_uses_actual_upper_median_victim_rank() -> None:

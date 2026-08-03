@@ -105,6 +105,18 @@ def _status_payload(status: str) -> dict:
     )
 
 
+def _final_payload(step_time: dict, *, system: dict | None = None) -> dict:
+    return build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", system or _status_payload("NORMAL")),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+
 def test_final_report_generator_preserves_summary_schema_and_order():
     payload = build_summary_payload(
         "fake.db",
@@ -213,15 +225,7 @@ def test_final_text_uses_single_process_average_layout():
         card="SYSTEM ORIGINAL CARD",
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", system),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time, system=system)
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
@@ -271,15 +275,7 @@ def test_final_text_renders_missing_step_metrics_as_na():
         card="STEP TIME ORIGINAL CARD",
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", _status_payload("NORMAL")),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time)
 
     text = payload["text"]
     lines = text.splitlines()
@@ -315,15 +311,7 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
         },
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", _status_payload("NORMAL")),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time)
 
     text = payload["text"]
     assert "Total             10.5ms            compat" in text
@@ -358,15 +346,7 @@ def test_final_text_includes_h2d_bound_diagnosis():
         },
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", _status_payload("NORMAL")),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time)
 
     assert "TraceML Verdict: H2D-BOUND / CRITICAL" in payload["text"]
     assert "Why: H2D transfer is 14.3% of the typical GPU iteration time." in (
@@ -453,15 +433,7 @@ def test_final_text_uses_multi_process_comparison_layout():
         },
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", system),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time, system=system)
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text
