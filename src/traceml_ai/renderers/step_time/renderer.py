@@ -29,22 +29,22 @@ from traceml_ai.step_time.pipeline import (
 )
 
 METRIC_LABELS = {
+    "step_time": "Step Time",
     "input_wait": "IW",
     "h2d": "H2D",
     "forward": "FWD",
     "backward": "BWD",
     "optimizer_step": "OPT",
-    "traced_step_time": "STEP",
     "residual_proxy": "RESIDUAL",
 }
 
 TABLE_METRIC_ORDER = (
+    "step_time",
     "input_wait",
     "h2d",
     "forward",
     "backward",
     "optimizer_step",
-    "traced_step_time",
     "residual_proxy",
 )
 
@@ -124,8 +124,8 @@ class StepTimeRenderer(BaseRenderer):
                 border_style="cyan",
             )
 
-        traced_step_metric = next(
-            (m for m in metrics if m.metric == "traced_step_time"), None
+        step_time_metric = next(
+            (m for m in metrics if m.metric == "step_time"), None
         )
         residual_metric = next(
             (m for m in metrics if m.metric == "residual_proxy"), None
@@ -192,7 +192,7 @@ class StepTimeRenderer(BaseRenderer):
             table.add_row("")
 
         # Optional residual share line (still meaningful in both modes)
-        if traced_step_metric and residual_metric:
+        if step_time_metric and residual_metric:
             residual_share = window.residual_share
             table.add_row(
                 "Residual Share (%)",
@@ -215,11 +215,12 @@ class StepTimeRenderer(BaseRenderer):
 
         footer = (
             "\n\n[dim]"
-            "Clock="
+            "Selected clock="
             f"{window.clock.upper()} | "
             "IW=input wait | H2D=host-to-device | FWD=forward | "
-            "BWD=backward | OPT=optimizer | STEP=traced step | "
-            "RESIDUAL=STEP−H2D−FWD−BWD−OPT"
+            "BWD=backward | OPT=optimizer | "
+            "Step Time=IW + Traced Step Time | "
+            "RESIDUAL=Traced Step Time−H2D−FWD−BWD−OPT"
             "[/dim]"
         )
         return Panel(

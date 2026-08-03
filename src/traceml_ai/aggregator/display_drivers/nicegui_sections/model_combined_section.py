@@ -24,15 +24,9 @@ from traceml_ai.step_time.pipeline import LiveStepTimeResult
 
 from . import theme
 
-# Fixed ribbon width for a phase that was never measured this window --
-# large enough to read as a deliberate marker, not a rounding artifact of
-# a real proportional segment.
-_UNMEASURED_SLIVER_PCT = 6.0
-
-# step_time is the envelope, not a ribbon phase, so it has no entry in
-# theme.PHASES. It still needs a name when it is the incomplete signal.
-# Matches the CLI table's abbreviation.
-_STEP_TIME_LABEL = "STEP"
+# Step Time is not a ribbon phase, so it has no entry in theme.PHASES. It
+# still needs a clear name when partial rank coverage makes it unavailable.
+_STEP_TIME_LABEL = "STEP TIME"
 
 
 def build_model_combined_section() -> Dict[str, Any]:
@@ -51,7 +45,7 @@ def build_model_combined_section() -> Dict[str, Any]:
             .classes("w-full items-center")
             .style("margin-bottom:14px; gap:12px;")
         ):
-            ui.label("Step time").classes("ctitle")
+            ui.label("Step Time").classes("ctitle")
             ui.element("div").style("flex:1;")
             win = ui.label("waiting for steps").classes("cmeta")
 
@@ -91,8 +85,8 @@ def build_model_combined_section() -> Dict[str, Any]:
             .style("gap:11px; margin-top:16px; flex-wrap:wrap;")
         ):
             for key, lab, acc in [
-                ("median", "MEDIAN STEP", theme.C_GPU),
-                ("worst", "WORST STEP", "#512da8"),
+                ("median", "MEDIAN STEP TIME", theme.C_GPU),
+                ("worst", "WORST STEP TIME", "#512da8"),
                 ("gap", "GAP", "#f9a825"),
                 ("residual", "RESIDUAL SHARE", theme.C_CPU),
                 ("rank", "WORST RANK", "#2e7d32"),
@@ -192,20 +186,24 @@ def update_model_combined_section(
         _clear_view(panel, _EXPIRED_SIG, "window expired")
         return
     m = _index(window.metrics)
-    if "traced_step_time" not in m:
-        _clear_view(panel, _NO_ENVELOPE_SIG, "step envelope unavailable")
+    if "step_time" not in m:
+        _clear_view(
+            panel,
+            _NO_ENVELOPE_SIG,
+            f"{window.clock.upper()} selected · Step Time unavailable",
+        )
         return
 
-    traced_step_metric = m["traced_step_time"]
-    st = traced_step_metric
+    step_time_metric = m["step_time"]
     steps_used = window.coverage.steps_used
-    _update_kpis(panel, window, traced_step_metric)
+    _update_kpis(panel, window, step_time_metric)
     representative = window.composition_representative_rank
     if representative is None:
         _clear_ribbon(
             panel,
             _NO_COHORT_SIG,
-            f"{int(steps_used)} aligned steps · no coherent phase cohort",
+            f"{int(steps_used)} aligned steps · "
+            f"{window.clock.upper()} selected · no coherent phase cohort",
         )
         return
 
@@ -222,32 +220,25 @@ def update_model_combined_section(
             value = rank_values.value(key)
             vals[key] = float(value) if value is not None else None
 
-    measured = {key: value for key, value in vals.items() if value is not None}
     unmeasured = [
         key for key, value in vals.items() if value is None and key != "h2d"
     ]
     universe_size = len(window.rank_universe)
     partial_metrics = [
         key
-        for key in [phase[1] for phase in theme.PHASES] + ["traced_step_time"]
+        for key in [phase[1] for phase in theme.PHASES] + ["step_time"]
         if key != "h2d" and 0 < len(window.ranks_for(key)) < universe_size
     ]
 
-    input_wait_value = vals.get("input_wait")
-    envelope = float(rank_values.traced_step_time_ms or 0.0) + (
-        input_wait_value if input_wait_value is not None else 0.0
-    )
-    tot = max(sum(measured.values()), envelope) or 1.0
-
-    # A measured-zero segment and a genuinely unmeasured one must never
-    # render identically -- an absent input_wait would otherwise let the
-    # OTHER phases sum to exactly traced Step Time (residual is a remainder), so
-    # the ribbon fills to 100% and a dark dataloader stream reads as a
-    # confirmed-fast one. Non-h2d unmeasured phases get a fixed hatched
-    # sliver instead of a proportional width; measured phases give up
-    # that width so the row still totals 100%.
-    reserved_pct = _UNMEASURED_SLIVER_PCT * len(unmeasured)
-    measured_scale = max(0.0, (100.0 - reserved_pct) / 100.0)
+    step_time_ms = rank_values.step_time_ms
+    if step_time_ms is None or step_time_ms <= 0.0:
+        _clear_ribbon(
+            panel,
+            _NO_COHORT_SIG,
+            f"{window.clock.upper()} selected · Step Time unavailable for "
+            "phase shares",
+        )
+        return
 
     sig = (
         tuple(
@@ -257,10 +248,14 @@ def update_model_combined_section(
         + tuple(sorted(partial_metrics))
         + (
             representative,
-            round(float(st.median_total), 3),
-            round(float(st.worst_total), 3),
+            round(float(step_time_metric.median_total), 3),
+            round(float(step_time_metric.worst_total), 3),
             int(steps_used),
-            int(st.worst_rank if st.worst_rank is not None else -1),
+            int(
+                step_time_metric.worst_rank
+                if step_time_metric.worst_rank is not None
+                else -1
+            ),
         )
     )
     if panel.get("_last_sig") == sig:
@@ -272,28 +267,13 @@ def update_model_combined_section(
     ):
         value = vals[key]
         if key in unmeasured:
-            # Unmeasured phase: a hatched sliver in the PHASE'S OWN color
-            # marks "unknown, not zero" (a dark stream must never read as
-            # confirmed-fast). The color still identifies the phase (blue =
-            # forward, gold = residual, matching the legend); the diagonal
-            # hatch overlay is what says "unmeasured". No on-sliver text --
-            # it would overlap the hatch illegibly at this width, and the
-            # window meta already names the missing phases.
-            seg.style(
-                f"width:{_UNMEASURED_SLIVER_PCT:.1f}%; "
-                "background:repeating-linear-gradient(45deg, "
-                f"{col} 0 2px, transparent 2px 5px);"
-            )
+            # The existing window metadata names missing signals. Leave the
+            # corresponding width blank rather than inventing a visual share
+            # or rescaling the measured phases.
+            seg.style("width:0%; background:transparent;")
             sl.text = ""
             continue
-        pct = (
-            (value / tot * 100.0 * measured_scale)
-            if value is not None
-            else 0.0
-        )
-        # Always restate the background. Style updates MERGE, so a phase
-        # that was hatched while unmeasured would keep the hatch forever
-        # once it recovers if this path only set the width.
+        pct = float(value / step_time_ms * 100.0) if value is not None else 0.0
         seg.style(f"width:{pct:.3f}%; background:{col};")
         sl.text = lab if pct >= 7.0 else ""
 
@@ -301,16 +281,17 @@ def update_model_combined_section(
     # engine and set via update_step_verdict (fed the model-diagnostics
     # payload), so the card never asserts a classification of its own.
 
-    steps_text = f"{int(steps_used)} aligned steps"
+    steps_text = (
+        f"{int(steps_used)} aligned steps · {window.clock.upper()} selected"
+    )
     steps_text += f" · representative r{representative}"
     if unmeasured or partial_metrics:
         incomplete = set(unmeasured) | set(partial_metrics)
         names = [lab for lab, key, _c in theme.PHASES if key in incomplete]
-        # traced_step_time has no ribbon segment, so it is not in PHASES, but it
-        # can still be the thing that is incomplete. Name it with the same
-        # abbreviation the CLI table uses rather than dropping it and
-        # printing a bare "partial:".
-        if "traced_step_time" in incomplete:
+        # step_time has no ribbon segment, so it is not in PHASES, but it can
+        # still be the incomplete signal. Name it rather than printing a bare
+        # "partial:".
+        if "step_time" in incomplete:
             names.append(_STEP_TIME_LABEL)
         steps_text += f" · partial: {','.join(names)}"
     panel["win"].text = steps_text

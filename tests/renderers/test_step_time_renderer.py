@@ -67,13 +67,14 @@ def _sparse_payload() -> LiveStepTimeResult:
 def test_cli_columns_exclude_summary_only_statistics() -> None:
     metrics = [
         _metric("traced_step_time", 100.0),
+        _metric("step_time", 120.0),
         _metric("compute", 80.0),
         _metric("dataloader_fetch", 10.0),
         _metric("step_time_cpu", 120.0),
     ]
 
     assert [metric.metric for metric in _table_metrics(metrics)] == [
-        "traced_step_time"
+        "step_time"
     ]
 
 
@@ -109,9 +110,13 @@ def test_step_time_cli_uses_the_precomputed_selected_clock_analysis() -> None:
     assert "WARMUP" in text
     assert "IW" in text
     assert "DL" not in text
+    assert "Step Time" in text
     assert "Average (1 steps)" in text
     assert "Sum (" not in text
     assert "40.0 ms" in text
+    assert "140.0 ms" in text
+    assert "100.0 ms" not in text
+    assert "Selected clock=GPU" in text
     assert "12.0 ms" not in text
 
 
@@ -178,7 +183,7 @@ def test_step_time_cli_refreshes_its_injected_session_once() -> None:
     text = _render_text(renderer.get_panel_renderable())
 
     session.refresh.assert_called_once_with()
-    assert "STEP" in text
+    assert "Step Time" in text
 
 
 def test_cli_omits_missing_phase_and_shows_incomplete_data() -> None:
@@ -192,6 +197,7 @@ def test_cli_omits_missing_phase_and_shows_incomplete_data() -> None:
     assert "RESIDUAL" not in header
     assert "BWD" in header
     assert "H2D" in header
+    assert "Step Time" in header
     assert "0.0 ms" in text
     assert "60.0 ms" in text
 
@@ -272,8 +278,11 @@ def test_cli_renders_multi_rank_sparse_table() -> None:
     header = next(line for line in text.splitlines() if "Metric" in line)
     assert "FWD" not in header
     assert "BWD" in header
+    assert "Step Time" in header
     assert "Median avg" in text
     assert "Worst avg" in text
     assert "60.0 ms" in text
     assert "120.0 ms" in text
+    assert "92.0 ms" in text
+    assert "184.0 ms" in text
     assert "Worst Rank" in text
