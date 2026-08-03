@@ -17,7 +17,6 @@ from typing import Iterator
 import traceml_ai.step_time as step_time_package
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.step_time import model
-from traceml_ai.utils import step_time_window as legacy_window
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGE_ROOT = _PROJECT_ROOT / "src" / "traceml_ai" / "step_time"
@@ -89,11 +88,50 @@ def test_typed_analysis_facts_are_exported_without_loading_analyzer() -> None:
     assert "traceml_ai.step_time.pipeline" not in dependencies
 
 
-def test_window_utility_reexports_canonical_contracts() -> None:
-    """Preserve the former window import path without duplicate classes."""
-    assert legacy_window.StepTimeWindow is model.StepTimeWindow
-    assert legacy_window.DiagnosisClock is model.DiagnosisClock
-    assert legacy_window.DIAGNOSIS_CLOCK_KEY == model.DIAGNOSIS_CLOCK_KEY
+def test_removed_utility_adapters_do_not_return() -> None:
+    """Keep production callers on the repository and typed window APIs."""
+    utility_root = _PROJECT_ROOT / "src" / "traceml_ai" / "utils"
+
+    assert not (utility_root / "step_time_window.py").exists()
+    assert not (utility_root / "step_time_sqlite.py").exists()
+
+
+def test_pipeline_is_the_only_builtin_orchestrator() -> None:
+    """Keep direct diagnosis limited to the API and compatibility facade."""
+    source_root = _PROJECT_ROOT / "src" / "traceml_ai"
+    sources = {
+        path.relative_to(source_root).as_posix(): path.read_text(
+            encoding="utf-8"
+        )
+        for path in source_root.glob("**/*.py")
+    }
+
+    diagnosis_owners = {
+        path
+        for path, source in sources.items()
+        if "diagnose_step_time_window(" in source
+    }
+    assert diagnosis_owners == {
+        "diagnostics/model_diagnostics.py",
+        "diagnostics/step_time/api.py",
+        "diagnostics/step_time/compat.py",
+        "step_time/pipeline.py",
+    }
+    assert {
+        path
+        for path, source in sources.items()
+        if "analyzer.analyze(" in source
+    } == {"step_time/pipeline.py"}
+    repository_calls = (
+        "repository.load_live(",
+        "repository.load_summary(",
+    )
+    for repository_call in repository_calls:
+        assert {
+            path
+            for path, source in sources.items()
+            if repository_call in source
+        } == {"step_time/pipeline.py"}
 
 
 def test_diagnosis_context_accepts_only_the_canonical_window() -> None:
@@ -182,6 +220,56 @@ def test_cli_presenter_has_no_data_or_diagnosis_dependencies() -> None:
     assert "build_step_diagnosis" not in source
     assert "StepCombinedComputer" not in source
     assert "StepTimeDashboardAdapter" not in source
+
+
+def test_released_compatibility_adapter_is_off_runtime_paths() -> None:
+    """Keep deprecated rank-map conversion out of built-in consumers."""
+    production_paths = (
+        _PROJECT_ROOT / "src" / "traceml_ai" / "step_time" / "pipeline.py",
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "renderers"
+        / "step_time"
+        / "renderer.py",
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "renderers"
+        / "model_diagnostics"
+        / "renderer.py",
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "reporting"
+        / "sections"
+        / "step_time"
+        / "__init__.py",
+    )
+
+    for path in production_paths:
+        source = path.read_text(encoding="utf-8")
+        assert "diagnostics.step_time.compat" not in source
+        assert "build_step_diagnosis(" not in source
+        assert "build_step_diagnosis_result(" not in source
+
+    api_path = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "diagnostics"
+        / "step_time"
+        / "api.py"
+    )
+    top_level_imports = (
+        node
+        for node in ast.parse(api_path.read_text(encoding="utf-8")).body
+        if isinstance(node, ast.ImportFrom)
+    )
+    assert not any(
+        node.level == 1 and node.module == "compat"
+        for node in top_level_imports
+    )
 
 
 def test_dashboard_compatibility_types_are_removed() -> None:

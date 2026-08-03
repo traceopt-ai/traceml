@@ -24,9 +24,9 @@ from traceml_ai.step_time.model import (
     StepTimeWindow,
 )
 from traceml_ai.step_time.sqlite import normalize_step_time_events
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
-    public_step_time_metric_values,
+from tests.step_time.factories import (
+    rank_average,
+    window_from_events,
 )
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -133,11 +133,18 @@ def test_analyzer_builds_one_typed_fact_set() -> None:
     assert window.compute_share == pytest.approx(0.85)
     assert window.residual_share == pytest.approx(0.05)
 
-    public = public_step_time_metric_values(rank.average)
-    assert public["total_step_ms"] == 200.0
-    assert public["dataloader_ms"] == 10.0
-    assert public["input_wait_ms"] == 5.0
-    assert public["compute_ms"] == 85.0
+    summary_statistics = {
+        metric.metric: metric
+        for metric in window.metrics
+        if metric.metric in {"compute", "dataloader_fetch", "total_step_cpu"}
+    }
+    assert summary_statistics["compute"].median_total == pytest.approx(85.0)
+    dataloader = summary_statistics["dataloader_fetch"]
+    assert dataloader.median_total == pytest.approx(10.0)
+    assert summary_statistics["total_step_cpu"].median_total == pytest.approx(
+        200.0
+    )
+    assert all(metric.series is None for metric in summary_statistics.values())
 
 
 def test_missing_and_measured_zero_keep_distinct_metric_cohorts() -> None:
@@ -243,20 +250,6 @@ def test_cpu_fallback_and_strategy_specific_straggler_cohorts() -> None:
     assert fsdp.straggler_ranks == (1,)
 
 
-def test_legacy_rank_projection_is_cached_and_read_only() -> None:
-    window = StepTimeAnalyzer().analyze(
-        _snapshot({0: _COMPLETE}),
-        window_size=2,
-    )
-
-    projection = window.per_rank_timing
-    assert projection is window.per_rank_timing
-    with pytest.raises(TypeError):
-        projection[0] = {}  # type: ignore[index]
-    with pytest.raises(TypeError):
-        projection[0]["forward"] = 0.0  # type: ignore[index]
-
-
 @pytest.mark.parametrize(
     ("profiles", "median", "representative", "worst"),
     [
@@ -324,7 +317,7 @@ def test_raw_fixture_adapter_matches_direct_normalized_analysis() -> None:
         rank: {step: _raw_events(profile, gpu=True) for step in (1, 2)}
         for rank, profile in {0: _COMPLETE, 1: _COMPLETE}.items()
     }
-    adapter_window = build_step_time_window_from_events(raw, max_rows=2)
+    adapter_window = window_from_events(raw, max_rows=2)
 
     rows = []
     source_id = 0
@@ -348,7 +341,6 @@ def test_raw_fixture_adapter_matches_direct_normalized_analysis() -> None:
     )
 
     assert adapter_window == direct_window
-    assert adapter_window.per_rank_timing == direct_window.per_rank_timing
 
 
 def test_analyzer_has_one_input_and_no_removed_shapes() -> None:
@@ -358,8 +350,18 @@ def test_analyzer_has_one_input_and_no_removed_shapes() -> None:
     assert "per_rank_timing" not in {
         field.name for field in fields(StepTimeWindow)
     }
+    assert not hasattr(StepTimeWindow(), "per_rank_timing")
 
     production = tuple(_SOURCE_ROOT.glob("**/*.py"))
+    mapping_owners = {
+        path.relative_to(_SOURCE_ROOT).as_posix()
+        for path in production
+        if "per_rank_timing" in path.read_text(encoding="utf-8")
+    }
+    assert mapping_owners == {
+        "diagnostics/step_time/api.py",
+        "diagnostics/step_time/compat.py",
+    }
     source = "\n".join(path.read_text(encoding="utf-8") for path in production)
     assert "per_rank_step_timing" not in source
     assert "_group_source_rows" not in source

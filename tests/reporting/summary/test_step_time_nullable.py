@@ -272,15 +272,3 @@ def test_partial_compute_triplet_nulls_only_derived_metrics(
     assert metrics["compute_ms"] is None
     assert metrics["residual_ms"] is None
     assert metrics["total_step_ms"] == 31.0
-
-
-def test_finite_float_or_none_preserves_missing_and_zero() -> None:
-    from traceml_ai.reporting.sections.step_time.model import (
-        finite_float_or_none,
-    )
-
-    assert finite_float_or_none(None) is None
-    assert finite_float_or_none(0.0) == 0.0
-    assert finite_float_or_none(float("nan")) is None
-    assert finite_float_or_none(float("inf")) is None
-    assert finite_float_or_none("bogus") is None

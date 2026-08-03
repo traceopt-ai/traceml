@@ -7,6 +7,7 @@ import pytest
 from rich.console import Console
 from tests.step_time.factories import (
     live_result_from_window,
+    rank_average,
     window_from_rank_averages,
 )
 
@@ -21,11 +22,8 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_secti
 from traceml_ai.diagnostics.model_diagnostics import (
     build_model_diagnostics_payload,
 )
-from traceml_ai.diagnostics.step_time import LIVE_STEP_TIME_POLICY
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
-from traceml_ai.reporting.sections.step_time.loader import (
-    load_step_time_section_data,
-)
+from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.step_time.model import (
     StepTimeLoadRequest,
     StepTimeMetric,
@@ -36,7 +34,6 @@ from traceml_ai.step_time.pipeline import (
     LiveStepTimeResult,
     LiveStepTimeSession,
 )
-from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 
 class _FakeSegment:
@@ -829,21 +826,13 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
         request=StepTimeLoadRequest(window_size=30, lookback_factor=4),
     ).refresh()
     window = result.analysis.window
-    assert window.per_rank_timing[0]["residual_proxy"] == pytest.approx(10.0)
-    diagnosis = diagnose_step_time_window(
-        window,
-        policy=LIVE_STEP_TIME_POLICY,
-        include_attribution=True,
-    )
-    assert diagnosis.metric_attribution["residual_proxy"][
-        "share_pct"
-    ] == pytest.approx(0.05)
+    assert rank_average(window, 0).residual_ms == pytest.approx(10.0)
+    assert window.residual_share == pytest.approx(0.05)
 
-    summary = load_step_time_section_data(str(db_path), max_rows=30)
-    assert summary.per_global_rank_summary[0].avg_residual_ms == pytest.approx(
-        10.0
-    )
-    assert summary.per_global_rank_summary[0].avg_h2d_ms is None
+    summary = StepTimeSummarySection(max_rows=30).build(str(db_path)).payload
+    summary_metrics = summary["groups"]["rows"]["0"]["metrics"]
+    assert summary_metrics["residual_ms"] == pytest.approx(10.0)
+    assert summary_metrics["h2d_ms"] is None
 
     renderer = StepCombinedRenderer(
         LiveStepTimeSession(

@@ -25,20 +25,21 @@ from tests.step_time.scenarios import (
     StepTimeScenario,
     create_step_time_database,
 )
+from tests.step_time.factories import rank_average
 from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
+from traceml_ai.diagnostics.step_time.api import diagnose_step_time_window
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedResult
 from traceml_ai.renderers.step_time import renderer as cli_renderer_module
 from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
-from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
-from traceml_ai.reporting.sections.step_time.model import (
+from traceml_ai.reporting.sections.step_time import (
     STEP_TIME_METRIC_NAMES,
+    StepTimeSummarySection,
 )
 from traceml_ai.step_time.model import StepTimeLoadRequest
 from traceml_ai.step_time.pipeline import LiveStepTimeSession
-from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 _WINDOW_KEYS = {
     "input_wait",
@@ -276,12 +277,15 @@ def test_canonical_window_matches_golden(
         }
         for rank in scenario.profiles
     }
-    assert set(window.per_rank_timing) == set(expected_rows)
+    assert {facts.global_rank for facts in window.rank_facts} == set(
+        expected_rows
+    )
     for rank, expected in expected_rows.items():
+        values = rank_average(window, rank)
         actual = {
             key: value
-            for key, value in window.per_rank_timing[rank].items()
-            if key in _WINDOW_KEYS
+            for key in _WINDOW_KEYS
+            if (value := values.value(key)) is not None
         }
         assert actual == pytest.approx(expected)
 

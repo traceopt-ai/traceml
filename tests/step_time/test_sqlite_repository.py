@@ -20,16 +20,14 @@ from tests.step_time.scenarios import (
     StepTimeScenario,
     create_step_time_database,
 )
+from tests.step_time.factories import rank_average
+from traceml_ai.step_time.analysis import StepTimeAnalyzer
 from traceml_ai.step_time.model import StepTimeLoadRequest
 from traceml_ai.step_time.sqlite import SQLiteStepTimeRepository
-from traceml_ai.utils.step_time_sqlite import (
-    load_step_time_summary_from_sqlite,
-    load_step_time_window_from_sqlite,
-)
 
 
 def _create_minimal_table(conn: sqlite3.Connection) -> None:
-    """Create the smallest schema accepted by the compatibility loader."""
+    """Create the smallest schema accepted by the repository."""
     conn.execute(
         """
         CREATE TABLE step_time_samples (
@@ -79,7 +77,7 @@ def test_deduplication_happens_before_distinct_step_limit(
         snapshot = SQLiteStepTimeRepository(conn).load_summary(
             StepTimeLoadRequest(window_size=4)
         )
-        loaded = load_step_time_window_from_sqlite(conn, max_rows=4)
+        window = StepTimeAnalyzer().analyze(snapshot, window_size=4)
 
     by_rank = {
         rank: sorted(
@@ -88,8 +86,8 @@ def test_deduplication_happens_before_distinct_step_limit(
         for rank in snapshot.global_ranks
     }
     assert by_rank == {0: [2, 3, 4, 5], 1: [2, 3, 4, 5]}
-    assert loaded.window.steps == [2, 3, 4, 5]
-    assert loaded.window.per_rank_timing[0]["forward"] == pytest.approx(47.25)
+    assert window.steps == [2, 3, 4, 5]
+    assert rank_average(window, 0).forward_ms == pytest.approx(47.25)
 
 
 def test_repository_decodes_each_selected_row_once(
@@ -239,12 +237,9 @@ def test_live_and_summary_profiles_feed_the_same_analysis(
         summary_source = SQLiteStepTimeRepository(conn).load_summary(
             StepTimeLoadRequest(window_size=4)
         )
-        live = load_step_time_window_from_sqlite(
-            conn,
-            max_rows=4,
-            lookback_factor=1,
-        )
-        summary = load_step_time_summary_from_sqlite(conn, max_rows=4)
+        analyzer = StepTimeAnalyzer()
+        live = analyzer.analyze(live_source, window_size=4)
+        summary = analyzer.analyze(summary_source, window_size=4)
 
     live_rows = {(row.global_rank, row.step): row for row in live_source.rows}
     summary_rows = {
@@ -253,7 +248,7 @@ def test_live_and_summary_profiles_feed_the_same_analysis(
     assert live_rows == summary_rows
     assert live_source.global_ranks == summary_source.global_ranks
     assert live_source.training_strategy == summary_source.training_strategy
-    assert live.window == summary.window
+    assert live == summary
 
 
 def test_live_selection_cost_is_independent_of_total_run_length(

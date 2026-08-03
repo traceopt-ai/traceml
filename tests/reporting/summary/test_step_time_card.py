@@ -6,63 +6,64 @@
 
 from __future__ import annotations
 
-from traceml_ai.diagnostics.step_time.adapters import (
-    StepTimeDiagnosisInput,
-    diagnose_step_time_summary,
+from traceml_ai.diagnostics.step_time import (
+    SUMMARY_STEP_TIME_POLICY,
+    diagnose_step_time_window,
 )
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
-from traceml_ai.reporting.summaries.step_time import (
-    RankStepSummary,
-)
 from traceml_ai.reporting.sections.step_time.builder import (
-    build_step_time_payload,
+    project_step_time_summary,
 )
-from traceml_ai.reporting.sections.step_time.loader import StepTimeSectionData
-from traceml_ai.reporting.sections.step_time.model import (
-    rank_summaries_from_window,
+from traceml_ai.step_time.model import (
+    StepTimeLoadRequest,
+    StepTimeRepositorySnapshot,
+    StepTimeSourceCursor,
+    StepTimeValues,
 )
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
+from traceml_ai.step_time.pipeline import (
+    StepTimeAnalysis,
 )
+from tests.step_time.factories import window_from_events
+
+_WINDOW_SIZE = 64
 
 
 def _rank(
     *,
-    steps: int = 64,
     dataloader: float = 5.0,
     h2d: float = 0.0,
     forward: float = 30.0,
     backward: float = 50.0,
     optimizer: float = 10.0,
     step_cpu: float | None = None,
-) -> RankStepSummary:
+) -> StepTimeValues:
     compute = forward + backward + optimizer
     known_step = h2d + compute
     effective_step = max(
         step_cpu if step_cpu is not None else known_step, known_step
     )
     residual = max(0.0, effective_step - known_step)
-    return RankStepSummary(
-        steps_analyzed=steps,
-        avg_dataloader_ms=dataloader,
-        avg_input_wait_ms=dataloader,
-        avg_step_time_ms=effective_step,
-        avg_h2d_ms=h2d,
-        avg_forward_ms=forward,
-        avg_backward_ms=backward,
-        avg_optimizer_ms=optimizer,
-        avg_traced_step_ms=effective_step,
-        avg_compute_ms=compute,
-        avg_residual_ms=residual,
-        avg_total_step_ms=dataloader + effective_step,
+    return StepTimeValues(
+        dataloader_cpu_ms=dataloader,
+        input_wait_ms=dataloader,
+        step_time_ms=effective_step,
+        h2d_ms=h2d,
+        forward_ms=forward,
+        backward_ms=backward,
+        optimizer_step_ms=optimizer,
+        step_time_cpu_ms=effective_step,
+        compute_ms=compute,
+        residual_ms=residual,
+        total_step_ms=dataloader + effective_step,
+        total_step_cpu_ms=dataloader + effective_step,
     )
 
 
 def _summary(
-    per_global_rank: dict[int, RankStepSummary],
+    per_global_rank: dict[int, StepTimeValues],
     per_rank_steps: dict[int, dict[int, dict]] | None = None,
 ):
-    window_size = 64
+    window_size = _WINDOW_SIZE
     step_events = (
         per_rank_steps
         if per_rank_steps is not None
@@ -71,28 +72,24 @@ def _summary(
             for rank, summary in per_global_rank.items()
         }
     )
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         step_events,
         max_rows=window_size,
         expected_ranks=sorted(per_global_rank),
     )
-    selected_summary = rank_summaries_from_window(window)
-    data = StepTimeSectionData(
-        training_steps=100,
-        latest_step_observed=99,
-        step_time_window=window,
-        per_global_rank_summary=selected_summary,
-        identities={},
-        max_rows=window_size,
-        training_strategy="ddp",
+    analysis = StepTimeAnalysis(
+        request=StepTimeLoadRequest(window_size=window_size),
+        snapshot=StepTimeRepositorySnapshot(
+            cursor=StepTimeSourceCursor(latest_step=99),
+            training_strategy="ddp",
+        ),
+        window=window,
+        diagnosis=diagnose_step_time_window(
+            window,
+            policy=SUMMARY_STEP_TIME_POLICY,
+        ),
     )
-    diagnosis = diagnose_step_time_summary(
-        StepTimeDiagnosisInput(
-            window=window,
-            training_strategy=data.training_strategy,
-        )
-    )
-    return build_step_time_payload(data, diagnosis)
+    return project_step_time_summary(analysis)
 
 
 def _event_stats(
@@ -114,30 +111,28 @@ def _event_stats(
 
 
 def _step_events_from_rank(
-    summary: RankStepSummary,
+    summary: StepTimeValues,
 ) -> dict[int, dict]:
     return {
         step: {
             "_traceml_internal:dataloader_next": _event_stats(
-                cpu_ms=summary.avg_dataloader_ms
+                cpu_ms=summary.dataloader_cpu_ms
             ),
-            "_traceml_internal:h2d_time": _event_stats(
-                cpu_ms=summary.avg_h2d_ms
-            ),
+            "_traceml_internal:h2d_time": _event_stats(cpu_ms=summary.h2d_ms),
             "_traceml_internal:forward_time": _event_stats(
-                cpu_ms=summary.avg_forward_ms
+                cpu_ms=summary.forward_ms
             ),
             "_traceml_internal:backward_time": _event_stats(
-                cpu_ms=summary.avg_backward_ms
+                cpu_ms=summary.backward_ms
             ),
             "_traceml_internal:optimizer_step": _event_stats(
-                cpu_ms=summary.avg_optimizer_ms
+                cpu_ms=summary.optimizer_step_ms
             ),
             "_traceml_internal:step_time": _event_stats(
-                cpu_ms=summary.avg_traced_step_ms
+                cpu_ms=summary.step_time_cpu_ms
             ),
         }
-        for step in range(int(summary.steps_analyzed))
+        for step in range(_WINDOW_SIZE)
     }
 
 
@@ -251,6 +246,21 @@ def test_step_time_balanced_card_is_compact() -> None:
         in payload["card"]
     )
     _assert_compact_card(payload["card"])
+
+
+def test_card_median_and_json_representative_are_explicit() -> None:
+    payload = _summary(
+        {
+            0: _rank(dataloader=0.0, step_cpu=100.0),
+            1: _rank(dataloader=0.0, step_cpu=200.0),
+        }
+    )
+
+    assert "total 150.0/200.0ms" in payload["card"]
+    assert payload["global"]["median"]["total_step_ms"] == {
+        "value": 100.0,
+        "idx": "0",
+    }
 
 
 def test_step_time_compute_bound_card_uses_short_reason() -> None:
@@ -420,7 +430,7 @@ def test_step_time_card_uses_h2d_diagnosis_score_not_worst_rollups() -> None:
 
 def test_step_time_residual_uses_average_of_per_step_clamps() -> None:
     payload = _summary(
-        {0: _rank(steps=64)},
+        {0: _rank()},
         per_rank_steps={0: _alternating_residual_step_metrics()},
     )
 

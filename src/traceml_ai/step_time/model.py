@@ -10,8 +10,6 @@ the same facts without making core analysis depend on a renderer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from functools import cached_property
-from types import MappingProxyType
 from typing import (
     Any,
     Dict,
@@ -51,6 +49,7 @@ _VALUE_FIELDS: Mapping[str, str] = {
     "total_step": "total_step_ms",
     "dataloader_fetch": "dataloader_cpu_ms",
     "step_time_cpu": "step_time_cpu_ms",
+    "total_step_cpu": "total_step_cpu_ms",
 }
 
 
@@ -151,26 +150,6 @@ class StepTimeValues:
         """Return one canonical value by its internal metric key."""
         field_name = _VALUE_FIELDS.get(str(metric))
         return getattr(self, field_name) if field_name is not None else None
-
-    def to_legacy_dict(self) -> Dict[str, float]:
-        """Project the temporary sparse rank-mapping compatibility shape."""
-        keys = (
-            "input_wait",
-            "h2d",
-            "forward",
-            "backward",
-            "optimizer_step",
-            "step_time",
-            "residual_proxy",
-            "total_step",
-            "dataloader_fetch",
-            "step_time_cpu",
-        )
-        return {
-            key: float(value)
-            for key in keys
-            if (value := self.value(key)) is not None
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,22 +257,6 @@ class StepTimeWindow:
     h2d_share: Optional[float] = None
     compute_share: Optional[float] = None
     residual_share: Optional[float] = None
-
-    @cached_property
-    def per_rank_timing(self) -> Mapping[int, Mapping[str, float]]:
-        """Return the temporary rank-average compatibility projection.
-
-        TODO(PR9): Remove after PR6-PR8 migrate all three presenters to typed
-        rank facts.
-        """
-        return MappingProxyType(
-            {
-                facts.global_rank: MappingProxyType(
-                    facts.average.to_legacy_dict()
-                )
-                for facts in self.rank_facts
-            }
-        )
 
     @property
     def rank_universe(self) -> tuple[int, ...]:

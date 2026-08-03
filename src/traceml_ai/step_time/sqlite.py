@@ -87,8 +87,8 @@ def normalize_step_time_events(
 ) -> Optional[dict[str, StepTimeClockValues]]:
     """Normalize one persisted event mapping into dual-clock source values.
 
-    The repository decoder and the temporary raw-fixture adapter share this
-    boundary so device summation and invalid-duration handling have one owner.
+    The repository decoder and event-focused tests share this boundary so
+    device summation and invalid-duration handling have one owner.
     """
     if not isinstance(events, dict):
         return None

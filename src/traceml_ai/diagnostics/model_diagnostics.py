@@ -13,8 +13,10 @@ from traceml_ai.diagnostics.step_memory import (
     LIVE_STEP_MEMORY_POLICY,
     build_step_memory_diagnosis,
 )
-from traceml_ai.diagnostics.step_time import build_step_diagnosis
-from traceml_ai.diagnostics.step_time.api import StepDiagnosis
+from traceml_ai.diagnostics.step_time.api import (
+    StepDiagnosis,
+    diagnose_step_time_window,
+)
 from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
@@ -23,7 +25,6 @@ from traceml_ai.diagnostics.trends import (
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
-from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 Severity = str  # "info" | "warn" | "crit"
 
@@ -157,15 +158,14 @@ def _build_step_time_item(
     window = context.step_time_window
     step_time_diag = context.step_time_diagnosis
     if step_time_diag is None:
-        step_time_diag = (
-            diagnose_step_time_window(
-                window,
-                policy=LIVE_STEP_TIME_POLICY,
-                training_strategy=context.step_time_training_strategy,
-            ).primary
-            if window is not None
-            else build_step_diagnosis([])
-        )
+        # Compatibility-only path for released direct callers. TraceML's
+        # dashboard always passes the diagnosis already produced by
+        # StepTimePipeline, so normal rendering never rediagnoses a window.
+        step_time_diag = diagnose_step_time_window(
+            window or StepTimeWindow(),
+            policy=LIVE_STEP_TIME_POLICY,
+            training_strategy=context.step_time_training_strategy,
+        ).primary
     return ModelDiagnosisItem(
         source="step_time",
         title="Step Time",

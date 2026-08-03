@@ -208,11 +208,7 @@ def _table_metrics(
     The live table intentionally uses diagnosis metrics.
     """
     by_key = {metric.metric: metric for metric in metrics}
-    ordered = [by_key[key] for key in TABLE_METRIC_ORDER if key in by_key]
-    extras = [
-        metric for metric in metrics if metric.metric not in TABLE_METRIC_ORDER
-    ]
-    return ordered + extras
+    return [by_key[key] for key in TABLE_METRIC_ORDER if key in by_key]
 
 
 def _format_skew(value: float | None) -> str:

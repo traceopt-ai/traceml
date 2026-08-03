@@ -7,13 +7,15 @@ provide aggregate metric objects and only need a typed rank-fact window.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import statistics
-from typing import Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from traceml_ai.diagnostics.step_time import (
     LIVE_STEP_TIME_POLICY,
     diagnose_step_time_window,
 )
+from traceml_ai.step_time.analysis import StepTimeAnalyzer
 from traceml_ai.step_time.model import (
     DiagnosisClock,
     StepTimeCoverage,
@@ -22,6 +24,7 @@ from traceml_ai.step_time.model import (
     StepTimeRankFacts,
     StepTimeRepositorySnapshot,
     StepTimeSourceCursor,
+    StepTimeSourceRow,
     StepTimeValues,
     StepTimeWindow,
 )
@@ -30,12 +33,79 @@ from traceml_ai.step_time.pipeline import (
     LiveStepTimeResult,
     StepTimeAnalysis,
 )
+from traceml_ai.step_time.sqlite import normalize_step_time_events
 
 
-def values_from_legacy(
+def window_from_events(
+    per_rank_steps: Mapping[int, Mapping[int, Any]],
+    *,
+    max_rows: int,
+    expected_ranks: Optional[Sequence[int]] = None,
+    completed_step: Optional[int] = None,
+    training_strategy: str = "ddp",
+) -> StepTimeWindow:
+    """Analyze concise raw-event fixtures through the production analyzer.
+
+    Raw event dictionaries belong in tests, not in the production Step Time
+    API. This factory keeps event-heavy diagnosis and integration fixtures
+    readable while exercising the same normalization and analysis code as a
+    repository load.
+    """
+    expected = tuple(
+        sorted(
+            {int(rank) for rank in (expected_ranks or per_rank_steps.keys())}
+        )
+    )
+    rows: list[StepTimeSourceRow] = []
+    source_id = 0
+    for rank, step_map in per_rank_steps.items():
+        for step, events in step_map.items():
+            source_id += 1
+            rows.append(
+                StepTimeSourceRow(
+                    source_id=source_id,
+                    global_rank=int(rank),
+                    step=int(step),
+                    metrics=normalize_step_time_events(events) or {},
+                )
+            )
+
+    window = StepTimeAnalyzer().analyze(
+        StepTimeRepositorySnapshot(
+            rows=tuple(rows),
+            global_ranks=expected,
+            training_strategy=str(training_strategy),
+            cursor=StepTimeSourceCursor(
+                latest_step=(
+                    int(completed_step) if completed_step is not None else None
+                )
+            ),
+        ),
+        window_size=max_rows,
+    )
+    if completed_step is not None and not window.steps:
+        window = replace(
+            window,
+            coverage=replace(
+                window.coverage,
+                completed_step=int(completed_step),
+            ),
+        )
+    return window
+
+
+def rank_average(window: StepTimeWindow, global_rank: int) -> StepTimeValues:
+    """Return one fixture rank's typed average, failing clearly if absent."""
+    facts = window.rank(global_rank)
+    if facts is None:
+        raise AssertionError(f"Step Time rank r{global_rank} is unavailable")
+    return facts.average
+
+
+def values_from_mapping(
     values: Mapping[str, float],
 ) -> StepTimeValues:
-    """Translate one concise test row into the canonical value type."""
+    """Translate one concise sparse fixture into canonical typed values."""
 
     def optional(key: str) -> Optional[float]:
         return float(values[key]) if key in values else None
@@ -88,7 +158,7 @@ def window_from_rank_averages(
     rank_facts = tuple(
         StepTimeRankFacts(
             global_rank=int(rank),
-            average=values_from_legacy(values),
+            average=values_from_mapping(values),
         )
         for rank, values in sorted(per_rank_timing.items())
     )
@@ -305,6 +375,8 @@ def _component_share(
 
 __all__ = [
     "live_result_from_window",
-    "values_from_legacy",
+    "rank_average",
+    "values_from_mapping",
+    "window_from_events",
     "window_from_rank_averages",
 ]

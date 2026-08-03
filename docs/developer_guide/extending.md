@@ -26,9 +26,9 @@ map and six SQLite scenarios show which layer owns each calculation and how to
 verify CLI, dashboard, and final-summary behavior together.
 
 Import shared Step Time contracts from `traceml_ai.step_time.model`. The
-renderer-owned schema compatibility path has been retired. The remaining
-`utils.step_time_window.StepTimeWindow` path exists only for downstream
-compatibility and is not an ownership location for new types.
+renderer-owned schema and historical `utils.step_time_*` paths have been
+removed. There is one typed domain model and no rank-dictionary projection on
+any built-in production path.
 
 Step Time SQLite selection and JSON normalization belong in
 `traceml_ai.step_time.sqlite`. Terminal and dashboard consumers use
@@ -51,6 +51,40 @@ refreshes it once and passes the same immutable result to the Step Time hero
 and model-diagnostics composer. Add a new Step Time dashboard view by
 consuming that result; do not register another provider or add a presenter
 cache.
+
+Final-summary Step Time uses the same `StepTimePipeline` with the `summary`
+profile. `StepTimeSummarySection` runs it once and gives the completed
+`StepTimeAnalysis` to a pure reporting projector. The projector may map facts
+to stable JSON names, topology, and text, but it must not query SQLite,
+reanalyze ranks, or run diagnosis again.
+
+The three core Step Time shapes are:
+
+```text
+StepTimeRepositorySnapshot
+  -> StepTimeWindow
+  -> StepTimeAnalysis
+```
+
+For a full domain change, read `step_time/model.py`, `sqlite.py`,
+`analysis.py`, and `pipeline.py` in that order. Then open only the affected
+presenter: the Rich renderer, the relevant NiceGUI section, or the final
+summary section and projector.
+
+### Step Time source compatibility
+
+The old mapping APIs `build_step_diagnosis()` and
+`build_step_diagnosis_result()` remain as deprecated one-release shims. They
+adapt a historical rank map to the canonical diagnoser and are never used by
+TraceML's built-in pipeline. New code must call
+`diagnose_step_time_window(window, policy=...)` with a canonical
+`StepTimeWindow` instead.
+
+The reporting facade likewise retains `RankStepSummary` for one release, but
+the built-in summary no longer constructs it. New integrations should read
+`StepTimeRankFacts` and `StepTimeValues` from the analyzed window. These
+compatibility names are scheduled for removal at the next breaking release;
+they must not acquire new behavior or become internal dependencies.
 
 ## TraceML Lifecycle
 
@@ -128,7 +162,7 @@ Current sections:
 - `step_time`
 - `step_memory`
 
-Each section follows this shape:
+Most sections use some variation of this shape:
 
 ```text
 loader.py     read SQLite / section inputs
@@ -136,6 +170,11 @@ builder.py    build JSON payload and card text
 formatter.py  render section text
 model.py      section-local data helpers
 ```
+
+Do not add empty layers merely to match that filename list. Step Time already
+loads, analyzes, and diagnoses through `StepTimePipeline`, so its reporting
+section contains only orchestration and a pure projector. It has no parallel
+loader model and no second statistics implementation.
 
 Register sections through `src/traceml_ai/reporting/final.py`. Keep the aggregator
 as a caller only; report assembly belongs in `reporting`.

@@ -2,14 +2,37 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
+from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.reporting.sections.output import persist_section_summary
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
-from traceml_ai.reporting.sections.step_time.model import (
-    MAX_SUMMARY_WINDOW_ROWS,
-    RankStepSummary,
-)
+
+MAX_SUMMARY_WINDOW_ROWS = DEFAULT_SUMMARY_WINDOW_ROWS
+
+
+@dataclass
+class RankStepSummary:
+    """Deprecated public container retained for one compatibility release.
+
+    The built-in summary no longer constructs this intermediate; it projects
+    canonical ``StepTimeRankFacts`` directly. External integrations can keep
+    importing the released type while they migrate to ``StepTimeValues``.
+    """
+
+    steps_analyzed: int
+    avg_dataloader_ms: Optional[float]
+    avg_input_wait_ms: Optional[float]
+    avg_step_time_ms: Optional[float]
+    avg_h2d_ms: Optional[float]
+    avg_forward_ms: Optional[float]
+    avg_backward_ms: Optional[float]
+    avg_optimizer_ms: Optional[float]
+    avg_traced_step_ms: Optional[float]
+    avg_compute_ms: Optional[float]
+    avg_residual_ms: Optional[float]
+    avg_total_step_ms: Optional[float]
 
 
 def generate_step_time_summary_card(

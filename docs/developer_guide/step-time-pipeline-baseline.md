@@ -150,7 +150,7 @@ PR5 makes diagnosis consume `StepTimeWindow` and typed rank facts directly.
 It no longer projects a nested rank mapping, rebuilds analyzer-owned shares,
 or constructs unused rich attribution on normal runtime calls. The new
 `StepTimePipeline` facade performs repository load, analysis, and diagnosis
-once; PR6 through PR8 will migrate existing surfaces onto it.
+once; PR6 and PR7 migrate the live surfaces onto it.
 
 Recorded on 2026-08-02 with the same environment and command as PR4:
 
@@ -247,6 +247,33 @@ provider, the dashboard, and final summary.
 
 These fixtures contain 1, 8, or 32 logical rank streams in SQLite. They do not
 use that number of GPUs or measure training throughput.
+
+## PR8/PR9 final-summary migration and cleanup
+
+PR8 moves final summary onto the shared pipeline's summary profile and makes
+reporting a pure projection. PR9 removes the displaced utility, loader,
+reporting-model, formatter, and rank-map production paths. Deprecated public
+entry points remain lazy and do not execute during this benchmark.
+
+Recorded on 2026-08-03 with Python 3.13.5, SQLite 3.50.2, macOS arm64, 400
+rows per logical rank, a 100-step window, two warmups, and seven repetitions:
+
+| Ranks | Stage | SELECTs | Median (ms) | Comparison with PR7 |
+|---:|---|---:|---:|---:|
+| 1 | one live provider (cache miss) | 2 | 8.375 | +2.7% |
+| 1 | shared dashboard refresh | 2 | 0.431 | +0.2% |
+| 1 | final summary | 2 | 6.989 | +7.5% |
+| 8 | one live provider (cache miss) | 2 | 32.838 | -0.2% |
+| 8 | shared dashboard refresh | 2 | 3.053 | +0.3% |
+| 8 | final summary | 2 | 15.482 | -2.8% |
+| 32 | one live provider (cache miss) | 2 | 119.302 | +1.9% |
+| 32 | shared dashboard refresh | 2 | 12.857 | -1.0% |
+| 32 | final summary | 2 | 46.673 | -3.1% |
+
+All medians remain within the 10% observational review budget, and query
+topology stays 2/2/2. The small positive and negative movements are local
+benchmark noise; this comparison supports only the conclusion that cleanup
+introduced no repeatable regression.
 
 ## Reproduce
 

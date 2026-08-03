@@ -8,7 +8,10 @@ from tests.step_time.factories import (
     live_result_from_window,
     window_from_rank_averages,
 )
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.renderers.step_time.renderer import (
+    StepCombinedRenderer,
+    _table_metrics,
+)
 from traceml_ai.step_time.model import StepTimeMetric
 
 
@@ -34,6 +37,19 @@ def _render_text(renderable) -> str:
     console = Console(record=True, width=140, color_system=None)
     console.print(renderable)
     return console.export_text()
+
+
+def test_cli_columns_exclude_summary_only_statistics() -> None:
+    metrics = [
+        _metric("step_time", 100.0),
+        _metric("compute", 80.0),
+        _metric("dataloader_fetch", 10.0),
+        _metric("total_step_cpu", 120.0),
+    ]
+
+    assert [metric.metric for metric in _table_metrics(metrics)] == [
+        "step_time"
+    ]
 
 
 def test_step_time_cli_uses_the_precomputed_selected_clock_analysis() -> None:

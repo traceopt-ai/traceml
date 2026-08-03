@@ -65,7 +65,6 @@ def test_run_calls_each_pipeline_stage_once(
     diagnose.assert_called_once_with(
         window,
         policy=expected_policy,
-        include_attribution=False,
     )
     assert result.snapshot is snapshot
     assert result.window is window

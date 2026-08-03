@@ -21,7 +21,7 @@ import pytest
 from traceml_ai.diagnostics.common import DiagnosticResult
 from traceml_ai.diagnostics.step_time.api import (
     StepDiagnosis,
-    build_step_diagnosis_result,
+    diagnose_step_time_window,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
@@ -38,11 +38,12 @@ from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
 )
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
-    diagnose_step_time_window,
+from tests.step_time.factories import (
+    rank_average,
+    values_from_mapping,
+    window_from_events,
+    window_from_rank_averages,
 )
-from tests.step_time.factories import window_from_rank_averages
 
 _EVENT_NAMES = {
     "input_wait": "_traceml_internal:dataloader_next",
@@ -101,7 +102,7 @@ def _diagnose(
     training_strategy: str = "ddp",
     max_rows: int = 30,
 ) -> DiagnosticResult[StepDiagnosis]:
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         per_rank_steps,
         max_rows=max_rows,
         training_strategy=training_strategy,
@@ -134,15 +135,11 @@ def _step_metric(*, world_size: int = 2) -> StepTimeMetric:
 
 
 def test_window_keeps_measured_zero_and_drops_missing() -> None:
-    zero = build_step_time_window_from_events(
-        {0: _step_events(h2d=0.0)}, max_rows=30
-    )
-    missing = build_step_time_window_from_events(
-        {0: _step_events(omit=("h2d",))}, max_rows=30
-    )
+    zero = window_from_events({0: _step_events(h2d=0.0)}, max_rows=30)
+    missing = window_from_events({0: _step_events(omit=("h2d",))}, max_rows=30)
 
-    assert zero.per_rank_timing[0]["h2d"] == pytest.approx(0.0)
-    assert "h2d" not in missing.per_rank_timing[0]
+    assert rank_average(zero, 0).h2d_ms == pytest.approx(0.0)
+    assert rank_average(missing, 0).h2d_ms is None
     zero_metrics = {metric.metric for metric in zero.metrics}
     missing_metrics = {metric.metric for metric in missing.metrics}
     assert "h2d" in zero_metrics
@@ -154,11 +151,11 @@ def test_grad_accum_sparse_optimizer_stays_available() -> None:
     for step in range(0, 24, 4):
         events[step][_EVENT_NAMES["optimizer_step"]] = _stats(8.0, gpu=False)
 
-    window = build_step_time_window_from_events({0: events}, max_rows=24)
+    window = window_from_events({0: events}, max_rows=24)
 
     # Present in 6 of 24 steps: available, averaged over the full window.
-    assert window.per_rank_timing[0]["optimizer_step"] == pytest.approx(2.0)
-    assert "residual_proxy" in window.per_rank_timing[0]
+    assert rank_average(window, 0).optimizer_step_ms == pytest.approx(2.0)
+    assert rank_average(window, 0).residual_ms is not None
     result = diagnose_step_time_window(window, policy=SUMMARY_STEP_TIME_POLICY)
     assert result.primary.kind != "INCOMPLETE_DATA"
 
@@ -294,7 +291,7 @@ _BALANCED_RANK = dict(
 
 
 def test_expected_rank_without_window_rows_is_incomplete() -> None:
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {0: _step_events(**_BALANCED_RANK)},
         max_rows=30,
         expected_ranks=(0, 1),
@@ -557,7 +554,7 @@ def test_gpu_run_without_h2d_events_stays_balanced() -> None:
 
 
 def test_gpu_window_without_h2d_still_derives_residual() -> None:
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {
             0: _step_events(
                 gpu=True,
@@ -569,8 +566,8 @@ def test_gpu_window_without_h2d_still_derives_residual() -> None:
     )
 
     assert window.clock == "gpu"
-    assert "residual_proxy" in window.per_rank_timing[0]
-    assert "h2d" not in window.per_rank_timing[0]
+    assert rank_average(window, 0).residual_ms is not None
+    assert rank_average(window, 0).h2d_ms is None
 
 
 def test_gpu_missing_forward_reports_incomplete_data() -> None:
@@ -593,16 +590,19 @@ def test_gpu_missing_forward_reports_incomplete_data() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Metrics-only callers: availability is unknowable, never "missing"
+# A complete canonical window remains balanced
 # ---------------------------------------------------------------------------
 
 
-def test_metrics_only_diagnosis_stays_balanced() -> None:
-    window = build_step_time_window_from_events(
+def test_complete_canonical_window_stays_balanced() -> None:
+    window = window_from_events(
         {0: _step_events(**_BALANCED_RANK)}, max_rows=30
     )
 
-    result = build_step_diagnosis_result(window.metrics)
+    result = diagnose_step_time_window(
+        window,
+        policy=SUMMARY_STEP_TIME_POLICY,
+    )
 
     assert result.primary.kind == "BALANCED"
 
@@ -613,7 +613,7 @@ def test_metrics_only_diagnosis_stays_balanced() -> None:
 
 
 def test_partial_metric_stats_use_measuring_ranks() -> None:
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {
             0: _step_events(
                 omit=("h2d",),
@@ -681,9 +681,9 @@ def test_intermittent_forward_drops_availability() -> None:
     )
     events[0][_EVENT_NAMES["forward"]] = _stats(40.0, gpu=False)
 
-    window = build_step_time_window_from_events({0: events}, max_rows=30)
-    assert "forward" not in window.per_rank_timing[0]
-    assert "residual_proxy" not in window.per_rank_timing[0]
+    window = window_from_events({0: events}, max_rows=30)
+    assert rank_average(window, 0).forward_ms is None
+    assert rank_average(window, 0).residual_ms is None
 
     result = diagnose_step_time_window(window, policy=SUMMARY_STEP_TIME_POLICY)
     assert result.primary.kind == "INCOMPLETE_DATA"
@@ -691,12 +691,12 @@ def test_intermittent_forward_drops_availability() -> None:
 
 
 def test_every_step_forward_stays_available() -> None:
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {0: _step_events(**_BALANCED_RANK)}, max_rows=30
     )
 
-    assert window.per_rank_timing[0]["forward"] == pytest.approx(30.0)
-    assert "residual_proxy" in window.per_rank_timing[0]
+    assert rank_average(window, 0).forward_ms == pytest.approx(30.0)
+    assert rank_average(window, 0).residual_ms is not None
 
 
 def test_intermittent_optimizer_stays_available_occurrence_metric() -> None:
@@ -706,16 +706,16 @@ def test_intermittent_optimizer_stays_available_occurrence_metric() -> None:
     events = _step_events(omit=("optimizer_step",), steps=30)
     events[0][_EVENT_NAMES["optimizer_step"]] = _stats(30.0, gpu=False)
 
-    window = build_step_time_window_from_events({0: events}, max_rows=30)
+    window = window_from_events({0: events}, max_rows=30)
 
-    assert window.per_rank_timing[0]["optimizer_step"] == pytest.approx(1.0)
-    assert "residual_proxy" in window.per_rank_timing[0]
+    assert rank_average(window, 0).optimizer_step_ms == pytest.approx(1.0)
+    assert rank_average(window, 0).residual_ms is not None
 
 
 def test_worst_value_and_rank_come_from_one_candidate_set() -> None:
     # r1 is 4x slower but has no measured input wait: the step metric
     # must not report r1's value with r0's rank.
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {
             0: _step_events(step_time=100.0),
             1: _step_events(
@@ -737,19 +737,15 @@ def test_worst_value_and_rank_come_from_one_candidate_set() -> None:
     assert step_metric.worst_rank == 1
 
 
-def test_public_projection_preserves_absence() -> None:
-    from traceml_ai.utils.step_time_window import (
-        public_step_time_metric_values,
-    )
-
+def test_typed_values_preserve_absence() -> None:
     # step envelope measured, input wait measured, compute never
-    # measured: the projection must not fabricate residual = step_time.
-    public = public_step_time_metric_values(
+    # measured: the fixture must not fabricate residual = step_time.
+    values = values_from_mapping(
         {"input_wait": 2.0, "step_time": 100.0, "step_time_cpu": 100.0}
     )
 
-    assert public["input_wait_ms"] == 2.0
-    assert public["step_time_ms"] == 100.0
-    assert public["forward_ms"] is None
-    assert public["compute_ms"] is None
-    assert public["residual_ms"] is None
+    assert values.input_wait_ms == 2.0
+    assert values.step_time_ms == 100.0
+    assert values.forward_ms is None
+    assert values.compute_ms is None
+    assert values.residual_ms is None

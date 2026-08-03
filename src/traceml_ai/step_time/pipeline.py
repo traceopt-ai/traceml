@@ -149,7 +149,6 @@ def _analyze_snapshot(
     diagnosis = diagnose_step_time_window(
         window,
         policy=policy,
-        include_attribution=False,
     )
     return StepTimeAnalysis(
         request=request,

@@ -73,7 +73,6 @@ class StepTimeAnalysisContext:
     """Diagnosis-ready view over one canonical analyzed window."""
 
     thresholds: "DiagnosisThresholds"
-    window: StepTimeWindow
     single_rank: bool
     steps_used: int
     overall_worst_rank: Optional[int]
@@ -83,13 +82,6 @@ class StepTimeAnalysisContext:
     input_wait_metric: Optional[StepTimeMetric]
     h2d_metric: Optional[StepTimeMetric]
     residual_metric: Optional[StepTimeMetric]
-    forward_metric: Optional[StepTimeMetric]
-    backward_metric: Optional[StepTimeMetric]
-    optimizer_metric: Optional[StepTimeMetric]
-
-    step_total: float
-    residual_total: float
-    compute_total: float
 
     residual_share: Optional[float]
     compute_share: Optional[float]
@@ -201,25 +193,6 @@ def metric_worst_rank(
         return int(metric.worst_rank)
     except (TypeError, ValueError, OverflowError):
         return None
-
-
-def compute_total(
-    *,
-    forward: Optional[StepTimeMetric],
-    backward: Optional[StepTimeMetric],
-    optimizer: Optional[StepTimeMetric],
-    single_rank: bool,
-) -> float:
-    """Return the visible aggregate compute total used by diagnosis."""
-    return sum(
-        metric_total(metric, single_rank=single_rank)
-        for metric in (forward, backward, optimizer)
-    )
-
-
-def metric_excess(metric: Optional[StepTimeMetric]) -> float:
-    """Return one metric's worst-minus-median excess."""
-    return max(0.0, metric_worst_total(metric) - metric_median_total(metric))
 
 
 def _rank_straggler_pair(
@@ -389,13 +362,7 @@ def _build_rank_straggler_evidence(
 
 
 def largest_compute_phase(
-    *,
     window: StepTimeWindow,
-    forward: Optional[StepTimeMetric],
-    backward: Optional[StepTimeMetric],
-    optimizer: Optional[StepTimeMetric],
-    step_total: float,
-    single_rank: bool,
 ) -> Optional[ComputeSignal]:
     """Pick the largest phase using the analyzer's coherent compute cohort."""
     cohort = tuple(
@@ -403,68 +370,44 @@ def largest_compute_phase(
         for rank in window.compute_ranks
         if (facts := window.rank(rank)) is not None
     )
-    if window.rank_facts:
-        if not cohort:
-            return None
-        iteration_total = _median(
+    if not cohort:
+        return None
+    iteration_total = _median(
+        tuple(
+            _rank_value(facts, "input_wait") + _rank_value(facts, "step_time")
+            for facts in cohort
+        )
+    )
+    candidates: list[ComputeSignal] = []
+    for label, key in (
+        ("Forward", "forward"),
+        ("Backward", "backward"),
+        ("Optimizer", "optimizer_step"),
+    ):
+        median, worst, worst_rank, excess = _rank_stats(
             tuple(
-                _rank_value(facts, "input_wait")
-                + _rank_value(facts, "step_time")
+                (facts.global_rank, _rank_value(facts, key))
                 for facts in cohort
             )
         )
-        candidates: list[ComputeSignal] = []
-        for label, key in (
-            ("Forward", "forward"),
-            ("Backward", "backward"),
-            ("Optimizer", "optimizer_step"),
-        ):
-            median, worst, worst_rank, excess = _rank_stats(
-                tuple(
-                    (facts.global_rank, _rank_value(facts, key))
-                    for facts in cohort
-                )
-            )
-            if median <= 0.0:
-                continue
-            candidates.append(
-                ComputeSignal(
-                    label=label,
-                    share=share(median, iteration_total),
-                    skew=(excess / median if len(cohort) >= 2 else None),
-                    median_ms=median,
-                    worst_ms=worst,
-                    excess_ms=excess,
-                    worst_rank=worst_rank,
-                )
-            )
-        return (
-            max(candidates, key=lambda item: item.median_ms)
-            if candidates
-            else None
-        )
-
-    candidates = []
-    for label, metric in (
-        ("Forward", forward),
-        ("Backward", backward),
-        ("Optimizer", optimizer),
-    ):
-        total = metric_total(metric, single_rank=single_rank)
-        if metric is None or total <= 0.0:
+        if median <= 0.0:
             continue
         candidates.append(
             ComputeSignal(
                 label=label,
-                share=share(total, step_total),
-                skew=metric_skew(metric, single_rank=single_rank),
-                median_ms=metric_median_total(metric),
-                worst_ms=metric_worst_total(metric),
-                excess_ms=metric_excess(metric),
-                worst_rank=metric_worst_rank(metric),
+                share=share(median, iteration_total),
+                skew=(excess / median if len(cohort) >= 2 else None),
+                median_ms=median,
+                worst_ms=worst,
+                excess_ms=excess,
+                worst_rank=worst_rank,
             )
         )
-    return max(candidates, key=lambda item: item.share) if candidates else None
+    return (
+        max(candidates, key=lambda item: item.median_ms)
+        if candidates
+        else None
+    )
 
 
 _MISSING_SIGNAL_ORDER: tuple[str, ...] = (
@@ -535,17 +478,12 @@ def build_step_time_context(
     input_wait_metric = metrics.get("input_wait")
     h2d_metric = metrics.get("h2d")
     residual_metric = metrics.get("residual_proxy")
-    forward_metric = metrics.get("forward")
-    backward_metric = metrics.get("backward")
-    optimizer_metric = metrics.get("optimizer_step")
 
     coverage = window.coverage
     single_rank = coverage.world_size <= 1 or coverage.ranks_present <= 1
     strategy = normalize_training_strategy(
         training_strategy or window.training_strategy
     )
-    step_total = metric_total(step_metric, single_rank=single_rank)
-
     iteration_cohort = tuple(
         facts
         for rank in window.iteration_ranks
@@ -607,7 +545,6 @@ def build_step_time_context(
     )
     return StepTimeAnalysisContext(
         thresholds=thresholds,
-        window=window,
         single_rank=single_rank,
         steps_used=int(coverage.steps_used),
         overall_worst_rank=(
@@ -620,20 +557,6 @@ def build_step_time_context(
         input_wait_metric=input_wait_metric,
         h2d_metric=h2d_metric,
         residual_metric=residual_metric,
-        forward_metric=forward_metric,
-        backward_metric=backward_metric,
-        optimizer_metric=optimizer_metric,
-        step_total=step_total,
-        residual_total=metric_total(
-            residual_metric,
-            single_rank=single_rank,
-        ),
-        compute_total=compute_total(
-            forward=forward_metric,
-            backward=backward_metric,
-            optimizer=optimizer_metric,
-            single_rank=single_rank,
-        ),
         residual_share=window.residual_share,
         compute_share=window.compute_share,
         input_bound_share=window.input_wait_share,
@@ -645,14 +568,7 @@ def build_step_time_context(
         input_wait_total=input_total,
         input_bound_step_total=input_step_total,
         iteration_time_total=input_total + input_step_total,
-        largest_compute=largest_compute_phase(
-            window=window,
-            forward=forward_metric,
-            backward=backward_metric,
-            optimizer=optimizer_metric,
-            step_total=step_total,
-            single_rank=single_rank,
-        ),
+        largest_compute=largest_compute_phase(window),
         rank_straggler=rank_straggler,
         missing_signals=missing,
         signal_coverage=signal_coverage,
@@ -663,9 +579,7 @@ __all__ = [
     "ComputeSignal",
     "StepTimeAnalysisContext",
     "build_step_time_context",
-    "compute_total",
     "largest_compute_phase",
-    "metric_excess",
     "metric_median_total",
     "metric_skew",
     "metric_total",

@@ -1,8 +1,8 @@
 # Step Time Pipeline Contract
 
 This page is the contributor map for Step Time. It describes the current
-behavior that CLI, dashboard, and final-summary changes must preserve. It does
-not prescribe presentation details or future query consolidation.
+behavior and ownership boundaries that CLI, dashboard, and final-summary
+changes must preserve.
 
 For diagnosis thresholds and issue semantics, see
 [`diagnostics/DIAGNOSIS.md`](https://github.com/traceopt-ai/traceml/blob/main/src/traceml_ai/diagnostics/DIAGNOSIS.md).
@@ -16,18 +16,19 @@ flowchart LR
     DB[(step_time_samples)]
     CLS["CLI LiveStepTimeSession<br/>calls StepTimePipeline"]
     DLS["Dashboard LiveStepTimeSession<br/>one refresh per tick"]
-    RESULT["Immutable StepTimeAnalysis<br/>window + diagnosis"]
+    SPS["Summary StepTimePipeline<br/>summary profile"]
+    RESULT["StepTimeAnalysis<br/>snapshot + window + diagnosis"]
     CLI["Pure Rich CLI presenter"]
     HERO["Dashboard hero presenter"]
     RAIL["Dashboard diagnostics composer"]
-    SUM["Final-summary adapter"]
+    SUM["Pure final-summary projector"]
     OUT["JSON and text"]
 
     DB --> CLS --> RESULT --> CLI
     DB --> DLS --> RESULT
     RESULT -. "same object" .-> HERO
     RESULT -. "same diagnosis" .-> RAIL
-    DB --> SUM --> OUT
+    DB --> SPS --> RESULT --> SUM --> OUT
 ```
 
 The repository has two SQL selection profiles, not three surface pipelines.
@@ -43,7 +44,12 @@ passes the resulting `StepTimeWindow` directly to diagnosis.
 last-good state, monotonic expiry, and cursor-based analysis reuse. The CLI
 injects one session into a pure Rich presenter. The dashboard driver owns one
 session and fans its immutable result to the hero and diagnostics composer.
-Final summary remains on its compatibility adapter until PR8.
+
+`StepTimeSummarySection` runs the same pipeline once with the `summary`
+profile, then passes the completed `StepTimeAnalysis` to a pure reporting
+projector. The projector owns public JSON names, topology, rank identities,
+and card text; it does not load SQLite, align steps, calculate domain
+statistics, or diagnose.
 
 The dashboard presenters never load or diagnose Step Time. One driver method
 performs the refresh and explicit fan-out, keeping the production reading path
@@ -59,45 +65,57 @@ short: driver, live session, then the two local presenters.
 | SQLite selection and row decoding | `step_time/sqlite.py` | live-tail or summary selection, identity, progress, or clock normalization changes |
 | Load/analyze/diagnose orchestration | `step_time/pipeline.py` | application flow or live/summary data-profile selection changes |
 | Live caching and freshness | `step_time/pipeline.py` | cursor reuse, last-good bridging, or monotonic expiry changes |
-| Analyzed-window compatibility adapter | `utils/step_time_sqlite.py` | an existing loader caller needs migration support |
 | Diagnosis thresholds and priority | `diagnostics/step_time/` | a rule, policy, attribution, or issue order changes |
 | Live CLI presentation | `renderers/step_time/renderer.py` | terminal labels or layout change |
 | Dashboard Step Time presentation | `aggregator/display_drivers/nicegui_sections/` | hero or diagnostics cards change |
-| Final-summary projection | `reporting/sections/step_time/` | public JSON or summary text changes |
+| Final-summary orchestration and projection | `reporting/sections/step_time/` | public JSON, topology, or summary text changes |
 | Cross-surface contract scenarios | `tests/step_time/` | any item above changes intentionally |
 
-Start with the contract scenarios before following a surface-specific call
-path. For live behavior, read `step_time/pipeline.py` and then the pure CLI
-presenter in `renderers/step_time/renderer.py`. For domain facts, read
-`step_time/sqlite.py`, `step_time/analysis.py`, and `step_time/model.py`.
-Diagnosis continues in `diagnostics/step_time/api.py`, then `context.py` and
-`rules.py`; none of those files rebuilds the historical rank map.
+Start with the contract scenarios before following a surface-specific path.
+The shortest core reading path is:
+
+```text
+step_time/model.py
+  -> step_time/sqlite.py
+  -> step_time/analysis.py
+  -> step_time/pipeline.py
+```
+
+Continue into only the surface being changed:
+
+- CLI: `renderers/step_time/renderer.py`;
+- dashboard: `aggregator/display_drivers/nicegui.py`, then the relevant
+  `nicegui_sections` presenter;
+- final summary: `reporting/sections/step_time/__init__.py`, then its pure
+  projector in `builder.py`;
+- diagnosis rules: `diagnostics/step_time/api.py`, `context.py`, and
+  `rules.py`.
+
+No surface path passes through `traceml_ai.utils` or a legacy rank map.
 
 ## Data-shape budget
 
-Step Time payloads previously crossed eight boundary-level representations
-between SQLite and a screen. The canonical path now permits at most five:
+Step Time payloads previously crossed eight boundary-level representations.
+The final design has three core shapes:
 
 ```text
-SQLite row
-  -> StepTimeSourceRow
-  -> typed StepTimeWindow facts
-  -> optional legacy rank-average projection
-  -> surface output
+StepTimeRepositorySnapshot   normalized source facts
+  -> StepTimeWindow          canonical analyzed facts
+  -> StepTimeAnalysis        window plus one diagnosis
 ```
 
-Only representations crossing a production function or module boundary are
-counted. A temporary object returned by `json.loads()` and analyzer lookup
-indexes are implementation details, not new payload contracts. The storage to
-canonical-facts path therefore has exactly two conversions and the analyzer
-returns exactly one typed fact graph.
+`StepTimeSourceRow` is the typed row contained by the repository snapshot;
+`LiveStepTimeResult` adds freshness to an existing analysis without copying
+its timing facts. Surface dictionaries and widgets are presentation output,
+not another domain model. Temporary `json.loads()` objects and analyzer lookup
+indexes are implementation details.
 
 `StepTimeWindow.rank_facts` replaces the former triple nested
 rank/step/metric dictionary. Dashboard, canonical diagnosis, and the CLI read
-typed facts and precomputed window shares directly. `per_rank_timing` remains
-a cached, read-only projection only for released mapping adapters; PR9 removes
-that compatibility surface. No presenter and no per-step production path uses
-the legacy projection.
+typed facts and precomputed window shares directly. Final summary projects the
+same typed facts and canonical metric statistics. There is no
+`per_rank_timing` projection and no production `Dict[int, Dict[str, float]]`
+Step Time payload.
 
 ### Model dependency boundary
 
@@ -106,7 +124,7 @@ data contracts and imports only the Python standard library. SQLite loading,
 diagnosis, reporting, Rich, NiceGUI, and Plotly depend on these contracts;
 the model never depends on them. New code should import from this central
 module. The unused renderer-owned schema shim has been retired; only the
-window and SQLite utility adapters remain during presenter migration.
+central model is an ownership location for Step Time types.
 
 `traceml_ai.step_time.analysis` depends only on the central model and NumPy.
 It does not import SQLite, diagnosis policies, reporting, Rich, or NiceGUI.
@@ -212,24 +230,29 @@ The cross-surface goldens freeze:
 They intentionally do not snapshot timestamps, private cache state, complete
 Rich/NiceGUI markup, or dictionary ordering.
 
-## Temporary compatibility seams
+## Removed internals and temporary source compatibility
 
-- The dashboard computer, dashboard adapter, renderer-owned cache, and legacy
-  `StepTimeResult` projection have been removed. Dashboard code consumes
-  `LiveStepTimeResult` directly.
-- `utils/step_time_window.py` accepts historical raw-event fixtures and
-  delegates to `StepTimeAnalyzer`; PR9 removes that input adapter.
-- `StepTimeWindow.per_rank_timing` lazily projects typed rank averages only for
-  released compatibility consumers; PR9 removes the projection.
-- The released mapping-based diagnosis functions adapt one sparse rank map to
-  a typed window. Canonical diagnosis and rules accept only `StepTimeWindow`;
-  PR9 removes the mapping adapter.
-- `utils/step_time_sqlite.py` preserves historical loader signatures while
-  calling the repository and analyzer directly; PR9 removes it.
+The migration deliberately removed the old `utils/step_time_window.py` and
+`utils/step_time_sqlite.py` pipelines and `StepTimeWindow.per_rank_timing`.
+None of the built-in surfaces constructs or consumes a rank dictionary.
 
-New code must not add another analyzer input type, per-step dictionary, or
-surface-specific schema to the central package. It must also read clock and
-coverage from the window rather than copying them onto every metric.
+For patch-line source compatibility, `build_step_diagnosis()`,
+`build_step_diagnosis_result()`, and `RankStepSummary` remain as deprecated
+one-release shims. The diagnosis shims lazily convert the released sparse
+rank input and preserve opt-in attribution; normal imports do not load that
+conversion module. The reporting shim is only a historical dataclass name.
+They are tested as boundaries and scheduled for removal at the next breaking
+release.
+
+New callers must construct or receive a canonical `StepTimeWindow`, call
+`diagnose_step_time_window(window, policy=...)`, and read
+`StepTimeAnalysis.window.rank_facts` / `StepTimeValues`. The built-in summary
+projector remains responsible for public JSON field names.
+
+New code must not put compatibility conversion on a runtime path, add another
+analyzer input type, restore a per-step dictionary, or add a surface-specific
+schema to the central package. It must read clock and coverage from the window
+rather than copying them onto every metric.
 
 ## Changing Step Time safely
 

@@ -49,11 +49,13 @@ DISPLAY_METRICS: tuple[str, ...] = (
     "residual_proxy",
 )
 
-_COMPUTE_KEYS: tuple[str, ...] = (
-    "forward",
-    "backward",
-    "optimizer_step",
+STATISTIC_METRICS: tuple[str, ...] = (
+    *DISPLAY_METRICS,
+    "compute",
+    DATALOADER_FETCH_KEY,
+    "total_step_cpu",
 )
+
 _REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
 OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
 _COMPOSITION_KEYS: tuple[str, ...] = (
@@ -468,7 +470,7 @@ def _build_metrics(
     coverage: StepTimeCoverage,
 ) -> list[StepTimeMetric]:
     metrics: list[StepTimeMetric] = []
-    for metric in DISPLAY_METRICS:
+    for metric in STATISTIC_METRICS:
         values = {
             facts.global_rank: value
             for facts in rank_facts
@@ -501,11 +503,15 @@ def _build_metrics(
         metrics.append(
             StepTimeMetric(
                 metric=metric,
-                series=_build_series(
-                    metric,
-                    rank_facts,
-                    measured_ranks,
-                    steps,
+                series=(
+                    _build_series(
+                        metric,
+                        rank_facts,
+                        measured_ranks,
+                        steps,
+                    )
+                    if metric in DISPLAY_METRICS
+                    else None
                 ),
                 window_size=int(coverage.expected_steps),
                 steps_used=int(coverage.steps_used),
@@ -713,6 +719,7 @@ __all__ = [
     "INPUT_WAIT_KEY",
     "OCCURRENCE_METRICS",
     "SELECTED_METRICS",
+    "STATISTIC_METRICS",
     "STEP_TIME_CPU_KEY",
     "StepTimeAnalyzer",
 ]
