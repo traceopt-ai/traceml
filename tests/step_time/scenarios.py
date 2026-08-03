@@ -29,7 +29,9 @@ EVENT_NAMES: Mapping[str, str] = {
     "forward": "_traceml_internal:forward_time",
     "backward": "_traceml_internal:backward_time",
     "optimizer_step": "_traceml_internal:optimizer_step",
-    "step_time": "_traceml_internal:step_time",
+    # Instrumentation still emits this historical raw event until its own
+    # migration. The scenario key uses the canonical inner-envelope name.
+    "traced_step_time": "_traceml_internal:step_time",
 }
 
 BALANCED_PROFILE: Mapping[str, float] = {
@@ -38,7 +40,7 @@ BALANCED_PROFILE: Mapping[str, float] = {
     "forward": 30.0,
     "backward": 45.0,
     "optimizer_step": 10.0,
-    "step_time": 95.0,
+    "traced_step_time": 95.0,
 }
 
 
@@ -142,7 +144,7 @@ SCENARIOS: tuple[StepTimeScenario, ...] = (
                 forward=20.0,
                 backward=20.0,
                 optimizer_step=0.0,
-                step_time=40.0,
+                traced_step_time=40.0,
             ),
             1: _profile(
                 input_wait=0.0,
@@ -150,7 +152,7 @@ SCENARIOS: tuple[StepTimeScenario, ...] = (
                 forward=20.0,
                 backward=120.0,
                 optimizer_step=0.0,
-                step_time=140.0,
+                traced_step_time=140.0,
             ),
         },
         steps=tuple(range(50, 74)),
@@ -165,7 +167,7 @@ SCENARIOS: tuple[StepTimeScenario, ...] = (
                 forward=20.0,
                 backward=20.0,
                 optimizer_step=0.0,
-                step_time=40.0,
+                traced_step_time=40.0,
             ),
             1: _profile(
                 input_wait=0.0,
@@ -173,7 +175,7 @@ SCENARIOS: tuple[StepTimeScenario, ...] = (
                 forward=80.0,
                 backward=80.0,
                 optimizer_step=0.0,
-                step_time=160.0,
+                traced_step_time=160.0,
             ),
         },
         steps=tuple(range(80, 104)),

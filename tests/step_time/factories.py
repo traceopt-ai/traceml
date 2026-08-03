@@ -87,23 +87,28 @@ def timing_row(
         "forward": forward,
         "backward": backward,
         "optimizer_step": optimizer,
-        "step_time": local_step,
+        "traced_step_time": local_step,
         "residual_proxy": residual,
-        "total_step": (
+        "step_time": (
             dataloader + local_step if total_step is None else total_step
         ),
     }
     if input_wait_cpu is not None and step_time_cpu is not None:
         row.update(
             input_wait=input_wait_cpu,
-            step_time=step_time_cpu,
-            total_step=input_wait_cpu + step_time_cpu,
+            traced_step_time=step_time_cpu,
+            step_time=input_wait_cpu + step_time_cpu,
+            dataloader_fetch=input_wait_cpu,
+            traced_step_time_cpu=step_time_cpu,
+            step_time_cpu=input_wait_cpu + step_time_cpu,
         )
     if input_wait_gpu is not None and step_time_gpu is not None:
         row.update(
             input_wait=input_wait_gpu,
-            step_time=step_time_gpu,
-            total_step=input_wait_gpu + step_time_gpu,
+            traced_step_time=step_time_gpu,
+            step_time=input_wait_gpu + step_time_gpu,
+            traced_step_time_gpu=step_time_gpu,
+            step_time_gpu=input_wait_gpu + step_time_gpu,
         )
     return row
 
@@ -121,6 +126,7 @@ def metrics_from_rank_timings(
         "forward",
         "backward",
         "optimizer_step",
+        "traced_step_time",
         "step_time",
         "residual_proxy",
     ):
@@ -216,18 +222,27 @@ def values_from_mapping(
         compute = float(forward + backward + optimizer)
 
     input_wait = optional("input_wait")
+    traced_step_time = optional("traced_step_time")
     step_time = optional("step_time")
-    total_step = optional("total_step")
-    if total_step is None and input_wait is not None and step_time is not None:
-        total_step = input_wait + step_time
+    if (
+        step_time is None
+        and input_wait is not None
+        and traced_step_time is not None
+    ):
+        step_time = input_wait + traced_step_time
 
-    dataloader_cpu = optional("dataloader_fetch")
+    dataloader_fetch_cpu = optional("dataloader_fetch")
+    traced_step_time_cpu = optional("traced_step_time_cpu")
     step_time_cpu = optional("step_time_cpu")
-    total_step_cpu = (
-        dataloader_cpu + step_time_cpu
-        if dataloader_cpu is not None and step_time_cpu is not None
-        else None
-    )
+    if (
+        step_time_cpu is None
+        and dataloader_fetch_cpu is not None
+        and traced_step_time_cpu is not None
+    ):
+        step_time_cpu = dataloader_fetch_cpu + traced_step_time_cpu
+
+    traced_step_time_gpu = optional("traced_step_time_gpu")
+    step_time_gpu = optional("step_time_gpu")
     return StepTimeValues(
         input_wait_ms=input_wait,
         h2d_ms=optional("h2d"),
@@ -235,11 +250,14 @@ def values_from_mapping(
         backward_ms=backward,
         optimizer_step_ms=optimizer,
         step_time_ms=step_time,
+        traced_step_time_ms=traced_step_time,
         compute_ms=compute,
         residual_ms=optional("residual_proxy"),
-        total_step_ms=total_step,
-        dataloader_cpu_ms=dataloader_cpu,
-        total_step_cpu_ms=total_step_cpu,
+        step_time_cpu_ms=step_time_cpu,
+        step_time_gpu_ms=step_time_gpu,
+        traced_step_time_cpu_ms=traced_step_time_cpu,
+        traced_step_time_gpu_ms=traced_step_time_gpu,
+        dataloader_fetch_cpu_ms=dataloader_fetch_cpu,
     )
 
 
@@ -327,9 +345,8 @@ def window_from_rank_averages(
         ),
         rank_facts=rank_facts,
         metrics=metrics if isinstance(metrics, list) else list(metrics),
-        iteration_ranks=carrying("input_wait", "step_time"),
+        step_ranks=carrying("step_time"),
         compute_ranks=carrying(
-            "input_wait",
             "step_time",
             "forward",
             "backward",
@@ -426,7 +443,8 @@ def single_rank_step_metrics(
 ) -> tuple[StepTimeMetric, ...]:
     """Build the standard complete single-rank metric cohort."""
     values = {
-        "step_time": step,
+        "traced_step_time": step,
+        "step_time": step + dataloader,
         "input_wait": dataloader,
         "forward": forward,
         "backward": backward,
@@ -512,17 +530,18 @@ def step_time_values(
     )
     residual = max(0.0, effective_step - known_step)
     return StepTimeValues(
-        dataloader_cpu_ms=dataloader,
+        dataloader_fetch_cpu_ms=dataloader,
         input_wait_ms=dataloader,
-        step_time_ms=effective_step,
+        step_time_ms=dataloader + effective_step,
+        traced_step_time_ms=effective_step,
         h2d_ms=h2d,
         forward_ms=forward,
         backward_ms=backward,
         optimizer_step_ms=optimizer,
         compute_ms=compute,
         residual_ms=residual,
-        total_step_ms=dataloader + effective_step,
-        total_step_cpu_ms=dataloader + effective_step,
+        step_time_cpu_ms=dataloader + effective_step,
+        traced_step_time_cpu_ms=effective_step,
     )
 
 
@@ -533,12 +552,12 @@ def step_events_from_values(
 ) -> dict[int, dict]:
     """Expand canonical rank values into a repeated CPU event window."""
     events = {
-        "_traceml_internal:dataloader_next": values.dataloader_cpu_ms,
+        "_traceml_internal:dataloader_next": values.dataloader_fetch_cpu_ms,
         "_traceml_internal:h2d_time": values.h2d_ms,
         "_traceml_internal:forward_time": values.forward_ms,
         "_traceml_internal:backward_time": values.backward_ms,
         "_traceml_internal:optimizer_step": values.optimizer_step_ms,
-        "_traceml_internal:step_time": values.step_time_ms,
+        "_traceml_internal:step_time": values.traced_step_time_ms,
     }
     return {
         step: {
@@ -630,11 +649,7 @@ def _composition_representative(
 ) -> Optional[int]:
     ranks = set(cohort)
     anchors = {
-        facts.global_rank: (
-            facts.average.total_step_ms
-            if facts.average.total_step_ms is not None
-            else facts.average.step_time_ms
-        )
+        facts.global_rank: facts.average.step_time_ms
         for facts in rank_facts
         if facts.global_rank in ranks
     }
@@ -658,15 +673,11 @@ def _component_share(
     for facts in rank_facts:
         values = facts.average
         numerator = values.value(component)
-        if (
-            numerator is None
-            or values.input_wait_ms is None
-            or values.step_time_ms is None
-        ):
+        step_time = values.step_time_ms
+        if numerator is None or step_time is None:
             continue
-        total = values.input_wait_ms + values.step_time_ms
-        if total > 0.0:
-            shares.append(float(numerator) / total)
+        if step_time > 0.0:
+            shares.append(float(numerator) / step_time)
     return float(statistics.median(shares)) if shares else None
 
 
