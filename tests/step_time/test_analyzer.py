@@ -21,13 +21,11 @@ from traceml_ai.step_time.model import (
     StepTimeClockValues,
     StepTimeRepositorySnapshot,
     StepTimeSourceRow,
+    StepTimeValues,
     StepTimeWindow,
 )
 from traceml_ai.step_time.sqlite import normalize_step_time_events
-from tests.step_time.factories import (
-    rank_average,
-    window_from_events,
-)
+from tests.step_time.factories import window_from_events
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _SOURCE_ROOT = _PROJECT_ROOT / "src" / "traceml_ai"
@@ -38,7 +36,7 @@ _COMPLETE = {
     "forward": 30.0,
     "backward": 45.0,
     "optimizer_step": 10.0,
-    "step_time": 95.0,
+    "traced_step_time": 95.0,
 }
 
 
@@ -119,11 +117,15 @@ def test_analyzer_builds_one_typed_fact_set() -> None:
     assert rank.steps[0].values.forward_ms == 30.0
     assert rank.average.compute_ms == 85.0
     assert rank.average.residual_ms == 5.0
-    assert rank.average.total_step_ms == 100.0
-    assert rank.average.dataloader_cpu_ms == 10.0
-    assert rank.average.total_step_cpu_ms == 200.0
+    assert rank.average.step_time_ms == 100.0
+    assert rank.average.traced_step_time_ms == 95.0
+    assert rank.average.step_time_cpu_ms == 200.0
+    assert rank.average.step_time_gpu_ms == 100.0
+    assert rank.average.traced_step_time_cpu_ms == 190.0
+    assert rank.average.traced_step_time_gpu_ms == 95.0
+    assert rank.average.dataloader_fetch_cpu_ms == 10.0
 
-    assert window.iteration_ranks == (0,)
+    assert window.step_ranks == (0,)
     assert window.compute_ranks == (0,)
     assert window.straggler_ranks == (0,)
     assert window.input_wait_share == pytest.approx(0.05)
@@ -134,13 +136,30 @@ def test_analyzer_builds_one_typed_fact_set() -> None:
     summary_statistics = {
         metric.metric: metric
         for metric in window.metrics
-        if metric.metric in {"compute", "dataloader_fetch", "total_step_cpu"}
+        if metric.metric
+        in {
+            "compute",
+            "dataloader_fetch",
+            "step_time_cpu",
+            "step_time_gpu",
+            "traced_step_time_cpu",
+            "traced_step_time_gpu",
+        }
     }
     assert summary_statistics["compute"].median_total == pytest.approx(85.0)
     dataloader = summary_statistics["dataloader_fetch"]
     assert dataloader.median_total == pytest.approx(10.0)
-    assert summary_statistics["total_step_cpu"].median_total == pytest.approx(
+    assert summary_statistics["step_time_cpu"].median_total == pytest.approx(
         200.0
+    )
+    assert summary_statistics["step_time_gpu"].median_total == pytest.approx(
+        100.0
+    )
+    assert summary_statistics["traced_step_time_cpu"].median_total == (
+        pytest.approx(190.0)
+    )
+    assert summary_statistics["traced_step_time_gpu"].median_total == (
+        pytest.approx(95.0)
     )
     assert all(metric.series is None for metric in summary_statistics.values())
 
@@ -228,7 +247,7 @@ def test_cpu_fallback_and_strategy_specific_straggler_cohorts() -> None:
         0: {
             "input_wait": 5.0,
             "backward": 45.0,
-            "step_time": 95.0,
+            "traced_step_time": 95.0,
         },
         1: _COMPLETE,
     }
@@ -242,8 +261,43 @@ def test_cpu_fallback_and_strategy_specific_straggler_cohorts() -> None:
     )
 
     assert ddp.clock == "cpu"
+    assert ddp.rank(0).average.step_time_cpu_ms == 100.0
+    assert ddp.rank(0).average.traced_step_time_cpu_ms == 95.0
+    assert ddp.rank(0).average.step_time_gpu_ms is None
+    assert ddp.rank(0).average.traced_step_time_gpu_ms is None
     assert ddp.straggler_ranks == (0, 1)
     assert fsdp.straggler_ranks == (1,)
+
+    gpu_rows = _snapshot({0: _COMPLETE}).rows
+    partial_gpu = StepTimeAnalyzer().analyze(
+        StepTimeRepositorySnapshot(
+            rows=tuple(
+                StepTimeSourceRow(
+                    source_id=row.source_id,
+                    global_rank=row.global_rank,
+                    step=row.step,
+                    metrics={
+                        metric: StepTimeClockValues(
+                            cpu_ms=timing.cpu_ms,
+                            gpu_ms=(
+                                None if metric == "forward" else timing.gpu_ms
+                            ),
+                        )
+                        for metric, timing in row.metrics.items()
+                    },
+                )
+                for row in gpu_rows
+            ),
+            global_ranks=(0,),
+        ),
+        window_size=2,
+    )
+    partial_values = partial_gpu.rank(0).average
+    assert partial_gpu.clock == "cpu"
+    assert partial_values.step_time_ms == 200.0
+    assert partial_values.traced_step_time_ms == 190.0
+    assert partial_values.step_time_gpu_ms == 100.0
+    assert partial_values.traced_step_time_gpu_ms == 95.0
 
 
 @pytest.mark.parametrize(
@@ -254,14 +308,14 @@ def test_cpu_fallback_and_strategy_specific_straggler_cohorts() -> None:
         ({0: 100.0, 1: 300.0, 2: 300.0}, 300.0, 1, 1),
     ],
 )
-def test_total_step_metric_names_median_representative_and_worst(
+def test_step_time_metric_names_median_representative_and_worst(
     profiles: Mapping[int, float],
     median: float,
     representative: int,
     worst: int,
 ) -> None:
     rank_profiles = {
-        rank: {"input_wait": 0.0, "step_time": total}
+        rank: {"input_wait": 0.0, "traced_step_time": total}
         for rank, total in profiles.items()
     }
     window = StepTimeAnalyzer().analyze(
@@ -269,12 +323,12 @@ def test_total_step_metric_names_median_representative_and_worst(
         window_size=2,
     )
 
-    total_step = _metric(window, "total_step")
-    assert total_step.median_total == median
-    assert total_step.representative_rank == representative
-    assert total_step.representative_total == profiles[representative]
-    assert total_step.worst_rank == worst
-    assert total_step.worst_total == profiles[worst]
+    step_time = _metric(window, "step_time")
+    assert step_time.median_total == median
+    assert step_time.representative_rank == representative
+    assert step_time.representative_total == profiles[representative]
+    assert step_time.worst_rank == worst
+    assert step_time.worst_total == profiles[worst]
 
 
 def test_alignment_uses_latest_common_suffix() -> None:
@@ -347,6 +401,25 @@ def test_analyzer_has_one_input_and_no_removed_shapes() -> None:
         field.name for field in fields(StepTimeWindow)
     }
     assert not hasattr(StepTimeWindow(), "per_rank_timing")
+    assert "iteration_ranks" not in {
+        field.name for field in fields(StepTimeWindow)
+    }
+    assert "step_ranks" in {field.name for field in fields(StepTimeWindow)}
+
+    value_fields = {field.name for field in fields(StepTimeValues)}
+    assert {
+        "step_time_ms",
+        "traced_step_time_ms",
+        "step_time_cpu_ms",
+        "step_time_gpu_ms",
+        "traced_step_time_cpu_ms",
+        "traced_step_time_gpu_ms",
+    }.issubset(value_fields)
+    assert {
+        "total_step_ms",
+        "total_step_cpu_ms",
+        "dataloader_cpu_ms",
+    }.isdisjoint(value_fields)
 
     production = tuple(_SOURCE_ROOT.glob("**/*.py"))
     mapping_owners = {

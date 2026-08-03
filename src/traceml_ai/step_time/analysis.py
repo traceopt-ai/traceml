@@ -28,7 +28,11 @@ from traceml_ai.step_time.model import (
 
 INPUT_WAIT_KEY = "input_wait"
 DATALOADER_FETCH_KEY = "dataloader_fetch"
-_STEP_TIME_CPU_KEY = "step_time_cpu"
+TRACED_STEP_TIME_KEY = "traced_step_time"
+_AGGREGATE_METRICS: tuple[str, ...] = (
+    INPUT_WAIT_KEY,
+    TRACED_STEP_TIME_KEY,
+)
 
 SELECTED_METRICS: tuple[str, ...] = (
     INPUT_WAIT_KEY,
@@ -36,7 +40,7 @@ SELECTED_METRICS: tuple[str, ...] = (
     "forward",
     "backward",
     "optimizer_step",
-    "step_time",
+    TRACED_STEP_TIME_KEY,
 )
 
 DISPLAY_METRICS: tuple[str, ...] = (
@@ -46,18 +50,21 @@ DISPLAY_METRICS: tuple[str, ...] = (
     "backward",
     "optimizer_step",
     "step_time",
+    TRACED_STEP_TIME_KEY,
     "residual_proxy",
 )
 
 STATISTIC_METRICS: tuple[str, ...] = (
     *DISPLAY_METRICS,
     "compute",
-    "total_step",
+    "step_time_cpu",
+    "step_time_gpu",
+    "traced_step_time_cpu",
+    "traced_step_time_gpu",
     DATALOADER_FETCH_KEY,
-    "total_step_cpu",
 )
 
-_REQUIRED_GPU_METRICS: tuple[str, ...] = (INPUT_WAIT_KEY, "step_time")
+_REQUIRED_GPU_METRICS: tuple[str, ...] = _AGGREGATE_METRICS
 OCCURRENCE_METRICS: frozenset[str] = frozenset(("optimizer_step", "h2d"))
 _COMPOSITION_KEYS: tuple[str, ...] = (
     INPUT_WAIT_KEY,
@@ -71,10 +78,18 @@ _RowIndex = Mapping[tuple[int, int], StepTimeSourceRow]
 
 
 class _Cohorts(NamedTuple):
-    iteration: tuple[int, ...]
+    step: tuple[int, ...]
     compute: tuple[int, ...]
     composition: tuple[int, ...]
     straggler: tuple[int, ...]
+
+
+class _RankAvailability(NamedTuple):
+    """Window-complete selected and aggregate signal availability."""
+
+    selected: frozenset[str]
+    cpu_aggregate: frozenset[str]
+    gpu_aggregate: frozenset[str]
 
 
 class StepTimeAnalyzer:
@@ -119,11 +134,28 @@ class StepTimeAnalyzer:
         observed_ranks = tuple(sorted(steps_by_rank))
         clock = _select_clock(row_index, observed_ranks, steps)
         availability = {
-            rank: _rank_availability(
-                row_index,
-                rank,
-                steps,
-                clock=clock,
+            rank: _RankAvailability(
+                selected=_rank_availability(
+                    row_index,
+                    rank,
+                    steps,
+                    clock=clock,
+                    metrics=SELECTED_METRICS,
+                ),
+                cpu_aggregate=_rank_availability(
+                    row_index,
+                    rank,
+                    steps,
+                    clock="cpu",
+                    metrics=_AGGREGATE_METRICS,
+                ),
+                gpu_aggregate=_rank_availability(
+                    row_index,
+                    rank,
+                    steps,
+                    clock="gpu",
+                    metrics=_AGGREGATE_METRICS,
+                ),
             )
             for rank in observed_ranks
         }
@@ -160,7 +192,7 @@ class StepTimeAnalyzer:
             coverage=coverage,
             rank_facts=rank_facts,
             metrics=metrics,
-            iteration_ranks=cohorts.iteration,
+            step_ranks=cohorts.step,
             compute_ranks=cohorts.compute,
             straggler_ranks=cohorts.straggler,
             composition_representative_rank=(
@@ -252,6 +284,7 @@ def _rank_availability(
     steps: Sequence[int],
     *,
     clock: DiagnosisClock,
+    metrics: Sequence[str],
 ) -> frozenset[str]:
     """Return signals trusted across one rank's aligned window.
 
@@ -262,23 +295,16 @@ def _rank_availability(
     counts: dict[str, int] = {}
     for step in steps:
         row = row_index[(int(rank), int(step))]
-        for metric in SELECTED_METRICS:
+        for metric in metrics:
             if _clock_value(row, metric, clock=clock) is not None:
                 counts[metric] = counts.get(metric, 0) + 1
-        input_values = row.metrics.get(INPUT_WAIT_KEY)
-        if input_values is not None and input_values.cpu_ms is not None:
-            counts[DATALOADER_FETCH_KEY] = (
-                counts.get(DATALOADER_FETCH_KEY, 0) + 1
-            )
-        step_values = row.metrics.get("step_time")
-        if step_values is not None and step_values.cpu_ms is not None:
-            counts[_STEP_TIME_CPU_KEY] = counts.get(_STEP_TIME_CPU_KEY, 0) + 1
 
     step_count = len(steps)
     return frozenset(
         metric
         for metric, count in counts.items()
-        if count == step_count or metric in OCCURRENCE_METRICS
+        if count == step_count
+        or (metric in OCCURRENCE_METRICS and metric in metrics)
     )
 
 
@@ -287,7 +313,7 @@ def _build_rank_facts(
     rank: int,
     steps: Sequence[int],
     *,
-    availability: frozenset[str],
+    availability: _RankAvailability,
     clock: DiagnosisClock,
 ) -> StepTimeRankFacts:
     step_facts = tuple(
@@ -311,19 +337,19 @@ def _build_rank_facts(
 def _build_step_values(
     row: StepTimeSourceRow,
     *,
-    availability: frozenset[str],
+    availability: _RankAvailability,
     clock: DiagnosisClock,
 ) -> StepTimeValues:
     selected = {
         metric: (
             _clock_value(row, metric, clock=clock)
-            if metric in availability
+            if metric in availability.selected
             else None
         )
         for metric in SELECTED_METRICS
     }
     for metric in OCCURRENCE_METRICS:
-        if metric in availability and selected[metric] is None:
+        if metric in availability.selected and selected[metric] is None:
             selected[metric] = 0.0
 
     input_wait = selected[INPUT_WAIT_KEY]
@@ -331,37 +357,36 @@ def _build_step_values(
     forward = selected["forward"]
     backward = selected["backward"]
     optimizer = selected["optimizer_step"]
-    step_time = selected["step_time"]
+    traced_step_time = selected[TRACED_STEP_TIME_KEY]
     compute = (
         float(forward + backward + optimizer)
         if None not in (forward, backward, optimizer)
         else None
     )
     residual = (
-        max(0.0, float(step_time - (h2d or 0.0) - compute))
-        if step_time is not None and compute is not None
+        max(0.0, float(traced_step_time - (h2d or 0.0) - compute))
+        if traced_step_time is not None and compute is not None
         else None
     )
-    total_step = (
-        float(input_wait + step_time)
-        if input_wait is not None and step_time is not None
+    step_time = (
+        float(input_wait + traced_step_time)
+        if input_wait is not None and traced_step_time is not None
         else None
     )
 
-    dataloader_cpu = _cpu_compatibility_value(
-        row,
-        INPUT_WAIT_KEY,
-        available=DATALOADER_FETCH_KEY in availability,
+    cpu_input_wait, traced_step_time_cpu, step_time_cpu = (
+        _clock_aggregate_values(
+            row,
+            clock="cpu",
+            availability=availability.cpu_aggregate,
+        )
     )
-    step_time_cpu = _cpu_compatibility_value(
-        row,
-        "step_time",
-        available=_STEP_TIME_CPU_KEY in availability,
-    )
-    total_step_cpu = (
-        float(dataloader_cpu + step_time_cpu)
-        if dataloader_cpu is not None and step_time_cpu is not None
-        else None
+    _gpu_input_wait, traced_step_time_gpu, step_time_gpu = (
+        _clock_aggregate_values(
+            row,
+            clock="gpu",
+            availability=availability.gpu_aggregate,
+        )
     )
     return StepTimeValues(
         input_wait_ms=input_wait,
@@ -370,25 +395,40 @@ def _build_step_values(
         backward_ms=backward,
         optimizer_step_ms=optimizer,
         step_time_ms=step_time,
+        traced_step_time_ms=traced_step_time,
         compute_ms=compute,
         residual_ms=residual,
-        total_step_ms=total_step,
-        dataloader_cpu_ms=dataloader_cpu,
-        total_step_cpu_ms=total_step_cpu,
+        step_time_cpu_ms=step_time_cpu,
+        step_time_gpu_ms=step_time_gpu,
+        traced_step_time_cpu_ms=traced_step_time_cpu,
+        traced_step_time_gpu_ms=traced_step_time_gpu,
+        dataloader_fetch_cpu_ms=cpu_input_wait,
     )
 
 
-def _cpu_compatibility_value(
+def _clock_aggregate_values(
     row: StepTimeSourceRow,
-    metric: str,
     *,
-    available: bool,
-) -> Optional[float]:
-    if not available:
-        return None
-    values = row.metrics.get(metric)
-    value = values.cpu_ms if values is not None else None
-    return float(value) if value is not None else 0.0
+    clock: DiagnosisClock,
+    availability: frozenset[str],
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """Return one clock's input, traced envelope, and outer Step Time."""
+    input_wait = (
+        _clock_value(row, INPUT_WAIT_KEY, clock=clock)
+        if INPUT_WAIT_KEY in availability
+        else None
+    )
+    traced_step_time = (
+        _clock_value(row, TRACED_STEP_TIME_KEY, clock=clock)
+        if TRACED_STEP_TIME_KEY in availability
+        else None
+    )
+    step_time = (
+        float(input_wait + traced_step_time)
+        if input_wait is not None and traced_step_time is not None
+        else None
+    )
+    return input_wait, traced_step_time, step_time
 
 
 def _average_values(steps: Sequence[StepTimeStepFacts]) -> StepTimeValues:
@@ -404,29 +444,25 @@ def _average_values(steps: Sequence[StepTimeStepFacts]) -> StepTimeValues:
     forward = average("forward_ms")
     backward = average("backward_ms")
     optimizer = average("optimizer_step_ms")
-    step_time = average("step_time_ms")
-    dataloader_cpu = average("dataloader_cpu_ms")
     return StepTimeValues(
         input_wait_ms=input_wait,
         h2d_ms=average("h2d_ms"),
         forward_ms=forward,
         backward_ms=backward,
         optimizer_step_ms=optimizer,
-        step_time_ms=step_time,
+        step_time_ms=average("step_time_ms"),
+        traced_step_time_ms=average("traced_step_time_ms"),
         compute_ms=(
             float(forward + backward + optimizer)
             if None not in (forward, backward, optimizer)
             else None
         ),
         residual_ms=average("residual_ms"),
-        # Preserve the historical avg(input wait) + avg(step time) order.
-        total_step_ms=(
-            float(input_wait + step_time)
-            if input_wait is not None and step_time is not None
-            else None
-        ),
-        dataloader_cpu_ms=dataloader_cpu,
-        total_step_cpu_ms=average("total_step_cpu_ms"),
+        step_time_cpu_ms=average("step_time_cpu_ms"),
+        step_time_gpu_ms=average("step_time_gpu_ms"),
+        traced_step_time_cpu_ms=average("traced_step_time_cpu_ms"),
+        traced_step_time_gpu_ms=average("traced_step_time_gpu_ms"),
+        dataloader_fetch_cpu_ms=average("dataloader_fetch_cpu_ms"),
     )
 
 
@@ -543,9 +579,8 @@ def _build_cohorts(
             )
         )
 
-    iteration = carrying(INPUT_WAIT_KEY, "step_time")
+    step = carrying("step_time")
     compute = carrying(
-        INPUT_WAIT_KEY,
         "step_time",
         "forward",
         "backward",
@@ -568,7 +603,7 @@ def _build_cohorts(
         and (not fsdp or (facts.average.forward_ms or 0.0) > 0.0)
     )
     return _Cohorts(
-        iteration=iteration,
+        step=step,
         compute=compute,
         composition=composition,
         straggler=straggler,
@@ -581,11 +616,7 @@ def _composition_representative_rank(
 ) -> Optional[int]:
     cohort_set = set(int(rank) for rank in cohort)
     anchors = {
-        facts.global_rank: (
-            facts.average.total_step_ms
-            if facts.average.total_step_ms is not None
-            else facts.average.step_time_ms
-        )
+        facts.global_rank: facts.average.step_time_ms
         for facts in rank_facts
         if facts.global_rank in cohort_set
     }
@@ -610,15 +641,11 @@ def _component_share(
     for facts in rank_facts:
         values = facts.average
         numerator = values.value(component)
-        if (
-            numerator is None
-            or values.input_wait_ms is None
-            or values.step_time_ms is None
-        ):
+        step_time = values.step_time_ms
+        if numerator is None or step_time is None:
             continue
-        iteration = values.input_wait_ms + values.step_time_ms
-        if iteration > 0.0:
-            shares.append(float(numerator) / iteration)
+        if step_time > 0.0:
+            shares.append(float(numerator) / step_time)
     if not shares:
         return None
     return float(np.median(np.asarray(shares, dtype=np.float64)))

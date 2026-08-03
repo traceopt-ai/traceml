@@ -87,6 +87,27 @@ def test_typed_analysis_facts_are_exported_without_loading_analyzer() -> None:
     assert "traceml_ai.step_time.analysis" not in dependencies
     assert "traceml_ai.step_time.pipeline" not in dependencies
 
+    value_fields = {field.name for field in fields(model.StepTimeValues)}
+    assert {
+        "step_time_ms",
+        "traced_step_time_ms",
+        "step_time_cpu_ms",
+        "step_time_gpu_ms",
+        "traced_step_time_cpu_ms",
+        "traced_step_time_gpu_ms",
+    }.issubset(value_fields)
+    assert {
+        "total_step_ms",
+        "total_step_cpu_ms",
+        "dataloader_cpu_ms",
+    }.isdisjoint(value_fields)
+
+    window_fields = {field.name for field in fields(model.StepTimeWindow)}
+    assert "step_ranks" in window_fields
+    assert "iteration_ranks" not in window_fields
+    assert "traced_step_time" in model.STEP_TIME_EVENT_NAMES
+    assert "step_time" not in model.STEP_TIME_EVENT_NAMES
+
 
 def test_pipeline_is_the_only_builtin_orchestrator() -> None:
     """Keep direct diagnosis limited to its implementation and pipeline."""

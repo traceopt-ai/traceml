@@ -21,9 +21,11 @@ STEP_TIME_EVENT_NAMES: Mapping[str, str] = {
     "forward": "_traceml_internal:forward_time",
     "backward": "_traceml_internal:backward_time",
     "optimizer_step": "_traceml_internal:optimizer_step",
-    "step_time": "_traceml_internal:step_time",
+    # The raw event is renamed by the instrumentation migration. Until then,
+    # this decoder maps its historical spelling to the canonical inner metric.
+    "traced_step_time": "_traceml_internal:step_time",
 }
-"""Persisted event names keyed by their canonical Step Time metric."""
+"""Persisted event names keyed by canonical timing metrics."""
 
 _VALUE_FIELDS: Mapping[str, str] = {
     "input_wait": "input_wait_ms",
@@ -32,11 +34,14 @@ _VALUE_FIELDS: Mapping[str, str] = {
     "backward": "backward_ms",
     "optimizer_step": "optimizer_step_ms",
     "step_time": "step_time_ms",
+    "traced_step_time": "traced_step_time_ms",
     "compute": "compute_ms",
     "residual_proxy": "residual_ms",
-    "total_step": "total_step_ms",
-    "dataloader_fetch": "dataloader_cpu_ms",
-    "total_step_cpu": "total_step_cpu_ms",
+    "step_time_cpu": "step_time_cpu_ms",
+    "step_time_gpu": "step_time_gpu_ms",
+    "traced_step_time_cpu": "traced_step_time_cpu_ms",
+    "traced_step_time_gpu": "traced_step_time_gpu_ms",
+    "dataloader_fetch": "dataloader_fetch_cpu_ms",
 }
 
 
@@ -115,9 +120,11 @@ class StepTimeValues:
     """Typed timing values for one step or one rank-window average.
 
     The phase fields use the clock selected for the complete analysis window.
+    ``step_time_ms`` is the selected-clock outer duration and
+    ``traced_step_time_ms`` is the selected-clock inner trace envelope.
+    Clock-qualified fields preserve both aggregate clocks independently.
     ``None`` means the signal was unavailable; a measured zero remains
-    ``0.0``. The two ``*_cpu_ms`` fields retain the historical CPU-clock
-    values required by final-summary compatibility output.
+    ``0.0``.
     """
 
     input_wait_ms: Optional[float] = None
@@ -126,11 +133,14 @@ class StepTimeValues:
     backward_ms: Optional[float] = None
     optimizer_step_ms: Optional[float] = None
     step_time_ms: Optional[float] = None
+    traced_step_time_ms: Optional[float] = None
     compute_ms: Optional[float] = None
     residual_ms: Optional[float] = None
-    total_step_ms: Optional[float] = None
-    dataloader_cpu_ms: Optional[float] = None
-    total_step_cpu_ms: Optional[float] = None
+    step_time_cpu_ms: Optional[float] = None
+    step_time_gpu_ms: Optional[float] = None
+    traced_step_time_cpu_ms: Optional[float] = None
+    traced_step_time_gpu_ms: Optional[float] = None
+    dataloader_fetch_cpu_ms: Optional[float] = None
 
     def value(self, metric: str) -> Optional[float]:
         """Return one canonical value by its internal metric key."""
@@ -217,7 +227,7 @@ class StepTimeWindow:
     )
     rank_facts: tuple[StepTimeRankFacts, ...] = ()
     metrics: list[StepTimeMetric] = field(default_factory=list)
-    iteration_ranks: tuple[int, ...] = ()
+    step_ranks: tuple[int, ...] = ()
     compute_ranks: tuple[int, ...] = ()
     straggler_ranks: tuple[int, ...] = ()
     composition_representative_rank: Optional[int] = None
