@@ -18,6 +18,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
+
 SAMPLER_NAME = "BatchSizeSampler"
 RETENTION_TABLES = ("batch_size_samples",)
 
@@ -54,23 +56,27 @@ class BatchSizePayloadIdentity:
     runtime_pid: Optional[int]
 
 
-def _payload_identity(
-    payload_dict: Dict[str, Any]
-) -> BatchSizePayloadIdentity:
-    """Return storage identity for one BatchSizeSampler payload."""
-    global_rank = _optional_int(payload_dict.get("global_rank"))
-    legacy_rank = _optional_int(payload_dict.get("rank"))
+def _payload_identity(meta: TelemetryMeta) -> BatchSizePayloadIdentity:
+    """
+    Return storage identity for one BatchSizeSampler payload.
+
+    ``global_rank`` is the canonical distributed identity. ``rank`` is still
+    written as the same value so current live renderers keep working until
+    they move to explicit identity fields.
+    """
+    global_rank = _optional_int(meta.global_rank)
+    legacy_rank = _optional_int(meta.rank)
     rank = global_rank if global_rank is not None else legacy_rank
 
     return BatchSizePayloadIdentity(
         rank=rank,
         global_rank=global_rank,
-        local_rank=_optional_int(payload_dict.get("local_rank")),
-        world_size=_optional_int(payload_dict.get("world_size")),
-        local_world_size=_optional_int(payload_dict.get("local_world_size")),
-        node_rank=_optional_int(payload_dict.get("node_rank")),
-        hostname=_optional_str(payload_dict.get("hostname")),
-        runtime_pid=_optional_int(payload_dict.get("pid")),
+        local_rank=_optional_int(meta.local_rank),
+        world_size=_optional_int(meta.world_size),
+        local_world_size=_optional_int(meta.local_world_size),
+        node_rank=_optional_int(meta.node_rank),
+        hostname=_optional_str(meta.hostname),
+        runtime_pid=_optional_int(meta.pid),
     )
 
 
@@ -117,11 +123,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def build_rows(
-    payload_dict: Dict[str, Any],
+    envelope: TelemetryEnvelope,
     recv_ts_ns: int,
 ) -> Dict[str, list[tuple]]:
     """
     Build SQLite projection rows from one decoded BatchSizeSampler payload.
+
+    Parameters
+    ----------
+    envelope:
+        Canonical telemetry envelope from the main SQLite writer.
+    recv_ts_ns:
+        Receive timestamp assigned by the main writer for this payload.
 
     Returns
     -------
@@ -130,13 +143,13 @@ def build_rows(
     """
     out: Dict[str, list[tuple]] = {"batch_size_samples": []}
 
-    sampler = payload_dict.get("sampler")
-    if not accepts_sampler(str(sampler) if sampler is not None else None):
+    sampler = envelope.meta.sampler
+    if not accepts_sampler(sampler):
         return out
 
-    identity = _payload_identity(payload_dict)
+    identity = _payload_identity(envelope.meta)
 
-    tables = payload_dict.get("tables")
+    tables = envelope.tables
     if not isinstance(tables, dict):
         return out
 

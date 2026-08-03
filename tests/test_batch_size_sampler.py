@@ -17,6 +17,7 @@ import traceml_ai.utils.batch_size as bs_module
 from traceml_ai.aggregator.sqlite_writers import batch_size as bs_writer
 from traceml_ai.samplers.batch_size_sampler import BatchSizeSampler
 from traceml_ai.samplers.schema.batch_size_schema import BatchSizeSample
+from traceml_ai.telemetry.envelope import TelemetryEnvelope, TelemetryMeta
 from traceml_ai.utils.batch_size import (
     BatchSizeBatch,
     BatchSizeEvent,
@@ -217,30 +218,36 @@ class TestBatchSizeSqlWriter:
             conn.close()
 
     def test_build_rows_produces_correct_tuple(self):
-        payload = {
-            "rank": 1,
-            "global_rank": 1,
-            "local_rank": 1,
-            "world_size": 2,
-            "local_world_size": 2,
-            "node_rank": 0,
-            "hostname": "host-a",
-            "pid": 42,
-            "sampler": "BatchSizeSampler",
-            "timestamp": 1000.0,
-            "tables": {
-                "BatchSizeTable": [
-                    {
-                        "seq": 5,
-                        "timestamp": 1001.5,
-                        "step": 3,
-                        "bytes_total": 2048,
-                        "n_transfers": 2,
-                    }
-                ]
+        envelope = TelemetryEnvelope(
+            meta=TelemetryMeta.from_mapping(
+                {
+                    "rank": 1,
+                    "global_rank": 1,
+                    "local_rank": 1,
+                    "world_size": 2,
+                    "local_world_size": 2,
+                    "node_rank": 0,
+                    "hostname": "host-a",
+                    "pid": 42,
+                    "sampler": "BatchSizeSampler",
+                    "timestamp": 1000.0,
+                }
+            ),
+            body={
+                "tables": {
+                    "BatchSizeTable": [
+                        {
+                            "seq": 5,
+                            "timestamp": 1001.5,
+                            "step": 3,
+                            "bytes_total": 2048,
+                            "n_transfers": 2,
+                        }
+                    ]
+                }
             },
-        }
-        out = bs_writer.build_rows(payload, recv_ts_ns=10**12)
+        )
+        out = bs_writer.build_rows(envelope=envelope, recv_ts_ns=10**12)
         rows = out["batch_size_samples"]
         assert len(rows) == 1
         row = rows[0]
@@ -259,41 +266,47 @@ class TestBatchSizeSqlWriter:
         assert row[13] == 2
 
     def test_build_rows_rejects_other_sampler(self):
-        payload = {
-            "sampler": "StepTimeSampler",
-            "tables": {"x": [{"seq": 1}]},
-        }
-        out = bs_writer.build_rows(payload, recv_ts_ns=0)
+        envelope = TelemetryEnvelope(
+            meta=TelemetryMeta.from_mapping({"sampler": "StepTimeSampler"}),
+            body={"tables": {"x": [{"seq": 1}]}},
+        )
+        out = bs_writer.build_rows(envelope=envelope, recv_ts_ns=0)
         assert out == {"batch_size_samples": []}
 
     def test_insert_rows_writes_to_table(self):
         conn = sqlite3.connect(":memory:")
         try:
             bs_writer.init_schema(conn)
-            payload = {
-                "rank": 0,
-                "global_rank": 0,
-                "sampler": "BatchSizeSampler",
-                "tables": {
-                    "BatchSizeTable": [
-                        {
-                            "seq": 1,
-                            "timestamp": 100.0,
-                            "step": 1,
-                            "bytes_total": 64,
-                            "n_transfers": 1,
-                        },
-                        {
-                            "seq": 2,
-                            "timestamp": 101.0,
-                            "step": 2,
-                            "bytes_total": 128,
-                            "n_transfers": 4,
-                        },
-                    ]
+            envelope = TelemetryEnvelope(
+                meta=TelemetryMeta.from_mapping(
+                    {
+                        "rank": 0,
+                        "global_rank": 0,
+                        "sampler": "BatchSizeSampler",
+                    }
+                ),
+                body={
+                    "tables": {
+                        "BatchSizeTable": [
+                            {
+                                "seq": 1,
+                                "timestamp": 100.0,
+                                "step": 1,
+                                "bytes_total": 64,
+                                "n_transfers": 1,
+                            },
+                            {
+                                "seq": 2,
+                                "timestamp": 101.0,
+                                "step": 2,
+                                "bytes_total": 128,
+                                "n_transfers": 4,
+                            },
+                        ]
+                    }
                 },
-            }
-            rows = bs_writer.build_rows(payload, recv_ts_ns=1)
+            )
+            rows = bs_writer.build_rows(envelope=envelope, recv_ts_ns=1)
             bs_writer.insert_rows(conn, rows)
             persisted = conn.execute(
                 "SELECT step, bytes_total, n_transfers FROM batch_size_samples "
