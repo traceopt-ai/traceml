@@ -46,7 +46,7 @@ LiveStepTimeFreshness = Literal["cold", "live", "bridged", "expired"]
 
 @dataclass(frozen=True, slots=True)
 class StepTimeAnalysis:
-    """Immutable result shared by future Step Time presenters."""
+    """Facts and diagnosis shared by Step Time presenters."""
 
     request: StepTimeLoadRequest
     snapshot: StepTimeRepositorySnapshot
@@ -65,7 +65,6 @@ class LiveStepTimeResult:
 
     freshness: LiveStepTimeFreshness
     analysis: StepTimeAnalysis
-    status_message: str
 
 
 @dataclass(slots=True)
@@ -149,7 +148,6 @@ def _analyze_snapshot(
     diagnosis = diagnose_step_time_window(
         window,
         policy=policy,
-        include_attribution=False,
     )
     return StepTimeAnalysis(
         request=request,
@@ -213,31 +211,23 @@ class LiveStepTimeSession:
         with self._lock:
             try:
                 analysis = self._run_pipeline()
-            except Exception as exc:
+            except Exception:
                 self._logger.exception("Live Step Time refresh failed")
                 return self._missing_result(
-                    message=f"STALE (exception: {type(exc).__name__})",
                     empty_analysis=self._empty_analysis,
                 )
 
             self._last_observed = analysis
             if not analysis.window.metrics:
                 return self._missing_result(
-                    message="STALE (no metrics this tick)",
                     empty_analysis=analysis,
                 )
 
             self._last_good = analysis
             self._last_good_at = float(self._monotonic())
-            message = "OK"
-            if analysis.window.worst_rank is not None:
-                message += (
-                    " | diagnosis_worst_rank=" f"r{analysis.window.worst_rank}"
-                )
             return LiveStepTimeResult(
                 freshness="live",
                 analysis=analysis,
-                status_message=message,
             )
 
     def _run_pipeline(self) -> StepTimeAnalysis:
@@ -257,7 +247,6 @@ class LiveStepTimeSession:
     def _missing_result(
         self,
         *,
-        message: str,
         empty_analysis: StepTimeAnalysis,
     ) -> LiveStepTimeResult:
         """Bridge a transient gap, or expose a cold/expired empty result."""
@@ -267,7 +256,6 @@ class LiveStepTimeSession:
                 return LiveStepTimeResult(
                     freshness="bridged",
                     analysis=self._last_good,
-                    status_message=message,
                 )
 
         freshness: LiveStepTimeFreshness = (
@@ -276,7 +264,6 @@ class LiveStepTimeSession:
         return LiveStepTimeResult(
             freshness=freshness,
             analysis=empty_analysis,
-            status_message="No fresh step-combined data",
         )
 
 

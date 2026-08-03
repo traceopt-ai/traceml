@@ -17,7 +17,6 @@ from typing import Iterator
 import traceml_ai.step_time as step_time_package
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.step_time import model
-from traceml_ai.utils import step_time_window as legacy_window
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _PACKAGE_ROOT = _PROJECT_ROOT / "src" / "traceml_ai" / "step_time"
@@ -89,11 +88,48 @@ def test_typed_analysis_facts_are_exported_without_loading_analyzer() -> None:
     assert "traceml_ai.step_time.pipeline" not in dependencies
 
 
-def test_window_utility_reexports_canonical_contracts() -> None:
-    """Preserve the former window import path without duplicate classes."""
-    assert legacy_window.StepTimeWindow is model.StepTimeWindow
-    assert legacy_window.DiagnosisClock is model.DiagnosisClock
-    assert legacy_window.DIAGNOSIS_CLOCK_KEY == model.DIAGNOSIS_CLOCK_KEY
+def test_removed_utility_adapters_do_not_return() -> None:
+    """Keep production callers on the repository and typed window APIs."""
+    utility_root = _PROJECT_ROOT / "src" / "traceml_ai" / "utils"
+
+    assert not (utility_root / "step_time_window.py").exists()
+    assert not (utility_root / "step_time_sqlite.py").exists()
+
+
+def test_pipeline_is_the_only_builtin_orchestrator() -> None:
+    """Keep direct diagnosis limited to its implementation and pipeline."""
+    source_root = _PROJECT_ROOT / "src" / "traceml_ai"
+    sources = {
+        path.relative_to(source_root).as_posix(): path.read_text(
+            encoding="utf-8"
+        )
+        for path in source_root.glob("**/*.py")
+    }
+
+    diagnosis_owners = {
+        path
+        for path, source in sources.items()
+        if "diagnose_step_time_window(" in source
+    }
+    assert diagnosis_owners == {
+        "diagnostics/step_time/api.py",
+        "step_time/pipeline.py",
+    }
+    assert {
+        path
+        for path, source in sources.items()
+        if "analyzer.analyze(" in source
+    } == {"step_time/pipeline.py"}
+    repository_calls = (
+        "repository.load_live(",
+        "repository.load_summary(",
+    )
+    for repository_call in repository_calls:
+        assert {
+            path
+            for path, source in sources.items()
+            if repository_call in source
+        } == {"step_time/pipeline.py"}
 
 
 def test_diagnosis_context_accepts_only_the_canonical_window() -> None:
@@ -101,7 +137,6 @@ def test_diagnosis_context_accepts_only_the_canonical_window() -> None:
     assert tuple(inspect.signature(build_step_time_context).parameters) == (
         "window",
         "thresholds",
-        "training_strategy",
     )
     context_source = (
         _PROJECT_ROOT
@@ -145,6 +180,18 @@ def test_metric_shape_has_no_repeated_window_wrappers() -> None:
     assert "clock" not in metric_fields
     assert "coverage" not in metric_fields
     assert "summary" not in metric_fields
+    assert {
+        "window_size",
+        "steps_used",
+        "skew_ratio",
+        "measured_ranks",
+    }.isdisjoint(metric_fields)
+    assert {"steps", "sum"}.isdisjoint(
+        field.name for field in fields(model.StepTimeSeries)
+    )
+    assert {"completed_step", "incomplete"}.isdisjoint(
+        field.name for field in fields(model.StepTimeCoverage)
+    )
     assert not hasattr(model, "StepTimeSummary")
     assert not hasattr(step_time_package, "StepTimeSummary")
 
@@ -184,21 +231,73 @@ def test_cli_presenter_has_no_data_or_diagnosis_dependencies() -> None:
     assert "StepTimeDashboardAdapter" not in source
 
 
-def test_dashboard_computer_is_only_a_compatibility_projection() -> None:
-    """Do not let SQL, clocks, or freshness return to the PR7 adapter."""
-    computer = (
+def test_removed_mapping_diagnosis_apis_do_not_return() -> None:
+    """Keep the deleted rank-map model and diagnosis path deleted."""
+    diagnosis = (
+        _PROJECT_ROOT / "src" / "traceml_ai" / "diagnostics" / "step_time"
+    )
+    api_source = (diagnosis / "api.py").read_text(encoding="utf-8")
+
+    assert not (diagnosis / "compat.py").exists()
+    assert "def build_step_diagnosis(" not in api_source
+    assert "def build_step_diagnosis_result(" not in api_source
+
+
+def test_dashboard_compatibility_types_are_removed() -> None:
+    """Keep dashboard consumers on the canonical live result."""
+    assert not (
         _PROJECT_ROOT
         / "src"
         / "traceml_ai"
         / "renderers"
         / "step_time"
         / "compute.py"
-    )
-    dependencies = set(_imports(computer))
-    source = computer.read_text(encoding="utf-8")
+    ).exists()
+    assert not hasattr(model, "StepTimeResult")
+    assert not hasattr(step_time_package, "StepTimeResult")
 
-    assert "sqlite3" not in dependencies
-    assert "time" not in dependencies
-    assert "traceml_ai.utils.step_time_sqlite" not in dependencies
-    assert "def compute_cli(" not in source
-    assert "def _stale_or_empty(" not in source
+
+def test_dashboard_diagnostics_has_no_provider_or_stale_cache() -> None:
+    """Keep live state in the one session owned by the dashboard driver."""
+    renderer = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "renderers"
+        / "model_diagnostics"
+        / "renderer.py"
+    )
+    source = renderer.read_text(encoding="utf-8")
+
+    assert "StepCombinedComputer" not in source
+    names = {
+        node.id
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Name)
+    }
+    assert "LiveStepTimeSession" not in names
+    assert "_cached" not in source
+
+
+def test_dashboard_sections_do_not_cache_semantic_step_time_payloads() -> None:
+    """Allow render signatures, but never retain a last-good domain result."""
+    sections = (
+        _PROJECT_ROOT
+        / "src"
+        / "traceml_ai"
+        / "aggregator"
+        / "display_drivers"
+        / "nicegui_sections"
+    )
+    hero = (sections / "model_combined_section.py").read_text(encoding="utf-8")
+    diagnostics = (sections / "model_diagnostics_section.py").read_text(
+        encoding="utf-8"
+    )
+
+    hero_names = {
+        node.id
+        for node in ast.walk(ast.parse(hero))
+        if isinstance(node, ast.Name)
+    }
+    assert "StepTimeResult" not in hero_names
+    assert '"_last"' not in diagnostics

@@ -351,11 +351,7 @@ class ComputeBoundRule(_BaseStepTimeRule):
         ):
             return None
 
-        label = (
-            context.largest_compute.label
-            if context.largest_compute is not None
-            else "Compute"
-        )
+        label = context.largest_compute or "Compute"
         return self._issue(
             kind="COMPUTE_BOUND",
             status="COMPUTE-BOUND",

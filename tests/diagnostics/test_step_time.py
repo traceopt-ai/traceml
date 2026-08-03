@@ -14,13 +14,13 @@ import pytest
 from traceml_ai.diagnostics.step_time.api import (
     DEFAULT_THRESHOLDS,
     StepDiagnosis,
-    build_step_diagnosis_result,
+    diagnose_step_time_window,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
-from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import (
     LIVE_STEP_TIME_POLICY,
     SUMMARY_STEP_TIME_POLICY,
+    StepTimeDiagnosisPolicy,
 )
 from traceml_ai.diagnostics.step_time.rules import (
     ComputeBoundRule,
@@ -30,18 +30,20 @@ from traceml_ai.diagnostics.step_time.rules import (
     ResidualHeavyRule,
 )
 from traceml_ai.diagnostics.step_time.trend import build_step_trend_note
+from traceml_ai.renderers.step_time.renderer import format_cli_diagnosis
 from traceml_ai.step_time.model import (
     StepTimeMetric,
     StepTimeSeries,
+    StepTimeValues,
 )
 from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
 )
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
-    diagnose_step_time_window,
+from tests.step_time.factories import (
+    rank_average,
+    window_from_events,
+    window_from_rank_averages,
 )
-from tests.step_time.factories import window_from_rank_averages
 
 
 def _time_metric(
@@ -51,25 +53,18 @@ def _time_metric(
     worst: float,
     worst_rank: int | None = 1,
     skew: float = 0.0,
-    world_size: int = 2,
     steps: int = 64,
 ) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
         series=StepTimeSeries(
-            steps=list(range(steps)),
             median=[median] * steps,
             worst=[worst] * steps,
-            sum=[median * world_size] * steps,
         ),
-        window_size=steps,
-        steps_used=steps,
         median_total=median,
         worst_total=worst,
         worst_rank=worst_rank,
-        skew_ratio=skew,
         skew_pct=skew,
-        measured_ranks=tuple(range(world_size)),
     )
 
 
@@ -143,7 +138,6 @@ def _metrics_from_per_rank_timing(
     steps: int = 64,
 ) -> tuple[StepTimeMetric, ...]:
     metrics: list[StepTimeMetric] = []
-    world_size = len(per_rank_timing)
     for key in (
         "input_wait",
         "h2d",
@@ -171,11 +165,34 @@ def _metrics_from_per_rank_timing(
                 worst=worst,
                 worst_rank=worst_rank,
                 skew=skew,
-                world_size=world_size,
                 steps=steps,
             )
         )
     return tuple(metrics)
+
+
+def _diagnose_rank_map(
+    metrics: tuple[StepTimeMetric, ...],
+    thresholds=DEFAULT_THRESHOLDS,
+    *,
+    per_rank_timing: dict[int, dict[str, float]],
+    diagnosis_clock: str = "cpu",
+    training_strategy: str = "ddp",
+):
+    """Diagnose a concise typed fixture without a production map adapter."""
+    window = window_from_rank_averages(
+        per_rank_timing,
+        metrics=metrics,
+        clock="gpu" if diagnosis_clock == "gpu" else "cpu",
+        training_strategy=training_strategy,
+    )
+    return diagnose_step_time_window(
+        window,
+        policy=StepTimeDiagnosisPolicy(
+            name="test",
+            thresholds=thresholds,
+        ),
+    )
 
 
 def _rank_context(
@@ -193,7 +210,6 @@ def _rank_context(
     return build_step_time_context(
         window=window,
         thresholds=DEFAULT_THRESHOLDS,
-        training_strategy=training_strategy,
     )
 
 
@@ -202,7 +218,7 @@ def _diagnose_summary_events(
     *,
     max_rows: int,
 ):
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         per_rank_steps,
         max_rows=max_rows,
     )
@@ -225,7 +241,6 @@ def _single_rank_step_metrics(
             median=step,
             worst=step,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -233,7 +248,6 @@ def _single_rank_step_metrics(
             median=dataloader,
             worst=dataloader,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -241,7 +255,6 @@ def _single_rank_step_metrics(
             median=forward,
             worst=forward,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -249,7 +262,6 @@ def _single_rank_step_metrics(
             median=backward,
             worst=backward,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -257,7 +269,6 @@ def _single_rank_step_metrics(
             median=optimizer,
             worst=optimizer,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -265,7 +276,6 @@ def _single_rank_step_metrics(
             median=residual,
             worst=residual,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
     )
@@ -303,19 +313,20 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
         },
     }
 
-    selected = build_step_time_window_from_events(
+    selected = window_from_events(
         {0: {1: events}},
         max_rows=1,
         expected_ranks=[0],
     )
 
     assert selected.clock == "gpu"
-    assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(4.0)
-    assert selected.per_rank_timing[0]["step_time"] == pytest.approx(20.0)
+    average = rank_average(selected, 0)
+    assert average.input_wait_ms == pytest.approx(4.0)
+    assert average.step_time_ms == pytest.approx(20.0)
     # optimizer_step and h2d were never measured: the residual must not
     # silently absorb them as zeros.
-    assert "residual_proxy" not in selected.per_rank_timing[0]
-    assert "optimizer_step" not in selected.per_rank_timing[0]
+    assert average.residual_ms is None
+    assert average.optimizer_step_ms is None
     rank_facts = selected.rank(0)
     assert rank_facts is not None
     step_values = rank_facts.steps[0].values
@@ -323,18 +334,19 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert step_values.step_time_ms == pytest.approx(20.0)
 
     events["_traceml_internal:dataloader_next"]["cuda:0"]["gpu_ms"] = None
-    selected = build_step_time_window_from_events(
+    selected = window_from_events(
         {0: {1: events}},
         max_rows=1,
         expected_ranks=[0],
     )
 
     assert selected.clock == "cpu"
-    assert selected.per_rank_timing[0]["input_wait"] == pytest.approx(12.0)
-    assert selected.per_rank_timing[0]["step_time"] == pytest.approx(60.0)
+    average = rank_average(selected, 0)
+    assert average.input_wait_ms == pytest.approx(12.0)
+    assert average.step_time_ms == pytest.approx(60.0)
     # optimizer_step was never measured, so compute and residual stay
     # underivable on the cpu clock as well.
-    assert "residual_proxy" not in selected.per_rank_timing[0]
+    assert average.residual_ms is None
 
     duration_only_events = {
         "_traceml_internal:dataloader_next": {"cpu": {"duration_ms": 12.0}},
@@ -344,7 +356,7 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
         "_traceml_internal:backward_time": {"cpu": {"duration_ms": 30.0}},
         "_traceml_internal:optimizer_step": {"cpu": {"duration_ms": 5.0}},
     }
-    selected = build_step_time_window_from_events(
+    selected = window_from_events(
         {0: {1: duration_only_events}},
         max_rows=1,
         expected_ranks=[0],
@@ -353,7 +365,7 @@ def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
     assert selected.clock == "cpu"
     # duration-only stats carry no selected-clock timing at all: every
     # metric is missing, not measured-as-zero.
-    assert selected.per_rank_timing[0] == {}
+    assert rank_average(selected, 0) == StepTimeValues()
     assert selected.metrics == []
 
 
@@ -728,7 +740,7 @@ def test_input_bound_remains_primary_when_h2d_is_also_material() -> None:
         )
     }
 
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
         diagnosis_clock="gpu",
@@ -753,7 +765,7 @@ def test_step_time_primary_orders_by_severity_before_impact() -> None:
         )
     }
 
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
     )
@@ -779,7 +791,7 @@ def test_step_time_primary_orders_equal_severity_by_impact() -> None:
         )
     }
 
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
     )
@@ -827,11 +839,11 @@ def test_rank_straggler_wins_only_an_exact_impact_tie() -> None:
         ),
     }
 
-    tied_result = build_step_diagnosis_result(
+    tied_result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(tied),
         per_rank_timing=tied,
     )
-    typical_result = build_step_diagnosis_result(
+    typical_result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(higher_typical),
         per_rank_timing=higher_typical,
     )
@@ -863,7 +875,7 @@ def test_step_time_primary_uses_capped_severity_before_impact() -> None:
         )
     }
 
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank, steps=5),
         per_rank_timing=per_rank,
     )
@@ -912,7 +924,7 @@ def test_compute_bound_is_secondary_to_rank_straggler() -> None:
         ),
     }
 
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
     )
@@ -978,7 +990,7 @@ def test_rank_straggler_classifies_culprit_excess(
     expected_kind: str,
     expected_phase: str,
 ) -> None:
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
     )
@@ -1045,7 +1057,7 @@ def test_fsdp_rank_straggler_uses_input_h2d_or_unattributed(
     expected_kind: str,
     expected_phase: str,
 ) -> None:
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
         training_strategy="fsdp",
@@ -1223,11 +1235,11 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
             step_time=100.0,
         ),
     }
-    early = build_step_diagnosis_result(
+    early = _diagnose_rank_map(
         _metrics_from_per_rank_timing(ddp_per_rank, steps=5),
         per_rank_timing=ddp_per_rank,
     )
-    confident = build_step_diagnosis_result(
+    confident = _diagnose_rank_map(
         _metrics_from_per_rank_timing(ddp_per_rank, steps=20),
         per_rank_timing=ddp_per_rank,
     )
@@ -1251,7 +1263,7 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
             step_time=100.0,
         ),
     }
-    fsdp = build_step_diagnosis_result(
+    fsdp = _diagnose_rank_map(
         _metrics_from_per_rank_timing(fsdp_per_rank, steps=20),
         per_rank_timing=fsdp_per_rank,
         training_strategy="fsdp",
@@ -1352,7 +1364,7 @@ def test_ddp_missing_forward_does_not_emit_compute_straggler() -> None:
         0: _timing_row(forward=100.0, backward=20.0, optimizer=0.0),
         1: _timing_row(forward=0.0, backward=120.0, optimizer=0.0),
     }
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
     )
@@ -1385,7 +1397,7 @@ def test_step_time_primary_prefers_rank_straggler_over_residual_heavy() -> (
         1: _timing_row(dataloader=10.0, backward=120.0, residual=80.0),
     }
 
-    result = build_step_diagnosis_result(
+    result = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank),
         per_rank_timing=per_rank,
     )
@@ -1402,7 +1414,7 @@ def test_step_time_early_warning_band_caps_severity() -> None:
         0: _timing_row(dataloader=50.0, step_time=100.0),
     }
 
-    warmup = build_step_diagnosis_result(
+    warmup = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank, steps=1),
         per_rank_timing=per_rank,
     )
@@ -1412,7 +1424,7 @@ def test_step_time_early_warning_band_caps_severity() -> None:
         == "Only 1 step per rank available; diagnosis requires 2."
     )
 
-    warning = build_step_diagnosis_result(
+    warning = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank, steps=5),
         per_rank_timing=per_rank,
     )
@@ -1420,7 +1432,7 @@ def test_step_time_early_warning_band_caps_severity() -> None:
     assert warning.primary.severity == "warn"
     assert warning.issues[0].severity == "warn"
 
-    confident = build_step_diagnosis_result(
+    confident = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank, steps=20),
         per_rank_timing=per_rank,
     )
@@ -1428,7 +1440,7 @@ def test_step_time_early_warning_band_caps_severity() -> None:
     assert confident.primary.severity == "crit"
     assert confident.issues[0].severity == "crit"
 
-    fsdp = build_step_diagnosis_result(
+    fsdp = _diagnose_rank_map(
         _metrics_from_per_rank_timing(per_rank, steps=20),
         per_rank_timing=per_rank,
         training_strategy="fsdp",
@@ -1463,7 +1475,7 @@ def test_builtin_live_and_summary_policies_use_identical_thresholds() -> None:
     assert live_thresholds is summary_thresholds
     assert live_thresholds.compute_bound_share_warn == pytest.approx(0.90)
 
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {0: _summary_step_events(input_wait_gpu=None, steps=40)},
         max_rows=100,
     )
@@ -1614,10 +1626,8 @@ def test_trend_abstains_when_required_share_is_unavailable(
     metric = replace(
         metric,
         series=StepTimeSeries(
-            steps=list(range(120)),
             median=rising,
             worst=rising,
-            sum=rising,
         ),
     )
 
@@ -1660,5 +1670,4 @@ def test_largest_compute_phase_uses_one_eligible_rank_cohort() -> None:
         },
     )
 
-    assert context.largest_compute is not None
-    assert context.largest_compute.label == "Backward"
+    assert context.largest_compute == "Backward"

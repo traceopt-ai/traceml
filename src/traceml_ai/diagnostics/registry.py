@@ -10,11 +10,14 @@ diagnostics orchestration loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Optional, Sequence
 
 from traceml_ai.core.registry import Registry
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml_ai.step_time.model import StepTimeWindow
+
+if TYPE_CHECKING:
+    from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 
 
 @dataclass(frozen=True)
@@ -29,7 +32,7 @@ class ModelDiagnosticContext:
 
     step_memory_metrics: Sequence[StepMemoryCombinedMetric]
     step_time_window: Optional[StepTimeWindow] = None
-    step_time_training_strategy: str = "ddp"
+    step_time_diagnosis: Optional[StepDiagnosis] = None
     step_memory_status_message: Optional[str] = None
     gpu_total_bytes: Optional[float] = None
 

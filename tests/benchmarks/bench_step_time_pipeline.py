@@ -41,22 +41,20 @@ from tests.step_time.scenarios import (  # noqa: E402
 from traceml_ai.aggregator.sqlite_writers.step_time import (  # noqa: E402
     init_schema as init_step_time_schema,
 )
+from traceml_ai.diagnostics.step_time.api import (  # noqa: E402
+    diagnose_step_time_window,
+)
 from traceml_ai.diagnostics.step_time.policy import (  # noqa: E402
     LIVE_STEP_TIME_POLICY,
-)
-from traceml_ai.renderers.step_time.compute import (  # noqa: E402
-    StepCombinedComputer,
 )
 from traceml_ai.reporting.sections.step_time import (  # noqa: E402
     StepTimeSummarySection,
 )
+from traceml_ai.step_time.analysis import StepTimeAnalyzer  # noqa: E402
 from traceml_ai.step_time.model import StepTimeLoadRequest  # noqa: E402
 from traceml_ai.step_time.pipeline import LiveStepTimeSession  # noqa: E402
-from traceml_ai.utils.step_time_sqlite import (  # noqa: E402
-    load_step_time_window_from_sqlite,
-)
-from traceml_ai.utils.step_time_window import (  # noqa: E402
-    diagnose_step_time_window,
+from traceml_ai.step_time.sqlite import (  # noqa: E402
+    SQLiteStepTimeRepository,
 )
 
 
@@ -123,10 +121,15 @@ def _benchmark_rank_count(
 
     def load_window():
         with sqlite3.connect(db_path) as conn:
-            return load_step_time_window_from_sqlite(
-                conn,
-                max_rows=window_size,
-                lookback_factor=4,
+            snapshot = SQLiteStepTimeRepository(conn).load_live(
+                StepTimeLoadRequest(
+                    window_size=window_size,
+                    lookback_factor=4,
+                )
+            )
+            return StepTimeAnalyzer().analyze(
+                snapshot,
+                window_size=window_size,
             )
 
     loaded = load_window()
@@ -137,13 +140,12 @@ def _benchmark_rank_count(
             lookback_factor=4,
         ),
     )
-    dashboard_hero = StepCombinedComputer(
+    dashboard = LiveStepTimeSession(
         str(db_path),
-        window_size=window_size,
-    )
-    dashboard_rail = StepCombinedComputer(
-        str(db_path),
-        window_size=window_size,
+        request=StepTimeLoadRequest(
+            window_size=window_size,
+            lookback_factor=4,
+        ),
     )
     summary = StepTimeSummarySection(max_rows=window_size)
 
@@ -156,20 +158,13 @@ def _benchmark_rank_count(
         (
             "diagnose",
             lambda: diagnose_step_time_window(
-                loaded.window,
+                loaded,
                 policy=LIVE_STEP_TIME_POLICY,
-                training_strategy=loaded.training_strategy,
             ),
         ),
         ("one live provider", live_cache_miss),
         ("unchanged live cache hit", live.refresh),
-        (
-            "dashboard Step Time refresh",
-            lambda: (
-                dashboard_hero.compute_dashboard(),
-                dashboard_rail.compute_dashboard(),
-            ),
-        ),
+        ("dashboard shared Step Time refresh", dashboard.refresh),
         ("final summary", lambda: summary.build(str(db_path))),
     )
     return [

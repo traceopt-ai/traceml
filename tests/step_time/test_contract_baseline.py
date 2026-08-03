@@ -25,21 +25,21 @@ from tests.step_time.scenarios import (
     StepTimeScenario,
     create_step_time_database,
 )
+from tests.step_time.factories import rank_average
 from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
+from traceml_ai.diagnostics.step_time.api import diagnose_step_time_window
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedResult
 from traceml_ai.renderers.step_time import renderer as cli_renderer_module
-from traceml_ai.renderers.step_time.compute import StepCombinedComputer
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
-from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
-from traceml_ai.reporting.sections.step_time.model import (
+from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
+from traceml_ai.reporting.sections.step_time import (
     STEP_TIME_METRIC_NAMES,
+    StepTimeSummarySection,
 )
 from traceml_ai.step_time.model import StepTimeLoadRequest
 from traceml_ai.step_time.pipeline import LiveStepTimeSession
-from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 _WINDOW_KEYS = {
     "input_wait",
@@ -265,10 +265,8 @@ def test_canonical_window_matches_golden(
     assert window.rank_universe == tuple(sorted(scenario.profiles))
     assert window.coverage.expected_steps == len(scenario.steps)
     assert window.coverage.steps_used == len(scenario.steps)
-    assert window.coverage.completed_step == scenario.steps[-1]
     assert window.coverage.world_size == len(scenario.profiles)
     assert window.coverage.ranks_present == len(scenario.profiles)
-    assert window.coverage.incomplete is False
 
     expected_rows = {
         rank: {
@@ -277,12 +275,15 @@ def test_canonical_window_matches_golden(
         }
         for rank in scenario.profiles
     }
-    assert set(window.per_rank_timing) == set(expected_rows)
+    assert {facts.global_rank for facts in window.rank_facts} == set(
+        expected_rows
+    )
     for rank, expected in expected_rows.items():
+        values = rank_average(window, rank)
         actual = {
             key: value
-            for key, value in window.per_rank_timing[rank].items()
-            if key in _WINDOW_KEYS
+            for key in _WINDOW_KEYS
+            if (value := values.value(key)) is not None
         }
         assert actual == pytest.approx(expected)
 
@@ -306,7 +307,6 @@ def test_canonical_window_matches_golden(
     diagnosis = diagnose_step_time_window(
         window,
         policy=LIVE_STEP_TIME_POLICY,
-        training_strategy=window.training_strategy,
     )
     expected = EXPECTED_DIAGNOSIS[scenario.name]
     assert diagnosis.primary.kind == expected.kind
@@ -337,7 +337,7 @@ def test_cli_dashboard_summary_diagnosis_parity(
         "format_cli_diagnosis",
         capture_cli,
     )
-    cli_renderer = StepCombinedRenderer(
+    cli_renderer = StepTimeRenderer(
         LiveStepTimeSession(
             str(db_path),
             request=StepTimeLoadRequest(
@@ -349,11 +349,14 @@ def test_cli_dashboard_summary_diagnosis_parity(
     cli_renderer.get_panel_renderable()
     cli_diagnosis = captured["diagnosis"]
 
-    dashboard_renderer = ModelDiagnosticsRenderer(str(db_path))
-    dashboard_renderer._step_time = StepCombinedComputer(
+    dashboard_result = LiveStepTimeSession(
         str(db_path),
-        window_size=len(scenario.steps),
-    )
+        request=StepTimeLoadRequest(
+            window_size=len(scenario.steps),
+            lookback_factor=4,
+        ),
+    ).refresh()
+    dashboard_renderer = ModelDiagnosticsRenderer(str(db_path))
     monkeypatch.setattr(
         dashboard_renderer._step_memory,
         "compute_dashboard",
@@ -362,7 +365,7 @@ def test_cli_dashboard_summary_diagnosis_parity(
             status_message="No GPU detected",
         ),
     )
-    dashboard = dashboard_renderer.get_dashboard_renderable()
+    dashboard = dashboard_renderer.get_dashboard_renderable(dashboard_result)
     dashboard_diagnosis = next(
         item for item in dashboard["items"] if item["source"] == "step_time"
     )

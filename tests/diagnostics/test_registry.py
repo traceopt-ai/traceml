@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from tests.step_time.factories import window_from_rank_averages
 from traceml_ai.diagnostics import model_diagnostics
 from traceml_ai.diagnostics.model_diagnostics import (
     DEFAULT_MODEL_DIAGNOSTIC_REGISTRY,
@@ -56,14 +57,10 @@ def _step_time_metric(name: str, value: float) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
         series=None,
-        window_size=1,
-        steps_used=1,
         median_total=value,
         worst_total=value,
         worst_rank=0,
-        skew_ratio=0.0,
         skew_pct=0.0,
-        measured_ranks=(0,),
     )
 
 
@@ -113,59 +110,46 @@ def test_model_diagnostics_payload_uses_registered_domains():
     assert payload.items[0].status == "BALANCED"
 
 
-def test_model_step_time_diagnostics_receive_canonical_window(monkeypatch):
+def test_model_step_time_diagnostics_receive_canonical_window():
     per_rank_timing = {
         0: {"input_wait": 1.0, "total_step": 10.0},
         1: {"input_wait": 2.0, "total_step": 11.0},
     }
-    captured = {}
-
     window = window_from_rank_averages(
         per_rank_timing,
         expected_ranks=(0, 1),
         metrics=[_step_time_metric("step_time", 10.0)],
     )
 
-    def fake_diagnosis(received_window, **kwargs):
-        captured["window"] = received_window
-        return SimpleNamespace(
-            primary=SimpleNamespace(
-                kind="BALANCED",
-                severity="info",
-                status="BALANCED",
-                reason="No timing issue.",
-                action="Keep monitoring.",
-                note=None,
-                confidence=0.75,
-                steps_used=3,
-                worst_rank=1,
-            )
-        )
-
-    monkeypatch.setattr(
-        model_diagnostics,
-        "diagnose_step_time_window",
-        fake_diagnosis,
+    diagnosis = SimpleNamespace(
+        kind="BALANCED",
+        severity="info",
+        status="BALANCED",
+        reason="No timing issue.",
+        action="Keep monitoring.",
+        note=None,
+        confidence=0.75,
+        steps_used=3,
+        worst_rank=1,
     )
 
     payload = build_model_diagnostics_payload(
         step_time_window=window,
+        step_time_diagnosis=diagnosis,
         step_memory_metrics=(),
     )
 
-    assert captured["window"] is window
     assert payload.items[0].source == "step_time"
     assert payload.items[0].status == "BALANCED"
+    assert payload.items[0].evidence["window"] == "1"
 
 
-def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
+def test_model_step_time_diagnostics_use_selected_metrics():
     diagnosis_metrics = (
         _step_time_metric("input_wait", 40.0),
         _step_time_metric("step_time", 100.0),
         _step_time_metric("residual_proxy", 0.0),
     )
-    captured = {}
-
     window = window_from_rank_averages(
         {
             0: {
@@ -179,71 +163,79 @@ def test_model_step_time_diagnostics_use_selected_metrics(monkeypatch):
         metrics=list(diagnosis_metrics),
     )
 
-    def fake_diagnosis(received_window, **kwargs):
-        captured["window"] = received_window
-        captured["training_strategy"] = kwargs.get("training_strategy")
-        return SimpleNamespace(
-            primary=SimpleNamespace(
-                kind="INPUT_BOUND",
-                severity="warn",
-                status="INPUT-BOUND",
-                reason="Input wait is high.",
-                action="Increase workers.",
-                note=None,
-                confidence=0.75,
-                steps_used=1,
-                worst_rank=0,
-            )
-        )
-
-    monkeypatch.setattr(
-        model_diagnostics,
-        "diagnose_step_time_window",
-        fake_diagnosis,
+    diagnosis = SimpleNamespace(
+        kind="INPUT_BOUND",
+        severity="warn",
+        status="INPUT-BOUND",
+        reason="Input wait is high.",
+        action="Increase workers.",
+        note=None,
+        confidence=0.75,
+        steps_used=1,
+        worst_rank=0,
     )
 
     payload = build_model_diagnostics_payload(
         step_time_window=window,
-        step_time_training_strategy="fsdp",
+        step_time_diagnosis=diagnosis,
         step_memory_metrics=(),
     )
 
-    assert captured["window"] is window
-    assert captured["training_strategy"] == "fsdp"
     assert payload.items[0].status == "INPUT-BOUND"
     assert payload.items[0].evidence["dominant"] == "input wait"
 
 
-def test_model_step_time_diagnostics_do_not_fallback_to_public_metrics(
-    monkeypatch,
-):
-    captured = {}
-
-    def fake_diagnosis(metrics, **kwargs):
-        captured["metrics"] = metrics
-        return SimpleNamespace(
-            kind="NO_DATA",
-            severity="info",
-            status="NO DATA",
-            reason="No selected diagnosis metrics.",
-            action="Wait for data.",
-            note=None,
-            confidence=None,
-            steps_used=0,
-            worst_rank=None,
-        )
-
-    monkeypatch.setattr(
-        model_diagnostics,
-        "build_step_diagnosis",
-        fake_diagnosis,
+def test_model_diagnostics_uses_precomputed_step_time_diagnosis():
+    window = window_from_rank_averages(
+        {0: {"step_time": 100.0, "total_step": 100.0}},
+        expected_ranks=(0,),
+        metrics=[_step_time_metric("step_time", 100.0)],
+    )
+    diagnosis = SimpleNamespace(
+        kind="BALANCED",
+        severity="info",
+        status="BALANCED",
+        reason="No timing issue.",
+        action="Keep monitoring.",
+        note=None,
+        confidence=0.75,
+        steps_used=1,
+        worst_rank=0,
     )
 
+    payload = build_model_diagnostics_payload(
+        step_time_window=window,
+        step_time_diagnosis=diagnosis,
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].status == "BALANCED"
+    assert payload.items[0].reason == "No timing issue."
+
+
+def test_model_diagnostics_requires_precomputed_step_time_diagnosis():
+    """The composer must not repeat analysis or diagnosis work."""
+    window = window_from_rank_averages(
+        {0: {"step_time": 100.0, "total_step": 100.0}},
+        expected_ranks=(0,),
+        metrics=[_step_time_metric("step_time", 100.0)],
+    )
+
+    payload = build_model_diagnostics_payload(
+        step_time_window=window,
+        step_memory_metrics=(),
+    )
+
+    assert payload.items[0].status == "NO DATA"
+    assert payload.items[0].evidence == {}
+
+
+def test_model_step_time_diagnostics_use_no_data_without_an_analysis():
     payload = build_model_diagnostics_payload(
         step_memory_metrics=(),
     )
 
-    assert captured["metrics"] == []
+    assert payload.items[0].status == "NO DATA"
     assert payload.items[0].evidence == {}
 
 

@@ -51,6 +51,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from nicegui import app, ui
 
 from traceml_ai.aggregator.display_drivers.base import BaseDisplayDriver
+from traceml_ai.aggregator.display_drivers.layout import (
+    MODEL_COMBINED_LAYOUT,
+    MODEL_DIAGNOSTICS_LAYOUT,
+)
 from traceml_ai.aggregator.display_drivers.nicegui_sections.pages import (
     define_pages,
 )
@@ -66,9 +70,9 @@ from traceml_ai.renderers.model_diagnostics.renderer import (
 )
 from traceml_ai.renderers.process.renderer import ProcessRenderer
 from traceml_ai.renderers.step_memory.renderer import StepMemoryRenderer
-from traceml_ai.renderers.step_time.compute import StepTimeDashboardAdapter
 from traceml_ai.renderers.system.renderer import SystemRenderer
 from traceml_ai.runtime.settings import TraceMLSettings
+from traceml_ai.step_time.pipeline import LiveStepTimeSession
 
 # Max seconds start() waits to confirm the dashboard server is listening before
 # returning anyway. Training must never block on the dashboard (TRA-68).
@@ -150,13 +154,19 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         # ---- Registration ----
         self._registered: bool = False
 
-        # ---- Renderers ----
+        # ---- One Step Time refresh fans out to both model sections. ----
+        self._step_time_session = LiveStepTimeSession(
+            db_path=self._settings.db_path
+        )
+        self._model_diagnostics = ModelDiagnosticsRenderer(
+            db_path=self._settings.db_path
+        )
+
+        # ---- Independent layout renderers ----
         self._renderers: List[DashboardRenderer] = [
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
-            StepTimeDashboardAdapter(db_path=self._settings.db_path),
             StepMemoryRenderer(db_path=self._settings.db_path),
-            ModelDiagnosticsRenderer(db_path=self._settings.db_path),
         ]
 
         # ---- UI server config (resolved via traceml.yaml/env/CLI) ----
@@ -435,7 +445,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         if not self._ui_ready:
             return
 
-        new_data: Dict[str, Any] = {}
+        new_data = self._compute_model_payloads()
         for layout, fn in self._layout_content_fns.items():
             try:
                 new_data[layout] = fn()
@@ -452,6 +462,28 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             for payload in new_data.values()
         ):
             self._last_data_monotonic = time.monotonic()
+
+    def _compute_model_payloads(self) -> Dict[str, Any]:
+        """Fan one live Step Time result to the hero and diagnostics rail."""
+        try:
+            step_time = self._step_time_session.refresh()
+        except Exception as exc:
+            error = LayoutError(str(exc))
+            return {
+                MODEL_COMBINED_LAYOUT: error,
+                MODEL_DIAGNOSTICS_LAYOUT: error,
+            }
+
+        try:
+            diagnostics = self._model_diagnostics.get_dashboard_renderable(
+                step_time
+            )
+        except Exception as exc:
+            diagnostics = LayoutError(str(exc))
+        return {
+            MODEL_COMBINED_LAYOUT: step_time,
+            MODEL_DIAGNOSTICS_LAYOUT: diagnostics,
+        }
 
     def staleness_text(self, now: Optional[float] = None) -> str:
         """Short 'stale Ns' label for the UI, or '' when data is fresh."""

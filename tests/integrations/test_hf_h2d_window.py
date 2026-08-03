@@ -45,6 +45,9 @@ pytest.importorskip("accelerate")
 from torch.utils.data import Dataset  # noqa: E402
 from transformers import Trainer, TrainingArguments  # noqa: E402
 
+from traceml_ai.diagnostics.step_time.api import (  # noqa: E402
+    diagnose_step_time_window,
+)
 from traceml_ai.diagnostics.step_time.policy import (  # noqa: E402
     SUMMARY_STEP_TIME_POLICY,
 )
@@ -53,10 +56,9 @@ from traceml_ai.instrumentation.patches.h2d_auto_timer_patch import (  # noqa: E
 )
 from traceml_ai.integrations import huggingface as hf  # noqa: E402
 from traceml_ai.sdk.instrumentation import trace_step  # noqa: E402
-from traceml_ai.utils.step_time_window import (  # noqa: E402
-    build_step_time_window_from_events,
-    diagnose_step_time_window,
-    public_step_time_metric_values,
+from tests.step_time.factories import (  # noqa: E402
+    rank_average,
+    window_from_events,
 )
 
 # ---------------------------------------------------------------------------
@@ -233,7 +235,7 @@ def _gpu_window(*, omit=(), h2d_value=None, steps: int = 30):
             for key in _EVENTS
             if key not in set(omit)
         }
-    return build_step_time_window_from_events(per_rank, max_rows=steps)
+    return window_from_events(per_rank, max_rows=steps)
 
 
 def test_uncaptured_h2d_reports_unavailable_not_measured_zero() -> None:
@@ -242,17 +244,11 @@ def test_uncaptured_h2d_reports_unavailable_not_measured_zero() -> None:
     # was never taken, which is what the issue reported.
     absent = _gpu_window(omit=("h2d",))
     assert absent.clock == "gpu"
-    assert (
-        public_step_time_metric_values(absent.per_rank_timing[0])["h2d_ms"]
-        is None
-    )
+    assert rank_average(absent, 0).h2d_ms is None
 
     # Twin: an in-window transfer that really measured 0.0 stays 0.0.
     measured = _gpu_window(h2d_value=0.0)
-    assert (
-        public_step_time_metric_values(measured.per_rank_timing[0])["h2d_ms"]
-        == 0.0
-    )
+    assert rank_average(measured, 0).h2d_ms == 0.0
 
 
 def test_uncaptured_h2d_cannot_produce_an_h2d_verdict() -> None:

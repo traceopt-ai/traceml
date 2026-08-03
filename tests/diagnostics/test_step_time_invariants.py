@@ -14,7 +14,7 @@ instances, by fuzzing the dimension each rule quantifies over:
   fragment; an occurrence-driven metric stays available.
 - F2 a metric summary's ``worst_total`` and ``worst_rank`` always come
   from one ordering: the named rank produced the reported worst value.
-- F3 the public projection preserves absence: a metric the window
+- F3 typed values preserve absence: a metric the window
   declined to derive is ``None``, never a fabricated number.
 
 The drift guard fails when a new selected metric is added without a
@@ -31,10 +31,11 @@ from traceml_ai.step_time.analysis import (
     OCCURRENCE_METRICS,
     SELECTED_METRICS,
 )
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
-    median_iteration_component_share,
-    public_step_time_metric_values,
+from tests.step_time.factories import (
+    rank_average,
+    values_from_mapping,
+    window_from_events,
+    window_from_rank_averages,
 )
 
 _EVENT_NAMES = {
@@ -83,7 +84,7 @@ def _window_from_presence(present_steps: dict[str, set[int]]):
             if step in steps:
                 events[_EVENT_NAMES[metric]] = _stat(_BASE_MS[metric])
         per_rank[0][step] = events
-    return build_step_time_window_from_events(per_rank, max_rows=_WINDOW)
+    return window_from_events(per_rank, max_rows=_WINDOW)
 
 
 def _all_steps() -> dict[str, set[int]]:
@@ -101,16 +102,17 @@ def assert_metric_worst_is_self_consistent(window) -> None:
         worst_rank = metric.worst_rank
         if worst_rank is None:
             continue
-        rank_row = window.per_rank_timing.get(worst_rank)
+        rank_facts = window.rank(worst_rank)
         assert (
-            rank_row is not None
+            rank_facts is not None
         ), f"{metric.metric}: worst_rank {worst_rank} is not a window rank"
+        rank_value = rank_facts.average.value(metric.metric)
         assert (
-            metric.metric in rank_row
+            rank_value is not None
         ), f"{metric.metric}: worst_rank {worst_rank} never measured it"
-        assert rank_row[metric.metric] == pytest.approx(metric.worst_total), (
+        assert rank_value == pytest.approx(metric.worst_total), (
             f"{metric.metric}: reported worst {metric.worst_total} "
-            f"but rank {worst_rank} has {rank_row[metric.metric]}"
+            f"but rank {worst_rank} has {rank_value}"
         )
 
 
@@ -142,7 +144,7 @@ def test_window_carries_canonical_metric_rank_availability() -> None:
                     events[_EVENT_NAMES[metric]] = _stat(value)
             per_rank[rank][step] = events
 
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         per_rank,
         max_rows=_WINDOW,
         expected_ranks=(0, 1),
@@ -151,15 +153,20 @@ def test_window_carries_canonical_metric_rank_availability() -> None:
     assert window.ranks_for("input_wait") == ()
     assert window.ranks_for("forward") == (0,)
     assert window.ranks_for("backward") == (0, 1)
-    assert window.per_rank_timing[0]["backward"] == pytest.approx(0.0)
-    assert window.is_complete("input_wait") is False
-    assert window.is_complete("forward") is False
-    assert window.is_complete("backward") is True
-    assert window.eligible_ranks(("forward", "backward")) == (0,)
+    assert rank_average(window, 0).backward_ms == pytest.approx(0.0)
+    assert window.ranks_for("input_wait") != window.rank_universe
+    assert window.ranks_for("forward") != window.rank_universe
+    assert window.ranks_for("backward") == window.rank_universe
+    assert tuple(
+        sorted(
+            set(window.ranks_for("forward"))
+            & set(window.ranks_for("backward"))
+        )
+    ) == (0,)
 
 
 def test_empty_window_keeps_expected_rank_universe() -> None:
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {},
         max_rows=_WINDOW,
         expected_ranks=(0, 1),
@@ -172,7 +179,6 @@ def test_skew_requires_two_measured_ranks_but_zero_remains_measured() -> None:
     single = _window_from_presence(_all_steps())
     single_step = next(m for m in single.metrics if m.metric == "step_time")
     assert single_step.skew_pct is None
-    assert single_step.skew_ratio is None
 
     presence_by_rank = {0: _all_steps(), 1: _all_steps()}
     per_rank = {0: {}, 1: {}}
@@ -187,7 +193,7 @@ def test_skew_requires_two_measured_ranks_but_zero_remains_measured() -> None:
             }
             per_rank[rank][step] = events
 
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         per_rank,
         max_rows=_WINDOW,
         expected_ranks=(0, 1),
@@ -209,7 +215,7 @@ def test_skew_is_unavailable_when_zero_median_hides_a_nonzero_rank() -> None:
                 for metric in _EVENT_NAMES
             }
 
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         per_rank,
         max_rows=_WINDOW,
         expected_ranks=(0, 1, 2),
@@ -218,7 +224,6 @@ def test_skew_is_unavailable_when_zero_median_hides_a_nonzero_rank() -> None:
     assert backward.median_total == pytest.approx(0.0)
     assert backward.worst_total == pytest.approx(10.0)
     assert backward.skew_pct is None
-    assert backward.skew_ratio is None
 
 
 def test_iteration_share_preserves_unavailable_and_measured_zero() -> None:
@@ -229,26 +234,23 @@ def test_iteration_share_preserves_unavailable_and_measured_zero() -> None:
             "residual_proxy": 10.0,
         }
     }
-    assert median_iteration_component_share(
-        rows, "residual_proxy"
-    ) == pytest.approx(0.05)
+    assert window_from_rank_averages(rows).residual_share == pytest.approx(
+        0.05
+    )
     rows[0]["residual_proxy"] = 0.0
-    assert median_iteration_component_share(
-        rows, "residual_proxy"
-    ) == pytest.approx(0.0)
+    assert window_from_rank_averages(rows).residual_share == pytest.approx(0.0)
     del rows[0]["residual_proxy"]
-    assert median_iteration_component_share(rows, "residual_proxy") is None
+    assert window_from_rank_averages(rows).residual_share is None
 
     invalid_compute = {
         0: {
             "input_wait": 10.0,
             "step_time": 100.0,
-            "forward": None,
             "backward": 20.0,
             "optimizer_step": 10.0,
         }
     }
-    assert median_iteration_component_share(invalid_compute, "compute") is None
+    assert window_from_rank_averages(invalid_compute).compute_share is None
 
 
 @pytest.mark.parametrize("metric", _REQUIRED_METRICS)
@@ -260,7 +262,7 @@ def test_required_metric_partial_presence_drops_availability(
     presence[metric] = set(range(present_count))  # present in a strict subset
     window = _window_from_presence(presence)
 
-    assert metric not in window.per_rank_timing[0], (
+    assert rank_average(window, 0).value(metric) is None, (
         f"{metric} present in {present_count}/{_WINDOW} steps must be "
         "unavailable, not averaged from a fragment"
     )
@@ -276,9 +278,9 @@ def test_occurrence_metric_partial_presence_stays_available(
     presence[metric] = set(range(present_count))
     window = _window_from_presence(presence)
 
-    assert metric in window.per_rank_timing[0]
+    assert rank_average(window, 0).value(metric) is not None
     # Averaged over the whole window: absent steps are true zeros.
-    assert window.per_rank_timing[0][metric] == pytest.approx(
+    assert rank_average(window, 0).value(metric) == pytest.approx(
         _BASE_MS[metric] * present_count / _WINDOW
     )
 
@@ -286,7 +288,7 @@ def test_occurrence_metric_partial_presence_stays_available(
 def test_required_metric_full_presence_is_available() -> None:
     window = _window_from_presence(_all_steps())
     for metric in _REQUIRED_METRICS:
-        assert metric in window.per_rank_timing[0]
+        assert rank_average(window, 0).value(metric) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +316,7 @@ def test_worst_value_and_rank_are_self_consistent(
     per_rank = {0: {}, 1: {}}
     fill(per_rank, 0, 100.0, False)
     fill(per_rank, 1, 400.0, slow_rank_lacks_input)
-    window = build_step_time_window_from_events(per_rank, max_rows=_WINDOW)
+    window = window_from_events(per_rank, max_rows=_WINDOW)
 
     assert_metric_worst_is_self_consistent(window)
     step_metric = next(m for m in window.metrics if m.metric == "step_time")
@@ -342,50 +344,48 @@ def test_self_consistency_holds_across_many_presence_patterns() -> None:
                         _BASE_MS[metric] * scale
                     )
                 per_rank[rank][step] = events
-        window = build_step_time_window_from_events(per_rank, max_rows=_WINDOW)
+        window = window_from_events(per_rank, max_rows=_WINDOW)
         assert_metric_worst_is_self_consistent(window)
         checked += 1
     assert checked == 16
 
 
 # ---------------------------------------------------------------------------
-# F3: the public projection preserves absence
+# F3: typed values preserve absence
 # ---------------------------------------------------------------------------
 
 
-_COMPUTE_PUBLIC_KEY = {
+_COMPUTE_FIELD = {
     "forward": "forward_ms",
     "backward": "backward_ms",
-    "optimizer_step": "optimizer_ms",
+    "optimizer_step": "optimizer_step_ms",
 }
 
 
-@pytest.mark.parametrize("missing", sorted(_COMPUTE_PUBLIC_KEY))
-def test_projection_nulls_residual_when_compute_incomplete(
+@pytest.mark.parametrize("missing", sorted(_COMPUTE_FIELD))
+def test_typed_values_null_residual_when_compute_incomplete(
     missing: str,
 ) -> None:
     presence = _all_steps()
     del presence[missing]
     window = _window_from_presence(presence)
-    public = public_step_time_metric_values(window.per_rank_timing[0])
+    values = rank_average(window, 0)
 
-    assert public[_COMPUTE_PUBLIC_KEY[missing]] is None
-    assert public["compute_ms"] is None
-    assert public["residual_ms"] is None
+    assert getattr(values, _COMPUTE_FIELD[missing]) is None
+    assert values.compute_ms is None
+    assert values.residual_ms is None
     # A measured metric on the same row stays a real number.
-    assert public["step_time_ms"] is not None
+    assert values.step_time_ms is not None
 
 
-def test_projection_keeps_measured_zero_distinct_from_absent() -> None:
-    measured_zero = public_step_time_metric_values(
+def test_typed_values_keep_measured_zero_distinct_from_absent() -> None:
+    measured_zero = values_from_mapping(
         {"h2d": 0.0, "input_wait": 4.0, "step_time": 64.0}
     )
-    absent = public_step_time_metric_values(
-        {"input_wait": 4.0, "step_time": 64.0}
-    )
+    absent = values_from_mapping({"input_wait": 4.0, "step_time": 64.0})
 
-    assert measured_zero["h2d_ms"] == 0.0
-    assert absent["h2d_ms"] is None
+    assert measured_zero.h2d_ms == 0.0
+    assert absent.h2d_ms is None
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,11 @@ import sqlite3
 
 import pytest
 from rich.console import Console
-from tests.step_time.factories import window_from_rank_averages
+from tests.step_time.factories import (
+    live_result_from_window,
+    rank_average,
+    window_from_rank_averages,
+)
 
 pytest.importorskip("nicegui")
 
@@ -13,24 +17,23 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
 from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_section import (
     _UNMEASURED_SLIVER_PCT,
     update_model_combined_section,
+    update_step_verdict,
 )
 from traceml_ai.diagnostics.model_diagnostics import (
     build_model_diagnostics_payload,
 )
-from traceml_ai.diagnostics.step_time import LIVE_STEP_TIME_POLICY
-from traceml_ai.renderers.step_time.compute import StepCombinedComputer
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
+from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.step_time.model import (
     StepTimeLoadRequest,
     StepTimeMetric,
-    StepTimeResult,
     StepTimeWindow,
 )
-from traceml_ai.step_time.pipeline import LiveStepTimeSession
-from traceml_ai.reporting.sections.step_time.loader import (
-    load_step_time_section_data,
+from traceml_ai.step_time.pipeline import (
+    LiveStepTimeFreshness,
+    LiveStepTimeResult,
+    LiveStepTimeSession,
 )
-from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 
 class _FakeSegment:
@@ -73,6 +76,11 @@ class _FakeSegment:
 class _FakeText:
     def __init__(self) -> None:
         self.text = ""
+        self.styles: list[str] = []
+
+    def style(self, value: str) -> "_FakeText":
+        self.styles.append(value)
+        return self
 
 
 class _FakeHtml:
@@ -88,14 +96,10 @@ def _metric(
     return StepTimeMetric(
         metric=name,
         series=None,
-        window_size=5,
-        steps_used=5,
         median_total=value,
         worst_total=worst if worst is not None else value,
         worst_rank=0,
-        skew_ratio=0.0,
         skew_pct=0.0,
-        measured_ranks=(0,),
     )
 
 
@@ -104,22 +108,23 @@ def _payload(
     *,
     per_rank_timing: dict[int, dict[str, float]] | None = None,
     clock: str = "cpu",
-    had_ok: bool = False,
-) -> StepTimeResult:
+    freshness: LiveStepTimeFreshness = "live",
+) -> LiveStepTimeResult:
     """Build a live result around one canonical Step Time window."""
     if per_rank_timing is None:
         row = {metric.metric: float(metric.median_total) for metric in metrics}
         if "input_wait" in row and "step_time" in row:
             row["total_step"] = row["input_wait"] + row["step_time"]
         per_rank_timing = {0: row}
-    return StepTimeResult(
-        window=window_from_rank_averages(
+    return live_result_from_window(
+        window_from_rank_averages(
             per_rank_timing,
             clock="gpu" if clock == "gpu" else "cpu",
             expected_ranks=tuple(sorted(per_rank_timing)),
             metrics=metrics,
+            steps_used=5,
         ),
-        had_ok=had_ok,
+        freshness=freshness,
     )
 
 
@@ -311,10 +316,8 @@ def test_residual_share_is_na_when_input_wait_is_unavailable() -> None:
 
     # Control twin: with input_wait measured the denominator is whole, so
     # the same residual reports a real share.
-    assert payload.window is not None
-    with_wait = _payload(
-        list(payload.window.metrics) + [_metric("input_wait", 10.0)]
-    )
+    window = payload.analysis.window
+    with_wait = _payload(list(window.metrics) + [_metric("input_wait", 10.0)])
     control = _panel()
     update_model_combined_section(control, with_wait)
     assert "n/a" not in control["kpis"]["residual"].content
@@ -430,7 +433,6 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
             _metric("residual_proxy", 20.0),
             _metric("step_time", 100.0),
         ],
-        had_ok=True,
     )
     panel = _panel()
     update_model_combined_section(panel, good)
@@ -439,14 +441,19 @@ def test_step_time_dashboard_hero_dead_run_shows_expired() -> None:
 
     # A never-had-data payload (cold start) must NOT clear the panel --
     # there is nothing to clear yet.
-    cold_start = StepTimeResult(had_ok=False)
+    cold_start = live_result_from_window(
+        StepTimeWindow(),
+        freshness="cold",
+    )
     cold_panel = _panel()
     update_model_combined_section(cold_panel, cold_start)
     assert cold_panel["win"].text == ""
 
-    # TTL expired: the computer reports had_ok=True with empty metrics.
-    # The dashboard must visibly clear rather than keep showing "good".
-    expired = StepTimeResult(had_ok=True)
+    # TTL expiry must visibly clear rather than keep showing "good".
+    expired = live_result_from_window(
+        StepTimeWindow(),
+        freshness="expired",
+    )
     update_model_combined_section(panel, expired)
 
     assert panel["win"].text == "window expired"
@@ -575,9 +582,9 @@ def test_step_time_dashboard_hero_flags_partial_rank_coverage() -> None:
     )
 
     # Control twin: every rank measured everything -> not partial.
-    assert payload.window is not None
+    window = payload.analysis.window
     symmetric = _payload(
-        payload.window.metrics,
+        window.metrics,
         per_rank_timing={
             rank: {
                 "input_wait": 10.0,
@@ -811,30 +818,20 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     finally:
         conn.close()
 
-    result = StepCombinedComputer(
+    result = LiveStepTimeSession(
         str(db_path),
-        window_size=30,
-    ).compute_dashboard()
-    assert result.window is not None
-    assert result.window.per_rank_timing[0]["residual_proxy"] == pytest.approx(
-        10.0
-    )
-    diagnosis = diagnose_step_time_window(
-        result.window,
-        policy=LIVE_STEP_TIME_POLICY,
-        include_attribution=True,
-    )
-    assert diagnosis.metric_attribution["residual_proxy"][
-        "share_pct"
-    ] == pytest.approx(0.05)
+        request=StepTimeLoadRequest(window_size=30, lookback_factor=4),
+    ).refresh()
+    window = result.analysis.window
+    assert rank_average(window, 0).residual_ms == pytest.approx(10.0)
+    assert window.residual_share == pytest.approx(0.05)
 
-    summary = load_step_time_section_data(str(db_path), max_rows=30)
-    assert summary.per_global_rank_summary[0].avg_residual_ms == pytest.approx(
-        10.0
-    )
-    assert summary.per_global_rank_summary[0].avg_h2d_ms is None
+    summary = StepTimeSummarySection(max_rows=30).build(str(db_path)).payload
+    summary_metrics = summary["groups"]["rows"]["0"]["metrics"]
+    assert summary_metrics["residual_ms"] == pytest.approx(10.0)
+    assert summary_metrics["h2d_ms"] is None
 
-    renderer = StepCombinedRenderer(
+    renderer = StepTimeRenderer(
         LiveStepTimeSession(
             str(db_path),
             request=StepTimeLoadRequest(
@@ -848,7 +845,8 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     assert "5.0%" in console.export_text()
 
     diagnostics = build_model_diagnostics_payload(
-        step_time_window=result.window,
+        step_time_window=window,
+        step_time_diagnosis=result.analysis.diagnosis.primary,
         step_memory_metrics=(),
     )
     step_item = next(
@@ -871,3 +869,33 @@ def test_diagnostics_rail_incomplete_data_is_neutral() -> None:
         == "neutral"
     )
     assert mds._row_sev({"severity": "info", "kind": "BALANCED"}) == "healthy"
+
+
+def test_empty_diagnostics_payload_clears_stale_ui_state() -> None:
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_diagnostics_section as mds,
+    )
+
+    panel = {
+        "overall": _FakeText(),
+        "body": _FakeHtml(),
+        "hint": _FakeText(),
+    }
+    panel["overall"].text = "CRITICAL"
+    panel["body"].content = "stale diagnosis"
+
+    mds.update_model_diagnostics_section(panel, {"items": []})
+
+    assert panel["overall"].text == "NO DATA"
+    assert panel["body"].content == ""
+    assert panel["hint"].text == "Waiting for diagnostics"
+    assert theme.SEV["neutral"] in panel["overall"].styles[-1]
+
+
+def test_empty_diagnostics_payload_clears_stale_hero_verdict() -> None:
+    panel = _panel()
+    panel["verdict"].text = "COMPUTE-BOUND"
+
+    update_step_verdict(panel, {"items": []})
+
+    assert panel["verdict"].text == "NO DATA"

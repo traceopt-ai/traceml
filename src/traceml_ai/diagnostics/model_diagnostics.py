@@ -13,8 +13,7 @@ from traceml_ai.diagnostics.step_memory import (
     LIVE_STEP_MEMORY_POLICY,
     build_step_memory_diagnosis,
 )
-from traceml_ai.diagnostics.step_time import build_step_diagnosis
-from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
+from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -22,7 +21,6 @@ from traceml_ai.diagnostics.trends import (
 from traceml_ai.loggers.error_log import get_error_logger
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
-from traceml_ai.utils.step_time_window import diagnose_step_time_window
 
 Severity = str  # "info" | "warn" | "crit"
 
@@ -98,7 +96,7 @@ def _log_model_diagnostic_error(message: str, exc: Exception) -> None:
 def build_model_diagnostics_payload(
     *,
     step_time_window: Optional[StepTimeWindow] = None,
-    step_time_training_strategy: str = "ddp",
+    step_time_diagnosis: Optional[StepDiagnosis] = None,
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
@@ -114,7 +112,7 @@ def build_model_diagnostics_payload(
     items: List[ModelDiagnosisItem] = []
     context = ModelDiagnosticContext(
         step_time_window=step_time_window,
-        step_time_training_strategy=str(step_time_training_strategy or "ddp"),
+        step_time_diagnosis=step_time_diagnosis,
         step_memory_metrics=step_memory_metrics,
         step_memory_status_message=step_memory_status_message,
         gpu_total_bytes=gpu_total_bytes,
@@ -152,15 +150,17 @@ def _build_step_time_item(
 ) -> ModelDiagnosisItem:
     """Build the registered step-time model diagnostic item."""
     window = context.step_time_window
-    step_time_diag = (
-        diagnose_step_time_window(
-            window,
-            policy=LIVE_STEP_TIME_POLICY,
-            training_strategy=context.step_time_training_strategy,
-        ).primary
-        if window is not None
-        else build_step_diagnosis([])
-    )
+    step_time_diag = context.step_time_diagnosis
+    if step_time_diag is None:
+        return ModelDiagnosisItem(
+            source="step_time",
+            title="Step Time",
+            kind="NO_DATA",
+            severity="info",
+            status="NO DATA",
+            reason="Step Time diagnosis is unavailable on this tick.",
+            action="Wait for more complete samples.",
+        )
     return ModelDiagnosisItem(
         source="step_time",
         title="Step Time",

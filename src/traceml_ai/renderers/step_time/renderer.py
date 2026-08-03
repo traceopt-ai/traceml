@@ -1,7 +1,4 @@
-"""
-Step Combined Renderer
-
-CLI renderer for rank-combined step-time averages.
+"""CLI presentation for canonical Step Time analyses.
 
 Behavior:
 - show selected-clock diagnosis metrics, not public duration metrics
@@ -17,7 +14,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from traceml_ai.aggregator.display_drivers.layout import MODEL_COMBINED_LAYOUT
-from traceml_ai.diagnostics.step_time import format_cli_diagnosis
+from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -52,7 +49,41 @@ TABLE_METRIC_ORDER = (
 )
 
 
-class StepCombinedRenderer(BaseRenderer):
+def format_cli_diagnosis(diagnosis: StepDiagnosis) -> str:
+    """Render one concise Rich-friendly diagnosis block."""
+    if diagnosis.kind == "BALANCED":
+        style = "bold green"
+    elif diagnosis.kind in {"NO_DATA", "WARMUP", "INCOMPLETE_DATA"}:
+        style = "bold bright_black"
+    elif diagnosis.kind == "INPUT_BOUND":
+        style = "bold yellow"
+    elif diagnosis.kind in {
+        "H2D_BOUND",
+        "INPUT_STRAGGLER",
+        "COMPUTE_STRAGGLER",
+        "H2D_STRAGGLER",
+        "STRAGGLER",
+        "RESIDUAL_HEAVY",
+    }:
+        style = "bold red" if diagnosis.severity == "crit" else "bold yellow"
+    else:
+        style = {
+            "crit": "bold red",
+            "warn": "bold yellow",
+            "info": "bold",
+        }.get(diagnosis.severity, "bold")
+
+    lines = [
+        f"[bold]Issue:[/bold] [{style}]{diagnosis.status}[/{style}]",
+        f"[bold]Why:[/bold] {diagnosis.reason}",
+        f"[bold]Next:[/bold] {diagnosis.action}",
+    ]
+    if diagnosis.note:
+        lines.append(f"[bold]Note:[/bold] {diagnosis.note}")
+    return "\n".join(lines)
+
+
+class StepTimeRenderer(BaseRenderer):
     """Pure Rich presenter for one canonical live Step Time result."""
 
     def __init__(self, session: LiveStepTimeSession) -> None:
@@ -63,7 +94,7 @@ class StepCombinedRenderer(BaseRenderer):
         self._session = session
 
     def get_panel_renderable(self) -> Panel:
-        """Refresh once and render the session's immutable result."""
+        """Refresh once and render the session's analyzed result."""
         return self.render(self._session.refresh())
 
     def render(self, payload: LiveStepTimeResult) -> Panel:
@@ -208,11 +239,7 @@ def _table_metrics(
     The live table intentionally uses diagnosis metrics.
     """
     by_key = {metric.metric: metric for metric in metrics}
-    ordered = [by_key[key] for key in TABLE_METRIC_ORDER if key in by_key]
-    extras = [
-        metric for metric in metrics if metric.metric not in TABLE_METRIC_ORDER
-    ]
-    return ordered + extras
+    return [by_key[key] for key in TABLE_METRIC_ORDER if key in by_key]
 
 
 def _format_skew(value: float | None) -> str:

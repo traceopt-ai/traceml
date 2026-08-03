@@ -1,26 +1,26 @@
 import json
 import sqlite3
 
-from traceml_ai.diagnostics.step_time.adapters import (
-    StepTimeDiagnosisInput,
-    diagnose_step_time_summary,
-)
-from traceml_ai.reporting.summaries.step_time import (
-    generate_step_time_summary_card,
+from traceml_ai.diagnostics.step_time import (
+    SUMMARY_STEP_TIME_POLICY,
+    diagnose_step_time_window,
 )
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
-from traceml_ai.reporting.sections.step_time.loader import (
-    StepTimeSectionData,
-    load_step_time_section_data,
+from traceml_ai.reporting.sections.step_time.builder import (
+    project_step_time_summary,
 )
-from traceml_ai.reporting.sections.step_time.model import (
-    rank_summaries_from_window,
+from traceml_ai.step_time.model import (
+    StepTimeLoadRequest,
+    StepTimeRepositorySnapshot,
+    StepTimeSourceCursor,
 )
-from traceml_ai.utils.step_time_sqlite import (
+from traceml_ai.step_time.pipeline import StepTimeAnalysis
+from traceml_ai.step_time.sqlite import (
     load_training_strategy_from_sqlite,
 )
-from traceml_ai.utils.step_time_window import (
-    build_step_time_window_from_events,
+from tests.step_time.factories import (
+    rank_average,
+    window_from_events,
 )
 
 
@@ -167,10 +167,7 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
     db_path = tmp_path / "telemetry"
     _create_step_time_db(str(db_path))
 
-    summary = generate_step_time_summary_card(
-        str(db_path),
-        print_to_stdout=False,
-    )
+    summary = StepTimeSummarySection().build(str(db_path)).payload
 
     assert summary["metadata"]["global_ranks_seen"] == 1
     assert summary["global"]["window"]["steps_analyzed"] == 2
@@ -200,7 +197,7 @@ def test_training_strategy_loader_uses_latest_available_row(tmp_path) -> None:
 
 
 def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         {
             0: {
                 1: {
@@ -236,27 +233,33 @@ def test_rank_summary_extracts_input_bound_clocks_from_events() -> None:
     values = rank_facts.steps[0].values
     assert values.input_wait_ms == 4.0
     assert values.step_time_ms == 20.0
-    assert window.per_rank_timing[0]["input_wait"] == 4.0
-    assert window.per_rank_timing[0]["step_time"] == 20.0
+    assert rank_average(window, 0).input_wait_ms == 4.0
+    assert rank_average(window, 0).step_time_ms == 20.0
 
 
-def test_step_time_section_loader_and_builder_use_sqlite_fixture(
+def test_step_time_section_uses_summary_pipeline_and_sqlite_fixture(
     tmp_path,
+    monkeypatch,
 ) -> None:
+    from traceml_ai.reporting.sections import step_time as section_module
+
     db_path = tmp_path / "telemetry"
     _create_step_time_db(str(db_path))
 
-    data = load_step_time_section_data(str(db_path))
+    calls = []
+    original_run = section_module.StepTimePipeline.run
+
+    def capture_run(pipeline, request):
+        calls.append((pipeline.profile, request.window_size))
+        return original_run(pipeline, request)
+
+    monkeypatch.setattr(section_module.StepTimePipeline, "run", capture_run)
     result = StepTimeSummarySection().build(str(db_path))
 
-    assert data.training_steps == 3
-    assert data.latest_step_observed == 2
-    assert data.training_strategy == "fsdp"
-    assert data.per_global_rank_summary[0].steps_analyzed == 2
-    assert data.step_time_window.coverage.steps_used == 2
-    diagnosis_input = StepTimeSummarySection().to_diagnosis_input(data)
-    assert diagnosis_input.training_strategy == "fsdp"
+    assert calls == [("summary", StepTimeSummarySection().max_rows)]
     assert result.section == "step_time"
+    assert result.payload["metadata"]["training_total_steps"] == 3
+    assert result.payload["metadata"]["training_latest_step"] == 2
     assert result.payload["metadata"]["global_ranks_seen"] == 1
     assert result.payload["global"]["median"]["total_step_ms"]["value"] == 31.0
     assert result.payload["groups"]["rows"]["0"]["identity"] == {
@@ -271,10 +274,6 @@ def test_step_time_section_loader_and_builder_use_sqlite_fixture(
 
 
 def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
-    from traceml_ai.reporting.sections.step_time.builder import (
-        build_step_time_payload,
-    )
-
     def event_stats(cpu_ms: float) -> dict[str, dict[str, float | bool | int]]:
         return {
             "cpu": {
@@ -300,27 +299,23 @@ def test_distributed_step_time_scope_shows_actual_analyzed_steps() -> None:
         }
         for rank in range(4)
     }
-    window = build_step_time_window_from_events(
+    window = window_from_events(
         per_rank_steps,
         max_rows=10000,
         expected_ranks=range(4),
     )
-    per_global_rank = rank_summaries_from_window(window)
-
-    data = StepTimeSectionData(
-        training_steps=129,
-        latest_step_observed=128,
-        step_time_window=window,
-        per_global_rank_summary=per_global_rank,
-        identities={},
-        max_rows=10000,
+    analysis = StepTimeAnalysis(
+        request=StepTimeLoadRequest(window_size=10000),
+        snapshot=StepTimeRepositorySnapshot(
+            cursor=StepTimeSourceCursor(latest_step=128),
+        ),
+        window=window,
+        diagnosis=diagnose_step_time_window(
+            window,
+            policy=SUMMARY_STEP_TIME_POLICY,
+        ),
     )
-    diagnosis = diagnose_step_time_summary(
-        StepTimeDiagnosisInput(
-            window=window,
-        )
-    )
-    summary = build_step_time_payload(data, diagnosis)
+    summary = project_step_time_summary(analysis)
     card = summary["card"]
 
     assert "compared over last 128 aligned steps across 4 global ranks" in card
