@@ -334,9 +334,10 @@ class TestDataloaderPatchRecordsBytes:
 
         # Two fetches of [tensor(4, 4) float32] = 64 bytes each.
         assert len(batches) == 2
-        assert [
-            e.bytes_count for e in bs_module._BATCH_SIZE_BUFFER
-        ] == [64, 64]
+        assert [e.bytes_count for e in bs_module._BATCH_SIZE_BUFFER] == [
+            64,
+            64,
+        ]
 
     def test_does_not_record_when_not_armed(self, monkeypatch):
         import traceml_ai.instrumentation.patches.dataloader_patch as dl_patch
