@@ -1,8 +1,7 @@
 # Step Time Pipeline Contract
 
-This page is the contributor map for Step Time. It describes the current
-behavior and ownership boundaries that CLI, dashboard, and final-summary
-changes must preserve.
+This page describes the Step Time pipeline, its ownership boundaries, and the
+behavior shared by CLI, dashboard, and final summary.
 
 For diagnosis thresholds and issue semantics, see
 [`diagnostics/DIAGNOSIS.md`](https://github.com/traceopt-ai/traceml/blob/main/src/traceml_ai/diagnostics/DIAGNOSIS.md).
@@ -31,10 +30,9 @@ flowchart LR
     DB --> SPS --> RESULT --> SUM --> OUT
 ```
 
-The repository has two SQL selection profiles, not three surface pipelines.
-Terminal and dashboard share an index-bounded live tail. Final summary uses a
-metadata-complete query. Both return one `StepTimeRepositorySnapshot` and feed
-the same `StepTimeAnalyzer`.
+The repository has two selection profiles. Terminal and dashboard share an
+index-bounded live tail; final summary uses a metadata-complete query. Both
+return `StepTimeRepositorySnapshot` and feed `StepTimeAnalyzer`.
 
 `StepTimePipeline.run(request)` is the application facade for that shared
 path. It selects one of the two data profiles, invokes the analyzer once, and
@@ -51,9 +49,8 @@ projector. The projector owns public JSON names, topology, rank identities,
 and card text; it does not load SQLite, align steps, calculate domain
 statistics, or diagnose.
 
-The dashboard presenters never load or diagnose Step Time. One driver method
-performs the refresh and explicit fan-out, keeping the production reading path
-short: driver, live session, then the two local presenters.
+Dashboard presenters do not load or diagnose Step Time. The driver refreshes
+once, then passes the completed result to the two local presenters.
 
 ## Where each decision belongs
 
@@ -91,12 +88,12 @@ Continue into only the surface being changed:
 - diagnosis rules: `diagnostics/step_time/api.py`, `context.py`, and
   `rules.py`.
 
-No surface path passes through `traceml_ai.utils` or a legacy rank map.
+Built-in surfaces use the central pipeline and typed facts; they do not use
+utility loaders or rank-map adapters.
 
 ## Data-shape budget
 
-Step Time payloads previously crossed eight boundary-level representations.
-The final design has three core shapes:
+Step Time has three core domain shapes:
 
 ```text
 StepTimeRepositorySnapshot   normalized source facts
@@ -110,21 +107,18 @@ its timing facts. Surface dictionaries and widgets are presentation output,
 not another domain model. Temporary `json.loads()` objects and analyzer lookup
 indexes are implementation details.
 
-`StepTimeWindow.rank_facts` replaces the former triple nested
-rank/step/metric dictionary. Dashboard, canonical diagnosis, and the CLI read
-typed facts and precomputed window shares directly. Final summary projects the
-same typed facts and canonical metric statistics. There is no
-`per_rank_timing` projection and no production `Dict[int, Dict[str, float]]`
-Step Time payload.
+`StepTimeWindow.rank_facts` holds the typed per-rank facts. Dashboard,
+diagnosis, and the CLI read typed facts and precomputed window shares directly.
+Final summary projects the same facts and metric statistics. Built-in paths do
+not pass rank dictionaries between layers.
 
 ### Model dependency boundary
 
 `traceml_ai.step_time.model` is the lowest Step Time layer. It owns shared
 data contracts and imports only the Python standard library. SQLite loading,
 diagnosis, reporting, Rich, NiceGUI, and Plotly depend on these contracts;
-the model never depends on them. New code should import from this central
-module. The unused renderer-owned schema shim has been retired; only the
-central model is an ownership location for Step Time types.
+the model never depends on them. Shared Step Time types belong in this central
+module.
 
 `traceml_ai.step_time.analysis` depends only on the central model and NumPy.
 It does not import SQLite, diagnosis policies, reporting, Rich, or NiceGUI.
@@ -136,14 +130,14 @@ contract does not load the analyzer or NumPy.
 | Type or field | Meaning |
 |---|---|
 | `StepTimeSourceRow` | One decoded source row with CPU/GPU clock pairs; no alignment or derived meaning. |
-| `StepTimeValues` | Fixed optional phase, derived, and CPU-compatibility values for one step or rank average. |
+| `StepTimeValues` | Optional phase, derived, and CPU-reporting values for one step or rank average. |
 | `StepTimeStepFacts` | One aligned step id and its typed values. |
 | `StepTimeRankFacts` | Typed aligned steps and the corresponding rank-window average. |
 | `StepTimeMetric` | Flat per-signal series and rank statistics; clock and coverage live once on `StepTimeWindow`. |
 | `StepTimeSourceCursor` | The single stored latest-row/latest-step position used by live-session reuse. |
 | `StepTimeWindow.training_strategy` | Run strategy analyzed with the window; diagnosis does not need a parallel source of truth. |
 | `representative_rank` | A real rank closest to the mathematical median; it is not the median itself. |
-| `*_cpu_ms` | Historical CPU-clock compatibility values used only where the public summary requires them. |
+| `*_cpu_ms` | CPU-clock values used by the public summary. |
 | Other `*_ms` fields | Values from the single clock selected for the complete analysis window. |
 
 ## Canonical window invariants
@@ -162,10 +156,9 @@ contract does not load the analyzer or NumPy.
 | Representative rank | Choose the real rank nearest the mathematical median, then the lower value, then the lower rank id. |
 | Residual meaning | `max(0, step - h2d - forward - backward - optimizer)` is unattributed time, not proof of communication or NCCL overhead. |
 
-CPU compatibility fields in `final_summary.json` are intentionally different
-from selected-clock diagnosis values. `dataloader_ms` and `total_step_ms`
-remain CPU-clocked, while `input_wait_ms`, `step_time_ms`, and phase metrics use
-the selected diagnosis clock.
+In `final_summary.json`, `dataloader_ms` and `total_step_ms` are CPU-clocked.
+`input_wait_ms`, `step_time_ms`, and phase metrics use the selected diagnosis
+clock.
 
 ## Surface responsibilities
 
@@ -211,14 +204,14 @@ defines six explicit SQLite scenarios:
 
 | Scenario | Contract protected |
 |---|---|
-| `complete_gpu` | complete multi-rank window, GPU selection, and separate CPU compatibility projection |
+| `complete_gpu` | complete multi-rank window, GPU selection, and CPU-reporting projection |
 | `sparse_missing_forward` | one rank lacks a required signal; compute and residual remain unavailable on that rank |
 | `measured_zero_forward` | an explicit zero remains measured and participates in compute, residual, and diagnosis |
 | `single_rank_cpu` | single-rank statistics and diagnosis without fabricated cross-rank skew |
 | `ddp_rank_straggler` | DDP visible-backward attribution and critical severity after a confident window |
 | `fsdp_rank_straggler` | FSDP strategy propagation, attribution behavior, and warning severity cap |
 
-The cross-surface goldens freeze:
+The cross-surface tests cover:
 
 - selected clock, aligned steps, rank universe, and coverage;
 - sparse per-rank values and selected metric statistics;
@@ -229,37 +222,16 @@ The cross-surface goldens freeze:
 They intentionally do not snapshot timestamps, private cache state, complete
 Rich/NiceGUI markup, or dictionary ordering.
 
-## Removed internals
-
-The migration deliberately removed the old `utils/step_time_window.py` and
-`utils/step_time_sqlite.py` pipelines, renderer-owned schemas, mapping-based
-diagnosis builders, reporting facades, and
-`StepTimeWindow.per_rank_timing`. None of the built-in surfaces constructs or
-consumes a rank dictionary.
-
-Internal compatibility adapters are intentionally not retained: they were
-not part of TraceML's documented stable API and keeping them would preserve a
-second data model and diagnosis path. User-facing CLI behavior and serialized
-summary fields remain stable at their actual boundaries.
-
-Callers receive a canonical `StepTimeWindow`, call
-`diagnose_step_time_window(window, policy=...)`, and read
-`StepTimeAnalysis.window.rank_facts` / `StepTimeValues`. The built-in summary
-projector remains responsible for public JSON field names. New code must not
-add another analyzer input type, restore a per-step dictionary, or add a
-surface-specific schema to the central package. It must read clock and
-coverage from the window rather than copying them onto every metric.
-
 ## Changing Step Time safely
 
 Before submitting a Step Time change:
 
 1. Identify the ownership row above; avoid adding the same calculation to a
    presenter.
-2. Add or update one explicit scenario only when a contract genuinely changes.
+2. Add or update a scenario when a contract genuinely changes.
 3. Run the cross-surface tests and inspect CLI, dashboard, and summary effects
    together.
-4. If SQL changes, update the observational query baseline deliberately.
+4. If SQL changes, record fresh benchmark measurements.
 5. If public summary keys or meanings change, update `reporting/SCHEMA.md` and
    consider schema-version compatibility.
 6. If diagnosis vocabulary or thresholds change, update
