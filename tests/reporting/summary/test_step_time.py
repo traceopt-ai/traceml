@@ -5,9 +5,6 @@ from traceml_ai.diagnostics.step_time import (
     SUMMARY_STEP_TIME_POLICY,
     diagnose_step_time_window,
 )
-from traceml_ai.reporting.summaries.step_time import (
-    generate_step_time_summary_card,
-)
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.reporting.sections.step_time.builder import (
     project_step_time_summary,
@@ -170,10 +167,7 @@ def test_step_time_summary_uses_persisted_events_json(tmp_path) -> None:
     db_path = tmp_path / "telemetry"
     _create_step_time_db(str(db_path))
 
-    summary = generate_step_time_summary_card(
-        str(db_path),
-        print_to_stdout=False,
-    )
+    summary = StepTimeSummarySection().build(str(db_path)).payload
 
     assert summary["metadata"]["global_ranks_seen"] == 1
     assert summary["global"]["window"]["steps_analyzed"] == 2

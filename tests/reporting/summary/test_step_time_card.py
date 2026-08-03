@@ -51,7 +51,6 @@ def _rank(
         forward_ms=forward,
         backward_ms=backward,
         optimizer_step_ms=optimizer,
-        step_time_cpu_ms=effective_step,
         compute_ms=compute,
         residual_ms=residual,
         total_step_ms=dataloader + effective_step,
@@ -129,7 +128,7 @@ def _step_events_from_rank(
                 cpu_ms=summary.optimizer_step_ms
             ),
             "_traceml_internal:step_time": _event_stats(
-                cpu_ms=summary.step_time_cpu_ms
+                cpu_ms=summary.step_time_ms
             ),
         }
         for step in range(_WINDOW_SIZE)

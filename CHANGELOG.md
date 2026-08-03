@@ -18,11 +18,11 @@ which carry the full historical notes for versions predating this file.
   `traceml_ai.utils.step_time_sqlite` were removed. Use
   `traceml_ai.step_time.model`, `traceml_ai.step_time.sqlite`,
   `traceml_ai.step_time.analysis`, and `traceml_ai.step_time.pipeline`.
-- `build_step_diagnosis()`, `build_step_diagnosis_result()`, and the
-  reporting-only `RankStepSummary` remain available as deprecated one-release
-  compatibility shims. New integrations should pass a canonical
-  `StepTimeWindow` to `diagnose_step_time_window(window, policy=...)` and
-  project `StepTimeRankFacts` / `StepTimeValues` directly.
+- **Breaking:** internal mapping diagnosis builders and the reporting-only
+  `RankStepSummary` facade were removed with the displaced Step Time pipeline.
+  Internal integrations now pass a canonical `StepTimeWindow` to
+  `diagnose_step_time_window(window, policy=...)` and project
+  `StepTimeRankFacts` / `StepTimeValues` directly.
 - NumPy 2 is supported: the `numpy<2` cap is removed, so installing
   TraceML no longer downgrades NumPy in a modern environment and
   resolvers no longer fall back to old TraceML releases.

@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Literal, Mapping, Optional, Sequence, cast
+from typing import Literal, Optional, cast
 
 from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
 
@@ -152,27 +152,6 @@ def _merge_note(base: Optional[str], extra: Optional[str]) -> Optional[str]:
     return f"{base} {extra}"
 
 
-def _pct(value: float) -> str:
-    """
-    Format a ratio as a percentage string.
-    """
-    return f"{non_negative_finite(value) * 100.0:.1f}%"
-
-
-def _rank_str(rank: Optional[int]) -> str:
-    """
-    Format a rank identifier for UI text.
-    """
-    return f"r{rank}" if rank is not None else "—"
-
-
-def _severity(value: float, crit_threshold: float) -> Severity:
-    """
-    Map a scalar signal to warn or crit severity.
-    """
-    return "crit" if non_negative_finite(value) >= crit_threshold else "warn"
-
-
 def _step_time_issue_sort_key(
     issue: DiagnosticIssue,
 ) -> tuple[int, float, int]:
@@ -235,14 +214,8 @@ def diagnose_step_time_window(
     window: StepTimeWindow,
     *,
     policy: StepTimeDiagnosisPolicy,
-    training_strategy: Optional[str] = None,
-    include_attribution: bool = False,
 ) -> DiagnosticResult[StepDiagnosis]:
-    """Diagnose one canonical window without rebuilding analyzer facts.
-
-    ``include_attribution`` is a deprecated opt-in compatibility feature.
-    Built-in surfaces consume analyzer facts directly and leave it disabled.
-    """
+    """Diagnose one canonical window without rebuilding analyzer facts."""
     metrics = window.metrics
     thresholds = policy.thresholds
     metric_names = [metric.metric for metric in metrics]
@@ -271,10 +244,8 @@ def diagnose_step_time_window(
     coverage = window.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
     steps_used = int(coverage.steps_used)
-    overall_worst_rank = (
-        window.worst_rank
-        if window.worst_rank is not None
-        else metric_worst_rank(step_metric)
+    overall_worst_rank = metric_worst_rank(
+        by_key.get("total_step") or step_metric
     )
     step_total = metric_total(step_metric, single_rank=single_rank)
 
@@ -301,7 +272,6 @@ def diagnose_step_time_window(
     context = build_step_time_context(
         window=window,
         thresholds=thresholds,
-        training_strategy=training_strategy,
     )
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
@@ -452,64 +422,9 @@ def diagnose_step_time_window(
             ),
         )
 
-    if include_attribution:
-        from .compat import build_metric_attribution
-
-        attribution = build_metric_attribution(window)
-    else:
-        attribution = {}
     return DiagnosticResult(
         primary=primary,
         issues=tuple(issues),
-        metric_attribution=attribution,
-    )
-
-
-def build_step_diagnosis_result(
-    metrics: Sequence[StepTimeMetric],
-    thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
-    *,
-    per_rank_timing: Optional[Mapping[int, Mapping[str, float]]] = None,
-    expected_ranks: Optional[Sequence[int]] = None,
-    diagnosis_clock: str = "cpu",
-    training_strategy: str = "ddp",
-) -> DiagnosticResult[StepDiagnosis]:
-    """Delegate the released rank-map API to its deprecated adapter.
-
-    The local import keeps compatibility conversion code off the normal
-    repository-to-window runtime path.
-    """
-    from .compat import build_step_diagnosis_result as compatibility_call
-
-    return compatibility_call(
-        metrics,
-        thresholds,
-        per_rank_timing=per_rank_timing,
-        expected_ranks=expected_ranks,
-        diagnosis_clock=diagnosis_clock,
-        training_strategy=training_strategy,
-    )
-
-
-def build_step_diagnosis(
-    metrics: Sequence[StepTimeMetric],
-    thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
-    *,
-    per_rank_timing: Optional[Mapping[int, Mapping[str, float]]] = None,
-    expected_ranks: Optional[Sequence[int]] = None,
-    diagnosis_clock: str = "cpu",
-    training_strategy: str = "ddp",
-) -> StepDiagnosis:
-    """Delegate the released primary-diagnosis API for one release."""
-    from .compat import build_step_diagnosis as compatibility_call
-
-    return compatibility_call(
-        metrics,
-        thresholds,
-        per_rank_timing=per_rank_timing,
-        expected_ranks=expected_ranks,
-        diagnosis_clock=diagnosis_clock,
-        training_strategy=training_strategy,
     )
 
 
@@ -519,8 +434,6 @@ __all__ = [
     "DiagnosisThresholds",
     "DEFAULT_THRESHOLDS",
     "StepDiagnosis",
-    "build_step_diagnosis",
-    "build_step_diagnosis_result",
     "build_step_warmup_diagnosis",
     "diagnose_step_time_window",
 ]

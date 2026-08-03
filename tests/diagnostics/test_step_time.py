@@ -17,7 +17,6 @@ from traceml_ai.diagnostics.step_time.api import (
     diagnose_step_time_window,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
-from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import (
     LIVE_STEP_TIME_POLICY,
     SUMMARY_STEP_TIME_POLICY,
@@ -31,6 +30,7 @@ from traceml_ai.diagnostics.step_time.rules import (
     ResidualHeavyRule,
 )
 from traceml_ai.diagnostics.step_time.trend import build_step_trend_note
+from traceml_ai.renderers.step_time.renderer import format_cli_diagnosis
 from traceml_ai.step_time.model import (
     StepTimeMetric,
     StepTimeSeries,
@@ -53,25 +53,18 @@ def _time_metric(
     worst: float,
     worst_rank: int | None = 1,
     skew: float = 0.0,
-    world_size: int = 2,
     steps: int = 64,
 ) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
         series=StepTimeSeries(
-            steps=list(range(steps)),
             median=[median] * steps,
             worst=[worst] * steps,
-            sum=[median * world_size] * steps,
         ),
-        window_size=steps,
-        steps_used=steps,
         median_total=median,
         worst_total=worst,
         worst_rank=worst_rank,
-        skew_ratio=skew,
         skew_pct=skew,
-        measured_ranks=tuple(range(world_size)),
     )
 
 
@@ -145,7 +138,6 @@ def _metrics_from_per_rank_timing(
     steps: int = 64,
 ) -> tuple[StepTimeMetric, ...]:
     metrics: list[StepTimeMetric] = []
-    world_size = len(per_rank_timing)
     for key in (
         "input_wait",
         "h2d",
@@ -173,7 +165,6 @@ def _metrics_from_per_rank_timing(
                 worst=worst,
                 worst_rank=worst_rank,
                 skew=skew,
-                world_size=world_size,
                 steps=steps,
             )
         )
@@ -201,7 +192,6 @@ def _diagnose_rank_map(
             name="test",
             thresholds=thresholds,
         ),
-        training_strategy=training_strategy,
     )
 
 
@@ -220,7 +210,6 @@ def _rank_context(
     return build_step_time_context(
         window=window,
         thresholds=DEFAULT_THRESHOLDS,
-        training_strategy=training_strategy,
     )
 
 
@@ -252,7 +241,6 @@ def _single_rank_step_metrics(
             median=step,
             worst=step,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -260,7 +248,6 @@ def _single_rank_step_metrics(
             median=dataloader,
             worst=dataloader,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -268,7 +255,6 @@ def _single_rank_step_metrics(
             median=forward,
             worst=forward,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -276,7 +262,6 @@ def _single_rank_step_metrics(
             median=backward,
             worst=backward,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -284,7 +269,6 @@ def _single_rank_step_metrics(
             median=optimizer,
             worst=optimizer,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
         _time_metric(
@@ -292,7 +276,6 @@ def _single_rank_step_metrics(
             median=residual,
             worst=residual,
             worst_rank=0,
-            world_size=1,
             steps=steps,
         ),
     )
@@ -1643,10 +1626,8 @@ def test_trend_abstains_when_required_share_is_unavailable(
     metric = replace(
         metric,
         series=StepTimeSeries(
-            steps=list(range(120)),
             median=rising,
             worst=rising,
-            sum=rising,
         ),
     )
 
@@ -1689,5 +1670,4 @@ def test_largest_compute_phase_uses_one_eligible_rank_cohort() -> None:
         },
     )
 
-    assert context.largest_compute is not None
-    assert context.largest_compute.label == "Backward"
+    assert context.largest_compute == "Backward"

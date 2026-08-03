@@ -121,12 +121,10 @@ def test_analyzer_builds_one_typed_fact_set() -> None:
     assert rank.average.residual_ms == 5.0
     assert rank.average.total_step_ms == 100.0
     assert rank.average.dataloader_cpu_ms == 10.0
-    assert rank.average.step_time_cpu_ms == 190.0
     assert rank.average.total_step_cpu_ms == 200.0
 
     assert window.iteration_ranks == (0,)
     assert window.compute_ranks == (0,)
-    assert window.composition_ranks == (0,)
     assert window.straggler_ranks == (0,)
     assert window.input_wait_share == pytest.approx(0.05)
     assert window.h2d_share == pytest.approx(0.05)
@@ -167,12 +165,10 @@ def test_missing_and_measured_zero_keep_distinct_metric_cohorts() -> None:
     assert window.compute_ranks == (0,)
 
     forward = _metric(window, "forward")
-    assert forward.measured_ranks == (0,)
     assert forward.median_total == 0.0
     assert forward.representative_rank == 0
     assert forward.representative_total == 0.0
     assert forward.series is not None
-    assert forward.series.steps == [1, 2]
     assert forward.series.median == [0.0, 0.0]
 
 
@@ -258,7 +254,7 @@ def test_cpu_fallback_and_strategy_specific_straggler_cohorts() -> None:
         ({0: 100.0, 1: 300.0, 2: 300.0}, 300.0, 1, 1),
     ],
 )
-def test_overall_statistics_name_median_representative_and_worst(
+def test_total_step_metric_names_median_representative_and_worst(
     profiles: Mapping[int, float],
     median: float,
     representative: int,
@@ -273,11 +269,12 @@ def test_overall_statistics_name_median_representative_and_worst(
         window_size=2,
     )
 
-    assert window.median_total_step_ms == median
-    assert window.representative_rank == representative
-    assert window.representative_total_step_ms == profiles[representative]
-    assert window.worst_rank == worst
-    assert window.worst_total_step_ms == profiles[worst]
+    total_step = _metric(window, "total_step")
+    assert total_step.median_total == median
+    assert total_step.representative_rank == representative
+    assert total_step.representative_total == profiles[representative]
+    assert total_step.worst_rank == worst
+    assert total_step.worst_total == profiles[worst]
 
 
 def test_alignment_uses_latest_common_suffix() -> None:
@@ -309,7 +306,6 @@ def test_alignment_uses_latest_common_suffix() -> None:
     assert empty.steps == []
     assert empty.rank_facts == ()
     assert empty.coverage.ranks_present == 2
-    assert empty.coverage.completed_step == 2
 
 
 def test_raw_fixture_adapter_matches_direct_normalized_analysis() -> None:
@@ -358,10 +354,7 @@ def test_analyzer_has_one_input_and_no_removed_shapes() -> None:
         for path in production
         if "per_rank_timing" in path.read_text(encoding="utf-8")
     }
-    assert mapping_owners == {
-        "diagnostics/step_time/api.py",
-        "diagnostics/step_time/compat.py",
-    }
+    assert mapping_owners == set()
     source = "\n".join(path.read_text(encoding="utf-8") for path in production)
     assert "per_rank_step_timing" not in source
     assert "_group_source_rows" not in source
@@ -392,7 +385,3 @@ def test_empty_snapshot_defaults_to_no_observed_ranks() -> None:
     assert window.metrics == []
     assert window.coverage.expected_steps == 100
     assert window.coverage.steps_used == 0
-    assert window.coverage.completed_step == 0
-    assert window.median_total_step_ms is None
-    assert window.representative_rank is None
-    assert window.worst_rank is None

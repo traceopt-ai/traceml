@@ -5,7 +5,6 @@ Data loading, diagnosis, and presentation remain in their respective layers.
 """
 
 from .model import (
-    DIAGNOSIS_CLOCK_KEY,
     STEP_TIME_EVENT_NAMES,
     DiagnosisClock,
     StepTimeClockValues,
@@ -24,7 +23,6 @@ from .model import (
 )
 
 __all__ = [
-    "DIAGNOSIS_CLOCK_KEY",
     "DiagnosisClock",
     "STEP_TIME_EVENT_NAMES",
     "StepTimeClockValues",

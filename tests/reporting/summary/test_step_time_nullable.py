@@ -14,9 +14,7 @@ import json
 import sqlite3
 
 from traceml_ai.reporting.compare.core import build_compare_payload
-from traceml_ai.reporting.summaries.step_time import (
-    generate_step_time_summary_card,
-)
+from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 
 _EVENT_NAMES = {
     "input_wait": "_traceml_internal:dataloader_next",
@@ -129,13 +127,11 @@ def _create_db(path: str, per_rank_events: dict) -> None:
 def test_missing_h2d_is_null_and_measured_zero_stays_zero(tmp_path) -> None:
     missing_db = tmp_path / "missing"
     _create_db(str(missing_db), {0: dict(_FULL_RANK_MS)})
-    missing = generate_step_time_summary_card(
-        str(missing_db), print_to_stdout=False
-    )
+    missing = StepTimeSummarySection().build(str(missing_db)).payload
 
     zero_db = tmp_path / "zero"
     _create_db(str(zero_db), {0: dict(_FULL_RANK_MS, h2d=0.0)})
-    zero = generate_step_time_summary_card(str(zero_db), print_to_stdout=False)
+    zero = StepTimeSummarySection().build(str(zero_db)).payload
 
     assert missing["global"]["average"]["h2d_ms"] is None
     assert missing["global"]["median"]["h2d_ms"] == {
@@ -167,7 +163,7 @@ def test_h2d_only_rank_keeps_row_and_stays_out_of_rank_selection(
             1: {"h2d": 6.0},
         },
     )
-    summary = generate_step_time_summary_card(str(db), print_to_stdout=False)
+    summary = StepTimeSummarySection().build(str(db)).payload
 
     rows = summary["groups"]["rows"]
     assert set(rows) == {"0", "1"}
@@ -232,7 +228,7 @@ def test_compare_treats_null_metric_as_unavailable(tmp_path) -> None:
 def test_single_rank_scope_wording_survives_null_total(tmp_path) -> None:
     db = tmp_path / "telemetry"
     _create_db(str(db), {0: {"h2d": 3.0}})
-    summary = generate_step_time_summary_card(str(db), print_to_stdout=False)
+    summary = StepTimeSummarySection().build(str(db)).payload
 
     # A single-rank run keeps single-rank wording even when its total
     # step is unmeasured and it cannot win a median/worst pick.
@@ -243,7 +239,7 @@ def test_single_rank_scope_wording_survives_null_total(tmp_path) -> None:
 def test_all_ranks_without_total_step_null_the_rank_picks(tmp_path) -> None:
     db = tmp_path / "telemetry"
     _create_db(str(db), {0: {"h2d": 2.0}, 1: {"h2d": 6.0}})
-    summary = generate_step_time_summary_card(str(db), print_to_stdout=False)
+    summary = StepTimeSummarySection().build(str(db)).payload
 
     assert summary["global"]["worst"]["total_step_ms"] == {
         "value": None,
@@ -261,7 +257,7 @@ def test_partial_compute_triplet_nulls_only_derived_metrics(
     db = tmp_path / "telemetry"
     values = {k: v for k, v in _FULL_RANK_MS.items() if k != "optimizer_step"}
     _create_db(str(db), {0: values})
-    summary = generate_step_time_summary_card(str(db), print_to_stdout=False)
+    summary = StepTimeSummarySection().build(str(db)).payload
 
     metrics = summary["groups"]["rows"]["0"]["metrics"]
     # Measured phases keep their values; only the metrics that need the

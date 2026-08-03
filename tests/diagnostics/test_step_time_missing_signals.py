@@ -24,9 +24,9 @@ from traceml_ai.diagnostics.step_time.api import (
     diagnose_step_time_window,
 )
 from traceml_ai.diagnostics.step_time.context import build_step_time_context
-from traceml_ai.diagnostics.step_time.formatters import format_cli_diagnosis
 from traceml_ai.diagnostics.step_time.policy import SUMMARY_STEP_TIME_POLICY
 from traceml_ai.diagnostics.step_time.rules import RankStragglerRule
+from traceml_ai.renderers.step_time.renderer import format_cli_diagnosis
 from traceml_ai.step_time.model import (
     StepTimeMetric,
 )
@@ -110,22 +110,17 @@ def _diagnose(
     return diagnose_step_time_window(
         window,
         policy=SUMMARY_STEP_TIME_POLICY,
-        training_strategy=training_strategy,
     )
 
 
-def _step_metric(*, world_size: int = 2) -> StepTimeMetric:
+def _step_metric() -> StepTimeMetric:
     return StepTimeMetric(
         metric="step_time",
         series=None,
-        window_size=30,
-        steps_used=30,
         median_total=100.0,
         worst_total=100.0,
         worst_rank=1,
-        skew_ratio=0.0,
         skew_pct=0.0,
-        measured_ranks=tuple(range(world_size)),
     )
 
 
@@ -381,7 +376,6 @@ def _straggler_issue(
     context = build_step_time_context(
         window=window,
         thresholds=SUMMARY_STEP_TIME_POLICY.thresholds,
-        training_strategy=training_strategy,
     )
     return RankStragglerRule().evaluate(context)
 

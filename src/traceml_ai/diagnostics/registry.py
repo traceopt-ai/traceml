@@ -33,7 +33,6 @@ class ModelDiagnosticContext:
     step_memory_metrics: Sequence[StepMemoryCombinedMetric]
     step_time_window: Optional[StepTimeWindow] = None
     step_time_diagnosis: Optional[StepDiagnosis] = None
-    step_time_training_strategy: str = "ddp"
     step_memory_status_message: Optional[str] = None
     gpu_total_bytes: Optional[float] = None
 

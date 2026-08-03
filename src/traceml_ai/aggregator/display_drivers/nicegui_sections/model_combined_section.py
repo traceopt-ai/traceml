@@ -198,13 +198,14 @@ def update_model_combined_section(
 
     step_metric = m["step_time"]
     st = step_metric
+    steps_used = window.coverage.steps_used
     _update_kpis(panel, window, step_metric)
     representative = window.composition_representative_rank
     if representative is None:
         _clear_ribbon(
             panel,
             _NO_COHORT_SIG,
-            f"{int(st.steps_used)} aligned steps · no coherent phase cohort",
+            f"{int(steps_used)} aligned steps · no coherent phase cohort",
         )
         return
 
@@ -258,7 +259,7 @@ def update_model_combined_section(
             representative,
             round(float(st.median_total), 3),
             round(float(st.worst_total), 3),
-            int(st.steps_used),
+            int(steps_used),
             int(st.worst_rank if st.worst_rank is not None else -1),
         )
     )
@@ -300,7 +301,7 @@ def update_model_combined_section(
     # engine and set via update_step_verdict (fed the model-diagnostics
     # payload), so the card never asserts a classification of its own.
 
-    steps_text = f"{int(st.steps_used)} aligned steps"
+    steps_text = f"{int(steps_used)} aligned steps"
     steps_text += f" · representative r{representative}"
     if unmeasured or partial_metrics:
         incomplete = set(unmeasured) | set(partial_metrics)

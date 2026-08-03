@@ -13,11 +13,7 @@ from traceml_ai.diagnostics.step_memory import (
     LIVE_STEP_MEMORY_POLICY,
     build_step_memory_diagnosis,
 )
-from traceml_ai.diagnostics.step_time.api import (
-    StepDiagnosis,
-    diagnose_step_time_window,
-)
-from traceml_ai.diagnostics.step_time.policy import LIVE_STEP_TIME_POLICY
+from traceml_ai.diagnostics.step_time.api import StepDiagnosis
 from traceml_ai.diagnostics.trends import (
     DEFAULT_TREND_CONFIG,
     compute_trend_pct,
@@ -101,7 +97,6 @@ def build_model_diagnostics_payload(
     *,
     step_time_window: Optional[StepTimeWindow] = None,
     step_time_diagnosis: Optional[StepDiagnosis] = None,
-    step_time_training_strategy: str = "ddp",
     step_memory_metrics: Sequence[StepMemoryCombinedMetric],
     step_memory_status_message: Optional[str] = None,
     gpu_total_bytes: Optional[float] = None,
@@ -118,7 +113,6 @@ def build_model_diagnostics_payload(
     context = ModelDiagnosticContext(
         step_time_window=step_time_window,
         step_time_diagnosis=step_time_diagnosis,
-        step_time_training_strategy=str(step_time_training_strategy or "ddp"),
         step_memory_metrics=step_memory_metrics,
         step_memory_status_message=step_memory_status_message,
         gpu_total_bytes=gpu_total_bytes,
@@ -158,14 +152,15 @@ def _build_step_time_item(
     window = context.step_time_window
     step_time_diag = context.step_time_diagnosis
     if step_time_diag is None:
-        # Compatibility-only path for released direct callers. TraceML's
-        # dashboard always passes the diagnosis already produced by
-        # StepTimePipeline, so normal rendering never rediagnoses a window.
-        step_time_diag = diagnose_step_time_window(
-            window or StepTimeWindow(),
-            policy=LIVE_STEP_TIME_POLICY,
-            training_strategy=context.step_time_training_strategy,
-        ).primary
+        return ModelDiagnosisItem(
+            source="step_time",
+            title="Step Time",
+            kind="NO_DATA",
+            severity="info",
+            status="NO DATA",
+            reason="Step Time diagnosis is unavailable on this tick.",
+            action="Wait for more complete samples.",
+        )
     return ModelDiagnosisItem(
         source="step_time",
         title="Step Time",

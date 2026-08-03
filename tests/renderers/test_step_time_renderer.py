@@ -9,7 +9,7 @@ from tests.step_time.factories import (
     window_from_rank_averages,
 )
 from traceml_ai.renderers.step_time.renderer import (
-    StepCombinedRenderer,
+    StepTimeRenderer,
     _table_metrics,
 )
 from traceml_ai.step_time.model import StepTimeMetric
@@ -22,14 +22,10 @@ def _metric(
     return StepTimeMetric(
         metric=name,
         series=None,
-        window_size=1,
-        steps_used=1,
         median_total=value,
         worst_total=value,
         worst_rank=0,
-        skew_ratio=0.0,
         skew_pct=0.0,
-        measured_ranks=(0,),
     )
 
 
@@ -68,7 +64,7 @@ def test_step_time_cli_uses_the_precomputed_selected_clock_analysis() -> None:
         ),
     )
 
-    renderer = StepCombinedRenderer(session=Mock())
+    renderer = StepTimeRenderer(session=Mock())
     text = _render_text(renderer.render(payload))
 
     assert payload.analysis.window.metrics is diagnosis_metrics
@@ -111,7 +107,7 @@ def test_step_time_cli_renders_zero_timings_as_zero() -> None:
         ),
     )
 
-    renderer = StepCombinedRenderer(session=Mock())
+    renderer = StepTimeRenderer(session=Mock())
     text = _render_text(renderer.render(payload))
 
     assert "IW" in text
@@ -131,7 +127,7 @@ def test_step_time_cli_refreshes_its_injected_session_once() -> None:
     session = Mock()
     session.refresh.return_value = payload
 
-    renderer = StepCombinedRenderer(session=session)
+    renderer = StepTimeRenderer(session=session)
     text = _render_text(renderer.get_panel_renderable())
 
     session.refresh.assert_called_once_with()

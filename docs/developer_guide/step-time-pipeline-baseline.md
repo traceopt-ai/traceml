@@ -252,28 +252,28 @@ use that number of GPUs or measure training throughput.
 
 PR8 moves final summary onto the shared pipeline's summary profile and makes
 reporting a pure projection. PR9 removes the displaced utility, loader,
-reporting-model, formatter, and rank-map production paths. Deprecated public
-entry points remain lazy and do not execute during this benchmark.
+reporting-model, formatter, rank-map, and internal compatibility paths.
 
 Recorded on 2026-08-03 with Python 3.13.5, SQLite 3.50.2, macOS arm64, 400
 rows per logical rank, a 100-step window, two warmups, and seven repetitions:
 
 | Ranks | Stage | SELECTs | Median (ms) | Comparison with PR7 |
 |---:|---|---:|---:|---:|
-| 1 | one live provider (cache miss) | 2 | 8.375 | +2.7% |
-| 1 | shared dashboard refresh | 2 | 0.431 | +0.2% |
-| 1 | final summary | 2 | 6.989 | +7.5% |
-| 8 | one live provider (cache miss) | 2 | 32.838 | -0.2% |
-| 8 | shared dashboard refresh | 2 | 3.053 | +0.3% |
-| 8 | final summary | 2 | 15.482 | -2.8% |
-| 32 | one live provider (cache miss) | 2 | 119.302 | +1.9% |
-| 32 | shared dashboard refresh | 2 | 12.857 | -1.0% |
-| 32 | final summary | 2 | 46.673 | -3.1% |
+| 1 | one live provider (cache miss) | 2 | 7.635 | -6.4% |
+| 1 | shared dashboard refresh | 2 | 0.452 | +5.1% |
+| 1 | final summary | 2 | 5.716 | -12.1% |
+| 8 | one live provider (cache miss) | 2 | 32.622 | -0.8% |
+| 8 | shared dashboard refresh | 2 | 3.117 | +2.4% |
+| 8 | final summary | 2 | 14.997 | -5.9% |
+| 32 | one live provider (cache miss) | 2 | 116.708 | -0.3% |
+| 32 | shared dashboard refresh | 2 | 12.962 | -0.2% |
+| 32 | final summary | 2 | 46.937 | -2.5% |
 
-All medians remain within the 10% observational review budget, and query
-topology stays 2/2/2. The small positive and negative movements are local
-benchmark noise; this comparison supports only the conclusion that cleanup
-introduced no repeatable regression.
+Query topology stays 2/2/2. The 1-rank summary improved by more than 10%, but
+the absolute movement is below one millisecond. Every measured regression is
+below 6%, and the 32-rank cache-miss and summary paths remain within 3% of
+PR7. This comparison supports only the conclusion that cleanup introduced no
+repeatable material regression.
 
 ## Reproduce
 

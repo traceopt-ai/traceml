@@ -154,10 +154,15 @@ def test_window_carries_canonical_metric_rank_availability() -> None:
     assert window.ranks_for("forward") == (0,)
     assert window.ranks_for("backward") == (0, 1)
     assert rank_average(window, 0).backward_ms == pytest.approx(0.0)
-    assert window.is_complete("input_wait") is False
-    assert window.is_complete("forward") is False
-    assert window.is_complete("backward") is True
-    assert window.eligible_ranks(("forward", "backward")) == (0,)
+    assert window.ranks_for("input_wait") != window.rank_universe
+    assert window.ranks_for("forward") != window.rank_universe
+    assert window.ranks_for("backward") == window.rank_universe
+    assert tuple(
+        sorted(
+            set(window.ranks_for("forward"))
+            & set(window.ranks_for("backward"))
+        )
+    ) == (0,)
 
 
 def test_empty_window_keeps_expected_rank_universe() -> None:
@@ -174,7 +179,6 @@ def test_skew_requires_two_measured_ranks_but_zero_remains_measured() -> None:
     single = _window_from_presence(_all_steps())
     single_step = next(m for m in single.metrics if m.metric == "step_time")
     assert single_step.skew_pct is None
-    assert single_step.skew_ratio is None
 
     presence_by_rank = {0: _all_steps(), 1: _all_steps()}
     per_rank = {0: {}, 1: {}}
@@ -220,7 +224,6 @@ def test_skew_is_unavailable_when_zero_median_hides_a_nonzero_rank() -> None:
     assert backward.median_total == pytest.approx(0.0)
     assert backward.worst_total == pytest.approx(10.0)
     assert backward.skew_pct is None
-    assert backward.skew_ratio is None
 
 
 def test_iteration_share_preserves_unavailable_and_measured_zero() -> None:

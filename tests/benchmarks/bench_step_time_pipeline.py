@@ -160,7 +160,6 @@ def _benchmark_rank_count(
             lambda: diagnose_step_time_window(
                 loaded,
                 policy=LIVE_STEP_TIME_POLICY,
-                training_strategy=loaded.training_strategy,
             ),
         ),
         ("one live provider", live_cache_miss),

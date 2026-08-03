@@ -7,7 +7,6 @@ provide aggregate metric objects and only need a typed rank-fact window.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import statistics
 from typing import Any, Mapping, Optional, Sequence
 
@@ -41,7 +40,6 @@ def window_from_events(
     *,
     max_rows: int,
     expected_ranks: Optional[Sequence[int]] = None,
-    completed_step: Optional[int] = None,
     training_strategy: str = "ddp",
 ) -> StepTimeWindow:
     """Analyze concise raw-event fixtures through the production analyzer.
@@ -75,22 +73,9 @@ def window_from_events(
             rows=tuple(rows),
             global_ranks=expected,
             training_strategy=str(training_strategy),
-            cursor=StepTimeSourceCursor(
-                latest_step=(
-                    int(completed_step) if completed_step is not None else None
-                )
-            ),
         ),
         window_size=max_rows,
     )
-    if completed_step is not None and not window.steps:
-        window = replace(
-            window,
-            coverage=replace(
-                window.coverage,
-                completed_step=int(completed_step),
-            ),
-        )
     return window
 
 
@@ -141,7 +126,6 @@ def values_from_mapping(
         residual_ms=optional("residual_proxy"),
         total_step_ms=total_step,
         dataloader_cpu_ms=dataloader_cpu,
-        step_time_cpu_ms=step_time_cpu,
         total_step_cpu_ms=total_step_cpu,
     )
 
@@ -153,6 +137,7 @@ def window_from_rank_averages(
     clock: DiagnosisClock = "cpu",
     expected_ranks: Optional[Sequence[int]] = None,
     training_strategy: str = "ddp",
+    steps_used: Optional[int] = None,
 ) -> StepTimeWindow:
     """Build a typed aggregate-only window for a renderer unit test."""
     rank_facts = tuple(
@@ -201,34 +186,17 @@ def window_from_rank_averages(
         and (facts.average.backward_ms or 0.0) > 0.0
         and (strategy != "fsdp" or (facts.average.forward_ms or 0.0) > 0.0)
     )
-    totals = {
-        facts.global_rank: facts.average.total_step_ms
-        for facts in rank_facts
-        if facts.average.total_step_ms is not None
-    }
-    median_total = (
-        float(statistics.median(totals.values())) if totals else None
+    inferred_steps = max(
+        (
+            len(metric.series.median)
+            for metric in metrics
+            if metric.series is not None
+        ),
+        default=1 if metrics else 0,
     )
-    representative = (
-        min(
-            totals,
-            key=lambda rank: (
-                abs(float(totals[rank]) - float(median_total)),
-                float(totals[rank]),
-                rank,
-            ),
-        )
-        if totals and median_total is not None
-        else None
-    )
-    worst = (
-        max(totals, key=lambda rank: (float(totals[rank]), -rank))
-        if totals
-        else None
-    )
-    step_metric = next(
-        (metric for metric in metrics if metric.metric == "step_time"),
-        None,
+    resolved_steps = max(
+        0,
+        int(inferred_steps if steps_used is None else steps_used),
     )
     composition_representative = _composition_representative(
         rank_facts,
@@ -238,29 +206,11 @@ def window_from_rank_averages(
         clock=clock,
         training_strategy=strategy,
         expected_ranks=expected,
-        coverage=(
-            StepTimeCoverage(
-                expected_steps=step_metric.window_size,
-                steps_used=step_metric.steps_used,
-                completed_step=(
-                    int(step_metric.series.steps[-1])
-                    if step_metric.series is not None
-                    and step_metric.series.steps
-                    else step_metric.steps_used
-                ),
-                world_size=len(expected),
-                ranks_present=len(rank_facts),
-                incomplete=len(rank_facts) < len(expected),
-            )
-            if step_metric is not None
-            else StepTimeCoverage(
-                expected_steps=0,
-                steps_used=0,
-                completed_step=0,
-                world_size=len(expected),
-                ranks_present=len(rank_facts),
-                incomplete=False,
-            )
+        coverage=StepTimeCoverage(
+            expected_steps=resolved_steps,
+            steps_used=resolved_steps,
+            world_size=len(expected),
+            ranks_present=len(rank_facts),
         ),
         rank_facts=rank_facts,
         metrics=metrics if isinstance(metrics, list) else list(metrics),
@@ -272,20 +222,8 @@ def window_from_rank_averages(
             "backward",
             "optimizer_step",
         ),
-        composition_ranks=composition,
         straggler_ranks=straggler,
-        median_total_step_ms=median_total,
-        representative_rank=representative,
-        representative_total_step_ms=(
-            float(totals[representative])
-            if representative is not None
-            else None
-        ),
         composition_representative_rank=composition_representative,
-        worst_rank=worst,
-        worst_total_step_ms=(
-            float(totals[worst]) if worst is not None else None
-        ),
         input_wait_share=_component_share(rank_facts, "input_wait"),
         h2d_share=_component_share(rank_facts, "h2d"),
         compute_share=_component_share(rank_facts, "compute"),
@@ -297,7 +235,6 @@ def live_result_from_window(
     window: StepTimeWindow,
     *,
     freshness: LiveStepTimeFreshness = "live",
-    status_message: str = "OK",
 ) -> LiveStepTimeResult:
     """Wrap one typed fixture window in the canonical live result shape."""
     request = StepTimeLoadRequest(
@@ -323,7 +260,6 @@ def live_result_from_window(
                 policy=LIVE_STEP_TIME_POLICY,
             ),
         ),
-        status_message=status_message,
     )
 
 

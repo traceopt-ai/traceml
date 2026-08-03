@@ -47,7 +47,7 @@ method is the smallest example of this boundary and can be tested without a
 database.
 
 The NiceGUI driver also owns exactly one live session. Each dashboard tick
-refreshes it once and passes the same immutable result to the Step Time hero
+refreshes it once and passes the same analyzed result to the Step Time hero
 and model-diagnostics composer. Add a new Step Time dashboard view by
 consuming that result; do not register another provider or add a presenter
 cache.
@@ -71,20 +71,15 @@ For a full domain change, read `step_time/model.py`, `sqlite.py`,
 presenter: the Rich renderer, the relevant NiceGUI section, or the final
 summary section and projector.
 
-### Step Time source compatibility
+### Step Time extension boundary
 
-The old mapping APIs `build_step_diagnosis()` and
-`build_step_diagnosis_result()` remain as deprecated one-release shims. They
-adapt a historical rank map to the canonical diagnoser and are never used by
-TraceML's built-in pipeline. New code must call
-`diagnose_step_time_window(window, policy=...)` with a canonical
-`StepTimeWindow` instead.
-
-The reporting facade likewise retains `RankStepSummary` for one release, but
-the built-in summary no longer constructs it. New integrations should read
-`StepTimeRankFacts` and `StepTimeValues` from the analyzed window. These
-compatibility names are scheduled for removal at the next breaking release;
-they must not acquire new behavior or become internal dependencies.
+Step Time is an internal subsystem with one supported domain input:
+`StepTimeWindow`. Diagnosis calls
+`diagnose_step_time_window(window, policy=...)`; reporting reads
+`StepTimeRankFacts` and `StepTimeValues` from the same analyzed window. Do not
+add rank-map converters, surface-specific domain models, or alternate
+diagnosis builders. Stable user-facing compatibility belongs at the CLI and
+serialized-report boundaries, not between internal pipeline layers.
 
 ## TraceML Lifecycle
 

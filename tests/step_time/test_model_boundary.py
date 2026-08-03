@@ -97,7 +97,7 @@ def test_removed_utility_adapters_do_not_return() -> None:
 
 
 def test_pipeline_is_the_only_builtin_orchestrator() -> None:
-    """Keep direct diagnosis limited to the API and compatibility facade."""
+    """Keep direct diagnosis limited to its implementation and pipeline."""
     source_root = _PROJECT_ROOT / "src" / "traceml_ai"
     sources = {
         path.relative_to(source_root).as_posix(): path.read_text(
@@ -112,9 +112,7 @@ def test_pipeline_is_the_only_builtin_orchestrator() -> None:
         if "diagnose_step_time_window(" in source
     }
     assert diagnosis_owners == {
-        "diagnostics/model_diagnostics.py",
         "diagnostics/step_time/api.py",
-        "diagnostics/step_time/compat.py",
         "step_time/pipeline.py",
     }
     assert {
@@ -139,7 +137,6 @@ def test_diagnosis_context_accepts_only_the_canonical_window() -> None:
     assert tuple(inspect.signature(build_step_time_context).parameters) == (
         "window",
         "thresholds",
-        "training_strategy",
     )
     context_source = (
         _PROJECT_ROOT
@@ -183,6 +180,18 @@ def test_metric_shape_has_no_repeated_window_wrappers() -> None:
     assert "clock" not in metric_fields
     assert "coverage" not in metric_fields
     assert "summary" not in metric_fields
+    assert {
+        "window_size",
+        "steps_used",
+        "skew_ratio",
+        "measured_ranks",
+    }.isdisjoint(metric_fields)
+    assert {"steps", "sum"}.isdisjoint(
+        field.name for field in fields(model.StepTimeSeries)
+    )
+    assert {"completed_step", "incomplete"}.isdisjoint(
+        field.name for field in fields(model.StepTimeCoverage)
+    )
     assert not hasattr(model, "StepTimeSummary")
     assert not hasattr(step_time_package, "StepTimeSummary")
 
@@ -222,54 +231,16 @@ def test_cli_presenter_has_no_data_or_diagnosis_dependencies() -> None:
     assert "StepTimeDashboardAdapter" not in source
 
 
-def test_released_compatibility_adapter_is_off_runtime_paths() -> None:
-    """Keep deprecated rank-map conversion out of built-in consumers."""
-    production_paths = (
-        _PROJECT_ROOT / "src" / "traceml_ai" / "step_time" / "pipeline.py",
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "renderers"
-        / "step_time"
-        / "renderer.py",
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "renderers"
-        / "model_diagnostics"
-        / "renderer.py",
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "reporting"
-        / "sections"
-        / "step_time"
-        / "__init__.py",
+def test_removed_mapping_diagnosis_apis_do_not_return() -> None:
+    """Keep the deleted rank-map model and diagnosis path deleted."""
+    diagnosis = (
+        _PROJECT_ROOT / "src" / "traceml_ai" / "diagnostics" / "step_time"
     )
+    api_source = (diagnosis / "api.py").read_text(encoding="utf-8")
 
-    for path in production_paths:
-        source = path.read_text(encoding="utf-8")
-        assert "diagnostics.step_time.compat" not in source
-        assert "build_step_diagnosis(" not in source
-        assert "build_step_diagnosis_result(" not in source
-
-    api_path = (
-        _PROJECT_ROOT
-        / "src"
-        / "traceml_ai"
-        / "diagnostics"
-        / "step_time"
-        / "api.py"
-    )
-    top_level_imports = (
-        node
-        for node in ast.parse(api_path.read_text(encoding="utf-8")).body
-        if isinstance(node, ast.ImportFrom)
-    )
-    assert not any(
-        node.level == 1 and node.module == "compat"
-        for node in top_level_imports
-    )
+    assert not (diagnosis / "compat.py").exists()
+    assert "def build_step_diagnosis(" not in api_source
+    assert "def build_step_diagnosis_result(" not in api_source
 
 
 def test_dashboard_compatibility_types_are_removed() -> None:

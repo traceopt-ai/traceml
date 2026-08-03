@@ -10,22 +10,10 @@ the same facts without making core analysis depend on a renderer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import (
-    Any,
-    Dict,
-    List,
-    Literal,
-    Mapping,
-    NamedTuple,
-    Optional,
-    Sequence,
-)
+from typing import List, Literal, Mapping, NamedTuple, Optional
 
 DiagnosisClock = Literal["cpu", "gpu"]
 """Clock selected consistently across one analysis window."""
-
-DIAGNOSIS_CLOCK_KEY = "diagnosis_clock"
-"""Stable final-summary key that records the selected diagnosis clock."""
 
 STEP_TIME_EVENT_NAMES: Mapping[str, str] = {
     "input_wait": "_traceml_internal:dataloader_next",
@@ -48,7 +36,6 @@ _VALUE_FIELDS: Mapping[str, str] = {
     "residual_proxy": "residual_ms",
     "total_step": "total_step_ms",
     "dataloader_fetch": "dataloader_cpu_ms",
-    "step_time_cpu": "step_time_cpu_ms",
     "total_step_cpu": "total_step_cpu_ms",
 }
 
@@ -129,7 +116,7 @@ class StepTimeValues:
 
     The phase fields use the clock selected for the complete analysis window.
     ``None`` means the signal was unavailable; a measured zero remains
-    ``0.0``. The three ``*_cpu_ms`` fields retain the historical CPU-clock
+    ``0.0``. The two ``*_cpu_ms`` fields retain the historical CPU-clock
     values required by final-summary compatibility output.
     """
 
@@ -143,7 +130,6 @@ class StepTimeValues:
     residual_ms: Optional[float] = None
     total_step_ms: Optional[float] = None
     dataloader_cpu_ms: Optional[float] = None
-    step_time_cpu_ms: Optional[float] = None
     total_step_cpu_ms: Optional[float] = None
 
     def value(self, metric: str) -> Optional[float]:
@@ -174,16 +160,12 @@ class StepTimeSeries:
     """Per-step aggregate values for one metric across participating ranks.
 
     Attributes:
-        steps: Aligned completed step identifiers.
         median: Median rank value for each aligned step.
         worst: Largest rank value for each aligned step.
-        sum: Sum of rank values for each aligned step.
     """
 
-    steps: List[int]
     median: List[float]
     worst: List[float]
-    sum: List[float]
 
 
 @dataclass(frozen=True)
@@ -192,10 +174,8 @@ class StepTimeCoverage:
 
     expected_steps: int
     steps_used: int
-    completed_step: int
     world_size: int
     ranks_present: int
-    incomplete: bool
 
 
 @dataclass(frozen=True)
@@ -204,16 +184,12 @@ class StepTimeMetric:
 
     metric: str
     series: Optional[StepTimeSeries]
-    window_size: int
-    steps_used: int
     median_total: float
     worst_total: float
     worst_rank: Optional[int]
-    skew_ratio: Optional[float]
     skew_pct: Optional[float]
     representative_rank: Optional[int] = None
     representative_total: Optional[float] = None
-    measured_ranks: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -223,8 +199,8 @@ class StepTimeWindow:
     ``rank_facts`` is the sole canonical rank representation. Missing fields
     are unavailable and measured zeroes remain ``0.0``. The explicit cohorts,
     rank statistics, and component shares are computed once by the analyzer.
-    Consumers should use :meth:`ranks_for` or :meth:`eligible_ranks` instead
-    of recreating availability rules.
+    Consumers should use :meth:`ranks_for` instead of recreating availability
+    rules.
     """
 
     clock: DiagnosisClock = "cpu"
@@ -235,24 +211,16 @@ class StepTimeWindow:
         default_factory=lambda: StepTimeCoverage(
             expected_steps=0,
             steps_used=0,
-            completed_step=0,
             world_size=0,
             ranks_present=0,
-            incomplete=False,
         )
     )
     rank_facts: tuple[StepTimeRankFacts, ...] = ()
     metrics: list[StepTimeMetric] = field(default_factory=list)
     iteration_ranks: tuple[int, ...] = ()
     compute_ranks: tuple[int, ...] = ()
-    composition_ranks: tuple[int, ...] = ()
     straggler_ranks: tuple[int, ...] = ()
-    median_total_step_ms: Optional[float] = None
-    representative_rank: Optional[int] = None
-    representative_total_step_ms: Optional[float] = None
     composition_representative_rank: Optional[int] = None
-    worst_rank: Optional[int] = None
-    worst_total_step_ms: Optional[float] = None
     input_wait_share: Optional[float] = None
     h2d_share: Optional[float] = None
     compute_share: Optional[float] = None
@@ -282,36 +250,8 @@ class StepTimeWindow:
             if facts.average.value(key) is not None
         )
 
-    def eligible_ranks(self, metrics: Sequence[str]) -> tuple[int, ...]:
-        """Return ranks carrying every requested metric in this window."""
-        keys = tuple(str(metric) for metric in metrics)
-        if not keys:
-            return self.rank_universe
-        return tuple(
-            facts.global_rank
-            for facts in self.rank_facts
-            if all(facts.average.value(key) is not None for key in keys)
-        )
-
-    def is_complete(self, metric: str) -> bool:
-        """Return whether every rank in the window measured one metric."""
-        ranks = self.rank_universe
-        return bool(ranks) and self.ranks_for(metric) == ranks
-
-    def to_json(self) -> Dict[str, Any]:
-        """Return the aligned-window metadata used by ``final_summary``."""
-        return {
-            "alignment": "common_steps",
-            "aligned_steps_analyzed": int(self.coverage.steps_used),
-            "start_step": self.steps[0] if self.steps else None,
-            "end_step": self.steps[-1] if self.steps else None,
-            "window_size": int(self.coverage.expected_steps),
-            DIAGNOSIS_CLOCK_KEY: self.clock,
-        }
-
 
 __all__ = [
-    "DIAGNOSIS_CLOCK_KEY",
     "DiagnosisClock",
     "STEP_TIME_EVENT_NAMES",
     "StepTimeClockValues",

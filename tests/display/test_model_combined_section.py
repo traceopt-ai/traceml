@@ -22,7 +22,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_secti
 from traceml_ai.diagnostics.model_diagnostics import (
     build_model_diagnostics_payload,
 )
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.step_time.model import (
     StepTimeLoadRequest,
@@ -96,14 +96,10 @@ def _metric(
     return StepTimeMetric(
         metric=name,
         series=None,
-        window_size=5,
-        steps_used=5,
         median_total=value,
         worst_total=worst if worst is not None else value,
         worst_rank=0,
-        skew_ratio=0.0,
         skew_pct=0.0,
-        measured_ranks=(0,),
     )
 
 
@@ -126,6 +122,7 @@ def _payload(
             clock="gpu" if clock == "gpu" else "cpu",
             expected_ranks=tuple(sorted(per_rank_timing)),
             metrics=metrics,
+            steps_used=5,
         ),
         freshness=freshness,
     )
@@ -834,7 +831,7 @@ def test_sqlite_window_has_one_share_across_live_and_summary_consumers(
     assert summary_metrics["residual_ms"] == pytest.approx(10.0)
     assert summary_metrics["h2d_ms"] is None
 
-    renderer = StepCombinedRenderer(
+    renderer = StepTimeRenderer(
         LiveStepTimeSession(
             str(db_path),
             request=StepTimeLoadRequest(

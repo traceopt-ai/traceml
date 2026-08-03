@@ -28,7 +28,7 @@ from traceml_ai.step_time.model import (
 
 INPUT_WAIT_KEY = "input_wait"
 DATALOADER_FETCH_KEY = "dataloader_fetch"
-STEP_TIME_CPU_KEY = "step_time_cpu"
+_STEP_TIME_CPU_KEY = "step_time_cpu"
 
 SELECTED_METRICS: tuple[str, ...] = (
     INPUT_WAIT_KEY,
@@ -52,6 +52,7 @@ DISPLAY_METRICS: tuple[str, ...] = (
 STATISTIC_METRICS: tuple[str, ...] = (
     *DISPLAY_METRICS,
     "compute",
+    "total_step",
     DATALOADER_FETCH_KEY,
     "total_step_cpu",
 )
@@ -74,14 +75,6 @@ class _Cohorts(NamedTuple):
     compute: tuple[int, ...]
     composition: tuple[int, ...]
     straggler: tuple[int, ...]
-
-
-class _OverallStatistics(NamedTuple):
-    median: Optional[float]
-    representative_rank: Optional[int]
-    representative_value: Optional[float]
-    worst_rank: Optional[int]
-    worst_value: Optional[float]
 
 
 class StepTimeAnalyzer:
@@ -110,10 +103,6 @@ class StepTimeAnalyzer:
 
         # Phase 1: index references to flat rows and align one common suffix.
         row_index, steps_by_rank = _index_source_rows(snapshot.rows)
-        latest_step = max(
-            (step for steps in steps_by_rank.values() for step in steps),
-            default=0,
-        )
         steps = _common_suffix(steps_by_rank, limit)
         if not steps:
             return StepTimeWindow(
@@ -121,7 +110,6 @@ class StepTimeAnalyzer:
                 training_strategy=snapshot.training_strategy,
                 coverage=_empty_coverage(
                     window_size=limit,
-                    completed_step=latest_step,
                     world_size=len(expected_ranks),
                     ranks_present=len(steps_by_rank),
                 ),
@@ -156,22 +144,14 @@ class StepTimeAnalyzer:
         coverage = StepTimeCoverage(
             expected_steps=limit,
             steps_used=len(steps),
-            completed_step=int(steps[-1]),
             world_size=len(expected_ranks),
             ranks_present=len(rank_facts),
-            incomplete=len(rank_facts) < len(expected_ranks),
         )
-        metrics = _build_metrics(
-            rank_facts,
-            steps,
-            coverage=coverage,
-        )
+        metrics = _build_metrics(rank_facts, steps)
         cohorts = _build_cohorts(
             rank_facts,
             training_strategy=snapshot.training_strategy,
         )
-        overall = _overall_step_statistics(rank_facts)
-
         return StepTimeWindow(
             clock=clock,
             training_strategy=snapshot.training_strategy,
@@ -182,19 +162,13 @@ class StepTimeAnalyzer:
             metrics=metrics,
             iteration_ranks=cohorts.iteration,
             compute_ranks=cohorts.compute,
-            composition_ranks=cohorts.composition,
             straggler_ranks=cohorts.straggler,
-            median_total_step_ms=overall.median,
-            representative_rank=overall.representative_rank,
-            representative_total_step_ms=overall.representative_value,
             composition_representative_rank=(
                 _composition_representative_rank(
                     rank_facts,
                     cohorts.composition,
                 )
             ),
-            worst_rank=overall.worst_rank,
-            worst_total_step_ms=overall.worst_value,
             input_wait_share=_component_share(rank_facts, INPUT_WAIT_KEY),
             h2d_share=_component_share(rank_facts, "h2d"),
             compute_share=_component_share(rank_facts, "compute"),
@@ -298,7 +272,7 @@ def _rank_availability(
             )
         step_values = row.metrics.get("step_time")
         if step_values is not None and step_values.cpu_ms is not None:
-            counts[STEP_TIME_CPU_KEY] = counts.get(STEP_TIME_CPU_KEY, 0) + 1
+            counts[_STEP_TIME_CPU_KEY] = counts.get(_STEP_TIME_CPU_KEY, 0) + 1
 
     step_count = len(steps)
     return frozenset(
@@ -382,7 +356,7 @@ def _build_step_values(
     step_time_cpu = _cpu_compatibility_value(
         row,
         "step_time",
-        available=STEP_TIME_CPU_KEY in availability,
+        available=_STEP_TIME_CPU_KEY in availability,
     )
     total_step_cpu = (
         float(dataloader_cpu + step_time_cpu)
@@ -400,7 +374,6 @@ def _build_step_values(
         residual_ms=residual,
         total_step_ms=total_step,
         dataloader_cpu_ms=dataloader_cpu,
-        step_time_cpu_ms=step_time_cpu,
         total_step_cpu_ms=total_step_cpu,
     )
 
@@ -433,7 +406,6 @@ def _average_values(steps: Sequence[StepTimeStepFacts]) -> StepTimeValues:
     optimizer = average("optimizer_step_ms")
     step_time = average("step_time_ms")
     dataloader_cpu = average("dataloader_cpu_ms")
-    step_time_cpu = average("step_time_cpu_ms")
     return StepTimeValues(
         input_wait_ms=input_wait,
         h2d_ms=average("h2d_ms"),
@@ -454,20 +426,13 @@ def _average_values(steps: Sequence[StepTimeStepFacts]) -> StepTimeValues:
             else None
         ),
         dataloader_cpu_ms=dataloader_cpu,
-        step_time_cpu_ms=step_time_cpu,
-        total_step_cpu_ms=(
-            float(dataloader_cpu + step_time_cpu)
-            if dataloader_cpu is not None and step_time_cpu is not None
-            else None
-        ),
+        total_step_cpu_ms=average("total_step_cpu_ms"),
     )
 
 
 def _build_metrics(
     rank_facts: Sequence[StepTimeRankFacts],
     steps: Sequence[int],
-    *,
-    coverage: StepTimeCoverage,
 ) -> list[StepTimeMetric]:
     metrics: list[StepTimeMetric] = []
     for metric in STATISTIC_METRICS:
@@ -495,7 +460,7 @@ def _build_metrics(
                 rank,
             ),
         )
-        skew_ratio, skew_pct = _skew(
+        skew_pct = _skew(
             median,
             worst,
             population=len(measured_ranks),
@@ -513,16 +478,12 @@ def _build_metrics(
                     if metric in DISPLAY_METRICS
                     else None
                 ),
-                window_size=int(coverage.expected_steps),
-                steps_used=int(coverage.steps_used),
                 median_total=median,
                 worst_total=worst,
                 worst_rank=int(worst_rank),
-                skew_ratio=skew_ratio,
                 skew_pct=skew_pct,
                 representative_rank=int(representative_rank),
                 representative_total=float(values[representative_rank]),
-                measured_ranks=measured_ranks,
             )
         )
     return metrics
@@ -537,7 +498,6 @@ def _build_series(
     by_rank = {facts.global_rank: facts for facts in rank_facts}
     median_values: list[float] = []
     worst_values: list[float] = []
-    sums: list[float] = []
     for offset, _step in enumerate(steps):
         values = np.asarray(
             [
@@ -548,12 +508,9 @@ def _build_series(
         )
         median_values.append(float(np.median(values)))
         worst_values.append(float(np.max(values)))
-        sums.append(float(np.sum(values)))
     return StepTimeSeries(
-        steps=[int(step) for step in steps],
         median=median_values,
         worst=worst_values,
-        sum=sums,
     )
 
 
@@ -562,14 +519,14 @@ def _skew(
     worst: float,
     *,
     population: int,
-) -> tuple[Optional[float], Optional[float]]:
+) -> Optional[float]:
     if population <= 1:
-        return None, None
+        return None
     if median > 0.0:
-        return worst / median, (worst - median) / median
+        return (worst - median) / median
     if worst <= 0.0:
-        return 0.0, 0.0
-    return None, None
+        return 0.0
+    return None
 
 
 def _build_cohorts(
@@ -615,35 +572,6 @@ def _build_cohorts(
         compute=compute,
         composition=composition,
         straggler=straggler,
-    )
-
-
-def _overall_step_statistics(
-    rank_facts: Sequence[StepTimeRankFacts],
-) -> _OverallStatistics:
-    values = {
-        facts.global_rank: facts.average.total_step_ms
-        for facts in rank_facts
-        if facts.average.total_step_ms is not None
-    }
-    if not values:
-        return _OverallStatistics(None, None, None, None, None)
-    median = float(np.median(np.asarray(tuple(values.values()))))
-    representative = min(
-        values,
-        key=lambda rank: (
-            abs(float(values[rank]) - median),
-            float(values[rank]),
-            rank,
-        ),
-    )
-    worst = max(values, key=lambda rank: (float(values[rank]), -rank))
-    return _OverallStatistics(
-        median=median,
-        representative_rank=int(representative),
-        representative_value=float(values[representative]),
-        worst_rank=int(worst),
-        worst_value=float(values[worst]),
     )
 
 
@@ -699,17 +627,14 @@ def _component_share(
 def _empty_coverage(
     *,
     window_size: int,
-    completed_step: int,
     world_size: int,
     ranks_present: int,
 ) -> StepTimeCoverage:
     return StepTimeCoverage(
         expected_steps=max(1, int(window_size)),
         steps_used=0,
-        completed_step=int(completed_step),
         world_size=max(0, int(world_size)),
         ranks_present=max(0, int(ranks_present)),
-        incomplete=False,
     )
 
 
@@ -720,6 +645,5 @@ __all__ = [
     "OCCURRENCE_METRICS",
     "SELECTED_METRICS",
     "STATISTIC_METRICS",
-    "STEP_TIME_CPU_KEY",
     "StepTimeAnalyzer",
 ]

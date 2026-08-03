@@ -44,20 +44,17 @@ def _analysis(*, metrics: bool, cursor: int = 1) -> StepTimeAnalysis:
     metric = StepTimeMetric(
         metric="step_time",
         series=None,
-        window_size=2,
-        steps_used=2,
         median_total=10.0,
         worst_total=10.0,
         worst_rank=0,
-        skew_ratio=0.0,
         skew_pct=0.0,
-        measured_ranks=(0,),
     )
     window = (
         window_from_rank_averages(
             {0: {"step_time": 10.0, "total_step": 10.0}},
             expected_ranks=(0,),
             metrics=(metric,),
+            steps_used=2,
         )
         if metrics
         else StepTimeWindow()
@@ -88,7 +85,6 @@ def test_cold_empty_read_does_not_claim_prior_data(monkeypatch) -> None:
 
     assert result.freshness == "cold"
     assert result.analysis is empty
-    assert result.status_message == "No fresh step-combined data"
 
 
 def test_last_good_bridges_then_expires_with_monotonic_time(
@@ -116,7 +112,6 @@ def test_last_good_bridges_then_expires_with_monotonic_time(
     assert live.analysis is good
     assert bridged.freshness == "bridged"
     assert bridged.analysis is good
-    assert bridged.status_message.startswith("STALE")
     assert expired.freshness == "expired"
     assert expired.analysis is empty
     assert not expired.analysis.window.metrics
@@ -169,7 +164,6 @@ def test_failed_reads_use_the_same_bridge_and_expiry_policy(
 
     assert bridged.freshness == "bridged"
     assert bridged.analysis is good
-    assert "OperationalError" in bridged.status_message
     assert expired.freshness == "expired"
     assert not expired.analysis.window.metrics
 

@@ -33,7 +33,7 @@ from traceml_ai.renderers.model_diagnostics.renderer import (
 )
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedResult
 from traceml_ai.renderers.step_time import renderer as cli_renderer_module
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
 from traceml_ai.reporting.sections.step_time import (
     STEP_TIME_METRIC_NAMES,
     StepTimeSummarySection,
@@ -265,10 +265,8 @@ def test_canonical_window_matches_golden(
     assert window.rank_universe == tuple(sorted(scenario.profiles))
     assert window.coverage.expected_steps == len(scenario.steps)
     assert window.coverage.steps_used == len(scenario.steps)
-    assert window.coverage.completed_step == scenario.steps[-1]
     assert window.coverage.world_size == len(scenario.profiles)
     assert window.coverage.ranks_present == len(scenario.profiles)
-    assert window.coverage.incomplete is False
 
     expected_rows = {
         rank: {
@@ -309,7 +307,6 @@ def test_canonical_window_matches_golden(
     diagnosis = diagnose_step_time_window(
         window,
         policy=LIVE_STEP_TIME_POLICY,
-        training_strategy=window.training_strategy,
     )
     expected = EXPECTED_DIAGNOSIS[scenario.name]
     assert diagnosis.primary.kind == expected.kind
@@ -340,7 +337,7 @@ def test_cli_dashboard_summary_diagnosis_parity(
         "format_cli_diagnosis",
         capture_cli,
     )
-    cli_renderer = StepCombinedRenderer(
+    cli_renderer = StepTimeRenderer(
         LiveStepTimeSession(
             str(db_path),
             request=StepTimeLoadRequest(

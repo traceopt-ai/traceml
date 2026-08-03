@@ -8,7 +8,7 @@
 
 The section has one readable application path: load the metadata-complete
 repository profile, run canonical analysis and diagnosis once, then project
-the immutable result to the public report schema.
+the analyzed result to the public report schema.
 """
 
 from __future__ import annotations

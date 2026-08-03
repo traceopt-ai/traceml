@@ -43,7 +43,7 @@ passes the resulting `StepTimeWindow` directly to diagnosis.
 `LiveStepTimeSession` is the sole live orchestration boundary. It owns
 last-good state, monotonic expiry, and cursor-based analysis reuse. The CLI
 injects one session into a pure Rich presenter. The dashboard driver owns one
-session and fans its immutable result to the hero and diagnostics composer.
+session and fans its analyzed result to the hero and diagnostics composer.
 
 `StepTimeSummarySection` runs the same pipeline once with the `summary`
 profile, then passes the completed `StepTimeAnalysis` to a pure reporting
@@ -119,7 +119,7 @@ Step Time payload.
 
 ### Model dependency boundary
 
-`traceml_ai.step_time.model` is the lowest Step Time layer. It owns immutable
+`traceml_ai.step_time.model` is the lowest Step Time layer. It owns shared
 data contracts and imports only the Python standard library. SQLite loading,
 diagnosis, reporting, Rich, NiceGUI, and Plotly depend on these contracts;
 the model never depends on them. New code should import from this central
@@ -139,9 +139,8 @@ contract does not load the analyzer or NumPy.
 | `StepTimeValues` | Fixed optional phase, derived, and CPU-compatibility values for one step or rank average. |
 | `StepTimeStepFacts` | One aligned step id and its typed values. |
 | `StepTimeRankFacts` | Typed aligned steps and the corresponding rank-window average. |
-| `StepTimeMetric` | Flat per-signal series and statistics; clock and coverage live once on `StepTimeWindow`. |
-| `StepTimeMetric.measured_ranks` | Exact rank population used for that metric's statistics and series. |
-| `StepTimeSourceCursor` | The single stored latest-row/latest-step position used by future live-session reuse. |
+| `StepTimeMetric` | Flat per-signal series and rank statistics; clock and coverage live once on `StepTimeWindow`. |
+| `StepTimeSourceCursor` | The single stored latest-row/latest-step position used by live-session reuse. |
 | `StepTimeWindow.training_strategy` | Run strategy analyzed with the window; diagnosis does not need a parallel source of truth. |
 | `representative_rank` | A real rank closest to the mathematical median; it is not the median itself. |
 | `*_cpu_ms` | Historical CPU-clock compatibility values used only where the public summary requires them. |
@@ -190,7 +189,7 @@ refreshes of the same session.
 | Freshness | Meaning | Analysis exposed |
 |---|---|---|
 | `cold` | No usable window has ever been read. | Canonical empty analysis. |
-| `live` | The current read produced a usable window. | Current immutable analysis. |
+| `live` | The current read produced a usable window. | Current analysis object. |
 | `bridged` | A read was empty or failed within the last-good TTL. | Last good analysis. |
 | `expired` | A previous good window exists, but its bridge TTL elapsed. | Canonical empty analysis. |
 
@@ -230,29 +229,26 @@ The cross-surface goldens freeze:
 They intentionally do not snapshot timestamps, private cache state, complete
 Rich/NiceGUI markup, or dictionary ordering.
 
-## Removed internals and temporary source compatibility
+## Removed internals
 
 The migration deliberately removed the old `utils/step_time_window.py` and
-`utils/step_time_sqlite.py` pipelines and `StepTimeWindow.per_rank_timing`.
-None of the built-in surfaces constructs or consumes a rank dictionary.
+`utils/step_time_sqlite.py` pipelines, renderer-owned schemas, mapping-based
+diagnosis builders, reporting facades, and
+`StepTimeWindow.per_rank_timing`. None of the built-in surfaces constructs or
+consumes a rank dictionary.
 
-For patch-line source compatibility, `build_step_diagnosis()`,
-`build_step_diagnosis_result()`, and `RankStepSummary` remain as deprecated
-one-release shims. The diagnosis shims lazily convert the released sparse
-rank input and preserve opt-in attribution; normal imports do not load that
-conversion module. The reporting shim is only a historical dataclass name.
-They are tested as boundaries and scheduled for removal at the next breaking
-release.
+Internal compatibility adapters are intentionally not retained: they were
+not part of TraceML's documented stable API and keeping them would preserve a
+second data model and diagnosis path. User-facing CLI behavior and serialized
+summary fields remain stable at their actual boundaries.
 
-New callers must construct or receive a canonical `StepTimeWindow`, call
+Callers receive a canonical `StepTimeWindow`, call
 `diagnose_step_time_window(window, policy=...)`, and read
 `StepTimeAnalysis.window.rank_facts` / `StepTimeValues`. The built-in summary
-projector remains responsible for public JSON field names.
-
-New code must not put compatibility conversion on a runtime path, add another
-analyzer input type, restore a per-step dictionary, or add a surface-specific
-schema to the central package. It must read clock and coverage from the window
-rather than copying them onto every metric.
+projector remains responsible for public JSON field names. New code must not
+add another analyzer input type, restore a per-step dictionary, or add a
+surface-specific schema to the central package. It must read clock and
+coverage from the window rather than copying them onto every metric.
 
 ## Changing Step Time safely
 

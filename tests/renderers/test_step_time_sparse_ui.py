@@ -21,7 +21,7 @@ from tests.step_time.factories import (
     live_result_from_window,
     window_from_rank_averages,
 )
-from traceml_ai.renderers.step_time.renderer import StepCombinedRenderer
+from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
 from traceml_ai.step_time.model import (
     StepTimeMetric,
     StepTimeWindow,
@@ -33,14 +33,10 @@ def _metric(name: str, value: float) -> StepTimeMetric:
     return StepTimeMetric(
         metric=name,
         series=None,
-        window_size=30,
-        steps_used=30,
         median_total=value,
         worst_total=value,
         worst_rank=0,
-        skew_ratio=0.0,
         skew_pct=0.0,
-        measured_ranks=(0,),
     )
 
 
@@ -74,12 +70,13 @@ def _sparse_payload() -> LiveStepTimeResult:
                 _metric("optimizer_step", 10.0),
                 _metric("step_time", 90.0),
             ],
+            steps_used=30,
         )
     )
 
 
 def test_cli_omits_missing_phase_and_shows_incomplete_data() -> None:
-    renderer = StepCombinedRenderer(session=Mock())
+    renderer = StepTimeRenderer(session=Mock())
     text = _render_text(renderer.render(_sparse_payload()))
 
     # The canonical diagnosis for the sparse window reaches the terminal.
@@ -98,7 +95,7 @@ def test_cli_omits_missing_phase_and_shows_incomplete_data() -> None:
 
 
 def test_cli_drops_dead_view_when_session_window_expires() -> None:
-    renderer = StepCombinedRenderer(session=Mock())
+    renderer = StepTimeRenderer(session=Mock())
 
     live_payload = _sparse_payload()
     live_text = _render_text(renderer.render(live_payload))
@@ -109,7 +106,6 @@ def test_cli_drops_dead_view_when_session_window_expires() -> None:
     expired = live_result_from_window(
         StepTimeWindow(),
         freshness="expired",
-        status_message="No fresh step-combined data",
     )
     stale_text = _render_text(renderer.render(expired))
 
@@ -119,7 +115,7 @@ def test_cli_drops_dead_view_when_session_window_expires() -> None:
 
 
 def test_cli_startup_shows_calm_waiting_panel() -> None:
-    renderer = StepCombinedRenderer(session=Mock())
+    renderer = StepTimeRenderer(session=Mock())
 
     text = _render_text(
         renderer.render(
@@ -141,14 +137,10 @@ def test_cli_renders_multi_rank_sparse_table() -> None:
         return StepTimeMetric(
             metric=metric.metric,
             series=None,
-            window_size=30,
-            steps_used=30,
             median_total=value,
             worst_total=value * 2,
             worst_rank=1,
-            skew_ratio=2.0,
             skew_pct=1.0,
-            measured_ranks=(0, 1),
         )
 
     per_rank_timing = {
@@ -177,9 +169,10 @@ def test_cli_renders_multi_rank_sparse_table() -> None:
                 _multi_metric("optimizer_step", 10.0),
                 _multi_metric("step_time", 90.0),
             ],
+            steps_used=30,
         )
     )
-    renderer = StepCombinedRenderer(session=Mock())
+    renderer = StepTimeRenderer(session=Mock())
     text = _render_text(renderer.render(payload))
 
     header = next(line for line in text.splitlines() if "Metric" in line)
