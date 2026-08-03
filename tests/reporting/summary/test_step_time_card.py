@@ -25,39 +25,15 @@ from traceml_ai.step_time.model import (
 from traceml_ai.step_time.pipeline import (
     StepTimeAnalysis,
 )
-from tests.step_time.factories import window_from_events
+from tests.step_time.factories import (
+    alternating_residual_step_events as _alternating_residual_step_metrics,
+    input_bound_step_events as _input_bound_step_metrics,
+    step_events_from_values as _step_events_from_rank,
+    step_time_values as _rank,
+    window_from_events,
+)
 
 _WINDOW_SIZE = 64
-
-
-def _rank(
-    *,
-    dataloader: float = 5.0,
-    h2d: float = 0.0,
-    forward: float = 30.0,
-    backward: float = 50.0,
-    optimizer: float = 10.0,
-    step_cpu: float | None = None,
-) -> StepTimeValues:
-    compute = forward + backward + optimizer
-    known_step = h2d + compute
-    effective_step = max(
-        step_cpu if step_cpu is not None else known_step, known_step
-    )
-    residual = max(0.0, effective_step - known_step)
-    return StepTimeValues(
-        dataloader_cpu_ms=dataloader,
-        input_wait_ms=dataloader,
-        step_time_ms=effective_step,
-        h2d_ms=h2d,
-        forward_ms=forward,
-        backward_ms=backward,
-        optimizer_step_ms=optimizer,
-        compute_ms=compute,
-        residual_ms=residual,
-        total_step_ms=dataloader + effective_step,
-        total_step_cpu_ms=dataloader + effective_step,
-    )
 
 
 def _summary(
@@ -91,95 +67,6 @@ def _summary(
         ),
     )
     return project_step_time_summary(analysis)
-
-
-def _event_stats(
-    *,
-    cpu_ms: float | None = None,
-    gpu_ms: float | None = None,
-) -> dict[str, dict[str, float | bool | int | None]]:
-    device = "cuda:0" if gpu_ms is not None else "cpu"
-    duration = gpu_ms if gpu_ms is not None else cpu_ms
-    return {
-        device: {
-            "is_gpu": gpu_ms is not None,
-            "duration_ms": duration,
-            "cpu_ms": cpu_ms,
-            "gpu_ms": gpu_ms,
-            "n_calls": 1,
-        }
-    }
-
-
-def _step_events_from_rank(
-    summary: StepTimeValues,
-) -> dict[int, dict]:
-    return {
-        step: {
-            "_traceml_internal:dataloader_next": _event_stats(
-                cpu_ms=summary.dataloader_cpu_ms
-            ),
-            "_traceml_internal:h2d_time": _event_stats(cpu_ms=summary.h2d_ms),
-            "_traceml_internal:forward_time": _event_stats(
-                cpu_ms=summary.forward_ms
-            ),
-            "_traceml_internal:backward_time": _event_stats(
-                cpu_ms=summary.backward_ms
-            ),
-            "_traceml_internal:optimizer_step": _event_stats(
-                cpu_ms=summary.optimizer_step_ms
-            ),
-            "_traceml_internal:step_time": _event_stats(
-                cpu_ms=summary.step_time_ms
-            ),
-        }
-        for step in range(_WINDOW_SIZE)
-    }
-
-
-def _input_bound_step_metrics(
-    *,
-    dataloader_cpu: float = 12.0,
-    step_time_cpu: float = 90.0,
-    input_wait_gpu: float,
-    step_time_gpu: float,
-    h2d_gpu: float = 0.0,
-    compute_gpu: float = 0.0,
-    steps: int = 64,
-) -> dict[int, dict]:
-    return {
-        step: {
-            "_traceml_internal:dataloader_next": _event_stats(
-                cpu_ms=dataloader_cpu, gpu_ms=input_wait_gpu
-            ),
-            "_traceml_internal:h2d_time": _event_stats(gpu_ms=h2d_gpu),
-            "_traceml_internal:forward_time": _event_stats(gpu_ms=compute_gpu),
-            "_traceml_internal:step_time": _event_stats(
-                cpu_ms=step_time_cpu,
-                gpu_ms=step_time_gpu,
-            ),
-        }
-        for step in range(steps)
-    }
-
-
-def _alternating_residual_step_metrics(steps: int = 64) -> dict[int, dict]:
-    out: dict[int, dict] = {}
-    for step in range(steps):
-        compute_ms, step_time_ms = (
-            (50.0, 100.0) if step % 2 == 0 else (100.0, 50.0)
-        )
-        # backward/optimizer are measured zeros: the residual derivation
-        # requires every compute phase to be measured, not assumed.
-        out[step] = {
-            "_traceml_internal:dataloader_next": _event_stats(cpu_ms=0.0),
-            "_traceml_internal:h2d_time": _event_stats(cpu_ms=0.0),
-            "_traceml_internal:forward_time": _event_stats(cpu_ms=compute_ms),
-            "_traceml_internal:backward_time": _event_stats(cpu_ms=0.0),
-            "_traceml_internal:optimizer_step": _event_stats(cpu_ms=0.0),
-            "_traceml_internal:step_time": _event_stats(cpu_ms=step_time_ms),
-        }
-    return out
 
 
 def _assert_compact_card(card: str) -> None:

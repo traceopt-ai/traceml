@@ -16,11 +16,9 @@ from traceml_ai.diagnostics.step_time.api import (
     StepDiagnosis,
     diagnose_step_time_window,
 )
-from traceml_ai.diagnostics.step_time.context import build_step_time_context
 from traceml_ai.diagnostics.step_time.policy import (
     LIVE_STEP_TIME_POLICY,
     SUMMARY_STEP_TIME_POLICY,
-    StepTimeDiagnosisPolicy,
 )
 from traceml_ai.diagnostics.step_time.rules import (
     ComputeBoundRule,
@@ -32,7 +30,6 @@ from traceml_ai.diagnostics.step_time.rules import (
 from traceml_ai.diagnostics.step_time.trend import build_step_trend_note
 from traceml_ai.renderers.step_time.renderer import format_cli_diagnosis
 from traceml_ai.step_time.model import (
-    StepTimeMetric,
     StepTimeSeries,
     StepTimeValues,
 )
@@ -40,245 +37,20 @@ from traceml_ai.reporting.summaries.issue_summary import (
     diagnostic_result_to_json,
 )
 from tests.step_time.factories import (
+    diagnose_rank_map as _diagnose_rank_map,
+    diagnose_summary_events as _diagnose_summary_events,
+    event_stats as _event_stats,
+    metrics_from_rank_timings as _metrics_from_per_rank_timing,
     rank_average,
+    rank_context as _rank_context,
+    single_rank_step_metrics as _single_rank_step_metrics,
+    summary_step_events as _summary_step_events,
+    time_context as _time_context,
+    time_metric as _time_metric,
+    timing_row as _timing_row,
     window_from_events,
     window_from_rank_averages,
 )
-
-
-def _time_metric(
-    name: str,
-    *,
-    median: float,
-    worst: float,
-    worst_rank: int | None = 1,
-    skew: float = 0.0,
-    steps: int = 64,
-) -> StepTimeMetric:
-    return StepTimeMetric(
-        metric=name,
-        series=StepTimeSeries(
-            median=[median] * steps,
-            worst=[worst] * steps,
-        ),
-        median_total=median,
-        worst_total=worst,
-        worst_rank=worst_rank,
-        skew_pct=skew,
-    )
-
-
-def _time_context(
-    *metrics: StepTimeMetric,
-    per_rank_timing: dict[int, dict[str, float]] | None = None,
-    diagnosis_clock: str = "cpu",
-):
-    window = window_from_rank_averages(
-        per_rank_timing or {},
-        metrics=metrics,
-        clock="gpu" if diagnosis_clock == "gpu" else "cpu",
-    )
-    return build_step_time_context(
-        window=window,
-        thresholds=DEFAULT_THRESHOLDS,
-    )
-
-
-def _median(values: list[float]) -> float:
-    ordered = sorted(float(value) for value in values)
-    mid = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[mid]
-    return (ordered[mid - 1] + ordered[mid]) / 2.0
-
-
-def _timing_row(
-    *,
-    dataloader: float = 10.0,
-    h2d: float = 0.0,
-    forward: float = 20.0,
-    backward: float = 30.0,
-    optimizer: float = 10.0,
-    residual: float = 0.0,
-    step_time: float | None = None,
-    total_step: float | None = None,
-    input_wait_cpu: float | None = None,
-    input_wait_gpu: float | None = None,
-    step_time_cpu: float | None = None,
-    step_time_gpu: float | None = None,
-) -> dict[str, float]:
-    known_step = h2d + forward + backward + optimizer
-    local_step = known_step + residual if step_time is None else step_time
-    row = {
-        "input_wait": dataloader,
-        "h2d": h2d,
-        "forward": forward,
-        "backward": backward,
-        "optimizer_step": optimizer,
-        "step_time": local_step,
-        "residual_proxy": residual,
-        "total_step": (
-            dataloader + local_step if total_step is None else total_step
-        ),
-    }
-    if input_wait_cpu is not None and step_time_cpu is not None:
-        row["input_wait"] = input_wait_cpu
-        row["step_time"] = step_time_cpu
-        row["total_step"] = input_wait_cpu + step_time_cpu
-    if input_wait_gpu is not None and step_time_gpu is not None:
-        row["input_wait"] = input_wait_gpu
-        row["step_time"] = step_time_gpu
-        row["total_step"] = input_wait_gpu + step_time_gpu
-    return row
-
-
-def _metrics_from_per_rank_timing(
-    per_rank_timing: dict[int, dict[str, float]],
-    *,
-    steps: int = 64,
-) -> tuple[StepTimeMetric, ...]:
-    metrics: list[StepTimeMetric] = []
-    for key in (
-        "input_wait",
-        "h2d",
-        "forward",
-        "backward",
-        "optimizer_step",
-        "step_time",
-        "residual_proxy",
-    ):
-        values_by_rank = {
-            int(rank): float(values.get(key, 0.0))
-            for rank, values in per_rank_timing.items()
-        }
-        median = _median(list(values_by_rank.values()))
-        worst_rank = max(
-            values_by_rank,
-            key=lambda rank: (values_by_rank[rank], -rank),
-        )
-        worst = values_by_rank[worst_rank]
-        skew = ((worst - median) / median) if median > 0.0 else 0.0
-        metrics.append(
-            _time_metric(
-                key,
-                median=median,
-                worst=worst,
-                worst_rank=worst_rank,
-                skew=skew,
-                steps=steps,
-            )
-        )
-    return tuple(metrics)
-
-
-def _diagnose_rank_map(
-    metrics: tuple[StepTimeMetric, ...],
-    thresholds=DEFAULT_THRESHOLDS,
-    *,
-    per_rank_timing: dict[int, dict[str, float]],
-    diagnosis_clock: str = "cpu",
-    training_strategy: str = "ddp",
-):
-    """Diagnose a concise typed fixture without a production map adapter."""
-    window = window_from_rank_averages(
-        per_rank_timing,
-        metrics=metrics,
-        clock="gpu" if diagnosis_clock == "gpu" else "cpu",
-        training_strategy=training_strategy,
-    )
-    return diagnose_step_time_window(
-        window,
-        policy=StepTimeDiagnosisPolicy(
-            name="test",
-            thresholds=thresholds,
-        ),
-    )
-
-
-def _rank_context(
-    per_rank_timing: dict[int, dict[str, float]],
-    *,
-    training_strategy: str = "ddp",
-    diagnosis_clock: str = "cpu",
-):
-    window = window_from_rank_averages(
-        per_rank_timing,
-        metrics=_metrics_from_per_rank_timing(per_rank_timing),
-        clock="gpu" if diagnosis_clock == "gpu" else "cpu",
-        training_strategy=training_strategy,
-    )
-    return build_step_time_context(
-        window=window,
-        thresholds=DEFAULT_THRESHOLDS,
-    )
-
-
-def _diagnose_summary_events(
-    per_rank_steps: dict[int, dict[int, dict]],
-    *,
-    max_rows: int,
-):
-    window = window_from_events(
-        per_rank_steps,
-        max_rows=max_rows,
-    )
-    return diagnose_step_time_window(window, policy=SUMMARY_STEP_TIME_POLICY)
-
-
-def _single_rank_step_metrics(
-    *,
-    step: float = 100.0,
-    dataloader: float = 5.0,
-    forward: float = 30.0,
-    backward: float = 50.0,
-    optimizer: float = 10.0,
-    residual: float = 5.0,
-    steps: int = 64,
-) -> tuple[StepTimeMetric, ...]:
-    return (
-        _time_metric(
-            "step_time",
-            median=step,
-            worst=step,
-            worst_rank=0,
-            steps=steps,
-        ),
-        _time_metric(
-            "input_wait",
-            median=dataloader,
-            worst=dataloader,
-            worst_rank=0,
-            steps=steps,
-        ),
-        _time_metric(
-            "forward",
-            median=forward,
-            worst=forward,
-            worst_rank=0,
-            steps=steps,
-        ),
-        _time_metric(
-            "backward",
-            median=backward,
-            worst=backward,
-            worst_rank=0,
-            steps=steps,
-        ),
-        _time_metric(
-            "optimizer_step",
-            median=optimizer,
-            worst=optimizer,
-            worst_rank=0,
-            steps=steps,
-        ),
-        _time_metric(
-            "residual_proxy",
-            median=residual,
-            worst=residual,
-            worst_rank=0,
-            steps=steps,
-        ),
-    )
 
 
 def test_diagnosis_clock_selection_prefers_gpu_then_cpu() -> None:
@@ -1385,58 +1157,6 @@ def test_builtin_live_and_summary_policies_use_identical_thresholds() -> None:
 
     assert live.primary == summary.primary
     assert live.issues == summary.issues
-
-
-def _event_stats(
-    *,
-    cpu_ms: float | None = None,
-    gpu_ms: float | None = None,
-) -> dict[str, dict[str, float | bool | int | None]]:
-    device = "cuda:0" if gpu_ms is not None else "cpu"
-    duration = gpu_ms if gpu_ms is not None else cpu_ms
-    return {
-        device: {
-            "is_gpu": gpu_ms is not None,
-            "duration_ms": duration,
-            "cpu_ms": cpu_ms,
-            "gpu_ms": gpu_ms,
-            "n_calls": 1,
-        }
-    }
-
-
-def _summary_step_events(
-    *,
-    input_wait_gpu: float | None,
-    h2d: float = 0.0,
-    step_time_gpu: float = 60.0,
-    steps: int = 60,
-) -> dict[int, dict]:
-    out: dict[int, dict] = {}
-    for step in range(steps):
-        events = {
-            "_traceml_internal:dataloader_next": _event_stats(cpu_ms=5.0),
-            "_traceml_internal:h2d_time": _event_stats(cpu_ms=h2d),
-            "_traceml_internal:forward_time": _event_stats(cpu_ms=20.0),
-            "_traceml_internal:backward_time": _event_stats(cpu_ms=30.0),
-            "_traceml_internal:optimizer_step": _event_stats(cpu_ms=10.0),
-            "_traceml_internal:step_time": _event_stats(cpu_ms=60.0),
-        }
-        if input_wait_gpu is not None:
-            events = {
-                "_traceml_internal:dataloader_next": _event_stats(
-                    gpu_ms=input_wait_gpu
-                ),
-                "_traceml_internal:h2d_time": _event_stats(gpu_ms=h2d),
-                "_traceml_internal:forward_time": _event_stats(gpu_ms=20.0),
-                "_traceml_internal:backward_time": _event_stats(gpu_ms=30.0),
-                "_traceml_internal:optimizer_step": _event_stats(gpu_ms=10.0),
-                "_traceml_internal:step_time": _event_stats(
-                    gpu_ms=step_time_gpu
-                ),
-            }
-        out[step] = events
-    return out
 
 
 def test_summary_input_bound_uses_explicit_input_clocks() -> None:

@@ -6,6 +6,11 @@
 
 from dataclasses import dataclass
 
+from tests.sqlite_fixtures import (
+    insert_process_sample,
+    insert_system_sample,
+    summary_database,
+)
 from traceml_ai.core.summaries import SummaryResult
 from traceml_ai.reporting.final import (
     FinalReportGenerator,
@@ -115,6 +120,72 @@ def _final_payload(step_time: dict, *, system: dict | None = None) -> dict:
             _PayloadSection("step_memory", _status_payload("BALANCED")),
         ),
     )
+
+
+def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
+    db_path = tmp_path / "final.db"
+    with summary_database(db_path) as conn:
+        insert_system_sample(
+            conn,
+            row_id=1,
+            rank=0,
+            ts=1.0,
+            gpu_available=False,
+            gpu_count=0,
+            gpu_util=None,
+        )
+        insert_process_sample(
+            conn,
+            row_id=1,
+            rank=0,
+            ts=1.0,
+            gpu_available=False,
+            gpu_count=0,
+        )
+
+    payload = build_summary_payload(str(db_path))
+
+    assert payload["schema_version"] == 1.7
+    assert set(payload) == {
+        "schema_version",
+        "generated_at",
+        "duration_s",
+        "meta",
+        "primary_diagnosis",
+        "system",
+        "process",
+        "step_time",
+        "step_memory",
+        "text",
+    }
+    assert set(payload["meta"]) == {
+        "run_name",
+        "mode",
+        "world_size",
+        "nodes_observed",
+        "gpus_observed",
+    }
+    assert payload["primary_diagnosis"]["kind"] == (
+        "INSUFFICIENT_STEP_TIME_DATA"
+    )
+    assert payload["meta"] == {
+        "run_name": None,
+        "mode": "single_node",
+        "world_size": 1,
+        "nodes_observed": 1,
+        "gpus_observed": 0,
+    }
+    for key in ("system", "process", "step_time", "step_memory"):
+        assert "metadata" in payload[key]
+        assert "card" in payload[key]
+        assert "diagnosis" in payload[key]
+        assert payload[key]["issues"]
+        assert payload[key]["diagnosis"] == payload[key]["issues"][0]
+        assert "- Next:" not in payload[key]["card"]
+    assert payload["system"]["diagnosis"]["status"] == "NORMAL"
+    assert "NO GPU" not in payload["system"]["card"]
+    assert "TraceML Verdict:" in payload["text"]
+    assert "Next:" in payload["text"]
 
 
 def test_final_report_generator_preserves_summary_schema_and_order():

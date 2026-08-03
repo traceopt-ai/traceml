@@ -13,20 +13,17 @@ copy/layout free to evolve intentionally.
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from pathlib import Path
 
 import pytest
 
-from tests.sqlite_fixtures import sqlite_database
-from traceml_ai.aggregator.sqlite_writers import (
-    process as process_projection,
-    step_memory as step_memory_projection,
-    step_time as step_time_projection,
-    system as system_projection,
+from tests.sqlite_fixtures import (
+    insert_process_sample as _insert_process_sample,
+    insert_step_memory_sample as _insert_step_memory_sample,
+    insert_step_time_sample as _insert_step_time_sample,
+    insert_system_sample as _insert_system_sample,
+    summary_database,
 )
-from traceml_ai.reporting.final import build_summary_payload
 from traceml_ai.reporting.schema import BaseSectionPayload
 from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
@@ -200,212 +197,11 @@ def test_base_section_payload_rejects_contract_mismatch(
         assert message in str(caught.value)
 
 
-_SUMMARY_INITIALIZERS = (
-    system_projection.init_schema,
-    process_projection.init_schema,
-    step_time_projection.init_schema,
-    step_memory_projection.init_schema,
-)
-
-
-def _insert_row(
-    conn: sqlite3.Connection,
-    table: str,
-    **values: object,
-) -> None:
-    columns = ", ".join(values)
-    placeholders = ", ".join("?" for _ in values)
-    conn.execute(
-        f"INSERT INTO {table} ({columns}) VALUES ({placeholders})",
-        tuple(values.values()),
-    )
-
-
-def _insert_system_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    ts: float,
-    gpu_available: bool,
-    gpu_count: int,
-    gpu_util: float | None = None,
-    world_size: int = 1,
-    local_world_size: int = 1,
-) -> None:
-    _insert_row(
-        conn,
-        "system_samples",
-        recv_ts_ns=row_id,
-        global_rank=rank,
-        local_rank=0,
-        world_size=world_size,
-        local_world_size=local_world_size,
-        node_rank=rank,
-        hostname=f"worker-{rank}",
-        sample_ts_s=ts,
-        seq=row_id,
-        cpu_percent=30.0 + rank,
-        ram_used_bytes=4_000.0 + rank,
-        ram_total_bytes=16_000.0,
-        gpu_available=int(gpu_available),
-        gpu_count=gpu_count,
-    )
-    if gpu_available and gpu_count > 0:
-        _insert_row(
-            conn,
-            "system_gpu_samples",
-            recv_ts_ns=row_id,
-            global_rank=rank,
-            local_rank=0,
-            world_size=world_size,
-            local_world_size=local_world_size,
-            node_rank=rank,
-            hostname=f"worker-{rank}",
-            sample_ts_s=ts,
-            seq=row_id,
-            gpu_idx=rank,
-            util=gpu_util,
-            mem_used_bytes=2_500.0,
-            mem_total_bytes=10_000.0,
-            temperature_c=None,
-            power_usage_w=None,
-            power_limit_w=None,
-        )
-
-
-def _insert_process_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    ts: float,
-    gpu_available: bool,
-    gpu_count: int,
-) -> None:
-    _insert_row(
-        conn,
-        "process_samples",
-        recv_ts_ns=row_id,
-        rank=rank,
-        global_rank=rank,
-        sample_ts_s=ts,
-        seq=row_id,
-        cpu_percent=50.0 + rank,
-        cpu_logical_core_count=8,
-        ram_used_bytes=1_000.0 + rank * 100.0,
-        ram_total_bytes=16_000.0,
-        gpu_available=int(gpu_available),
-        gpu_count=gpu_count,
-        gpu_device_index=rank if gpu_available else None,
-        gpu_mem_used_bytes=(2_000.0 + rank * 500.0 if gpu_available else None),
-        gpu_mem_reserved_bytes=(
-            2_500.0 + rank * 600.0 if gpu_available else None
-        ),
-        gpu_mem_total_bytes=10_000.0 if gpu_available else None,
-    )
-
-
-def _step_time_events(
-    *,
-    dataloader: float,
-    forward: float,
-    backward: float,
-    optimizer: float,
-    step_time: float,
-) -> str:
-    values = {
-        "_traceml_internal:dataloader_next": dataloader,
-        "_traceml_internal:forward_time": forward,
-        "_traceml_internal:backward_time": backward,
-        "_traceml_internal:optimizer_step": optimizer,
-        "_traceml_internal:step_time": step_time,
-    }
-    return json.dumps(
-        {
-            event: {
-                "cpu": {
-                    "is_gpu": False,
-                    "duration_ms": value,
-                    "cpu_ms": value,
-                    "gpu_ms": None,
-                    "n_calls": 1,
-                }
-            }
-            for event, value in values.items()
-        }
-    )
-
-
-def _insert_step_time_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    step: int,
-    step_time: float,
-) -> None:
-    _insert_row(
-        conn,
-        "step_time_samples",
-        recv_ts_ns=row_id,
-        rank=rank,
-        global_rank=rank,
-        local_rank=0,
-        world_size=1,
-        local_world_size=1,
-        node_rank=rank,
-        hostname=f"worker-{rank}",
-        sample_ts_s=float(step),
-        seq=row_id,
-        step=step,
-        events_json=_step_time_events(
-            dataloader=1.0,
-            forward=2.0 + rank,
-            backward=3.0 + rank,
-            optimizer=1.0,
-            step_time=step_time,
-        ),
-    )
-
-
-def _insert_step_memory_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    step: int,
-    alloc: float | None,
-    reserved: float | None,
-    device: str | None = "cuda:0",
-    world_size: int = 1,
-    local_world_size: int = 1,
-) -> None:
-    _insert_row(
-        conn,
-        "step_memory_samples",
-        recv_ts_ns=row_id,
-        rank=rank,
-        global_rank=rank,
-        local_rank=0,
-        world_size=world_size,
-        local_world_size=local_world_size,
-        node_rank=rank,
-        hostname=f"worker-{rank}",
-        sample_ts_s=float(step),
-        seq=row_id,
-        device=device,
-        step=step,
-        peak_alloc_bytes=alloc,
-        peak_reserved_bytes=reserved,
-    )
-
-
 def test_summary_sections_handle_empty_tables_with_stable_schema(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "empty.db"
-    with sqlite_database(db_path, *_SUMMARY_INITIALIZERS):
+    with summary_database(db_path):
         pass
 
     sections = (
@@ -450,7 +246,7 @@ def test_summary_sections_handle_empty_tables_with_stable_schema(
 
 def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     db_path = tmp_path / "single_rank.db"
-    with sqlite_database(db_path, *_SUMMARY_INITIALIZERS) as conn:
+    with summary_database(db_path) as conn:
         _insert_system_sample(
             conn,
             row_id=1,
@@ -519,7 +315,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
 
 def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
     db_path = tmp_path / "multi_rank.db"
-    with sqlite_database(db_path, *_SUMMARY_INITIALIZERS) as conn:
+    with summary_database(db_path) as conn:
         gpu_mem_by_rank = {0: 2_500.0, 1: 5_000.0}
         for rank in (0, 1):
             _insert_system_sample(
@@ -607,7 +403,7 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "no_gpu.db"
-    with sqlite_database(db_path, *_SUMMARY_INITIALIZERS) as conn:
+    with summary_database(db_path) as conn:
         _insert_system_sample(
             conn,
             row_id=1,
@@ -654,71 +450,3 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
     assert payload["global"]["window"]["steps_analyzed"] == 0
     assert "steps_used" not in payload["global"]["window"]
     assert payload["issues"][0]["kind"] == "NO_GPU"
-
-
-def test_final_summary_fixture_schema_contains_all_sections(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "final.db"
-    with sqlite_database(db_path, *_SUMMARY_INITIALIZERS) as conn:
-        _insert_system_sample(
-            conn,
-            row_id=1,
-            rank=0,
-            ts=1.0,
-            gpu_available=False,
-            gpu_count=0,
-            gpu_util=None,
-        )
-        _insert_process_sample(
-            conn,
-            row_id=1,
-            rank=0,
-            ts=1.0,
-            gpu_available=False,
-            gpu_count=0,
-        )
-
-    payload = build_summary_payload(str(db_path))
-
-    assert payload["schema_version"] == 1.7
-    assert set(payload) == {
-        "schema_version",
-        "generated_at",
-        "duration_s",
-        "meta",
-        "primary_diagnosis",
-        "system",
-        "process",
-        "step_time",
-        "step_memory",
-        "text",
-    }
-    assert set(payload["meta"]) == {
-        "run_name",
-        "mode",
-        "world_size",
-        "nodes_observed",
-        "gpus_observed",
-    }
-    assert payload["primary_diagnosis"]["kind"] == (
-        "INSUFFICIENT_STEP_TIME_DATA"
-    )
-    assert payload["meta"] == {
-        "run_name": None,
-        "mode": "single_node",
-        "world_size": 1,
-        "nodes_observed": 1,
-        "gpus_observed": 0,
-    }
-    for key in ("system", "process", "step_time", "step_memory"):
-        assert "metadata" in payload[key]
-        assert "card" in payload[key]
-        assert "diagnosis" in payload[key]
-        assert payload[key]["issues"]
-        assert payload[key]["diagnosis"] == payload[key]["issues"][0]
-        assert "- Next:" not in payload[key]["card"]
-    assert payload["system"]["diagnosis"]["status"] == "NORMAL"
-    assert "NO GPU" not in payload["system"]["card"]
-    assert "TraceML Verdict:" in payload["text"]
-    assert "Next:" in payload["text"]

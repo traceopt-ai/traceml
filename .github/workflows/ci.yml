@@ -64,17 +64,15 @@ jobs:
           pip install pytest 'tomli; python_version < "3.11"'
       - name: Run core tests
         run: |
+          # Keep this matrix torch-free; torch-dependent paths run in the
+          # integration job, which installs the torch extra explicitly.
           pytest \
-            tests/aggregator \
             tests/config \
             tests/core \
             tests/step_time \
             tests/diagnostics \
             tests/reporting/test_view.py \
-            tests/runtime \
-            tests/sdk \
             tests/telemetry \
-            tests/test_h2d_timing.py \
             -q
 
   test-windows-teardown:
@@ -112,15 +110,18 @@ jobs:
           pip install pytest
       - name: Run integration tests
         run: |
+          # Aggregator, runtime, SDK, and root timing tests import torch.
           pytest \
+            tests/aggregator \
             tests/integrations \
-            tests/runtime/test_sampler_registry.py \
-            tests/runtime/test_telemetry_publisher.py \
+            tests/runtime \
+            tests/sdk \
             tests/reporting/compare \
             tests/reporting/html \
             tests/reporting/summary \
             tests/renderers \
             tests/display \
+            tests/test_h2d_timing.py \
             -q
 
   test-latest-deps:
