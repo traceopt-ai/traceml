@@ -230,27 +230,22 @@ def _phase_share_evidence(
     step_time_summary: Mapping[str, Any],
     system_summary: Mapping[str, Any],
 ) -> JsonDict:
-    """Build supporting average phase observations for a Step Time finding."""
+    """Build supporting observations from already-projected canonical values."""
     average = _global_average(step_time_summary)
-    total_ms = _float_or_none(average.get("total_step_ms"))
     step_time_ms = _float_or_none(average.get("step_time_ms"))
-    input_wait_ms = _float_or_none(average.get("input_wait_ms"))
-    iteration_time_ms = (
-        input_wait_ms + step_time_ms
-        if input_wait_ms is not None and step_time_ms is not None
-        else None
-    )
+    traced_step_time_ms = _float_or_none(average.get("traced_step_time_ms"))
     window = _global_window(step_time_summary)
     evidence: JsonDict = {
         "type": "phase_share",
         "basis": "average",
         "steps_analyzed": _steps_analyzed(step_time_summary),
-        "total_step_ms": _round(total_ms),
         "step_time_ms": _round(step_time_ms),
+        "traced_step_time_ms": _round(traced_step_time_ms),
         "diagnosis_clock": window.get("diagnosis_clock"),
-        "dataloader_ms": _round(_float_or_none(average.get("dataloader_ms"))),
+        "dataloader_fetch_cpu_ms": _round(
+            _float_or_none(average.get("dataloader_fetch_cpu_ms"))
+        ),
     }
-    evidence["iteration_time_ms"] = _round(iteration_time_ms)
 
     for metric in PHASE_METRICS:
         evidence[metric] = _round(_float_or_none(average.get(metric)))
@@ -360,7 +355,7 @@ def _rank_comparison_evidence(
 
     metric = _metric_for_primary_diagnosis(diagnosis)
     if metric is None:
-        metric = "total_step_ms"
+        metric = "step_time_ms"
     comparison = _comparison(
         step_time_summary=step_time_summary,
         metric=metric,
@@ -383,19 +378,19 @@ def _step_time_score_evidence(
     if kind in PHASE_SHARE_KINDS:
         return {
             "score": score,
-            "score_basis": "median_per_rank_iteration_share",
-            "score_denominator": "input_wait_ms + step_time_ms per rank",
+            "score_basis": "median_per_rank_step_time_share",
+            "score_denominator": "selected-clock Step Time per rank",
         }
 
     issue_evidence = _mapping(diagnosis.get("evidence"))
     return {
         "score": score,
-        "score_basis": "visible_cost_ms / victim_iteration_time_ms",
+        "score_basis": "visible_cost_ms / victim_step_time_ms",
         "score_numerator_ms": _float_or_none(
             issue_evidence.get("visible_cost_ms")
         ),
         "score_denominator_ms": _float_or_none(
-            issue_evidence.get("iteration_time_ms")
+            issue_evidence.get("step_time_ms")
         ),
     }
 

@@ -69,11 +69,11 @@ def test_friendly_metric_labels_and_raw_fallback(
     make_payload, make_section
 ) -> None:
     section = make_section(
-        metric_names=["total_step_ms", "weird_custom_metric"],
-        average={"total_step_ms": 100.0, "weird_custom_metric": 1.0},
+        metric_names=["step_time_ms", "weird_custom_metric"],
+        average={"step_time_ms": 100.0, "weird_custom_metric": 1.0},
     )
     out = render_sections(make_payload(step_time=section))
-    assert "Total step" in out  # mapped label
+    assert "Step Time" in out  # mapped label
     assert "weird_custom_metric" in out  # unknown key rendered raw
 
 

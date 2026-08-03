@@ -194,10 +194,14 @@ EXPECTED_METRIC_SUMMARIES: dict[
 EXPECTED_PUBLIC_ROWS: dict[str, dict[int, dict[str, float | None]]] = {
     "complete_gpu": {
         0: {
-            "total_step_ms": 200.0,
-            "dataloader_ms": 10.0,
+            "step_time_ms": 100.0,
+            "traced_step_time_ms": 95.0,
             "input_wait_ms": 5.0,
-            "step_time_ms": 95.0,
+            "step_time_cpu_ms": 200.0,
+            "step_time_gpu_ms": 100.0,
+            "traced_step_time_cpu_ms": 190.0,
+            "traced_step_time_gpu_ms": 95.0,
+            "dataloader_fetch_cpu_ms": 10.0,
             "compute_ms": 85.0,
             "residual_ms": 5.0,
         }
@@ -207,7 +211,12 @@ EXPECTED_PUBLIC_ROWS: dict[str, dict[int, dict[str, float | None]]] = {
             "forward_ms": None,
             "compute_ms": None,
             "residual_ms": None,
-            "step_time_ms": 95.0,
+            "step_time_ms": 100.0,
+            "traced_step_time_ms": 95.0,
+            "step_time_cpu_ms": 100.0,
+            "traced_step_time_cpu_ms": 95.0,
+            "step_time_gpu_ms": None,
+            "traced_step_time_gpu_ms": None,
         }
     },
     "measured_zero_forward": {
@@ -219,19 +228,47 @@ EXPECTED_PUBLIC_ROWS: dict[str, dict[int, dict[str, float | None]]] = {
     },
     "single_rank_cpu": {
         0: {
-            "total_step_ms": 100.0,
-            "dataloader_ms": 5.0,
             "input_wait_ms": 5.0,
-            "step_time_ms": 95.0,
+            "step_time_ms": 100.0,
+            "traced_step_time_ms": 95.0,
+            "step_time_cpu_ms": 100.0,
+            "traced_step_time_cpu_ms": 95.0,
+            "step_time_gpu_ms": None,
+            "traced_step_time_gpu_ms": None,
+            "dataloader_fetch_cpu_ms": 5.0,
         }
     },
     "ddp_rank_straggler": {
-        0: {"total_step_ms": 140.0, "input_wait_ms": 100.0},
-        1: {"total_step_ms": 140.0, "compute_ms": 140.0},
+        0: {
+            "step_time_ms": 140.0,
+            "traced_step_time_ms": 40.0,
+            "step_time_cpu_ms": 140.0,
+            "traced_step_time_cpu_ms": 40.0,
+            "input_wait_ms": 100.0,
+        },
+        1: {
+            "step_time_ms": 140.0,
+            "traced_step_time_ms": 140.0,
+            "step_time_cpu_ms": 140.0,
+            "traced_step_time_cpu_ms": 140.0,
+            "compute_ms": 140.0,
+        },
     },
     "fsdp_rank_straggler": {
-        0: {"total_step_ms": 140.0, "input_wait_ms": 100.0},
-        1: {"total_step_ms": 160.0, "compute_ms": 160.0},
+        0: {
+            "step_time_ms": 140.0,
+            "traced_step_time_ms": 40.0,
+            "step_time_cpu_ms": 140.0,
+            "traced_step_time_cpu_ms": 40.0,
+            "input_wait_ms": 100.0,
+        },
+        1: {
+            "step_time_ms": 160.0,
+            "traced_step_time_ms": 160.0,
+            "step_time_cpu_ms": 160.0,
+            "traced_step_time_cpu_ms": 160.0,
+            "compute_ms": 160.0,
+        },
     },
 }
 
