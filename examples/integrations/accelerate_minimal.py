@@ -40,12 +40,23 @@ def main():
     optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
 
+    # Build the Accelerator before calling traceml.init() so TraceML's
+    # instrumentation installs after the distributed/device context already
+    # exists.
     accelerator = Accelerator()
     traceml.init(mode="auto")
 
+    # accelerator.prepare() moves the model/data to the right device and,
+    # under a distributed launch, wraps the model (e.g. in DDP).
     model, optimizer, dataloader = accelerator.prepare(
         model, optimizer, dataloader
     )
+
+    # Pass the unwrapped model to trace_step, exactly like model.module for
+    # DDP and base_model for FSDP: TraceML keys instrumentation off id(model)
+    # and reads device placement from model.parameters(), so it needs the
+    # real underlying module, not a distributed wrapper. A no-op here
+    # (single process); strips the wrapper under --nproc-per-node.
     traced_model = accelerator.unwrap_model(model)
 
     model.train()
