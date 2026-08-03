@@ -40,7 +40,7 @@ def _create_step_time_db(path: str) -> None:
                 forward=5.0,
                 backward=10.0,
                 optimizer=4.0,
-                step_time=30.0,
+                traced_step_time=30.0,
             )
 
 

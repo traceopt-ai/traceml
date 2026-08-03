@@ -71,44 +71,46 @@ def timing_row(
     backward: float = 30.0,
     optimizer: float = 10.0,
     residual: float = 0.0,
+    traced_step_time: float | None = None,
     step_time: float | None = None,
-    total_step: float | None = None,
     input_wait_cpu: float | None = None,
     input_wait_gpu: float | None = None,
-    step_time_cpu: float | None = None,
-    step_time_gpu: float | None = None,
+    traced_step_time_cpu: float | None = None,
+    traced_step_time_gpu: float | None = None,
 ) -> dict[str, float]:
     """Build one concise per-rank aggregate timing row."""
     known_step = h2d + forward + backward + optimizer
-    local_step = known_step + residual if step_time is None else step_time
+    inner_step = (
+        known_step + residual if traced_step_time is None else traced_step_time
+    )
     row = {
         "input_wait": dataloader,
         "h2d": h2d,
         "forward": forward,
         "backward": backward,
         "optimizer_step": optimizer,
-        "traced_step_time": local_step,
+        "traced_step_time": inner_step,
         "residual_proxy": residual,
         "step_time": (
-            dataloader + local_step if total_step is None else total_step
+            dataloader + inner_step if step_time is None else step_time
         ),
     }
-    if input_wait_cpu is not None and step_time_cpu is not None:
+    if input_wait_cpu is not None and traced_step_time_cpu is not None:
         row.update(
             input_wait=input_wait_cpu,
-            traced_step_time=step_time_cpu,
-            step_time=input_wait_cpu + step_time_cpu,
+            traced_step_time=traced_step_time_cpu,
+            step_time=input_wait_cpu + traced_step_time_cpu,
             dataloader_fetch=input_wait_cpu,
-            traced_step_time_cpu=step_time_cpu,
-            step_time_cpu=input_wait_cpu + step_time_cpu,
+            traced_step_time_cpu=traced_step_time_cpu,
+            step_time_cpu=input_wait_cpu + traced_step_time_cpu,
         )
-    if input_wait_gpu is not None and step_time_gpu is not None:
+    if input_wait_gpu is not None and traced_step_time_gpu is not None:
         row.update(
             input_wait=input_wait_gpu,
-            traced_step_time=step_time_gpu,
-            step_time=input_wait_gpu + step_time_gpu,
-            traced_step_time_gpu=step_time_gpu,
-            step_time_gpu=input_wait_gpu + step_time_gpu,
+            traced_step_time=traced_step_time_gpu,
+            step_time=input_wait_gpu + traced_step_time_gpu,
+            traced_step_time_gpu=traced_step_time_gpu,
+            step_time_gpu=input_wait_gpu + traced_step_time_gpu,
         )
     return row
 
@@ -486,7 +488,7 @@ def summary_step_events(
     *,
     input_wait_gpu: float | None,
     h2d: float = 0.0,
-    step_time_gpu: float = 60.0,
+    traced_step_time_gpu: float = 60.0,
     steps: int = 60,
 ) -> dict[int, dict]:
     """Build a repeated complete phase window for summary diagnosis tests."""
@@ -500,7 +502,7 @@ def summary_step_events(
         "_traceml_internal:backward_time": 30.0,
         "_traceml_internal:optimizer_step": 10.0,
         "_traceml_internal:step_time": (
-            step_time_gpu if clock == "gpu" else 60.0
+            traced_step_time_gpu if clock == "gpu" else 60.0
         ),
     }
     return {
@@ -519,29 +521,33 @@ def step_time_values(
     forward: float = 30.0,
     backward: float = 50.0,
     optimizer: float = 10.0,
-    step_cpu: float | None = None,
+    traced_step_time_cpu: float | None = None,
 ) -> StepTimeValues:
     """Build canonical values for summary-card fixtures."""
     compute = forward + backward + optimizer
     known_step = h2d + compute
-    effective_step = max(
-        step_cpu if step_cpu is not None else known_step,
+    effective_traced_step_time = max(
+        (
+            traced_step_time_cpu
+            if traced_step_time_cpu is not None
+            else known_step
+        ),
         known_step,
     )
-    residual = max(0.0, effective_step - known_step)
+    residual = max(0.0, effective_traced_step_time - known_step)
     return StepTimeValues(
         dataloader_fetch_cpu_ms=dataloader,
         input_wait_ms=dataloader,
-        step_time_ms=dataloader + effective_step,
-        traced_step_time_ms=effective_step,
+        step_time_ms=dataloader + effective_traced_step_time,
+        traced_step_time_ms=effective_traced_step_time,
         h2d_ms=h2d,
         forward_ms=forward,
         backward_ms=backward,
         optimizer_step_ms=optimizer,
         compute_ms=compute,
         residual_ms=residual,
-        step_time_cpu_ms=dataloader + effective_step,
-        traced_step_time_cpu_ms=effective_step,
+        step_time_cpu_ms=dataloader + effective_traced_step_time,
+        traced_step_time_cpu_ms=effective_traced_step_time,
     )
 
 
@@ -570,9 +576,9 @@ def step_events_from_values(
 def input_bound_step_events(
     *,
     dataloader_cpu: float = 12.0,
-    step_time_cpu: float = 90.0,
+    traced_step_time_cpu: float = 90.0,
     input_wait_gpu: float,
-    step_time_gpu: float,
+    traced_step_time_gpu: float,
     h2d_gpu: float = 0.0,
     compute_gpu: float = 0.0,
     steps: int = 64,
@@ -586,8 +592,8 @@ def input_bound_step_events(
         "_traceml_internal:h2d_time": event_stats(gpu_ms=h2d_gpu),
         "_traceml_internal:forward_time": event_stats(gpu_ms=compute_gpu),
         "_traceml_internal:step_time": event_stats(
-            cpu_ms=step_time_cpu,
-            gpu_ms=step_time_gpu,
+            cpu_ms=traced_step_time_cpu,
+            gpu_ms=traced_step_time_gpu,
         ),
     }
     return {step: events for step in range(steps)}
@@ -597,7 +603,7 @@ def alternating_residual_step_events(steps: int = 64) -> dict[int, dict]:
     """Build the alternating residual-clamp regression fixture."""
     out: dict[int, dict] = {}
     for step in range(steps):
-        compute_ms, step_time_ms = (
+        compute_ms, traced_step_time_ms = (
             (50.0, 100.0) if step % 2 == 0 else (100.0, 50.0)
         )
         out[step] = {
@@ -606,7 +612,9 @@ def alternating_residual_step_events(steps: int = 64) -> dict[int, dict]:
             "_traceml_internal:forward_time": event_stats(cpu_ms=compute_ms),
             "_traceml_internal:backward_time": event_stats(cpu_ms=0.0),
             "_traceml_internal:optimizer_step": event_stats(cpu_ms=0.0),
-            "_traceml_internal:step_time": event_stats(cpu_ms=step_time_ms),
+            "_traceml_internal:step_time": event_stats(
+                cpu_ms=traced_step_time_ms
+            ),
         }
     return out
 

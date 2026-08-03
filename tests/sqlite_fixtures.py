@@ -226,7 +226,7 @@ def step_time_events(
     forward: float,
     backward: float,
     optimizer: float,
-    step_time: float,
+    traced_step_time: float,
     h2d: float | None = None,
     clock: str = "cpu",
 ) -> dict[str, dict[str, dict[str, float | bool | int | None]]]:
@@ -236,7 +236,7 @@ def step_time_events(
         "_traceml_internal:forward_time": forward,
         "_traceml_internal:backward_time": backward,
         "_traceml_internal:optimizer_step": optimizer,
-        "_traceml_internal:step_time": step_time,
+        "_traceml_internal:step_time": traced_step_time,
     }
     if h2d is not None:
         values["_traceml_internal:h2d_time"] = h2d
@@ -262,7 +262,7 @@ def insert_step_time_sample(
     row_id: int,
     rank: int,
     step: int,
-    step_time: float,
+    traced_step_time: float,
     events: Mapping[str, Any] | None = None,
     dataloader: float = 1.0,
     h2d: float | None = None,
@@ -285,7 +285,7 @@ def insert_step_time_sample(
         forward=2.0 + rank if forward is None else forward,
         backward=3.0 + rank if backward is None else backward,
         optimizer=optimizer,
-        step_time=step_time,
+        traced_step_time=traced_step_time,
         clock=clock,
     )
     _insert_row(

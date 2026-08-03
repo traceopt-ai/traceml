@@ -112,8 +112,16 @@ def test_model_diagnostics_payload_uses_registered_domains():
 
 def test_model_step_time_diagnostics_receive_canonical_window():
     per_rank_timing = {
-        0: {"input_wait": 1.0, "total_step": 10.0},
-        1: {"input_wait": 2.0, "total_step": 11.0},
+        0: {
+            "input_wait": 1.0,
+            "traced_step_time": 9.0,
+            "step_time": 10.0,
+        },
+        1: {
+            "input_wait": 2.0,
+            "traced_step_time": 9.0,
+            "step_time": 11.0,
+        },
     }
     window = window_from_rank_averages(
         per_rank_timing,
@@ -147,14 +155,16 @@ def test_model_step_time_diagnostics_receive_canonical_window():
 def test_model_step_time_diagnostics_use_selected_metrics():
     diagnosis_metrics = (
         _step_time_metric("input_wait", 40.0),
-        _step_time_metric("step_time", 100.0),
+        _step_time_metric("traced_step_time", 100.0),
+        _step_time_metric("step_time", 140.0),
         _step_time_metric("residual_proxy", 0.0),
     )
     window = window_from_rank_averages(
         {
             0: {
                 "input_wait": 40.0,
-                "step_time": 100.0,
+                "traced_step_time": 100.0,
+                "step_time": 140.0,
                 "residual_proxy": 0.0,
             }
         },
@@ -187,7 +197,13 @@ def test_model_step_time_diagnostics_use_selected_metrics():
 
 def test_model_diagnostics_uses_precomputed_step_time_diagnosis():
     window = window_from_rank_averages(
-        {0: {"step_time": 100.0, "total_step": 100.0}},
+        {
+            0: {
+                "input_wait": 0.0,
+                "traced_step_time": 100.0,
+                "step_time": 100.0,
+            }
+        },
         expected_ranks=(0,),
         metrics=[_step_time_metric("step_time", 100.0)],
     )
@@ -216,7 +232,13 @@ def test_model_diagnostics_uses_precomputed_step_time_diagnosis():
 def test_model_diagnostics_requires_precomputed_step_time_diagnosis():
     """The composer must not repeat analysis or diagnosis work."""
     window = window_from_rank_averages(
-        {0: {"step_time": 100.0, "total_step": 100.0}},
+        {
+            0: {
+                "input_wait": 0.0,
+                "traced_step_time": 100.0,
+                "step_time": 100.0,
+            }
+        },
         expected_ranks=(0,),
         metrics=[_step_time_metric("step_time", 100.0)],
     )

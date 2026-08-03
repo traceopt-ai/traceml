@@ -109,7 +109,7 @@ def test_step_time_balanced_card_is_compact() -> None:
                 forward=20.0,
                 backward=35.0,
                 optimizer=5.0,
-                step_cpu=75.0,
+                traced_step_time_cpu=75.0,
             ),
             1: _rank(
                 dataloader=5.0,
@@ -117,7 +117,7 @@ def test_step_time_balanced_card_is_compact() -> None:
                 forward=21.0,
                 backward=34.0,
                 optimizer=5.0,
-                step_cpu=75.0,
+                traced_step_time_cpu=75.0,
             ),
         }
     )
@@ -139,8 +139,8 @@ def test_step_time_balanced_card_is_compact() -> None:
 def test_card_median_and_json_representative_are_explicit() -> None:
     payload = _summary(
         {
-            0: _rank(dataloader=0.0, step_cpu=100.0),
-            1: _rank(dataloader=0.0, step_cpu=200.0),
+            0: _rank(dataloader=0.0, traced_step_time_cpu=100.0),
+            1: _rank(dataloader=0.0, traced_step_time_cpu=200.0),
         }
     )
 
@@ -161,7 +161,7 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                     forward=20.0,
                     backward=65.0,
                     optimizer=5.0,
-                    step_cpu=95.0,
+                    traced_step_time_cpu=95.0,
                 ),
                 "status": "COMPUTE-BOUND",
                 "card": (
@@ -180,11 +180,11 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                     forward=20.0,
                     backward=35.0,
                     optimizer=5.0,
-                    step_cpu=100.0,
+                    traced_step_time_cpu=100.0,
                 ),
                 "steps": _input_bound_step_metrics(
                     input_wait_gpu=40.0,
-                    step_time_gpu=100.0,
+                    traced_step_time_gpu=100.0,
                     compute_gpu=90.0,
                 ),
                 "status": "INPUT-BOUND",
@@ -217,14 +217,14 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                     forward=20.0,
                     backward=35.0,
                     optimizer=5.0,
-                    step_cpu=100.0,
+                    traced_step_time_cpu=100.0,
                 ),
                 "steps": _input_bound_step_metrics(
                     input_wait_gpu=0.0,
                     h2d_gpu=20.0,
                     compute_gpu=70.0,
-                    step_time_cpu=100.0,
-                    step_time_gpu=100.0,
+                    traced_step_time_cpu=100.0,
+                    traced_step_time_gpu=100.0,
                 ),
                 "status": "H2D-BOUND",
                 "diagnosis": {"metric": "h2d", "phase": "h2d"},
@@ -243,7 +243,7 @@ def test_card_median_and_json_representative_are_explicit() -> None:
                     forward=20.0,
                     backward=45.0,
                     optimizer=5.0,
-                    step_cpu=100.0,
+                    traced_step_time_cpu=100.0,
                 ),
                 "status": "RESIDUAL-HEAVY",
                 "card": (
@@ -289,15 +289,15 @@ def test_step_time_card_uses_h2d_diagnosis_score_not_worst_rollups() -> None:
                 input_wait_gpu=0.0,
                 h2d_gpu=10.0,
                 compute_gpu=90.0,
-                step_time_cpu=300.0,
-                step_time_gpu=100.0,
+                traced_step_time_cpu=300.0,
+                traced_step_time_gpu=100.0,
             ),
             1: _input_bound_step_metrics(
                 input_wait_gpu=20.0,
                 h2d_gpu=90.0,
                 compute_gpu=10.0,
-                step_time_cpu=120.0,
-                step_time_gpu=100.0,
+                traced_step_time_cpu=120.0,
+                traced_step_time_gpu=100.0,
             ),
         },
     )

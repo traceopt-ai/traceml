@@ -230,14 +230,15 @@ def test_step_time_share_preserves_unavailable_and_measured_zero() -> None:
     rows = {
         0: {
             "input_wait": 100.0,
+            "h2d": 10.0,
             "traced_step_time": 100.0,
             "step_time": 200.0,
             "residual_proxy": 10.0,
         }
     }
-    assert window_from_rank_averages(rows).residual_share == pytest.approx(
-        0.05
-    )
+    window = window_from_rank_averages(rows)
+    assert window.h2d_share == pytest.approx(0.05)
+    assert window.residual_share == pytest.approx(0.05)
     rows[0]["residual_proxy"] = 0.0
     assert window_from_rank_averages(rows).residual_share == pytest.approx(0.0)
     del rows[0]["residual_proxy"]

@@ -151,7 +151,7 @@ def test_input_bound_rule_uses_cpu_clock_when_gpu_is_absent() -> None:
             0: _timing_row(
                 dataloader=5.0,
                 input_wait_cpu=35.0,
-                step_time_cpu=100.0,
+                traced_step_time_cpu=100.0,
             )
         },
     )
@@ -184,12 +184,12 @@ def test_input_bound_uses_median_per_rank_step_time_share() -> None:
             0: _timing_row(
                 dataloader=10.0,
                 input_wait_gpu=10.0,
-                step_time_gpu=100.0,
+                traced_step_time_gpu=100.0,
             ),
             1: _timing_row(
                 dataloader=10.0,
                 input_wait_gpu=60.0,
-                step_time_gpu=100.0,
+                traced_step_time_gpu=100.0,
             ),
         }
     )
@@ -206,18 +206,18 @@ def test_input_bound_uses_median_per_rank_step_time_share() -> None:
 
 
 @pytest.mark.parametrize(
-    ("input_wait", "step_time", "expected_severity"),
+    ("input_wait", "traced_step_time", "expected_severity"),
     [(10.0, 90.0, "warn"), (20.0, 80.0, "crit")],
 )
 def test_input_bound_uses_step_time_share_thresholds(
     input_wait: float,
-    step_time: float,
+    traced_step_time: float,
     expected_severity: str,
 ) -> None:
     per_rank = {
         0: _timing_row(
             dataloader=input_wait,
-            step_time=step_time,
+            traced_step_time=traced_step_time,
         )
     }
 
@@ -251,7 +251,7 @@ def test_h2d_bound_conditions(
             forward=0.0,
             backward=0.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
         for rank, h2d in enumerate(h2d_by_rank)
     }
@@ -290,7 +290,7 @@ def test_residual_heavy_uses_step_time_share_thresholds(
             backward=0.0,
             optimizer=0.0,
             residual=residual,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
     }
 
@@ -309,14 +309,14 @@ def test_compute_bound_is_informational_despite_compute_skew() -> None:
             forward=90.0,
             backward=0.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=0.0,
             forward=150.0,
             backward=0.0,
             optimizer=0.0,
-            step_time=160.0,
+            traced_step_time=160.0,
         ),
     }
 
@@ -342,7 +342,7 @@ def test_compute_bound_uses_step_time_share_threshold(
             forward=compute,
             backward=0.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
     }
 
@@ -361,14 +361,14 @@ def test_compute_share_is_median_of_per_rank_step_time_shares() -> None:
             forward=100.0,
             backward=0.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=100.0,
             forward=80.0,
             backward=0.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
     }
 
@@ -395,13 +395,21 @@ def test_compute_share_is_median_of_per_rank_step_time_shares() -> None:
             id="material-h2d",
         ),
         pytest.param(
-            {"dataloader": 10.0, "forward": 90.0, "step_time": 90.0},
+            {
+                "dataloader": 10.0,
+                "forward": 90.0,
+                "traced_step_time": 90.0,
+            },
             "cpu",
             0.90,
             id="material-input-wait",
         ),
         pytest.param(
-            {"forward": 90.0, "residual": 10.0, "step_time": 100.0},
+            {
+                "forward": 90.0,
+                "residual": 10.0,
+                "traced_step_time": 100.0,
+            },
             "cpu",
             0.90,
             id="material-residual",
@@ -419,7 +427,7 @@ def test_compute_bound_abstains_for_competing_costs(
         "forward": 0.0,
         "backward": 0.0,
         "optimizer": 0.0,
-        "step_time": 100.0,
+        "traced_step_time": 100.0,
         **overrides,
     }
     per_rank = {0: _timing_row(**row)}
@@ -438,7 +446,7 @@ def test_cpu_h2d_does_not_suppress_compute_bound() -> None:
             forward=90.0,
             backward=0.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
     }
 
@@ -456,7 +464,7 @@ def test_input_bound_remains_primary_when_h2d_is_also_material() -> None:
             forward=0.0,
             backward=0.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
     }
 
@@ -481,7 +489,7 @@ def test_step_time_primary_orders_by_severity_before_impact() -> None:
             backward=0.0,
             optimizer=0.0,
             residual=30.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
     }
 
@@ -507,7 +515,7 @@ def test_step_time_primary_orders_equal_severity_by_impact() -> None:
             backward=0.0,
             optimizer=0.0,
             residual=19.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
     }
 
@@ -532,14 +540,14 @@ def test_rank_straggler_wins_only_an_exact_impact_tie() -> None:
             forward=0.0,
             backward=20.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=20.0,
             forward=0.0,
             backward=40.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
     }
     higher_typical = {
@@ -548,14 +556,14 @@ def test_rank_straggler_wins_only_an_exact_impact_tie() -> None:
             forward=0.0,
             backward=20.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=20.0,
             forward=0.0,
             backward=35.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
     }
 
@@ -591,7 +599,7 @@ def test_step_time_primary_uses_capped_severity_before_impact() -> None:
             backward=0.0,
             optimizer=0.0,
             residual=30.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         )
     }
 
@@ -633,14 +641,14 @@ def test_compute_bound_is_secondary_to_rank_straggler() -> None:
             forward=90.0,
             backward=10.0,
             optimizer=0.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=0.0,
             forward=90.0,
             backward=30.0,
             optimizer=0.0,
-            step_time=120.0,
+            traced_step_time=120.0,
         ),
     }
 
@@ -826,12 +834,12 @@ def test_rank_straggler_uses_victim_step_time_impact_thresholds(
         0: _timing_row(
             dataloader=0.0,
             backward=10.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=0.0,
             backward=10.0 + visible_cost,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
     }
 
@@ -845,6 +853,8 @@ def test_rank_straggler_uses_victim_step_time_impact_thresholds(
     assert issue.kind == "STRAGGLER"
     assert issue.severity == expected_severity
     assert issue.score == pytest.approx(visible_cost / 100.0)
+    assert issue.evidence["step_time_ms"] == pytest.approx(100.0)
+    assert "iteration_time_ms" not in issue.evidence
 
 
 @pytest.mark.parametrize(
@@ -868,12 +878,12 @@ def test_rank_straggler_requires_component_coverage_for_attribution(
     culprit = _timing_row(
         dataloader=0.0,
         backward=20.0,
-        step_time=100.0,
+        traced_step_time=100.0,
     )
     victim = _timing_row(
         dataloader=0.0,
         backward=120.0,
-        step_time=100.0,
+        traced_step_time=100.0,
     )
     if component == "input":
         culprit["input_wait"] = excess
@@ -915,12 +925,12 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
         0: _timing_row(
             dataloader=100.0,
             backward=20.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=0.0,
             backward=120.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
     }
     early = _diagnose_rank_map(
@@ -942,13 +952,13 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
             dataloader=100.0,
             forward=20.0,
             backward=20.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
         1: _timing_row(
             dataloader=0.0,
             forward=80.0,
             backward=80.0,
-            step_time=100.0,
+            traced_step_time=100.0,
         ),
     }
     fsdp = _diagnose_rank_map(
@@ -970,17 +980,17 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
                 0: _timing_row(
                     dataloader=200.0,
                     backward=0.0,
-                    step_time=200.0,
+                    traced_step_time=200.0,
                 ),
                 1: _timing_row(
                     dataloader=80.0,
                     backward=20.0,
-                    step_time=100.0,
+                    traced_step_time=100.0,
                 ),
                 2: _timing_row(
                     dataloader=0.0,
                     backward=120.0,
-                    step_time=140.0,
+                    traced_step_time=140.0,
                 ),
             },
             ("INPUT_STRAGGLER", 1, 2),
@@ -988,8 +998,8 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
         (
             "ddp",
             {
-                0: _timing_row(backward=0.0, step_time=100.0),
-                1: _timing_row(backward=0.0, step_time=120.0),
+                0: _timing_row(backward=0.0, traced_step_time=100.0),
+                1: _timing_row(backward=0.0, traced_step_time=120.0),
             },
             None,
         ),
@@ -999,17 +1009,17 @@ def test_rank_straggler_keeps_confidence_and_fsdp_severity_caps() -> None:
                 0: _timing_row(
                     dataloader=200.0,
                     backward=1.0,
-                    step_time=0.0,
+                    traced_step_time=0.0,
                 ),
                 1: _timing_row(
                     dataloader=80.0,
                     backward=20.0,
-                    step_time=100.0,
+                    traced_step_time=100.0,
                 ),
                 2: _timing_row(
                     dataloader=0.0,
                     backward=120.0,
-                    step_time=140.0,
+                    traced_step_time=140.0,
                 ),
             },
             ("INPUT_STRAGGLER", 0, 1),
@@ -1084,7 +1094,7 @@ def test_step_time_primary_prefers_rank_straggler_over_residual_heavy() -> (
 
 def test_step_time_early_warning_band_caps_severity() -> None:
     per_rank = {
-        0: _timing_row(dataloader=50.0, step_time=100.0),
+        0: _timing_row(dataloader=50.0, traced_step_time=100.0),
     }
 
     warmup = _diagnose_rank_map(
@@ -1229,6 +1239,32 @@ def test_summary_input_bound_trend_uses_selected_input_wait_series() -> None:
     assert result.primary.note is not None
     assert result.primary.note.startswith("Trend: input wait is ")
     assert "dataloader" not in result.primary.note
+
+
+def test_summary_compute_trend_uses_outer_step_time_series() -> None:
+    steps = 240
+    per_step: dict[int, dict] = {}
+    for step in range(steps):
+        input_wait = 0.0 if step < steps // 2 else 10.0
+        per_step[step] = {
+            "_traceml_internal:dataloader_next": _event_stats(
+                gpu_ms=input_wait
+            ),
+            "_traceml_internal:h2d_time": _event_stats(gpu_ms=0.0),
+            "_traceml_internal:forward_time": _event_stats(gpu_ms=50.0),
+            "_traceml_internal:backward_time": _event_stats(gpu_ms=30.0),
+            "_traceml_internal:optimizer_step": _event_stats(gpu_ms=10.0),
+            "_traceml_internal:step_time": _event_stats(gpu_ms=90.0),
+        }
+
+    result = _diagnose_summary_events(
+        {0: per_step},
+        max_rows=steps,
+    )
+
+    assert result.primary.kind == "COMPUTE_BOUND"
+    assert result.primary.note is not None
+    assert result.primary.note.startswith("Trend: step time is worsening")
 
 
 @pytest.mark.parametrize(
