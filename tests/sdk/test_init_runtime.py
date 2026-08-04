@@ -325,6 +325,28 @@ def test_init_raises_when_aggregator_unreachable_and_strict(
     assert initialization.get_init_config() is None  # config not stored
 
 
+@pytest.mark.parametrize(
+    ("env_value", "explicit_value", "expected"),
+    [
+        (None, None, "warn"),
+        ("raise", None, "raise"),
+        ("raise", "warn", "warn"),
+        ("warn", "raise", "raise"),
+    ],
+)
+def test_missing_aggregator_policy_precedence(
+    initialization, monkeypatch, env_value, explicit_value, expected
+):
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
+    if env_value is not None:
+        monkeypatch.setenv("TRACEML_ON_MISSING_AGGREGATOR", env_value)
+
+    assert (
+        initialization._resolve_on_missing_aggregator(explicit_value)
+        == expected
+    )
+
+
 def test_init_skips_runtime_when_already_active(initialization, monkeypatch):
     import traceml_ai.runtime.lifecycle as lifecycle
 

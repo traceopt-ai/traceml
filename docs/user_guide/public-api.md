@@ -1,198 +1,241 @@
 # Public API
 
-The stable surface that user code imports and calls. Everything in this page is covered by TraceML's compatibility contract across v0.x minor releases.
-
-## Core API
+Import the stable core API from `traceml_ai`:
 
 ```python
 import traceml_ai as traceml
-
-traceml.init(mode="auto")
-
-with traceml.trace_step(model):
-    ...
 ```
 
-The old `import traceml` path remains available for compatibility, but emits a
-`FutureWarning` and may be removed in a future release. Do not import from
-decorator compatibility paths.
+The reference below documents every symbol in `traceml_ai.__all__`. The old
+`import traceml` path remains a compatibility import and emits a
+`FutureWarning`; new code should use `traceml_ai`.
 
-## Hugging Face integration
+## Stable Core API
 
-::: traceml_ai.integrations.huggingface.init
+### `traceml.__version__`
+
+A string identifying the installed TraceML version. It is useful when recording
+the environment for a run or bug report.
+
+### Lifecycle
+
+::: traceml_ai.api.init
     options:
       show_root_heading: true
-      show_source: true
+      show_root_full_path: false
+      show_source: false
 
-::: traceml_ai.integrations.huggingface.TraceMLTrainerCallback
+::: traceml_ai.api.start
     options:
       show_root_heading: true
-      show_source: true
+      show_root_full_path: false
+      show_source: false
 
-::: traceml_ai.integrations.huggingface.TraceMLTrainer
+### Step boundary
+
+::: traceml_ai.api.trace_step
     options:
       show_root_heading: true
-      show_source: true
+      show_root_full_path: false
+      show_source: false
 
-## PyTorch Lightning integration
+### End-of-run summaries
 
-::: traceml_ai.integrations.lightning.init
+::: traceml_ai.api.summary
     options:
       show_root_heading: true
-      show_source: true
+      show_root_full_path: false
+      show_source: false
 
-::: traceml_ai.integrations.lightning.TraceMLCallback
+::: traceml_ai.api.final_summary
     options:
       show_root_heading: true
-      show_source: true
+      show_root_full_path: false
+      show_source: false
 
-## Ray Train integration
+### Manual instrumentation helpers
 
-::: traceml_ai.integrations.ray.TraceMLTorchTrainer
+Use these only for manual or selective instrumentation. Automatic mode already
+times the matching PyTorch paths, and manual wrappers reject duplicate automatic
+instrumentation where double-counting would be possible.
+
+::: traceml_ai.api.wrap_dataloader_fetch
     options:
       show_root_heading: true
-      show_source: true
+      show_root_full_path: false
+      show_source: false
 
-::: traceml_ai.integrations.ray.TraceMLRayConfig
+::: traceml_ai.api.wrap_forward
     options:
       show_root_heading: true
-      show_source: true
+      show_root_full_path: false
+      show_source: false
+
+::: traceml_ai.api.wrap_backward
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_source: false
+
+::: traceml_ai.api.wrap_optimizer
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_source: false
+
+::: traceml_ai.api.wrap_h2d
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_source: false
 
 ## CLI
 
-TraceML ships with a CLI entry point installed as `traceml`.
+TraceML installs the `traceml` command-line entry point:
 
 ```bash
-traceml run <script>                 # default: final summary JSON/text
-traceml run <script> --mode=summary  # explicit form of the default
-traceml run <script> --mode=cli      # explicit live terminal view
+traceml run <script>                  # final summary JSON/text
+traceml run <script> --mode=summary   # explicit summary mode
+traceml run <script> --mode=cli       # live terminal view
 traceml run <script> --mode=dashboard # live browser view
-traceml watch <script>               # zero-code system/process summary
-traceml serve                        # standalone summary aggregator by default
+traceml watch <script>                # zero-code system/process summary
+traceml serve                         # standalone aggregator
 ```
 
 Summary mode is the default for every topology. Live `cli` and `dashboard`
-modes are intended for single-node runs.
-Dashboard mode is included in the default `traceml-ai` install.
+modes are intended for single-node runs. Use PyTorch Profiler or Nsight for
+operator- or kernel-level profiling.
 
-TraceML no longer ships layer-level/deep profiling. Use PyTorch Profiler,
-Nsight, or another operator-level profiler when you need that detail.
+## Direct Launch with `traceml serve`
 
-See `traceml --help` for the full set of options.
-
-## Direct launch with `traceml serve`
-
-`traceml run` starts the aggregator and your script together. If you would
-rather launch training yourself with `python` or `torchrun`, run the aggregator
-as a standalone process and call `traceml.init(...)` inside your script.
-
-`traceml serve` owns only the aggregator. It binds a host/port, prints the
-reachable endpoint, blocks until SIGINT/SIGTERM, shuts down cleanly, and writes
-the final summary on exit. It never launches or wraps your training script.
+`traceml run` starts the aggregator and your script together. For direct
+`python` or `torchrun` launches, start the aggregator yourself and call
+`traceml.init(...)` inside the training script:
 
 ```bash
-# terminal 1: start the aggregator
+# terminal 1
 traceml serve --aggregator-host 127.0.0.1 --aggregator-port 29765
 
-# terminal 2: run your script directly
+# terminal 2
 python train.py
 ```
 
-For torchrun and multi-node, bind the aggregator so workers on other nodes can
-connect:
+`traceml serve` owns only the aggregator. It binds the endpoint, waits for a
+shutdown signal, and writes the final summary; it never launches or wraps the
+training script.
+
+For multi-node workers, bind the aggregator on a reachable address and set the
+endpoint on every training node:
 
 ```bash
-# aggregator node: --nnodes x --nproc-per-node = total workers, so the
-# aggregator waits for every rank before finalizing (and warns about ranks
-# that never report)
 traceml serve --aggregator-bind-host 0.0.0.0 --aggregator-host <node0-ip> \
   --aggregator-port 29765 --nnodes <N> --nproc-per-node <M>
 
-# each training node: workers read the aggregator endpoint from the
-# environment, so set it before torchrun
 TRACEML_AGGREGATOR_HOST=<node0-ip> TRACEML_AGGREGATOR_PORT=29765 \
   torchrun ... train.py
 ```
 
-Workers resolve the aggregator host from `TRACEML_AGGREGATOR_HOST` (default
-`127.0.0.1`), so on multi-node it must be set on every non-aggregator node or
-those workers cannot reach node 0.
+Workers resolve `TRACEML_AGGREGATOR_HOST` as `127.0.0.1` by default, so every
+non-aggregator node needs the reachable node-0 address above.
 
 `traceml serve` flags:
 
 | Flag | Meaning |
 |---|---|
-| `--aggregator-host` | Address workers connect to. Default `127.0.0.1`. |
-| `--aggregator-bind-host` | Address the aggregator binds to. Use `0.0.0.0` for multi-node. Default `127.0.0.1`. |
-| `--aggregator-port` | Aggregator TCP port. Default `29765`. |
-| `--nnodes` / `--nproc-per-node` | Total ranks = product. The aggregator waits for all of them before finalizing and warns about missing ranks. Falls back to `TRACEML_EXPECTED_WORLD_SIZE`, else 1. |
-| `--mode` | Display mode: `summary` (default), `cli`, or `dashboard`. |
+| `--aggregator-host` | Address workers connect to; default `127.0.0.1`. |
+| `--aggregator-bind-host` | Bind address; use `0.0.0.0` for multi-node. |
+| `--aggregator-port` | Aggregator TCP port; default `29765`. |
+| `--nnodes` / `--nproc-per-node` | Expected world size; the aggregator waits for all ranks before finalizing. |
+| `--mode` | `summary` (default), `cli`, or `dashboard`. |
 | `--logs-dir` | Directory for session logs. |
-| `--run-name` / `--session-id` | Run identity. Workers must use the same value for shared artifacts. |
+| `--run-name` / `--session-id` | Shared run identity for worker artifacts. |
 
-### Configuration in the direct-launch path
+### Missing-aggregator behavior
 
-In the direct `python` path you cannot pass `traceml run` flags, so runtime
-settings are resolved with this precedence:
+If the aggregator cannot be reached, `traceml.init(...)` retries for its
+bounded timeout, writes one stderr warning, and continues with tracing disabled
+as a no-op. This is the default `warn` policy; it does not stop training.
 
-1. explicit `traceml.init(...)` arguments
-2. `TRACEML_*` environment variables
-3. `traceml.yaml`
-4. built-in defaults
+Use strict behavior when telemetry is required, for example in CI:
 
 ```python
-traceml.init(
-    mode="auto",          # instrumentation mode
-    ui_mode="summary",    # display/telemetry mode
-    logs_dir="logs",
-    session_id="my_run",
-    aggregator_host="127.0.0.1",
-    aggregator_port=29765,
-)
+traceml.init(on_missing_aggregator="raise")
 ```
 
-The aggregator endpoint (`aggregator_host`, `aggregator_port`) is a launch
-setting, not read from `traceml.yaml`. If the aggregator is not reachable,
-`traceml.init(...)` retries for a short bounded period and then raises a clear
-error. Use `traceml.init(disabled=True)` (or `TRACEML_DISABLED=1`) to run with
-tracing fully disabled as a no-op.
+The policy resolves in this order: the explicit
+`on_missing_aggregator` argument, `TRACEML_ON_MISSING_AGGREGATOR`, then `warn`.
+It is not read from `traceml.yaml`.
+
+`aggregator_host` and `aggregator_port` are direct-launch settings, not
+`traceml.yaml` settings. Other runtime settings resolve as explicit
+`traceml.init(...)` arguments, then `TRACEML_*` environment variables, then
+`traceml.yaml`, then built-in defaults.
 
 ### Matching display modes across processes
 
-`traceml run` configures one display mode for the whole run. In the direct-launch
-path the aggregator and the worker are launched separately, so their display
-modes are set independently: `traceml serve --mode` for the aggregator, and
-`ui_mode` (via `traceml.init(ui_mode=...)` or `TRACEML_UI_MODE`) for the worker.
-
-For the live `cli` STDOUT/STDERR panel to show your script's output, set both to
-`cli` so the worker mirrors its stdout to the aggregator:
+In direct-launch mode, set the aggregator display with `traceml serve --mode`
+and the worker display with `traceml.init(ui_mode=...)` or `TRACEML_UI_MODE`.
+Use `cli` for both when the live terminal panel should include worker output:
 
 ```bash
 traceml serve --mode cli --run-name demo --aggregator-port 29765
 TRACEML_UI_MODE=cli TRACEML_SESSION_ID=demo python train.py
 ```
 
-If the modes differ (for example a `cli` aggregator with a worker left on the
-default `summary`), telemetry, diagnosis, and the final summary are unaffected;
+If the modes differ, telemetry, diagnosis, and final artifacts are unaffected;
 only worker stdout mirroring into the live panel is skipped.
 
-## Summary APIs
+## Framework Integrations
 
-### `traceml.summary()`
+Framework integrations are separate from the stable core API above. Use the
+matching integration guide for installation and runtime requirements.
 
-Returns a compact flat dict for experiment trackers such as W&B, MLflow, or
-internal dashboards. Call it near the end of training; it reuses the canonical
-`final_summary.json` if one already exists.
+### Hugging Face
 
-```python
-summary = traceml.summary(print_text=True)
-if summary is not None:
-    wandb.log(summary)
-```
+Preferred path: call the integration `init()` once and register
+`TraceMLTrainerCallback` with your existing `transformers.Trainer`.
 
-### `traceml.final_summary()`
+::: traceml_ai.integrations.huggingface.init
+    options:
+      show_root_heading: true
+      show_source: false
 
-Returns the full `final_summary.json` payload. Use this when you need the
-complete structured report or want to store the artifact for `traceml compare`.
-TraceML generates this canonical artifact once per run and reuses it on later
-calls.
+::: traceml_ai.integrations.huggingface.TraceMLTrainerCallback
+    options:
+      show_root_heading: true
+      show_source: false
+
+#### Legacy compatibility: `TraceMLTrainer`
+
+`TraceMLTrainer` remains supported for existing users. New code should prefer
+`TraceMLTrainerCallback`; see the [Hugging Face guide](integrations/huggingface.md)
+for its trade-offs.
+
+::: traceml_ai.integrations.huggingface.TraceMLTrainer
+    options:
+      show_root_heading: true
+      show_source: false
+
+### PyTorch Lightning
+
+::: traceml_ai.integrations.lightning.init
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: traceml_ai.integrations.lightning.TraceMLCallback
+    options:
+      show_root_heading: true
+      show_source: false
+
+### Ray Train
+
+::: traceml_ai.integrations.ray.TraceMLTorchTrainer
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: traceml_ai.integrations.ray.TraceMLRayConfig
+    options:
+      show_root_heading: true
+      show_source: false
