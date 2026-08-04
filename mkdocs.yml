@@ -5,6 +5,12 @@ repo_url: https://github.com/traceopt-ai/traceml
 repo_name: traceopt-ai/traceml
 edit_uri: edit/main/docs/
 
+validation:
+  links:
+    # Broken anchors are only INFO by default, which `mkdocs build --strict`
+    # does not fail on. Warn so strict mode rejects them in CI.
+    anchors: warn
+
 theme:
   name: material
   # logo: assets/logo.png        # uncomment when traceopt.ai logo is available
