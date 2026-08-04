@@ -9,10 +9,14 @@ on:
       - 'mkdocs.yml'
       - 'pyproject.toml'
   pull_request:
-    branches: [main]
+    # PRs in this repo target release branches (version_*) day to day and
+    # main only for the batch merge; the docs check must run on both.
+    branches: [main, 'version_*']
     paths:
+      - 'docs/**'
+      - '*.md'
       - 'mkdocs.yml'
-      - 'pyproject.toml' # Skips PR builds entirely for pure .md text files!
+      - 'pyproject.toml'
 
 concurrency:
   group: docs-${{ github.ref }}
