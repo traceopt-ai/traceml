@@ -5,12 +5,15 @@ Get from install to your first TraceML diagnosis in a few minutes.
 TraceML diagnoses input, compute, waiting, memory, and distributed-rank
 bottlenecks in PyTorch training. It complements experiment trackers and deeper
 operator- or kernel-level profilers by showing you where to investigate first.
-
 TraceML runs with your existing PyTorch script and writes a structured
 `final_summary.json` plus a human-readable `final_summary.txt` at the end of
 the run.
 
 ## 1. Install
+
+TraceML requires Python 3.10+. This path assumes your project already has
+PyTorch. For a fresh source checkout, use the optional example path below;
+`.[torch]` installs the supported PyTorch dependencies (PyTorch 2.5+).
 
 With pip:
 
@@ -31,18 +34,18 @@ Using Hugging Face, Lightning, Ray, W&B, or MLflow? See
 
 Add TraceML initialization once, then wrap the training step body:
 
-```python
-import traceml_ai as traceml
+```diff
+    import traceml_ai as traceml
 
-traceml.init(mode="auto")
++   traceml.init(mode="auto")
 
-for batch in dataloader:
-    with traceml.trace_step(model):
-        optimizer.zero_grad(set_to_none=True)
-        outputs = model(batch["x"])
-        loss = criterion(outputs, batch["y"])
-        loss.backward()
-        optimizer.step()
+    for batch in dataloader:
++       with traceml.trace_step(model):
+            optimizer.zero_grad(set_to_none=True)
+            outputs = model(batch["x"])
+            loss = criterion(outputs, batch["y"])
+            loss.backward()
+            optimizer.step()
 ```
 
 Wrap the work from `zero_grad(...)` through `optimizer.step()`.
@@ -56,10 +59,16 @@ traceml run train.py
 By default, TraceML runs without a live UI, prints a compact final diagnosis
 when training ends, and writes `final_summary.json` and `final_summary.txt`.
 
-To try the same flow with a checked-in example first:
+## Or Run the Checked-In Example
+
+To try TraceML before modifying your own script, clone the repository. The
+examples are not included in the PyPI wheel:
 
 ```bash
-traceml run examples/quickstart.py
+git clone https://github.com/traceopt-ai/traceml.git
+cd traceml
+pip install ".[torch]"
+traceml run examples/quickstart.py --mode=summary
 ```
 
 TraceML writes:
@@ -108,7 +117,9 @@ artifacts. See [How to Read TraceML Output](reading-output.md#what-the-summary-c
 <details>
 <summary><strong>Try TraceML with Docker</strong></summary>
 
-From a repository checkout, build the image and run the default CPU demo:
+Docker also builds from a repository checkout, rather than from the PyPI
+package. From the cloned `traceml` directory, build and run the default CPU
+demo:
 
 ```bash
 docker build -t traceml-demo .
@@ -167,6 +178,47 @@ for larger jobs.
 
 ## 4. Read Your Diagnosis
 
+Here is an illustrative single-process result where a slow DataLoader leaves
+the GPU waiting:
+
+```text
++----------------------------------------------------------------------------+
+|  TraceML Run Summary | duration 52.4s                                      |
++----------------------------------------------------------------------------+
+|                                                                            |
+|  TraceML Verdict: INPUT-BOUND / CRITICAL                                   |
+|  Why: Input Wait is 64.0% of the typical GPU Step Time.                    |
+|  Next: Increase workers, prefetch, or storage throughput.                  |
+|                                                                            |
+|  Section Status                                                            |
+|  Section       Status                  Severity                            |
+|  ------------------------------------------------                          |
+|  Step Time     INPUT-BOUND             CRITICAL                            |
+|  System        LOW GPU UTIL            INFO                                |
+|  Process       NORMAL                  INFO                                |
+|  Step Memory   BALANCED                INFO                                |
+|                                                                            |
+|  Step Time Evidence                                                        |
+|  Phase             Average           Share                                 |
+|  ------------------------------------------------                          |
+|  Step Time         200.4ms           100.0%                                |
+|  Input Wait        128.0ms           64.0%                                 |
+|  Compute           68.0ms            34.0%                                 |
+|  Residual          3.6ms             1.8%                                  |
+|  H2D               0.4ms             0.2%                                  |
++----------------------------------------------------------------------------+
+```
+
+Your verdict and measurements depend on your workload and hardware.
+
+TraceML can surface input-bound, H2D-bound, compute-bound, and residual-heavy
+patterns; distributed jobs can also identify rank stragglers. Its other
+sections report memory growth, and [Compare Runs](compare.md) identifies
+regressions between saved summaries.
+
+<details>
+<summary><strong>Running DDP or multi-node training? See a rank-straggler diagnosis</strong></summary>
+
 ```text
 +----------------------------------------------------------------------------+
 |  TraceML Run Summary | duration 40.1s                                      |
@@ -205,8 +257,9 @@ for larger jobs.
 In this example, rank 0 is the slow input rank, which can hold back the aligned
 distributed step.
 
-TraceML also triages input-pipeline delays, compute-heavy steps, waiting and
-residual time, memory growth, and run regressions. Start with
+</details>
+
+For the full verdict reference and recommended next actions, start with
 [How to Read TraceML Output](reading-output.md), then choose the matching
 troubleshooting guide below when you need a focused investigation.
 

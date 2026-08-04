@@ -4,6 +4,16 @@ This folder contains the easiest ways to try TraceML without reading the full co
 
 If you are new to TraceML, start here.
 
+The scripts in this folder are available only in a repository checkout; they
+are not included in the PyPI wheel. From the repository root, install their
+PyTorch dependency once:
+
+```bash
+pip install ".[torch]"
+```
+
+All commands below assume that checkout directory.
+
 ---
 
 ## Start here
