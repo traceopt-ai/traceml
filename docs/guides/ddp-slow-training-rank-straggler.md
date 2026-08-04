@@ -72,12 +72,12 @@ These fingerprints came from the DDP demo on two nodes with one GPU per node.
 
 | Scenario | Diagnosis | Key signal |
 |---|---|---|
-| Balanced | `COMPUTE-BOUND` | total `124.6/124.6ms`, input `1.4/1.4ms`, compute `122.4/122.4ms` |
+| Balanced | `COMPUTE-BOUND` | Step Time `124.6/124.6ms`, Input Wait `1.4/1.4ms`, compute `122.4/122.4ms` |
 | Input straggler | `INPUT STRAGGLER` | r0 input wait `201.6ms` vs r1 `1.4ms` |
 | Compute straggler | `COMPUTE STRAGGLER` | r0 optimizer `33.1ms` vs r1 `14.5ms` |
 
-Read the balanced run as the control: both ranks have similar total step time,
-input time is small, and the run is mostly compute.
+Read the balanced run as the control: both ranks have similar Step Time, Input
+Wait is small, and the run is mostly compute.
 
 Read the input-straggler run as a rank-local input issue: rank 0 reaches compute
 late because its input path is slower.
@@ -169,8 +169,8 @@ the old and new summaries:
 traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
-Look for changes in total step time, visible rank skew, input time, compute
-time, residual time, and diagnosis.
+Look for changes in common-clock Step Time, visible rank skew, Input Wait,
+compute time, residual time, and diagnosis.
 
 ## Related
 

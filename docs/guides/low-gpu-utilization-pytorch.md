@@ -77,8 +77,8 @@ After changing the suspected cause, compare the before and after summaries:
 traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
-Check whether GPU utilization, total step time, input time, residual time, or the
-primary diagnosis changed.
+Check whether GPU utilization, common-clock Step Time, Input Wait, residual
+time, or the primary diagnosis changed.
 
 ## Related
 

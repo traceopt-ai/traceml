@@ -56,7 +56,8 @@ Start with `TraceML Verdict`, then check the `Step Time Evidence` table.
 
 For input pipeline problems, the most relevant diagnoses are:
 
-- `INPUT-BOUND`: input wait is taking a large share of iteration time
+- `INPUT-BOUND`: Input Wait is taking a large share of selected-clock Step
+  Time
 - `INPUT STRAGGLER`: one rank has meaningfully more input-wait burden than a
   typical rank
 
@@ -70,7 +71,7 @@ Next: Inspect input wait, collate_fn, preprocessing, and storage on the slow ran
 Step Time Evidence
 Phase           Median        Worst         Skew        Scope
 --------------------------------------------------------------------------
-Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0
+Step Time       303.7ms       304.1ms       0.1%        rank=r0 node=n0
 Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0
 Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1
 ```
@@ -112,8 +113,8 @@ After changing the input path, compare the old and new final summaries:
 traceml compare old_run/final_summary.json new_run/final_summary.json
 ```
 
-Use the compare output to check whether total step time, input time, residual
-time, or the diagnosis changed.
+Use the compare output to check whether common-clock Step Time, Input Wait,
+residual time, or the diagnosis changed.
 
 ## When this is not the right guide
 

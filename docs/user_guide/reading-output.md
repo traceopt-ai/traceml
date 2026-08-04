@@ -141,6 +141,44 @@ The local UI is best for:
 
 ---
 
+## Step Time glossary
+
+TraceML uses one selected clock for an aligned analysis window. It selects GPU
+only when every required timing signal is complete on GPU for every included
+rank and step; otherwise it uses CPU. The selected clock is shown as
+`diagnosis_clock` in JSON and in the live-output footer.
+
+```text
+Step Time = Input Wait + Traced Step Time
+Residual = Traced Step Time − H2D − Forward − Backward − Optimizer
+```
+
+- **Step Time** is the complete selected-clock duration used for diagnosis,
+  displayed shares, and run comparison.
+- **Traced Step Time** is the inner duration instrumented by
+  `traceml.trace_step(...)`; it is a subtotal, not an end-to-end replacement
+  for Step Time.
+- **Input Wait** is selected-clock time spent waiting for the next batch.
+- **DataLoader Fetch (CPU)** is supplemental CPU evidence. When GPU is
+  selected it can differ from Input Wait; it is never added into Step Time or
+  counted twice.
+- `null` / `n/a` means a signal was not measured in the window. A measured
+  `0.0 ms` remains a real zero.
+
+Examples:
+
+| Window | Selected values | Interpretation |
+|---|---|---|
+| GPU complete | GPU Step Time and GPU Traced Step Time | GPU timing is used consistently for phases and shares. |
+| GPU incomplete | CPU Step Time and CPU Traced Step Time | CPU is selected; unavailable GPU aggregates remain `null`. |
+| Partial GPU evidence | CPU selected values plus optional GPU aggregates | Do not replace missing GPU values with zero or mix clocks. |
+
+The raw `_traceml_internal:step_time` event is an internal persisted telemetry
+key. After SQLite normalization, user-facing output calls that inner metric
+Traced Step Time.
+
+---
+
 ## Step-time diagnoses
 
 The step-time diagnosis explains where training time is going.
@@ -204,7 +242,7 @@ What to do next:
 
 Meaning:
 
-- input wait is taking a large share of iteration time
+- Input Wait is taking a large share of selected-clock Step Time
 - TraceML uses the median per-rank input share, so one unusually slow rank
   does not hide a broad input bottleneck
 
@@ -218,7 +256,7 @@ Common causes:
 What to look at:
 
 - `Input Wait`
-- its share of iteration time
+- its share of selected-clock Step Time
 - whether the issue is broad or rank-specific
 
 What to do next:
@@ -234,13 +272,14 @@ What to do next:
 
 Meaning:
 
-- host-to-device transfer is taking a large share of typical iteration time
+- host-to-device transfer is taking a large share of typical selected-clock
+  Step Time
 - TraceML uses the median per-rank H2D share, so one unusually slow rank does
   not hide a broad transfer bottleneck
 - this diagnosis requires GPU-selected timing; CPU host-call duration is not
   treated as transfer cost
 
-TraceML reports a warning at 10% of iteration time and critical severity at
+TraceML reports a warning at 10% of Step Time and critical severity at
 20%.
 
 What to do next:
@@ -427,21 +466,21 @@ What to do next:
 
 Meaning:
 
-- a meaningful part of the traced step is not attributed to H2D, forward,
+- a meaningful part of Traced Step Time is not attributed to H2D, forward,
   backward, or optimizer work
 
 In TraceML:
 
 - `compute = forward + backward + optimizer`
-- `residual = step_time - h2d - compute`
-- `total_step = input_wait + step_time`
+- `residual = traced_step_time - h2d - compute`
+- `step_time = input_wait + traced_step_time`
 
-TraceML evaluates residual as the median per-rank share of selected-clock
-iteration time (`input_wait + step_time`). Input and residual findings warn at
+TraceML evaluates residual as the median per-rank share of selected-clock Step
+Time. Input and residual findings warn at
 10% and are critical at 20%; rank skew is supporting evidence rather than a
 gate that hides a typical bottleneck.
 
-This is residual unattributed time inside the traced step, not direct
+This is residual unattributed time inside Traced Step Time, not direct
 collective, NCCL, or all-reduce timing.
 
 Common causes:
@@ -492,7 +531,8 @@ In the CLI step summary, the important columns are:
 - `Forward`
 - `Backward`
 - `Optimizer`
-- `STEP` / `Traced Step`
+- `Step Time`
+- `Traced Step Time`
 - `Residual`
 
 Important rows:
@@ -515,7 +555,7 @@ Important rows:
 
 ### `Residual`
 
-- how much of the traced step is unattributed to H2D, forward, backward, or
+- how much of Traced Step Time is unattributed to H2D, forward, backward, or
   optimizer work
 
 A good reading pattern is:

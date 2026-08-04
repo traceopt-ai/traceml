@@ -7,6 +7,8 @@ For diagnosis thresholds and issue semantics, see
 [`diagnostics/DIAGNOSIS.md`](https://github.com/traceopt-ai/traceml/blob/main/src/traceml_ai/diagnostics/DIAGNOSIS.md).
 For the public final-summary shape, see
 [`reporting/SCHEMA.md`](https://github.com/traceopt-ai/traceml/blob/main/src/traceml_ai/reporting/SCHEMA.md).
+For user-facing timing definitions, see the
+[Step Time glossary](../user_guide/reading-output.md#step-time-glossary).
 
 ## Current flow
 
@@ -137,8 +139,8 @@ contract does not load the analyzer or NumPy.
 | `StepTimeSourceCursor` | The single stored latest-row/latest-step position used by live-session reuse. |
 | `StepTimeWindow.training_strategy` | Run strategy analyzed with the window; diagnosis does not need a parallel source of truth. |
 | `representative_rank` | A real rank closest to the mathematical median; it is not the median itself. |
-| `*_cpu_ms` | CPU-clock values used by the public summary. |
-| Other `*_ms` fields | Values from the single clock selected for the complete analysis window. |
+| `*_cpu_ms` / `*_gpu_ms` | Explicit clock aggregates preserved independently for public summary and compare compatibility. |
+| Selected `*_ms` fields | Values from the one clock selected for the complete analysis window. |
 
 ## Canonical window invariants
 
@@ -147,19 +149,28 @@ contract does not load the analyzer or NumPy.
 | Common window | Only the latest bounded set of completed step ids shared across the participating ranks is analyzed. |
 | Expected ranks | The window retains the persisted global-rank universe even when a rank lacks a metric. |
 | Selected clock | One clock, CPU or GPU, is selected for the entire window. Phase values are never mixed across clocks. |
-| Required metrics | Input wait, forward, backward, and step envelope must be measured on every aligned step for a rank. Partial presence makes that metric unavailable for the rank. |
+| Required metrics | Input Wait, forward, backward, and Traced Step Time must be measured on every aligned step for a rank. Partial presence makes that metric unavailable for the rank. |
 | Occurrence-driven metrics | H2D and optimizer may legitimately occur on only some steps. Once observed, absent steps contribute zero work. An entirely absent H2D means no observed transfers, not incomplete instrumentation. |
 | Missing versus zero | An unavailable metric is absent from the sparse rank row and projects to `null`. A measured `0.0` remains present and projects to `0.0`. |
-| Derived metrics | Compute needs forward, backward, and optimizer. Residual needs the traced envelope and every compute phase; absent H2D contributes zero. Step Time needs input wait and the traced envelope. |
+| Derived metrics | Compute needs forward, backward, and optimizer. Residual needs Traced Step Time and every compute phase; absent H2D contributes zero. Step Time needs Input Wait and Traced Step Time. |
 | Rank cohorts | A diagnosis uses only ranks carrying all metrics required by that rule. Consumers must not reconstruct another availability policy. |
 | Metric statistics | Median, worst value, worst rank, and skew are computed from ranks that measured that metric. The worst value and rank must describe the same rank. |
 | Representative rank | Choose the real rank nearest the mathematical median, then the lower value, then the lower rank id. |
-| Residual meaning | `max(0, step - h2d - forward - backward - optimizer)` is unattributed time, not proof of communication or NCCL overhead. |
+| Residual meaning | `max(0, Traced Step Time - h2d - forward - backward - optimizer)` is unattributed time, not proof of communication or NCCL overhead. |
 
 In `final_summary.json`, `step_time_ms`, `traced_step_time_ms`, and phase
 metrics use the selected diagnosis clock. The explicit CPU/GPU Step Time and
 Traced Step Time fields preserve both clocks, while `dataloader_fetch_cpu_ms`
-is supplemental CPU evidence.
+is supplemental CPU evidence. It is not part of Step Time and is never added
+to selected-clock Input Wait.
+
+## Naming boundary
+
+`traceml.trace_step(...)` remains the public API name. It records the inner
+instrumented duration that becomes canonical Traced Step Time only after
+SQLite normalization. `_traceml_internal:step_time` is intentionally stable
+raw telemetry and storage vocabulary below that normalization boundary; it is
+not a public metric name or presentation label.
 
 ## Surface responsibilities
 
@@ -246,8 +257,8 @@ PYTHONDONTWRITEBYTECODE=1 pytest -p no:cacheprovider tests/step_time -q
 
 | Term | Meaning |
 |---|---|
-| Step envelope | Instrumented time inside one traced training step. |
-| Iteration | Selected input wait plus the selected step envelope. |
+| Traced Step Time | Instrumented inner duration inside one traced training step. |
+| Step Time | Selected Input Wait plus selected Traced Step Time. |
 | Common window | Aligned completed step suffix shared by participating ranks. |
 | Rank universe | Expected global ranks retained by the canonical window. |
 | Measured rank | A rank carrying a particular sparse metric. |

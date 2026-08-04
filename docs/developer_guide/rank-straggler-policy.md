@@ -5,6 +5,8 @@ straggler, which rank it blames, and how confident it is. It is the developer
 reference behind the Step Time rank-straggler diagnoses. For the user-facing
 walkthrough of a slow rank, see
 [Diagnosing a slow rank in DDP](../guides/ddp-slow-training-rank-straggler.md).
+For the shared timing definitions, see the
+[Step Time glossary](../user_guide/reading-output.md#step-time-glossary).
 
 The implementation lives in `src/traceml_ai/diagnostics/` (rule evaluation and
 culprit/victim context) and `src/traceml_ai/reporting/primary_diagnosis.py`
@@ -28,8 +30,8 @@ window, as opposed to the single-rank bottleneck kinds (`INPUT_BOUND`,
 ## Selected clock and eligibility
 
 Step Time diagnosis analyzes one *selected clock* for the window. It uses GPU
-event timing when every rank and step has GPU timing for the step envelope,
-input wait, and traced phase events; otherwise it falls back to explicit
+event timing when every rank and step has GPU timing for Traced Step Time,
+Input Wait, and traced phase events; otherwise it falls back to explicit
 `cpu_ms` timing. All rank-straggler comparisons below are in that selected
 clock.
 
@@ -40,8 +42,8 @@ visible_r = backward_r              # DDP / default
 visible_r = forward_r + backward_r  # FSDP
 ```
 
-Only ranks with a measured visible-phase anchor, a measured step envelope,
-and a measured input wait are eligible:
+Only ranks with a measured visible-phase anchor, measured Traced Step Time,
+and measured Input Wait are eligible:
 
 ```text
 DDP / default: input_wait measured and backward_r > 0 and step_time_r > 0
