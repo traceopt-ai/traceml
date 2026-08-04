@@ -1,5 +1,6 @@
 import importlib
 import inspect
+import re
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -769,3 +770,36 @@ def test_wrap_optimizer_preserves_identity_and_times_step(monkeypatch):
     assert result == "ok"
     assert optimizer.called is True
     assert calls == [("_traceml_internal:optimizer_step", "step", True)]
+
+
+def test_public_api_page_documents_every_public_symbol():
+    """The Public API page and ``__all__`` must not drift (issue #334).
+
+    public-api.md renders the api-module docstrings through mkdocstrings
+    directives. Every symbol in ``traceml_ai.__all__`` needs one (plus the
+    ``__version__`` prose entry), and no directive may document a symbol
+    that is not public.
+    """
+    import traceml_ai
+
+    page = (ROOT / "docs" / "user_guide" / "public-api.md").read_text(
+        encoding="utf-8"
+    )
+    directives = set(
+        re.findall(r"^::: traceml_ai\.api\.(\w+)", page, flags=re.MULTILINE)
+    )
+    documented = set(directives)
+    if "`traceml.__version__`" in page:
+        documented.add("__version__")
+
+    missing = sorted(set(traceml_ai.__all__) - documented)
+    unexpected = sorted(directives - set(traceml_ai.__all__))
+
+    assert not missing, (
+        "symbols in traceml_ai.__all__ without a public-api.md entry: "
+        f"{missing}"
+    )
+    assert not unexpected, (
+        "public-api.md documents symbols missing from traceml_ai.__all__: "
+        f"{unexpected}"
+    )
