@@ -359,6 +359,17 @@ traced_step_time_cpu_ms
 traced_step_time_gpu_ms
 ```
 
+The clock-qualified relationships are:
+
+```text
+CPU Step Time = CPU Input Wait + CPU Traced Step Time
+GPU Step Time = GPU Input Wait + GPU Traced Step Time
+```
+
+The summary publishes the selected Input Wait as `input_wait_ms`; CPU and GPU
+Input Wait are not additional summary fields. The explicit Step Time and Traced
+Step Time aggregates above retain the corresponding clock-qualified values.
+
 `dataloader_fetch_cpu_ms` is supplemental CPU DataLoader-fetch evidence. It
 is never added into Input Wait or Step Time and has no phase-share percentage.
 Every displayed phase share uses the selected `step_time_ms` denominator.

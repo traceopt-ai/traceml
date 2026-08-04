@@ -584,6 +584,9 @@ def test_canonical_surface_values_share_one_step_time_contract(
                 }
             }
         },
+        # 1.7 takes the canonical branch. A pre-1.7 reader would interpret
+        # step_time_ms as traced time and produce a different denominator;
+        # dedicated legacy-adapter coverage lives in test_svg.py.
         schema_version=1.7,
     )
     assert direct_denominator.count('width="5.00%"') == 2
