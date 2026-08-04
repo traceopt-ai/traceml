@@ -113,6 +113,14 @@ def _status(section: Dict[str, Any], side: str) -> Optional[str]:
     return text or None
 
 
+def _step_time_label(context: CompareVerdictContext) -> str:
+    """Return the common-clock label selected by the compare adapter."""
+    clock = context.section("step_time").get("comparison_clock")
+    if clock in {"cpu", "gpu"}:
+        return f"{str(clock).upper()} Step Time"
+    return "Step Time"
+
+
 class MissingPrimarySignalsRule:
     def evaluate(
         self,
@@ -199,11 +207,12 @@ class MixedPrimarySignalsRule:
         step_good = step <= -context.policy.step_avg_pct_moderate
         mem_bad = memory >= 10.0
         mem_good = memory <= -10.0
+        step_time_label = _step_time_label(context)
 
         if step_good and mem_bad:
-            why = "Step time improved, but step memory worsened."
+            why = f"{step_time_label} improved, but step memory worsened."
         elif step_bad and mem_good:
-            why = "Step memory improved, but step time worsened."
+            why = f"Step memory improved, but {step_time_label} worsened."
         else:
             return None
 
@@ -232,7 +241,7 @@ class StepTimeRegressionRule:
             priority=VerdictPriority.STEP_TIME_REGRESSION,
             domain="step_time",
             metric="step_time_ms",
-            why=f"Step time increased by {pct:.1f}%.",
+            why=f"{_step_time_label(context)} increased by {pct:.1f}%.",
         )
 
 
@@ -251,7 +260,7 @@ class StepTimeImprovementRule:
             priority=VerdictPriority.STEP_TIME_IMPROVEMENT,
             domain="step_time",
             metric="step_time_ms",
-            why=f"Step time decreased by {abs(pct):.1f}%.",
+            why=(f"{_step_time_label(context)} decreased by {abs(pct):.1f}%."),
         )
 
 

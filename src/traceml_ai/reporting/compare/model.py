@@ -61,9 +61,10 @@ class CompareSection:
     diagnosis: CompareDiagnosis
     metrics: Dict[str, CompareMetric] = field(default_factory=dict)
     notes: tuple[str, ...] = ()
+    comparison_clock: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "available": self.available,
             "diagnosis": self.diagnosis.to_dict(),
             "metrics": {
@@ -71,6 +72,9 @@ class CompareSection:
             },
             "notes": list(self.notes),
         }
+        if self.name == "step_time":
+            payload["comparison_clock"] = self.comparison_clock
+        return payload
 
 
 @dataclass(frozen=True)

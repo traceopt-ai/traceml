@@ -120,7 +120,7 @@ def test_summary_projects_canonical_step_time_metrics(monkeypatch, tmp_path):
     get_final_summary_json_path(session_root).write_text(
         json.dumps(
             {
-                "schema_version": 1.8,
+                "schema_version": 1.7,
                 "step_time": {
                     "diagnosis": {"status": "BALANCED", "severity": "info"},
                     "global": {

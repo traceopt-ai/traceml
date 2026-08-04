@@ -27,10 +27,10 @@ def test_phase_bar_emits_svg_rects_for_present_phases(make_section) -> None:
     assert out.count("<rect") == 3  # input wait + forward + backward
 
 
-def test_phase_bar_adapts_legacy_inner_step_time_for_pre_1_8(
+def test_phase_bar_adapts_legacy_inner_step_time_for_pre_1_7(
     make_section,
 ) -> None:
-    # Schema < 1.8 used step_time_ms for the inner envelope. The private
+    # Schema < 1.7 used step_time_ms for the inner envelope. The private
     # reader adapter reconstructs historical outer Step Time only here.
     section = make_section(
         metric_names=["dataloader_ms", "step_time_ms", "forward_ms"],

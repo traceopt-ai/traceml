@@ -25,6 +25,7 @@ TEXT_METRIC_ORDER_BY_SECTION: Dict[str, tuple[str, ...]] = {
     "step_time": (
         "step_time_ms",
         "input_ms",
+        "dataloader_fetch_cpu_ms",
         "h2d_ms",
         "compute_ms",
         "residual_ms",
@@ -161,11 +162,17 @@ def _rows_for_section(
     return rows
 
 
-def _section_title(section_name: str) -> str:
-    return SECTION_TITLE_BY_SECTION.get(
+def _section_title(section_name: str, section: Dict[str, Any]) -> str:
+    title = SECTION_TITLE_BY_SECTION.get(
         section_name,
         section_name.replace("_", " ").title(),
     )
+    if section_name != "step_time":
+        return title
+    clock = section.get("comparison_clock")
+    if clock in {"cpu", "gpu"}:
+        return f"{title} ({str(clock).upper()} comparison clock)"
+    return f"{title} (no common comparison clock)"
 
 
 def _format_table_rows(rows: Iterable[tuple[str, str, str, str]]) -> list[str]:
@@ -254,7 +261,7 @@ class CompareTextFormatter(Formatter[Dict[str, Any], str]):
             section = sections.get(section_name)
             if isinstance(section, dict):
                 _append_card_line(lines)
-                _append_card_line(lines, _section_title(section_name))
+                _append_card_line(lines, _section_title(section_name, section))
                 for text in _format_table_rows(
                     _rows_for_section(section_name, section)
                 ):

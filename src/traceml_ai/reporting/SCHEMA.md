@@ -1,10 +1,10 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.8`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.7`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
 
-Schema `1.8` publishes canonical Step Time vocabulary. Every public timing
+Schema `1.7` publishes canonical Step Time vocabulary. Every public timing
 metric is nullable: `null` means the
 underlying timing signal was never measured in the analyzed window (missing
 instrumentation), while a measured zero stays `0.0`. Null metrics are
@@ -24,7 +24,7 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.8,
+  "schema_version": 1.7,
   "generated_at": "...",
   "duration_s": null,
   "meta": {
@@ -382,7 +382,7 @@ step_time_ms = complete selected-clock step duration
 diagnosis_clock = "cpu" | "gpu"
 ```
 
-Schema `1.8` does not publish historical timing aliases. Readers that support
+Schema `1.7` does not publish historical timing aliases. Readers that support
 older summary files must use an explicit schema-versioned compatibility adapter
 at their input boundary; new output remains canonical.
 

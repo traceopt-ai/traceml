@@ -14,7 +14,6 @@ from traceml_ai.reporting.compare.model import CompareSection
 from traceml_ai.reporting.compare.sections.base import (
     as_float,
     global_average,
-    global_average_has_key,
     numeric_metric,
     section_available,
     section_diagnosis,
@@ -32,12 +31,13 @@ class StepTimeComparer:
     ) -> CompareSection:
         lhs = lhs_payload.get(self.name)
         rhs = rhs_payload.get(self.name)
-        lhs_step_clock = self._step_time_clock(lhs_payload, lhs)
-        rhs_step_clock = self._step_time_clock(rhs_payload, rhs)
-        step_clocks_match = (
-            lhs_step_clock is not None
-            and rhs_step_clock is not None
-            and lhs_step_clock == rhs_step_clock
+        comparison_clock, lhs_step_time, rhs_step_time = (
+            self._common_step_time_values(
+                lhs_payload,
+                lhs,
+                rhs_payload,
+                rhs,
+            )
         )
         lhs_selected_clock = self._selected_clock(lhs)
         rhs_selected_clock = self._selected_clock(rhs)
@@ -47,12 +47,10 @@ class StepTimeComparer:
             and lhs_selected_clock == rhs_selected_clock
         )
         notes: tuple[str, ...] = ()
-        if not step_clocks_match:
+        if comparison_clock is None:
             notes += (
-                "Step Time metrics are unavailable because the selected "
-                "clocks differ or are missing "
-                f"(A: {lhs_step_clock or 'n/a'}, "
-                f"B: {rhs_step_clock or 'n/a'}).",
+                "Step Time metrics are unavailable because the summaries "
+                "have no common measured GPU or CPU clock.",
             )
         if not selected_clocks_match:
             notes += (
@@ -84,18 +82,10 @@ class StepTimeComparer:
             metrics={
                 "step_time_ms": numeric_metric(
                     key="step_time_ms",
-                    label="Step Time",
+                    label=self._step_time_label(comparison_clock),
                     unit="ms",
-                    lhs=self._step_time_value(
-                        lhs_payload,
-                        lhs,
-                        clocks_match=step_clocks_match,
-                    ),
-                    rhs=self._step_time_value(
-                        rhs_payload,
-                        rhs,
-                        clocks_match=step_clocks_match,
-                    ),
+                    lhs=lhs_step_time,
+                    rhs=rhs_step_time,
                     direction="higher_is_worse",
                 ),
                 "input_ms": numeric_metric(
@@ -105,6 +95,14 @@ class StepTimeComparer:
                     lhs=selected_input(lhs),
                     rhs=selected_input(rhs),
                     direction="higher_is_worse",
+                ),
+                "dataloader_fetch_cpu_ms": numeric_metric(
+                    key="dataloader_fetch_cpu_ms",
+                    label="DataLoader Fetch (CPU)",
+                    unit="ms",
+                    lhs=self._dataloader_fetch_cpu_value(lhs_payload, lhs),
+                    rhs=self._dataloader_fetch_cpu_value(rhs_payload, rhs),
+                    direction="context",
                 ),
                 "h2d_ms": numeric_metric(
                     key="h2d_ms",
@@ -162,26 +160,40 @@ class StepTimeComparer:
                 ),
             },
             notes=notes,
+            comparison_clock=comparison_clock,
         )
 
     def _value(self, section: Any, key: str) -> Any:
         return global_average(section, key)
 
     def _input_value(self, section: Any) -> Any:
-        """Return selected-clock input wait.
+        """Return selected-clock Input Wait without legacy substitution.
 
-        Falls back to ``dataloader_ms`` only when ``input_wait_ms`` is
-        absent entirely (a pre-1.6 payload that never had the key). A
-        schema>=1.6 payload always carries the key; a present-but-null
-        value there means the signal was genuinely never measured this
-        window and must not be silently replaced by a different metric.
+        Historical ``dataloader_ms`` is CPU supplemental DataLoader-fetch
+        evidence, not selected-clock Input Wait. Compatibility for that field
+        is isolated in :meth:`_dataloader_fetch_cpu_value`.
         """
-        value = self._value(section, "input_wait_ms")
-        if value is not None:
-            return value
-        if global_average_has_key(section, "input_wait_ms"):
-            return None
-        return self._value(section, "dataloader_ms")
+        return self._value(section, "input_wait_ms")
+
+    def _dataloader_fetch_cpu_value(
+        self,
+        payload: Dict[str, Any],
+        section: Any,
+    ) -> Any:
+        """Read supplemental CPU fetch timing through the versioned seam.
+
+        Pre-1.7 summaries called this CPU-only field ``dataloader_ms``.
+        Schema 1.7 publishes the canonical ``dataloader_fetch_cpu_ms`` name.
+        This value is comparison context only; it never stands in for Input
+        Wait or contributes to a Step Time verdict.
+        """
+        schema = self._schema_version(payload)
+        key = (
+            "dataloader_fetch_cpu_ms"
+            if schema is not None and schema >= 1.7
+            else "dataloader_ms"
+        )
+        return global_average(section, key)
 
     def _dominant_phase(self, section: Any) -> Any:
         phases = {
@@ -208,23 +220,59 @@ class StepTimeComparer:
         except (TypeError, ValueError):
             return None
 
-    def _step_time_clock(
+    def _clock_step_time_values(
         self,
         payload: Dict[str, Any],
         section: Any,
-    ) -> Optional[str]:
-        """Return the clock represented by this payload's Step Time values."""
+    ) -> Dict[str, Any]:
+        """Read canonical clocks through the versioned summary seam.
+
+        Schema 1.7 publishes explicit CPU and GPU outer Step Time aggregates.
+        Historical summaries only expose ``total_step_ms``; it is compatibility
+        evidence for CPU Step Time and is never interpreted as GPU.
+        """
         schema = self._schema_version(payload)
-        if schema is None or schema < 1.8:
-            # Historical outer Step Time was explicitly CPU-clocked.
-            return "cpu"
-        window = (
-            section.get("global", {}).get("window", {})
-            if isinstance(section, dict)
-            else {}
-        )
-        clock = str(window.get("diagnosis_clock") or "").lower()
-        return clock if clock in {"cpu", "gpu"} else None
+        if schema is None or schema < 1.7:
+            return {
+                "cpu": global_average(section, "total_step_ms"),
+                "gpu": None,
+            }
+        return {
+            "cpu": global_average(section, "step_time_cpu_ms"),
+            "gpu": global_average(section, "step_time_gpu_ms"),
+        }
+
+    def _common_step_time_values(
+        self,
+        lhs_payload: Dict[str, Any],
+        lhs: Any,
+        rhs_payload: Dict[str, Any],
+        rhs: Any,
+    ) -> tuple[Optional[str], Any, Any]:
+        """Select one measured common clock without reconstructing Step Time.
+
+        GPU is preferred when both summaries publish it. CPU is the fallback
+        when both summaries publish CPU evidence. A numeric zero is measured;
+        only absent or null values make a clock unavailable.
+        """
+        lhs_values = self._clock_step_time_values(lhs_payload, lhs)
+        rhs_values = self._clock_step_time_values(rhs_payload, rhs)
+        for clock in ("gpu", "cpu"):
+            lhs_value = lhs_values[clock]
+            rhs_value = rhs_values[clock]
+            if (
+                as_float(lhs_value) is not None
+                and as_float(rhs_value) is not None
+            ):
+                return clock, lhs_value, rhs_value
+        return None, None, None
+
+    @staticmethod
+    def _step_time_label(comparison_clock: Optional[str]) -> str:
+        """Return the rendered outer Step Time label for the common clock."""
+        if comparison_clock in {"cpu", "gpu"}:
+            return f"{comparison_clock.upper()} Step Time"
+        return "Step Time"
 
     @staticmethod
     def _selected_clock(section: Any) -> Optional[str]:
@@ -236,24 +284,6 @@ class StepTimeComparer:
         )
         clock = str(window.get("diagnosis_clock") or "").lower()
         return clock if clock in {"cpu", "gpu"} else None
-
-    def _step_time_value(
-        self,
-        payload: Dict[str, Any],
-        section: Any,
-        *,
-        clocks_match: bool,
-    ) -> Any:
-        """Read outer Step Time through the schema-version compatibility seam."""
-        if not clocks_match:
-            return None
-        schema = self._schema_version(payload)
-        key = (
-            "step_time_ms"
-            if schema is not None and schema >= 1.8
-            else "total_step_ms"
-        )
-        return global_average(section, key)
 
 
 __all__ = ["StepTimeComparer"]

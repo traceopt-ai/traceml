@@ -83,7 +83,7 @@ _PUBLIC_METRICS = {
     "backward_ms": ("backward_ms", "backward"),
     "optimizer_ms": ("optimizer_step_ms", "optimizer_step"),
 }
-"""Stable schema-1.8 fields projected from the canonical timing contract."""
+"""Stable schema-1.7 fields projected from the canonical timing contract."""
 
 
 class _MetricProjection(NamedTuple):
