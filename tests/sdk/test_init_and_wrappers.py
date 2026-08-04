@@ -1,4 +1,5 @@
 import importlib
+import inspect
 import sys
 from contextlib import contextmanager
 from pathlib import Path
@@ -191,6 +192,45 @@ def test_start_is_alias_for_init():
     assert cfg.patch_dataloader is False
     assert cfg.patch_forward is False
     assert cfg.patch_backward is False
+
+
+def test_start_forwards_missing_aggregator_policy(monkeypatch):
+    initialization = _reload_initialization_module()
+    captured = {}
+    expected = object()
+
+    def fake_init(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(initialization, "init", fake_init)
+
+    assert (
+        initialization.start(mode="manual", on_missing_aggregator="raise")
+        is expected
+    )
+    assert captured["mode"] == "manual"
+    assert captured["on_missing_aggregator"] == "raise"
+
+
+def test_public_start_matches_init_and_forwards_missing_aggregator_policy(
+    monkeypatch,
+):
+    import traceml_ai.api as api
+    import traceml_ai.sdk.initial as initialization
+
+    captured = {}
+    expected = object()
+
+    def fake_start(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(initialization, "start", fake_start)
+
+    assert inspect.signature(api.start) == inspect.signature(api.init)
+    assert api.start(on_missing_aggregator="raise") is expected
+    assert captured["on_missing_aggregator"] == "raise"
 
 
 def test_api_import_does_not_initialize_implicitly():
