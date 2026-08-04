@@ -8,6 +8,7 @@ job already runs.
 |---|---|---|
 | Plain PyTorch loop | `traceml.trace_step(...)` | [Quickstart](quickstart.md) |
 | Hugging Face Trainer | `TraceMLTrainerCallback` | [Hugging Face](integrations/huggingface.md) |
+| Hugging Face Accelerate | `traceml.trace_step(...)` | [Hugging Face Accelerate](integrations/accelerate.md) |
 | PyTorch Lightning | `traceml_ai.integrations.lightning.init()` + `TraceMLCallback` | [PyTorch Lightning](integrations/lightning.md) |
 | Ray Train | `TraceMLTorchTrainer` | [Ray Train](integrations/ray.md) |
 | DeepSpeed | `traceml.trace_step(...)` | [DeepSpeed](integrations/deepspeed.md) |
