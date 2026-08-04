@@ -16,9 +16,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import subprocess
 from typing import Any, Mapping
 
 import pytest
+from rich.console import Console
 
 from tests.step_time.scenarios import (
     SCENARIOS,
@@ -34,6 +36,8 @@ from traceml_ai.renderers.model_diagnostics.renderer import (
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedResult
 from traceml_ai.renderers.step_time import renderer as cli_renderer_module
 from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
+from traceml_ai.reporting.compare import build_compare_payload
+from traceml_ai.reporting.html.svg import phase_bar
 from traceml_ai.reporting.sections.step_time import (
     STEP_TIME_METRIC_NAMES,
     StepTimeSummarySection,
@@ -51,6 +55,8 @@ _WINDOW_KEYS = {
     "step_time",
     "residual_proxy",
 }
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass(frozen=True)
@@ -481,3 +487,167 @@ def test_final_summary_projection_matches_golden(
 
     # The same diagnosis object is projected as the first ordered issue.
     assert payload["diagnosis"] == payload["issues"][0]
+
+
+def test_canonical_surface_values_share_one_step_time_contract(
+    scenario_db: tuple[StepTimeScenario, Path],
+    tmp_path: Path,
+) -> None:
+    """Keep CLI, summary, HTML, and compare on canonical outer Step Time."""
+    scenario, db_path = scenario_db
+    request = StepTimeLoadRequest(
+        window_size=len(scenario.steps),
+        lookback_factor=4,
+    )
+    live = LiveStepTimeSession(str(db_path), request=request).refresh()
+    window = live.analysis.window
+    summary = (
+        StepTimeSummarySection(max_rows=len(scenario.steps))
+        .build(str(db_path))
+        .payload
+    )
+    average = summary["global"]["average"]
+
+    def rank_average(field: str) -> float | None:
+        values = [
+            getattr(facts.average, field)
+            for facts in window.rank_facts
+            if getattr(facts.average, field) is not None
+        ]
+        return None if not values else sum(values) / len(values)
+
+    assert average["step_time_ms"] == pytest.approx(
+        rank_average("step_time_ms")
+    )
+    assert average["traced_step_time_ms"] == pytest.approx(
+        rank_average("traced_step_time_ms")
+    )
+
+    console = Console(record=True, width=140)
+    renderer = StepTimeRenderer(
+        LiveStepTimeSession(str(db_path), request=request)
+    )
+    console.print(renderer.get_panel_renderable())
+    cli_text = console.export_text()
+    assert "Step Time" in cli_text
+    assert "Traced Step Time" in cli_text
+    assert "STEP=traced" not in cli_text
+
+    pytest.importorskip("nicegui")
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import theme
+    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
+        model_combined_section,
+    )
+
+    class _Element:
+        def __init__(self) -> None:
+            self.content = ""
+            self.text = ""
+
+        def style(self, _value: str) -> "_Element":
+            return self
+
+    dashboard = {
+        "seg_divs": [_Element() for _ in theme.PHASES],
+        "seg_labs": [_Element() for _ in theme.PHASES],
+        "win": _Element(),
+        "verdict": _Element(),
+        "kpis": {
+            key: _Element()
+            for key in ("median", "worst", "gap", "residual", "rank")
+        },
+        "_last_sig": None,
+    }
+    model_combined_section.update_model_combined_section(dashboard, live)
+    step_metric = next(
+        metric for metric in window.metrics if metric.metric == "step_time"
+    )
+    assert (
+        f"{step_metric.median_total:.0f}"
+        in dashboard["kpis"]["median"].content
+    )
+    assert f"{window.clock.upper()} selected" in dashboard["win"].text
+
+    html = phase_bar({"global": {"average": average}}, schema_version=1.7)
+    if average["step_time_ms"] in (None, 0.0):
+        assert html == ""
+    else:
+        assert "<svg" in html
+
+    direct_denominator = phase_bar(
+        {
+            "global": {
+                "average": {
+                    "step_time_ms": 200.0,
+                    "input_wait_ms": 10.0,
+                    "forward_ms": 10.0,
+                }
+            }
+        },
+        schema_version=1.7,
+    )
+    assert direct_denominator.count('width="5.00%"') == 2
+
+    compare = build_compare_payload(
+        lhs_payload={"schema_version": 1.7, "step_time": summary},
+        rhs_payload={"schema_version": 1.7, "step_time": summary},
+        lhs_path=tmp_path / "before.json",
+        rhs_path=tmp_path / "after.json",
+    )
+    expected_clock = (
+        "gpu" if average.get("step_time_gpu_ms") is not None else "cpu"
+    )
+    assert compare["sections"]["step_time"]["comparison_clock"] == (
+        expected_clock
+    )
+    expected_key = f"step_time_{expected_clock}_ms"
+    assert compare["sections"]["step_time"]["metrics"]["step_time_ms"][
+        "lhs"
+    ] == pytest.approx(average[expected_key])
+
+
+def test_public_step_time_vocabulary_excludes_obsolete_terms() -> None:
+    """Keep legacy timing names below explicit compatibility boundaries."""
+    tracked = subprocess.run(
+        ["git", "ls-files"],
+        cwd=_PROJECT_ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.splitlines()
+    public_paths = [
+        _PROJECT_ROOT / path
+        for path in tracked
+        if path == "README.md"
+        or (path.startswith("docs/") and path.endswith(".md"))
+        or path
+        in {
+            "src/traceml_ai/renderers/step_time/renderer.py",
+            (
+                "src/traceml_ai/aggregator/display_drivers/"
+                "nicegui_sections/model_combined_section.py"
+            ),
+            "src/traceml_ai/reporting/final.py",
+            "src/traceml_ai/reporting/primary_diagnosis.py",
+            "src/traceml_ai/reporting/sections/step_time/builder.py",
+            "src/traceml_ai/reporting/html/textutils.py",
+            "src/traceml_ai/reporting/compare/formatters.py",
+            "src/traceml_ai/reporting/compare/verdict.py",
+        }
+    ]
+    forbidden = (
+        "total_step_ms",
+        "iteration_time_ms",
+        "Total step",
+        "total step time",
+        "iteration time",
+        "STEP=traced",
+        "STEP / Traced Step",
+    )
+    offenders = {
+        path.relative_to(_PROJECT_ROOT).as_posix(): token
+        for path in public_paths
+        for token in forbidden
+        if token.lower() in path.read_text(encoding="utf-8").lower()
+    }
+    assert offenders == {}

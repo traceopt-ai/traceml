@@ -62,7 +62,7 @@ class StepTimeSampler(BaseSampler):
         """
         Return whether `duration_ms` should use the recorded GPU clock.
 
-        Dataloader fetch and full step envelope events keep CPU-wall
+        Input Wait and the raw traced-step event keep CPU-wall
         `duration_ms` for compatibility while still carrying nullable
         `gpu_ms` evidence for later analysis.
         """

@@ -12,6 +12,9 @@ excluded from `global.average`, `global.median`, and `global.worst` and from
 rank median/worst selection; a rank with only some metrics measured (for
 example an H2D-only rank) keeps its row with `null` for the others.
 
+For user-facing definitions and examples, see the
+[Step Time glossary](../../../docs/user_guide/reading-output.md#step-time-glossary).
+
 Sections:
 
 - `system`: node-level CPU, RAM, GPU utilization, GPU memory, temperature,
@@ -362,6 +365,11 @@ Every displayed phase share uses the selected `step_time_ms` denominator.
 Those table shares are observational averages and may differ from the
 authoritative median per-rank diagnosis `score`.
 
+When GPU is selected, `input_wait_ms` is GPU-clocked while
+`dataloader_fetch_cpu_ms` remains CPU evidence, so they can differ. When CPU
+is selected they describe the same CPU input-wait interval; neither is counted
+twice.
+
 `residual_ms` is residual unattributed step time. It is averaged from
 per-step clamped residuals, not recomputed from already-averaged phase totals:
 
@@ -377,7 +385,7 @@ The selected-clock diagnosis contract is:
 
 ```text
 input_wait_ms = selected-clock input wait
-traced_step_time_ms = selected-clock traced step envelope
+traced_step_time_ms = selected-clock Traced Step Time
 step_time_ms = complete selected-clock step duration
 diagnosis_clock = "cpu" | "gpu"
 ```

@@ -102,9 +102,8 @@ availability instead of synthesizing zeros that would leak the missing work
 into the residual. An absent H2D means "no observed transfers", contributes
 zero to derived metrics, and is never reported as a missing signal. Derived
 metrics exist only when their inputs are available: `compute` needs forward,
-backward, and optimizer; outer `step_time` needs input wait plus the traced
-step envelope; `residual_proxy` needs the traced step envelope plus every compute
-phase.
+backward, and optimizer; outer `step_time` needs Input Wait plus Traced Step
+Time; `residual_proxy` needs Traced Step Time plus every compute phase.
 
 The canonical `StepTimeWindow` carries the expected rank universe and sparse
 per-rank metrics. A metric's measured-rank population and any multi-metric
@@ -124,8 +123,8 @@ for missing signals, Step Time reports `INCOMPLETE_DATA` instead of
 `BALANCED`.
 
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
-GPU event timing when every rank/step has GPU timing for the traced envelope,
-input wait, and traced phase events present in the window. Otherwise it uses
+GPU event timing when every rank/step has GPU timing for Traced Step Time,
+Input Wait, and traced phase events present in the window. Otherwise it uses
 explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
 summary use the same global-rank SQLite loader and selected-clock window
 builder for diagnosis-facing timing; they differ only by row window sizing.
@@ -133,7 +132,7 @@ The canonical model exposes selected-clock `input_wait_ms`, outer
 `step_time_ms`, and inner `traced_step_time_ms`. Summary JSON also publishes
 explicit CPU and GPU Step Time and Traced Step Time aggregates.
 `dataloader_fetch_cpu_ms` remains supplemental CPU fetch evidence and is not a
-selected-clock phase-share denominator.
+selected-clock phase-share denominator or a second Step Time component.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
 display or diagnosis. In the final text report, selected-clock phase shares
 are divided directly by public `step_time_ms`. These report-table shares are
@@ -193,7 +192,7 @@ unattributed step time averaged from per-step clamped residuals:
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_time_ms = selected traced envelope timing
+traced_step_time_ms = selected Traced Step Time
 step_time_ms = selected input_wait_ms + selected traced_step_time_ms
 residual_ms = average(max(0, traced_step_time_ms - known_step_ms))
 ```

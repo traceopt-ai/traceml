@@ -35,7 +35,7 @@ GPU waiting:
 +----------------------------------------------------------------------------+
 |                                                                            |
 |  TraceML Verdict: INPUT-BOUND / CRITICAL                                   |
-|  Why: Input wait is 64.0% of the typical GPU iteration time.               |
+|  Why: Input Wait is 64.0% of the typical GPU Step Time.                    |
 |  Next: Increase workers, prefetch, or storage throughput.                  |
 |                                                                            |
 |  Section Status                                                            |
@@ -57,10 +57,9 @@ GPU waiting:
 |  Step Time Evidence                                                        |
 |  Phase             Average           Share                                 |
 |  ------------------------------------------------                          |
-|  Total             200.4ms           compat                                |
-|  Dataloader        130.4ms           compat                                |
+|  Step Time         200.4ms           100.0%                                |
 |  Input Wait        128.0ms           64.0%                                 |
-|  Step Time         72.0ms            36.0%                                 |
+|  Traced Step Time  72.0ms            supplemental                          |
 |  Compute           68.0ms            34.0%                                 |
 |  Residual          3.6ms             1.8%                                  |
 |  H2D               0.4ms             0.2%                                  |
@@ -99,7 +98,7 @@ GPU waiting:
 |  Step Time Evidence                                                        |
 |  Phase           Median        Worst         Skew        Scope             |
 |  --------------------------------------------------------------------------|
-|  Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
+|  Step Time       303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
 |  Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
 |  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
 +----------------------------------------------------------------------------+
@@ -191,7 +190,7 @@ diagnosis and cuts step time:
 |  Primary diagnosis: INPUT-BOUND -> COMPUTE-BOUND (changed)                           |
 |                                                                                      |
 |  Verdict: IMPROVEMENT                                                                |
-|  Why: Step time decreased by 59.9%.                                                  |
+|  Why: GPU Step Time decreased by 59.9%.                                              |
 +--------------------------------------------------------------------------------------+
 ```
 
@@ -209,12 +208,12 @@ diagnosis and cuts step time:
 |  Primary diagnosis: INPUT-BOUND -> COMPUTE-BOUND (changed)                           |
 |                                                                                      |
 |  Verdict: IMPROVEMENT                                                                |
-|  Why: Step time decreased by 59.9%.                                                  |
+|  Why: GPU Step Time decreased by 59.9%.                                              |
 |                                                                                      |
-|  Step Time                                                                           |
+|  Step Time (GPU comparison clock)                                                    |
 |  Metric                       A                 B                 Delta              |
 |  Step time diagnosis          INPUT-BOUND       COMPUTE-BOUND     changed            |
-|  Total step                   200.4 ms          80.4 ms           -120.0 ms (-59.9%) |
+|  GPU Step Time                200.4 ms          80.4 ms           -120.0 ms (-59.9%) |
 |  Input                        128.0 ms          8.0 ms            -120.0 ms (-93.8%) |
 |  H2D                          0.4 ms            0.4 ms            +0.0 ms (+0.0%)    |
 |  Compute                      68.0 ms           68.0 ms           +0.0 ms (+0.0%)    |
@@ -275,15 +274,11 @@ Use the live terminal view locally or over SSH:
 traceml run train.py --mode=cli
 ```
 
-![TraceML live terminal view](docs/assets/cli_demo.gif)
-
 Use the browser dashboard on a single node:
 
 ```bash
 traceml run train.py --mode=dashboard
 ```
-
-![TraceML live browser dashboard](docs/assets/dashboard_live.gif)
 
 For remote browser access and SSH tunneling, see the
 [full quickstart](docs/user_guide/quickstart.md).
