@@ -53,7 +53,7 @@ def _make_section(
 def _make_payload(
     *,
     meta: Any = "default",
-    schema_version: Any = 1.4,
+    schema_version: Any = 1.7,
     primary_diagnosis: Optional[Any] = None,
     step_time: Optional[Dict[str, Any]] = None,
     step_memory: Optional[Dict[str, Any]] = None,
@@ -68,7 +68,28 @@ def _make_payload(
             "nodes_observed": 1,
             "gpus_observed": 2,
         }
-    st_metrics = ["total_step_ms", "dataloader_ms", "compute_ms"]
+    # The full schema-1.7 step_time metric set. Only total_step_ms,
+    # dataloader_ms, and compute_ms are ever measured in this default
+    # fixture; the rest stay None (never a fabricated 0.0) so tests that
+    # take the bare default payload exercise the same null-vs-zero shape
+    # a real nullable-metrics run produces.
+    st_metrics = [
+        "total_step_ms",
+        "dataloader_ms",
+        "input_wait_ms",
+        "step_time_ms",
+        "h2d_ms",
+        "compute_ms",
+        "residual_ms",
+        "forward_ms",
+        "backward_ms",
+        "optimizer_ms",
+    ]
+    _st_unmeasured = {
+        name: None
+        for name in st_metrics
+        if name not in ("total_step_ms", "dataloader_ms", "compute_ms")
+    }
     sm_metrics = ["peak_allocated_bytes", "peak_reserved_bytes"]
     payload = {
         "schema_version": schema_version,
@@ -84,6 +105,7 @@ def _make_payload(
                     "total_step_ms": 100.0,
                     "dataloader_ms": 20.0,
                     "compute_ms": 75.0,
+                    **_st_unmeasured,
                 },
                 kind="BALANCED",
                 status="BALANCED",
@@ -96,6 +118,7 @@ def _make_payload(
                             "total_step_ms": 99.0,
                             "dataloader_ms": 19.0,
                             "compute_ms": 75.0,
+                            **_st_unmeasured,
                         },
                     },
                     "1": {
@@ -104,6 +127,7 @@ def _make_payload(
                             "total_step_ms": 101.0,
                             "dataloader_ms": 21.0,
                             "compute_ms": 75.0,
+                            **_st_unmeasured,
                         },
                     },
                 },

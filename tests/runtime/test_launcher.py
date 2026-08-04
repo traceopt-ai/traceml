@@ -756,7 +756,11 @@ def test_resolve_existing_script_path_rejects_missing_file(tmp_path) -> None:
         resolve_existing_script_path(str(tmp_path / "missing.py"))
 
 
-def test_run_manifest_write_and_update_are_atomic(tmp_path) -> None:
+def test_run_manifest_write_and_update_merge_correctly(tmp_path) -> None:
+    # Atomicity of the underlying write (crash-mid-write leaves the target
+    # untouched, no stray temp file) is pinned directly in
+    # tests/runtime/test_atomic_io.py; this test only covers the content
+    # merge across write_run_manifest -> update_run_manifest.
     script = tmp_path / "train.py"
     script.write_text("print('ok')\n", encoding="utf-8")
     session_root = tmp_path / "logs" / "session"
