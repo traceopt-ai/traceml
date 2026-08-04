@@ -150,8 +150,9 @@ logs/<run_name>/final_summary.txt
 ```
 
 See the
-[full quickstart](docs/user_guide/quickstart.md) for Colab, Docker, direct
-`python`/`torchrun` launches, HTML reports, and advanced options.
+[full quickstart](docs/user_guide/quickstart.md) for source-only examples,
+Docker (both require a repository checkout), Colab, direct `python`/`torchrun`
+launches, HTML reports, and advanced options.
 
 ## What TraceML Diagnoses
 
