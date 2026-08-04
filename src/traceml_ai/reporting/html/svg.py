@@ -37,13 +37,13 @@ def _phase_bar_denominator(
     *,
     schema_version: Any,
 ) -> Optional[float]:
-    """Return canonical Step Time, adapting only pre-1.8 report payloads."""
+    """Return canonical Step Time, adapting only pre-1.7 report payloads."""
     schema = _schema_number(schema_version)
-    if schema is not None and schema >= 1.8:
+    if schema is not None and schema >= 1.7:
         value = avg.get("step_time_ms")
         return float(value) if isinstance(value, (int, float)) else None
 
-    # Compatibility reader for historical final summaries only: before 1.8,
+    # Compatibility reader for historical final summaries only: before 1.7,
     # step_time_ms was the traced envelope and the outer duration was absent.
     traced = avg.get("step_time_ms")
     input_wait = avg.get("input_wait_ms")
@@ -59,7 +59,7 @@ def _phase_bar_denominator(
 def phase_bar(
     step_time_section: Dict[str, Any],
     *,
-    schema_version: Any = 1.8,
+    schema_version: Any = 1.7,
 ) -> str:
     """Render phase widths against canonical Step Time without rescaling."""
     avg = (step_time_section.get("global") or {}).get("average") or {}

@@ -62,9 +62,9 @@ def _schema_warnings(
         (
             "Summary schema versions differ: A uses "
             f"{lhs_version}, B uses {rhs_version}. Step Time fields changed "
-            "in schema 1.6, became nullable in schema 1.7, and were "
-            "renamed in schema 1.8; Step Time deltas require matching "
-            "selected clocks."
+            "in schema 1.6 and were made nullable and canonical in schema "
+            "1.7; compare uses a common measured GPU "
+            "clock when possible and otherwise a common CPU clock."
         )
     ]
 

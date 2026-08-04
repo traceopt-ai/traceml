@@ -145,7 +145,7 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
 
     payload = build_summary_payload(str(db_path))
 
-    assert payload["schema_version"] == 1.8
+    assert payload["schema_version"] == 1.7
     assert set(payload) == {
         "schema_version",
         "generated_at",
@@ -199,7 +199,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.8
+    assert payload["schema_version"] == 1.7
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",

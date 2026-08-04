@@ -41,10 +41,10 @@ from traceml_ai.sdk.protocol import (
 )
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
-# Version of the final_summary.json contract. 1.8 publishes canonical Step
+# Version of the final_summary.json contract. 1.7 publishes canonical Step
 # Time and Traced Step Time values, including both explicit clock aggregates.
 # A timing signal that was never measured remains null; a measured zero is 0.0.
-SCHEMA_VERSION = 1.8
+SCHEMA_VERSION = 1.7
 
 SUMMARY_WIDTH = 78
 SUMMARY_INNER_TEXT_WIDTH = SUMMARY_WIDTH - 4
