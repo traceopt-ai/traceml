@@ -1,0 +1,72 @@
+name: Notebook Smoke
+
+on:
+  pull_request:
+    branches: [main, 'version_*']
+    paths:
+      - 'notebooks/**'
+      - 'src/traceml_ai/**'
+      - 'pyproject.toml'
+      - '.github/workflows/notebook-smoke.yml'
+  push:
+    branches: [main, 'version_*']
+    paths:
+      - 'notebooks/**'
+      - 'src/traceml_ai/**'
+      - 'pyproject.toml'
+      - '.github/workflows/notebook-smoke.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+concurrency:
+  group: notebook-smoke-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: CPU notebook smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install TraceML and notebook runner
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[torch,hf]" nbconvert ipykernel
+      - name: Execute the PyTorch smoke notebook
+        env:
+          TRACEML_NOTEBOOK_MODE: smoke
+          TRACEML_NOTEBOOK_SKIP_INSTALL: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p notebook-smoke/pytorch
+          cp notebooks/data_loading_bottleneck.ipynb notebook-smoke/pytorch/notebook.ipynb
+          cd notebook-smoke/pytorch
+          jupyter nbconvert --to notebook --execute notebook.ipynb \
+            --ExecutePreprocessor.timeout=180 \
+            --output=executed.ipynb
+          test -f logs/pytorch_smoke/final_summary.json
+          test -f logs/pytorch_smoke/final_summary.txt
+      - name: Execute the Hugging Face smoke notebook
+        env:
+          TRACEML_NOTEBOOK_MODE: smoke
+          TRACEML_NOTEBOOK_SKIP_INSTALL: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p notebook-smoke/huggingface
+          cp notebooks/huggingface_dataloading_bottleneck.ipynb notebook-smoke/huggingface/notebook.ipynb
+          cd notebook-smoke/huggingface
+          jupyter nbconvert --to notebook --execute notebook.ipynb \
+            --ExecutePreprocessor.timeout=180 \
+            --output=executed.ipynb
+          test -f logs/hf_smoke/final_summary.json
+          test -f logs/hf_smoke/final_summary.txt
