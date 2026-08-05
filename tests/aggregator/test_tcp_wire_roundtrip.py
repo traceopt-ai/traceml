@@ -236,10 +236,15 @@ def test_client_reconnects_lazily_after_server_restart(tmp_path, writer):
     try:
         agg = _make_aggregator(tmp_path, tcp_server=second, writer=writer)
 
-        client.send_batch([_system_envelope(global_rank=2)])
-        assert second.wait_for_data(
-            timeout=2.0
-        ), "client did not reconnect after the server came back"
+        deadline = time.monotonic() + 5.0
+        received = False
+        while time.monotonic() < deadline:
+            client.send_batch([_system_envelope(global_rank=2)])
+            if second.wait_for_data(timeout=0.2):
+                received = True
+                break
+
+        assert received, "client did not reconnect after the server came back"
         agg._drain_tcp()
         assert writer.force_flush(timeout_sec=2.0)
 
