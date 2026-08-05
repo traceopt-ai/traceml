@@ -1,8 +1,19 @@
 # Final Summary JSON
 
-TraceML writes one end-of-run JSON file. The current schema version is `1.6`.
+TraceML writes one end-of-run JSON file. The current schema version is `1.7`.
 Each section has the same outer shape so the output is easy to store, diff, and
 consume from tooling.
+
+Schema `1.7` publishes canonical Step Time vocabulary. Every public timing
+metric is nullable: `null` means the
+underlying timing signal was never measured in the analyzed window (missing
+instrumentation), while a measured zero stays `0.0`. Null metrics are
+excluded from `global.average`, `global.median`, and `global.worst` and from
+rank median/worst selection; a rank with only some metrics measured (for
+example an H2D-only rank) keeps its row with `null` for the others.
+
+For user-facing definitions and examples, see the
+[Step Time glossary](../../../docs/user_guide/reading-output.md#step-time-glossary).
 
 Sections:
 
@@ -16,7 +27,7 @@ Sections:
 
 ```json
 {
-  "schema_version": 1.6,
+  "schema_version": 1.7,
   "generated_at": "...",
   "duration_s": null,
   "meta": {
@@ -81,8 +92,12 @@ Selection policy:
   and System reports `LOW_GPU_UTILIZATION` or `MODERATE_GPU_UTILIZATION`.
 - `NO_CLEAR_PERFORMANCE_BOTTLENECK` appears when Step Time is `BALANCED` and
   GPU utilization is not low/moderate.
-- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA` or
-  `WARMUP`.
+- `INSUFFICIENT_STEP_TIME_DATA` appears when Step Time is `NO_DATA`,
+  `WARMUP`, or `INCOMPLETE_DATA`. For `INCOMPLETE_DATA` its summary and
+  action name the missing-phase problem, its evidence carries
+  `step_time_status: "INCOMPLETE DATA"`, and the Step Time section's
+  diagnosis evidence lists `missing_signals` plus per-signal
+  `signal_coverage`.
 - Step Time may emit warning-only bottleneck diagnoses before its confident
   threshold; critical Step Time diagnoses require the confident window size.
   Live and summary use the same global-rank Step Time SQLite window loader;
@@ -104,18 +119,17 @@ Primary diagnosis evidence uses a small union:
   "type": "phase_share",
   "basis": "average",
   "steps_analyzed": 256,
-  "total_step_ms": 200.0,
-  "dataloader_ms": 40.0,
   "input_wait_ms": 80.0,
-  "step_time_ms": 160.0,
-  "iteration_time_ms": 240.0,
+  "step_time_ms": 240.0,
+  "traced_step_time_ms": 160.0,
   "diagnosis_clock": "gpu",
+  "dataloader_fetch_cpu_ms": 40.0,
   "h2d_ms": 0.4,
   "compute_ms": 120.0,
   "residual_ms": 39.6,
   "score": 0.333,
-  "score_basis": "median_per_rank_iteration_share",
-  "score_denominator": "input_wait_ms + step_time_ms per rank",
+  "score_basis": "median_per_rank_step_time_share",
+  "score_denominator": "selected-clock Step Time per rank",
   "gpu_util_avg_percent": 37.8
 }
 ```
@@ -123,9 +137,9 @@ Primary diagnosis evidence uses a small union:
 `phase_share` is used for `INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and
 `COMPUTE_BOUND`. Millisecond values come from `step_time.global.average` and
 are supporting observations only. For scored typical bottlenecks, `score` is
-the authoritative median per-rank iteration-impact fraction. Informational
+the authoritative median per-rank Step Time fraction. Informational
 `COMPUTE_BOUND` uses the median per-rank
-`(forward_ms + backward_ms + optimizer_ms) / iteration_time_ms` share with a
+`(forward_ms + backward_ms + optimizer_ms) / step_time_ms` share with a
 90% threshold, but has no score because it is excluded from impact-based
 primary ordering.
 
@@ -252,14 +266,17 @@ Fallback evidence types are:
 - `summary` is the short explanation. Older `reason` fields should be treated
   as pre-`1.4` input, not the current final-summary contract.
 - `score` is an optional section-specific ranking signal. In Step Time, scored
-  typical bottlenecks use median per-rank iteration impact and stragglers use
-  visible wait cost divided by victim iteration time.
+  typical bottlenecks use median per-rank Step Time impact and stragglers use
+  visible wait cost divided by victim Step Time.
 - Section-specific details such as `scope`, `samples_used`, `steps_used`,
   `note`, and `confidence` belong in `evidence`.
 - `groups.rows` contains row data only: `identity` and `metrics`.
 - Row-level diagnosis is intentionally omitted for now.
 - `global.average`, `global.median`, `global.worst`, and
   `groups.rows[*].metrics` must use exactly `metadata.section_metric_names`.
+  Keys are always present; a Step Time metric whose signal was never
+  measured carries `null` (`{"value": null, "idx": null}` for rank points)
+  and never a fabricated `0.0`.
 - `global.index_by` must match `groups.by`.
 - `idx` points to a key in `groups.rows`.
 - `metadata.global_ranks_seen` is all observed ranks.
@@ -298,10 +315,14 @@ in `global_ranks_used`.
     "gpu_mem_headroom_bytes"
   ],
   "step_time": [
-    "total_step_ms",
-    "dataloader_ms",
     "input_wait_ms",
     "step_time_ms",
+    "traced_step_time_ms",
+    "step_time_cpu_ms",
+    "step_time_gpu_ms",
+    "traced_step_time_cpu_ms",
+    "traced_step_time_gpu_ms",
+    "dataloader_fetch_cpu_ms",
     "h2d_ms",
     "compute_ms",
     "residual_ms",
@@ -328,15 +349,37 @@ Metric suffixes are units:
 
 Step Time uses one selected clock per aligned window. GPU timing is used when
 the window has complete GPU event timings; otherwise explicit CPU timing is
-used. `input_wait_ms` and `step_time_ms` expose this selected-clock timing.
-The public `dataloader_ms` key is kept for compatibility and represents CPU
-dataloader fetch wall time.
-The public `total_step_ms` key is also CPU-clocked for compatibility; it is
-not the denominator for selected-clock phase shares. The final text report
-uses derived `iteration_time_ms = input_wait_ms + step_time_ms` for every
-selected-clock phase share and labels CPU compatibility rows separately.
+used. `input_wait_ms`, `step_time_ms`, and `traced_step_time_ms` expose
+selected-clock values. The four explicit aggregate fields preserve both clocks:
+
+```text
+step_time_cpu_ms
+step_time_gpu_ms
+traced_step_time_cpu_ms
+traced_step_time_gpu_ms
+```
+
+The clock-qualified relationships are:
+
+```text
+CPU Step Time = CPU Input Wait + CPU Traced Step Time
+GPU Step Time = GPU Input Wait + GPU Traced Step Time
+```
+
+The summary publishes the selected Input Wait as `input_wait_ms`; CPU and GPU
+Input Wait are not additional summary fields. The explicit Step Time and Traced
+Step Time aggregates above retain the corresponding clock-qualified values.
+
+`dataloader_fetch_cpu_ms` is supplemental CPU DataLoader-fetch evidence. It
+is never added into Input Wait or Step Time and has no phase-share percentage.
+Every displayed phase share uses the selected `step_time_ms` denominator.
 Those table shares are observational averages and may differ from the
 authoritative median per-rank diagnosis `score`.
+
+When GPU is selected, `input_wait_ms` is GPU-clocked while
+`dataloader_fetch_cpu_ms` remains CPU evidence, so they can differ. When CPU
+is selected they describe the same CPU input-wait interval; neither is counted
+twice.
 
 `residual_ms` is residual unattributed step time. It is averaged from
 per-step clamped residuals, not recomputed from already-averaged phase totals:
@@ -344,20 +387,23 @@ per-step clamped residuals, not recomputed from already-averaged phase totals:
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = selected step envelope timing
-iteration_time_ms = selected input_wait_ms + selected traced_step_ms
-residual_ms = average(max(0, traced_step_ms - known_step_ms))
-total_step_ms = CPU dataloader_ms + CPU step envelope timing
+traced_step_time_ms = selected traced envelope timing
+step_time_ms = selected input_wait_ms + selected traced_step_time_ms
+residual_ms = average(max(0, traced_step_time_ms - known_step_ms))
 ```
 
 The selected-clock diagnosis contract is:
 
 ```text
 input_wait_ms = selected-clock input wait
-step_time_ms = selected-clock traced step envelope
-iteration_time_ms = input_wait_ms + step_time_ms, emitted only as diagnosis evidence
+traced_step_time_ms = selected-clock Traced Step Time
+step_time_ms = complete selected-clock step duration
 diagnosis_clock = "cpu" | "gpu"
 ```
+
+Schema `1.7` does not publish historical timing aliases. Readers that support
+older summary files must use an explicit schema-versioned compatibility adapter
+at their input boundary; new output remains canonical.
 
 `duration_ms` is stored compatibility timing and is not a Step Time display or
 diagnosis fallback. `residual_ms` can include validation, checkpointing,

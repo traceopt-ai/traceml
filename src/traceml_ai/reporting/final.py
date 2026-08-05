@@ -41,6 +41,11 @@ from traceml_ai.sdk.protocol import (
 )
 from traceml_ai.utils.atomic_io import write_json_atomic, write_text_atomic
 
+# Version of the final_summary.json contract. 1.7 publishes canonical Step
+# Time and Traced Step Time values, including both explicit clock aggregates.
+# A timing signal that was never measured remains null; a measured zero is 0.0.
+SCHEMA_VERSION = 1.7
+
 SUMMARY_WIDTH = 78
 SUMMARY_INNER_TEXT_WIDTH = SUMMARY_WIDTH - 4
 
@@ -51,15 +56,15 @@ _SYSTEM_EVIDENCE_METRICS = (
     ("GPU Temp", "gpu_temp_c"),
 )
 _STEP_TIME_EVIDENCE_METRICS = (
-    ("Total", "total_step_ms"),
-    ("Dataloader", "dataloader_ms"),
-    ("Input Wait", "input_wait_ms"),
     ("Step Time", "step_time_ms"),
+    ("Traced Step Time", "traced_step_time_ms"),
+    ("Input Wait", "input_wait_ms"),
     ("Compute", "compute_ms"),
     ("Residual", "residual_ms"),
     ("H2D", "h2d_ms"),
+    ("DataLoader Fetch (CPU)", "dataloader_fetch_cpu_ms"),
 )
-_STEP_TIME_CPU_COMPAT_METRICS = frozenset(("total_step_ms", "dataloader_ms"))
+_STEP_TIME_SUPPLEMENTAL_METRICS = frozenset(("dataloader_fetch_cpu_ms",))
 _SEVERITY_LABELS = {
     "crit": "CRITICAL",
     "critical": "CRITICAL",
@@ -601,15 +606,9 @@ def _append_step_time_evidence_single(
     lines: List[str],
     step_time_summary: Dict[str, Any],
 ) -> None:
-    """Append selected-clock average/share Step Time evidence."""
-    widths = (16, 16, 12)
+    """Append canonical selected-clock average/share Step Time evidence."""
+    widths = (22, 16, 12)
     step_time = _average_value(step_time_summary, "step_time_ms")
-    input_wait = _average_value(step_time_summary, "input_wait_ms")
-    iteration_time = (
-        input_wait + step_time
-        if input_wait is not None and step_time is not None
-        else None
-    )
     lines.append(row("Step Time Evidence", width=SUMMARY_WIDTH))
     lines.append(
         row(
@@ -620,12 +619,10 @@ def _append_step_time_evidence_single(
     lines.append(row(_table_rule(widths), width=SUMMARY_WIDTH))
     for label, metric in _STEP_TIME_EVIDENCE_METRICS:
         value = _average_value(step_time_summary, metric)
-        if metric in _STEP_TIME_CPU_COMPAT_METRICS:
-            # These fields stay CPU-clocked for compatibility; selected-clock
-            # phase shares use selected-clock iteration time as the denominator.
-            share = "compat"
+        if metric in _STEP_TIME_SUPPLEMENTAL_METRICS:
+            share = "supplemental"
         else:
-            share = _format_share(value, iteration_time)
+            share = _format_share(value, step_time)
         lines.append(
             row(
                 _table_line(
@@ -831,7 +828,7 @@ class FinalReportGenerator:
         )
 
         return {
-            "schema_version": 1.6,
+            "schema_version": SCHEMA_VERSION,
             "generated_at": utc_now_iso(),
             "duration_s": _summary_duration_s(
                 step_time_summary,

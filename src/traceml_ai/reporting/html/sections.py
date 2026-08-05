@@ -130,7 +130,10 @@ def _section_bars(
 ) -> str:
     """Section-specific inline chart, between the diagnosis and the tables."""
     if name == "step_time":
-        return phase_bar(section)
+        return phase_bar(
+            section,
+            schema_version=payload.get("schema_version"),
+        )
     if name == "step_memory":
         return memory_bars(section, payload.get("process") or {})
     return ""

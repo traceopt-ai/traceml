@@ -12,6 +12,7 @@ def test_render_returns_parseable_html_document(make_payload) -> None:
     out = render_html_report(make_payload())
     assert out.startswith("<!DOCTYPE html>")
     assert "<title>" in out
+    assert "None" not in out
     assert _parses(out)
 
 

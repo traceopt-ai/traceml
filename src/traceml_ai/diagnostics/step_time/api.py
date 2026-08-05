@@ -9,9 +9,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Literal, Optional, Sequence, cast
+from typing import Literal, Optional, cast
 
-from traceml_ai.renderers.step_time.schema import StepCombinedTimeMetric
+from traceml_ai.step_time.model import StepTimeMetric, StepTimeWindow
 
 from ..common import (
     BaseDiagnosis,
@@ -23,22 +23,22 @@ from ..common import (
 )
 from .context import (
     build_step_time_context,
-    compute_rank_values_from_components,
-    metric_median_total,
-    metric_skew,
     metric_total,
     metric_worst_rank,
-    metric_worst_total,
     non_negative_finite,
-    share,
 )
-from .policy import DEFAULT_THRESHOLDS, DiagnosisThresholds
+from .policy import (
+    DEFAULT_THRESHOLDS,
+    DiagnosisThresholds,
+    StepTimeDiagnosisPolicy,
+)
 from .rules import run_step_time_rules
 from .trend import DEFAULT_STEP_TREND_HEURISTICS, build_step_trend_note
 
 DiagnosisKind = Literal[
     "NO_DATA",
     "WARMUP",
+    "INCOMPLETE_DATA",
     "BALANCED",
     "STRAGGLER",
     "INPUT_STRAGGLER",
@@ -53,6 +53,7 @@ DiagnosisKind = Literal[
 _STATUS_BY_KIND: dict[DiagnosisKind, str] = {
     "NO_DATA": "NO DATA",
     "WARMUP": "WARMUP",
+    "INCOMPLETE_DATA": "INCOMPLETE DATA",
     "BALANCED": "BALANCED",
     "STRAGGLER": "STRAGGLER",
     "INPUT_STRAGGLER": "INPUT STRAGGLER",
@@ -151,27 +152,6 @@ def _merge_note(base: Optional[str], extra: Optional[str]) -> Optional[str]:
     return f"{base} {extra}"
 
 
-def _pct(value: float) -> str:
-    """
-    Format a ratio as a percentage string.
-    """
-    return f"{non_negative_finite(value) * 100.0:.1f}%"
-
-
-def _rank_str(rank: Optional[int]) -> str:
-    """
-    Format a rank identifier for UI text.
-    """
-    return f"r{rank}" if rank is not None else "—"
-
-
-def _severity(value: float, crit_threshold: float) -> Severity:
-    """
-    Map a scalar signal to warn or crit severity.
-    """
-    return "crit" if non_negative_finite(value) >= crit_threshold else "warn"
-
-
 def _step_time_issue_sort_key(
     issue: DiagnosticIssue,
 ) -> tuple[int, float, int]:
@@ -195,105 +175,15 @@ def _cap_issue_severity(
     return replace(issue, severity=severity)
 
 
-def _top_rank_entries(
-    rank_values: Dict[int, float],
-    *,
-    max_items: int = 3,
-) -> list[Dict[str, Any]]:
-    """
-    Build a compact ranked list of the most affected ranks for one metric.
-    """
-    if not rank_values:
-        return []
-
-    ordered = sorted(
-        (
-            (int(rank), non_negative_finite(value))
-            for rank, value in rank_values.items()
-        ),
-        key=lambda item: (-item[1], item[0]),
-    )
-    if not ordered:
-        return []
-
-    values = sorted(value for _, value in ordered)
-    median_value = values[len(values) // 2]
-
-    out: list[Dict[str, Any]] = []
-    for rank, value in ordered[: max(1, int(max_items))]:
-        excess = max(0.0, value - median_value)
-        out.append(
-            {
-                "rank": rank,
-                "value_ms": value,
-                "excess_vs_median_ms": excess,
-                "pct_vs_median": (
-                    (excess / median_value) if median_value > 0.0 else None
-                ),
-            }
-        )
-    return out
-
-
-def _rank_summary_values(
-    rank_values: Dict[int, float],
-) -> tuple[float, float, Optional[int], float]:
-    """
-    Return median, worst value, worst rank, and skew for rank values.
-    """
-    if not rank_values:
-        return 0.0, 0.0, None, 0.0
-    clean = {
-        int(rank): non_negative_finite(value)
-        for rank, value in rank_values.items()
-    }
-    ordered = sorted(clean.values())
-    mid = len(ordered) // 2
-    if len(ordered) % 2:
-        median = float(ordered[mid])
-    else:
-        median = float((ordered[mid - 1] + ordered[mid]) / 2.0)
-    worst_rank = max(clean, key=lambda rank: (clean[rank], -int(rank)))
-    worst = clean[worst_rank]
-    skew = ((worst - median) / median) if median > 0.0 else 0.0
-    return median, worst, int(worst_rank), max(0.0, skew)
-
-
-def _metric_attribution_entry(
-    *,
-    metric: Optional[StepCombinedTimeMetric],
-    metric_key: str,
-    rank_values: Dict[int, float],
-    step_total: float,
-    single_rank: bool,
-    phase: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Build one machine-readable attribution block for a metric / phase.
-    """
-    return {
-        "metric": metric_key,
-        "phase": phase,
-        "median_total_ms": metric_median_total(metric),
-        "worst_total_ms": metric_worst_total(metric),
-        "worst_rank": metric_worst_rank(metric),
-        "skew_pct": metric_skew(metric, single_rank=single_rank),
-        "share_pct": share(
-            metric_total(metric, single_rank=single_rank), step_total
-        ),
-        "top_ranks": _top_rank_entries(rank_values),
-    }
-
-
 def _apply_trend_note(
     diagnosis: StepDiagnosis,
     *,
-    step_metric: Optional[StepCombinedTimeMetric],
-    residual_metric: Optional[StepCombinedTimeMetric],
-    input_wait_metric: Optional[StepCombinedTimeMetric],
+    step_metric: Optional[StepTimeMetric],
+    residual_metric: Optional[StepTimeMetric],
+    input_wait_metric: Optional[StepTimeMetric],
     single_rank: bool,
-    residual_share: float,
-    input_bound_share: float,
+    residual_share: Optional[float],
+    input_bound_share: Optional[float],
     thresholds: DiagnosisThresholds,
 ) -> StepDiagnosis:
     """
@@ -320,22 +210,14 @@ def _apply_trend_note(
         return diagnosis
 
 
-def build_step_diagnosis_result(
-    metrics: Sequence[StepCombinedTimeMetric],
-    thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
+def diagnose_step_time_window(
+    window: StepTimeWindow,
     *,
-    per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
-    diagnosis_clock: str = "cpu",
-    training_strategy: str = "ddp",
+    policy: StepTimeDiagnosisPolicy,
 ) -> DiagnosticResult[StepDiagnosis]:
-    """
-    Build a rich step-time diagnosis result from one analyzed window.
-
-    Runtime consumers should typically use `result.primary`. Final-summary and
-    dashboard consumers can additionally use:
-    - `result.issues`
-    - `result.metric_attribution`
-    """
+    """Diagnose one canonical window without rebuilding analyzer facts."""
+    metrics = window.metrics
+    thresholds = policy.thresholds
     metric_names = [metric.metric for metric in metrics]
     if len(metric_names) != len(set(metric_names)):
         primary = _mk_diag(
@@ -350,18 +232,53 @@ def build_step_diagnosis_result(
     by_key = {metric.metric: metric for metric in metrics}
     step_metric = by_key.get("step_time")
     if step_metric is None:
+        context = build_step_time_context(
+            window=window,
+            thresholds=thresholds,
+        )
+        if context.missing_signals:
+            primary = _mk_diag(
+                kind="INCOMPLETE_DATA",
+                severity="info",
+                reason=(
+                    "Missing timing signals prevent a reliable diagnosis: "
+                    + ", ".join(context.missing_signals)
+                    + "."
+                ),
+                action=(
+                    "Instrument the missing phases (auto mode or the "
+                    "matching wrap_* helpers) to restore coverage."
+                ),
+                steps_used=int(window.coverage.steps_used),
+            )
+            return DiagnosticResult(
+                primary=primary,
+                issues=(
+                    DiagnosticIssue(
+                        kind=primary.kind,
+                        status=primary.status,
+                        severity=primary.severity,
+                        summary=primary.reason,
+                        action=primary.action,
+                        evidence={
+                            "missing_signals": list(context.missing_signals),
+                            "signal_coverage": dict(context.signal_coverage),
+                        },
+                    ),
+                ),
+            )
         primary = _mk_diag(
             kind="NO_DATA",
             severity="info",
-            reason="step_time metric is missing.",
+            reason="Step Time metric is missing.",
             action="Wait for the first complete window.",
             steps_used=0,
         )
         return DiagnosticResult(primary=primary)
 
-    coverage = step_metric.coverage
+    coverage = window.coverage
     single_rank = (coverage.world_size <= 1) or (coverage.ranks_present <= 1)
-    steps_used = int(step_metric.summary.steps_used)
+    steps_used = int(coverage.steps_used)
     overall_worst_rank = metric_worst_rank(step_metric)
     step_total = metric_total(step_metric, single_rank=single_rank)
 
@@ -386,11 +303,8 @@ def build_step_diagnosis_result(
         )
 
     context = build_step_time_context(
-        metrics=metrics,
+        window=window,
         thresholds=thresholds,
-        per_rank_timing=per_rank_timing,
-        diagnosis_clock=diagnosis_clock,
-        training_strategy=training_strategy,
     )
     raw_issues = run_step_time_rules(context)
     issue_list = list(raw_issues)
@@ -456,7 +370,8 @@ def build_step_diagnosis_result(
                 None if context.single_rank else context.overall_worst_rank
             ),
             note=(
-                "residual_ms = selected step_time_ms - h2d_ms - compute_ms."
+                "residual_ms = selected traced_step_time_ms - h2d_ms - "
+                "compute_ms."
             ),
         )
     elif primary_issue is not None and primary_issue.kind == "COMPUTE_BOUND":
@@ -471,16 +386,43 @@ def build_step_diagnosis_result(
             ),
         )
     else:
-        primary = _mk_diag(
-            kind="BALANCED",
-            severity="info",
-            reason="No dominant bottleneck is visible in this window.",
-            action="Focus on throughput only if overall speed is still low.",
-            steps_used=context.steps_used,
-            worst_rank=(
-                None if context.single_rank else context.overall_worst_rank
-            ),
-        )
+        missing_signals = context.missing_signals
+        signal_coverage = context.signal_coverage
+        if missing_signals:
+            primary = _mk_diag(
+                kind="INCOMPLETE_DATA",
+                severity="info",
+                reason=(
+                    "Missing timing signals prevent a reliable diagnosis: "
+                    + ", ".join(missing_signals)
+                    + "."
+                ),
+                action=(
+                    "Instrument the missing phases (auto mode or the "
+                    "matching wrap_* helpers) to restore coverage."
+                ),
+                steps_used=context.steps_used,
+                worst_rank=(
+                    None if context.single_rank else context.overall_worst_rank
+                ),
+            )
+            incomplete_evidence = {
+                "missing_signals": list(missing_signals),
+                "signal_coverage": dict(signal_coverage),
+            }
+        else:
+            primary = _mk_diag(
+                kind="BALANCED",
+                severity="info",
+                reason="No dominant bottleneck is visible in this window.",
+                action=(
+                    "Focus on throughput only if overall speed is still low."
+                ),
+                steps_used=context.steps_used,
+                worst_rank=(
+                    None if context.single_rank else context.overall_worst_rank
+                ),
+            )
 
     primary = _apply_trend_note(
         primary,
@@ -506,121 +448,18 @@ def build_step_diagnosis_result(
                     if primary.worst_rank is not None
                     else ()
                 ),
+                evidence=(
+                    incomplete_evidence
+                    if primary.kind == "INCOMPLETE_DATA"
+                    else {}
+                ),
             ),
         )
-
-    compute_rank_values = compute_rank_values_from_components(
-        context.rank_values
-    )
-    (
-        compute_median_ms,
-        compute_worst_ms,
-        compute_worst_rank,
-        compute_skew,
-    ) = _rank_summary_values(compute_rank_values)
-
-    metric_attribution = {
-        "input_wait": _metric_attribution_entry(
-            metric=context.input_wait_metric,
-            metric_key="input_wait",
-            rank_values=context.rank_values.get("input_wait", {}),
-            step_total=context.step_total,
-            single_rank=context.single_rank,
-            phase="input",
-        ),
-        "h2d": _metric_attribution_entry(
-            metric=context.h2d_metric,
-            metric_key="h2d",
-            rank_values=context.rank_values.get("h2d", {}),
-            step_total=context.step_total,
-            single_rank=context.single_rank,
-            phase="h2d",
-        ),
-        "forward": _metric_attribution_entry(
-            metric=context.forward_metric,
-            metric_key="forward",
-            rank_values=context.rank_values.get("forward", {}),
-            step_total=context.step_total,
-            single_rank=context.single_rank,
-            phase="forward",
-        ),
-        "backward": _metric_attribution_entry(
-            metric=context.backward_metric,
-            metric_key="backward",
-            rank_values=context.rank_values.get("backward", {}),
-            step_total=context.step_total,
-            single_rank=context.single_rank,
-            phase="backward",
-        ),
-        "optimizer_step": _metric_attribution_entry(
-            metric=context.optimizer_metric,
-            metric_key="optimizer_step",
-            rank_values=context.rank_values.get("optimizer_step", {}),
-            step_total=context.step_total,
-            single_rank=context.single_rank,
-            phase="optimizer",
-        ),
-        "residual_proxy": _metric_attribution_entry(
-            metric=context.residual_metric,
-            metric_key="residual_proxy",
-            rank_values=context.rank_values.get("residual_proxy", {}),
-            step_total=context.step_total,
-            single_rank=context.single_rank,
-            phase="residual",
-        ),
-        "step_time": _metric_attribution_entry(
-            metric=context.step_metric,
-            metric_key="step_time",
-            rank_values=context.rank_values.get("step_time", {}),
-            step_total=context.step_total,
-            single_rank=context.single_rank,
-            phase="step",
-        ),
-        "compute": {
-            "metric": "compute",
-            "phase": "compute",
-            "median_total_ms": compute_median_ms,
-            "worst_total_ms": compute_worst_ms,
-            "worst_rank": compute_worst_rank,
-            "skew_pct": compute_skew,
-            "share_pct": share(compute_median_ms, context.step_total),
-            "top_ranks": _top_rank_entries(compute_rank_values),
-        },
-    }
 
     return DiagnosticResult(
         primary=primary,
         issues=tuple(issues),
-        metric_attribution=metric_attribution,
     )
-
-
-def build_step_diagnosis(
-    metrics: Sequence[StepCombinedTimeMetric],
-    thresholds: DiagnosisThresholds = DEFAULT_THRESHOLDS,
-    *,
-    per_rank_timing: Optional[Dict[int, Dict[str, float]]] = None,
-    diagnosis_clock: str = "cpu",
-    training_strategy: str = "ddp",
-) -> StepDiagnosis:
-    """
-    Build one primary diagnosis from step-combined metrics.
-
-    This remains the backward-compatible runtime entry point. Richer consumers
-    should use `build_step_diagnosis_result(...)`.
-    """
-    primary = build_step_diagnosis_result(
-        metrics,
-        thresholds=thresholds,
-        per_rank_timing=per_rank_timing,
-        diagnosis_clock=diagnosis_clock,
-        training_strategy=training_strategy,
-    ).primary
-    if not isinstance(primary, StepDiagnosis):
-        raise TypeError(
-            "build_step_diagnosis_result() must return StepDiagnosis as primary"
-        )
-    return primary
 
 
 __all__ = [
@@ -630,6 +469,5 @@ __all__ = [
     "DEFAULT_THRESHOLDS",
     "StepDiagnosis",
     "build_step_warmup_diagnosis",
-    "build_step_diagnosis",
-    "build_step_diagnosis_result",
+    "diagnose_step_time_window",
 ]

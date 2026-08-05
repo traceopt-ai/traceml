@@ -20,6 +20,67 @@ Live UI and final summaries are separate paths. They can share diagnostics, but
 they should pass explicit policies such as `LIVE_STEP_TIME_POLICY` or
 `SUMMARY_STEP_TIME_POLICY` when thresholds differ.
 
+For Step Time specifically, start with the
+[Step Time pipeline contract](step-time-pipeline-contract.md). Its ownership
+map and six SQLite scenarios show which layer owns each calculation and how to
+verify CLI, dashboard, and final-summary behavior together.
+
+Import shared Step Time contracts from `traceml_ai.step_time.model`. The
+renderer-owned schema and historical `utils.step_time_*` paths have been
+removed. There is one typed domain model and no rank-dictionary projection on
+any built-in production path.
+
+Step Time SQLite selection and JSON normalization belong in
+`traceml_ai.step_time.sqlite`. Terminal and dashboard consumers use
+`SQLiteStepTimeRepository.load_live()` for an index-bounded tail. Final
+summary uses `load_summary()` for the same timing facts plus identities and
+run progress. Both accept `StepTimeLoadRequest`, return the same snapshot
+type, and feed the same analysis. Do not add rank-by-rank reads in renderers
+or reporting sections.
+
+Live Step Time orchestration belongs to `LiveStepTimeSession` in
+`traceml_ai.step_time.pipeline`. The session owns cursor reuse, last-good
+bridging, and monotonic expiry; a presenter receives `LiveStepTimeResult` and
+formats it. Do not open SQLite, call the analyzer, diagnose, or keep freshness
+state in a Rich or NiceGUI presenter. The CLI renderer's public `render()`
+method is the smallest example of this boundary and can be tested without a
+database.
+
+The NiceGUI driver also owns exactly one live session. Each dashboard tick
+refreshes it once and passes the same analyzed result to the Step Time hero
+and model-diagnostics composer. Add a new Step Time dashboard view by
+consuming that result; do not register another provider or add a presenter
+cache.
+
+Final-summary Step Time uses the same `StepTimePipeline` with the `summary`
+profile. `StepTimeSummarySection` runs it once and gives the completed
+`StepTimeAnalysis` to a pure reporting projector. The projector may map facts
+to stable JSON names, topology, and text, but it must not query SQLite,
+reanalyze ranks, or run diagnosis again.
+
+The three core Step Time shapes are:
+
+```text
+StepTimeRepositorySnapshot
+  -> StepTimeWindow
+  -> StepTimeAnalysis
+```
+
+For a full domain change, read `step_time/model.py`, `sqlite.py`,
+`analysis.py`, and `pipeline.py` in that order. Then open only the affected
+presenter: the Rich renderer, the relevant NiceGUI section, or the final
+summary section and projector.
+
+### Step Time extension boundary
+
+Step Time is an internal subsystem with one supported domain input:
+`StepTimeWindow`. Diagnosis calls
+`diagnose_step_time_window(window, policy=...)`; reporting reads
+`StepTimeRankFacts` and `StepTimeValues` from the same analyzed window. Do not
+add rank-map converters, surface-specific domain models, or alternate
+diagnosis builders. Stable user-facing compatibility belongs at the CLI and
+serialized-report boundaries, not between internal pipeline layers.
+
 ## TraceML Lifecycle
 
 TraceML has two runtime pieces:
@@ -96,7 +157,7 @@ Current sections:
 - `step_time`
 - `step_memory`
 
-Each section follows this shape:
+Most sections use some variation of this shape:
 
 ```text
 loader.py     read SQLite / section inputs
@@ -104,6 +165,11 @@ builder.py    build JSON payload and card text
 formatter.py  render section text
 model.py      section-local data helpers
 ```
+
+Do not add empty layers merely to match that filename list. Step Time already
+loads, analyzes, and diagnoses through `StepTimePipeline`, so its reporting
+section contains only orchestration and a pure projector. It has no parallel
+loader model and no second statistics implementation.
 
 Register sections through `src/traceml_ai/reporting/final.py`. Keep the aggregator
 as a caller only; report assembly belongs in `reporting`.
@@ -197,6 +263,7 @@ tests/sdk/
 tests/telemetry/
 tests/display/
 tests/integrations/
+tests/step_time/       cross-surface Step Time contracts
 ```
 
 Keep tests close to the behavior they protect. The most valuable tests are

@@ -4,89 +4,60 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-Final-report step-time section.
+"""Final-report Step Time section.
+
+The section has one readable application path: load the metadata-complete
+repository profile, run canonical analysis and diagnosis once, then project
+the analyzed result to the public report schema.
 """
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from typing import ClassVar
 
 from traceml_ai.core.summaries import SummaryResult
-from traceml_ai.diagnostics.common import DiagnosticResult
-from traceml_ai.diagnostics.step_time.adapters import (
-    StepTimeDiagnosisInput,
-    diagnose_step_time_summary,
+from traceml_ai.reporting.config import (
+    DEFAULT_SUMMARY_WINDOW_ROWS,
+    normalize_summary_window_rows,
 )
-from traceml_ai.diagnostics.step_time.api import StepDiagnosis
-from traceml_ai.reporting.sections.base import BaseSummarySection
 from traceml_ai.reporting.sections.step_time.builder import (
-    build_step_time_payload,
+    STEP_TIME_METRIC_NAMES,
+    project_step_time_summary,
 )
-from traceml_ai.reporting.sections.step_time.formatter import (
-    format_step_time_section_text,
-)
-from traceml_ai.reporting.sections.step_time.loader import (
-    StepTimeSectionData,
-    load_step_time_section_data,
-)
-from traceml_ai.reporting.sections.step_time.model import (
-    MAX_SUMMARY_WINDOW_ROWS,
-)
+from traceml_ai.step_time.model import StepTimeLoadRequest
+from traceml_ai.step_time.pipeline import StepTimePipeline
+from traceml_ai.step_time.sqlite import SQLiteStepTimeRepository
 
 
 @dataclass(frozen=True)
-class StepTimeSummarySection(
-    BaseSummarySection[
-        StepTimeSectionData,
-        StepTimeDiagnosisInput,
-        DiagnosticResult[StepDiagnosis],
-    ],
-):
-    """Build TraceML's final-report step-time section."""
+class StepTimeSummarySection:
+    """Load, analyze, and project TraceML's final Step Time section once."""
 
     name: ClassVar[str] = "step_time"
-    max_rows: int = MAX_SUMMARY_WINDOW_ROWS
+    max_rows: int = DEFAULT_SUMMARY_WINDOW_ROWS
 
-    def load(self, db_path: str) -> StepTimeSectionData:
-        """Load the bounded, step-aligned Step Time telemetry window."""
-        return load_step_time_section_data(db_path, max_rows=self.max_rows)
+    def build(self, db_path: str) -> SummaryResult:
+        """Build one schema-stable section from persisted telemetry."""
+        row_limit = normalize_summary_window_rows(self.max_rows)
+        with closing(sqlite3.connect(db_path)) as connection:
+            analysis = StepTimePipeline(
+                repository=SQLiteStepTimeRepository(connection),
+                profile="summary",
+            ).run(StepTimeLoadRequest(window_size=row_limit))
 
-    def to_diagnosis_input(
-        self,
-        data: StepTimeSectionData,
-    ) -> StepTimeDiagnosisInput:
-        """Adapt the canonical Step Time window to diagnosis."""
-        return StepTimeDiagnosisInput(
-            window=data.step_time_window,
-            training_strategy=data.training_strategy,
-        )
-
-    def diagnose(
-        self,
-        diagnosis_input: StepTimeDiagnosisInput,
-    ) -> DiagnosticResult[StepDiagnosis]:
-        """Run Step Time diagnosis for the aligned telemetry window."""
-        return diagnose_step_time_summary(diagnosis_input)
-
-    def build_payload(
-        self,
-        data: StepTimeSectionData,
-        diagnosis_result: DiagnosticResult[StepDiagnosis],
-    ) -> SummaryResult:
-        """Assemble the Step Time summary payload and display text."""
-        payload = build_step_time_payload(data, diagnosis_result)
+        payload = project_step_time_summary(analysis)
         return SummaryResult(
             section=self.name,
             payload=payload,
-            text=format_step_time_section_text(payload),
+            text=str(payload.get("card", "")),
         )
 
 
 __all__ = [
+    "STEP_TIME_METRIC_NAMES",
     "StepTimeSummarySection",
-    "build_step_time_payload",
-    "format_step_time_section_text",
-    "load_step_time_section_data",
+    "project_step_time_summary",
 ]

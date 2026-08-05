@@ -89,6 +89,26 @@ def test_init_disabled_via_env(initialization, monkeypatch):
     assert started == []
 
 
+def test_direct_runtime_settings_default_to_summary(
+    initialization, monkeypatch, tmp_path
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("TRACEML_UI_MODE", raising=False)
+    monkeypatch.delenv("TRACEML_MODE", raising=False)
+
+    settings = initialization._resolve_runtime_settings(
+        ui_mode=None,
+        interval=None,
+        logs_dir=None,
+        enable_logging=None,
+        session_id="direct-default",
+        aggregator_host=None,
+        aggregator_port=None,
+    )
+
+    assert settings.mode == "summary"
+
+
 def test_disabled_env_dynamically_silences_low_level_utilities(monkeypatch):
     import torch.nn as nn
 
@@ -303,6 +323,28 @@ def test_init_raises_when_aggregator_unreachable_and_strict(
 
     assert started == []  # never started after a failed preflight
     assert initialization.get_init_config() is None  # config not stored
+
+
+@pytest.mark.parametrize(
+    ("env_value", "explicit_value", "expected"),
+    [
+        (None, None, "warn"),
+        ("raise", None, "raise"),
+        ("raise", "warn", "warn"),
+        ("warn", "raise", "raise"),
+    ],
+)
+def test_missing_aggregator_policy_precedence(
+    initialization, monkeypatch, env_value, explicit_value, expected
+):
+    monkeypatch.delenv("TRACEML_ON_MISSING_AGGREGATOR", raising=False)
+    if env_value is not None:
+        monkeypatch.setenv("TRACEML_ON_MISSING_AGGREGATOR", env_value)
+
+    assert (
+        initialization._resolve_on_missing_aggregator(explicit_value)
+        == expected
+    )
 
 
 def test_init_skips_runtime_when_already_active(initialization, monkeypatch):

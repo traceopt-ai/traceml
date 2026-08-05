@@ -191,8 +191,19 @@ That means:
 - if the two summaries use different schema versions, compare emits a warning because some fields may have changed meaning
 
 This helps keep compare useful across incremental TraceML releases.
-For Step Time input timing, schema 1.6 compares selected-clock `input_wait_ms`
-when present and falls back to legacy `dataloader_ms` for older summaries.
+Input Wait is compared only as selected-clock `input_wait_ms`; historical
+`dataloader_ms` is never substituted for it. Pre-1.7 `dataloader_ms` is
+instead adapted to the supplemental CPU `dataloader_fetch_cpu_ms` comparison
+field, which does not affect Step Time verdicts or phase shares.
+Schema 1.7 publishes explicit CPU and GPU outer Step Time aggregates. Compare
+uses GPU when both summaries have measured GPU Step Time; otherwise it uses CPU
+when both have measured CPU Step Time. If neither clock is shared, Step Time is
+inconclusive. Historical outer timing is interpreted only as CPU Step Time at
+the versioned compare boundary. Selected-clock phases still require matching
+diagnosis clocks, so CPU and GPU phase values are never mixed. Since schema
+1.7, a Step Time metric can be `null` when its timing signal was never measured
+in the analyzed window; compare treats a null side as unavailable (no delta)
+instead of reading it as zero.
 
 ---
 

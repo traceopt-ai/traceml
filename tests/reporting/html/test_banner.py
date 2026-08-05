@@ -268,3 +268,15 @@ def test_render_banner_falls_back_to_status_when_summary_missing(
 
 def test_render_html_report_includes_the_banner(make_payload) -> None:
     assert '<div class="banner' in render_html_report(make_payload())
+
+
+def test_severity_tier_incomplete_data_is_neutral() -> None:
+    from traceml_ai.reporting.html.banner import severity_tier
+
+    # INCOMPLETE DATA is a coverage state, not a finding: it must render
+    # with the neutral tier like its NO_DATA / WARMUP siblings.
+    assert (
+        severity_tier({"severity": "info", "kind": "INCOMPLETE_DATA"})
+        == "neutral"
+    )
+    assert severity_tier({"severity": "info", "kind": "BALANCED"}) == "good"

@@ -23,7 +23,7 @@ from .textutils import esc
 _SECTION_ORDER = ("step_time", "step_memory", "system", "process")
 _SEVERITY_RANK = {"crit": 3, "warn": 2, "info": 1}
 _HEALTHY_KINDS = {"BALANCED", "NORMAL"}
-_NEUTRAL_KINDS = {"NO_DATA", "WARMUP", "NO_GPU"}
+_NEUTRAL_KINDS = {"NO_DATA", "WARMUP", "NO_GPU", "INCOMPLETE_DATA"}
 _PRIMARY_SOURCE = "primary"
 
 

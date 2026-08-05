@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import torch
 from torch import nn
+from torch.utils.data import DataLoader, TensorDataset
 
 import traceml_ai as traceml
 
@@ -37,6 +38,25 @@ class TinyMLP(nn.Module):
         return self.net(x)
 
 
+def build_dataloader() -> DataLoader[tuple[torch.Tensor, torch.Tensor]]:
+    """Return one deterministic, CPU-friendly epoch of synthetic batches.
+
+    A real PyTorch DataLoader is intentional: TraceML's automatic mode records
+    its fetch timing, just as it would for a normal training script. Keep this
+    loader fast; the diagnosis demos are the place to inject artificial delay.
+    """
+    generator = torch.Generator().manual_seed(SEED)
+    dataset = TensorDataset(
+        torch.randn(NUM_STEPS * BATCH_SIZE, INPUT_DIM, generator=generator),
+        torch.randint(
+            NUM_CLASSES,
+            (NUM_STEPS * BATCH_SIZE,),
+            generator=generator,
+        ),
+    )
+    return DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=0)
+
+
 def main() -> None:
     torch.manual_seed(SEED)
 
@@ -48,11 +68,12 @@ def main() -> None:
     model = TinyMLP().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
+    dataloader = build_dataloader()
 
     model.train()
-    for step in range(1, NUM_STEPS + 1):
-        x = torch.randn(BATCH_SIZE, INPUT_DIM, device=device)
-        y = torch.randint(0, NUM_CLASSES, (BATCH_SIZE,), device=device)
+    for step, (x, y) in enumerate(dataloader, start=1):
+        x = x.to(device)
+        y = y.to(device)
 
         with traceml.trace_step(model):
             optimizer.zero_grad(set_to_none=True)

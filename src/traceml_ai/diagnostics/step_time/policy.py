@@ -14,9 +14,9 @@ class DiagnosisThresholds:
     their selected timing windows. Explicit callers may still supply a custom
     policy.
 
-    Typical overhead diagnoses use selected-clock per-rank iteration shares.
+    Typical overhead diagnoses use selected-clock per-rank Step Time shares.
     The context takes the median of those shares across ranks, where
-    ``iteration_time_ms = input_wait_ms + step_time_ms``. The shared overhead
+    ``step_time_ms = input_wait_ms + traced_step_time_ms``. The shared overhead
     thresholds are the future configuration surface for input, residual, and
     H2D policies. Compute-bound uses the same denominator and a separate
     informational dominance threshold.

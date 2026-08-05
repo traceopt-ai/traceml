@@ -10,18 +10,16 @@ def _widths(html: str):
 def test_phase_bar_emits_svg_rects_for_present_phases(make_section) -> None:
     section = make_section(
         metric_names=[
-            "total_step_ms",
-            "dataloader_ms",
             "input_wait_ms",
+            "step_time_ms",
             "forward_ms",
             "backward_ms",
         ],
         average={
-            "dataloader_ms": 20.0,
             "input_wait_ms": 20.0,
             "forward_ms": 30.0,
             "backward_ms": 50.0,
-            "total_step_ms": 100.0,
+            "step_time_ms": 100.0,
         },
     )
     out = phase_bar(section)
@@ -29,27 +27,49 @@ def test_phase_bar_emits_svg_rects_for_present_phases(make_section) -> None:
     assert out.count("<rect") == 3  # input wait + forward + backward
 
 
-def test_phase_bar_falls_back_to_dataloader_ms_for_pre_1_6(
+def test_phase_bar_adapts_legacy_inner_step_time_for_pre_1_7(
     make_section,
 ) -> None:
-    # Schema < 1.6 reports carry dataloader_ms but no input_wait_ms; the
-    # input phase must still render rather than silently dropping out.
+    # Schema < 1.7 used step_time_ms for the inner envelope. The private
+    # reader adapter reconstructs historical outer Step Time only here.
     section = make_section(
-        metric_names=["total_step_ms", "dataloader_ms", "forward_ms"],
+        metric_names=["dataloader_ms", "step_time_ms", "forward_ms"],
         average={
             "dataloader_ms": 60.0,
             "forward_ms": 40.0,
-            "total_step_ms": 100.0,
+            "step_time_ms": 40.0,
         },
     )
-    out = phase_bar(section)
+    out = phase_bar(section, schema_version=1.5)
     assert "input wait" in out
     assert out.count("<rect") == 2  # input (via dataloader_ms) + forward
 
 
+def test_phase_bar_null_input_wait_is_not_borrowed_from_dataloader(
+    make_section,
+) -> None:
+    # Schema >= 1.6 always carries the input_wait_ms key; a present-but-
+    # null value means genuinely unmeasured, not "old payload without
+    # the key" -- the chart must drop the phase, not borrow
+    # dataloader_ms's number under the "input wait" label.
+    section = make_section(
+        metric_names=["total_step_ms", "input_wait_ms", "forward_ms"],
+        average={
+            "input_wait_ms": None,
+            "dataloader_ms": 60.0,
+            "forward_ms": 40.0,
+            "step_time_ms": 100.0,
+        },
+    )
+    out = phase_bar(section)
+    assert "input wait" not in out
+    assert out.count("<rect") == 1  # forward only
+    assert 'width="40.00%"' in out
+
+
 def test_phase_bar_empty_when_no_timing(make_section) -> None:
     section = make_section(
-        metric_names=["total_step_ms"], average={"total_step_ms": 0.0}
+        metric_names=["step_time_ms"], average={"step_time_ms": 0.0}
     )
     assert phase_bar(section) == ""
 

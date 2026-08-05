@@ -44,7 +44,10 @@ from traceml_ai.launcher.process import (
 from traceml_ai.reporting.config import DEFAULT_SUMMARY_WINDOW_ROWS
 from traceml_ai.runtime.launch_context import LaunchContext
 from traceml_ai.runtime.session import get_session_id
-from traceml_ai.runtime.settings import DEFAULT_FINALIZE_TIMEOUT_SEC
+from traceml_ai.runtime.settings import (
+    DEFAULT_FINALIZE_TIMEOUT_SEC,
+    DEFAULT_UI_MODE,
+)
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
 
 DASHBOARD_DEPENDENCY_INSTALL_HINT = (
@@ -53,8 +56,8 @@ DASHBOARD_DEPENDENCY_INSTALL_HINT = (
     "`pip install -U traceml-ai` or `pip install nicegui`."
 )
 
-SINGLE_NODE_DEFAULT_MODE = "dashboard"
-MULTI_NODE_DEFAULT_MODE = "summary"
+SINGLE_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
+MULTI_NODE_DEFAULT_MODE = DEFAULT_UI_MODE
 
 
 def _launch_defaults_for_topology(

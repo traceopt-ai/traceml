@@ -5,6 +5,12 @@ repo_url: https://github.com/traceopt-ai/traceml
 repo_name: traceopt-ai/traceml
 edit_uri: edit/main/docs/
 
+validation:
+  links:
+    # Broken anchors are only INFO by default, which `mkdocs build --strict`
+    # does not fail on. Warn so strict mode rejects them in CI.
+    anchors: warn
+
 theme:
   name: material
   # logo: assets/logo.png        # uncomment when traceopt.ai logo is available
@@ -86,6 +92,7 @@ nav:
       - Integrations:
           - Overview: user_guide/integrations.md
           - Hugging Face: user_guide/integrations/huggingface.md
+          - Hugging Face Accelerate: user_guide/integrations/accelerate.md
           - PyTorch Lightning: user_guide/integrations/lightning.md
           - Ray Train: user_guide/integrations/ray.md
           - DeepSpeed: user_guide/integrations/deepspeed.md
@@ -95,6 +102,7 @@ nav:
       - Public API: user_guide/public-api.md
   - Developer Guide:
       - Architecture: developer_guide/architecture.md
+      - Step Time Pipeline Contract: developer_guide/step-time-pipeline-contract.md
       - Rank Straggler Policy: developer_guide/rank-straggler-policy.md
       - Extending TraceML: developer_guide/extending.md
       - Contributing: developer_guide/contributing.md

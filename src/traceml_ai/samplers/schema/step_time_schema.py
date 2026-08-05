@@ -35,7 +35,7 @@ Clocks
 - GPU events use CUDA event (stream) time and are stored in nullable `gpu_ms`.
 - `duration_ms` preserves the legacy effective clock: GPU time when available,
   otherwise CPU wall time. `is_gpu` identifies which clock backs `duration_ms`.
-- Dataloader fetch and full step envelope events preserve CPU-wall
+- Input Wait and the raw traced-step event preserve CPU-wall
   `duration_ms` for compatibility even when `gpu_ms` is recorded.
 
 Schema (per DB row)

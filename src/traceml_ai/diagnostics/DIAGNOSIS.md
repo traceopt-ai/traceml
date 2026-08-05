@@ -64,6 +64,11 @@ Training-step timing.
 
 - `NO_DATA`: no usable step-time data.
 - `WARMUP`: some data exists, but not enough for diagnosis.
+- `INCOMPLETE_DATA` with status `INCOMPLETE DATA`: timing exists, but one or
+  more phase signals were not measured on every observed rank and no rule
+  could reach a reliable conclusion. The evidence lists `missing_signals`
+  (metric names) and per-signal `signal_coverage` (`measured ranks /
+  observed ranks`).
 - `BALANCED`: no clear timing bottleneck or rank straggler.
 - `STRAGGLER`: visible rank skew exists, but input wait, H2D, and DDP forward
   do not explain the likely culprit.
@@ -73,35 +78,71 @@ Training-step timing.
   materially higher forward time than the victim rank.
 - `H2D_STRAGGLER`: the culprit rank has materially higher host-to-device
   transfer time than the victim rank.
-- `INPUT_BOUND`: selected-clock input wait is a material typical iteration cost.
-- `H2D_BOUND`: selected-clock GPU H2D transfer is a material typical iteration
+- `INPUT_BOUND`: selected-clock input wait is a material typical Step Time cost.
+- `H2D_BOUND`: selected-clock GPU H2D transfer is a material typical Step Time
   cost.
-- `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical step;
+- `COMPUTE_BOUND`: forward/backward/optimizer time dominates the typical Step
+  Time;
   this is informational when no material overhead is visible.
-- `RESIDUAL_HEAVY`: unattributed residual time is a material typical iteration
+- `RESIDUAL_HEAVY`: unattributed residual time is a material typical Step Time
   cost.
 
+Missing signals and measured zeros are different things. A timing event that
+was never observed in the window stays an absent metric (it is not converted
+to `0.0`), while a phase measured at `0.0` stays a valid zero. Availability
+is metric-specific. Occurrence-driven metrics (`optimizer_step`, `h2d`)
+legitimately skip steps: the optimizer under gradient accumulation, and H2D
+when a step performs no host-to-device copies. They are available for a rank
+when measured in at least one aligned step, and their absent steps count as
+zero work. Every other metric (`input_wait`, `forward`, `backward`,
+`traced_step_time`) must occur on every bracketed step, so it is available only
+when measured in every aligned step of the rank's window; intermittent
+presence means the instrumentation dropped out mid-window and drops
+availability instead of synthesizing zeros that would leak the missing work
+into the residual. An absent H2D means "no observed transfers", contributes
+zero to derived metrics, and is never reported as a missing signal. Derived
+metrics exist only when their inputs are available: `compute` needs forward,
+backward, and optimizer; outer `step_time` needs Input Wait plus Traced Step
+Time; `residual_proxy` needs Traced Step Time plus every compute phase.
+
+The canonical `StepTimeWindow` carries the expected rank universe and sparse
+per-rank metrics. A metric's measured-rank population and any multi-metric
+eligible cohort are derived directly from those facts. Diagnosis, reporting,
+and presentation layers must not reconstruct a separate availability policy
+from aggregate values.
+
+The public final-summary projection preserves absence rather than
+re-deriving declined values. Each rule abstains when
+its required signals are unavailable: input needs input wait + outer Step
+Time; H2D needs GPU-clock H2D + outer Step Time; compute and residual need
+every compute phase + outer Step Time; rank stragglers need their visible-phase
+anchors + outer Step Time. Rules still fire from the
+ranks that measured their signals, so one dark rank does not silence an
+otherwise measured finding. When no rule fires and at least one abstained
+for missing signals, Step Time reports `INCOMPLETE_DATA` instead of
+`BALANCED`.
+
 Step-time diagnosis uses one selected clock for the analyzed window. It uses
-GPU event timing when every rank/step has GPU timing for the step envelope,
-input wait, and traced phase events present in the window. Otherwise it uses
+GPU event timing when every rank/step has GPU timing for Traced Step Time,
+Input Wait, and traced phase events present in the window. Otherwise it uses
 explicit `cpu_ms` timing. The live CLI Step Time table, dashboard, and final
 summary use the same global-rank SQLite loader and selected-clock window
 builder for diagnosis-facing timing; they differ only by row window sizing.
-Summary JSON exposes selected-clock `input_wait_ms` and `step_time_ms`.
-The compatibility `dataloader_ms` field remains CPU dataloader fetch time, and
-`total_step_ms` remains CPU dataloader fetch plus CPU step envelope timing.
-These compatibility fields are not selected-clock phase-share denominators.
+The canonical model exposes selected-clock `input_wait_ms`, outer
+`step_time_ms`, and inner `traced_step_time_ms`. Summary JSON also publishes
+explicit CPU and GPU Step Time and Traced Step Time aggregates.
+`dataloader_fetch_cpu_ms` remains supplemental CPU fetch evidence and is not a
+selected-clock phase-share denominator or a second Step Time component.
 `duration_ms` stays stored compatibility timing and is not used for Step Time
 display or diagnosis. In the final text report, selected-clock phase shares
-are divided by `input_wait_ms + step_time_ms`; CPU compatibility rows are
-labeled separately. These report-table shares are observational and do not
-replace the median per-rank diagnosis score.
+are divided directly by public `step_time_ms`. These report-table shares are
+observational and do not replace the median per-rank diagnosis score.
 
-Typical overhead diagnoses use selected-clock per-rank iteration shares:
+Typical overhead diagnoses use selected-clock per-rank Step Time shares:
 
 ```text
-iteration_r = input_wait_r + step_time_r
-component_share_r = component_r / iteration_r
+step_time_r = input_wait_r + traced_step_time_r
+component_share_r = component_r / step_time_r
 typical_component_share = median(component_share_r across ranks)
 ```
 
@@ -112,11 +153,11 @@ host-call duration is not reported as transfer cost. Cross-rank skew remains
 evidence in a typical-bottleneck finding, but does not suppress one. In
 contrast, `H2D_STRAGGLER` identifies one rank's excess H2D time.
 `COMPUTE_BOUND` remains an informational finding when the median per-rank
-compute share reaches 90% of selected-clock iteration time and no material
+compute share reaches 90% of selected-clock Step Time and no material
 input, H2D, or residual overhead is visible. Built-in live and summary policies
 use this same threshold; their analyzed window sizes differ.
 
-Step Time uses `DiagnosticIssue.score` as normalized iteration impact for
+Step Time uses `DiagnosticIssue.score` as normalized Step Time impact for
 `INPUT_BOUND`, `H2D_BOUND`, `RESIDUAL_HEAVY`, and all rank-straggler findings.
 Typical findings use the median per-rank share above; stragglers use the
 culprit/victim score below. `COMPUTE_BOUND` has no score because its
@@ -151,10 +192,9 @@ unattributed step time averaged from per-step clamped residuals:
 ```text
 compute_ms = forward_ms + backward_ms + optimizer_ms
 known_step_ms = h2d_ms + compute_ms
-traced_step_ms = selected step envelope timing
-iteration_time_ms = selected input_wait_ms + selected traced_step_ms
-residual_ms = average(max(0, traced_step_ms - known_step_ms))
-total_step_ms = CPU dataloader_ms + CPU step envelope timing
+traced_step_time_ms = selected Traced Step Time
+step_time_ms = selected input_wait_ms + selected traced_step_time_ms
+residual_ms = average(max(0, traced_step_time_ms - known_step_ms))
 ```
 
 Rank stragglers use culprit/victim evidence from selected-clock timing. TraceML
@@ -165,12 +205,13 @@ visible_r = backward_r              # DDP/default
 visible_r = forward_r + backward_r  # FSDP
 ```
 
-Only ranks with measured visible-phase anchors and a measured step envelope are
-eligible:
+Only ranks with measured visible-phase anchors and measured outer Step Time
+are eligible:
 
 ```text
-DDP/default: backward_r > 0 and step_time_r > 0
-FSDP:        forward_r > 0 and backward_r > 0 and step_time_r > 0
+DDP/default: input_wait measured and backward_r > 0 and step_time_r > 0
+FSDP:        input_wait measured and forward_r > 0 and backward_r > 0
+             and step_time_r > 0
 ```
 
 If fewer than two ranks are eligible, TraceML does not report a rank straggler.
@@ -183,8 +224,7 @@ that likely arrived late and therefore waited least in the visible phase. The
 victim rank is the upper actual median rank by visible value.
 
 ```text
-denom = input_wait_victim + step_time_victim
-score = (visible_victim - visible_culprit) / denom
+score = (visible_victim - visible_culprit) / step_time_victim
 ```
 
 If `score < 0.10`, TraceML does not report a rank straggler. At 10% it reports
@@ -197,9 +237,11 @@ h2d_excess = h2d_culprit - h2d_victim
 forward_excess = forward_culprit - forward_victim  # DDP/default only
 ```
 
-DDP/default compute attribution requires measured forward time on both the
-culprit and victim ranks. A component names the cause only when it covers at
-least 80% of visible wait cost:
+Every candidate component must be measured on both the culprit and victim
+ranks: DDP/default compute attribution requires measured forward time on
+both, and H2D attribution requires measured H2D time on both, so an
+unmeasured phase can never name the cause. A component names the cause only
+when it covers at least 80% of visible wait cost:
 
 ```text
 component_coverage = min(1, component_excess / visible_cost)

@@ -22,7 +22,7 @@ _SOURCE_NAMES = {
 # Color buckets come from the engine's own severity (info|warn|crit), already
 # present in the payload — never re-parsed from the status text. New diagnosis
 # kinds therefore color correctly with no change here (single source of truth).
-_NEUTRAL_KINDS = ("NO_DATA", "WARMUP", "NO_GPU")
+_NEUTRAL_KINDS = ("NO_DATA", "WARMUP", "NO_GPU", "INCOMPLETE_DATA")
 
 
 def _row_sev(item: Dict[str, Any]) -> str:
@@ -74,7 +74,7 @@ def build_model_diagnostics_section(
             "font-family:var(--mono); font-size:11px; color:var(--muted); "
             "font-style:italic; padding-top:6px;"
         )
-    return {"overall": overall, "body": body, "hint": hint, "_last": None}
+    return {"overall": overall, "body": body, "hint": hint}
 
 
 def update_model_diagnostics_section(
@@ -83,11 +83,15 @@ def update_model_diagnostics_section(
     try:
         items = _items(payload)
         if not items:
-            payload = panel.get("_last")
-            items = _items(payload)
-        if not items:
+            panel["overall"].text = "NO DATA"
+            panel["body"].content = ""
+            panel["hint"].text = "Waiting for diagnostics"
+            neutral = theme.SEV["neutral"]
+            panel["overall"].style(
+                f"background:{_tint(neutral)}; color:{neutral}; "
+                f"border:1px solid {_tint(neutral, 0.28)};"
+            )
             return
-        panel["_last"] = payload
         panel["hint"].text = ""
 
         sev = _overall_sev(_overall(payload))

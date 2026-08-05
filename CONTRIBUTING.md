@@ -134,6 +134,9 @@ If in doubt, open an issue before implementing.
 
 For code extension points, see
 [`docs/developer_guide/extending.md`](docs/developer_guide/extending.md).
+For performance-sensitive Step Time changes, also read the
+[`Step Time pipeline contract`](docs/developer_guide/step-time-pipeline-contract.md)
+and run the feature-local `tests/step_time/` suite.
 
 ---
 

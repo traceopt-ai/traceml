@@ -164,7 +164,7 @@ class RankStragglerRule(_BaseStepTimeRule):
                 "visible_culprit_ms": evidence.visible_culprit_ms,
                 "visible_victim_ms": evidence.visible_victim_ms,
                 "visible_cost_ms": evidence.visible_cost_ms,
-                "iteration_time_ms": evidence.iteration_time_ms,
+                "step_time_ms": evidence.step_time_ms,
                 "component_excesses_ms": evidence.component_excesses_ms,
                 "component_coverage": evidence.component_coverage,
             },
@@ -183,6 +183,10 @@ class InputBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
+        if context.input_bound_share is None:
+            # Input wait or outer Step Time was never measured: abstain
+            # rather than diagnose from a fake zero.
+            return None
         if context.input_bound_share < context.thresholds.overhead_share_warn:
             return None
 
@@ -195,7 +199,7 @@ class InputBoundRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"Input wait is {_pct(context.input_bound_share)} of the "
-                f"typical {context.diagnosis_clock} iteration time."
+                f"typical {context.diagnosis_clock.upper()} Step Time."
             ),
             action="Increase workers, prefetch, or storage throughput.",
             metric="input_wait",
@@ -206,8 +210,8 @@ class InputBoundRule(_BaseStepTimeRule):
             ranks=(context.input_bound_worst_rank,),
             evidence={
                 "input_wait_ms": context.input_wait_total,
-                "step_time_ms": context.input_bound_step_total,
-                "iteration_time_ms": context.iteration_time_total,
+                "traced_step_time_ms": context.traced_step_time_total,
+                "step_time_ms": context.step_time_total,
                 "input_bound_share": context.input_bound_share,
                 "diagnosis_clock": context.diagnosis_clock,
             },
@@ -226,6 +230,9 @@ class H2DBoundRule(_BaseStepTimeRule):
     ) -> Optional[DiagnosticIssue]:
         if context.diagnosis_clock != "gpu":
             return None
+        if context.h2d_share is None:
+            # H2D or outer Step Time was never measured.
+            return None
         if context.h2d_share < context.thresholds.overhead_share_warn:
             return None
         worst_rank = metric_worst_rank(context.h2d_metric)
@@ -239,7 +246,7 @@ class H2DBoundRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"H2D transfer is {_pct(context.h2d_share)} of the "
-                "typical GPU iteration time."
+                "typical GPU Step Time."
             ),
             action=(
                 "Inspect pinned memory, batch transfer, and host-to-device "
@@ -277,6 +284,10 @@ class ResidualHeavyRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
+        if context.residual_share is None:
+            # The residual is underivable because a component phase was
+            # never measured: abstain instead of absorbing missing work.
+            return None
         if context.residual_share < context.thresholds.overhead_share_warn:
             return None
 
@@ -289,7 +300,7 @@ class ResidualHeavyRule(_BaseStepTimeRule):
             ),
             summary=(
                 f"Residual time is {_pct(context.residual_share)} of the "
-                f"typical {context.diagnosis_clock} iteration time."
+                f"typical {context.diagnosis_clock.upper()} Step Time."
             ),
             action=(
                 "Inspect work outside traced phases, CPU stalls, logging, "
@@ -315,23 +326,32 @@ class ComputeBoundRule(_BaseStepTimeRule):
         self,
         context: StepTimeAnalysisContext,
     ) -> Optional[DiagnosticIssue]:
+        if context.compute_share is None:
+            # A compute phase or outer Step Time was never
+            # measured: dominance cannot be established.
+            return None
         if context.compute_share < context.thresholds.compute_bound_share_warn:
             return None
-        if context.input_bound_share >= context.thresholds.overhead_share_warn:
+        if (
+            context.input_bound_share is not None
+            and context.input_bound_share
+            >= context.thresholds.overhead_share_warn
+        ):
             return None
         if (
             context.diagnosis_clock == "gpu"
+            and context.h2d_share is not None
             and context.h2d_share >= context.thresholds.overhead_share_warn
         ):
             return None
-        if context.residual_share >= context.thresholds.overhead_share_warn:
+        if (
+            context.residual_share is not None
+            and context.residual_share
+            >= context.thresholds.overhead_share_warn
+        ):
             return None
 
-        label = (
-            context.largest_compute.label
-            if context.largest_compute is not None
-            else "Compute"
-        )
+        label = context.largest_compute or "Compute"
         return self._issue(
             kind="COMPUTE_BOUND",
             status="COMPUTE-BOUND",

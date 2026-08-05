@@ -6,6 +6,11 @@
 
 from dataclasses import dataclass
 
+from tests.sqlite_fixtures import (
+    insert_process_sample,
+    insert_system_sample,
+    summary_database,
+)
 from traceml_ai.core.summaries import SummaryResult
 from traceml_ai.reporting.final import (
     FinalReportGenerator,
@@ -105,6 +110,84 @@ def _status_payload(status: str) -> dict:
     )
 
 
+def _final_payload(step_time: dict, *, system: dict | None = None) -> dict:
+    return build_summary_payload(
+        "fake.db",
+        generator=_generator(
+            _PayloadSection("system", system or _status_payload("NORMAL")),
+            _PayloadSection("process", _status_payload("NORMAL")),
+            _PayloadSection("step_time", step_time),
+            _PayloadSection("step_memory", _status_payload("BALANCED")),
+        ),
+    )
+
+
+def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
+    db_path = tmp_path / "final.db"
+    with summary_database(db_path) as conn:
+        insert_system_sample(
+            conn,
+            row_id=1,
+            rank=0,
+            ts=1.0,
+            gpu_available=False,
+            gpu_count=0,
+            gpu_util=None,
+        )
+        insert_process_sample(
+            conn,
+            row_id=1,
+            rank=0,
+            ts=1.0,
+            gpu_available=False,
+            gpu_count=0,
+        )
+
+    payload = build_summary_payload(str(db_path))
+
+    assert payload["schema_version"] == 1.7
+    assert set(payload) == {
+        "schema_version",
+        "generated_at",
+        "duration_s",
+        "meta",
+        "primary_diagnosis",
+        "system",
+        "process",
+        "step_time",
+        "step_memory",
+        "text",
+    }
+    assert set(payload["meta"]) == {
+        "run_name",
+        "mode",
+        "world_size",
+        "nodes_observed",
+        "gpus_observed",
+    }
+    assert payload["primary_diagnosis"]["kind"] == (
+        "INSUFFICIENT_STEP_TIME_DATA"
+    )
+    assert payload["meta"] == {
+        "run_name": None,
+        "mode": "single_node",
+        "world_size": 1,
+        "nodes_observed": 1,
+        "gpus_observed": 0,
+    }
+    for key in ("system", "process", "step_time", "step_memory"):
+        assert "metadata" in payload[key]
+        assert "card" in payload[key]
+        assert "diagnosis" in payload[key]
+        assert payload[key]["issues"]
+        assert payload[key]["diagnosis"] == payload[key]["issues"][0]
+        assert "- Next:" not in payload[key]["card"]
+    assert payload["system"]["diagnosis"]["status"] == "NORMAL"
+    assert "NO GPU" not in payload["system"]["card"]
+    assert "TraceML Verdict:" in payload["text"]
+    assert "Next:" in payload["text"]
+
+
 def test_final_report_generator_preserves_summary_schema_and_order():
     payload = build_summary_payload(
         "fake.db",
@@ -116,7 +199,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
         ),
     )
 
-    assert payload["schema_version"] == 1.6
+    assert payload["schema_version"] == 1.7
     assert payload["duration_s"] == 10.0
     assert list(payload.keys()) == [
         "schema_version",
@@ -178,7 +261,7 @@ def test_final_text_uses_single_process_average_layout():
         "INPUT_BOUND",
         "INPUT-BOUND",
         severity="crit",
-        summary="Input wait is 48.5% of the typical GPU iteration time.",
+        summary="Input wait is 48.5% of the typical GPU Step Time.",
         action="Increase workers, prefetch, or storage throughput.",
     )
     step_time = _payload(
@@ -187,10 +270,10 @@ def test_final_text_uses_single_process_average_layout():
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "average": {
-                "total_step_ms": 139.1,
-                "dataloader_ms": 120.0,
+                "dataloader_fetch_cpu_ms": 120.0,
                 "input_wait_ms": 130.8,
-                "step_time_ms": 139.1,
+                "step_time_ms": 269.9,
+                "traced_step_time_ms": 139.1,
                 "compute_ms": 6.9,
                 "residual_ms": 1.3,
                 "h2d_ms": 0.2,
@@ -213,30 +296,26 @@ def test_final_text_uses_single_process_average_layout():
         card="SYSTEM ORIGINAL CARD",
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", system),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time, system=system)
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
-    assert (
-        "Why: Input wait is 48.5% of the typical GPU iteration time." in text
-    )
+    assert "Why: Input wait is 48.5% of the typical GPU Step Time." in text
     assert "Next: Increase workers, prefetch, or storage throughput." in text
     assert "System Evidence" in text
     assert "Metric            Average" in text
     assert "Step Time Evidence" in text
-    assert "Phase             Average           Share" in text
-    assert "Total             139.1ms           compat" in text
-    assert "Input Wait        130.8ms           48.5%" in text
-    assert "Dataloader        120.0ms           compat" in text
-    assert "Step Time         139.1ms           51.5%" in text
+    assert "Phase" in text
+    assert "Average" in text
+    assert "Share" in text
+    assert "Input Wait" in text
+    assert "130.8ms" in text
+    assert "48.5%" in text
+    assert "Step Time" in text
+    assert "Traced Step Time" in text
+    assert "DataLoader Fetch" in text
+    assert "supplemental" in text
+    assert "Total" not in text
     assert "Median" not in text
     assert "Worst" not in text
     assert "Skew" not in text
@@ -246,6 +325,49 @@ def test_final_text_uses_single_process_average_layout():
     assert payload["system"]["card"] == "SYSTEM ORIGINAL CARD"
 
 
+def test_final_text_renders_missing_step_metrics_as_na():
+    step_diag = _diagnosis(
+        "INCOMPLETE_DATA",
+        "INCOMPLETE DATA",
+        summary="Missing timing signals prevent a reliable diagnosis: h2d.",
+        action="Instrument the missing phases.",
+    )
+    step_time = _payload(
+        metadata={"global_ranks_used": 1},
+        diagnosis=step_diag,
+        global_summary={
+            "window": {"steps_analyzed": 60, "diagnosis_clock": "cpu"},
+            "average": {
+                "dataloader_fetch_cpu_ms": 120.0,
+                "input_wait_ms": 130.8,
+                "step_time_ms": 269.9,
+                "traced_step_time_ms": 139.1,
+                "compute_ms": None,
+                "residual_ms": None,
+                "h2d_ms": None,
+            },
+        },
+        card="STEP TIME ORIGINAL CARD",
+    )
+
+    payload = _final_payload(step_time)
+
+    text = payload["text"]
+    lines = text.splitlines()
+
+    def _evidence_row(label: str) -> str:
+        for line in lines:
+            if label in line:
+                return line
+        raise AssertionError(f"no evidence row for {label}")
+
+    # A never-measured metric renders n/a; measured metrics keep values.
+    assert "n/a" in _evidence_row("H2D")
+    assert "n/a" in _evidence_row("Compute")
+    assert "n/a" in _evidence_row("Residual")
+    assert "130.8ms" in _evidence_row("Input Wait")
+
+
 def test_final_text_uses_selected_step_time_for_phase_shares():
     step_time = _payload(
         metadata={"global_ranks_used": 1},
@@ -253,10 +375,10 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "average": {
-                "total_step_ms": 10.5,
-                "dataloader_ms": 0.5,
+                "dataloader_fetch_cpu_ms": 0.5,
                 "input_wait_ms": 2.0,
-                "step_time_ms": 50.0,
+                "step_time_ms": 52.0,
+                "traced_step_time_ms": 50.0,
                 "compute_ms": 48.0,
                 "residual_ms": 1.0,
                 "h2d_ms": 1.0,
@@ -264,23 +386,18 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
         },
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", _status_payload("NORMAL")),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time)
 
     text = payload["text"]
-    assert "Total             10.5ms            compat" in text
-    assert "Dataloader        0.5ms             compat" in text
-    assert "Step Time         50.0ms            96.2%" in text
-    assert "Compute           48.0ms            92.3%" in text
-    assert "457.1%" not in text
-    assert "476.2%" not in text
+    assert "DataLoader Fetch" in text
+    assert "supplemental" in text
+    assert "Traced Step Time" in text
+    assert "96.2%" in text
+    assert "Compute" in text
+    assert "48.0ms" in text
+    assert "92.3%" in text
+    assert "Step Time" in text
+    assert "Total" not in text
 
 
 def test_final_text_includes_h2d_bound_diagnosis():
@@ -290,16 +407,16 @@ def test_final_text_includes_h2d_bound_diagnosis():
             "H2D_BOUND",
             "H2D-BOUND",
             severity="crit",
-            summary="H2D transfer is 14.3% of the typical GPU iteration time.",
+            summary="H2D transfer is 14.3% of the typical GPU Step Time.",
             action="Inspect pinned memory and batch transfers.",
         ),
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "average": {
-                "total_step_ms": 150.0,
-                "dataloader_ms": 40.0,
+                "dataloader_fetch_cpu_ms": 40.0,
                 "input_wait_ms": 40.0,
-                "step_time_ms": 100.0,
+                "step_time_ms": 140.0,
+                "traced_step_time_ms": 100.0,
                 "h2d_ms": 20.0,
                 "compute_ms": 70.0,
                 "residual_ms": 10.0,
@@ -307,18 +424,10 @@ def test_final_text_includes_h2d_bound_diagnosis():
         },
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", _status_payload("NORMAL")),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time)
 
     assert "TraceML Verdict: H2D-BOUND / CRITICAL" in payload["text"]
-    assert "Why: H2D transfer is 14.3% of the typical GPU iteration time." in (
+    assert "Why: H2D transfer is 14.3% of the typical GPU Step Time." in (
         payload["text"]
     )
 
@@ -344,19 +453,19 @@ def test_final_text_uses_multi_process_comparison_layout():
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
             "median": {
-                "total_step_ms": _point(303.7, 1),
-                "dataloader_ms": _point(3.8, 1),
+                "dataloader_fetch_cpu_ms": _point(3.8, 1),
                 "input_wait_ms": _point(13.8, 1),
-                "step_time_ms": _point(299.9, 1),
+                "step_time_ms": _point(303.7, 1),
+                "traced_step_time_ms": _point(299.9, 1),
                 "compute_ms": _point(259.5, 1),
                 "residual_ms": _point(40.5, 1),
                 "h2d_ms": _point(0.2, 1),
             },
             "worst": {
-                "total_step_ms": _point(304.1, 0),
-                "dataloader_ms": _point(254.5, 0),
+                "dataloader_fetch_cpu_ms": _point(254.5, 0),
                 "input_wait_ms": _point(264.5, 0),
-                "step_time_ms": _point(49.6, 0),
+                "step_time_ms": _point(304.1, 0),
+                "traced_step_time_ms": _point(49.6, 0),
                 "compute_ms": _point(261.0, 0),
                 "residual_ms": _point(42.1, 0),
                 "h2d_ms": _point(0.4, 0),
@@ -402,15 +511,7 @@ def test_final_text_uses_multi_process_comparison_layout():
         },
     )
 
-    payload = build_summary_payload(
-        "fake.db",
-        generator=_generator(
-            _PayloadSection("system", system),
-            _PayloadSection("process", _status_payload("NORMAL")),
-            _PayloadSection("step_time", step_time),
-            _PayloadSection("step_memory", _status_payload("BALANCED")),
-        ),
-    )
+    payload = _final_payload(step_time, system=system)
 
     text = payload["text"]
     assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text

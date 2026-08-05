@@ -660,12 +660,14 @@ def start(
     aggregator_port: Optional[int] = None,
     connect_timeout_sec: float = 10.0,
     connect_retry_interval_sec: float = 0.25,
+    on_missing_aggregator: Optional[str] = None,
 ) -> TraceMLInitConfig:
     """
     Alias for `init()` for the current transition period.
 
     This keeps the already-exposed public surface usable while the TraceML
-    is being formalized. Today, `start()` and `init()` are equivalent.
+    is being formalized. It forwards every public ``init()`` option, including
+    the missing-aggregator policy.
     """
     return init(
         mode=mode,
@@ -683,6 +685,7 @@ def start(
         aggregator_port=aggregator_port,
         connect_timeout_sec=connect_timeout_sec,
         connect_retry_interval_sec=connect_retry_interval_sec,
+        on_missing_aggregator=on_missing_aggregator,
         _source="user",
     )
 

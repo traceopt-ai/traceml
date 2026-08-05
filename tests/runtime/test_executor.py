@@ -153,9 +153,18 @@ def test_read_traceml_env_defaults_to_two_second_interval(monkeypatch):
     assert read_traceml_env()["interval"] == 2.0
 
 
+def test_read_traceml_env_defaults_to_summary(monkeypatch):
+    monkeypatch.setenv("TRACEML_SCRIPT_PATH", "train.py")
+    monkeypatch.delenv("TRACEML_UI_MODE", raising=False)
+    monkeypatch.delenv("TRACEML_MODE", raising=False)
+
+    assert read_traceml_env()["mode"] == "summary"
+
+
 def test_trace_settings_default_to_two_second_cadences():
     settings = TraceMLSettings()
 
+    assert settings.mode == "summary"
     assert settings.sampler_interval_sec == 2.0
     assert settings.render_interval_sec == 2.0
 

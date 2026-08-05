@@ -16,10 +16,21 @@ import pytest
 
 pytest.importorskip("nicegui")
 
+from tests.step_time.factories import live_result_from_window  # noqa: E402
 from traceml_ai.aggregator.display_drivers.nicegui import (  # noqa: E402
+    LayoutError,
     NiceGUIDisplayDriver,
 )
+from traceml_ai.aggregator.display_drivers.layout import (  # noqa: E402
+    MODEL_COMBINED_LAYOUT,
+    MODEL_DIAGNOSTICS_LAYOUT,
+)
 from traceml_ai.runtime.settings import TraceMLSettings  # noqa: E402
+from traceml_ai.step_time.model import StepTimeWindow  # noqa: E402
+from traceml_ai.step_time.pipeline import (  # noqa: E402
+    LiveStepTimeFreshness,
+    LiveStepTimeResult,
+)
 
 
 def _driver(**settings_kwargs) -> NiceGUIDisplayDriver:
@@ -81,6 +92,7 @@ def test_update_display_records_timestamp_on_success() -> None:
 def test_update_display_keeps_stale_when_all_payloads_error() -> None:
     driver = _driver()
     driver._ui_ready = True
+    driver._compute_model_payloads = lambda: {}
 
     def boom() -> None:
         raise RuntimeError("x")
@@ -158,3 +170,80 @@ def test_dashboard_sections_build_without_error() -> None:
     build_process_section()
     build_step_memory_section()
     build_model_diagnostics_section()
+
+
+@pytest.mark.parametrize(
+    "freshness",
+    ("cold", "live", "bridged", "expired"),
+)
+def test_dashboard_tick_fans_out_one_step_time_result(
+    monkeypatch: pytest.MonkeyPatch,
+    freshness: LiveStepTimeFreshness,
+) -> None:
+    """The hero and rail share one result in every freshness state."""
+    driver = _driver()
+    result = live_result_from_window(
+        StepTimeWindow(),
+        freshness=freshness,
+    )
+    refreshes: list[object] = []
+    diagnostics_inputs: list[object] = []
+
+    def refresh() -> LiveStepTimeResult:
+        refreshes.append(result)
+        return result
+
+    def render_diagnostics(
+        step_time: LiveStepTimeResult,
+    ) -> dict[str, list[object]]:
+        diagnostics_inputs.append(step_time)
+        return {"items": []}
+
+    monkeypatch.setattr(driver._step_time_session, "refresh", refresh)
+    monkeypatch.setattr(
+        driver._model_diagnostics,
+        "get_dashboard_renderable",
+        render_diagnostics,
+    )
+    for renderer in driver._renderers:
+        monkeypatch.setattr(
+            renderer,
+            "get_dashboard_renderable",
+            lambda: {},
+        )
+
+    driver._ui_ready = True
+    driver.tick()
+
+    assert refreshes == [result]
+    assert diagnostics_inputs == [result]
+    assert driver.latest_data[MODEL_COMBINED_LAYOUT] is result
+    assert driver.latest_data[MODEL_DIAGNOSTICS_LAYOUT] == {"items": []}
+
+
+def test_diagnostics_failure_does_not_hide_shared_step_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rail presentation failure must not discard a valid hero result."""
+    driver = _driver()
+    result = live_result_from_window(StepTimeWindow())
+
+    monkeypatch.setattr(
+        driver._step_time_session,
+        "refresh",
+        lambda: result,
+    )
+
+    def fail(_step_time: LiveStepTimeResult) -> None:
+        raise RuntimeError("rail failed")
+
+    monkeypatch.setattr(
+        driver._model_diagnostics,
+        "get_dashboard_renderable",
+        fail,
+    )
+
+    payloads = driver._compute_model_payloads()
+
+    assert payloads[MODEL_COMBINED_LAYOUT] is result
+    assert isinstance(payloads[MODEL_DIAGNOSTICS_LAYOUT], LayoutError)

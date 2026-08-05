@@ -13,23 +13,22 @@ copy/layout free to evolve intentionally.
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from pathlib import Path
 
-from traceml_ai.aggregator.sqlite_writers import (
-    process as process_projection,
-    step_memory as step_memory_projection,
-    step_time as step_time_projection,
-    system as system_projection,
+import pytest
+
+from tests.sqlite_fixtures import (
+    insert_process_sample as _insert_process_sample,
+    insert_step_memory_sample as _insert_step_memory_sample,
+    insert_step_time_sample as _insert_step_time_sample,
+    insert_system_sample as _insert_system_sample,
+    summary_database,
 )
-from traceml_ai.reporting.final import build_summary_payload
 from traceml_ai.reporting.schema import BaseSectionPayload
 from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.reporting.sections.system import SystemSummarySection
-
 
 SECTION_KEYS = {
     "metadata",
@@ -146,436 +145,64 @@ def _assert_section_shape(payload: dict, *, group_by: str) -> None:
             assert set(row["metrics"]) == set(metric_names)
 
 
-def test_base_section_payload_rejects_metric_contract_mismatch() -> None:
-    try:
-        BaseSectionPayload(
-            metadata={"section_metric_names": ["cpu_percent"]},
-            diagnosis=None,
-            issues=[],
-            global_summary={
-                "index_by": "global_rank",
-                "window": {},
-                "average": {"cpu_percent": 1.0, "extra_metric": 2.0},
-                "median": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-                "worst": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-            },
-            groups={"by": "global_rank", "rows": {}},
-            units={},
-            card="",
-        ).to_json()
-    except ValueError as exc:
-        assert "section_metric_names" in str(exc)
-    else:
-        raise AssertionError("Expected metric contract mismatch to fail")
-
-
-def test_base_section_payload_rejects_group_index_mismatch() -> None:
-    try:
-        BaseSectionPayload(
-            metadata={"section_metric_names": ["cpu_percent"]},
-            diagnosis=None,
-            issues=[],
-            global_summary={
-                "index_by": "global_rank",
-                "window": {},
-                "average": {"cpu_percent": 1.0},
-                "median": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-                "worst": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-            },
-            groups={"by": "node_rank", "rows": {}},
-            units={},
-            card="",
-        ).to_json()
-    except ValueError as exc:
-        assert "groups.by" in str(exc)
-    else:
-        raise AssertionError("Expected group index mismatch to fail")
-
-
-def test_base_section_payload_rejects_group_metric_mismatch() -> None:
-    try:
-        BaseSectionPayload(
-            metadata={"section_metric_names": ["cpu_percent"]},
-            diagnosis=None,
-            issues=[],
-            global_summary={
-                "index_by": "global_rank",
-                "window": {},
-                "average": {"cpu_percent": 1.0},
-                "median": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-                "worst": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-            },
-            groups={
-                "by": "global_rank",
-                "rows": {
-                    "0": {
-                        "identity": {},
-                        "metrics": {
-                            "cpu_percent": 1.0,
-                            "extra_metric": 2.0,
-                        },
-                    },
-                },
-            },
-            units={},
-            card="",
-        ).to_json()
-    except ValueError as exc:
-        assert "groups.rows" in str(exc)
-        assert "section_metric_names" in str(exc)
-    else:
-        raise AssertionError("Expected group metric mismatch to fail")
-
-
-def test_base_section_payload_rejects_extra_group_row_fields() -> None:
-    try:
-        BaseSectionPayload(
-            metadata={"section_metric_names": ["cpu_percent"]},
-            diagnosis=None,
-            issues=[],
-            global_summary={
-                "index_by": "global_rank",
-                "window": {},
-                "average": {"cpu_percent": 1.0},
-                "median": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-                "worst": {"cpu_percent": {"value": 1.0, "idx": "0"}},
-            },
-            groups={
-                "by": "global_rank",
-                "rows": {
-                    "0": {
-                        "identity": {},
-                        "diagnosis": None,
-                        "metrics": {"cpu_percent": 1.0},
-                    },
-                },
-            },
-            units={},
-            card="",
-        ).to_json()
-    except ValueError as exc:
-        assert "identity and metrics" in str(exc)
-    else:
-        raise AssertionError("Expected extra group row fields to fail")
-
-
-def _connect_with_summary_schema(db_path: Path) -> sqlite3.Connection:
-    """Create a tiny TraceML SQLite fixture with all summary tables."""
-    conn = sqlite3.connect(db_path)
-    system_projection.init_schema(conn)
-    process_projection.init_schema(conn)
-    step_time_projection.init_schema(conn)
-    step_memory_projection.init_schema(conn)
-    return conn
-
-
-def _insert_system_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    ts: float,
-    gpu_available: bool,
-    gpu_count: int,
-    gpu_util: float | None = None,
-    world_size: int = 1,
-    local_world_size: int = 1,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO system_samples(
-            recv_ts_ns,
-            global_rank,
-            local_rank,
-            world_size,
-            local_world_size,
-            node_rank,
-            hostname,
-            sample_ts_s,
-            seq,
-            cpu_percent,
-            ram_used_bytes,
-            ram_total_bytes,
-            gpu_available,
-            gpu_count
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """,
-        (
-            row_id,
-            rank,
-            0,
-            world_size,
-            local_world_size,
-            rank,
-            f"worker-{rank}",
-            ts,
-            row_id,
-            30.0 + rank,
-            4_000.0 + rank,
-            16_000.0,
-            int(gpu_available),
-            gpu_count,
-        ),
-    )
-    if gpu_available and gpu_count > 0:
-        conn.execute(
-            """
-            INSERT INTO system_gpu_samples(
-                recv_ts_ns,
-                global_rank,
-                local_rank,
-                world_size,
-                local_world_size,
-                node_rank,
-                hostname,
-                sample_ts_s,
-                seq,
-                gpu_idx,
-                util,
-                mem_used_bytes,
-                mem_total_bytes,
-                temperature_c,
-                power_usage_w,
-                power_limit_w
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-            """,
-            (
-                row_id,
-                rank,
-                0,
-                world_size,
-                local_world_size,
-                rank,
-                f"worker-{rank}",
-                ts,
-                row_id,
-                rank,
-                gpu_util,
-                2_500.0,
-                10_000.0,
-                None,
-                None,
-                None,
-            ),
-        )
-
-
-def _insert_process_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    ts: float,
-    gpu_available: bool,
-    gpu_count: int,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO process_samples(
-            recv_ts_ns,
-            rank,
-            global_rank,
-            sample_ts_s,
-            seq,
-            cpu_percent,
-            cpu_logical_core_count,
-            ram_used_bytes,
-            ram_total_bytes,
-            gpu_available,
-            gpu_count,
-            gpu_device_index,
-            gpu_mem_used_bytes,
-            gpu_mem_reserved_bytes,
-            gpu_mem_total_bytes
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """,
-        (
-            row_id,
-            rank,
-            rank,
-            ts,
-            row_id,
-            50.0 + rank,
-            8,
-            1_000.0 + rank * 100.0,
-            16_000.0,
-            int(gpu_available),
-            gpu_count,
-            rank if gpu_available else None,
-            2_000.0 + rank * 500.0 if gpu_available else None,
-            2_500.0 + rank * 600.0 if gpu_available else None,
-            10_000.0 if gpu_available else None,
-        ),
-    )
-
-
-def _step_time_events(
-    *,
-    dataloader: float,
-    forward: float,
-    backward: float,
-    optimizer: float,
-    step_time: float,
-) -> str:
-    events = {
-        "_traceml_internal:dataloader_next": {
-            "cpu": {
-                "is_gpu": False,
-                "duration_ms": dataloader,
-                "cpu_ms": dataloader,
-                "gpu_ms": None,
-                "n_calls": 1,
-            }
+def _valid_base_section_kwargs() -> dict:
+    point = {"value": 1.0, "idx": "0"}
+    return {
+        "metadata": {"section_metric_names": ["cpu_percent"]},
+        "diagnosis": None,
+        "issues": [],
+        "global_summary": {
+            "index_by": "global_rank",
+            "window": {},
+            "average": {"cpu_percent": 1.0},
+            "median": {"cpu_percent": point},
+            "worst": {"cpu_percent": point},
         },
-        "_traceml_internal:forward_time": {
-            "cpu": {
-                "is_gpu": False,
-                "duration_ms": forward,
-                "cpu_ms": forward,
-                "gpu_ms": None,
-                "n_calls": 1,
-            }
-        },
-        "_traceml_internal:backward_time": {
-            "cpu": {
-                "is_gpu": False,
-                "duration_ms": backward,
-                "cpu_ms": backward,
-                "gpu_ms": None,
-                "n_calls": 1,
-            }
-        },
-        "_traceml_internal:optimizer_step": {
-            "cpu": {
-                "is_gpu": False,
-                "duration_ms": optimizer,
-                "cpu_ms": optimizer,
-                "gpu_ms": None,
-                "n_calls": 1,
-            }
-        },
-        "_traceml_internal:step_time": {
-            "cpu": {
-                "is_gpu": False,
-                "duration_ms": step_time,
-                "cpu_ms": step_time,
-                "gpu_ms": None,
-                "n_calls": 1,
-            }
-        },
+        "groups": {"by": "global_rank", "rows": {}},
+        "units": {},
+        "card": "",
     }
-    return json.dumps(events)
 
 
-def _insert_step_time_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    step: int,
-    step_time: float,
+@pytest.mark.parametrize(
+    ("case", "messages"),
+    [
+        ("global-metric", ("section_metric_names",)),
+        ("group-index", ("groups.by",)),
+        ("group-metric", ("groups.rows", "section_metric_names")),
+        ("group-field", ("identity and metrics",)),
+    ],
+)
+def test_base_section_payload_rejects_contract_mismatch(
+    case: str,
+    messages: tuple[str, ...],
 ) -> None:
-    conn.execute(
-        """
-        INSERT INTO step_time_samples(
-            recv_ts_ns,
-            rank,
-            global_rank,
-            local_rank,
-            world_size,
-            local_world_size,
-            node_rank,
-            hostname,
-            sample_ts_s,
-            seq,
-            step,
-            events_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """,
-        (
-            row_id,
-            rank,
-            rank,
-            0,
-            1,
-            1,
-            rank,
-            f"worker-{rank}",
-            float(step),
-            row_id,
-            step,
-            _step_time_events(
-                dataloader=1.0,
-                forward=2.0 + rank,
-                backward=3.0 + rank,
-                optimizer=1.0,
-                step_time=step_time,
-            ),
-        ),
-    )
+    kwargs = _valid_base_section_kwargs()
+    if case == "global-metric":
+        kwargs["global_summary"]["average"]["extra_metric"] = 2.0
+    elif case == "group-index":
+        kwargs["groups"]["by"] = "node_rank"
+    else:
+        row = {"identity": {}, "metrics": {"cpu_percent": 1.0}}
+        if case == "group-metric":
+            row["metrics"]["extra_metric"] = 2.0
+        else:
+            row["diagnosis"] = None
+        kwargs["groups"]["rows"]["0"] = row
 
+    with pytest.raises(ValueError) as caught:
+        BaseSectionPayload(**kwargs).to_json()
 
-def _insert_step_memory_sample(
-    conn: sqlite3.Connection,
-    *,
-    row_id: int,
-    rank: int,
-    step: int,
-    alloc: float | None,
-    reserved: float | None,
-    device: str | None = "cuda:0",
-    world_size: int = 1,
-    local_world_size: int = 1,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO step_memory_samples(
-            recv_ts_ns,
-            rank,
-            global_rank,
-            local_rank,
-            world_size,
-            local_world_size,
-            node_rank,
-            hostname,
-            sample_ts_s,
-            seq,
-            device,
-            step,
-            peak_alloc_bytes,
-            peak_reserved_bytes
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """,
-        (
-            row_id,
-            rank,
-            rank,
-            0,
-            world_size,
-            local_world_size,
-            rank,
-            f"worker-{rank}",
-            float(step),
-            row_id,
-            device,
-            step,
-            alloc,
-            reserved,
-        ),
-    )
+    for message in messages:
+        assert message in str(caught.value)
 
 
 def test_summary_sections_handle_empty_tables_with_stable_schema(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "empty.db"
-    conn = _connect_with_summary_schema(db_path)
-    conn.close()
+    with summary_database(db_path):
+        pass
 
     sections = (
         SystemSummarySection(),
@@ -619,8 +246,7 @@ def test_summary_sections_handle_empty_tables_with_stable_schema(
 
 def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     db_path = tmp_path / "single_rank.db"
-    conn = _connect_with_summary_schema(db_path)
-    try:
+    with summary_database(db_path) as conn:
         _insert_system_sample(
             conn,
             row_id=1,
@@ -644,7 +270,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
                 row_id=step,
                 rank=0,
                 step=step,
-                step_time=10.0,
+                traced_step_time=10.0,
             )
             _insert_step_memory_sample(
                 conn,
@@ -654,9 +280,6 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
                 alloc=100.0 + step,
                 reserved=200.0 + step,
             )
-        conn.commit()
-    finally:
-        conn.close()
 
     system = SystemSummarySection().build(str(db_path)).payload
     process = ProcessSummarySection().build(str(db_path)).payload
@@ -677,7 +300,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
     assert process["metadata"]["global_ranks_seen"] == 1
     assert step_time["metadata"]["mode"] == "single_node"
     assert step_time["metadata"]["global_ranks_seen"] == 1
-    assert step_time["global"]["median"]["total_step_ms"]["value"] == 11.0
+    assert step_time["global"]["median"]["step_time_ms"]["value"] == 11.0
     assert step_time["units"] == {"time": "ms"}
     assert step_memory["metadata"]["global_ranks_seen"] == 1
     assert step_memory["metadata"]["global_ranks_used"] == 1
@@ -692,8 +315,7 @@ def test_summary_sections_cover_single_rank_gpu_run(tmp_path: Path) -> None:
 
 def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
     db_path = tmp_path / "multi_rank.db"
-    conn = _connect_with_summary_schema(db_path)
-    try:
+    with summary_database(db_path) as conn:
         gpu_mem_by_rank = {0: 2_500.0, 1: 5_000.0}
         for rank in (0, 1):
             _insert_system_sample(
@@ -730,7 +352,7 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
                     row_id=row_id,
                     rank=rank,
                     step=step,
-                    step_time=10.0 + rank,
+                    traced_step_time=10.0 + rank,
                 )
                 _insert_step_memory_sample(
                     conn,
@@ -743,9 +365,6 @@ def test_summary_sections_cover_multi_rank_aligned_run(tmp_path: Path) -> None:
                     world_size=2,
                     local_world_size=1,
                 )
-        conn.commit()
-    finally:
-        conn.close()
 
     step_time = StepTimeSummarySection(max_rows=5).build(str(db_path)).payload
     step_memory = (
@@ -784,8 +403,7 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
     tmp_path: Path,
 ) -> None:
     db_path = tmp_path / "no_gpu.db"
-    conn = _connect_with_summary_schema(db_path)
-    try:
+    with summary_database(db_path) as conn:
         _insert_system_sample(
             conn,
             row_id=1,
@@ -812,9 +430,6 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
             reserved=None,
             device=None,
         )
-        conn.commit()
-    finally:
-        conn.close()
 
     payload = (
         StepMemorySummarySection(window_size=4).build(str(db_path)).payload
@@ -835,75 +450,3 @@ def test_step_memory_section_reports_no_gpu_without_throwing(
     assert payload["global"]["window"]["steps_analyzed"] == 0
     assert "steps_used" not in payload["global"]["window"]
     assert payload["issues"][0]["kind"] == "NO_GPU"
-
-
-def test_final_summary_fixture_schema_contains_all_sections(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "final.db"
-    conn = _connect_with_summary_schema(db_path)
-    try:
-        _insert_system_sample(
-            conn,
-            row_id=1,
-            rank=0,
-            ts=1.0,
-            gpu_available=False,
-            gpu_count=0,
-            gpu_util=None,
-        )
-        _insert_process_sample(
-            conn,
-            row_id=1,
-            rank=0,
-            ts=1.0,
-            gpu_available=False,
-            gpu_count=0,
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    payload = build_summary_payload(str(db_path))
-
-    assert payload["schema_version"] == 1.6
-    assert set(payload) == {
-        "schema_version",
-        "generated_at",
-        "duration_s",
-        "meta",
-        "primary_diagnosis",
-        "system",
-        "process",
-        "step_time",
-        "step_memory",
-        "text",
-    }
-    assert set(payload["meta"]) == {
-        "run_name",
-        "mode",
-        "world_size",
-        "nodes_observed",
-        "gpus_observed",
-    }
-    assert payload["primary_diagnosis"]["kind"] == (
-        "INSUFFICIENT_STEP_TIME_DATA"
-    )
-    assert payload["meta"] == {
-        "run_name": None,
-        "mode": "single_node",
-        "world_size": 1,
-        "nodes_observed": 1,
-        "gpus_observed": 0,
-    }
-    for key in ("system", "process", "step_time", "step_memory"):
-        assert "metadata" in payload[key]
-        assert "card" in payload[key]
-        assert "diagnosis" in payload[key]
-        assert payload[key]["issues"]
-        assert payload[key]["diagnosis"] == payload[key]["issues"][0]
-        assert "- Next:" not in payload[key]["card"]
-    assert payload["system"]["diagnosis"]["status"] == "NORMAL"
-    assert "NO GPU" not in payload["system"]["card"]
-    assert "TraceML Verdict:" in payload["text"]
-    assert "Next:" in payload["text"]

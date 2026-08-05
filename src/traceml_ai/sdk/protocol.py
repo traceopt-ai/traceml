@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from traceml_ai.runtime.settings import DEFAULT_UI_MODE
+
 
 @dataclass(frozen=True)
 class TraceMLSessionContext:
@@ -114,7 +116,7 @@ def resolve_session_context_from_env() -> TraceMLSessionContext:
     logs_dir = os.environ.get("TRACEML_LOGS_DIR", "").strip()
     mode = (
         os.environ.get("TRACEML_UI_MODE", "").strip()
-        or os.environ.get("TRACEML_MODE", "cli").strip()
+        or os.environ.get("TRACEML_MODE", DEFAULT_UI_MODE).strip()
     )
     history_enabled = (
         os.environ.get("TRACEML_HISTORY_ENABLED", "1").strip() == "1"

@@ -80,7 +80,7 @@ def _metric_has_both(metric: Dict[str, Any]) -> bool:
 
 
 def _primary_availability(context: CompareVerdictContext) -> str:
-    step = _metric_has_both(context.metric("step_time", "total_step_ms"))
+    step = _metric_has_both(context.metric("step_time", "step_time_ms"))
     memory = _metric_has_both(
         context.metric("step_memory", "peak_reserved_bytes")
     )
@@ -113,6 +113,14 @@ def _status(section: Dict[str, Any], side: str) -> Optional[str]:
     return text or None
 
 
+def _step_time_label(context: CompareVerdictContext) -> str:
+    """Return the common-clock label selected by the compare adapter."""
+    clock = context.section("step_time").get("comparison_clock")
+    if clock in {"cpu", "gpu"}:
+        return f"{str(clock).upper()} Step Time"
+    return "Step Time"
+
+
 class MissingPrimarySignalsRule:
     def evaluate(
         self,
@@ -121,9 +129,7 @@ class MissingPrimarySignalsRule:
         state = _primary_availability(context)
         if state != "insufficient":
             return None
-        step_state = _metric_state(
-            context.metric("step_time", "total_step_ms")
-        )
+        step_state = _metric_state(context.metric("step_time", "step_time_ms"))
         memory_state = _metric_state(
             context.metric("step_memory", "peak_reserved_bytes")
         )
@@ -190,7 +196,7 @@ class MixedPrimarySignalsRule:
         self,
         context: CompareVerdictContext,
     ) -> Optional[CompareFinding]:
-        step = _signed_pct(context.metric("step_time", "total_step_ms"))
+        step = _signed_pct(context.metric("step_time", "step_time_ms"))
         memory = _signed_pct(
             context.metric("step_memory", "peak_reserved_bytes")
         )
@@ -201,11 +207,12 @@ class MixedPrimarySignalsRule:
         step_good = step <= -context.policy.step_avg_pct_moderate
         mem_bad = memory >= 10.0
         mem_good = memory <= -10.0
+        step_time_label = _step_time_label(context)
 
         if step_good and mem_bad:
-            why = "Step time improved, but step memory worsened."
+            why = f"{step_time_label} improved, but step memory worsened."
         elif step_bad and mem_good:
-            why = "Step memory improved, but step time worsened."
+            why = f"Step memory improved, but {step_time_label} worsened."
         else:
             return None
 
@@ -224,7 +231,7 @@ class StepTimeRegressionRule:
         self,
         context: CompareVerdictContext,
     ) -> Optional[CompareFinding]:
-        metric = context.metric("step_time", "total_step_ms")
+        metric = context.metric("step_time", "step_time_ms")
         pct = _signed_pct(metric)
         if pct is None or pct < context.policy.step_avg_pct_moderate:
             return None
@@ -233,8 +240,8 @@ class StepTimeRegressionRule:
             severity="warning",
             priority=VerdictPriority.STEP_TIME_REGRESSION,
             domain="step_time",
-            metric="total_step_ms",
-            why=f"Step time increased by {pct:.1f}%.",
+            metric="step_time_ms",
+            why=f"{_step_time_label(context)} increased by {pct:.1f}%.",
         )
 
 
@@ -243,7 +250,7 @@ class StepTimeImprovementRule:
         self,
         context: CompareVerdictContext,
     ) -> Optional[CompareFinding]:
-        metric = context.metric("step_time", "total_step_ms")
+        metric = context.metric("step_time", "step_time_ms")
         pct = _signed_pct(metric)
         if pct is None or pct > -context.policy.step_avg_pct_moderate:
             return None
@@ -252,8 +259,8 @@ class StepTimeImprovementRule:
             severity="info",
             priority=VerdictPriority.STEP_TIME_IMPROVEMENT,
             domain="step_time",
-            metric="total_step_ms",
-            why=f"Step time decreased by {abs(pct):.1f}%.",
+            metric="step_time_ms",
+            why=(f"{_step_time_label(context)} decreased by {abs(pct):.1f}%."),
         )
 
 
@@ -431,9 +438,7 @@ def build_compare_verdict(
             "reason": primary.why if state != "comparable" else None,
         },
         "step_time": {
-            "state": _metric_state(
-                context.metric("step_time", "total_step_ms")
-            )
+            "state": _metric_state(context.metric("step_time", "step_time_ms"))
         },
         "step_memory": {
             "state": _metric_state(

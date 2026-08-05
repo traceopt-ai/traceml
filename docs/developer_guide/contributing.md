@@ -72,6 +72,11 @@ pytest tests/
 
 New code must include tests unless the change is docs-only.
 
+Step Time contributors should run the feature-local contract suite in
+`tests/step_time/` and read the
+[Step Time pipeline contract](step-time-pipeline-contract.md) before changing
+window, diagnosis, dashboard, or final-summary behavior.
+
 ## Docs
 
 If a code change affects user-facing behavior, update the relevant doc in the same PR.
