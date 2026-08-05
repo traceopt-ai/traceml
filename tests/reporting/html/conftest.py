@@ -9,6 +9,10 @@ from typing import Any, Dict, Optional
 
 import pytest
 
+from traceml_ai.reporting.sections.step_time.builder import (
+    STEP_TIME_METRIC_NAMES,
+)
+
 
 def _make_section(
     *,
@@ -53,7 +57,7 @@ def _make_section(
 def _make_payload(
     *,
     meta: Any = "default",
-    schema_version: Any = 1.4,
+    schema_version: Any = 1.7,
     primary_diagnosis: Optional[Any] = None,
     step_time: Optional[Dict[str, Any]] = None,
     step_memory: Optional[Dict[str, Any]] = None,
@@ -68,7 +72,16 @@ def _make_payload(
             "nodes_observed": 1,
             "gpus_observed": 2,
         }
-    st_metrics = ["total_step_ms", "dataloader_ms", "compute_ms"]
+    # Use the current production schema-1.7 metric set. Only Step Time,
+    # input wait, and compute are measured in this default fixture; every
+    # other field stays None (never a fabricated 0.0) so bare payload tests
+    # exercise the nullable shape emitted by real runs.
+    st_metrics = list(STEP_TIME_METRIC_NAMES)
+    _st_unmeasured = {
+        name: None
+        for name in st_metrics
+        if name not in ("step_time_ms", "input_wait_ms", "compute_ms")
+    }
     sm_metrics = ["peak_allocated_bytes", "peak_reserved_bytes"]
     payload = {
         "schema_version": schema_version,
@@ -81,9 +94,10 @@ def _make_payload(
             else _make_section(
                 metric_names=st_metrics,
                 average={
-                    "total_step_ms": 100.0,
-                    "dataloader_ms": 20.0,
+                    "step_time_ms": 100.0,
+                    "input_wait_ms": 20.0,
                     "compute_ms": 75.0,
+                    **_st_unmeasured,
                 },
                 kind="BALANCED",
                 status="BALANCED",
@@ -93,17 +107,19 @@ def _make_payload(
                     "0": {
                         "identity": {"global_rank": 0, "hostname": "h0"},
                         "metrics": {
-                            "total_step_ms": 99.0,
-                            "dataloader_ms": 19.0,
+                            "step_time_ms": 99.0,
+                            "input_wait_ms": 19.0,
                             "compute_ms": 75.0,
+                            **_st_unmeasured,
                         },
                     },
                     "1": {
                         "identity": {"global_rank": 1, "hostname": "h0"},
                         "metrics": {
-                            "total_step_ms": 101.0,
-                            "dataloader_ms": 21.0,
+                            "step_time_ms": 101.0,
+                            "input_wait_ms": 21.0,
                             "compute_ms": 75.0,
+                            **_st_unmeasured,
                         },
                     },
                 },

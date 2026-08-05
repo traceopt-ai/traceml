@@ -48,10 +48,10 @@ def _write_atomic_text(path: Path | str, text: str) -> None:
             prefix=f".{path.name}.",
             suffix=".tmp",
         ) as tmp:
+            tmp_path = Path(tmp.name)
             tmp.write(text)
             tmp.flush()
             os.fsync(tmp.fileno())
-            tmp_path = Path(tmp.name)
 
         os.replace(tmp_path, path)
     except Exception:
