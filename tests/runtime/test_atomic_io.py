@@ -6,7 +6,7 @@
 
 """Atomicity of ``utils/atomic_io.py`` writes (issue #326).
 
-``tests/runtime/test_launcher.py::test_run_manifest_write_and_update_are_atomic``
+``tests/runtime/test_launcher.py::test_run_manifest_write_and_update_merge_correctly``
 only checked the merged JSON content, never a crash mid-write, so it pinned
 no atomicity guarantee despite its name. These tests exercise the actual
 mechanism (temp file + fsync + ``os.replace``): a failure during the
@@ -91,6 +91,26 @@ def test_write_json_atomic_leaves_no_file_on_failure_for_new_path(
         write_json_atomic(target, {"status": "starting"})
 
     assert not target.exists()
+    assert _tmp_siblings(tmp_path) == []
+
+
+def test_write_json_atomic_cleans_up_temp_file_when_fsync_fails(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "manifest.json"
+    write_json_atomic(target, {"status": "starting"})
+
+    monkeypatch.setattr(
+        "traceml_ai.utils.atomic_io.os.fsync",
+        lambda *_a, **_k: (_ for _ in ()).throw(OSError("disk full")),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        write_json_atomic(target, {"status": "completed"})
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {
+        "status": "starting"
+    }
     assert _tmp_siblings(tmp_path) == []
 
 
