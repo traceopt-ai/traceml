@@ -4,6 +4,7 @@ import torch.nn as nn
 
 from traceml_ai.runtime.state import should_record_trace_events
 
+from .batch_size import flush_batch_size_buffer
 from .step_memory import flush_step_memory_buffer
 from .timing import flush_step_time_buffer
 
@@ -18,3 +19,4 @@ def flush_step_events(model: nn.Module, step: int) -> None:
 
     flush_step_memory_buffer(model, step)
     flush_step_time_buffer(step)
+    flush_batch_size_buffer(step)
