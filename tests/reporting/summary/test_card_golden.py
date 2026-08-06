@@ -21,6 +21,13 @@ import pytest
 from traceml_ai.reporting.primary_diagnosis import build_primary_diagnosis
 from traceml_ai.reporting.summary_card import (
     CardDoc,
+    Span,
+    STYLE_BOLD,
+    STYLE_CRIT,
+    STYLE_NEXT,
+    STYLE_OK,
+    STYLE_PLAIN,
+    STYLE_WARN,
     build_summary_card,
     card_to_ansi,
     card_to_plain,
@@ -939,11 +946,12 @@ GOLDENS = {
 |     ├─ H2D             0.4 ms   <1%                                        |
 |     └─ Residual        3.6 ms    2%                                        |
 |                                                                            |
+|  Peak step memory: 2.9 GB allocated · 3.2 GB reserved                      |
+|                                                                            |
 |  Next: raise DataLoader num_workers, enable pin_memory / prefetch, or check|
 |  storage read throughput.                                                  |
 |                                                                            |
 |  Supporting: GPU util 24% avg -- consistent with input starvation.         |
-|  Peak step memory: 2.9 GB allocated · 3.2 GB reserved                      |
 |                                                                            |
 |  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)     |
 +----------------------------------------------------------------------------+""",
@@ -990,12 +998,13 @@ GOLDENS = {
 |     ├─ H2D             0.4 ms   <1%                                        |
 |     └─ Residual        3.6 ms    2%                                        |
 |                                                                            |
+|  Peak step memory: 3.9 GB allocated · 4.6 GB reserved                      |
+|                                                                            |
 |  Next: raise DataLoader num_workers, enable pin_memory / prefetch, or check|
 |  storage read throughput.                                                  |
 |                                                                            |
 |  Also, not the cause of slow steps:                                        |
 |  ! Step memory grew 1.2 GB over the run -- possible leak  (WARNING)        |
-|  Peak step memory: 3.9 GB allocated · 4.6 GB reserved                      |
 |                                                                            |
 |  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)     |
 +----------------------------------------------------------------------------+""",
@@ -1017,10 +1026,10 @@ GOLDENS = {
 |     ├─ H2D             1.2 ms   <1%                                        |
 |     └─ Residual      115.4 ms   48%                                        |
 |                                                                            |
+|  Peak step memory: 2.9 GB allocated · 3.2 GB reserved                      |
+|                                                                            |
 |  Next: look for untraced work between steps -- validation, checkpointing,  |
 |  logging -- or inefficient kernels (torch.profiler).                       |
-|                                                                            |
-|  Peak step memory: 2.9 GB allocated · 3.2 GB reserved                      |
 |                                                                            |
 |  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)     |
 +----------------------------------------------------------------------------+""",
@@ -1099,11 +1108,12 @@ GOLDENS = {
 |     ├─ H2D             1.1 ms   <1%                                        |
 |     └─ Residual       39.3 ms   13%                                        |
 |                                                                            |
+|  Peak step memory: 9.8 GB reserved · worst rank r2                         |
+|                                                                            |
 |  Next: inspect dataloader, collate_fn, preprocessing, and storage on rank 0|
 |  (node n0).                                                                |
 |                                                                            |
 |  Supporting: GPU util median 14% -- ranks idle at the step barrier.        |
-|  Peak step memory: 9.8 GB reserved · worst rank r2                         |
 |                                                                            |
 |  Full evidence: logs/ddp_pretrain/final_summary.json  (--html-report)      |
 +----------------------------------------------------------------------------+""",
@@ -1150,10 +1160,10 @@ GOLDENS = {
 |     ├─ Compute        29.4 ms   86%                                        |
 |     └─ Residual        2.3 ms    7%                                        |
 |                                                                            |
+|  Peak step memory: 18.8 MB allocated · 23.1 MB reserved                    |
+|                                                                            |
 |  Next: look for untraced work between steps -- validation, checkpointing,  |
 |  logging -- or inefficient kernels (torch.profiler).                       |
-|                                                                            |
-|  Peak step memory: 18.8 MB allocated · 23.1 MB reserved                    |
 |                                                                            |
 |  Full evidence: logs/session_20260806_101725_5580d3/final_summary.json     |
 |  (--html-report)                                                           |
@@ -1176,11 +1186,12 @@ GOLDENS = {
 |     ├─ H2D             0.1 ms    2%                                        |
 |     └─ Residual        0.7 ms   14%  ◀  cause                              |
 |                                                                            |
+|  Peak step memory: 25.1 MB reserved · even across ranks                    |
+|                                                                            |
 |  Next: look for untraced work between steps -- validation, checkpointing,  |
 |  logging.                                                                  |
 |                                                                            |
 |  Supporting: GPU util 7% avg.                                              |
-|  Peak step memory: 25.1 MB reserved · even across ranks                    |
 |                                                                            |
 |  Full evidence: logs/session_20260806_101837_1b81f7/final_summary.json     |
 |  (--html-report)                                                           |
@@ -1403,6 +1414,72 @@ def test_ansi_rendering_uses_only_the_allowed_codes(name: str) -> None:
         "\x1b[1;31m",
         "\x1b[1;33m",
     }
+
+
+def _spans_for_line(doc: CardDoc, text: str):
+    """Return the styled spans in the first card row containing ``text``."""
+    for line in doc.lines:
+        if text in "".join(span.text for span in line.spans):
+            return line.spans
+    raise AssertionError(f"No card row contains {text!r}")
+
+
+def test_terminal_style_contract_keeps_evidence_neutral() -> None:
+    doc = CASES["run_input_bound_critical"]()
+
+    verdict = _spans_for_line(doc, "Verdict:")
+    assert [(span.text, span.style) for span in verdict] == [
+        ("Verdict: ", STYLE_BOLD),
+        ("INPUT-BOUND  (CRITICAL)", STYLE_CRIT),
+    ]
+
+    culprit = _spans_for_line(doc, "Input Wait")
+    assert len(culprit) == 2
+    assert culprit[0].style == STYLE_PLAIN
+    assert culprit[1] == Span("◀  cause", STYLE_CRIT)
+
+    next_line = _spans_for_line(doc, "Next:")
+    assert next_line[0] == Span("Next: ", STYLE_BOLD)
+    assert next_line[1].style == STYLE_NEXT
+
+
+def test_terminal_style_contract_colours_primary_status_values() -> None:
+    secondary = _spans_for_line(
+        CASES["run_input_bound_with_also"](),
+        "Step memory grew",
+    )
+    assert [(span.text, span.style) for span in secondary] == [
+        (
+            "! Step memory grew 1.2 GB over the run -- possible leak  (",
+            STYLE_PLAIN,
+        ),
+        ("WARNING", STYLE_WARN),
+        (")", STYLE_PLAIN),
+    ]
+
+    normal = _spans_for_line(CASES["watch_healthy"](), "Host health:")
+    assert [(span.text, span.style) for span in normal] == [
+        ("Host health: ", STYLE_BOLD),
+        ("NORMAL", STYLE_OK),
+    ]
+
+    warning = _spans_for_line(
+        CASES["watch_memory_pressure"](),
+        "Host health:",
+    )
+    assert [(span.text, span.style) for span in warning] == [
+        ("Host health: ", STYLE_BOLD),
+        ("MEMORY PRESSURE  (WARNING)", STYLE_WARN),
+    ]
+
+    multi_normal = _spans_for_line(
+        CASES["watch_multi_node"](),
+        "Host health:",
+    )
+    assert [(span.text, span.style) for span in multi_normal] == [
+        ("Host health: ", STYLE_BOLD),
+        ("NORMAL on all 3 nodes", STYLE_OK),
+    ]
 
 
 @pytest.mark.parametrize("name", WATCH_CASES)

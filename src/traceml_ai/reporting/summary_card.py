@@ -54,6 +54,21 @@ FINAL_SUMMARY_HTML_NAME = "final_summary.html"
 RUN_TITLE = "TraceML Run Summary"
 WATCH_TITLE = "TraceML Watch Summary"
 
+# Terminal presentation contract
+# -----------------------------
+# - Chrome (borders, run metadata, section captions, and artifact hints) is
+#   dim neutral text.
+# - Titles and action text are bold in the terminal's default foreground.
+# - Measurements, explanations, and evidence rows use the terminal's default
+#   foreground; they are never colour-coded as a whole.
+# - The primary Verdict and Host health values are colour-coded by severity:
+#   normal is green, warning is amber, and critical is red. Secondary severity
+#   labels and culprit markers use the same colours, but their surrounding
+#   evidence stays neutral.
+#
+# Keep this contract when extending the card. The stored JSON/text artifacts
+# are deliberately plain; ANSI styling is an interactive-terminal enhancement
+# only and must not carry information that is absent from plain text.
 STYLE_PLAIN = "plain"
 STYLE_BORDER = "border"
 STYLE_DIM = "dim"
@@ -70,7 +85,7 @@ _ANSI_CODES = {
     STYLE_CRIT: "\x1b[1;31m",
     STYLE_WARN: "\x1b[1;33m",
     STYLE_OK: "\x1b[32m",
-    STYLE_NEXT: "\x1b[32m",
+    STYLE_NEXT: "\x1b[1m",
 }
 _ANSI_RESET = "\x1b[0m"
 
@@ -220,6 +235,25 @@ class CardDoc:
                 )
             else:
                 self.text(line, style)
+
+    def wrapped_with_severity(
+        self,
+        value: str,
+        *,
+        severity_label: str,
+        severity_style: str,
+    ) -> None:
+        """Append wrapped text with only its final severity word coloured."""
+        for line in wrap_lines(value, INNER_WIDTH):
+            before, marker, after = line.rpartition(severity_label)
+            if marker:
+                self.add(
+                    Span(before),
+                    Span(marker, severity_style),
+                    Span(after),
+                )
+            else:
+                self.text(line)
 
 
 def _visible_spans(line: CardLine) -> List[Span]:
@@ -932,6 +966,11 @@ def _append_timing_tree(
     for label, metric, depth in present:
         value = values[metric]
         glyph = _tree_glyph(depth, last_by_depth.get(depth) == metric)
+        suffix = (
+            _culprit_suffix(primary, kind=kind)
+            if metric == culprit_metric and metric != "step_time_ms"
+            else None
+        )
         text = _tree_row_text(
             f"{glyph}{label}",
             ms_text=_fmt_ms(float(value or 0.0)),
@@ -942,15 +981,14 @@ def _append_timing_tree(
                 else None
             ),
             worst=worst_cells.get(metric),
-            suffix=(
-                _culprit_suffix(primary, kind=kind)
-                if metric == culprit_metric and metric != "step_time_ms"
-                else None
-            ),
+            suffix=suffix,
             suffix_column=suffix_column,
         )
-        if metric == culprit_metric and metric != "step_time_ms":
-            doc.text(text, severity_style)
+        if suffix:
+            doc.add(
+                Span(text[: -len(suffix)]),
+                Span(suffix, severity_style),
+            )
         else:
             doc.text(text)
     return True
@@ -1039,11 +1077,12 @@ def _append_verdict(doc: CardDoc, primary: Mapping[str, Any]) -> None:
     """Append the verdict line."""
     status = _display_status(primary)
     severity = _severity(primary.get("severity"))
+    status_style = _severity_style(severity)
     if severity not in {"info", ""}:
         status = f"{status}  ({_severity_label(severity)})"
     doc.add(
         Span("Verdict: ", STYLE_BOLD),
-        Span(status, _severity_style(severity)),
+        Span(status, status_style),
     )
 
 
@@ -1305,11 +1344,14 @@ def _append_run_body(
                 after_next.append(
                     (
                         f"! {summary}  ({_severity_label(severity)})",
-                        _severity_style(severity),
+                        severity,
                     )
                 )
         if peak is not None:
-            after_next.append((peak, STYLE_DIM))
+            # Keep the measured memory evidence beside the timing evidence,
+            # before the recommended action.  This also keeps the ordering
+            # consistent with the all-normal path above.
+            before_next.append(peak)
 
     for line in before_next:
         doc.text(line, STYLE_DIM)
@@ -1322,7 +1364,14 @@ def _append_run_body(
     if after_next:
         doc.blank()
         for text, style in after_next:
-            doc.wrapped(text, style=style)
+            if style in _SEVERITY_RANK:
+                doc.wrapped_with_severity(
+                    text,
+                    severity_label=_severity_label(style),
+                    severity_style=_severity_style(style),
+                )
+            else:
+                doc.wrapped(text, style=style)
 
 
 def _watch_health_lines(
