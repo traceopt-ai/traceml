@@ -141,6 +141,7 @@ class TraceMLAggregator:
             settle_telemetry=self._settle_telemetry,
             summary_window_rows=int(settings.summary_window_rows),
             write_html=bool(settings.html_report),
+            profile=str(settings.profile),
         )
 
         # Display driver owns renderer selection and layout mapping.
@@ -267,6 +268,7 @@ class TraceMLAggregator:
                             self._settings.summary_window_rows
                         ),
                         write_html=bool(self._settings.html_report),
+                        profile=str(self._settings.profile),
                     )
                 except Exception as summary_exc:
                     # A summary-generation error is only fatal if it left no

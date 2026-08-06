@@ -10,8 +10,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from traceml_ai.reporting.summary_card import colorize_stored_card
 from traceml_ai.sdk.protocol import (
     build_final_summary_request,
+    get_final_summary_html_path,
     get_final_summary_json_path,
     get_final_summary_request_path,
     get_final_summary_response_path,
@@ -35,6 +37,31 @@ def _read_text_or_empty(path: Path) -> str:
         return ""
 
 
+def _print_summary_text(
+    text: str,
+    summary: Dict[str, Any],
+    session_root: Path,
+) -> None:
+    """
+    Print the stored summary card, colorized when stdout is a terminal.
+
+    The stored text stays the source of truth: colorization only applies when
+    the card rebuilt from ``summary`` reproduces it exactly, so this can never
+    change what is printed beyond the escape codes.
+    """
+    try:
+        html_written = get_final_summary_html_path(session_root).is_file()
+        text = colorize_stored_card(
+            text,
+            summary,
+            session_root=str(session_root),
+            write_html=html_written,
+        )
+    except Exception:
+        pass
+    print(text)
+
+
 def _load_existing_final_summary(
     session_root: Path,
     *,
@@ -48,7 +75,7 @@ def _load_existing_final_summary(
     if print_text:
         text = _read_text_or_empty(get_final_summary_txt_path(session_root))
         if text:
-            print(text)
+            _print_summary_text(text, summary, session_root)
 
     return summary
 
@@ -139,7 +166,11 @@ def final_summary(
                 if summary_txt_path:
                     text = _read_text_or_empty(Path(summary_txt_path))
                     if text:
-                        print(text)
+                        _print_summary_text(
+                            text,
+                            summary,
+                            Path(summary_txt_path).parent,
+                        )
 
             return summary
 
