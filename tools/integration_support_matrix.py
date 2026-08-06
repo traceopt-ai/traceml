@@ -11,7 +11,7 @@ import argparse
 import json
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -51,6 +51,21 @@ VALIDATION_LEVELS = {
     "documented recipe",
     "experimental",
 }
+# Per-scope coverage statuses. These are deliberately a different set from
+# VALIDATION_LEVELS: a scope can be out of scope ("Not applicable"), untested
+# ("Not claimed"), or known-broken ("Unsupported"), none of which are
+# validation levels. Statuses are matched exactly, so an unlisted spelling
+# such as "ci tested" must fail loudly here rather than silently bypass the
+# ci_evidence requirement below.
+COVERAGE_STATUSES = {
+    "CI tested",
+    "Documented recipe",
+    "Experimental",
+    "Not applicable",
+    "Not claimed",
+    "Unsupported",
+}
+REQUIRED_LIMITATIONS = {"guide", "guide_label", "issues"}
 BEGIN = "<!-- BEGIN GENERATED: integration-support-matrix -->"
 END = "<!-- END GENERATED: integration-support-matrix -->"
 
@@ -136,6 +151,32 @@ def validate_manifest(
                 raise ValueError(
                     f"{entry['id']}: {scope} has an invalid coverage claim"
                 )
+            if claim["status"] not in COVERAGE_STATUSES:
+                raise ValueError(
+                    f"{entry['id']}: {scope} has unknown coverage status "
+                    f"{claim['status']!r}; expected one of "
+                    f"{sorted(COVERAGE_STATUSES)}"
+                )
+
+        limitations = entry["limitations"]
+        if not isinstance(limitations, dict):
+            raise ValueError(f"{entry['id']}: limitations must be an object")
+        missing_limitations = REQUIRED_LIMITATIONS - set(limitations)
+        if missing_limitations:
+            raise ValueError(
+                f"{entry['id']}: limitations missing "
+                f"{sorted(missing_limitations)}"
+            )
+        limitations_guide = limitations["guide"].split("#", 1)[0]
+        if not (root / "docs" / limitations_guide).is_file():
+            raise ValueError(
+                f"{entry['id']}: missing limitations guide "
+                f"{limitations['guide']}"
+            )
+        if not isinstance(limitations["issues"], list):
+            raise ValueError(
+                f"{entry['id']}: limitations issues must be a list"
+            )
 
         is_ci_claim = entry["validation_level"] == "CI tested" or any(
             claim["status"] == "CI tested" for claim in coverage.values()
@@ -155,7 +196,34 @@ def validate_manifest(
             raise ValueError(
                 f"{entry['id']}: missing cited test {evidence['test']}"
             )
-        job_extras = installed_extras(ci_job_body(workflow, evidence["job"]))
+        job_body = ci_job_body(workflow, evidence["job"])
+        # Existence on disk is not evidence that CI runs it. The job invokes
+        # pytest with directories rather than individual files, so accept the
+        # cited path or any parent directory of it. Each candidate must appear
+        # as a whole path token: a bare "tests" must not match "tests/renderers"
+        # and count an unrelated suite as evidence.
+        test_path = PurePosixPath(evidence["test"])
+        invoked = [test_path, *test_path.parents]
+        # Search only the shell commands. YAML keys and comments are prose:
+        # a step named "Run integration tests" or a comment mentioning
+        # "timing tests" must not satisfy the bare "tests" parent candidate.
+        commands = "\n".join(
+            line.split("#", 1)[0]
+            for line in job_body.splitlines()
+            if not re.match(r"\s*-?\s*[A-Za-z_][\w-]*:", line)
+        )
+        if not any(
+            re.search(
+                rf"(?<![\w/]){re.escape(str(candidate))}(?![\w/])", commands
+            )
+            for candidate in invoked
+            if str(candidate) != "."
+        ):
+            raise ValueError(
+                f"{entry['id']}: CI job {evidence['job']!r} does not invoke "
+                f"cited test {evidence['test']} or a directory containing it"
+            )
+        job_extras = installed_extras(job_body)
         missing_extras = set(evidence["extras"]) - job_extras
         if missing_extras:
             raise ValueError(
