@@ -53,11 +53,13 @@ Sections:
 section diagnoses. It answers "why was training slow?" and is intentionally
 narrower than section-level health/resource diagnoses.
 
-`text` is a compact human-readable verdict report. It is presentation text for
+`text` is a compact human-readable verdict card. It is presentation text for
 the CLI/TXT artifact, not a structured contract for downstream parsers. It
-starts with `TraceML Verdict`, `Why`, and `Next`, then shows compact section
-status plus System and Step Time evidence tables. Detailed section prose
-remains in each section-local `card` field.
+leads with `Verdict` and `Why`, then a hierarchical step-timing tree, `Next`,
+and bounded corroboration. It is profile-aware: `traceml watch` renders a
+host-and-process health card and never shows step timing, because watch does
+not collect it. Detailed section prose remains in each section-local `card`
+field.
 
 ## Primary Diagnosis Shape
 

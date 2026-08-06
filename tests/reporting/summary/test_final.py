@@ -184,7 +184,8 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
         assert "- Next:" not in payload[key]["card"]
     assert payload["system"]["diagnosis"]["status"] == "NORMAL"
     assert "NO GPU" not in payload["system"]["card"]
-    assert "TraceML Verdict:" in payload["text"]
+    assert "TraceML Run Summary" in payload["text"]
+    assert "Verdict: NOT ENOUGH STEP DATA" in payload["text"]
     assert "Next:" in payload["text"]
 
 
@@ -223,11 +224,14 @@ def test_final_report_generator_preserves_summary_schema_and_order():
     assert payload["primary_diagnosis"]["kind"] == (
         "INSUFFICIENT_STEP_TIME_DATA"
     )
-    assert "TraceML Run Summary | duration 10.0s" in payload["text"]
-    assert "TraceML Verdict:" in payload["text"]
-    assert "Section Status" in payload["text"]
-    assert "System Evidence" in payload["text"]
-    assert "Step Time Evidence" in payload["text"]
+    text = payload["text"]
+    assert "TraceML Run Summary" in text
+    assert "10.0s" in text
+    assert "Verdict: NOT ENOUGH STEP DATA" in text
+    # The verdict card replaced the old section-status and evidence tables.
+    assert "Section Status" not in text
+    assert "System Evidence" not in text
+    assert "Step Time Evidence" not in text
 
 
 def test_final_report_generator_fails_open_for_one_section():
@@ -253,7 +257,8 @@ def test_final_report_generator_fails_open_for_one_section():
     assert payload["primary_diagnosis"]["kind"] == (
         "INSUFFICIENT_STEP_TIME_DATA"
     )
-    assert "Process" in payload["text"]
+    assert "TraceML Run Summary" in payload["text"]
+    assert "Verdict: NOT ENOUGH STEP DATA" in payload["text"]
 
 
 def test_final_text_uses_single_process_average_layout():
@@ -299,33 +304,31 @@ def test_final_text_uses_single_process_average_layout():
     payload = _final_payload(step_time, system=system)
 
     text = payload["text"]
-    assert "TraceML Verdict: INPUT-BOUND / CRITICAL" in text
+    assert "Verdict: INPUT-BOUND  (CRITICAL)" in text
+    # No composed score on this diagnosis, so the verbatim JSON summary and
+    # action are used (the F7 fallback path).
     assert "Why: Input wait is 48.5% of the typical GPU Step Time." in text
     assert "Next: Increase workers, prefetch, or storage throughput." in text
-    assert "System Evidence" in text
-    assert "Metric            Average" in text
-    assert "Step Time Evidence" in text
-    assert "Phase" in text
-    assert "Average" in text
-    assert "Share" in text
-    assert "Input Wait" in text
-    assert "130.8ms" in text
-    assert "48.5%" in text
-    assert "Step Time" in text
-    assert "Traced Step Time" in text
-    assert "DataLoader Fetch" in text
-    assert "supplemental" in text
-    assert "Total" not in text
+    assert "Where a step goes (average, GPU clock)" in text
+    assert "Step Time           269.9 ms  100%" in text
+    assert "├─ Input Wait       130.8 ms   48%" in text
+    assert "└─ Traced Step Time 139.1 ms   52%" in text
+    assert "Supporting: GPU util 0% avg" in text
+    # Single-machine cards carry no distributed vocabulary and no tables.
+    assert "Section Status" not in text
     assert "Median" not in text
     assert "Worst" not in text
     assert "Skew" not in text
-    assert "rank=r" not in text
-    assert "node=n" not in text
+    assert "rank" not in text
+    assert "node" not in text
+    # DataLoader Fetch is supplemental; it is never a timing-tree row.
+    assert "DataLoader Fetch" not in text
+    assert "supplemental" not in text
     assert payload["step_time"]["card"] == "STEP TIME ORIGINAL CARD"
     assert payload["system"]["card"] == "SYSTEM ORIGINAL CARD"
 
 
-def test_final_text_renders_missing_step_metrics_as_na():
+def test_final_text_omits_never_measured_step_metrics():
     step_diag = _diagnosis(
         "INCOMPLETE_DATA",
         "INCOMPLETE DATA",
@@ -353,19 +356,14 @@ def test_final_text_renders_missing_step_metrics_as_na():
     payload = _final_payload(step_time)
 
     text = payload["text"]
-    lines = text.splitlines()
 
-    def _evidence_row(label: str) -> str:
-        for line in lines:
-            if label in line:
-                return line
-        raise AssertionError(f"no evidence row for {label}")
-
-    # A never-measured metric renders n/a; measured metrics keep values.
-    assert "n/a" in _evidence_row("H2D")
-    assert "n/a" in _evidence_row("Compute")
-    assert "n/a" in _evidence_row("Residual")
-    assert "130.8ms" in _evidence_row("Input Wait")
+    # Never-measured signals are omitted and explained in words. The card
+    # never prints a placeholder value for a signal that was not measured.
+    assert "n/a" not in text
+    assert "H2D" not in text
+    assert "Compute" not in text
+    assert "Residual" not in text
+    assert "Verdict: STEP TIMING INCOMPLETE" in text
 
 
 def test_final_text_uses_selected_step_time_for_phase_shares():
@@ -389,14 +387,12 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
     payload = _final_payload(step_time)
 
     text = payload["text"]
-    assert "DataLoader Fetch" in text
-    assert "supplemental" in text
-    assert "Traced Step Time" in text
-    assert "96.2%" in text
-    assert "Compute" in text
-    assert "48.0ms" in text
-    assert "92.3%" in text
-    assert "Step Time" in text
+    # Shares use the selected-clock step_time_ms denominator.
+    assert "Step Time            52.0 ms  100%" in text
+    assert "└─ Traced Step Time  50.0 ms   96%" in text
+    assert "├─ Compute        48.0 ms   92%" in text
+    assert "DataLoader Fetch" not in text
+    assert "supplemental" not in text
     assert "Total" not in text
 
 
@@ -426,10 +422,11 @@ def test_final_text_includes_h2d_bound_diagnosis():
 
     payload = _final_payload(step_time)
 
-    assert "TraceML Verdict: H2D-BOUND / CRITICAL" in payload["text"]
+    assert "Verdict: H2D-BOUND  (CRITICAL)" in payload["text"]
     assert "Why: H2D transfer is 14.3% of the typical GPU Step Time." in (
         payload["text"]
     )
+    assert "├─ H2D            20.0 ms   14%" in payload["text"]
 
 
 def test_final_text_uses_multi_process_comparison_layout():
@@ -514,23 +511,28 @@ def test_final_text_uses_multi_process_comparison_layout():
     payload = _final_payload(step_time, system=system)
 
     text = payload["text"]
-    assert "TraceML Verdict: INPUT STRAGGLER / CRITICAL" in text
+    assert "Verdict: INPUT STRAGGLER  (CRITICAL)" in text
     assert payload["primary_diagnosis"]["summary"] == (
         "r0 has excess input wait burden relative to victim r1 "
         "(~82.6% impact; ~100.0% of visible wait cost)."
     )
-    assert "Why: r0 has excess input wait burden relative to victim r1" in text
+    # The Why line is composed from rank-comparison evidence.
+    assert "Why: rank 0 (node n0) waits 264.5 ms per step for input" in text
+    assert "the median rank" in text
+    assert "Where a step goes (median rank, GPU clock)" in text
+    assert "worst rank" in text
     assert (
-        "Metric          Median        Worst         Skew        Scope" in text
+        "├─ Input Wait        13.8 ms    5%                 264.5 ms (r0)"
+        "  ◀  19x" in text
     )
-    assert "GPU Util        14.0%         0.0%          14.0pp" in text
-    assert "node=n1" in text
     assert (
-        "Phase           Median        Worst         Skew        Scope" in text
+        "Step Time           303.7 ms  100%                 304.1 ms (r0)"
+        in text
     )
-    assert "Input Wait      13.8ms        264.5ms       1816.7%" in text
-    assert "rank=r0 node=n0" in text
-    assert "Average" not in text
+    # The old wide median/worst/skew/scope table is gone.
+    assert "Skew" not in text
+    assert "rank=r" not in text
+    assert "node=n" not in text
 
 
 def test_reporting_final_is_the_summary_orchestration_owner():
