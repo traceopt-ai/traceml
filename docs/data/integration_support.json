@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "validation_levels": {
+    "CI tested": "A named CI job installs the required extra and runs the cited real-framework test.",
+    "nightly tested": "A scheduled job runs the cited real-framework test; no row currently has this level.",
+    "documented recipe": "The guide and example describe the path, but this repository has no cited real-framework CI job for it.",
+    "experimental": "The path is documented only as an unvalidated topology or configuration."
+  },
+  "integrations": [
+    {
+      "id": "pytorch",
+      "stack": "Plain PyTorch loop",
+      "recommended_api": "traceml.init() + traceml.trace_step(model)",
+      "guide": "user_guide/quickstart.md",
+      "tested_dependency_range": "CI resolves torch>=2.5.0 (not pinned; this is not a broad version matrix).",
+      "coverage": {
+        "cpu": { "status": "CI tested", "detail": "Ubuntu integration job" },
+        "gpu": { "status": "Not claimed", "detail": "no GPU job" },
+        "single_process": { "status": "CI tested", "detail": "launcher smoke run" },
+        "multi_process": { "status": "Not claimed", "detail": "no matrix evidence" },
+        "multi_node": { "status": "Not claimed", "detail": "no matrix evidence" }
+      },
+      "emitted_signals": "The cited smoke test asserts a final summary; it does not declare a per-signal contract.",
+      "example": "examples/quickstart.py",
+      "validation_level": "CI tested",
+      "ci_evidence": {
+        "job": "test-integration",
+        "extras": ["torch"],
+        "test": "tests/runtime/test_final_summary_smoke.py",
+        "label": "real PyTorch launcher smoke test"
+      },
+      "limitations": {
+        "guide_label": "Distributed Training",
+        "guide": "user_guide/distributed-training.md",
+        "issues": [141, 320, 323]
+      }
+    },
+    {
+      "id": "huggingface-trainer",
+      "stack": "Hugging Face Trainer",
+      "recommended_api": "traceml_ai.integrations.huggingface.init() + TraceMLTrainerCallback",
+      "guide": "user_guide/integrations/huggingface.md",
+      "tested_dependency_range": "CI resolves torch>=2.5.0, transformers (unbounded), and accelerate>=0.26.0; not a pinned compatibility matrix.",
+      "coverage": {
+        "cpu": { "status": "CI tested", "detail": "real Trainer run" },
+        "gpu": { "status": "Not claimed", "detail": "no GPU job" },
+        "single_process": { "status": "CI tested", "detail": "CPU only" },
+        "multi_process": { "status": "Documented recipe", "detail": "no real distributed job" },
+        "multi_node": { "status": "Experimental", "detail": "no reproducible job" }
+      },
+      "emitted_signals": "dataloader fetch with the recommended callback; step, forward, backward, and optimizer through a real Trainer conformance run.",
+      "example": "examples/integrations/huggingface_trainer_minimal.py",
+      "validation_level": "CI tested",
+      "ci_evidence": {
+        "job": "test-integration",
+        "extras": ["torch", "hf"],
+        "test": "tests/integrations/test_hf_trainer.py",
+        "label": "real Transformers Trainer test"
+      },
+      "limitations": {
+        "guide_label": "Hugging Face limitations",
+        "guide": "user_guide/integrations/huggingface.md#limitations",
+        "issues": [141, 320, 323]
+      }
+    },
+    {
+      "id": "accelerate",
+      "stack": "Hugging Face Accelerate",
+      "recommended_api": "traceml.init() + traceml.trace_step(accelerator.unwrap_model(model))",
+      "guide": "user_guide/integrations/accelerate.md",
+      "tested_dependency_range": "CI resolves torch>=2.5.0 and accelerate>=0.26.0; not a pinned compatibility matrix.",
+      "coverage": {
+        "cpu": { "status": "CI tested", "detail": "real Accelerator.prepare/backward run" },
+        "gpu": { "status": "Not claimed", "detail": "no GPU job" },
+        "single_process": { "status": "CI tested", "detail": "CPU only" },
+        "multi_process": { "status": "Documented recipe", "detail": "no real distributed job" },
+        "multi_node": { "status": "Experimental", "detail": "no reproducible job" }
+      },
+      "emitted_signals": "step, forward, backward, optimizer, and dataloader fetch on the cited real Accelerate run.",
+      "example": "examples/integrations/accelerate_minimal.py",
+      "validation_level": "CI tested",
+      "ci_evidence": {
+        "job": "test-integration",
+        "extras": ["torch", "hf"],
+        "test": "tests/integrations/test_accelerate.py",
+        "label": "real Accelerate prepare/backward test"
+      },
+      "limitations": {
+        "guide_label": "Accelerate limitations",
+        "guide": "user_guide/integrations/accelerate.md#limitations",
+        "issues": [141, 320, 323]
+      }
+    },
+    {
+      "id": "lightning",
+      "stack": "PyTorch Lightning",
+      "recommended_api": "traceml_ai.integrations.lightning.init() + TraceMLCallback",
+      "guide": "user_guide/integrations/lightning.md",
+      "tested_dependency_range": "Documented install requirement: lightning>=2.6.0. No real-Lightning CI-tested range.",
+      "coverage": {
+        "cpu": { "status": "Documented recipe", "detail": "no real-Lightning job" },
+        "gpu": { "status": "Documented recipe", "detail": "no GPU job" },
+        "single_process": { "status": "Documented recipe", "detail": "no Trainer.fit() CI run" },
+        "multi_process": { "status": "Documented recipe", "detail": "no real distributed job" },
+        "multi_node": { "status": "Experimental", "detail": "no reproducible job" }
+      },
+      "emitted_signals": "Guide documents step, forward, backward, optimizer, dataloader fetch, and H2D; no real-Lightning CI signal assertion exists.",
+      "example": "examples/integrations/lightning_minimal.py",
+      "validation_level": "documented recipe",
+      "limitations": {
+        "guide_label": "Lightning guide",
+        "guide": "user_guide/integrations/lightning.md",
+        "issues": [141, 320, 323]
+      }
+    },
+    {
+      "id": "ray-train",
+      "stack": "Ray Train",
+      "recommended_api": "TraceMLTorchTrainer + TraceMLRayConfig",
+      "guide": "user_guide/integrations/ray.md",
+      "tested_dependency_range": "Documented install requirement: ray[train]>=2.0.0. No real-Ray CI-tested range.",
+      "coverage": {
+        "cpu": { "status": "Documented recipe", "detail": "no real-Ray job" },
+        "gpu": { "status": "Documented recipe", "detail": "no GPU job" },
+        "single_process": { "status": "Documented recipe", "detail": "local Ray recipe" },
+        "multi_process": { "status": "Documented recipe", "detail": "worker recipe only" },
+        "multi_node": { "status": "Experimental", "detail": "no reproducible job" }
+      },
+      "emitted_signals": "Guide documents step, forward, backward, optimizer, and wrapped Ray Data fetch timing; no real-Ray CI signal assertion exists.",
+      "example": "examples/ray/torchtrainer_minimal.py",
+      "validation_level": "documented recipe",
+      "limitations": {
+        "guide_label": "Ray guide",
+        "guide": "user_guide/integrations/ray.md",
+        "issues": [141, 320, 323]
+      }
+    },
+    {
+      "id": "deepspeed",
+      "stack": "DeepSpeed",
+      "recommended_api": "traceml.init() + traceml.trace_step(model_engine.module)",
+      "guide": "user_guide/integrations/deepspeed.md",
+      "tested_dependency_range": "Documented install requirement: deepspeed>=0.10.0. No real-DeepSpeed CI-tested range.",
+      "coverage": {
+        "cpu": { "status": "Unsupported", "detail": "the guide requires CUDA" },
+        "gpu": { "status": "Documented recipe", "detail": "no CUDA CI job" },
+        "single_process": { "status": "Documented recipe", "detail": "no real engine run" },
+        "multi_process": { "status": "Documented recipe", "detail": "no real distributed job" },
+        "multi_node": { "status": "Experimental", "detail": "no reproducible job" }
+      },
+      "emitted_signals": "Guide documents DataLoader fetch, H2D, forward, backward, optimizer, step, and memory; no real-DeepSpeed CI signal assertion exists.",
+      "example": "examples/integrations/deepspeed_minimal.py",
+      "validation_level": "documented recipe",
+      "limitations": {
+        "guide_label": "DeepSpeed limitations",
+        "guide": "user_guide/integrations/deepspeed.md#limitations",
+        "issues": [141, 320, 323]
+      }
+    },
+    {
+      "id": "wandb-mlflow",
+      "stack": "W&B / MLflow",
+      "recommended_api": "traceml.summary()",
+      "guide": "user_guide/integrations/wandb-mlflow.md",
+      "tested_dependency_range": "No W&B or MLflow dependency is installed or run in CI.",
+      "coverage": {
+        "cpu": { "status": "Documented recipe", "detail": "tracker client not run" },
+        "gpu": { "status": "Not applicable", "detail": "tracker export is device-independent" },
+        "single_process": { "status": "Documented recipe", "detail": "no tracker-client CI run" },
+        "multi_process": { "status": "Not claimed", "detail": "no matrix evidence" },
+        "multi_node": { "status": "Not claimed", "detail": "no matrix evidence" }
+      },
+      "emitted_signals": "No tracker telemetry is emitted by TraceML; the documented integration exports TraceML's compact summary dictionary.",
+      "example": "examples/summary_logging_minimal.py",
+      "validation_level": "documented recipe",
+      "limitations": {
+        "guide_label": "W&B / MLflow guide",
+        "guide": "user_guide/integrations/wandb-mlflow.md",
+        "issues": [323]
+      }
+    }
+  ]
+}
