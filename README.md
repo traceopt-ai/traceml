@@ -7,100 +7,100 @@
 [![PyPI version](https://img.shields.io/pypi/v/traceml-ai.svg)](https://pypi.org/project/traceml-ai/)
 [![CI](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml/badge.svg)](https://github.com/traceopt-ai/traceml/actions/workflows/ci.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](./LICENSE)
-[![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml/stargazers)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/traceopt-ai/traceml/blob/main/LICENSE)
+[![GitHub stars](https://badgen.net/github/stars/traceopt-ai/traceml?icon=github)](https://github.com/traceopt-ai/traceml)
 
 [**Quickstart**](#quickstart) •
 [**Try in Colab**](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb) •
-[**Integrations**](docs/user_guide/integrations.md) •
+[**Integrations**](https://traceopt-ai.github.io/traceml/user_guide/integrations/) •
 [**Documentation**](https://traceopt-ai.github.io/traceml/) •
-[**Discord**](https://discord.gg/rY3EQguZAN)
+[**GitHub Issues**](https://github.com/traceopt-ai/traceml/issues)
 
 </div>
 
 **TraceML is an open-source tool that explains why PyTorch training is slow.**
-It analyzes the full training run and gives you:
+At the end of a run, it gives you:
 
 - **A diagnosis:** data loading, GPU compute, waiting, memory growth, or a slow
   distributed worker.
 - **The evidence:** timing, CPU/GPU usage, memory, and per-worker measurements.
 - **The next step:** what part of your training setup to investigate first.
 
-Here is an example where TraceML finds that a slow DataLoader is leaving the
-GPU waiting:
+### Example diagnosis
+
+```text
+Verdict: INPUT-BOUND  (CRITICAL)
+Why: input wait is 64% of the typical step; the GPU sits idle while
+batches arrive.
+Next: raise DataLoader num_workers, enable pin_memory / prefetch, or check
+storage read throughput.
+```
+
+TraceML produces this diagnosis at the end of the instrumented training run.
+
+<details>
+<summary><strong>See the complete single-run report</strong></summary>
 
 ```text
 +----------------------------------------------------------------------------+
-|  TraceML Run Summary | duration 52.4s                                      |
+|  TraceML Run Summary                                                       |
+|  bert_finetune · 1 GPU · 256 steps analyzed · 52.4s                        |
 +----------------------------------------------------------------------------+
 |                                                                            |
-|  TraceML Verdict: INPUT-BOUND / CRITICAL                                   |
-|  Why: Input Wait is 64.0% of the typical GPU Step Time.                    |
-|  Next: Increase workers, prefetch, or storage throughput.                  |
+|  Verdict: INPUT-BOUND  (CRITICAL)                                          |
+|  Why: input wait is 64% of the typical step; the GPU sits idle while       |
+|  batches arrive.                                                           |
 |                                                                            |
-|  Section Status                                                            |
-|  Section       Status                  Severity                            |
-|  ------------------------------------------------                          |
-|  Step Time     INPUT-BOUND             CRITICAL                            |
-|  System        LOW GPU UTIL            INFO                                |
-|  Process       NORMAL                  INFO                                |
-|  Step Memory   BALANCED                INFO                                |
+|  Where a step goes (average, GPU clock)                                    |
+|  Step Time           200.4 ms  100%  ████████████████████████████          |
+|  ├─ Input Wait       128.0 ms   64%  ██████████████████░░░░░░░░░░  ◀  cause|
+|  └─ Traced Step Time  72.0 ms   36%  ██████████░░░░░░░░░░░░░░░░░░          |
+|     ├─ Compute        68.0 ms   34%                                        |
+|     ├─ H2D             0.4 ms   <1%                                        |
+|     └─ Residual        3.6 ms    2%                                        |
 |                                                                            |
-|  System Evidence                                                           |
-|  Metric            Average                                                 |
-|  ----------------------------------                                        |
-|  CPU Util          18.4%                                                   |
-|  GPU Util          24.0%                                                   |
-|  GPU Memory        3.33GB                                                  |
-|  GPU Temp          42C                                                     |
+|  Peak step memory: 2.9 GB allocated · 3.2 GB reserved                      |
 |                                                                            |
-|  Step Time Evidence                                                        |
-|  Phase             Average           Share                                 |
-|  ------------------------------------------------                          |
-|  Step Time         200.4ms           100.0%                                |
-|  Input Wait        128.0ms           64.0%                                 |
-|  Traced Step Time  72.0ms            supplemental                          |
-|  Compute           68.0ms            34.0%                                 |
-|  Residual          3.6ms             1.8%                                  |
-|  H2D               0.4ms             0.2%                                  |
+|  Next: raise DataLoader num_workers, enable pin_memory / prefetch, or check|
+|  storage read throughput.                                                  |
+|                                                                            |
+|  Supporting: GPU util 24% avg -- consistent with input starvation.         |
+|                                                                            |
+|  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)     |
 +----------------------------------------------------------------------------+
 ```
+
+</details>
 
 <details>
 <summary><strong>Running distributed training? See a rank-straggler diagnosis</strong></summary>
 
 ```text
 +----------------------------------------------------------------------------+
-|  TraceML Run Summary | duration 40.1s                                      |
+|  TraceML Run Summary                                                       |
+|  ddp_pretrain · 4 GPUs · 2 nodes · 250 steps analyzed · 40.1s              |
 +----------------------------------------------------------------------------+
 |                                                                            |
-|  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
-|  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
-|  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
-|  slow rank.                                                                |
+|  Verdict: INPUT STRAGGLER  (CRITICAL)                                      |
+|  Why: rank 0 (node n0) waits 254.5 ms per step for input; the median rank  |
+|  waits 3.8 ms. All 4 ranks then advance at rank 0's pace.                  |
 |                                                                            |
-|  Section Status                                                            |
-|  Section       Status                  Severity                            |
-|  ------------------------------------------------                          |
-|  Step Time     INPUT STRAGGLER         CRITICAL                            |
-|  System        LOW GPU UTIL            INFO                                |
-|  Process       NORMAL                  INFO                                |
-|  Step Memory   BALANCED                INFO                                |
+|  Where a step goes (median rank, GPU clock)         worst rank             |
+|  Step Time           303.7 ms  100%                 304.1 ms (r0)          |
+|  ├─ Input Wait         3.8 ms    1%                 254.5 ms (r0)  ◀  67x  |
+|  └─ Traced Step Time 299.9 ms   99%                                        |
+|     ├─ Compute       259.5 ms   85%                                        |
+|     ├─ H2D             1.1 ms   <1%                                        |
+|     └─ Residual       39.3 ms   13%                                        |
 |                                                                            |
-|  System Evidence                                                           |
-|  Metric          Median        Worst         Skew        Scope             |
-|  --------------------------------------------------------------------------|
-|  CPU Util        18.4%         71.2%         52.8pp      node=n1           |
-|  GPU Util        14.0%         0.0%          14.0pp      node=n0           |
-|  GPU Memory      6.20GB        8.90GB        43.5%       node=n1           |
-|  GPU Temp        42C           58C           16C         node=n1           |
+|  Peak step memory: 9.8 GB reserved · worst rank r2                         |
 |                                                                            |
-|  Step Time Evidence                                                        |
-|  Phase           Median        Worst         Skew        Scope             |
-|  --------------------------------------------------------------------------|
-|  Step Time       303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
-|  Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
-|  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
+|  Next: inspect dataloader, collate_fn, preprocessing, and storage on rank 0|
+|  (node n0).                                                                |
+|                                                                            |
+|  Supporting: GPU util median 14% -- ranks idle at the step barrier.        |
+|                                                                            |
+|  Full evidence: logs/ddp_pretrain/final_summary.json  (--html-report)      |
 +----------------------------------------------------------------------------+
 ```
 
@@ -110,17 +110,17 @@ GPU waiting:
 
 ### 1. Install
 
+TraceML expects an existing PyTorch project. Install the TraceML package with:
+
 ```bash
 pip install traceml-ai
 ```
 
-Or, in a project managed by [uv](https://docs.astral.sh/uv/):
-
-```bash
-uv add traceml-ai
-```
+Using [uv](https://docs.astral.sh/uv/) instead? Run `uv add traceml-ai`.
 
 ### 2. Instrument the training step
+
+Add TraceML around the core step in your existing PyTorch training script:
 
 ```diff
 +   import traceml_ai as traceml
@@ -142,31 +142,25 @@ uv add traceml-ai
 traceml run train.py
 ```
 
-Summary mode is the default. TraceML prints the final diagnosis and writes:
+Summary mode is the default. TraceML prints the final diagnosis and writes
+`final_summary.json` and `final_summary.txt` under `logs/<run_name>/`.
 
-```text
-logs/<run_name>/final_summary.json
-logs/<run_name>/final_summary.txt
-```
+No training script ready? [Try the Colab example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb).
 
-See the
-[full quickstart](docs/user_guide/quickstart.md) for source-only examples,
-Docker (both require a repository checkout), Colab, direct `python`/`torchrun`
-launches, HTML reports, and advanced options.
+Read [How to Read TraceML Output](https://traceopt-ai.github.io/traceml/user_guide/reading-output/)
+for the complete field definitions, diagnosis rules, evidence, and recommended
+actions.
 
 ## What TraceML Diagnoses
 
 | Diagnosis | Where to investigate |
 |---|---|
 | Input-bound | DataLoader workers, transforms, tokenization, collation, or storage |
+| H2D-bound | Pinned memory, non-blocking copies, batch size, or transfer overlap |
 | Compute-bound | Model compute, mixed precision, batch size, or deeper profiling |
 | Residual-heavy | Work outside traced phases, CPU stalls, logging, checkpointing, validation, or unobserved transfers |
 | Rank straggler | Rank-local input, data imbalance, node variance, or networking |
 | Memory creep | Retained tensors, logging references, or cached activations |
-| Run regression | Code, data, environment, hardware, or infrastructure changes |
-
-Read [How to Read TraceML Output](docs/user_guide/reading-output.md) for the
-diagnosis rules, evidence fields, and recommended next actions.
 
 ## Compare Runs
 
@@ -244,8 +238,8 @@ diagnosis and cuts step time:
 
 </details>
 
-See [Compare Runs](docs/user_guide/compare.md) for the complete workflow and
-artifact format.
+See [Compare Runs](https://traceopt-ai.github.io/traceml/user_guide/compare/)
+for the complete workflow and artifact format.
 
 ## Save the Result
 
@@ -263,8 +257,8 @@ if summary is not None:
 ```
 
 The same result can be stored in MLflow. See
-[W&B and MLflow](docs/user_guide/integrations/wandb-mlflow.md) for complete
-examples.
+[W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
+for complete examples.
 
 <details>
 <summary><strong>Want live diagnostics during training?</strong></summary>
@@ -282,31 +276,32 @@ traceml run train.py --mode=dashboard
 ```
 
 For remote browser access and SSH tunneling, see the
-[full quickstart](docs/user_guide/quickstart.md).
+[full quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/).
 
 </details>
 
 ## Distributed Training and Integrations
 
-- **Distributed:** [DDP, FSDP, and multi-node](docs/user_guide/distributed-training.md)
-  or [Slurm](docs/user_guide/slurm.md)
-- **Frameworks:** [Hugging Face](docs/user_guide/integrations/huggingface.md),
-  [PyTorch Lightning](docs/user_guide/integrations/lightning.md),
-  [Ray Train](docs/user_guide/integrations/ray.md), and
-  [DeepSpeed](docs/user_guide/integrations/deepspeed.md)
-- **Trackers:** [W&B and MLflow](docs/user_guide/integrations/wandb-mlflow.md)
+- **Distributed:** [DDP, FSDP, and multi-node](https://traceopt-ai.github.io/traceml/user_guide/distributed-training/)
+  or [Slurm](https://traceopt-ai.github.io/traceml/user_guide/slurm/)
+- **Frameworks:** [Hugging Face](https://traceopt-ai.github.io/traceml/user_guide/integrations/huggingface/),
+  [PyTorch Lightning](https://traceopt-ai.github.io/traceml/user_guide/integrations/lightning/),
+  [Ray Train](https://traceopt-ai.github.io/traceml/user_guide/integrations/ray/),
+  and [DeepSpeed](https://traceopt-ai.github.io/traceml/user_guide/integrations/deepspeed/)
+- **Trackers:** [W&B and MLflow](https://traceopt-ai.github.io/traceml/user_guide/integrations/wandb-mlflow/)
 
-Summary mode supports single-node and multi-node runs. Live terminal and
-dashboard modes are explicit single-node options. See the
-[FAQ](docs/user_guide/faq.md) for current support and limitations.
+Summary mode is the documented path for single-node and multi-node runs. Live
+terminal and dashboard modes are explicit single-node options. See the
+[FAQ](https://traceopt-ai.github.io/traceml/user_guide/faq/) for current
+support and limitations.
 
 ## Learn More
 
-- [Complete quickstart](docs/user_guide/quickstart.md)
-- [Examples](examples/README.md)
-- [Troubleshoot slow training](docs/guides/slow-pytorch-training.md)
-- [Public API](docs/user_guide/public-api.md)
-- [FAQ](docs/user_guide/faq.md)
+- [Complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/)
+- [Examples](https://github.com/traceopt-ai/traceml/blob/main/examples/README.md)
+- [Troubleshoot slow training](https://traceopt-ai.github.io/traceml/guides/slow-pytorch-training/)
+- [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)
+- [FAQ](https://traceopt-ai.github.io/traceml/user_guide/faq/)
 
 ## Community
 
@@ -314,11 +309,11 @@ If TraceML helps you find a bottleneck, consider
 [starring the repository](https://github.com/traceopt-ai/traceml).
 Contributions and real-world slowdown reports are welcome:
 
-- [Contributing guide](CONTRIBUTING.md)
+- [Contributing guide](https://github.com/traceopt-ai/traceml/blob/main/CONTRIBUTING.md)
 - [Open an issue](https://github.com/traceopt-ai/traceml/issues)
-- [Security policy](SECURITY.md)
+- [Security policy](https://github.com/traceopt-ai/traceml/blob/main/SECURITY.md)
 - [Discord](https://discord.gg/rY3EQguZAN)
 
 ## License
 
-Apache 2.0. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](https://github.com/traceopt-ai/traceml/blob/main/LICENSE).
