@@ -52,7 +52,7 @@ traceml view logs/<run_name>/final_summary.json
 
 ## What to look for
 
-Start with `TraceML Verdict`, then check the `Step Time Evidence` table.
+Start with `Verdict`, then check `Where a step goes`.
 
 For input pipeline problems, the most relevant diagnoses are:
 
@@ -64,16 +64,20 @@ For input pipeline problems, the most relevant diagnoses are:
 Example excerpt:
 
 ```text
-TraceML Verdict: INPUT STRAGGLER / CRITICAL
-Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.
-Next: Inspect input wait, collate_fn, preprocessing, and storage on the slow rank.
+Verdict: INPUT STRAGGLER  (CRITICAL)
+Why: rank 0 (node n0) waits 254.5 ms per step for input; the median rank
+waits 3.8 ms. All 4 ranks then advance at rank 0's pace.
 
-Step Time Evidence
-Phase           Median        Worst         Skew        Scope
---------------------------------------------------------------------------
-Step Time       303.7ms       304.1ms       0.1%        rank=r0 node=n0
-Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0
-Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1
+Where a step goes (median rank, GPU clock)         worst rank
+Step Time           303.7 ms  100%                 304.1 ms (r0)
+├─ Input Wait         3.8 ms    1%                 254.5 ms (r0)  ◀  67x
+└─ Traced Step Time 299.9 ms   99%
+   ├─ Compute       259.5 ms   85%
+   ├─ H2D             1.1 ms   <1%
+   └─ Residual       39.3 ms   13%
+
+Next: inspect dataloader, collate_fn, preprocessing, and storage on rank 0
+(node n0).
 ```
 
 Read this as:

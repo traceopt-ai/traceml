@@ -16,7 +16,7 @@ The concepts are the same in both.
 
 ## Start with the diagnosis
 
-TraceML output has two layers:
+TraceML output has three layers:
 
 1. **Primary Diagnosis**
    - the first answer in the end-of-run summary
@@ -55,13 +55,18 @@ By default, `traceml run train.py` prints a compact final summary and writes
 
 The text summary is intentionally verdict-first:
 
-- `TraceML Verdict`: the promoted performance diagnosis and severity
+- the run context: run name, device and topology, analyzed steps, and duration
+- `Verdict`: the promoted performance diagnosis and severity
 - `Why`: the short evidence-backed reason
+- `Where a step goes`: the selected-clock step decomposition, with median and
+  worst-rank evidence on distributed runs
+- conditional context such as peak step memory, DataLoader fetch time, or
+  system, process, and memory health
 - `Next`: the first action to try or inspect
-- `Section Status`: compact health/status across System, Process, Step Time,
-  and Step Memory
-- `System Evidence` and `Step Time Evidence`: the core numbers behind the
-  verdict
+- `Supporting` and `Also`: relevant context and secondary findings when they
+  are present
+- `Full evidence`: the path to the structured JSON artifact and the optional
+  HTML-report hint
 
 Detailed section prose remains in the `system.card`, `process.card`,
 `step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
