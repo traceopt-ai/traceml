@@ -183,29 +183,30 @@ the GPU waiting:
 
 ```text
 +----------------------------------------------------------------------------+
-|  TraceML Run Summary | duration 52.4s                                      |
+|  TraceML Run Summary                                                       |
+|  bert_finetune · 1 GPU · 256 steps analyzed · 52.4s                        |
 +----------------------------------------------------------------------------+
 |                                                                            |
-|  TraceML Verdict: INPUT-BOUND / CRITICAL                                   |
-|  Why: Input Wait is 64.0% of the typical GPU Step Time.                    |
-|  Next: Increase workers, prefetch, or storage throughput.                  |
+|  Verdict: INPUT-BOUND  (CRITICAL)                                          |
+|  Why: input wait is 64% of the typical step; the GPU sits idle while       |
+|  batches arrive.                                                           |
 |                                                                            |
-|  Section Status                                                            |
-|  Section       Status                  Severity                            |
-|  ------------------------------------------------                          |
-|  Step Time     INPUT-BOUND             CRITICAL                            |
-|  System        LOW GPU UTIL            INFO                                |
-|  Process       NORMAL                  INFO                                |
-|  Step Memory   BALANCED                INFO                                |
+|  Where a step goes (average, GPU clock)                                    |
+|  Step Time           200.4 ms  100%  ████████████████████████████          |
+|  ├─ Input Wait       128.0 ms   64%  ██████████████████░░░░░░░░░░  ◀  cause|
+|  └─ Traced Step Time  72.0 ms   36%  ██████████░░░░░░░░░░░░░░░░░░          |
+|     ├─ Compute        68.0 ms   34%                                        |
+|     ├─ H2D             0.4 ms   <1%                                        |
+|     └─ Residual        3.6 ms    2%                                        |
 |                                                                            |
-|  Step Time Evidence                                                        |
-|  Phase             Average           Share                                 |
-|  ------------------------------------------------                          |
-|  Step Time         200.4ms           100.0%                                |
-|  Input Wait        128.0ms           64.0%                                 |
-|  Compute           68.0ms            34.0%                                 |
-|  Residual          3.6ms             1.8%                                  |
-|  H2D               0.4ms             0.2%                                  |
+|  Peak step memory: 2.9 GB allocated · 3.2 GB reserved                      |
+|                                                                            |
+|  Next: raise DataLoader num_workers, enable pin_memory / prefetch, or check|
+|  storage read throughput.                                                  |
+|                                                                            |
+|  Supporting: GPU util 24% avg -- consistent with input starvation.         |
+|                                                                            |
+|  Full evidence: logs/bert_finetune/final_summary.json  (--html-report)     |
 +----------------------------------------------------------------------------+
 ```
 
@@ -221,36 +222,30 @@ regressions between saved summaries.
 
 ```text
 +----------------------------------------------------------------------------+
-|  TraceML Run Summary | duration 40.1s                                      |
+|  TraceML Run Summary                                                       |
+|  ddp_pretrain · 4 GPUs · 2 nodes · 250 steps analyzed · 40.1s              |
 +----------------------------------------------------------------------------+
 |                                                                            |
-|  TraceML Verdict: INPUT STRAGGLER / CRITICAL                               |
-|  Why: Rank r0 input wait was 254.5ms vs median rank r1 at 3.8ms.           |
-|  Next: Inspect dataloader, collate_fn, preprocessing, and storage on the   |
-|  slow rank.                                                                |
+|  Verdict: INPUT STRAGGLER  (CRITICAL)                                      |
+|  Why: rank 0 (node n0) waits 254.5 ms per step for input; the median rank  |
+|  waits 3.8 ms. All 4 ranks then advance at rank 0's pace.                  |
 |                                                                            |
-|  Section Status                                                            |
-|  Section       Status                  Severity                            |
-|  ------------------------------------------------                          |
-|  Step Time     INPUT STRAGGLER         CRITICAL                            |
-|  System        LOW GPU UTIL            INFO                                |
-|  Process       NORMAL                  INFO                                |
-|  Step Memory   BALANCED                INFO                                |
+|  Where a step goes (median rank, GPU clock)         worst rank             |
+|  Step Time           303.7 ms  100%                 304.1 ms (r0)          |
+|  ├─ Input Wait         3.8 ms    1%                 254.5 ms (r0)  ◀  67x  |
+|  └─ Traced Step Time 299.9 ms   99%                                        |
+|     ├─ Compute       259.5 ms   85%                                        |
+|     ├─ H2D             1.1 ms   <1%                                        |
+|     └─ Residual       39.3 ms   13%                                        |
 |                                                                            |
-|  System Evidence                                                           |
-|  Metric          Median        Worst         Skew        Scope             |
-|  --------------------------------------------------------------------------|
-|  CPU Util        18.4%         71.2%         52.8pp      node=n1           |
-|  GPU Util        14.0%         0.0%          14.0pp      node=n0           |
-|  GPU Memory      6.20GB        8.90GB        43.5%       node=n1           |
-|  GPU Temp        42C           58C           16C         node=n1           |
+|  Peak step memory: 9.8 GB reserved · worst rank r2                         |
 |                                                                            |
-|  Step Time Evidence                                                        |
-|  Phase           Median        Worst         Skew        Scope             |
-|  --------------------------------------------------------------------------|
-|  Total           303.7ms       304.1ms       0.1%        rank=r0 node=n0   |
-|  Input Wait      3.8ms         254.5ms       6597.4%     rank=r0 node=n0   |
-|  Compute         259.5ms       261.0ms       0.6%        rank=r2 node=n1   |
+|  Next: inspect dataloader, collate_fn, preprocessing, and storage on rank 0|
+|  (node n0).                                                                |
+|                                                                            |
+|  Supporting: GPU util median 14% -- ranks idle at the step barrier.        |
+|                                                                            |
+|  Full evidence: logs/ddp_pretrain/final_summary.json  (--html-report)      |
 +----------------------------------------------------------------------------+
 ```
 

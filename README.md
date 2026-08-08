@@ -38,6 +38,52 @@ storage read throughput.
 
 TraceML produces this diagnosis at the end of the instrumented training run.
 
+Want the complete evidence? Jump to the
+[single-run and distributed example reports](#example-reports).
+
+## Quickstart
+
+### 1. Install
+
+TraceML expects an existing PyTorch project. Install the TraceML package with:
+
+```bash
+pip install traceml-ai
+```
+
+Using [uv](https://docs.astral.sh/uv/) instead? Run `uv add traceml-ai`.
+
+### 2. Instrument the training step
+
+Add TraceML around the core step in your existing PyTorch training script:
+
+```diff
++   import traceml_ai as traceml
+
++   traceml.init(mode="auto")
+
+    for batch in dataloader:
++       with traceml.trace_step(model):
+            optimizer.zero_grad(set_to_none=True)
+            outputs = model(batch["x"])
+            loss = criterion(outputs, batch["y"])
+            loss.backward()
+            optimizer.step()
+```
+
+### 3. Run
+
+```bash
+traceml run train.py
+```
+
+Summary mode is the default. TraceML prints the final diagnosis and writes
+`final_summary.json` and `final_summary.txt` under `logs/<run_name>/`.
+
+No training script ready? [Try the Colab example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb).
+
+## Example Reports
+
 <details>
 <summary><strong>See the complete single-run report</strong></summary>
 
@@ -105,47 +151,6 @@ TraceML produces this diagnosis at the end of the instrumented training run.
 ```
 
 </details>
-
-## Quickstart
-
-### 1. Install
-
-TraceML expects an existing PyTorch project. Install the TraceML package with:
-
-```bash
-pip install traceml-ai
-```
-
-Using [uv](https://docs.astral.sh/uv/) instead? Run `uv add traceml-ai`.
-
-### 2. Instrument the training step
-
-Add TraceML around the core step in your existing PyTorch training script:
-
-```diff
-+   import traceml_ai as traceml
-
-+   traceml.init(mode="auto")
-
-    for batch in dataloader:
-+       with traceml.trace_step(model):
-            optimizer.zero_grad(set_to_none=True)
-            outputs = model(batch["x"])
-            loss = criterion(outputs, batch["y"])
-            loss.backward()
-            optimizer.step()
-```
-
-### 3. Run
-
-```bash
-traceml run train.py
-```
-
-Summary mode is the default. TraceML prints the final diagnosis and writes
-`final_summary.json` and `final_summary.txt` under `logs/<run_name>/`.
-
-No training script ready? [Try the Colab example](https://colab.research.google.com/github/traceopt-ai/traceml/blob/main/notebooks/data_loading_bottleneck.ipynb).
 
 Read [How to Read TraceML Output](https://traceopt-ai.github.io/traceml/user_guide/reading-output/)
 for the complete field definitions, diagnosis rules, evidence, and recommended

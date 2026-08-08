@@ -96,7 +96,7 @@ see Limitations.
 
 ## Troubleshooting
 
-### The verdict says RESIDUAL-HEAVY / CRITICAL on the minimal example
+### The verdict says RESIDUAL-HEAVY (CRITICAL) on the minimal example
 
 This is expected on this specific example, not a sign of a problem. The
 synthetic `TinyMLP` finishes each step in roughly a millisecond, so ordinary
