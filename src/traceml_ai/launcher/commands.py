@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from traceml_ai.launcher.launch_config import (
+    TORCH_LAUNCHER_REQUIRED,
     DistributedLaunchConfig,
     RunIdentity,
     TorchrunLaunchConfig,
@@ -49,6 +50,7 @@ from traceml_ai.runtime.settings import (
     DEFAULT_UI_MODE,
 )
 from traceml_ai.utils.msgpack_codec import Decoder as MsgpackDecoder
+from traceml_ai.utils.torch_support import torch_available
 
 DASHBOARD_DEPENDENCY_INSTALL_HINT = (
     "Dashboard mode requires nicegui. It is included in the "
@@ -218,19 +220,36 @@ def _launch_disabled_process(
     raise SystemExit(train_proc.returncode)
 
 
+def _require_torch_launcher_support(torchrun: TorchrunLaunchConfig) -> None:
+    """Reject a torch-free multi-process launch before anything starts.
+
+    ``torch.distributed.run`` is what launches extra processes, so without
+    torch the topology is impossible. Checking it here means the user gets
+    one clear error instead of a started aggregator and a failure later.
+    """
+    if not torchrun.requires_torch_launcher():
+        return
+    if torch_available():
+        return
+    raise SystemExit(f"[TraceML] ERROR: {TORCH_LAUNCHER_REQUIRED}")
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
     if _disable_traceml_requested(args, os.environ):
         try:
-            TorchrunLaunchConfig.from_args(args)
+            torchrun_cfg = TorchrunLaunchConfig.from_args(args)
         except ValueError as exc:
             raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+        _require_torch_launcher_support(torchrun_cfg)
         return
 
     try:
         launch_cfg = DistributedLaunchConfig.from_args(args)
     except ValueError as exc:
         raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
+
+    _require_torch_launcher_support(launch_cfg.torchrun)
 
     try:
         RunIdentity.from_args(
