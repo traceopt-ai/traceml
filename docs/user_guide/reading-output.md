@@ -87,6 +87,16 @@ traceml view logs/<run_name>/final_summary.json --html out.html
 The HTML report is optional and additive: the JSON and TXT artifacts are
 unchanged whether or not you pass `--html-report`.
 
+`traceml view` prints the card that was stored with the run, so an artifact
+always reads back exactly as it was written. To read an older artifact in the
+current card layout, rebuild it from the same JSON:
+
+```bash
+traceml view logs/<run_name>/final_summary.json --re-render
+```
+
+This only changes what is printed. The stored artifact is not modified.
+
 ### Live CLI
 
 When launched with `--mode=cli`, the terminal shows live:

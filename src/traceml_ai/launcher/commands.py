@@ -810,7 +810,11 @@ def run_view(args: argparse.Namespace) -> None:
 
         from traceml_ai.reporting.view import view_summary
 
-        view_summary(args.summary, print_to_stdout=True)
+        view_summary(
+            args.summary,
+            print_to_stdout=True,
+            re_render=bool(getattr(args, "re_render", False)),
+        )
     except RuntimeError as exc:
         print(f"[TraceML] ERROR: {exc}", file=sys.stderr)
         raise SystemExit(1)
