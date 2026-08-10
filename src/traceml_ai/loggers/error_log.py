@@ -17,7 +17,7 @@ def setup_error_logger(is_aggregator=False) -> logging.Logger:
     """
     Configure and initialize the global TraceML error logger.
 
-    This function sets up a process-wide logger named ``"traceml"`` with:
+    This function sets up a process-wide logger named ``"traceml_ai"`` with:
       - WARNING and above logged to stderr (for visibility during runs)
       - ERROR and above logged to a rotating file on disk
 
@@ -43,7 +43,9 @@ def setup_error_logger(is_aggregator=False) -> logging.Logger:
     logging.Logger
         The configured TraceML root logger.
     """
-    logger = logging.getLogger("traceml")
+    # Parent of every ``get_error_logger`` child ("traceml_ai.<name>"), so
+    # child records propagate into the handlers attached here.
+    logger = logging.getLogger("traceml_ai")
 
     # If handlers are already attached, assume the logger
     # has been initialized and return it as-is.
