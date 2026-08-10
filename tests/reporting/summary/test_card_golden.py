@@ -1003,6 +1003,7 @@ GOLDENS = {
 |  Next: raise DataLoader num_workers, enable pin_memory / prefetch, or check|
 |  storage read throughput.                                                  |
 |                                                                            |
+|  Supporting: GPU util 88% avg.                                             |
 |  Also, not the cause of slow steps:                                        |
 |  ! Step memory grew 1.2 GB over the run -- possible leak  (WARNING)        |
 |                                                                            |
@@ -1289,6 +1290,21 @@ def test_card_matches_golden(name: str) -> None:
 def test_card_lines_are_exactly_card_width(name: str) -> None:
     for line in plain(name).splitlines():
         assert len(line) == 78, (name, len(line), line)
+
+
+def test_gpu_utilization_is_shown_for_a_finding_at_any_level() -> None:
+    """The number readers look for first is not hidden by its own value."""
+    # Low utilization corroborates the finding, so the card says so.
+    assert (
+        "Supporting: GPU util 24% avg -- consistent with input starvation."
+        in plain("run_input_bound_critical")
+    )
+
+    # High utilization does not corroborate it. The number is still shown,
+    # without a claim attached to it.
+    high = plain("run_input_bound_with_also")
+    assert "Supporting: GPU util 88% avg." in high
+    assert "88% avg -- consistent" not in high
 
 
 def test_run_header_gpu_count_is_capped_by_world_size() -> None:

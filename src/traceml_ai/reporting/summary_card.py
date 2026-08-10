@@ -168,7 +168,9 @@ _WATCH_MULTI_WORST_COLUMN = 26
 _SKEW_MATERIAL_RATIO = 0.20
 _SKEW_MATERIAL_DELTA_MS = 1.0
 _MEMORY_SKEW_EVEN_RATIO = 0.10
-_SUPPORTING_GPU_UTIL_MAX = 50.0
+# Below this, GPU utilization corroborates a step-time finding and the card
+# says so. At or above it the number is still shown, but without a claim.
+_LOW_GPU_UTIL_MAX = 50.0
 
 _WATCH_BOUNDARY = (
     "Watch monitors host and process health only; it does not measure "
@@ -1091,15 +1093,25 @@ def _supporting_line(
     primary: Mapping[str, Any],
     multi: bool,
 ) -> Optional[str]:
-    """Return the supporting GPU-utilization line, when it applies."""
+    """Return the GPU-utilization line shown beside a performance finding.
+
+    GPU utilization is the number most readers reach for first, so it is
+    shown whenever it was measured. Only the explanation is conditional:
+    low utilization is consistent with the finding above it, while high
+    utilization is reported without interpreting it.
+    """
     kind = str(primary.get("kind") or "")
     if kind not in PHASE_SHARE_KINDS and kind not in STRAGGLER_KINDS:
         return None
     evidence = _mapping(primary.get("evidence"))
     util = _float(evidence.get("gpu_util_avg_percent"))
-    if util is None or util >= _SUPPORTING_GPU_UTIL_MAX:
-        return None
     value = _fmt_percent(util)
+    if util is None or value is None:
+        return None
+    if util >= _LOW_GPU_UTIL_MAX:
+        if multi and kind in STRAGGLER_KINDS:
+            return f"Supporting: GPU util median {value}%."
+        return f"Supporting: GPU util {value}% avg."
     if multi and kind in STRAGGLER_KINDS:
         return (
             f"Supporting: GPU util median {value}% -- ranks idle at the step "
