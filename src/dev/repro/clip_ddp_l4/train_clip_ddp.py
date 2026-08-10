@@ -613,8 +613,12 @@ def train(args: argparse.Namespace) -> None:
         gradient_checkpointing=args.gradient_checkpointing,
         save_on_each_node=False,
         torch_compile=args.torch_compile,
-        torch_compile_backend=args.torch_compile_backend,
-        torch_compile_mode=args.torch_compile_mode,
+        torch_compile_backend=(
+            args.torch_compile_backend if args.torch_compile else None
+        ),
+        torch_compile_mode=(
+            args.torch_compile_mode if args.torch_compile else None
+        ),
         tf32=args.tf32,
         ddp_broadcast_buffers=False,
         disable_tqdm=args.disable_tqdm,

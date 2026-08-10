@@ -124,6 +124,11 @@ Before collecting results, record `nvidia-smi -q`, GPU topology, CPU count,
 storage type, PyTorch, CUDA, Transformers, Accelerate, Datasets, and TraceML
 versions. The script prints the software versions into the run log.
 
+The default BF16 and TF32 settings target L4 and A100. A T4 host is a different
+hardware configuration and should use `PRECISION=fp16`, `--no-tf32`, and an
+attention backend supported by that environment. Report T4 results separately
+from L4 and A100 results.
+
 ## Dataset modes
 
 ### `generated` (default)
