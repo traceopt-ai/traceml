@@ -35,9 +35,13 @@ From the TraceML repository root, install the project and Hugging Face
 dependencies in an existing CUDA-enabled PyTorch environment:
 
 ```bash
-python -m pip install -e '.[torch,hf]'
+python -m pip install -e '.[hf]'
 python -m pip install datasets pillow
 ```
+
+The commands intentionally use the `hf` extra without the `torch` extra so an
+existing CUDA-enabled PyTorch installation is not replaced. Install PyTorch
+separately only when the GPU environment does not already provide it.
 
 Flash Attention must be installed separately with a build compatible with the
 machine's PyTorch and CUDA versions. To verify the command without launching

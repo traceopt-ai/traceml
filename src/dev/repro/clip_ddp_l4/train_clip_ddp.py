@@ -511,7 +511,7 @@ def train(args: argparse.Namespace) -> None:
     except ImportError as exc:
         raise RuntimeError(
             "Install the Hugging Face dependencies before running this "
-            "reproduction: pip install -e '.[torch,hf]'"
+            "reproduction: pip install -e '.[hf]'"
         ) from exc
 
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
