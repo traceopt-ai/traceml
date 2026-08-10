@@ -377,6 +377,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a TraceML summary JSON file.",
     )
     view_parser.add_argument(
+        "--re-render",
+        action="store_true",
+        help=(
+            "Rebuild the card from the summary JSON with the current "
+            "renderer instead of printing the stored text. Use this to read "
+            "an older artifact in the current card layout. The stored "
+            "artifact is not modified."
+        ),
+    )
+    view_parser.add_argument(
         "--html",
         nargs="?",
         const="",
