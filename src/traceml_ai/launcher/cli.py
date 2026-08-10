@@ -420,3 +420,10 @@ def main() -> None:
     else:
         parser.print_help()
         raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    # Without this guard, `python -m traceml_ai.launcher.cli run train.py`
+    # imports the module and exits 0 without running anything, silently
+    # swallowing the user's command.
+    main()
