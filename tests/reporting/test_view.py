@@ -166,7 +166,7 @@ def test_view_summary_re_render_falls_back_when_rendering_fails(
     tmp_path, monkeypatch
 ) -> None:
     """A read-only command must never fail because a rebuild failed."""
-    import traceml_ai.reporting.summary_card as summary_card
+    import traceml_ai.reporting.terminal_card.card as summary_card
 
     def _boom(*_args, **_kwargs):
         raise ValueError("renderer exploded")

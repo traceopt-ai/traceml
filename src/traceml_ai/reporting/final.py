@@ -27,7 +27,7 @@ from traceml_ai.reporting.sections.process import ProcessSummarySection
 from traceml_ai.reporting.sections.step_memory import StepMemorySummarySection
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.reporting.sections.system import SystemSummarySection
-from traceml_ai.reporting.summary_card import (
+from traceml_ai.reporting.terminal_card.card import (
     build_card_from_payload,
     build_fallback_card,
     card_hints,

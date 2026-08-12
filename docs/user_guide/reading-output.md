@@ -58,15 +58,55 @@ The text summary is intentionally verdict-first:
 - the run context: run name, device and topology, analyzed steps, and duration
 - `Verdict`: the promoted performance diagnosis and severity
 - `Why`: the short evidence-backed reason
-- `Where a step goes`: the selected-clock step decomposition, with median and
-  worst-rank evidence on distributed runs
-- conditional context such as peak step memory, DataLoader fetch time, or
-  system, process, and memory health
-- `Next`: the first action to try or inspect
-- `Supporting` and `Also`: relevant context and secondary findings when they
-  are present
+- `Next`: the first action to try or inspect for that verdict, directly below
+  `Why`
+- the selected-clock step decomposition: a window average for one process, or
+  the median Step Time rank (including its node) for a distributed run
+- individual Forward, Backward, and Optimizer rows when those phases were
+  measured
+- diagnosed culprit/victim rank values in `Why` when a distributed straggler
+  has complete stored attribution evidence. In distributed output, `Scope: N
+  = node · R = global rank · G = GPU index` defines compact identities used
+  consistently in Why text, pane headings, evidence, and table cells
+- System, Process, and Step Memory status with the available measurements that
+  support each status. System uses node-average tables, while Process and Step
+  Memory use an `avg` table for one observed rank and a `median rank avg` /
+  `worst rank avg` table for multiple observed ranks. Step Timing and Step
+  Memory share fixed upper panes; System and Process use matching lower panes,
+  all separated by `||`. Each resource section places Evidence directly below
+  its heading, with
+  `Evidence: None` for a normal/balanced result
+- supplemental DataLoader fetch time when measured
+- additional warning or critical findings when they are present
 - `Full evidence`: the path to the structured JSON artifact and the optional
   HTML-report hint
+
+For a distributed run, the median rank is the observed rank whose per-rank
+window-average Step Time is closest to the cross-rank median. Every displayed
+phase comes from that selected rank row; TraceML does not combine unrelated
+per-metric medians. System and Process averages cover each section's own
+telemetry observation window; they are not aligned to the Step Time window.
+The Run card is twice the width of the Watch card. Step Timing and Step Memory
+share fixed upper panes, and System and Process share fixed lower panes. Their
+divider stays in the same column for single-rank, one-node distributed, and
+multi-node distributed runs.
+In the multi-node System table, each metric uses the median and worst
+node-average points already stored in the summary. “Worst” is not a temporal
+maximum, and different rows can identify different nodes. RAM and GPU-memory
+bytes/percent stay paired from the same selected node row.
+The Process table follows the same rule across observed ranks: every value is
+an observation-window average, each metric may name a different worst rank,
+and RSS and CUDA-reserved byte/percentage pairs come from one selected rank
+row. System and Process always show an `Evidence` row: non-normal statuses use
+a compact presentation of their stored structured trigger and scope, falling
+back to the stored diagnosis summary when needed; normal statuses show
+`Evidence: None`. The table itself never labels its averages as peaks.
+Evidence and long values wrap within their pane and retain the fixed divider
+position.
+Unavailable measurements are omitted, while a measured zero remains visible.
+For older or partial artifacts that lack the stored fields needed by a
+structured scope, the renderer preserves the stored diagnosis summary instead
+of inferring new evidence.
 
 Detailed section prose remains in the `system.card`, `process.card`,
 `step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
@@ -179,6 +219,10 @@ Residual = Traced Step Time − H2D − Forward − Backward − Optimizer
   counted twice.
 - `null` / `n/a` means a signal was not measured in the window. A measured
   `0.0 ms` remains a real zero.
+
+The Run terminal card keeps Traced Step Time in the structured summary but
+does not print that redundant subtotal. It shows Input Wait, Compute, H2D,
+and Residual directly beneath Step Time instead.
 
 Examples:
 
@@ -588,6 +632,11 @@ A good reading pattern is:
 
 The step-memory diagnosis explains memory pressure, imbalance, and drift over time.
 
+The end-of-run summary always includes Step Memory status, compact Evidence,
+and available allocated/reserved average-per-step-peak rows. On a distributed
+run, Allocated and Reserved each use their own stored median and worst rank
+points; the displayed rank may therefore differ by metric.
+
 It is based on:
 
 - memory peaks over the aligned step window
@@ -761,6 +810,14 @@ The system panel reports machine-level pressure and GPU-utilization symptoms.
 It is still context for the training diagnosis: low or moderate GPU
 utilization says the GPU was not fully busy, but it does not prove why.
 
+The end-of-run summary always includes the System status and available core
+CPU, RAM, GPU utilization, GPU memory, temperature, and power measurements.
+These are averages over the System telemetry observation window, not the
+aligned Step Time window. One observed node uses an `avg` column. Multiple
+observed nodes use `median node avg` and `worst node avg` columns, with the
+stored worst node shown per metric. This is a comparison of node averages, not
+peak values over time.
+
 It helps answer:
 
 - is the machine saturated?
@@ -776,6 +833,7 @@ Common fields:
 - GPU utilization
 - GPU memory
 - GPU temperature
+- GPU power
 - GPU headroom
 
 Use this panel to understand machine-level pressure around the training run.
@@ -798,17 +856,30 @@ the likely reason.
 
 The process panel shows what the training processes themselves are consuming.
 
+The end-of-run summary includes the Process status and available CPU capacity,
+RSS, CUDA used, and CUDA reserved measurements. One observed rank uses an
+`avg` column. Multiple observed ranks use `median rank avg` and
+`worst rank avg` columns, with stored worst-rank and node identities shown
+when available. These values cover the Process telemetry observation window;
+they are not step-aligned or temporal peaks.
+
+For a non-normal status, `Evidence` shows the stored diagnostic trigger—for
+example, peak RSS pressure, CUDA memory pressure, allocator overhang, or
+cross-rank CUDA-memory imbalance. A normal Process status shows
+`Evidence: None`.
+
 It helps answer:
 
-- how much CPU the worst rank is using
-- how much GPU memory the processes are using
+- how much CPU capacity the processes used on average
+- how much RSS and CUDA memory the processes used on average
 - whether process-level GPU memory is imbalanced
 
 Common fields:
 
-- worst-rank CPU
-- GPU memory used / reserved / total
-- GPU used imbalance
+- CPU capacity
+- RSS used
+- CUDA used
+- CUDA reserved, including device-capacity percentage when available
 
 Use this panel when:
 

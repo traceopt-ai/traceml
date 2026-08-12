@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from traceml_ai.reporting.summary_card import colorize_stored_card
+from traceml_ai.reporting.terminal_card.card import colorize_stored_card
 from traceml_ai.sdk.protocol import (
     build_final_summary_request,
     get_final_summary_html_path,

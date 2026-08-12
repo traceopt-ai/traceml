@@ -60,7 +60,7 @@ def _re_rendered_card(payload: dict, *, stored_text: str) -> str:
     text the artifact already carries.
     """
     try:
-        from traceml_ai.reporting.summary_card import (
+        from traceml_ai.reporting.terminal_card.card import (
             build_card_from_payload,
             card_profile_from_text,
             card_to_plain,
