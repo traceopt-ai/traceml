@@ -492,6 +492,121 @@ def _step_time_single(
     )
 
 
+def _system_multi_node(
+    *,
+    diagnosis: Dict[str, Any],
+    average: Dict[str, Any],
+    median: Dict[str, Any],
+    worst: Dict[str, Any],
+    metrics_by_node: Dict[int, Dict[str, Any]],
+    gpus_observed: int = 4,
+    nodes_expected: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Build multi-node System data from explicit stored node values."""
+    nodes = tuple(metrics_by_node)
+    return _section(
+        diagnosis=diagnosis,
+        metadata={
+            "mode": "multi_node",
+            "nodes_observed": len(nodes),
+            "nodes_expected": (
+                len(nodes) if nodes_expected is None else nodes_expected
+            ),
+            "gpus_observed": gpus_observed,
+        },
+        average=average,
+        median=median,
+        worst=worst,
+        rows=_node_rows(*nodes, metrics_by_node=metrics_by_node),
+        by="node_rank",
+    )
+
+
+def _step_time_multi_rank(
+    *,
+    diagnosis: Dict[str, Any],
+    steps_analyzed: Optional[int],
+    median: Dict[str, Any],
+    worst: Dict[str, Any],
+    metrics_by_rank: Dict[int, Dict[str, Any]],
+    node_ranks: Optional[Dict[int, int]] = None,
+    ranks: Tuple[int, ...] = (0, 1, 2, 3),
+    mode: str = "multi_node",
+    issues: Optional[List[Dict[str, Any]]] = None,
+    clock: str = "gpu",
+    alignment: str = "common_steps",
+) -> Dict[str, Any]:
+    """Build multi-rank Step Time data with explicit stored points and rows."""
+    return _section(
+        diagnosis=diagnosis,
+        issues=issues,
+        metadata={"mode": mode, "global_ranks_used": len(ranks)},
+        window={
+            "steps_analyzed": steps_analyzed,
+            "diagnosis_clock": clock,
+            "alignment": alignment,
+        },
+        median=median,
+        worst=worst,
+        rows=_rank_rows(
+            *ranks,
+            node_ranks=node_ranks,
+            metrics_by_rank=metrics_by_rank,
+        ),
+    )
+
+
+def _step_memory_multi_rank(
+    *,
+    diagnosis: Dict[str, Any],
+    median: Dict[str, Any],
+    worst: Dict[str, Any],
+    metrics_by_rank: Dict[int, Dict[str, Any]],
+    node_ranks: Optional[Dict[int, int]] = None,
+    ranks: Tuple[int, ...] = (0, 1, 2, 3),
+) -> Dict[str, Any]:
+    """Build multi-rank Step Memory data with explicit per-metric points."""
+    return _section(
+        diagnosis=diagnosis,
+        metadata={"global_ranks_used": len(ranks)},
+        median=median,
+        worst=worst,
+        rows=_rank_rows(
+            *ranks,
+            node_ranks=node_ranks,
+            metrics_by_rank=metrics_by_rank,
+        ),
+    )
+
+
+def _render_single_run(
+    *,
+    run_name: str,
+    step_time: Dict[str, Any],
+    system: Optional[Dict[str, Any]] = None,
+    process: Optional[Dict[str, Any]] = None,
+    step_memory: Optional[Dict[str, Any]] = None,
+    duration_s: float = 1.0,
+) -> str:
+    """Render a behavior-only single-process Run with neutral defaults."""
+    return card_to_plain(
+        _card(
+            profile="run",
+            system=system if system is not None else _system_single(),
+            process=process if process is not None else _NORMAL_PROCESS,
+            step_time=step_time,
+            step_memory=(
+                step_memory
+                if step_memory is not None
+                else _step_memory_single(None, None)
+            ),
+            meta=_meta(run_name=run_name),
+            duration_s=duration_s,
+            artifact_hint=f"logs/{run_name}/final_summary.json",
+        )
+    )
+
+
 def run_input_bound_critical() -> CardDoc:
     """run x single GPU, INPUT-BOUND critical (the flagship card)."""
     return _card(
@@ -746,18 +861,13 @@ def run_step_timing_incomplete() -> CardDoc:
 
 def run_multi_input_straggler() -> CardDoc:
     """run x multi rank, input straggler on rank 0."""
-    system = _section(
+    node_ranks = {0: 0, 1: 0, 2: 1, 3: 1}
+    system = _system_multi_node(
         diagnosis=_issue(
             "LOW_GPU_UTILIZATION",
             "LOW GPU UTIL",
             summary="GPU utilization averaged 14%.",
         ),
-        metadata={
-            "mode": "multi_node",
-            "nodes_observed": 2,
-            "nodes_expected": 2,
-            "gpus_observed": 4,
-        },
         average={
             "cpu_percent": 22.0,
             "ram_bytes": 18.4e9,
@@ -788,35 +898,30 @@ def run_multi_input_straggler() -> CardDoc:
             "gpu_temp_c": _point(70.0, "1"),
             "gpu_power_w": _point(280.0, "1"),
         },
-        rows=_node_rows(
-            0,
-            1,
-            metrics_by_node={
-                0: {
-                    "cpu_percent": 18.0,
-                    "ram_bytes": 16.0e9,
-                    "ram_percent": 27.0,
-                    "gpu_util_percent": 19.0,
-                    "gpu_mem_bytes": 5.0e9,
-                    "gpu_mem_percent": 31.0,
-                    "gpu_temp_c": 58.0,
-                    "gpu_power_w": 220.0,
-                },
-                1: {
-                    "cpu_percent": 26.0,
-                    "ram_bytes": 20.8e9,
-                    "ram_percent": 35.0,
-                    "gpu_util_percent": 9.0,
-                    "gpu_mem_bytes": 7.0e9,
-                    "gpu_mem_percent": 44.0,
-                    "gpu_temp_c": 70.0,
-                    "gpu_power_w": 280.0,
-                },
+        metrics_by_node={
+            0: {
+                "cpu_percent": 18.0,
+                "ram_bytes": 16.0e9,
+                "ram_percent": 27.0,
+                "gpu_util_percent": 19.0,
+                "gpu_mem_bytes": 5.0e9,
+                "gpu_mem_percent": 31.0,
+                "gpu_temp_c": 58.0,
+                "gpu_power_w": 220.0,
             },
-        ),
-        by="node_rank",
+            1: {
+                "cpu_percent": 26.0,
+                "ram_bytes": 20.8e9,
+                "ram_percent": 35.0,
+                "gpu_util_percent": 9.0,
+                "gpu_mem_bytes": 7.0e9,
+                "gpu_mem_percent": 44.0,
+                "gpu_temp_c": 70.0,
+                "gpu_power_w": 280.0,
+            },
+        },
     )
-    step_time = _section(
+    step_time = _step_time_multi_rank(
         diagnosis=_issue(
             "INPUT_STRAGGLER",
             "INPUT STRAGGLER",
@@ -834,12 +939,7 @@ def run_multi_input_straggler() -> CardDoc:
                 "visible_cost_ms": 100.0,
             },
         ),
-        metadata={"mode": "multi_node", "global_ranks_used": 4},
-        window={
-            "steps_analyzed": 250,
-            "diagnosis_clock": "gpu",
-            "alignment": "common_steps",
-        },
+        steps_analyzed=250,
         median={
             "step_time_ms": _point(303.7, "1"),
             "input_wait_ms": _point(3.8, "1"),
@@ -856,43 +956,36 @@ def run_multi_input_straggler() -> CardDoc:
             "h2d_ms": _point(1.2, "0"),
             "residual_ms": _point(39.5, "0"),
         },
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            node_ranks={0: 0, 1: 0, 2: 1, 3: 1},
-            metrics_by_rank={
-                0: {
-                    "step_time_ms": 304.1,
-                    "input_wait_ms": 254.5,
-                    "traced_step_time_ms": 300.5,
-                    "compute_ms": 261.0,
-                    "h2d_ms": 1.2,
-                    "residual_ms": 39.5,
-                    "dataloader_fetch_cpu_ms": 249.0,
-                    "forward_ms": 81.0,
-                    "backward_ms": 170.0,
-                    "optimizer_ms": 10.0,
-                },
-                1: {
-                    "step_time_ms": 303.7,
-                    "input_wait_ms": 3.8,
-                    "traced_step_time_ms": 299.9,
-                    "compute_ms": 259.5,
-                    "h2d_ms": 1.1,
-                    "residual_ms": 39.3,
-                    "dataloader_fetch_cpu_ms": 3.7,
-                    "forward_ms": 80.0,
-                    "backward_ms": 169.5,
-                    "optimizer_ms": 10.0,
-                },
+        node_ranks=node_ranks,
+        metrics_by_rank={
+            0: {
+                "step_time_ms": 304.1,
+                "input_wait_ms": 254.5,
+                "traced_step_time_ms": 300.5,
+                "compute_ms": 261.0,
+                "h2d_ms": 1.2,
+                "residual_ms": 39.5,
+                "dataloader_fetch_cpu_ms": 249.0,
+                "forward_ms": 81.0,
+                "backward_ms": 170.0,
+                "optimizer_ms": 10.0,
             },
-        ),
+            1: {
+                "step_time_ms": 303.7,
+                "input_wait_ms": 3.8,
+                "traced_step_time_ms": 299.9,
+                "compute_ms": 259.5,
+                "h2d_ms": 1.1,
+                "residual_ms": 39.3,
+                "dataloader_fetch_cpu_ms": 3.7,
+                "forward_ms": 80.0,
+                "backward_ms": 169.5,
+                "optimizer_ms": 10.0,
+            },
+        },
     )
-    step_memory = _section(
+    step_memory = _step_memory_multi_rank(
         diagnosis=_issue("BALANCED", "BALANCED"),
-        metadata={"global_ranks_used": 4},
         median={
             "peak_allocated_bytes": _point(8.5e9, "1"),
             "peak_reserved_bytes": _point(8.9e9, "1"),
@@ -901,23 +994,17 @@ def run_multi_input_straggler() -> CardDoc:
             "peak_allocated_bytes": _point(9.4e9, "2"),
             "peak_reserved_bytes": _point(9.8e9, "2"),
         },
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            node_ranks={0: 0, 1: 0, 2: 1, 3: 1},
-            metrics_by_rank={
-                1: {
-                    "peak_allocated_bytes": 8.5e9,
-                    "peak_reserved_bytes": 8.9e9,
-                },
-                2: {
-                    "peak_allocated_bytes": 9.4e9,
-                    "peak_reserved_bytes": 9.8e9,
-                },
+        node_ranks=node_ranks,
+        metrics_by_rank={
+            1: {
+                "peak_allocated_bytes": 8.5e9,
+                "peak_reserved_bytes": 8.9e9,
             },
-        ),
+            2: {
+                "peak_allocated_bytes": 9.4e9,
+                "peak_reserved_bytes": 9.8e9,
+            },
+        },
     )
     return _card(
         profile="run",
@@ -939,49 +1026,21 @@ def run_multi_input_straggler() -> CardDoc:
 
 def run_multi_healthy() -> CardDoc:
     """run x multi rank, balanced and even across ranks."""
-    system = _section(
-        diagnosis=_issue("NORMAL", "NORMAL"),
-        metadata={
-            "mode": "single_node",
-            "nodes_observed": 1,
-            "nodes_expected": 1,
-            "gpus_observed": 4,
-        },
-        average={
-            "cpu_percent": 38.0,
-            "ram_bytes": 18.4e9,
-            "ram_percent": 31.0,
-            "gpu_util_percent": 94.0,
-            "gpu_mem_bytes": 6.0e9,
-            "gpu_mem_percent": 38.0,
-            "gpu_temp_c": 64.0,
-            "gpu_power_w": 240.0,
-        },
-        rows=_node_rows(
-            0,
-            metrics_by_node={
-                0: {
-                    "cpu_percent": 38.0,
-                    "ram_bytes": 18.4e9,
-                    "ram_percent": 31.0,
-                    "gpu_util_percent": 94.0,
-                    "gpu_mem_bytes": 6.0e9,
-                    "gpu_mem_percent": 38.0,
-                    "gpu_temp_c": 64.0,
-                    "gpu_power_w": 240.0,
-                }
-            },
-        ),
-        by="node_rank",
+    system = _system_single(
+        cpu_percent=38.0,
+        ram_bytes=18.4e9,
+        ram_percent=31.0,
+        gpu_util_percent=94.0,
+        gpu_mem_bytes=6.0e9,
+        gpu_mem_percent=38.0,
+        gpu_temp_c=64.0,
+        gpu_power_w=240.0,
+        gpus_observed=4,
     )
-    step_time = _section(
+    step_time = _step_time_multi_rank(
         diagnosis=_issue("BALANCED", "BALANCED"),
-        metadata={"mode": "single_node", "global_ranks_used": 4},
-        window={
-            "steps_analyzed": 250,
-            "diagnosis_clock": "gpu",
-            "alignment": "common_steps",
-        },
+        steps_analyzed=250,
+        mode="single_node",
         median={
             "step_time_ms": _point(152.1, "1"),
             "input_wait_ms": _point(2.0, "1"),
@@ -998,38 +1057,31 @@ def run_multi_healthy() -> CardDoc:
             "h2d_ms": _point(1.7, "2"),
             "residual_ms": _point(3.4, "2"),
         },
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            metrics_by_rank={
-                1: {
-                    "step_time_ms": 152.1,
-                    "input_wait_ms": 2.0,
-                    "traced_step_time_ms": 150.1,
-                    "compute_ms": 145.2,
-                    "h2d_ms": 1.6,
-                    "residual_ms": 3.3,
-                    "dataloader_fetch_cpu_ms": 1.8,
-                    "forward_ms": 50.0,
-                    "backward_ms": 85.2,
-                    "optimizer_ms": 10.0,
-                },
-                2: {
-                    "step_time_ms": 152.7,
-                    "input_wait_ms": 2.1,
-                    "traced_step_time_ms": 150.6,
-                    "compute_ms": 145.6,
-                    "h2d_ms": 1.7,
-                    "residual_ms": 3.4,
-                },
+        metrics_by_rank={
+            1: {
+                "step_time_ms": 152.1,
+                "input_wait_ms": 2.0,
+                "traced_step_time_ms": 150.1,
+                "compute_ms": 145.2,
+                "h2d_ms": 1.6,
+                "residual_ms": 3.3,
+                "dataloader_fetch_cpu_ms": 1.8,
+                "forward_ms": 50.0,
+                "backward_ms": 85.2,
+                "optimizer_ms": 10.0,
             },
-        ),
+            2: {
+                "step_time_ms": 152.7,
+                "input_wait_ms": 2.1,
+                "traced_step_time_ms": 150.6,
+                "compute_ms": 145.6,
+                "h2d_ms": 1.7,
+                "residual_ms": 3.4,
+            },
+        },
     )
-    step_memory = _section(
+    step_memory = _step_memory_multi_rank(
         diagnosis=_issue("BALANCED", "BALANCED"),
-        metadata={"global_ranks_used": 4},
         median={
             "peak_allocated_bytes": _point(8.7e9, "1"),
             "peak_reserved_bytes": _point(9.0e9, "1"),
@@ -1038,22 +1090,16 @@ def run_multi_healthy() -> CardDoc:
             "peak_allocated_bytes": _point(8.8e9, "2"),
             "peak_reserved_bytes": _point(9.1e9, "2"),
         },
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            metrics_by_rank={
-                1: {
-                    "peak_allocated_bytes": 8.7e9,
-                    "peak_reserved_bytes": 9.0e9,
-                },
-                2: {
-                    "peak_allocated_bytes": 8.8e9,
-                    "peak_reserved_bytes": 9.1e9,
-                },
+        metrics_by_rank={
+            1: {
+                "peak_allocated_bytes": 8.7e9,
+                "peak_reserved_bytes": 9.0e9,
             },
-        ),
+            2: {
+                "peak_allocated_bytes": 8.8e9,
+                "peak_reserved_bytes": 9.1e9,
+            },
+        },
     )
     return _card(
         profile="run",
@@ -1124,24 +1170,15 @@ def run_single_gpu_on_shared_host() -> CardDoc:
 
 def run_multi_residual_heavy() -> CardDoc:
     """run x 4-rank DDP, residual-heavy with a competing step-time issue."""
-    system = _section(
+    system = _system_single(
         diagnosis=_issue(
             "LOW_GPU_UTILIZATION",
             "LOW GPU UTIL",
             summary="GPU utilization averaged 6.8%.",
         ),
-        metadata={
-            "mode": "single_node",
-            "nodes_observed": 1,
-            "nodes_expected": 1,
-            "gpus_observed": 4,
-        },
-        average={
-            "cpu_percent": 2.4,
-            "gpu_util_percent": 6.833333333333333,
-        },
-        rows=_node_rows(0),
-        by="node_rank",
+        cpu_percent=2.4,
+        gpu_util_percent=6.833333333333333,
+        gpus_observed=4,
     )
     residual_heavy = _issue(
         "RESIDUAL_HEAVY",
@@ -1162,15 +1199,11 @@ def run_multi_residual_heavy() -> CardDoc:
         action="Increase workers, prefetch, or storage throughput.",
         score=0.11,
     )
-    step_time = _section(
+    step_time = _step_time_multi_rank(
         diagnosis=residual_heavy,
         issues=[residual_heavy, input_bound],
-        metadata={"mode": "single_node", "global_ranks_used": 4},
-        window={
-            "steps_analyzed": 128,
-            "diagnosis_clock": "gpu",
-            "alignment": "common_steps",
-        },
+        steps_analyzed=128,
+        mode="single_node",
         median={
             "step_time_ms": _point(5.203032052493654, "1"),
             "input_wait_ms": _point(0.575069501879625, "1"),
@@ -1187,54 +1220,47 @@ def run_multi_residual_heavy() -> CardDoc:
             "h2d_ms": _point(0.08191550013725646, "1"),
             "residual_ms": _point(0.7465767902322114, "1"),
         },
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            metrics_by_rank={
-                0: {
-                    "step_time_ms": 5.201,
-                    "input_wait_ms": 0.573,
-                    "traced_step_time_ms": 4.657,
-                    "compute_ms": 3.84,
-                    "h2d_ms": 0.08,
-                    "residual_ms": 0.737,
-                },
-                1: {
-                    "step_time_ms": 5.203032052493654,
-                    "input_wait_ms": 0.575069501879625,
-                    "traced_step_time_ms": 4.6259870529174805,
-                    "compute_ms": 3.83626828956767,
-                    "h2d_ms": 0.08052700001280755,
-                    "residual_ms": 0.7217999144340865,
-                    "dataloader_fetch_cpu_ms": 0.57,
-                    "forward_ms": 1.3,
-                    "backward_ms": 2.2,
-                    "optimizer_ms": 0.33626828956767,
-                },
-                2: {
-                    "step_time_ms": 5.229208162869327,
-                    "input_wait_ms": 0.579,
-                    "traced_step_time_ms": 4.65,
-                    "compute_ms": 3.86,
-                    "h2d_ms": 0.081,
-                    "residual_ms": 0.74,
-                },
-                3: {
-                    "step_time_ms": 5.21,
-                    "input_wait_ms": 0.576,
-                    "traced_step_time_ms": 4.63,
-                    "compute_ms": 3.8683359728602227,
-                    "h2d_ms": 0.081,
-                    "residual_ms": 0.73,
-                },
+        metrics_by_rank={
+            0: {
+                "step_time_ms": 5.201,
+                "input_wait_ms": 0.573,
+                "traced_step_time_ms": 4.657,
+                "compute_ms": 3.84,
+                "h2d_ms": 0.08,
+                "residual_ms": 0.737,
             },
-        ),
+            1: {
+                "step_time_ms": 5.203032052493654,
+                "input_wait_ms": 0.575069501879625,
+                "traced_step_time_ms": 4.6259870529174805,
+                "compute_ms": 3.83626828956767,
+                "h2d_ms": 0.08052700001280755,
+                "residual_ms": 0.7217999144340865,
+                "dataloader_fetch_cpu_ms": 0.57,
+                "forward_ms": 1.3,
+                "backward_ms": 2.2,
+                "optimizer_ms": 0.33626828956767,
+            },
+            2: {
+                "step_time_ms": 5.229208162869327,
+                "input_wait_ms": 0.579,
+                "traced_step_time_ms": 4.65,
+                "compute_ms": 3.86,
+                "h2d_ms": 0.081,
+                "residual_ms": 0.74,
+            },
+            3: {
+                "step_time_ms": 5.21,
+                "input_wait_ms": 0.576,
+                "traced_step_time_ms": 4.63,
+                "compute_ms": 3.8683359728602227,
+                "h2d_ms": 0.081,
+                "residual_ms": 0.73,
+            },
+        },
     )
-    step_memory = _section(
+    step_memory = _step_memory_multi_rank(
         diagnosis=_issue("BALANCED", "BALANCED"),
-        metadata={"global_ranks_used": 4},
         median={
             "peak_allocated_bytes": _point(18838528.0, "1"),
             "peak_reserved_bytes": _point(23068672.0, "1"),
@@ -1243,22 +1269,16 @@ def run_multi_residual_heavy() -> CardDoc:
             "peak_allocated_bytes": _point(20971520.0, "0"),
             "peak_reserved_bytes": _point(25149440.0, "0"),
         },
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            metrics_by_rank={
-                0: {
-                    "peak_allocated_bytes": 20971520.0,
-                    "peak_reserved_bytes": 25149440.0,
-                },
-                1: {
-                    "peak_allocated_bytes": 18838528.0,
-                    "peak_reserved_bytes": 23068672.0,
-                },
+        metrics_by_rank={
+            0: {
+                "peak_allocated_bytes": 20971520.0,
+                "peak_reserved_bytes": 25149440.0,
             },
-        ),
+            1: {
+                "peak_allocated_bytes": 18838528.0,
+                "peak_reserved_bytes": 23068672.0,
+            },
+        },
     )
     return _card(
         profile="run",
@@ -2690,14 +2710,8 @@ def _coherent_multi_inputs(
 ) -> Dict[str, Any]:
     """Build crossed aggregate points backed by coherent grouped rows."""
     node_ranks = {0: 0, 1: 0, 2: 1, 3: 1}
-    system = _section(
+    system = _system_multi_node(
         diagnosis=_issue("NORMAL", "NORMAL"),
-        metadata={
-            "mode": "multi_node",
-            "nodes_observed": 2,
-            "nodes_expected": 2,
-            "gpus_observed": 4,
-        },
         average={
             "cpu_percent": 20.0,
             "ram_bytes": 8.0e9,
@@ -2729,42 +2743,32 @@ def _coherent_multi_inputs(
             "gpu_temp_c": _point(70.0, "0"),
             "gpu_power_w": _point(280.0, "0"),
         },
-        rows=_node_rows(
-            0,
-            1,
-            metrics_by_node={
-                0: {
-                    "cpu_percent": 30.0,
-                    "ram_bytes": 6.0e9,
-                    "ram_percent": 20.0,
-                    "gpu_util_percent": 95.0,
-                    "gpu_mem_bytes": 6.0e9,
-                    "gpu_mem_percent": 38.0,
-                    "gpu_temp_c": 70.0,
-                    "gpu_power_w": 280.0,
-                },
-                1: {
-                    "cpu_percent": 10.0,
-                    "ram_bytes": 10.0e9,
-                    "ram_percent": 30.0,
-                    "gpu_util_percent": 85.0,
-                    "gpu_mem_bytes": 2.0e9,
-                    "gpu_mem_percent": 12.0,
-                    "gpu_temp_c": 50.0,
-                    "gpu_power_w": 220.0,
-                },
+        metrics_by_node={
+            0: {
+                "cpu_percent": 30.0,
+                "ram_bytes": 6.0e9,
+                "ram_percent": 20.0,
+                "gpu_util_percent": 95.0,
+                "gpu_mem_bytes": 6.0e9,
+                "gpu_mem_percent": 38.0,
+                "gpu_temp_c": 70.0,
+                "gpu_power_w": 280.0,
             },
-        ),
-        by="node_rank",
-    )
-    step_time = _section(
-        diagnosis=_issue("BALANCED", "BALANCED"),
-        metadata={"mode": "multi_node", "global_ranks_used": 4},
-        window={
-            "steps_analyzed": 40,
-            "diagnosis_clock": "gpu",
-            "alignment": "common_steps",
+            1: {
+                "cpu_percent": 10.0,
+                "ram_bytes": 10.0e9,
+                "ram_percent": 30.0,
+                "gpu_util_percent": 85.0,
+                "gpu_mem_bytes": 2.0e9,
+                "gpu_mem_percent": 12.0,
+                "gpu_temp_c": 50.0,
+                "gpu_power_w": 220.0,
+            },
         },
+    )
+    step_time = _step_time_multi_rank(
+        diagnosis=_issue("BALANCED", "BALANCED"),
+        steps_analyzed=40,
         # The aggregate points intentionally select different ranks. Only the
         # step_time_ms index may select the representative grouped row.
         median={
@@ -2780,32 +2784,25 @@ def _coherent_multi_inputs(
             "dataloader_fetch_cpu_ms": _point(88.0, "3"),
         },
         worst={"step_time_ms": _point(101.0, "1")},
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            node_ranks=node_ranks,
-            metrics_by_rank={
-                1: {"step_time_ms": 101.0},
-                2: {
-                    "step_time_ms": 100.0,
-                    "input_wait_ms": 10.0,
-                    "traced_step_time_ms": 90.0,
-                    "compute_ms": 80.0,
-                    "h2d_ms": 2.0,
-                    "residual_ms": 8.0,
-                    "forward_ms": 20.0,
-                    "backward_ms": 50.0,
-                    "optimizer_ms": 10.0,
-                    "dataloader_fetch_cpu_ms": 7.0,
-                },
+        node_ranks=node_ranks,
+        metrics_by_rank={
+            1: {"step_time_ms": 101.0},
+            2: {
+                "step_time_ms": 100.0,
+                "input_wait_ms": 10.0,
+                "traced_step_time_ms": 90.0,
+                "compute_ms": 80.0,
+                "h2d_ms": 2.0,
+                "residual_ms": 8.0,
+                "forward_ms": 20.0,
+                "backward_ms": 50.0,
+                "optimizer_ms": 10.0,
+                "dataloader_fetch_cpu_ms": 7.0,
             },
-        ),
+        },
     )
-    step_memory = _section(
+    step_memory = _step_memory_multi_rank(
         diagnosis=_issue("BALANCED", "BALANCED"),
-        metadata={"global_ranks_used": 4},
         median={
             "peak_allocated_bytes": _point(
                 999.0e9,
@@ -2826,23 +2823,17 @@ def _coherent_multi_inputs(
                 "1" if reserved_points_measured else "missing",
             ),
         },
-        rows=_rank_rows(
-            0,
-            1,
-            2,
-            3,
-            node_ranks=node_ranks,
-            metrics_by_rank={
-                1: {
-                    "peak_allocated_bytes": 5.0e9,
-                    "peak_reserved_bytes": 6.0e9,
-                },
-                3: {
-                    "peak_allocated_bytes": 3.0e9,
-                    "peak_reserved_bytes": 4.0e9,
-                },
+        node_ranks=node_ranks,
+        metrics_by_rank={
+            1: {
+                "peak_allocated_bytes": 5.0e9,
+                "peak_reserved_bytes": 6.0e9,
             },
-        ),
+            3: {
+                "peak_allocated_bytes": 3.0e9,
+                "peak_reserved_bytes": 4.0e9,
+            },
+        },
     )
     return {
         "profile": "run",
@@ -3051,18 +3042,7 @@ def test_compute_children_keep_tree_connectors_when_other_phases_are_absent() ->
         backward_ms=None,
         optimizer_ms=2.0,
     )
-    text = card_to_plain(
-        _card(
-            profile="run",
-            system=_system_single(),
-            process=_NORMAL_PROCESS,
-            step_time=step_time,
-            step_memory=_step_memory_single(None, None),
-            meta=_meta(run_name="child-connectors"),
-            duration_s=1.0,
-            artifact_hint="logs/child-connectors/final_summary.json",
-        )
-    )
+    text = _render_single_run(run_name="child-connectors", step_time=step_time)
 
     assert re.search(r"└─ Compute\s+9\.0 ms\s+90%", text)
     assert re.search(r"   ├─ Forward\s+0\.0 ms\s+0%", text)
@@ -3102,17 +3082,8 @@ def test_compute_child_combinations_omit_nulls_and_keep_connectors(
             values["Optimizer"] if "Optimizer" in measured else None
         ),
     )
-    text = card_to_plain(
-        _card(
-            profile="run",
-            system=_system_single(),
-            process=_NORMAL_PROCESS,
-            step_time=step_time,
-            step_memory=_step_memory_single(None, None),
-            meta=_meta(run_name="child-combinations"),
-            duration_s=1.0,
-            artifact_hint="logs/child-combinations/final_summary.json",
-        )
+    text = _render_single_run(
+        run_name="child-combinations", step_time=step_time
     )
 
     for label, value in values.items():
@@ -3151,17 +3122,8 @@ def test_compute_bound_why_uses_stored_phase_without_selecting_a_largest() -> (
         backward_ms=9.0,
         optimizer_ms=1.0,
     )
-    text = card_to_plain(
-        _card(
-            profile="run",
-            system=_system_single(),
-            process=_NORMAL_PROCESS,
-            step_time=step_time,
-            step_memory=_step_memory_single(None, None),
-            meta=_meta(run_name="stored-compute-phase"),
-            duration_s=1.0,
-            artifact_hint="logs/stored-compute-phase/final_summary.json",
-        )
+    text = _render_single_run(
+        run_name="stored-compute-phase", step_time=step_time
     )
 
     assert (
@@ -3213,18 +3175,7 @@ def test_run_why_falls_back_to_stored_summary_for_legacy_bound_payload() -> (
         compute_ms=4.0,
         residual_ms=1.0,
     )
-    text = card_to_plain(
-        _card(
-            profile="run",
-            system=_system_single(),
-            process=_NORMAL_PROCESS,
-            step_time=step_time,
-            step_memory=_step_memory_single(None, None),
-            meta=_meta(run_name="legacy-bound"),
-            duration_s=1.0,
-            artifact_hint="logs/legacy-bound/final_summary.json",
-        )
-    )
+    text = _render_single_run(run_name="legacy-bound", step_time=step_time)
 
     assert "Why: Legacy input summary stays unchanged." in text
     assert "Next: Stored action." in text
@@ -4009,17 +3960,12 @@ def test_other_findings_skip_section_primaries_and_keep_later_issues() -> None:
     step_memory = _step_memory_single(3.9e9, 4.6e9, diagnosis=creep)
     step_memory["issues"] = [creep, fragmentation]
 
-    text = card_to_plain(
-        _card(
-            profile="run",
-            system=_system_single(gpu_util_percent=88.0),
-            process=_NORMAL_PROCESS,
-            step_time=step_time,
-            step_memory=step_memory,
-            meta=_meta(run_name="ddp_balanced"),
-            duration_s=2.7,
-            artifact_hint="logs/ddp_balanced/final_summary.json",
-        )
+    text = _render_single_run(
+        run_name="ddp_balanced",
+        step_time=step_time,
+        system=_system_single(gpu_util_percent=88.0),
+        step_memory=step_memory,
+        duration_s=2.7,
     )
 
     assert text.count("Step memory grew 1.2 GB over the run") == 1
