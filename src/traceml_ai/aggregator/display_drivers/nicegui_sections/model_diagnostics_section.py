@@ -74,7 +74,7 @@ def build_model_diagnostics_section(
             "font-family:var(--mono); font-size:11px; color:var(--muted); "
             "font-style:italic; padding-top:6px;"
         )
-    return {"overall": overall, "body": body, "hint": hint}
+    return {"overall": overall, "body": body, "hint": hint, "_last": None}
 
 
 def update_model_diagnostics_section(
@@ -82,6 +82,16 @@ def update_model_diagnostics_section(
 ) -> None:
     try:
         items = _items(payload)
+        held = False
+        if items:
+            panel["_last"] = payload
+        else:
+            # A transiently empty read (ranks settling, end of run, a rank
+            # dying) is not a new verdict, so re-render the last one the
+            # engine produced instead of blanking the rail (#353).
+            payload = panel.get("_last")
+            items = _items(payload)
+            held = bool(items)
         if not items:
             panel["overall"].text = "NO DATA"
             panel["body"].content = ""
@@ -92,7 +102,13 @@ def update_model_diagnostics_section(
                 f"border:1px solid {_tint(neutral, 0.28)};"
             )
             return
-        panel["hint"].text = ""
+        # States what this view itself observed. It classifies nothing: no
+        # threshold, no staleness age, no severity of its own.
+        panel["hint"].text = (
+            "Holding last diagnosis - no update in the latest refresh"
+            if held
+            else ""
+        )
 
         sev = _overall_sev(_overall(payload))
         col = theme.SEV.get(sev, theme.SEV["neutral"])
