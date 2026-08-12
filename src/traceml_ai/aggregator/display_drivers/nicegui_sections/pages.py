@@ -9,6 +9,7 @@ from traceml_ai.aggregator.display_drivers.layout import (
     PROCESS_LAYOUT,
     SYSTEM_LAYOUT,
 )
+from traceml_ai.reporting.summary_card import _WATCH_BOUNDARY
 
 from . import theme
 from .model_combined_section import (
@@ -31,6 +32,56 @@ from .system_section import (
     update_gpu_gauge_section,
     update_system_section,
 )
+
+# Section groups the dashboard page can build. This is layout SELECTION --
+# which panels exist for a profile -- never interpretation: no thresholds and
+# no severity live here.
+SECTION_HERO = "hero"
+SECTION_GPU_GAUGE = "gpu_gauge"
+SECTION_SYSTEM = "system"
+SECTION_PROCESS = "process"
+SECTION_STEP_MEMORY = "step_memory"
+SECTION_DIAGNOSTICS = "diagnostics"
+
+ALL_SECTIONS = frozenset(
+    {
+        SECTION_HERO,
+        SECTION_GPU_GAUGE,
+        SECTION_SYSTEM,
+        SECTION_PROCESS,
+        SECTION_STEP_MEMORY,
+        SECTION_DIAGNOSTICS,
+    }
+)
+
+# Panels that only step telemetry can ever fill.
+STEP_COUPLED_SECTIONS = frozenset({SECTION_HERO, SECTION_STEP_MEMORY})
+
+WATCH_PROFILE = "watch"
+
+# The watch boundary is stated in exactly one place. The dashboard renders
+# the summary card's sentence rather than wording its own, so the two
+# surfaces cannot drift and no surface invents user-facing copy. Private
+# import on purpose: summary_card owns the sentence, and a rename there
+# should break loudly here rather than leave a stale duplicate behind.
+WATCH_BOUNDARY_LINE = _WATCH_BOUNDARY
+
+
+def _is_watch(profile: str) -> bool:
+    """Watch-profile check, normalized the way the summary card does it."""
+    return str(profile or "").strip().lower() == WATCH_PROFILE
+
+
+def _sections_for_profile(profile: str) -> frozenset[str]:
+    """Section groups the dashboard builds for ``profile``.
+
+    ``watch`` never collects step timing, so the step-coupled panels are not
+    built at all rather than left permanently empty. Every other profile,
+    including an unknown or missing one, builds the full run layout.
+    """
+    if _is_watch(profile):
+        return ALL_SECTIONS - STEP_COUPLED_SECTIONS
+    return ALL_SECTIONS
 
 
 def _run_context_text(payload) -> str:
@@ -104,29 +155,35 @@ def _cell(flex: str):
     )
 
 
-def define_pages(cls):
-    """Attach the NiceGUI pages with the revamped bento layout."""
-    theme.register_static_fonts(app)
-    deep_enabled = getattr(cls._settings, "profile", "run") == "deep"
+def build_main_page(cls, profile: str) -> None:
+    """Build the dashboard body for one client, for ``profile``'s sections.
 
-    @ui.page("/")
-    def main_page():
-        ui.add_head_html(theme.head_html())
+    A panel outside the profile's section set is never created and never
+    subscribed: under ``watch`` there is no step telemetry to show, so the
+    step-coupled panels are omitted instead of sitting permanently empty.
+    The remaining cells expand to fill the row they are left alone in.
+    """
+    sections = _sections_for_profile(profile)
+    ui.add_head_html(theme.head_html())
+    with (
+        ui.column()
+        .classes("w-full")
+        .style("gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;")
+    ):
+        header_ctx = build_header(cls, profile == "deep")
+
+        if _is_watch(profile):
+            # State the boundary once, where the step panels would have been.
+            ui.label(WATCH_BOUNDARY_LINE).classes("cmeta")
+
+        # Row 1: hero (step-time ribbon + verdict) | GPU gauge
+        hero_cards = None
         with (
-            ui.column()
-            .classes("w-full")
-            .style(
-                "gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;"
-            )
+            ui.row()
+            .classes("w-full items-stretch")
+            .style("gap:16px; flex-wrap:wrap;")
         ):
-            header_ctx = build_header(cls, deep_enabled)
-
-            # Row 1: hero (step-time ribbon + verdict) | GPU gauge
-            with (
-                ui.row()
-                .classes("w-full items-stretch")
-                .style("gap:16px; flex-wrap:wrap;")
-            ):
+            if SECTION_HERO in sections:
                 with _cell("2.4"):
                     hero_cards = build_model_combined_section()
                     cls.subscribe_layout(
@@ -134,67 +191,82 @@ def define_pages(cls):
                         hero_cards,
                         update_model_combined_section,
                     )
-                with _cell("1"):
-                    gauge_cards = build_gpu_gauge_section()
+            with _cell("1"):
+                gauge_cards = build_gpu_gauge_section()
 
-            # Row 2: System | Process
-            with (
-                ui.row()
-                .classes("w-full items-stretch")
-                .style("gap:16px; flex-wrap:wrap;")
-            ):
-                with _cell("2"):
-                    system_cards = build_system_section()
-                with _cell("1.3"):
-                    cards = build_process_section()
-                    cls.subscribe_layout(
-                        PROCESS_LAYOUT, cards, update_process_section
-                    )
+        # Row 2: System | Process. Both are in every profile's section set,
+        # so they are built unconditionally.
+        with (
+            ui.row()
+            .classes("w-full items-stretch")
+            .style("gap:16px; flex-wrap:wrap;")
+        ):
+            with _cell("2"):
+                system_cards = build_system_section()
+            with _cell("1.3"):
+                cards = build_process_section()
+                cls.subscribe_layout(
+                    PROCESS_LAYOUT, cards, update_process_section
+                )
 
-            # One SYSTEM_LAYOUT subscriber drives both the chart and the gauge
-            # (two subscribers on one layout/client would evict each other).
-            def _update_system(
-                _c, d, _sc=system_cards, _gc=gauge_cards, _h=header_ctx
-            ):
-                update_system_section(_sc, d)
-                update_gpu_gauge_section(_gc, d)
-                txt = _run_context_text(d)
-                if txt:
-                    _h.text = txt
-                    _h.style(
-                        "font-family:var(--mono); font-size:11px; "
-                        "color:var(--muted); display:inline-block;"
-                    )
+        # One SYSTEM_LAYOUT subscriber drives both the chart and the gauge
+        # (two subscribers on one layout/client would evict each other).
+        def _update_system(
+            _c, d, _sc=system_cards, _gc=gauge_cards, _h=header_ctx
+        ):
+            update_system_section(_sc, d)
+            update_gpu_gauge_section(_gc, d)
+            txt = _run_context_text(d)
+            if txt:
+                _h.text = txt
+                _h.style(
+                    "font-family:var(--mono); font-size:11px; "
+                    "color:var(--muted); display:inline-block;"
+                )
 
-            cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
+        cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
 
-            # Row 3: Step Memory | Diagnostics
-            with (
-                ui.row()
-                .classes("w-full items-stretch")
-                .style("gap:16px; flex-wrap:wrap;")
-            ):
+        # Row 3: Step Memory | Diagnostics. The rail stays in every profile:
+        # it carries the System and Process findings too.
+        with (
+            ui.row()
+            .classes("w-full items-stretch")
+            .style("gap:16px; flex-wrap:wrap;")
+        ):
+            if SECTION_STEP_MEMORY in sections:
                 with _cell("1.3"):
                     cards = build_step_memory_section()
                     cls.subscribe_layout(
                         MODEL_MEMORY_LAYOUT, cards, update_step_memory_section
                     )
-                with _cell("1"):
-                    diag_cards = build_model_diagnostics_section()
+            with _cell("1"):
+                diag_cards = build_model_diagnostics_section()
 
-                    # One MODEL_DIAGNOSTICS_LAYOUT subscriber drives BOTH the
-                    # rail and the hero verdict, so the hero shows the engine's
-                    # step-time status verbatim (single source of truth) and
-                    # auto-tracks any diagnosis-vocab change. Two subscribers on
-                    # one layout/client would evict each other.
-                    def _update_diag(_c, d, _dc=diag_cards, _hc=hero_cards):
-                        update_model_diagnostics_section(_dc, d)
+                # One MODEL_DIAGNOSTICS_LAYOUT subscriber drives BOTH the
+                # rail and the hero verdict, so the hero shows the engine's
+                # step-time status verbatim (single source of truth) and
+                # auto-tracks any diagnosis-vocab change. Two subscribers on
+                # one layout/client would evict each other. Without a hero
+                # the same subscriber updates the rail alone.
+                def _update_diag(_c, d, _dc=diag_cards, _hc=hero_cards):
+                    update_model_diagnostics_section(_dc, d)
+                    if _hc is not None:
                         update_step_verdict(_hc, d)
 
-                    cls.subscribe_layout(
-                        MODEL_DIAGNOSTICS_LAYOUT, diag_cards, _update_diag
-                    )
+                cls.subscribe_layout(
+                    MODEL_DIAGNOSTICS_LAYOUT, diag_cards, _update_diag
+                )
 
-        cls.ensure_ui_timer(0.75)
-        if not cls._ui_ready:
-            cls._ui_ready = True
+    cls.ensure_ui_timer(0.75)
+    if not cls._ui_ready:
+        cls._ui_ready = True
+
+
+def define_pages(cls):
+    """Attach the NiceGUI pages with the revamped bento layout."""
+    theme.register_static_fonts(app)
+    profile = getattr(cls._settings, "profile", "run")
+
+    @ui.page("/")
+    def main_page():
+        build_main_page(cls, profile)
