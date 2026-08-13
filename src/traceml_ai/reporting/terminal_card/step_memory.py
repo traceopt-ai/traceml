@@ -29,12 +29,12 @@ from traceml_ai.reporting.terminal_card.common import (
     point,
     status_spans,
 )
+from traceml_ai.reporting.terminal_card.evidence import format_section_evidence
 from traceml_ai.reporting.terminal_card.layout import (
     STYLE_DIM,
     CardDoc,
     append_table_row,
 )
-from traceml_ai.reporting.terminal_card.run_evidence import format_run_evidence
 
 _LABEL_WIDTH = 28
 _MEDIAN_WIDTH = 20
@@ -133,7 +133,7 @@ def build_run_step_memory_pane(
             details_style=STYLE_DIM,
         )
     )
-    evidence = format_run_evidence("step_memory", step_memory_summary)
+    evidence = format_section_evidence("step_memory", step_memory_summary)
     if evidence:
         doc.wrapped(evidence, label="Evidence: ")
     else:

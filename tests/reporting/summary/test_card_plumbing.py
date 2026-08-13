@@ -41,6 +41,13 @@ def test_terminal_card_facade_keeps_its_public_symbols() -> None:
     rendered = terminal_card.card_to_plain(terminal_card.build_fallback_card())
     assert "TraceML Run Summary" in rendered
 
+    watch = terminal_card.card_to_plain(
+        terminal_card.build_fallback_card(profile="watch")
+    )
+    assert "TraceML Watch Summary" in watch
+    assert "Verdict:" not in watch
+    assert all(len(line) == 156 for line in watch.splitlines())
+
 
 class _TTYBuffer(io.StringIO):
     """A stdout stand-in that claims to be an interactive terminal."""
@@ -114,10 +121,21 @@ def test_watch_profile_renders_the_watch_card(
 ) -> None:
     text = _run(session, tmp_path, profile="watch")["text"]
     assert "TraceML Watch Summary" in text
+    assert "session_test · 1 rank" in text
+    assert "SYSTEM METRICS:" in text
+    assert "PROCESS METRICS:" in text
+    assert all(len(line) == 156 for line in text.splitlines())
+    assert {
+        line.index("||") for line in text.splitlines() if "||" in line
+    } == {64}
+    assert "Verdict:" not in text
+    assert "Why:" not in text
+    assert "Next:" not in text
+    assert "Host health:" not in text
     assert "Step Time" not in text
     assert "Step Memory" not in text
     assert "steps analyzed" not in text
-    assert "traceml run <your-script>.py" in text
+    assert "traceml run <your-script>.py" not in text
 
 
 def test_footer_names_the_session_relative_artifact(

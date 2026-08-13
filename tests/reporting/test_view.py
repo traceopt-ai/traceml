@@ -148,6 +148,11 @@ def test_view_summary_re_render_infers_the_watch_profile(tmp_path) -> None:
     text = view_summary(summary_path, print_to_stdout=False, re_render=True)
 
     assert "TraceML Watch Summary" in text
+    assert "SYSTEM METRICS:" in text
+    assert "PROCESS METRICS:" in text
+    assert "Verdict:" not in text
+    assert "Why:" not in text
+    assert "Next:" not in text
     assert "Step Time" not in text
 
 
