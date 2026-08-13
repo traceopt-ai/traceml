@@ -42,6 +42,24 @@ def _rank_str(rank: Optional[int]) -> str:
     return f"r{rank}" if rank is not None else "—"
 
 
+def _rank_measurement_comparison(
+    *,
+    rank: int,
+    value_ms: float,
+    wording: str,
+    comparison_rank: int,
+    comparison_value_ms: float,
+    note: Optional[str] = None,
+) -> str:
+    """Format one concise, measurement-first rank comparison."""
+    measurement = wording.format(value=f"{value_ms:.1f}")
+    text = (
+        f"{_rank_str(rank)} {measurement}, compared with "
+        f"{comparison_value_ms:.1f} ms on {_rank_str(comparison_rank)}"
+    )
+    return f"{text}; {note}." if note else f"{text}."
+
+
 @dataclass(frozen=True)
 class _BaseStepTimeRule(DiagnosticRule[StepTimeAnalysisContext]):
     """
@@ -117,28 +135,49 @@ class RankStragglerRule(_BaseStepTimeRule):
             "h2d": "H2D",
             "sync_or_unattributed": "sync or unattributed work",
         }.get(evidence.component, evidence.component)
-        cause_coverage = non_negative_finite(
-            evidence.component_coverage.get(evidence.component, 0.0)
-        )
         if evidence.kind == "STRAGGLER":
-            summary = (
-                f"{_rank_str(rank)} is slower than victim "
-                f"{_rank_str(evidence.victim_rank)} "
-                f"(~{_pct(evidence.score)} impact); no measured component "
-                "explains "
-                f"{_pct(context.thresholds.straggler_cause_coverage_min)} "
-                "of visible wait cost."
+            metric_label = (
+                "Forward + Backward"
+                if evidence.visible_metric == "forward_backward"
+                else "Backward"
+            )
+            summary = _rank_measurement_comparison(
+                rank=evidence.victim_rank,
+                value_ms=evidence.component_victim_ms,
+                wording=f"spent {{value}} ms in {metric_label}",
+                comparison_rank=rank,
+                comparison_value_ms=evidence.component_culprit_ms,
+                note="cause not measured",
             )
             action = (
                 "Inspect synchronization, collectives, and unattributed work "
                 f"around {_rank_str(rank)}."
             )
+        elif evidence.kind == "INPUT_STRAGGLER":
+            summary = _rank_measurement_comparison(
+                rank=rank,
+                value_ms=evidence.component_culprit_ms,
+                wording="waited {value} ms for input",
+                comparison_rank=evidence.victim_rank,
+                comparison_value_ms=evidence.component_victim_ms,
+            )
+            action = f"Inspect {component_label} on {_rank_str(rank)}."
+        elif evidence.kind == "H2D_STRAGGLER":
+            summary = _rank_measurement_comparison(
+                rank=rank,
+                value_ms=evidence.component_culprit_ms,
+                wording="spent {value} ms on H2D transfers",
+                comparison_rank=evidence.victim_rank,
+                comparison_value_ms=evidence.component_victim_ms,
+            )
+            action = f"Inspect {component_label} on {_rank_str(rank)}."
         else:
-            summary = (
-                f"{_rank_str(rank)} has excess {component_label} burden "
-                f"relative to victim {_rank_str(evidence.victim_rank)} "
-                f"(~{_pct(evidence.score)} impact; "
-                f"~{_pct(cause_coverage)} of visible wait cost)."
+            summary = _rank_measurement_comparison(
+                rank=rank,
+                value_ms=evidence.component_culprit_ms,
+                wording="spent {value} ms in Forward",
+                comparison_rank=evidence.victim_rank,
+                comparison_value_ms=evidence.component_victim_ms,
             )
             action = f"Inspect {component_label} on {_rank_str(rank)}."
 

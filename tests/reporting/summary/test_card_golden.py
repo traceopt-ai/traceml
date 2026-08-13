@@ -926,7 +926,9 @@ def run_multi_input_straggler() -> CardDoc:
             "INPUT_STRAGGLER",
             "INPUT STRAGGLER",
             severity="crit",
-            summary="r0 has excess input wait burden relative to victim r1.",
+            summary=(
+                "r0 waited 254.5 ms for input, compared with 3.8 ms on r1."
+            ),
             action="Inspect input wait on the slow rank.",
             phase="input",
             score=0.83,

@@ -437,10 +437,7 @@ def test_final_text_uses_diagnosed_straggler_rank_rows():
         "INPUT_STRAGGLER",
         "INPUT STRAGGLER",
         severity="crit",
-        summary=(
-            "r0 has excess input wait burden relative to victim r1 "
-            "(~82.6% impact; ~100.0% of visible wait cost)."
-        ),
+        summary=("r0 waited 264.5 ms for input, compared with 13.8 ms on r1."),
         phase="input",
         action=(
             "Inspect input wait, collate_fn, preprocessing, and storage "
@@ -530,8 +527,7 @@ def test_final_text_uses_diagnosed_straggler_rank_rows():
     text = payload["text"]
     assert "Verdict: INPUT STRAGGLER  (CRITICAL)" in text
     assert payload["primary_diagnosis"]["summary"] == (
-        "r0 has excess input wait burden relative to victim r1 "
-        "(~82.6% impact; ~100.0% of visible wait cost)."
+        "r0 waited 264.5 ms for input, compared with 13.8 ms on r1."
     )
     assert "Why: R0/N0 waited 264.5 ms for input; R1/N1" in text
     assert "13.8 ms for input." in text
