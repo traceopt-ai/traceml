@@ -634,8 +634,10 @@ The step-memory diagnosis explains memory pressure, imbalance, and drift over ti
 
 The end-of-run summary always includes Step Memory status, compact Evidence,
 and available allocated/reserved average-per-step-peak rows. On a distributed
-run, Allocated and Reserved each use their own stored median and worst rank
-points; the displayed rank may therefore differ by metric.
+run, the stored median and worst reserved-memory points select grouped rank
+rows, and both Allocated and Reserved come from each selected row. If a
+reserved-memory selector is unavailable, its allocated-memory selector is
+used instead.
 
 It is based on:
 

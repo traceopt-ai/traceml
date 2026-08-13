@@ -6,9 +6,9 @@
 
 """Run-card Step Memory pane.
 
-The stored values are averages of per-step peaks.  In distributed output each
-Allocated/Reserved metric independently uses its stored median/worst rank
-point; the pane deliberately does not create a synthetic coherent pair.
+The stored values are averages of per-step peaks. In distributed output the
+reserved-memory median/worst points select coherent grouped rank rows, and
+both Allocated and Reserved are read from each selected row.
 """
 
 from __future__ import annotations
@@ -23,11 +23,10 @@ from traceml_ai.reporting.terminal_card.common import (
     diagnosis,
     format_capacity,
     format_scope,
+    group_row,
     group_rows,
-    identity,
     metadata,
     point,
-    point_value,
     status_spans,
 )
 from traceml_ai.reporting.terminal_card.layout import (
@@ -75,33 +74,28 @@ def _coverage_text(
     return None
 
 
-def _point_scope(
-    step_memory_summary: Mapping[str, Any], idx: Any
-) -> Optional[str]:
-    """Resolve one stored Step Memory point to its rank/node identity."""
-    row_identity = identity(step_memory_summary, idx)
+def _selected_row(
+    step_memory_summary: Mapping[str, Any], block: str
+) -> Mapping[str, Any]:
+    """Return the coherent rank row selected for a comparison column."""
+    for metric in ("peak_reserved_bytes", "peak_allocated_bytes"):
+        selected = point(step_memory_summary, block, metric)
+        if as_float(selected.get("value")) is None:
+            continue
+        row = group_row(step_memory_summary, selected.get("idx"))
+        if row:
+            return row
+    return {}
+
+
+def _row_scope(row: Mapping[str, Any]) -> Optional[str]:
+    """Return the rank/node identity of one selected grouped rank row."""
+    row_identity = as_mapping(row.get("identity"))
     rank = as_int(row_identity.get("global_rank"))
     if rank is None:
         return None
     node = as_int(row_identity.get("node_rank"))
     return format_scope(rank=rank, node=node)
-
-
-def _has_table_data(
-    step_memory_summary: Mapping[str, Any], *, multi_rank: bool
-) -> bool:
-    """Return whether the selected Step Memory table has measured values."""
-    metrics = ("peak_allocated_bytes", "peak_reserved_bytes")
-    if not multi_rank:
-        return any(
-            average(step_memory_summary, metric) is not None
-            for metric in metrics
-        )
-    return any(
-        point_value(step_memory_summary, block, metric) is not None
-        for block in ("median", "worst")
-        for metric in metrics
-    )
 
 
 def _append_table_header(doc: CardDoc, *, multi_rank: bool) -> None:
@@ -117,28 +111,6 @@ def _append_table_header(doc: CardDoc, *, multi_rank: bool) -> None:
         doc.text(f"{'avg per-step peak':<{_LABEL_WIDTH}}avg", STYLE_DIM)
 
 
-def _append_metric(
-    doc: CardDoc,
-    step_memory_summary: Mapping[str, Any],
-    *,
-    label: str,
-    metric: str,
-    multi_rank: bool,
-) -> None:
-    """Append one per-metric average-of-per-step-peaks row from JSON."""
-    median_point = point(step_memory_summary, "median", metric)
-    worst_point = point(step_memory_summary, "worst", metric)
-    append_table_row(
-        doc,
-        label=label,
-        average=format_capacity(average(step_memory_summary, metric)),
-        median=format_capacity(as_float(median_point.get("value"))),
-        worst=format_capacity(as_float(worst_point.get("value"))),
-        worst_scope=_point_scope(step_memory_summary, worst_point.get("idx")),
-        multi=multi_rank,
-    )
-
-
 def build_run_step_memory_pane(
     step_memory_summary: Mapping[str, Any],
     *,
@@ -149,6 +121,10 @@ def build_run_step_memory_pane(
     doc = CardDoc(width=width)
     section_diagnosis = diagnosis(step_memory_summary)
     multi_rank = _rank_count(step_memory_summary) > 1
+    median_row = _selected_row(step_memory_summary, "median")
+    worst_row = _selected_row(step_memory_summary, "worst")
+    median_metrics = as_mapping(median_row.get("metrics"))
+    worst_metrics = as_mapping(worst_row.get("metrics"))
     doc.wrapped_spans(
         *status_spans(
             "STEP MEMORY",
@@ -166,25 +142,36 @@ def build_run_step_memory_pane(
         "NO_GPU",
     }:
         return doc
-    if not _has_table_data(step_memory_summary, multi_rank=multi_rank):
+    metrics = (
+        ("Allocated", "peak_allocated_bytes"),
+        ("Reserved", "peak_reserved_bytes"),
+    )
+    if multi_rank:
+        has_table_data = any(
+            as_float(row.get(metric)) is not None
+            for row in (median_metrics, worst_metrics)
+            for _, metric in metrics
+        )
+    else:
+        has_table_data = any(
+            average(step_memory_summary, metric) is not None
+            for _, metric in metrics
+        )
+    if not has_table_data:
         return doc
 
     doc.blank()
     _append_table_header(doc, multi_rank=multi_rank)
-    _append_metric(
-        doc,
-        step_memory_summary,
-        label="Allocated",
-        metric="peak_allocated_bytes",
-        multi_rank=multi_rank,
-    )
-    _append_metric(
-        doc,
-        step_memory_summary,
-        label="Reserved",
-        metric="peak_reserved_bytes",
-        multi_rank=multi_rank,
-    )
+    for label, metric in metrics:
+        append_table_row(
+            doc,
+            label=label,
+            average=format_capacity(average(step_memory_summary, metric)),
+            median=format_capacity(as_float(median_metrics.get(metric))),
+            worst=format_capacity(as_float(worst_metrics.get(metric))),
+            worst_scope=_row_scope(worst_row),
+            multi=multi_rank,
+        )
     return doc
 
 

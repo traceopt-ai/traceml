@@ -302,8 +302,9 @@ in `global_ranks_used`.
 The distributed Run card resolves
 `step_time.global.median.step_time_ms.idx` to one grouped row and reads all
 displayed phases from that row. Its upper-pane Step Memory table reads
-Allocated and Reserved independently from their stored median/worst points;
-the associated rank identity comes from each selected point's grouped row.
+the median and worst reserved-memory point indexes and reads Allocated and
+Reserved from each selected grouped row. If a reserved-memory selector is
+unavailable, the corresponding allocated-memory point selects the row.
 All displayed values remain averages of per-step peaks over the aligned
 window. These are presentation selection rules; they do not add aggregates to
 the schema.

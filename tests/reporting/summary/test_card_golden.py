@@ -565,7 +565,7 @@ def _step_memory_multi_rank(
     node_ranks: Optional[Dict[int, int]] = None,
     ranks: Tuple[int, ...] = (0, 1, 2, 3),
 ) -> Dict[str, Any]:
-    """Build multi-rank Step Memory data with explicit per-metric points."""
+    """Build multi-rank Step Memory data with explicit points and rank rows."""
     return _section(
         diagnosis=diagnosis,
         metadata={"global_ranks_used": len(ranks)},
@@ -2194,8 +2194,8 @@ GOLDENS = {
 |                                                               ||  Evidence: None                                                                         |
 |                                                               ||                                                                                         |
 |                                                               ||  avg per-step peak           median rank avg     worst rank avg                         |
-|                                                               ||  Allocated                   999.0 GB            888.0 GB, R2/N1                        |
-|                                                               ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
+|                                                               ||  Allocated                                       5.0 GB, R1/N0                          |
+|                                                               ||  Reserved                                        6.0 GB, R1/N0                          |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
 |  Evidence: None                                               ||  Evidence: None                                                                         |
@@ -2226,7 +2226,7 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   999.0 GB            3.0 GB, R3/N1                          |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              3.0 GB, R3/N1                          |
 |  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              4.0 GB, R3/N1                          |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
@@ -2262,7 +2262,7 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   999.0 GB            888.0 GB, R2/N1                        |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
 |  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
@@ -2418,7 +2418,7 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   999.0 GB            888.0 GB, R2/N1                        |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
 |  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
@@ -2454,7 +2454,7 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   999.0 GB            888.0 GB, R2/N1                        |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
 |  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
@@ -2490,7 +2490,7 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   999.0 GB            888.0 GB, R2/N1                        |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
 |  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
@@ -2527,7 +2527,7 @@ GOLDENS = {
 |  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
-|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   999.0 GB            888.0 GB, R2/N1                        |
+|  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
 |  │  ├─ Backward       50.0 ms   50%                           ||  Reserved                    4.0 GB              6.0 GB, R1/N0                          |
 |  │  └─ Optimizer      10.0 ms   10%                           ||                                                                                         |
 |  ├─ H2D                2.0 ms    2%                           ||                                                                                         |
@@ -3200,32 +3200,32 @@ def test_run_why_falls_back_when_diagnosed_straggler_row_is_missing() -> None:
     assert "Why: Legacy straggler summary stays unchanged." in text
 
 
-@pytest.mark.parametrize("reserved_points_measured", [True, False])
-def test_multi_process_step_memory_uses_stored_per_metric_points(
-    reserved_points_measured: bool,
-) -> None:
-    text = card_to_plain(
-        _card(
-            **_coherent_multi_inputs(
-                reserved_points_measured=reserved_points_measured
-            )
-        )
+def test_multi_process_step_memory_uses_reserved_selected_rows() -> None:
+    text = card_to_plain(_card(**_coherent_multi_inputs()))
+
+    assert (
+        "Allocated                   3.0 GB              5.0 GB, R1/N0" in text
     )
-    if reserved_points_measured:
-        assert (
-            "Allocated                   999.0 GB            888.0 GB, R2/N1"
-            in text
-        )
-        assert (
-            "Reserved                    4.0 GB              6.0 GB, R1/N0"
-            in text
-        )
-    else:
-        assert (
-            "Allocated                   999.0 GB            888.0 GB, R1/N0"
-            in text
-        )
-        assert "Reserved" not in text
+    assert (
+        "Reserved                    4.0 GB              6.0 GB, R1/N0" in text
+    )
+    assert "999.0 GB" not in text
+    assert "888.0 GB" not in text
+
+
+def test_multi_process_step_memory_falls_back_to_allocated_selectors() -> None:
+    text = card_to_plain(
+        _card(**_coherent_multi_inputs(reserved_points_measured=False))
+    )
+
+    assert (
+        "Allocated                   3.0 GB              5.0 GB, R1/N0" in text
+    )
+    assert (
+        "Reserved                    4.0 GB              6.0 GB, R1/N0" in text
+    )
+    assert "999.0 GB" not in text
+    assert "888.0 GB" not in text
 
 
 def test_multi_process_step_memory_keeps_metric_rows_when_points_share_a_rank() -> (
@@ -3234,11 +3234,48 @@ def test_multi_process_step_memory_keeps_metric_rows_when_points_share_a_rank() 
     text = plain("run_multi_duplicate_memory_pair")
 
     assert (
-        "Allocated                   999.0 GB            3.0 GB, R3/N1" in text
+        "Allocated                   3.0 GB              3.0 GB, R3/N1" in text
     )
     assert (
         "Reserved                    4.0 GB              4.0 GB, R3/N1" in text
     )
+
+
+def test_multi_process_step_memory_preserves_selected_zero_values() -> None:
+    inputs = _coherent_multi_inputs()
+    step_memory = inputs["step_memory"]
+    for block, rank in (("median", "3"), ("worst", "1")):
+        for metric in ("peak_allocated_bytes", "peak_reserved_bytes"):
+            step_memory["global"][block][metric] = _point(0.0, rank)
+    for rank in ("1", "3"):
+        step_memory["groups"]["rows"][rank]["metrics"] = {
+            "peak_allocated_bytes": 0.0,
+            "peak_reserved_bytes": 0.0,
+        }
+
+    text = card_to_plain(_card(**inputs))
+
+    assert (
+        "Allocated                   0.0 MB              0.0 MB, R1/N0" in text
+    )
+    assert (
+        "Reserved                    0.0 MB              0.0 MB, R1/N0" in text
+    )
+
+
+def test_multi_process_step_memory_omits_missing_selected_rows() -> None:
+    inputs = _coherent_multi_inputs()
+    step_memory = inputs["step_memory"]
+    for block in ("median", "worst"):
+        for metric in ("peak_allocated_bytes", "peak_reserved_bytes"):
+            step_memory["global"][block][metric]["idx"] = "missing"
+
+    text = card_to_plain(_card(**inputs))
+
+    assert "STEP MEMORY: BALANCED" in text
+    assert "avg per-step peak" not in text
+    assert "999.0 GB" not in text
+    assert "888.0 GB" not in text
 
 
 def test_rendering_does_not_mutate_summary_inputs() -> None:
@@ -3255,12 +3292,13 @@ def test_partial_rank_payload_reports_missing_coherent_rows() -> None:
 
     assert "STEP TIMING unavailable: selected rank row missing." in text
     assert (
-        "Allocated                   999.0 GB            888.0 GB, R2/N1"
-        in text
+        "Allocated                                       5.0 GB, R1/N0" in text
     )
     assert (
-        "Reserved                    4.0 GB              6.0 GB, R1/N0" in text
+        "Reserved                                        6.0 GB, R1/N0" in text
     )
+    assert "999.0 GB" not in text
+    assert "888.0 GB" not in text
 
 
 def test_resource_blocks_preserve_measured_zero_and_omit_null() -> None:
