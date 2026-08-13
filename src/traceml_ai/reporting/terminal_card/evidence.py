@@ -9,75 +9,30 @@ the fallback.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional
 
-from traceml_ai.reporting.terminal_card.common import format_scope
+from traceml_ai.reporting.terminal_card.common import (
+    as_float,
+    as_int,
+    as_mapping,
+    as_sequence,
+    format_scope,
+    identity_for_rank,
+)
 
 _NORMAL_KINDS = frozenset({"NORMAL", "BALANCED"})
 
 
-def _mapping(value: Any) -> Mapping[str, Any]:
-    """Return a mapping, or an empty mapping for malformed payload blocks."""
-    return value if isinstance(value, Mapping) else {}
-
-
-def _sequence(value: Any) -> Sequence[Any]:
-    """Return a non-string sequence, or an empty tuple."""
-    if isinstance(value, Sequence) and not isinstance(value, str):
-        return value
-    return ()
-
-
-def _float(value: Any) -> Optional[float]:
-    """Return a numeric payload value as a float when possible."""
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _int(value: Any) -> Optional[int]:
-    """Return a numeric payload value as an integer when possible."""
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _group_rows(section: Mapping[str, Any]) -> Mapping[str, Any]:
-    return _mapping(_mapping(section.get("groups")).get("rows"))
-
-
-def _identity_for_rank(
-    section: Mapping[str, Any], rank: Optional[int]
-) -> Mapping[str, Any]:
-    """Resolve a stored rank through existing grouped-row identities."""
-    if rank is None:
-        return {}
-    direct = _mapping(
-        _mapping(_group_rows(section).get(str(rank))).get("identity")
-    )
-    if _int(direct.get("global_rank")) == rank:
-        return direct
-    for row in _group_rows(section).values():
-        identity = _mapping(_mapping(row).get("identity"))
-        if _int(identity.get("global_rank")) == rank:
-            return identity
-    return direct
-
-
 def _system_scope(diagnosis: Mapping[str, Any]) -> Optional[str]:
     """Return the existing structured System node/GPU scope, if any."""
-    scope = _mapping(_mapping(diagnosis.get("evidence")).get("scope"))
+    scope = as_mapping(as_mapping(diagnosis.get("evidence")).get("scope"))
     node = scope.get("node_rank", scope.get("node"))
     return format_scope(
-        node=_int(node),
+        node=as_int(node),
         gpu=(
-            _int(scope.get("gpu_idx")) if scope.get("level") == "gpu" else None
+            as_int(scope.get("gpu_idx"))
+            if scope.get("level") == "gpu"
+            else None
         ),
     )
 
@@ -87,8 +42,8 @@ def _rank_scope(
 ) -> Optional[str]:
     if rank is None:
         return None
-    identity = _identity_for_rank(section, rank)
-    return format_scope(rank=rank, node=_int(identity.get("node_rank")))
+    identity = identity_for_rank(section, rank)
+    return format_scope(rank=rank, node=as_int(identity.get("node_rank")))
 
 
 def _diagnosis_rank(
@@ -101,18 +56,18 @@ def _diagnosis_rank(
         "highest_rss_rank",
         "rank",
     ):
-        rank = _int(evidence.get(key))
+        rank = as_int(evidence.get(key))
         if rank is not None:
             return rank
-    for value in _sequence(diagnosis.get("ranks")):
-        rank = _int(value)
+    for value in as_sequence(diagnosis.get("ranks")):
+        rank = as_int(value)
         if rank is not None:
             return rank
     return None
 
 
 def _pct(value: Any) -> Optional[str]:
-    numeric = _float(value)
+    numeric = as_float(value)
     if numeric is None:
         return None
     return f"{numeric:.1f}%"
@@ -120,7 +75,7 @@ def _pct(value: Any) -> Optional[str]:
 
 def _bytes(value: Any) -> Optional[str]:
     """Format an existing byte value compactly without deriving a metric."""
-    numeric = _float(value)
+    numeric = as_float(value)
     if numeric is None:
         return None
     sign = "+" if numeric > 0.0 else ""
@@ -156,7 +111,7 @@ def _system_evidence(
     entry = fields.get(kind)
     if entry is None:
         return None
-    value = _float(evidence.get(entry[0]))
+    value = as_float(evidence.get(entry[0]))
     if value is None:
         return None
     if kind == "HIGH_GPU_TEMPERATURE":
@@ -193,7 +148,7 @@ def _process_evidence(
             scope,
         )
     if kind == "GPU_MEMORY_RESERVED_OVERHANG":
-        ratio = _float(evidence.get("gpu_mem_reserved_overhang_ratio"))
+        ratio = as_float(evidence.get("gpu_mem_reserved_overhang_ratio"))
         return _scope_text(
             (
                 f"CUDA reserved/allocated {ratio:.2f}x"
@@ -231,7 +186,7 @@ def _step_memory_evidence(
     family = "CUDA reserved" if "reserved" in metric else "CUDA allocated"
     scope = _rank_scope(section, _diagnosis_rank(diagnosis, evidence))
     if kind == "HIGH_PRESSURE":
-        pressure_frac = _float(evidence.get("pressure_frac"))
+        pressure_frac = as_float(evidence.get("pressure_frac"))
         value = (
             _pct(pressure_frac * 100.0) if pressure_frac is not None else None
         )
@@ -239,8 +194,8 @@ def _step_memory_evidence(
             f"{family} pressure {value}" if value else None, scope
         )
     if kind == "IMBALANCE":
-        skew_pct = _float(evidence.get("skew_pct"))
-        pressure_frac = _float(evidence.get("pressure_frac"))
+        skew_pct = as_float(evidence.get("skew_pct"))
+        pressure_frac = as_float(evidence.get("pressure_frac"))
         skew = _pct(skew_pct * 100.0) if skew_pct is not None else None
         pressure = (
             _pct(pressure_frac * 100.0) if pressure_frac is not None else None
@@ -253,7 +208,7 @@ def _step_memory_evidence(
         )
     if kind in {"CREEP_CONFIRMED", "CREEP_EARLY"}:
         growth = _bytes(evidence.get("overall_abs_delta_bytes"))
-        growth_fraction = _float(evidence.get("overall_worst_growth_pct"))
+        growth_fraction = as_float(evidence.get("overall_worst_growth_pct"))
         growth_pct = (
             _pct(growth_fraction * 100.0)
             if growth_fraction is not None
@@ -290,11 +245,11 @@ def format_section_evidence(
     leave the evidence row blank. Unknown, incomplete, and older payloads keep
     their stored diagnosis summary, which is the stable compatibility path.
     """
-    diagnosis = _mapping(section.get("diagnosis"))
+    diagnosis = as_mapping(section.get("diagnosis"))
     if str(diagnosis.get("kind") or "NO_DATA") in _NORMAL_KINDS:
         # NORMAL/BALANCED headings and metric tables need no evidence filler.
         return None
-    evidence = _mapping(diagnosis.get("evidence"))
+    evidence = as_mapping(diagnosis.get("evidence"))
     if section_name == "system":
         compact = _system_evidence(diagnosis, evidence)
     elif section_name == "process":
