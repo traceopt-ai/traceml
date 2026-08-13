@@ -131,6 +131,20 @@ def test_view_summary_re_renders_an_older_card(tmp_path) -> None:
     assert "256 steps analyzed" in text
 
 
+@pytest.mark.parametrize("schema_version", [1.5, 1.6])
+def test_view_summary_re_render_keeps_pre_1_7_card(
+    tmp_path, schema_version
+) -> None:
+    summary_path = tmp_path / "summary.json"
+    payload = _payload_with_stored_card(_OLD_CARD)
+    payload["schema_version"] = schema_version
+    _write_json(summary_path, payload)
+
+    text = view_summary(summary_path, print_to_stdout=False, re_render=True)
+
+    assert text == _OLD_CARD
+
+
 def test_view_summary_default_still_prints_the_stored_card(tmp_path) -> None:
     summary_path = tmp_path / "summary.json"
     _write_json(summary_path, _payload_with_stored_card(_OLD_CARD))
@@ -152,21 +166,20 @@ def test_view_summary_re_render_infers_the_watch_profile(tmp_path) -> None:
 
 
 def test_view_summary_re_render_survives_a_bare_payload(tmp_path) -> None:
-    """A payload with no sections still renders, it does not raise."""
+    """An unversioned payload keeps its stored card rather than raising."""
     summary_path = tmp_path / "summary.json"
     _write_json(summary_path, {"text": _OLD_CARD})
 
     text = view_summary(summary_path, print_to_stdout=False, re_render=True)
 
-    assert "TraceML Run Summary" in text
-    assert "Section Status" not in text
+    assert text == _OLD_CARD
 
 
 def test_view_summary_re_render_falls_back_when_rendering_fails(
     tmp_path, monkeypatch
 ) -> None:
     """A read-only command must never fail because a rebuild failed."""
-    import traceml_ai.reporting.summary_card as summary_card
+    import traceml_ai.reporting.terminal_card.card as summary_card
 
     def _boom(*_args, **_kwargs):
         raise ValueError("renderer exploded")

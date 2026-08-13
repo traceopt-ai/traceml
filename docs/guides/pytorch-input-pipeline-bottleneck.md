@@ -52,7 +52,7 @@ traceml view logs/<run_name>/final_summary.json
 
 ## What to look for
 
-Start with `Verdict`, then check `Where a step goes`.
+Start with `Verdict`, then check the selected-clock step decomposition.
 
 For input pipeline problems, the most relevant diagnoses are:
 
@@ -65,19 +65,32 @@ Example excerpt:
 
 ```text
 Verdict: INPUT STRAGGLER  (CRITICAL)
-Why: rank 0 (node n0) waits 254.5 ms per step for input; the median rank
-waits 3.8 ms. All 4 ranks then advance at rank 0's pace.
+Why: R0/N0 waited 254.5 ms for input; R1/N0 waited 3.8 ms for input.
+Next: Inspect input wait on the slow rank.
+Scope: N = node · R = global rank · G = GPU index
 
-Where a step goes (median rank, GPU clock)         worst rank
-Step Time           303.7 ms  100%                 304.1 ms (r0)
-├─ Input Wait         3.8 ms    1%                 254.5 ms (r0)  ◀  67x
-└─ Traced Step Time 299.9 ms   99%
-   ├─ Compute       259.5 ms   85%
-   ├─ H2D             1.1 ms   <1%
-   └─ Residual       39.3 ms   13%
+STEP TIMING (Median R1/N0), GPU Clock              || STEP MEMORY: BALANCED · 4/4 ranks
+Step Time            303.7 ms  100%                ||
+├─ Input Wait          3.8 ms    1%                 ||
+├─ Compute         259.5 ms   85%                  || avg per-step peak       median rank avg     worst rank avg
+│  ├─ Forward      80.0 ms   26%                    || Allocated               8.5 GB              9.4 GB, R2/N1
+│  ├─ Backward    169.5 ms   56%                    || Reserved                8.9 GB              9.8 GB, R2/N1
+│  └─ Optimizer    10.0 ms    3%                    ||
+├─ H2D               1.1 ms   <1%                  ||
+└─ Residual         39.3 ms   13%                  ||
+DataLoader fetch: 3.7 ms (CPU, supplemental)       ||
 
-Next: inspect dataloader, collate_fn, preprocessing, and storage on rank 0
-(node n0).
+SYSTEM METRICS: LOW GPU UTIL · 2/2 nodes                     ||  PROCESS METRICS: NORMAL · 4/4 ranks
+Evidence: GPU utilization averaged 14%.                      ||
+                                                               ||
+                       median node avg   worst node avg      ||                       median rank avg   worst rank avg
+CPU                    18%               26%, N1             ||  CPU capacity         12%               81%, R2/N1
+RAM used               16.0 GB (27%)     20.8 GB (35%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0
+GPU util               9%                9%, N1              ||  CUDA used            2.9 GB            4.6 GB, R3/N1
+GPU memory/device      5.0 GB (31%)      7.0 GB (44%), N1    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1
+GPU temperature        58C               70C, N1             ||
+GPU power              220W              280W, N1            ||
+
 ```
 
 Read this as:
@@ -85,6 +98,12 @@ Read this as:
 - input time is large enough to affect training speed
 - rank 0 is slower in the input path than the typical rank
 - other ranks may wait because distributed training follows the slowest rank
+
+The median-rank timing tree is one real rank, not a combination of per-metric
+medians. The `Evidence` lines use stored diagnosis summaries and structured
+scopes; the top-level `Why` line reads the diagnosed culprit and victim values
+from their stored rank rows. System and Process averages cover their own telemetry
+observation windows and are not aligned to these steps.
 
 If the diagnosis is `INPUT-BOUND`, inspect the whole input path. If the
 diagnosis is `INPUT STRAGGLER`, inspect the called-out rank first.

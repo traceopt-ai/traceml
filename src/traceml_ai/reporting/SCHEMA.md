@@ -48,18 +48,28 @@ Sections:
 
 `meta` contains run-level identity and observed topology. Section-level
 `metadata` remains section-specific coverage and metric-contract information.
+The terminal card labels a GPU count as observed only when it comes from
+`system.metadata.gpus_observed`; it does not assert that every observed GPU
+was used by the workload.
 
 `primary_diagnosis` is a top-level performance finding promoted from existing
 section diagnoses. It answers "why was training slow?" and is intentionally
 narrower than section-level health/resource diagnoses.
 
-`text` is a compact human-readable verdict card. It is presentation text for
-the CLI/TXT artifact, not a structured contract for downstream parsers. It
-leads with `Verdict` and `Why`, then a hierarchical step-timing tree, `Next`,
-and bounded corroboration. It is profile-aware: `traceml watch` renders a
-host-and-process health card and never shows step timing, because watch does
-not collect it. Detailed section prose remains in each section-local `card`
-field.
+`text` is a compact human-readable CLI/TXT card, not a parser contract. Run
+renders `Verdict`, `Why`, and `Next`, followed by fixed Step Timing/Step Memory
+and System/Process panes; Watch retains its compact health card. The Run card
+uses only stored summary values: a distributed timing tree reads the rank at
+`global.median.step_time_ms.idx`, resource tables use stored average or
+median/worst points, and `Why` reads attributed culprit/victim rows. Values are
+not recomputed. Distributed cards print
+`Scope: N = node · R = global rank · G = GPU index`; normal resources leave
+the evidence row blank, and non-normal resources show compact stored evidence
+with the available scope.
+
+`text` is profile-aware: `traceml watch` renders a host-and-process health card
+and never shows step timing, because watch does not collect it. Detailed
+section prose remains in each section-local `card` field.
 
 ## Primary Diagnosis Shape
 
@@ -290,6 +300,23 @@ Fallback evidence types are:
 `step_time` and `step_memory` use `common_steps` alignment. If a rank does not
 have the common step window, it can be counted in `global_ranks_seen` but not
 in `global_ranks_used`.
+
+The distributed Run card resolves
+`step_time.global.median.step_time_ms.idx` to one grouped row and reads all
+displayed phases from that row. Its upper-pane Step Memory table reads
+the median and worst reserved-memory point indexes and reads Allocated and
+Reserved from each selected grouped row. If a reserved-memory selector is
+unavailable, the corresponding allocated-memory point selects the row.
+All displayed values remain averages of per-step peaks over the aligned
+window. These are presentation selection rules; they do not add aggregates to
+the schema.
+
+`system` and `process` use their own sample observation windows. Their averages
+are not aligned to the `step_time` or `step_memory` common-step window.
+The Process table reads RSS and CUDA-reserved byte/percentage pairs from one
+grouped rank row, anchored by the stored percentage point with the byte point
+as a null-percentage fallback. These are presentation selection rules and do
+not create new aggregates or diagnoses.
 
 ## Metric Names
 

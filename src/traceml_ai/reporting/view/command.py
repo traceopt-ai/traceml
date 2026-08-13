@@ -55,12 +55,18 @@ def view_summary(
 def _re_rendered_card(payload: dict, *, stored_text: str) -> str:
     """Rebuild the card from the payload, falling back to the stored text.
 
-    A payload old or partial enough to defeat the current renderer must not
-    turn a read-only command into an error, so any failure degrades to the
-    text the artifact already carries.
+    Pre-1.7 payloads use different Step Time field meanings, so rendering them
+    with the current card could mislabel historical timing. Keep their stored
+    card instead. Any other rendering failure also degrades to stored text.
     """
     try:
-        from traceml_ai.reporting.summary_card import (
+        if float(payload.get("schema_version")) < 1.7:
+            return stored_text
+    except (TypeError, ValueError):
+        return stored_text
+
+    try:
+        from traceml_ai.reporting.terminal_card.card import (
             build_card_from_payload,
             card_profile_from_text,
             card_to_plain,

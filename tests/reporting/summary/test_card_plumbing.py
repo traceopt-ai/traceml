@@ -28,10 +28,18 @@ from tests.sqlite_fixtures import (
 )
 from traceml_ai.reporting import final as reporting_final
 from traceml_ai.reporting.final import generate_summary
-from traceml_ai.reporting.summary_card import card_profile_from_text
+from traceml_ai.reporting.terminal_card import card as terminal_card
+from traceml_ai.reporting.terminal_card.card import card_profile_from_text
 from traceml_ai.sdk import summary_client
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def test_terminal_card_facade_keeps_its_public_symbols() -> None:
+    """The module split must not change the established card import surface."""
+    assert all(hasattr(terminal_card, name) for name in terminal_card.__all__)
+    rendered = terminal_card.card_to_plain(terminal_card.build_fallback_card())
+    assert "TraceML Run Summary" in rendered
 
 
 class _TTYBuffer(io.StringIO):
@@ -282,4 +290,4 @@ def test_card_failure_degrades_to_a_minimal_card(
     assert "Verdict:" in text
     assert "final_summary.json" in text
     for line in lines:
-        assert len(line) == 78
+        assert len(line) == 156

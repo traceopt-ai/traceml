@@ -68,8 +68,9 @@ def _diagnosis(
     summary: str = "summary",
     action: str = "action",
     phase: str | None = None,
+    **extra,
 ) -> dict:
-    return {
+    diagnosis = {
         "kind": kind,
         "status": status,
         "severity": severity,
@@ -77,6 +78,8 @@ def _diagnosis(
         "action": action,
         "phase": phase,
     }
+    diagnosis.update(extra)
+    return diagnosis
 
 
 def _payload(
@@ -185,7 +188,7 @@ def test_final_summary_fixture_schema_contains_all_sections(tmp_path) -> None:
     assert payload["system"]["diagnosis"]["status"] == "NORMAL"
     assert "NO GPU" not in payload["system"]["card"]
     assert "TraceML Run Summary" in payload["text"]
-    assert "Verdict: NOT ENOUGH STEP DATA" in payload["text"]
+    assert "Verdict: INSUFFICIENT STEP-TIME DATA" in payload["text"]
     assert "Next:" in payload["text"]
 
 
@@ -227,7 +230,7 @@ def test_final_report_generator_preserves_summary_schema_and_order():
     text = payload["text"]
     assert "TraceML Run Summary" in text
     assert "10.0s" in text
-    assert "Verdict: NOT ENOUGH STEP DATA" in text
+    assert "Verdict: INSUFFICIENT STEP-TIME DATA" in text
     # The verdict card replaced the old section-status and evidence tables.
     assert "Section Status" not in text
     assert "System Evidence" not in text
@@ -258,7 +261,7 @@ def test_final_report_generator_fails_open_for_one_section():
         "INSUFFICIENT_STEP_TIME_DATA"
     )
     assert "TraceML Run Summary" in payload["text"]
-    assert "Verdict: NOT ENOUGH STEP DATA" in payload["text"]
+    assert "Verdict: INSUFFICIENT STEP-TIME DATA" in payload["text"]
 
 
 def test_final_text_uses_single_process_average_layout():
@@ -305,25 +308,26 @@ def test_final_text_uses_single_process_average_layout():
 
     text = payload["text"]
     assert "Verdict: INPUT-BOUND  (CRITICAL)" in text
-    # No composed score on this diagnosis, so the verbatim JSON summary and
-    # action are used (the F7 fallback path).
+    # The terminal card presents the stored primary summary and action.
     assert "Why: Input wait is 48.5% of the typical GPU Step Time." in text
     assert "Next: Increase workers, prefetch, or storage throughput." in text
-    assert "Where a step goes (average, GPU clock)" in text
+    assert "STEP TIMING (Window Average), GPU Clock" in text
     assert "Step Time           269.9 ms  100%" in text
     assert "├─ Input Wait       130.8 ms   48%" in text
-    assert "└─ Traced Step Time 139.1 ms   52%" in text
-    assert "Supporting: GPU util 0% avg" in text
-    # Single-machine cards carry no distributed vocabulary and no tables.
+    assert "Traced Step Time" not in text
+    assert "├─ Compute            6.9 ms    3%" in text
+    assert "SYSTEM METRICS: LOW GPU UTIL" in text
+    assert "GPU util               0%" in text
+    # Single-process cards carry no distributed comparison tables.
     assert "Section Status" not in text
     assert "Median" not in text
     assert "Worst" not in text
     assert "Skew" not in text
-    assert "rank" not in text
     assert "node" not in text
-    # DataLoader Fetch is supplemental; it is never a timing-tree row.
+    assert "1 rank" in text
+    # DataLoader fetch is supplemental; it is never a timing-tree row.
     assert "DataLoader Fetch" not in text
-    assert "supplemental" not in text
+    assert "DataLoader fetch: 120.0 ms (CPU, supplemental)" in text
     assert payload["step_time"]["card"] == "STEP TIME ORIGINAL CARD"
     assert payload["system"]["card"] == "SYSTEM ORIGINAL CARD"
 
@@ -363,7 +367,7 @@ def test_final_text_omits_never_measured_step_metrics():
     assert "H2D" not in text
     assert "Compute" not in text
     assert "Residual" not in text
-    assert "Verdict: STEP TIMING INCOMPLETE" in text
+    assert "Verdict: INSUFFICIENT STEP-TIME DATA" in text
 
 
 def test_final_text_uses_selected_step_time_for_phase_shares():
@@ -389,10 +393,10 @@ def test_final_text_uses_selected_step_time_for_phase_shares():
     text = payload["text"]
     # Shares use the selected-clock step_time_ms denominator.
     assert "Step Time            52.0 ms  100%" in text
-    assert "└─ Traced Step Time  50.0 ms   96%" in text
-    assert "├─ Compute        48.0 ms   92%" in text
+    assert "Traced Step Time" not in text
+    assert "├─ Compute           48.0 ms   92%" in text
     assert "DataLoader Fetch" not in text
-    assert "supplemental" not in text
+    assert "DataLoader fetch: 0.5 ms (CPU, supplemental)" in text
     assert "Total" not in text
 
 
@@ -405,6 +409,7 @@ def test_final_text_includes_h2d_bound_diagnosis():
             severity="crit",
             summary="H2D transfer is 14.3% of the typical GPU Step Time.",
             action="Inspect pinned memory and batch transfers.",
+            share_pct=0.143,
         ),
         global_summary={
             "window": {"steps_analyzed": 60, "diagnosis_clock": "gpu"},
@@ -423,26 +428,27 @@ def test_final_text_includes_h2d_bound_diagnosis():
     payload = _final_payload(step_time)
 
     assert "Verdict: H2D-BOUND  (CRITICAL)" in payload["text"]
-    assert "Why: H2D transfer is 14.3% of the typical GPU Step Time." in (
-        payload["text"]
-    )
-    assert "├─ H2D            20.0 ms   14%" in payload["text"]
+    assert "Why: H2D transfers took 14% of Step Time." in payload["text"]
+    assert "├─ H2D               20.0 ms   14%" in payload["text"]
 
 
-def test_final_text_uses_multi_process_comparison_layout():
+def test_final_text_uses_diagnosed_straggler_rank_rows():
     step_diag = _diagnosis(
         "INPUT_STRAGGLER",
         "INPUT STRAGGLER",
         severity="crit",
-        summary=(
-            "r0 has excess input wait burden relative to victim r1 "
-            "(~82.6% impact; ~100.0% of visible wait cost)."
-        ),
+        summary=("r0 waited 264.5 ms for input, compared with 13.8 ms on r1."),
         phase="input",
         action=(
             "Inspect input wait, collate_fn, preprocessing, and storage "
             "on the slow rank."
         ),
+        evidence={
+            "culprit_rank": 0,
+            "victim_rank": 1,
+            "visible_metric": "backward",
+            "visible_cost_ms": 250.7,
+        },
     )
     step_time = _payload(
         metadata={"global_ranks_used": 2},
@@ -473,11 +479,19 @@ def test_final_text_uses_multi_process_comparison_layout():
             "rows": {
                 "0": {
                     "identity": {"global_rank": 0, "node_rank": 0},
-                    "metrics": {},
+                    "metrics": {"input_wait_ms": 264.5},
                 },
                 "1": {
                     "identity": {"global_rank": 1, "node_rank": 1},
-                    "metrics": {},
+                    "metrics": {
+                        "dataloader_fetch_cpu_ms": 3.8,
+                        "input_wait_ms": 13.8,
+                        "step_time_ms": 303.7,
+                        "traced_step_time_ms": 299.9,
+                        "compute_ms": 259.5,
+                        "residual_ms": 40.5,
+                        "h2d_ms": 0.2,
+                    },
                 },
             },
         },
@@ -513,22 +527,20 @@ def test_final_text_uses_multi_process_comparison_layout():
     text = payload["text"]
     assert "Verdict: INPUT STRAGGLER  (CRITICAL)" in text
     assert payload["primary_diagnosis"]["summary"] == (
-        "r0 has excess input wait burden relative to victim r1 "
-        "(~82.6% impact; ~100.0% of visible wait cost)."
+        "r0 waited 264.5 ms for input, compared with 13.8 ms on r1."
     )
-    # The Why line is composed from rank-comparison evidence.
-    assert "Why: rank 0 (node n0) waits 264.5 ms per step for input" in text
-    assert "the median rank" in text
-    assert "Where a step goes (median rank, GPU clock)" in text
-    assert "worst rank" in text
+    assert "Why: R0/N0 waited 264.5 ms for input; R1/N1" in text
+    assert "13.8 ms for input." in text
     assert (
-        "├─ Input Wait        13.8 ms    5%                 264.5 ms (r0)"
-        "  ◀  19x" in text
+        "Next: Inspect input wait, collate_fn, preprocessing, and storage "
+        "on the" in text
     )
-    assert (
-        "Step Time           303.7 ms  100%                 304.1 ms (r0)"
-        in text
-    )
+    assert "STEP TIMING (Median R1/N1), GPU Clock" in text
+    assert "├─ Input Wait        13.8 ms    5%" in text
+    assert "Step Time           303.7 ms  100%" in text
+    assert "Input comparison:" not in text
+    assert "x median" not in text
+    assert "◀ cause" not in text
     # The old wide median/worst/skew/scope table is gone.
     assert "Skew" not in text
     assert "rank=r" not in text
