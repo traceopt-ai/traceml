@@ -239,10 +239,11 @@ def build_run_process_pane(
             details_style=STYLE_DIM,
         )
     )
-    stages.evidence.wrapped(
-        format_run_evidence("process", process_summary) or "None",
-        label="Evidence: ",
-    )
+    evidence = format_run_evidence("process", process_summary)
+    if evidence:
+        stages.evidence.wrapped(evidence, label="Evidence: ")
+    else:
+        stages.evidence.blank()
     stages.spacer.blank()
     if str(section_diagnosis.get("kind") or "NO_DATA") == "NO_DATA":
         return stages

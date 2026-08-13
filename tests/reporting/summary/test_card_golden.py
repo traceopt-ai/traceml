@@ -1846,7 +1846,7 @@ GOLDENS = {
 |  Next: Increase workers, prefetch, or storage throughput.                                                                                                |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time           200.4 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           200.4 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait       128.0 ms   64%  ◀  cause                 ||                                                                                         |
 |  ├─ Compute           68.0 ms   34%                           ||  avg per-step peak           avg                                                        |
 |  │  ├─ Forward        24.0 ms   12%                           ||  Allocated                   2.9 GB                                                     |
@@ -1857,7 +1857,7 @@ GOLDENS = {
 |  DataLoader fetch: 120.0 ms (CPU, supplemental)               ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: GPU utilization averaged 24%.                      ||  Evidence: None                                                                         |
+|  Evidence: GPU utilization averaged 24%.                      ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    18%                                   ||  CPU capacity         14%                                                               |
@@ -1881,7 +1881,7 @@ GOLDENS = {
 |  Next: No data-pipeline or rank-skew bottleneck was detected; use model/kernel-level profiling if more speed is needed.                                  |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time           191.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           191.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         2.1 ms    1%                           ||                                                                                         |
 |  ├─ Compute          185.0 ms   97%                           ||  avg per-step peak           avg                                                        |
 |  │  ├─ Forward        65.0 ms   34%                           ||  Allocated                   2.9 GB                                                     |
@@ -1892,7 +1892,7 @@ GOLDENS = {
 |  DataLoader fetch: 1.8 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    42%                                   ||  CPU capacity         14%                                                               |
@@ -1923,7 +1923,7 @@ GOLDENS = {
 |  └─ Residual           3.6 ms    2%                           ||  Reserved                    4.6 GB                                                     |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    18%                                   ||  CPU capacity         14%                                                               |
@@ -1948,14 +1948,14 @@ GOLDENS = {
 |  Next: Inspect untraced work, validation/checkpointing, kernel efficiency, or missing instrumentation.                                                   |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time           240.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           240.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         3.1 ms    1%                           ||                                                                                         |
 |  ├─ Compute          120.3 ms   50%                           ||  avg per-step peak           avg                                                        |
 |  ├─ H2D                1.2 ms   <1%                           ||  Allocated                   2.9 GB                                                     |
 |  └─ Residual         115.4 ms   48%                           ||  Reserved                    3.2 GB                                                     |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: GPU utilization averaged 22%.                      ||  Evidence: None                                                                         |
+|  Evidence: GPU utilization averaged 22%.                      ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    17%                                   ||  CPU capacity         14%                                                               |
@@ -1984,7 +1984,7 @@ GOLDENS = {
 |  DataLoader fetch: 0.2 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    25%                                   ||  CPU capacity         14%                                                               |
@@ -2004,10 +2004,10 @@ GOLDENS = {
 |  Next: Run for more steps or ensure step timing is recorded.                                                                                             |
 |                                                                                                                                                          |
 |                                                               ||  STEP MEMORY: BALANCED                                                                  |
-|                                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    17%                                   ||  CPU capacity         14%                                                               |
@@ -2029,10 +2029,10 @@ GOLDENS = {
 |  Next: Instrument the missing phases; the Step Time section lists the missing signal names.                                                              |
 |                                                                                                                                                          |
 |                                                               ||  STEP MEMORY: BALANCED                                                                  |
-|                                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                                                               ||                       avg                                                               |
 |                                                               ||  CPU capacity         14%                                                               |
@@ -2055,7 +2055,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R1/N0), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           303.7 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           303.7 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         3.8 ms    1%                           ||                                                                                         |
 |  ├─ Compute          259.5 ms   85%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        80.0 ms   26%                           ||  Allocated                   8.5 GB              9.4 GB, R2/N1                          |
@@ -2066,7 +2066,7 @@ GOLDENS = {
 |  DataLoader fetch: 3.7 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL · 2/2 nodes                     ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: GPU utilization averaged 14%.                      ||  Evidence: None                                                                         |
+|  Evidence: GPU utilization averaged 14%.                      ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    18%               26%, N1             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2091,7 +2091,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R1/N0), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           152.1 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           152.1 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         2.0 ms    1%                           ||                                                                                         |
 |  ├─ Compute          145.2 ms   95%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        50.0 ms   33%                           ||  Allocated                   8.7 GB              8.8 GB, R2/N0                          |
@@ -2102,7 +2102,7 @@ GOLDENS = {
 |  DataLoader fetch: 1.8 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       median rank avg   worst rank avg                                  |
 |  CPU                    38%                                   ||  CPU capacity         12%               81%, R2/N0                                      |
@@ -2126,14 +2126,14 @@ GOLDENS = {
 |  Next: Inspect untraced work, validation/checkpointing, kernel efficiency, or missing instrumentation.                                                   |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time            34.2 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time            34.2 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         2.5 ms    7%                           ||                                                                                         |
 |  ├─ Compute           29.4 ms   86%                           ||  avg per-step peak           avg                                                        |
 |  └─ Residual           2.3 ms    7%                           ||  Allocated                   18.8 MB                                                    |
 |  DataLoader fetch: 2.5 ms (CPU, supplemental)                 ||  Reserved                    23.1 MB                                                    |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: GPU utilization averaged 0.2%.                     ||  Evidence: None                                                                         |
+|  Evidence: GPU utilization averaged 0.2%.                     ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    0%                                    ||  CPU capacity         14%                                                               |
@@ -2157,7 +2157,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R1/N0), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time             5.2 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time             5.2 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         0.6 ms   11%                           ||                                                                                         |
 |  ├─ Compute            3.8 ms   74%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward         1.3 ms   25%                           ||  Allocated                   18.8 MB             21.0 MB, R0/N0                         |
@@ -2168,7 +2168,7 @@ GOLDENS = {
 |  DataLoader fetch: 0.6 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: GPU utilization averaged 6.8%.                     ||  Evidence: None                                                                         |
+|  Evidence: GPU utilization averaged 6.8%.                     ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       median rank avg   worst rank avg                                  |
 |  CPU                    2%                                    ||  CPU capacity         12%               81%, R2/N0                                      |
@@ -2191,14 +2191,14 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING unavailable: selected rank row missing.          ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|                                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                                                               ||  avg per-step peak           median rank avg     worst rank avg                         |
 |                                                               ||  Allocated                                       5.0 GB, R1/N0                          |
 |                                                               ||  Reserved                                        6.0 GB, R1/N0                          |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2223,7 +2223,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R2/N1), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              3.0 GB, R3/N1                          |
@@ -2234,7 +2234,7 @@ GOLDENS = {
 |  DataLoader fetch: 7.0 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2259,7 +2259,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R2/N1), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
@@ -2270,7 +2270,7 @@ GOLDENS = {
 |  DataLoader fetch: 7.0 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: HIGH GPU PWR  (WARNING) · 2/4 nodes          ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: GPU power 83.7% of limit · N0/G0                   ||  Evidence: None                                                                         |
+|  Evidence: GPU power 83.7% of limit · N0/G0                   ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2294,7 +2294,7 @@ GOLDENS = {
 |  Next: No data-pipeline or rank-skew bottleneck was detected; use model/kernel-level profiling if more speed is needed.                                  |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time            10.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time            10.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         0.0 ms    0%                           ||                                                                                         |
 |  ├─ Compute           10.0 ms  100%                           ||  avg per-step peak           avg                                                        |
 |  │  ├─ Forward         0.0 ms    0%                           ||  Allocated                   0.0 MB                                                     |
@@ -2305,7 +2305,7 @@ GOLDENS = {
 |  DataLoader fetch: 0.0 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  CPU                    0%                                    ||  CPU capacity         0%                                                                |
@@ -2350,7 +2350,7 @@ GOLDENS = {
 |  Next: Inspect pinned memory and batch transfers.                                                                                                        |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         5.0 ms    5%                           ||                                                                                         |
 |  ├─ Compute           70.0 ms   70%                           ||  avg per-step peak           avg                                                        |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.0 GB                                                     |
@@ -2360,7 +2360,7 @@ GOLDENS = {
 |  └─ Residual           5.0 ms    5%                           ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  GPU util               72%                                   ||  CPU capacity         14%                                                               |
@@ -2382,7 +2382,7 @@ GOLDENS = {
 |  Next: Optimize model compute or reduce step cost.                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Window Average), GPU Clock                      ||  STEP MEMORY: BALANCED                                                                  |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait         1.0 ms    1%                           ||                                                                                         |
 |  ├─ Compute           95.0 ms   95%  ◀  cause                 ||  avg per-step peak           avg                                                        |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   2.0 GB                                                     |
@@ -2392,7 +2392,7 @@ GOLDENS = {
 |  └─ Residual           3.0 ms    3%                           ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         avg                                   ||                       avg                                                               |
 |  GPU util               95%                                   ||  CPU capacity         14%                                                               |
@@ -2415,7 +2415,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R2/N1), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
@@ -2426,7 +2426,7 @@ GOLDENS = {
 |  DataLoader fetch: 7.0 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2451,7 +2451,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R2/N1), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
@@ -2462,7 +2462,7 @@ GOLDENS = {
 |  DataLoader fetch: 7.0 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2487,7 +2487,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R2/N1), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
@@ -2498,7 +2498,7 @@ GOLDENS = {
 |  DataLoader fetch: 7.0 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2524,7 +2524,7 @@ GOLDENS = {
 |  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
 |                                                                                                                                                          |
 |  STEP TIMING (Median R2/N1), GPU Clock                        ||  STEP MEMORY: BALANCED · 4/4 ranks                                                      |
-|  Step Time           100.0 ms  100%                           ||  Evidence: None                                                                         |
+|  Step Time           100.0 ms  100%                           ||                                                                                         |
 |  ├─ Input Wait        10.0 ms   10%                           ||                                                                                         |
 |  ├─ Compute           80.0 ms   80%                           ||  avg per-step peak           median rank avg     worst rank avg                         |
 |  │  ├─ Forward        20.0 ms   20%                           ||  Allocated                   3.0 GB              5.0 GB, R1/N0                          |
@@ -2535,7 +2535,7 @@ GOLDENS = {
 |  DataLoader fetch: 7.0 ms (CPU, supplemental)                 ||                                                                                         |
 |                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
-|  Evidence: None                                               ||  Evidence: None                                                                         |
+|                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
 |                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
 |  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
@@ -2895,12 +2895,10 @@ def test_resource_panes_keep_one_fixed_separator_for_all_topologies(
 
 
 def test_step_memory_pane_keeps_a_blank_row_before_its_table() -> None:
-    """Keep the upper-pane Evidence/table separation visible in plain text."""
+    """Keep the upper-pane heading/table separation visible in plain text."""
     lines = plain("run_multi_input_straggler").splitlines()
-    evidence_index = next(
-        index
-        for index, line in enumerate(lines)
-        if "||  Evidence: None" in line
+    heading_index = next(
+        index for index, line in enumerate(lines) if "STEP MEMORY:" in line
     )
     table_index = next(
         index
@@ -2909,11 +2907,12 @@ def test_step_memory_pane_keeps_a_blank_row_before_its_table() -> None:
     )
     right_pane_rows = [
         line.split("||  ", 1)[1][:-1].strip()
-        for line in lines[evidence_index + 1 : table_index]
+        for line in lines[heading_index + 1 : table_index]
         if "||  " in line
     ]
 
-    assert "" in right_pane_rows
+    assert right_pane_rows
+    assert set(right_pane_rows) == {""}
 
 
 def test_run_timing_tree_omits_bars_and_keeps_cause_by_share() -> None:
@@ -3613,7 +3612,7 @@ def test_process_normal_omits_evidence_and_no_data_omits_empty_table() -> None:
         world_size=1,
     )
 
-    assert "Evidence: None" in _process_block(normal)
+    assert "Evidence:" not in _process_block(normal)
     assert (
         _process_block(no_data)
         == """\

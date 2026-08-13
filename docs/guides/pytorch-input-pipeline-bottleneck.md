@@ -70,7 +70,7 @@ Next: Inspect input wait on the slow rank.
 Scope: N = node · R = global rank · G = GPU index
 
 STEP TIMING (Median R1/N0), GPU Clock              || STEP MEMORY: BALANCED · 4/4 ranks
-Step Time            303.7 ms  100%                || Evidence: None
+Step Time            303.7 ms  100%                ||
 ├─ Input Wait          3.8 ms    1%                 ||
 ├─ Compute         259.5 ms   85%                  || avg per-step peak       median rank avg     worst rank avg
 │  ├─ Forward      80.0 ms   26%                    || Allocated               8.5 GB              9.4 GB, R2/N1
@@ -81,7 +81,7 @@ Step Time            303.7 ms  100%                || Evidence: None
 DataLoader fetch: 3.7 ms (CPU, supplemental)       ||
 
 SYSTEM METRICS: LOW GPU UTIL · 2/2 nodes                     ||  PROCESS METRICS: NORMAL · 4/4 ranks
-Evidence: GPU utilization averaged 14%.                      ||  Evidence: None
+Evidence: GPU utilization averaged 14%.                      ||
                                                                ||
                        median node avg   worst node avg      ||                       median rank avg   worst rank avg
 CPU                    18%               26%, N1             ||  CPU capacity         12%               81%, R2/N1

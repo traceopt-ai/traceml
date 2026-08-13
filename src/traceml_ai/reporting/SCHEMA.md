@@ -62,8 +62,10 @@ and System/Process panes; Watch retains its compact health card. The Run card
 uses only stored summary values: a distributed timing tree reads the rank at
 `global.median.step_time_ms.idx`, resource tables use stored average or
 median/worst points, and `Why` reads attributed culprit/victim rows. Values are
-not recomputed. Distributed cards print `Scope: N = node · R = global rank · G = GPU index`; normal resources show `Evidence: None`, and non-normal resources
-show compact stored evidence with the available scope.
+not recomputed. Distributed cards print
+`Scope: N = node · R = global rank · G = GPU index`; normal resources leave
+the evidence row blank, and non-normal resources show compact stored evidence
+with the available scope.
 
 `text` is profile-aware: `traceml watch` renders a host-and-process health card
 and never shows step timing, because watch does not collect it. Detailed

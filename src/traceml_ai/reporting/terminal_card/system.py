@@ -304,10 +304,11 @@ def build_run_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
                 multi_node=multi_node,
             )
 
-    stages.evidence.wrapped(
-        format_run_evidence("system", system_summary) or "None",
-        label="Evidence: ",
-    )
+    evidence = format_run_evidence("system", system_summary)
+    if evidence:
+        stages.evidence.wrapped(evidence, label="Evidence: ")
+    else:
+        stages.evidence.blank()
     stages.spacer.blank()
     return stages
 

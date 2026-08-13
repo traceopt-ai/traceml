@@ -73,9 +73,9 @@ The text summary is intentionally verdict-first:
   Memory use an `avg` table for one observed rank and a `median rank avg` /
   `worst rank avg` table for multiple observed ranks. Step Timing and Step
   Memory share fixed upper panes; System and Process use matching lower panes,
-  all separated by `||`. Each resource section places Evidence directly below
-  its heading, with
-  `Evidence: None` for a normal/balanced result
+  all separated by `||`. A non-normal resource section places its stored
+  Evidence directly below the heading; normal/balanced sections leave that
+  row blank
 - supplemental DataLoader fetch time when measured
 - additional warning or critical findings when they are present
 - `Full evidence`: the path to the structured JSON artifact and the optional
@@ -97,10 +97,10 @@ bytes/percent stay paired from the same selected node row.
 The Process table follows the same rule across observed ranks: every value is
 an observation-window average, each metric may name a different worst rank,
 and RSS and CUDA-reserved byte/percentage pairs come from one selected rank
-row. System and Process always show an `Evidence` row: non-normal statuses use
-a compact presentation of their stored structured trigger and scope, falling
-back to the stored diagnosis summary when needed; normal statuses show
-`Evidence: None`. The table itself never labels its averages as peaks.
+row. For non-normal System and Process statuses, `Evidence` uses a compact
+presentation of the stored structured trigger and scope, falling back to the
+stored diagnosis summary when needed. Normal statuses leave the evidence row
+blank. The table itself never labels its averages as peaks.
 Evidence and long values wrap within their pane and retain the fixed divider
 position.
 Unavailable measurements are omitted, while a measured zero remains visible.
@@ -868,7 +868,7 @@ they are not step-aligned or temporal peaks.
 For a non-normal status, `Evidence` shows the stored diagnostic trigger—for
 example, peak RSS pressure, CUDA memory pressure, allocator overhang, or
 cross-rank CUDA-memory imbalance. A normal Process status shows
-`Evidence: None`.
+its measurements without a redundant evidence line.
 
 It helps answer:
 

@@ -286,11 +286,13 @@ def format_run_evidence(
     """Return compact Run-card evidence from an existing section payload.
 
     ``section_name`` selects only presentation terminology.  No diagnosis or
-    aggregate is recalculated.  Unknown, incomplete, and older payloads keep
+    aggregate is recalculated. Healthy sections return ``None`` so panes can
+    leave the evidence row blank. Unknown, incomplete, and older payloads keep
     their stored diagnosis summary, which is the stable compatibility path.
     """
     diagnosis = _mapping(section.get("diagnosis"))
     if str(diagnosis.get("kind") or "NO_DATA") in _NORMAL_KINDS:
+        # NORMAL/BALANCED headings and metric tables need no evidence filler.
         return None
     evidence = _mapping(diagnosis.get("evidence"))
     if section_name == "system":

@@ -133,10 +133,11 @@ def build_run_step_memory_pane(
             details_style=STYLE_DIM,
         )
     )
-    doc.wrapped(
-        format_run_evidence("step_memory", step_memory_summary) or "None",
-        label="Evidence: ",
-    )
+    evidence = format_run_evidence("step_memory", step_memory_summary)
+    if evidence:
+        doc.wrapped(evidence, label="Evidence: ")
+    else:
+        doc.blank()
     if str(section_diagnosis.get("kind") or "NO_DATA") in {
         "NO_DATA",
         "NO_GPU",
