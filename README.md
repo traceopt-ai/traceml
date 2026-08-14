@@ -303,6 +303,7 @@ support and limitations.
 ## Learn More
 
 - [Complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/)
+- [Measured case studies](https://github.com/traceopt-ai/traceml/blob/main/examples/case_studies/README.md)
 - [Examples](https://github.com/traceopt-ai/traceml/blob/main/examples/README.md)
 - [Troubleshoot slow training](https://traceopt-ai.github.io/traceml/guides/slow-pytorch-training/)
 - [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)
