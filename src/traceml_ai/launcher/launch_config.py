@@ -103,11 +103,11 @@ class TorchrunLaunchConfig:
     def to_command(self) -> list[str]:
         """Return the launch command for the training runner.
 
-        Without torch, ``torch.distributed.run`` does not exist. A single
-        process does not need it, so a torch-free install starts the
-        training process directly. Multi-process topologies are rejected
-        during argument validation, before any process is started; the
-        raise here is the backstop for a caller that skipped validation.
+        Without torch, ``torch.distributed.run`` does not exist. Torch-free
+        single-process callers such as ``watch`` do not need it and start the
+        target directly. Multi-process topologies are rejected during argument
+        validation, before any process is started; the raise here is the
+        backstop for a caller that skipped validation.
         """
         if not torch_available():
             if not self.requires_torch_launcher():

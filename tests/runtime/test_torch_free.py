@@ -15,6 +15,7 @@ subprocess with torch blocked (``sys.modules["torch"] = None`` makes any
 ``import torch`` raise ``ModuleNotFoundError`` with ``name == "torch"``).
 """
 
+import builtins
 import os
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from traceml_ai.launcher.launch_config import (
     TORCH_LAUNCHER_REQUIRED,
     TorchrunLaunchConfig,
 )
-from traceml_ai.utils.torch_support import is_missing_torch
+from traceml_ai.utils.torch_support import is_missing_torch, torch_available
 
 _SRC_ROOT = str(Path(traceml_ai.__file__).resolve().parents[1])
 
@@ -138,6 +139,22 @@ def test_only_torch_counts_as_a_missing_torch_install(module_name, expected):
     assert is_missing_torch(exc) is expected
 
 
+def test_torch_available_does_not_mask_an_unrelated_import_error(monkeypatch):
+    real_import = builtins.__import__
+
+    def import_with_broken_torch(name, *args, **kwargs):
+        if name == "torch":
+            exc = ImportError("unrelated dependency is missing")
+            exc.name = "unrelated_dependency"
+            raise exc
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_with_broken_torch)
+
+    with pytest.raises(ImportError, match="unrelated dependency"):
+        torch_available()
+
+
 def test_an_unrelated_import_error_is_not_masked():
     """A broken import inside a torch module must still surface.
 
@@ -183,6 +200,26 @@ def test_single_process_launch_command_falls_back_without_torch():
     )
     assert result.returncode == 0, result.stderr
     assert "FALLBACK_OK" in result.stdout
+
+
+def test_run_requires_torch_before_launching_processes():
+    result = _run_torch_free(
+        "import argparse\n"
+        "from traceml_ai.launcher.commands import validate_launch_args\n"
+        "args = argparse.Namespace(command='run', script='x.py', "
+        "nnodes=1, nproc_per_node=1, node_rank=0, "
+        "master_addr='127.0.0.1', master_port=29500, "
+        "aggregator_host=None, aggregator_bind_host=None, "
+        "aggregator_port=29765, disable_traceml=False)\n"
+        "try:\n"
+        "    validate_launch_args(args)\n"
+        "except SystemExit as exc:\n"
+        "    assert 'step-aware diagnosis' in str(exc), str(exc)\n"
+        "    assert 'traceml-ai[torch]' in str(exc), str(exc)\n"
+        "    print('RUN_REJECTED_OK')\n"
+    )
+    assert result.returncode == 0, result.stderr
+    assert "RUN_REJECTED_OK" in result.stdout
 
 
 @pytest.mark.parametrize(

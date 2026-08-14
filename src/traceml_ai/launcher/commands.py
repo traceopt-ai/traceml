@@ -234,6 +234,18 @@ def _require_torch_launcher_support(torchrun: TorchrunLaunchConfig) -> None:
     raise SystemExit(f"[TraceML] ERROR: {TORCH_LAUNCHER_REQUIRED}")
 
 
+def _require_run_torch_support(args: argparse.Namespace) -> None:
+    """Require torch for the step-aware ``run`` command."""
+    if getattr(args, "command", None) != "run":
+        return
+    if torch_available():
+        return
+    raise SystemExit(
+        "[TraceML] ERROR: traceml run requires torch for step-aware "
+        "diagnosis. Install it with: pip install 'traceml-ai[torch]'"
+    )
+
+
 def validate_launch_args(args: argparse.Namespace) -> None:
     """Validate cross-argument constraints for TraceML launch commands."""
     if _disable_traceml_requested(args, os.environ):
@@ -250,6 +262,7 @@ def validate_launch_args(args: argparse.Namespace) -> None:
         raise SystemExit(f"[TraceML] ERROR: {exc}") from exc
 
     _require_torch_launcher_support(launch_cfg.torchrun)
+    _require_run_torch_support(args)
 
     try:
         RunIdentity.from_args(

@@ -34,7 +34,9 @@ def torch_available() -> bool:
     """Return whether torch can be imported in this environment."""
     try:
         import torch  # noqa: F401
-    except ImportError:
+    except ImportError as exc:
+        if not is_missing_torch(exc):
+            raise
         return False
     return True
 
