@@ -300,8 +300,9 @@ terminal and dashboard modes are explicit single-node options. See the
 [FAQ](https://traceopt-ai.github.io/traceml/user_guide/faq/) for current
 support and limitations.
 
-Capacity-relative GPU memory diagnoses assume equal GPU capacity across ranks;
-mixed-capacity runs may produce inaccurate global memory-pressure diagnoses.
+Distributed GPU analysis currently assumes homogeneous GPU hardware across
+ranks. Heterogeneous GPU configurations may produce inaccurate cross-rank
+analysis and diagnoses.
 
 ## Learn More
 
