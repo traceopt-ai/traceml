@@ -212,6 +212,30 @@ class StepMemoryMetricsDB:
         return int(row[0] or 0) if row else 0
 
 
+def load_gpu_total_bytes(conn: sqlite3.Connection) -> Optional[float]:
+    """
+    Best-effort device total memory from process telemetry.
+
+    This is optional but useful for HIGH_PRESSURE diagnosis. Live renderers
+    and the final-summary loader share this one reader so both paths derive
+    device capacity identically.
+    """
+    try:
+        row = conn.execute(
+            "SELECT MAX(gpu_mem_total_bytes) FROM process_samples;"
+        ).fetchone()
+    except Exception:
+        return None
+
+    if not row or row[0] is None:
+        return None
+    try:
+        value = float(row[0])
+    except Exception:
+        return None
+    return value if value > 0.0 else None
+
+
 def build_step_memory_combined_result(
     conn: sqlite3.Connection,
     *,
@@ -230,12 +254,14 @@ def build_step_memory_combined_result(
     """
     ws = max(1, int(window_size))
     gpu_available = db.detect_gpu_available(conn)
+    gpu_total_bytes = load_gpu_total_bytes(conn)
     latest_per_rank = db.fetch_latest_step_per_global_rank(conn)
 
     if not latest_per_rank:
         return StepMemoryCombinedResult(
             metrics=[],
             status_message="Waiting for first fully completed step across all ranks…",
+            gpu_total_bytes=gpu_total_bytes,
         )
 
     world_size = len(latest_per_rank)
@@ -353,6 +379,7 @@ def build_step_memory_combined_result(
                 else "No complete memory metrics available"
             )
         ),
+        gpu_total_bytes=gpu_total_bytes,
     )
 
 

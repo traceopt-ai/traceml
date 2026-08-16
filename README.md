@@ -346,6 +346,10 @@ terminal and dashboard modes are explicit single-node options. See the
 [FAQ](https://traceopt-ai.github.io/traceml/user_guide/faq/) for current
 support and limitations.
 
+Distributed GPU analysis currently assumes homogeneous GPU hardware across
+ranks. Heterogeneous GPU configurations may produce inaccurate cross-rank
+analysis and diagnoses.
+
 ## Learn More
 
 - [Complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/)
