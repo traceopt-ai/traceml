@@ -170,6 +170,11 @@ TraceML can surface:
 Single-node DDP supports live CLI/dashboard views and final summaries.
 Multi-node DDP is supported for end-of-run summary reports.
 
+Capacity-relative GPU memory diagnoses currently assume equal GPU memory
+capacity across ranks. Mixed-capacity runs still collect per-rank telemetry,
+but global `HIGH_PRESSURE`, `IMBALANCE`, and aggregate Process pressure
+diagnoses may be inaccurate.
+
 ---
 
 ## Does TraceML support multi-node?
