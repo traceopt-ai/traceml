@@ -145,6 +145,8 @@ traceml view logs/<run_name>/final_summary.json --re-render
 ```
 
 This only changes what is printed. The stored artifact is not modified.
+Because earlier schemas use different Step Time meanings, payloads older than
+schema 1.7 keep their stored card instead of using the current renderer.
 
 ### Live CLI
 

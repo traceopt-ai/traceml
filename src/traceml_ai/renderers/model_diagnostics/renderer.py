@@ -62,9 +62,11 @@ class ModelDiagnosticsRenderer(BaseRenderer):
             self._logger.exception("Step Memory diagnostics compute failed")
             step_memory_metrics = ()
             step_memory_status = "Step Memory data unavailable"
+            step_memory_gpu_total_bytes = None
         else:
             step_memory_metrics = step_memory.metrics
             step_memory_status = step_memory.status_message
+            step_memory_gpu_total_bytes = step_memory.gpu_total_bytes
 
         try:
             payload: ModelDiagnosticsPayload = build_model_diagnostics_payload(
@@ -72,7 +74,7 @@ class ModelDiagnosticsRenderer(BaseRenderer):
                 step_time_diagnosis=step_time.analysis.diagnosis.primary,
                 step_memory_metrics=step_memory_metrics,
                 step_memory_status_message=step_memory_status,
-                gpu_total_bytes=None,
+                gpu_total_bytes=step_memory_gpu_total_bytes,
             )
             return payload.to_dict()
 
