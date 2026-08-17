@@ -29,7 +29,6 @@ These are the main user-facing examples.
 | `ray/torchtrainer_minimal.py` | Minimal Ray Train example with Ray Data input timing | CPU / CUDA | Uses `TraceMLTorchTrainer` |
 | `ray/lightning_text_classifier.py` | Ray Train + Lightning text classifier | CPU / CUDA | Uses Ray Data, `TraceMLCallback`, and optional input/H2D demo knobs |
 | `integrations/huggingface_trainer_minimal.py` | Minimal Hugging Face `TraceMLTrainerCallback` example | CPU / CUDA | No model download required |
-| `integrations/trl_lora_gradient_accumulation.py` | Controlled TRL + LoRA comparison with a fixed effective batch | CUDA (T4+) | Companion workload for the Colab notebook; run each batch/accumulation lane through `traceml run` |
 | `integrations/accelerate_minimal.py` | Minimal Hugging Face `Accelerate` loop wrapped with `traceml.trace_step(...)` | CPU / CUDA | No model download required |
 | `integrations/lightning_minimal.py` | Minimal Lightning integration init + `TraceMLCallback` example | CPU / CUDA | No dataset download required |
 | `integrations/deepspeed_minimal.py` | Minimal DeepSpeed loop wrapped with `traceml.trace_step(...)` | CUDA | Requires `deepspeed`; exits cleanly without it |
