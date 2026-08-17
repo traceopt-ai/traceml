@@ -5,7 +5,6 @@ import sqlite3
 
 import pytest
 from rich.console import Console
-
 from tests.step_time.factories import (
     live_result_from_window,
     rank_average,
@@ -22,10 +21,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.model_combined_secti
 from traceml_ai.diagnostics.model_diagnostics import (
     build_model_diagnostics_payload,
 )
-from traceml_ai.renderers.step_time.renderer import (
-    StepTimeRenderer,
-    format_cli_diagnosis,
-)
+from traceml_ai.renderers.step_time.renderer import StepTimeRenderer
 from traceml_ai.reporting.sections.step_time import StepTimeSummarySection
 from traceml_ai.step_time.model import (
     StepTimeLoadRequest,
@@ -778,146 +774,6 @@ def test_diagnostics_rail_incomplete_data_is_neutral() -> None:
         == "neutral"
     )
     assert mds._row_sev({"severity": "info", "kind": "BALANCED"}) == "healthy"
-
-
-def test_diagnostics_rail_row_renders_engine_action() -> None:
-    # Issue #357: the rail dropped the engine's action, so the dashboard
-    # showed a verdict with no next step while the terminal printed one.
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
-        model_diagnostics_section as mds,
-    )
-
-    row = mds._row_html(
-        {
-            "source": "step_time",
-            "status": "INPUT-BOUND",
-            "reason": "Input wait is 80.0% of the typical CPU Step Time.",
-            "action": "Increase workers, prefetch, or storage throughput.",
-        }
-    )
-
-    assert "Next: Increase workers, prefetch, or storage throughput." in row
-
-
-def test_diagnostics_rail_row_renders_action_and_note() -> None:
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
-        model_diagnostics_section as mds,
-    )
-
-    row = mds._row_html(
-        {
-            "source": "step_memory",
-            "status": "MEMORY-CREEP",
-            "reason": "Allocated memory grows across the window.",
-            "action": "Check for retained tensors between steps.",
-            "note": "peak 12.4 GB on rank 3",
-        }
-    )
-
-    assert "Next: Check for retained tensors between steps." in row
-    assert "peak 12.4 GB on rank 3" in row
-
-
-@pytest.mark.parametrize("action", (None, "", "   "))
-def test_diagnostics_rail_row_omits_next_without_action(
-    action: str | None,
-) -> None:
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
-        model_diagnostics_section as mds,
-    )
-
-    item = {
-        "source": "step_time",
-        "status": "NO DATA",
-        "reason": "Waiting for the first complete window.",
-    }
-    if action is not None:
-        item["action"] = action
-
-    row = mds._row_html(item)
-
-    assert "Next:" not in row
-    assert "Waiting for the first complete window." in row
-
-
-def test_diagnostics_rail_row_truncates_action_like_reason() -> None:
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
-        model_diagnostics_section as mds,
-    )
-
-    row = mds._row_html(
-        {
-            "source": "step_time",
-            "status": "INPUT-BOUND",
-            "reason": "R" * 300,
-            "action": "A" * 300,
-            "note": "N" * 300,
-        }
-    )
-
-    for char in ("R", "A", "N"):
-        assert char * 127 + "…" in row
-        assert char * 128 not in row
-
-
-def test_diagnostics_rail_row_never_truncates_inside_an_html_entity() -> None:
-    """Cutting escaped text can split ``&amp;`` into literal ``&a``."""
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
-        model_diagnostics_section as mds,
-    )
-
-    # Places the '&' where its 5-character entity would straddle the cut.
-    long_text = "x" * 125 + "& more text that runs past the cap" + "z" * 40
-
-    row = mds._row_html(
-        {
-            "source": "step_time",
-            "status": "INPUT-BOUND",
-            "reason": long_text,
-            "action": long_text,
-            "note": long_text,
-        }
-    )
-
-    assert "&amp;" in row
-    for broken in ("&a…", "&am…", "&amp…"):
-        assert broken not in row
-
-
-def test_diagnostics_rail_next_line_matches_cli_diagnosis() -> None:
-    """One engine verdict reads the same on the terminal and the rail."""
-    from traceml_ai.aggregator.display_drivers.nicegui_sections import (
-        model_diagnostics_section as mds,
-    )
-
-    result = _payload(
-        _metrics(
-            overrides={
-                "input_wait": 80.0,
-                "h2d": 0.0,
-                "forward": 5.0,
-                "backward": 10.0,
-                "optimizer_step": 4.0,
-                "residual_proxy": 1.0,
-                "traced_step_time": 20.0,
-            }
-        )
-    )
-    diagnosis = result.analysis.diagnosis.primary
-    assert diagnosis.kind == "INPUT_BOUND"
-    assert diagnosis.action
-
-    payload = build_model_diagnostics_payload(
-        step_time_window=result.analysis.window,
-        step_time_diagnosis=diagnosis,
-        step_memory_metrics=(),
-    ).to_dict()
-    item = next(
-        entry for entry in payload["items"] if entry["source"] == "step_time"
-    )
-
-    assert diagnosis.action in format_cli_diagnosis(diagnosis)
-    assert f"Next: {diagnosis.action}" in mds._row_html(item)
 
 
 def test_empty_diagnostics_payload_clears_stale_ui_state() -> None:

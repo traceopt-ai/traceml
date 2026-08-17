@@ -13,26 +13,11 @@ from traceml_ai.samplers.runtime_environment_sampler import (
     RuntimeEnvironmentSampler,
 )
 from traceml_ai.samplers.stdout_stderr_sampler import StdoutStderrSampler
+from traceml_ai.samplers.step_memory_sampler import StepMemorySampler
+from traceml_ai.samplers.step_time_sampler import StepTimeSampler
 from traceml_ai.samplers.system_sampler import SystemSampler
 
 SamplerFactory = Callable[[], BaseSampler]
-
-
-# The step samplers reach torch through the timing and step-memory utilities.
-# They are run-profile only, so importing them lazily keeps `watch` free of
-# the torch import chain entirely instead of guarding each module it reaches.
-def _step_time_sampler() -> BaseSampler:
-    """Build the step-time sampler, importing torch-backed timing on use."""
-    from traceml_ai.samplers.step_time_sampler import StepTimeSampler
-
-    return StepTimeSampler()
-
-
-def _step_memory_sampler() -> BaseSampler:
-    """Build the step-memory sampler, importing torch-backed state on use."""
-    from traceml_ai.samplers.step_memory_sampler import StepMemorySampler
-
-    return StepMemorySampler()
 
 
 @dataclass(frozen=True)
@@ -97,13 +82,13 @@ DEFAULT_SAMPLER_REGISTRY: Registry[SamplerSpec] = Registry(
         _spec("stdout_stderr", StdoutStderrSampler, modes=("cli",)),
         _spec(
             "step_time",
-            _step_time_sampler,
+            StepTimeSampler,
             profiles=("run",),
             drain_on_recording_stop=True,
         ),
         _spec(
             "step_memory",
-            _step_memory_sampler,
+            StepMemorySampler,
             profiles=("run",),
             drain_on_recording_stop=True,
         ),

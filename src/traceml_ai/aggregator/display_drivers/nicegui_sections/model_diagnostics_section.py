@@ -1,9 +1,7 @@
 """Model diagnostics rail — overall verdict + per-source severity rows (PR2).
 
-Renderer payload {overall_severity, items:[{source,status,reason,action,
-note,confidence_label,evidence}]} is unchanged; only the presentation
-changes. The row shows the engine's own ``action`` under the same "Next:"
-label the terminal uses, so one verdict reads the same on both surfaces.
+Renderer payload {overall_severity, items:[{source,status,reason,
+confidence_label,evidence}]} is unchanged; only the presentation changes.
 """
 
 from __future__ import annotations
@@ -25,9 +23,6 @@ _SOURCE_NAMES = {
 # present in the payload — never re-parsed from the status text. New diagnosis
 # kinds therefore color correctly with no change here (single source of truth).
 _NEUTRAL_KINDS = ("NO_DATA", "WARMUP", "NO_GPU", "INCOMPLETE_DATA")
-# One length budget for every text line of a row (reason, action, note), so
-# the rail cannot truncate the same engine sentence differently per field.
-_MAX_LINE_CHARS = 130
 
 
 def _row_sev(item: Dict[str, Any]) -> str:
@@ -132,42 +127,14 @@ def _tint(hex_color: str, alpha: float = 0.12) -> str:
     return f"rgba({r},{g},{b},{alpha})"
 
 
-def _line_text(value: Any) -> str:
-    """Escaped, length-capped text for one line of a diagnosis row.
-
-    Truncate first, escape second. Cutting escaped text can slice through an
-    entity (``&amp;`` becomes ``&a``), which renders as broken literal markup;
-    the cap is also meant to bound what the reader sees, not how long the
-    escaped form happens to be.
-    """
-    text = str(value or "").strip()
-    if len(text) > _MAX_LINE_CHARS:
-        text = text[: _MAX_LINE_CHARS - 3] + "…"
-    return html.escape(text)
-
-
 def _row_html(item: Dict[str, Any]) -> str:
     source = _SOURCE_NAMES.get(
         str(item.get("source")), str(item.get("source", "")).title()
     )
     status = str(item.get("status", "NO DATA"))
-    reason = _line_text(item.get("reason"))
-    # Verbatim engine text: the rail must not reword, shorten or re-derive
-    # the next step it prints (issue #357).
-    action = _line_text(item.get("action"))
-    note = _line_text(item.get("note"))
-    action_html = (
-        f"<div style='font-family:var(--sans); font-size:12px; font-weight:500; "
-        f"color:{theme.INK}; line-height:1.4; margin-top:4px;'>Next: {action}</div>"
-        if action
-        else ""
-    )
-    note_html = (
-        f"<div style='font-family:var(--sans); font-size:11px; "
-        f"color:{theme.MUTED}; line-height:1.4; margin-top:3px;'>{note}</div>"
-        if note
-        else ""
-    )
+    reason = html.escape(str(item.get("reason", "")).strip())
+    if len(reason) > 130:
+        reason = reason[:127] + "…"
     sev = _row_sev(item)
     col = theme.SEV.get(sev, theme.SEV["neutral"])
     conf = str(item.get("confidence_label", "") or "").strip()
@@ -187,7 +154,6 @@ def _row_html(item: Dict[str, Any]) -> str:
         f"{conf_html}</div>"
         f"<div style='font-family:var(--mono); font-size:10px; font-weight:600; letter-spacing:.05em; color:{col}; margin-top:2px;'>{html.escape(status)}</div>"
         f"<div style='font-family:var(--sans); font-size:12px; color:#4b5563; line-height:1.4; margin-top:3px;'>{reason}</div>"
-        f"{action_html}{note_html}"
         f"{ev}</div></div>"
     )
 

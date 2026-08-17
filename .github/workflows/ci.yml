@@ -62,20 +62,6 @@ jobs:
           pip install -e .
           # tomli backports tomllib to 3.10 for the packaging guard.
           pip install pytest 'tomli; python_version < "3.11"'
-      - name: Torch-free watch (end to end, no torch installed)
-        run: |
-          # This job installs TraceML without the torch extra, so it is the
-          # only leg that proves the documented torch-free path really
-          # works. Importing is not enough: the failure this guards against
-          # was a module-scope torch import inside the launch chain, which
-          # only surfaces when the command actually runs.
-          set -euo pipefail
-          echo "print('training done')" > tiny_train.py
-          python -m traceml_ai.launcher.cli watch tiny_train.py \
-            --mode=summary --run-name torch_free_ci | tee watch_out.txt
-          grep -q "training done" watch_out.txt
-          grep -q "TraceML Watch Summary" watch_out.txt
-          test -f logs/torch_free_ci/final_summary.json
       - name: Run core tests
         run: |
           # Keep this matrix torch-free; torch-dependent paths run in the

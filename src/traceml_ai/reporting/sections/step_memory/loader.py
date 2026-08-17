@@ -12,7 +12,6 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-from traceml_ai.renderers.step_memory.common import load_gpu_total_bytes
 from traceml_ai.renderers.step_memory.schema import StepMemoryCombinedMetric
 from traceml_ai.reporting.config import normalize_summary_window_rows
 from traceml_ai.reporting.sections.step_memory.model import (
@@ -57,6 +56,28 @@ def _load_latest_step_observed(conn: sqlite3.Connection) -> Optional[int]:
     if not row or row[0] is None:
         return None
     return int(row[0])
+
+
+def _load_gpu_total_bytes(conn: sqlite3.Connection) -> Optional[float]:
+    """
+    Best-effort device total memory from process telemetry.
+
+    This is optional but useful for HIGH_PRESSURE diagnosis.
+    """
+    try:
+        row = conn.execute(
+            "SELECT MAX(gpu_mem_total_bytes) FROM process_samples;"
+        ).fetchone()
+    except Exception:
+        return None
+
+    if not row or row[0] is None:
+        return None
+    try:
+        value = float(row[0])
+    except Exception:
+        return None
+    return value if value > 0.0 else None
 
 
 def _load_gpu_available(conn: sqlite3.Connection) -> Optional[bool]:
@@ -250,7 +271,7 @@ def load_step_memory_section_data(
             latest_step_observed + 1 if latest_step_observed is not None else 0
         )
 
-        gpu_total_bytes = load_gpu_total_bytes(conn)
+        gpu_total_bytes = _load_gpu_total_bytes(conn)
         gpu_available = _load_gpu_available(conn)
 
         aligned_window = _build_aligned_window(

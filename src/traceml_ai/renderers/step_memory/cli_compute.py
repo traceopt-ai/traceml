@@ -68,7 +68,6 @@ class StepMemoryCLIComputer:
                 return StepMemoryCombinedResult(
                     metrics=self._last_ok.metrics,
                     status_message=msg,
-                    gpu_total_bytes=self._last_ok.gpu_total_bytes,
                 )
 
         return StepMemoryCombinedResult(

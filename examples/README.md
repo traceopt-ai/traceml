@@ -103,21 +103,6 @@ traceml run examples/advanced/bert_single_gpu_compare.py --mode=summary --summar
 
 ---
 
-## Case studies
-
-Measured before/after write-ups where TraceML diagnosed a bottleneck in a
-training run, a targeted intervention was applied, and the result was evaluated
-using wall-clock measurements. These are write-ups rather than runnable scripts.
-
-| Case study | Model | Bottleneck | Result |
-|---|---|---|---|
-| [`case_studies/resnet18_input_bound`](case_studies/resnet18_input_bound/) | ResNet-18, single T4 | Input-bound data loading | 43.8% lower step time; median GPU utilization 51% to 100% |
-
-See [`case_studies/README.md`](case_studies/README.md) for the index and for how
-to add a new one.
-
----
-
 ## How to run examples
 
 Standard run with the default summary:

@@ -346,14 +346,9 @@ terminal and dashboard modes are explicit single-node options. See the
 [FAQ](https://traceopt-ai.github.io/traceml/user_guide/faq/) for current
 support and limitations.
 
-Distributed GPU analysis currently assumes homogeneous GPU hardware across
-ranks. Heterogeneous GPU configurations may produce inaccurate cross-rank
-analysis and diagnoses.
-
 ## Learn More
 
 - [Complete quickstart](https://traceopt-ai.github.io/traceml/user_guide/quickstart/)
-- [Measured case studies](https://github.com/traceopt-ai/traceml/blob/main/examples/case_studies/README.md)
 - [Examples](https://github.com/traceopt-ai/traceml/blob/main/examples/README.md)
 - [Troubleshoot slow training](https://traceopt-ai.github.io/traceml/guides/slow-pytorch-training/)
 - [Public API](https://traceopt-ai.github.io/traceml/user_guide/public-api/)

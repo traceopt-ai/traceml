@@ -67,12 +67,7 @@ class StepMemoryCombinedResult:
     Final renderer-facing payload for step memory combined.
 
     This is the ONLY object UI layers should consume.
-
-    `gpu_total_bytes` is best-effort device capacity read from process
-    telemetry. It is None when the run reported no capacity, and diagnosis
-    then simply cannot evaluate capacity-relative rules.
     """
 
     metrics: List[StepMemoryCombinedMetric]
     status_message: str
-    gpu_total_bytes: Optional[float] = None

@@ -86,10 +86,14 @@ window-average Step Time is closest to the cross-rank median. Every displayed
 phase comes from that selected rank row; TraceML does not combine unrelated
 per-metric medians. System and Process averages cover each section's own
 telemetry observation window; they are not aligned to the Step Time window.
-The Run card is twice the width of the Watch card. Step Timing and Step Memory
-share fixed upper panes, and System and Process share fixed lower panes. Their
-divider stays in the same column for single-rank, one-node distributed, and
-multi-node distributed runs.
+Run and Watch use the same 156-column frame. Run shows Step Timing and Step
+Memory in the upper panes, followed by System and Process in the lower panes.
+Watch is the System/Process subset: it omits performance `Verdict`, `Why`,
+`Next`, Step Timing, and Step Memory. Its header gets rank coverage from the
+Process section and does not show a step count. Both profiles use the same
+System/Process pane builders, footer, distributed scope legend, and fixed
+divider for single-rank, one-node distributed, and multi-node distributed
+output.
 In the multi-node System table, each metric uses the median and worst
 node-average points already stored in the summary. “Worst” is not a temporal
 maximum, and different rows can identify different nodes. RAM and GPU-memory
@@ -141,8 +145,6 @@ traceml view logs/<run_name>/final_summary.json --re-render
 ```
 
 This only changes what is printed. The stored artifact is not modified.
-Because earlier schemas use different Step Time meanings, payloads older than
-schema 1.7 keep their stored card instead of using the current renderer.
 
 ### Live CLI
 
