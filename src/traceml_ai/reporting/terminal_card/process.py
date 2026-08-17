@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared Run/Watch Process Metrics pane.
+"""Run-card Process Metrics pane.
 
 Process values are observation-window rank averages.  Each median/worst cell
 uses the stored point for that metric; memory byte/percentage pairs are read
@@ -33,7 +33,6 @@ from traceml_ai.reporting.terminal_card.common import (
     point_value,
     status_spans,
 )
-from traceml_ai.reporting.terminal_card.evidence import format_section_evidence
 from traceml_ai.reporting.terminal_card.layout import (
     RUN_RIGHT_PANE_WIDTH,
     STYLE_DIM,
@@ -43,6 +42,7 @@ from traceml_ai.reporting.terminal_card.layout import (
     append_table_row,
     new_pane_stages,
 )
+from traceml_ai.reporting.terminal_card.run_evidence import format_run_evidence
 
 _PROCESS_LABEL_WIDTH = 21
 _PROCESS_MEDIAN_WIDTH = 18
@@ -224,10 +224,10 @@ def _has_table_data(
     )
 
 
-def build_process_pane(
+def build_run_process_pane(
     process_summary: Mapping[str, Any], *, meta: Mapping[str, Any]
 ) -> PaneStages:
-    """Build staged Process Metrics content shared by Run and Watch."""
+    """Build staged Process Metrics content for the lower-right Run pane."""
     stages = new_pane_stages(RUN_RIGHT_PANE_WIDTH)
     section_diagnosis = diagnosis(process_summary)
     multi_rank = _rank_count(process_summary) > 1
@@ -239,7 +239,7 @@ def build_process_pane(
             details_style=STYLE_DIM,
         )
     )
-    evidence = format_section_evidence("process", process_summary)
+    evidence = format_run_evidence("process", process_summary)
     if evidence:
         stages.evidence.wrapped(evidence, label="Evidence: ")
     else:
@@ -293,4 +293,4 @@ def build_process_pane(
     return stages
 
 
-__all__ = ["build_process_pane"]
+__all__ = ["build_run_process_pane"]

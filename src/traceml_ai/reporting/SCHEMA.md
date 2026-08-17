@@ -58,11 +58,8 @@ narrower than section-level health/resource diagnoses.
 
 `text` is a compact human-readable CLI/TXT card, not a parser contract. Run
 renders `Verdict`, `Why`, and `Next`, followed by fixed Step Timing/Step Memory
-and System/Process panes. Watch uses the same 156-column header, System/Process
-panes, scope legend, secondary findings, and footer, but omits the performance
-verdict and both step sections. Its rank coverage comes from Process metadata;
-Run rank and step coverage come from Step Time. The card uses only stored
-summary values: a distributed timing tree reads the rank at
+and System/Process panes; Watch retains its compact health card. The Run card
+uses only stored summary values: a distributed timing tree reads the rank at
 `global.median.step_time_ms.idx`, resource tables use stored average or
 median/worst points, and `Why` reads attributed culprit/victim rows. Values are
 not recomputed. Distributed cards print
@@ -70,9 +67,9 @@ not recomputed. Distributed cards print
 the evidence row blank, and non-normal resources show compact stored evidence
 with the available scope.
 
-`text` is profile-aware: `traceml watch` renders only System and Process
-because Watch does not collect usable step timing. Detailed section prose
-remains in each section-local `card` field.
+`text` is profile-aware: `traceml watch` renders a host-and-process health card
+and never shows step timing, because watch does not collect it. Detailed
+section prose remains in each section-local `card` field.
 
 ## Primary Diagnosis Shape
 

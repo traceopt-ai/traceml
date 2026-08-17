@@ -315,10 +315,10 @@ def is_multi_process(step_time_summary: Mapping[str, Any]) -> bool:
     return bool(used is not None and used > 1)
 
 
-def resolve_multi_process(
+def run_is_multi_process(
     meta: Mapping[str, Any], sections: Sequence[Mapping[str, Any]]
 ) -> bool:
-    """Resolve topology from world size, then stored section rank evidence."""
+    """Resolve Run topology from world size, then stored rank evidence."""
     world_size = as_int(meta.get("world_size"))
     if world_size is not None:
         return world_size > 1
@@ -338,6 +338,12 @@ def resolve_multi_process(
         if len(ranks) > 1:
             return True
     return False
+
+
+def is_multi_node(meta: Mapping[str, Any]) -> bool:
+    """Return whether more than one node was observed."""
+    nodes = as_int(meta.get("nodes_observed"))
+    return bool(nodes is not None and nodes > 1)
 
 
 def clock_label(step_time_summary: Mapping[str, Any]) -> str:
@@ -376,6 +382,7 @@ __all__ = [
     "group_rows",
     "identity",
     "identity_for_rank",
+    "is_multi_node",
     "is_multi_process",
     "join_segments",
     "metadata",
@@ -384,7 +391,7 @@ __all__ = [
     "plural",
     "point",
     "point_value",
-    "resolve_multi_process",
+    "run_is_multi_process",
     "section_block",
     "severity",
     "severity_label",

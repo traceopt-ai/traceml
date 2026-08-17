@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared Run/Watch System Metrics pane.
+"""Run-card System Metrics pane.
 
 System values are observation-window averages.  In the multi-node table each
 metric independently uses its stored median/worst node point; related memory
@@ -32,7 +32,6 @@ from traceml_ai.reporting.terminal_card.common import (
     point_value,
     status_spans,
 )
-from traceml_ai.reporting.terminal_card.evidence import format_section_evidence
 from traceml_ai.reporting.terminal_card.layout import (
     RUN_LEFT_PANE_WIDTH,
     CardDoc,
@@ -41,6 +40,7 @@ from traceml_ai.reporting.terminal_card.layout import (
     append_table_row,
     new_pane_stages,
 )
+from traceml_ai.reporting.terminal_card.run_evidence import format_run_evidence
 
 _SYSTEM_LABEL_WIDTH = 23
 _SYSTEM_MEDIAN_WIDTH = 18
@@ -231,8 +231,8 @@ def _has_table_data(
     )
 
 
-def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
-    """Build staged System Metrics content shared by Run and Watch."""
+def build_run_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
+    """Build staged System Metrics content for the lower-left Run pane."""
     stages = new_pane_stages(RUN_LEFT_PANE_WIDTH)
     section_diagnosis = diagnosis(system_summary)
     multi_node = _node_count(system_summary) > 1
@@ -304,7 +304,7 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
                 multi_node=multi_node,
             )
 
-    evidence = format_section_evidence("system", system_summary)
+    evidence = format_run_evidence("system", system_summary)
     if evidence:
         stages.evidence.wrapped(evidence, label="Evidence: ")
     else:
@@ -313,4 +313,4 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
     return stages
 
 
-__all__ = ["build_system_pane", "coverage_text", "observed_gpu_count"]
+__all__ = ["build_run_system_pane", "coverage_text", "observed_gpu_count"]

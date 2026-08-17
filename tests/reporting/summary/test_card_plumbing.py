@@ -41,13 +41,6 @@ def test_terminal_card_facade_keeps_its_public_symbols() -> None:
     rendered = terminal_card.card_to_plain(terminal_card.build_fallback_card())
     assert "TraceML Run Summary" in rendered
 
-    watch = terminal_card.card_to_plain(
-        terminal_card.build_fallback_card(profile="watch")
-    )
-    assert "TraceML Watch Summary" in watch
-    assert "Verdict:" not in watch
-    assert all(len(line) == 156 for line in watch.splitlines())
-
 
 class _TTYBuffer(io.StringIO):
     """A stdout stand-in that claims to be an interactive terminal."""

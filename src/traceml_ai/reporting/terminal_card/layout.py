@@ -7,9 +7,9 @@
 """Terminal-card primitives and fixed-pane layout.
 
 This module is deliberately payload-agnostic.  It owns the styled document
-model, plain/ANSI rendering, and the shared summary-card pane compositor. Section
+model, plain/ANSI rendering, and the shared Run-card pane compositor.  Section
 modules provide ``CardDoc`` content; this module makes that content fit the
-same fixed geometry in every Run and Watch topology.
+same fixed geometry in every Run topology.
 """
 
 from __future__ import annotations

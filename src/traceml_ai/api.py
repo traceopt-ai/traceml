@@ -32,7 +32,7 @@ def trace_step(model: nn.Module) -> ContextManager[None]:
     When tracing is disabled, the context manager is a no-op. Exceptions from
     the training body still propagate normally.
     """
-    from traceml_ai.sdk.instrumentation import trace_step as _trace_step
+    from traceml_ai.sdk import trace_step as _trace_step
 
     return _trace_step(model)
 
@@ -138,9 +138,7 @@ def wrap_dataloader_fetch(obj: Any) -> Any:
     RuntimeError
         If a torch ``DataLoader`` is already automatically instrumented.
     """
-    from traceml_ai.sdk.wrappers import (
-        wrap_dataloader_fetch as _wrap_dataloader_fetch,
-    )
+    from traceml_ai.sdk import wrap_dataloader_fetch as _wrap_dataloader_fetch
 
     return _wrap_dataloader_fetch(obj)
 
@@ -167,7 +165,7 @@ def wrap_forward(model: nn.Module) -> nn.Module:
         If automatic forward instrumentation is active or the instance cannot
         be wrapped safely.
     """
-    from traceml_ai.sdk.wrappers import wrap_forward as _wrap_forward
+    from traceml_ai.sdk import wrap_forward as _wrap_forward
 
     return _wrap_forward(model)
 
@@ -192,7 +190,7 @@ def wrap_backward(loss: Any) -> Any:
     RuntimeError
         If automatic backward instrumentation is active.
     """
-    from traceml_ai.sdk.wrappers import wrap_backward as _wrap_backward
+    from traceml_ai.sdk import wrap_backward as _wrap_backward
 
     return _wrap_backward(loss)
 
@@ -219,7 +217,7 @@ def wrap_optimizer(optimizer: Any) -> Any:
         If automatic optimizer instrumentation is active or the instance
         cannot be wrapped safely.
     """
-    from traceml_ai.sdk.wrappers import wrap_optimizer as _wrap_optimizer
+    from traceml_ai.sdk import wrap_optimizer as _wrap_optimizer
 
     return _wrap_optimizer(optimizer)
 
@@ -248,7 +246,7 @@ def wrap_h2d(obj: Any) -> Any:
     Use this in manual or selective mode. If automatic H2D timing becomes
     active after wrapping, the proxy passes through to avoid double counting.
     """
-    from traceml_ai.sdk.wrappers import wrap_h2d as _wrap_h2d
+    from traceml_ai.sdk import wrap_h2d as _wrap_h2d
 
     return _wrap_h2d(obj)
 
