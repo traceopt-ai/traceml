@@ -4,7 +4,7 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Run-card Process Metrics pane.
+"""Shared Run/Watch Process Metrics pane.
 
 Process values are observation-window rank averages.  Each median/worst cell
 uses the stored point for that metric; memory byte/percentage pairs are read
@@ -26,13 +26,14 @@ from traceml_ai.reporting.terminal_card.common import (
     format_percent,
     format_scope,
     group_row,
-    group_rows,
     identity,
-    metadata,
     point,
     point_value,
+    rank_count,
+    rank_coverage,
     status_spans,
 )
+from traceml_ai.reporting.terminal_card.evidence import build_section_evidence
 from traceml_ai.reporting.terminal_card.layout import (
     RUN_RIGHT_PANE_WIDTH,
     STYLE_DIM,
@@ -42,45 +43,16 @@ from traceml_ai.reporting.terminal_card.layout import (
     append_table_row,
     new_pane_stages,
 )
-from traceml_ai.reporting.terminal_card.run_evidence import format_run_evidence
 
 _PROCESS_LABEL_WIDTH = 21
 _PROCESS_MEDIAN_WIDTH = 18
-
-
-def _rank_count(process_summary: Mapping[str, Any]) -> int:
-    """Return the Process ranks represented by stored telemetry."""
-    section_metadata = metadata(process_summary)
-    count = as_int(section_metadata.get("global_ranks_used"))
-    if count is not None:
-        return max(0, count)
-
-    ranks = set()
-    anonymous_rows = 0
-    for raw_row in group_rows(process_summary).values():
-        row_identity = as_mapping(as_mapping(raw_row).get("identity"))
-        rank = as_int(row_identity.get("global_rank"))
-        if rank is None:
-            anonymous_rows += 1
-        else:
-            ranks.add(rank)
-    return len(ranks) + anonymous_rows
 
 
 def _coverage_text(
     process_summary: Mapping[str, Any], *, meta: Mapping[str, Any]
 ) -> Optional[str]:
     """Return observed/expected Process-rank coverage for the status line."""
-    observed = _rank_count(process_summary)
-    expected = as_int(meta.get("world_size"))
-    if expected is not None and expected > 0:
-        if observed == expected == 1:
-            return None
-        unit = "rank" if expected == 1 else "ranks"
-        return f"{observed}/{expected} {unit}"
-    if observed > 0:
-        return f"{observed} {'rank' if observed == 1 else 'ranks'} observed"
-    return None
+    return rank_coverage(process_summary, meta=meta).detail_text()
 
 
 def _point_scope(
@@ -134,11 +106,11 @@ def _append_scalar_metric(
     metric: str,
     value_kind: str,
     multi_rank: bool,
-) -> None:
+) -> bool:
     """Append one Process scalar from stored average/point fields."""
     median_point = point(process_summary, "median", metric)
     worst_point = point(process_summary, "worst", metric)
-    append_table_row(
+    return append_table_row(
         doc,
         label=label,
         average=_format_scalar(
@@ -165,7 +137,7 @@ def _append_memory_metric(
     bytes_metric: str,
     percent_metric: str,
     multi_rank: bool,
-) -> None:
+) -> bool:
     """Append a coherent Process memory pair from stored rank averages."""
     average_metrics = as_mapping(
         as_mapping(process_summary.get("global")).get("average")
@@ -176,7 +148,7 @@ def _append_memory_metric(
     worst_metrics, worst_scope = _point_metrics(
         process_summary, "worst", anchors=(percent_metric, bytes_metric)
     )
-    append_table_row(
+    return append_table_row(
         doc,
         label=label,
         average=format_memory_value(
@@ -224,13 +196,13 @@ def _has_table_data(
     )
 
 
-def build_run_process_pane(
+def build_process_pane(
     process_summary: Mapping[str, Any], *, meta: Mapping[str, Any]
 ) -> PaneStages:
-    """Build staged Process Metrics content for the lower-right Run pane."""
+    """Build staged Process Metrics content shared by Run and Watch."""
     stages = new_pane_stages(RUN_RIGHT_PANE_WIDTH)
     section_diagnosis = diagnosis(process_summary)
-    multi_rank = _rank_count(process_summary) > 1
+    multi_rank = rank_count(process_summary) > 1
     stages.heading.wrapped_spans(
         *status_spans(
             "PROCESS METRICS",
@@ -239,9 +211,10 @@ def build_run_process_pane(
             details_style=STYLE_DIM,
         )
     )
-    evidence = format_run_evidence("process", process_summary)
-    if evidence:
-        stages.evidence.wrapped(evidence, label="Evidence: ")
+    evidence = build_section_evidence("process", process_summary)
+    if evidence.text:
+        stages.evidence.wrapped(evidence.text, label="Evidence: ")
+        stages.uses_scope = evidence.uses_scope
     else:
         stages.evidence.blank()
     stages.spacer.blank()
@@ -258,7 +231,7 @@ def build_run_process_pane(
         label_width=_PROCESS_LABEL_WIDTH,
         median_width=_PROCESS_MEDIAN_WIDTH,
     )
-    _append_scalar_metric(
+    stages.uses_scope |= _append_scalar_metric(
         stages.table,
         process_summary,
         label="CPU capacity",
@@ -266,7 +239,7 @@ def build_run_process_pane(
         value_kind="percent",
         multi_rank=multi_rank,
     )
-    _append_memory_metric(
+    stages.uses_scope |= _append_memory_metric(
         stages.table,
         process_summary,
         label="RSS used",
@@ -274,7 +247,7 @@ def build_run_process_pane(
         percent_metric="ram_percent",
         multi_rank=multi_rank,
     )
-    _append_scalar_metric(
+    stages.uses_scope |= _append_scalar_metric(
         stages.table,
         process_summary,
         label="CUDA used",
@@ -282,7 +255,7 @@ def build_run_process_pane(
         value_kind="capacity",
         multi_rank=multi_rank,
     )
-    _append_memory_metric(
+    stages.uses_scope |= _append_memory_metric(
         stages.table,
         process_summary,
         label="CUDA reserved",
@@ -293,4 +266,4 @@ def build_run_process_pane(
     return stages
 
 
-__all__ = ["build_run_process_pane"]
+__all__ = ["build_process_pane"]

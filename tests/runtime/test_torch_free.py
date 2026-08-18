@@ -289,7 +289,9 @@ def test_watch_runs_end_to_end_without_torch(tmp_path):
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
     assert "training done" in result.stdout
     assert "TraceML Watch Summary" in result.stdout
-    assert "Host health" in result.stdout
+    assert "SYSTEM METRICS:" in result.stdout
+    assert "PROCESS METRICS:" in result.stdout
+    assert "Host health" not in result.stdout
     assert "ModuleNotFoundError" not in result.stderr
 
     summary = logs_dir / "torch_free_e2e" / "final_summary.json"

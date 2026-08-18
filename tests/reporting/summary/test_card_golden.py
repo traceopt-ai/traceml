@@ -1449,46 +1449,6 @@ def run_unmeasured_resource_sections() -> CardDoc:
     )
 
 
-def _watch_system(
-    *,
-    diagnosis: Optional[Dict[str, Any]] = None,
-    cpu_percent: float,
-    ram_bytes: float,
-    ram_percent: float,
-    gpu_util_percent: Optional[float] = None,
-    gpu_mem_bytes: Optional[float] = None,
-    gpu_mem_percent: Optional[float] = None,
-    gpu_temp_c: Optional[float] = None,
-) -> Dict[str, Any]:
-    """Build a single-node System payload for watch cards."""
-    return _section(
-        diagnosis=diagnosis or _issue("NORMAL", "NORMAL"),
-        metadata={"mode": "single_node", "gpus_observed": 1},
-        average={
-            "cpu_percent": cpu_percent,
-            "ram_bytes": ram_bytes,
-            "ram_percent": ram_percent,
-            "gpu_util_percent": gpu_util_percent,
-            "gpu_mem_bytes": gpu_mem_bytes,
-            "gpu_mem_percent": gpu_mem_percent,
-            "gpu_temp_c": gpu_temp_c,
-        },
-        worst={"gpu_temp_c": _point(gpu_temp_c, "0")},
-        rows=_node_rows(0),
-        by="node_rank",
-    )
-
-
-def _watch_process(rss_bytes: float) -> Dict[str, Any]:
-    """Build a Process payload for watch cards."""
-    return _section(
-        diagnosis=_issue("NORMAL", "NORMAL"),
-        metadata={"global_ranks_used": 1},
-        worst={"ram_bytes": _point(rss_bytes, "0")},
-        rows=_rank_rows(0),
-    )
-
-
 _WATCH_STEP_TIME = _section(
     diagnosis=_issue("NO_DATA", "NO DATA"),
     metadata={"global_ranks_used": 1},
@@ -1498,10 +1458,10 @@ _WATCH_STEP_MEMORY = _section(diagnosis=_issue("NO_GPU", "NO GPU"))
 
 
 def watch_healthy() -> CardDoc:
-    """watch x single machine, healthy host."""
+    """watch x single process, healthy System and Process sections."""
     return _card(
         profile="watch",
-        system=_watch_system(
+        system=_system_single(
             cpu_percent=18.0,
             ram_bytes=6.2e9,
             ram_percent=19.375,
@@ -1510,21 +1470,25 @@ def watch_healthy() -> CardDoc:
             gpu_mem_percent=64.375,
             gpu_temp_c=61.0,
         ),
-        process=_watch_process(4.1e9),
+        process=_NORMAL_PROCESS,
         step_time=_WATCH_STEP_TIME,
         step_memory=_WATCH_STEP_MEMORY,
-        meta=_meta(),
+        meta=_meta(run_name="watch-single"),
         duration_s=312.0,
         artifact_hint="logs/watch_20260806/final_summary.json",
     )
 
 
 def watch_low_gpu_utilization() -> CardDoc:
-    """watch x single machine, low GPU utilization observation."""
+    """watch x one-node DDP, low GPU utilization."""
     return _card(
         profile="watch",
-        system=_watch_system(
-            diagnosis=_issue("LOW_GPU_UTILIZATION", "LOW GPU UTIL"),
+        system=_system_single(
+            diagnosis=_issue(
+                "LOW_GPU_UTILIZATION",
+                "LOW GPU UTIL",
+                evidence={"gpu_util_avg_percent": 14.0},
+            ),
             cpu_percent=18.0,
             ram_bytes=6.2e9,
             ram_percent=19.375,
@@ -1532,18 +1496,24 @@ def watch_low_gpu_utilization() -> CardDoc:
             gpu_mem_bytes=3.3e9,
             gpu_mem_percent=20.625,
             gpu_temp_c=42.0,
+            gpus_observed=4,
         ),
-        process=_watch_process(4.1e9),
+        process=_ONE_NODE_MULTI_PROCESS,
         step_time=_WATCH_STEP_TIME,
         step_memory=_WATCH_STEP_MEMORY,
-        meta=_meta(),
+        meta=_meta(
+            run_name="watch-ddp",
+            world_size=4,
+            nodes_observed=1,
+            gpus_observed=4,
+        ),
         duration_s=312.0,
         artifact_hint="logs/watch_20260806/final_summary.json",
     )
 
 
 def watch_memory_pressure() -> CardDoc:
-    """watch x single machine, host memory pressure."""
+    """watch x single process, host memory pressure."""
     pressure = _issue(
         "MEMORY_PRESSURE",
         "MEMORY PRESSURE",
@@ -1557,7 +1527,7 @@ def watch_memory_pressure() -> CardDoc:
     )
     return _card(
         profile="watch",
-        system=_watch_system(
+        system=_system_single(
             diagnosis=pressure,
             cpu_percent=64.0,
             ram_bytes=30.1e9,
@@ -1567,51 +1537,107 @@ def watch_memory_pressure() -> CardDoc:
             gpu_mem_percent=93.125,
             gpu_temp_c=79.0,
         ),
-        process=_watch_process(28.6e9),
+        process=_NORMAL_PROCESS,
         step_time=_WATCH_STEP_TIME,
         step_memory=_WATCH_STEP_MEMORY,
-        meta=_meta(),
+        meta=_meta(run_name="watch-pressure"),
         duration_s=312.0,
         artifact_hint="logs/watch_20260806/final_summary.json",
     )
 
 
 def watch_multi_node() -> CardDoc:
-    """watch x multi node, healthy hosts."""
-    system = _section(
+    """watch x multi-process, multi-node healthy resources."""
+    system = _system_multi_node(
         diagnosis=_issue("NORMAL", "NORMAL"),
-        metadata={"mode": "multi_node", "nodes_observed": 3},
+        average={
+            "cpu_percent": 20.0,
+            "ram_bytes": 8.0e9,
+            "ram_percent": 25.0,
+            "gpu_util_percent": 90.0,
+            "gpu_mem_bytes": 4.0e9,
+            "gpu_mem_percent": 25.0,
+            "gpu_temp_c": 60.0,
+            "gpu_power_w": 250.0,
+        },
         median={
-            "cpu_percent": _point(24.0, "0"),
-            "ram_percent": _point(31.0, "0"),
-            "gpu_util_percent": _point(88.0, "0"),
-            "gpu_mem_percent": _point(71.0, "0"),
-            "gpu_temp_c": _point(64.0, "0"),
+            "cpu_percent": _point(10.0, "1"),
+            "ram_percent": _point(20.0, "0"),
+            "gpu_util_percent": _point(85.0, "1"),
+            "gpu_mem_percent": _point(12.0, "1"),
+            "gpu_temp_c": _point(50.0, "1"),
+            "gpu_power_w": _point(220.0, "1"),
         },
         worst={
-            "cpu_percent": _point(71.0, "1"),
-            "ram_percent": _point(64.0, "1"),
-            "gpu_util_percent": _point(62.0, "2"),
-            "gpu_mem_percent": _point(93.0, "0"),
-            "gpu_temp_c": _point(81.0, "0"),
+            "cpu_percent": _point(30.0, "0"),
+            "ram_percent": _point(30.0, "1"),
+            "gpu_util_percent": _point(85.0, "1"),
+            "gpu_mem_percent": _point(38.0, "0"),
+            "gpu_temp_c": _point(70.0, "0"),
+            "gpu_power_w": _point(280.0, "0"),
         },
-        rows=_node_rows(0, 1, 2),
-        by="node_rank",
+        metrics_by_node={
+            0: {
+                "cpu_percent": 30.0,
+                "ram_bytes": 6.0e9,
+                "ram_percent": 20.0,
+                "gpu_util_percent": 95.0,
+                "gpu_mem_bytes": 6.0e9,
+                "gpu_mem_percent": 38.0,
+                "gpu_temp_c": 70.0,
+                "gpu_power_w": 280.0,
+            },
+            1: {
+                "cpu_percent": 10.0,
+                "ram_bytes": 10.0e9,
+                "ram_percent": 30.0,
+                "gpu_util_percent": 85.0,
+                "gpu_mem_bytes": 2.0e9,
+                "gpu_mem_percent": 12.0,
+                "gpu_temp_c": 50.0,
+                "gpu_power_w": 220.0,
+            },
+        },
     )
     return _card(
         profile="watch",
         system=system,
-        process=_watch_process(4.1e9),
+        process=_TWO_NODE_MULTI_PROCESS,
         step_time=_WATCH_STEP_TIME,
         step_memory=_WATCH_STEP_MEMORY,
         meta=_meta(
+            run_name="watch-multinode",
             mode="multi_node",
-            world_size=12,
-            nodes_observed=3,
-            gpus_observed=12,
+            world_size=4,
+            nodes_observed=2,
+            gpus_observed=4,
         ),
         duration_s=760.0,
         artifact_hint="logs/watch_20260806/final_summary.json",
+    )
+
+
+def watch_cpu_only_partial() -> CardDoc:
+    """watch x CPU-only partial rank coverage on one node."""
+    return _card(
+        profile="watch",
+        system=_system_single(
+            cpu_percent=7.0,
+            ram_bytes=8.3e9,
+            ram_percent=32.0,
+            gpus_observed=0,
+        ),
+        process=_CPU_ONLY_PROCESS,
+        step_time=_WATCH_STEP_TIME,
+        step_memory=_WATCH_STEP_MEMORY,
+        meta=_meta(
+            run_name="watch-cpu-partial",
+            world_size=4,
+            nodes_observed=1,
+            gpus_observed=0,
+        ),
+        duration_s=21.1,
+        artifact_hint="logs/watch-cpu-partial/final_summary.json",
     )
 
 
@@ -1814,6 +1840,7 @@ CASES = {
     "watch_low_gpu_utilization": watch_low_gpu_utilization,
     "watch_memory_pressure": watch_memory_pressure,
     "watch_multi_node": watch_multi_node,
+    "watch_cpu_only_partial": watch_cpu_only_partial,
 }
 
 WATCH_CASES = tuple(name for name in CASES if name.startswith("watch_"))
@@ -1831,7 +1858,6 @@ SINGLE_MACHINE_CASES = (
     "run_h2d_bound",
     "run_compute_bound",
     "watch_healthy",
-    "watch_low_gpu_utilization",
     "watch_memory_pressure",
 )
 
@@ -2551,81 +2577,113 @@ GOLDENS = {
 |  Full evidence: logs/fsdp-straggler/final_summary.json  (--html-report)                                                                                  |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
     "watch_healthy": """\
-+----------------------------------------------------------------------------+
-|  TraceML Watch Summary                                                     |
-|  1 machine · 1 GPU · observed for 5m 12s                                   |
-+----------------------------------------------------------------------------+
-|                                                                            |
-|  Host health: NORMAL                                                       |
-|                                                                            |
-|  CPU Util   18% avg          RAM       6.2 / 32.0 GB  (19%)                |
-|  GPU Util   76% avg          GPU Mem  10.3 / 16.0 GB  (64%)                |
-|  GPU Temp   61C max          Proc RSS  4.1 GB                              |
-|                                                                            |
-|  Watch monitors host and process health only; it does not measure step     |
-|  time. To diagnose training speed: traceml run <your-script>.py            |
-|                                                                            |
-|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)    |
-+----------------------------------------------------------------------------+""",
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|  TraceML Watch Summary                                                                                                                                   |
+|  watch-single · 1 rank · 1 GPU observed · 5m 12s                                                                                                         |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                                                                                                          |
+|  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL                                                                |
+|                                                               ||                                                                                         |
+|                                                               ||                                                                                         |
+|                         avg                                   ||                       avg                                                               |
+|  CPU                    18%                                   ||  CPU capacity         14%                                                               |
+|  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)                                                      |
+|  GPU util               76%                                   ||  CUDA used            2.9 GB                                                            |
+|  GPU memory/device      10.3 GB (64%)                         ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  GPU temperature        61C                                   ||                                                                                         |
+|                                                                                                                                                          |
+|                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
+|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
     "watch_low_gpu_utilization": """\
-+----------------------------------------------------------------------------+
-|  TraceML Watch Summary                                                     |
-|  1 machine · 1 GPU · observed for 5m 12s                                   |
-+----------------------------------------------------------------------------+
-|                                                                            |
-|  Host health: NORMAL                                                       |
-|                                                                            |
-|  CPU Util   18% avg          RAM       6.2 / 32.0 GB  (19%)                |
-|  GPU Util   14% avg          GPU Mem   3.3 / 16.0 GB  (21%)                |
-|  GPU Temp   42C max          Proc RSS  4.1 GB                              |
-|                                                                            |
-|  Observation: GPU utilization stayed low (14% avg). Watch cannot tell      |
-|  whether that is input, transfer, sync, or idle time.                      |
-|  Next: traceml run <your-script>.py -- measures step time and finds the    |
-|  cause.                                                                    |
-|                                                                            |
-|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)    |
-+----------------------------------------------------------------------------+""",
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|  TraceML Watch Summary                                                                                                                                   |
+|  watch-ddp · 4/4 ranks · 4 GPUs observed · 1/1 node · 5m 12s                                                                                             |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                                                                                                          |
+|  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
+|                                                                                                                                                          |
+|  SYSTEM METRICS: LOW GPU UTIL                                 ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
+|  Evidence: GPU utilization 14.0%                              ||                                                                                         |
+|                                                               ||                                                                                         |
+|                         avg                                   ||                       median rank avg   worst rank avg                                  |
+|  CPU                    18%                                   ||  CPU capacity         12%               81%, R2/N0                                      |
+|  RAM used               6.2 GB (19%)                          ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
+|  GPU util               14%                                   ||  CUDA used            2.9 GB            4.6 GB, R3/N0                                   |
+|  GPU memory/device      3.3 GB (21%)                          ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N0                             |
+|  GPU temperature        42C                                   ||                                                                                         |
+|                                                                                                                                                          |
+|                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
+|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
     "watch_memory_pressure": """\
-+----------------------------------------------------------------------------+
-|  TraceML Watch Summary                                                     |
-|  1 machine · 1 GPU · observed for 5m 12s                                   |
-+----------------------------------------------------------------------------+
-|                                                                            |
-|  Host health: MEMORY PRESSURE  (WARNING)                                   |
-|  RAM 30.1 / 32.0 GB (94%) -- the host is close to memory exhaustion.       |
-|                                                                            |
-|  CPU Util   64% avg          RAM      30.1 / 32.0 GB  (94%)                |
-|  GPU Util   81% avg          GPU Mem  14.9 / 16.0 GB  (93%)                |
-|  GPU Temp   79C max          Proc RSS 28.6 GB                              |
-|                                                                            |
-|  Next: reduce DataLoader workers or caching, or move work off this host.   |
-|                                                                            |
-|  Watch monitors host and process health only; it does not measure step     |
-|  time. To diagnose training speed: traceml run <your-script>.py            |
-|                                                                            |
-|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)    |
-+----------------------------------------------------------------------------+""",
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|  TraceML Watch Summary                                                                                                                                   |
+|  watch-pressure · 1 rank · 1 GPU observed · 5m 12s                                                                                                       |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                                                                                                          |
+|  SYSTEM METRICS: MEMORY PRESSURE  (WARNING)                   ||  PROCESS METRICS: NORMAL                                                                |
+|  Evidence: RAM 30.1 / 32.0 GB (94%) -- the host is close to   ||                                                                                         |
+|  memory exhaustion.                                           ||                                                                                         |
+|                                                               ||                                                                                         |
+|                         avg                                   ||                       avg                                                               |
+|  CPU                    64%                                   ||  CPU capacity         14%                                                               |
+|  RAM used               30.1 GB (94%)                         ||  RSS used             3.1 GB (10%)                                                      |
+|  GPU util               81%                                   ||  CUDA used            2.9 GB                                                            |
+|  GPU memory/device      14.9 GB (93%)                         ||  CUDA reserved        3.2 GB (20%)                                                      |
+|  GPU temperature        79C                                   ||                                                                                         |
+|                                                                                                                                                          |
+|                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
+|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
     "watch_multi_node": """\
-+----------------------------------------------------------------------------+
-|  TraceML Watch Summary                                                     |
-|  3 nodes · 12 GPUs · observed for 12m 40s                                  |
-+----------------------------------------------------------------------------+
-|                                                                            |
-|  Host health: NORMAL on all 3 nodes                                        |
-|                                                                            |
-|              median        worst node                                      |
-|  CPU Util    24% avg       71%  (n1)                                       |
-|  RAM         31% used      64%  (n1)                                       |
-|  GPU Util    88% avg       62%  (n2)                                       |
-|  GPU Mem     71% used      93%  (n0)                                       |
-|  GPU Temp    64C max       81C  (n0)                                       |
-|                                                                            |
-|  Watch monitors host and process health only; it does not measure step     |
-|  time. To diagnose training speed: traceml run <your-script>.py            |
-|                                                                            |
-|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)    |
-+----------------------------------------------------------------------------+""",
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|  TraceML Watch Summary                                                                                                                                   |
+|  watch-multinode · 4/4 ranks · 4 GPUs observed · 2/2 nodes · 12m 40s                                                                                     |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                                                                                                          |
+|  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
+|                                                                                                                                                          |
+|  SYSTEM METRICS: NORMAL · 2/2 nodes                           ||  PROCESS METRICS: NORMAL · 4/4 ranks                                                    |
+|                                                               ||                                                                                         |
+|                                                               ||                                                                                         |
+|                         median node avg   worst node avg      ||                       median rank avg   worst rank avg                                  |
+|  CPU                    10%               30%, N0             ||  CPU capacity         12%               81%, R2/N1                                      |
+|  RAM used               6.0 GB (20%)      10.0 GB (30%), N1   ||  RSS used             3.1 GB (10%)      5.4 GB (17%), R1/N0                             |
+|  GPU util               85%               85%, N1             ||  CUDA used            2.9 GB            4.6 GB, R3/N1                                   |
+|  GPU memory/device      2.0 GB (12%)      6.0 GB (38%), N0    ||  CUDA reserved        3.2 GB (20%)      6.8 GB (43%), R3/N1                             |
+|  GPU temperature        50C               70C, N0             ||                                                                                         |
+|  GPU power              220W              280W, N0            ||                                                                                         |
+|                                                                                                                                                          |
+|                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
+|  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
+    "watch_cpu_only_partial": """\
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|  TraceML Watch Summary                                                                                                                                   |
+|  watch-cpu-partial · 1/4 ranks · CPU only (no GPU detected) · 1/1 node · 21.1s                                                                           |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+
+|                                                                                                                                                          |
+|  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL · 1/4 ranks                                                    |
+|                                                               ||                                                                                         |
+|                                                               ||                                                                                         |
+|                         avg                                   ||                       avg                                                               |
+|  CPU                    7%                                    ||  CPU capacity         14%                                                               |
+|  RAM used               8.3 GB (32%)                          ||  RSS used             3.1 GB (10%)                                                      |
+|                                                                                                                                                          |
+|                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
+|  Full evidence: logs/watch-cpu-partial/final_summary.json  (--html-report)                                                                               |
++----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
 }
 
 
@@ -2869,7 +2927,7 @@ def test_run_action_sits_between_why_and_panes() -> None:
 
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_card_lines_are_exactly_card_width(name: str) -> None:
-    expected_width = 78 if name.startswith("watch_") else 156
+    expected_width = 156
     for line in plain(name).splitlines():
         assert len(line) == expected_width, (name, len(line), line)
 
@@ -3930,10 +3988,11 @@ def test_unmeasured_resource_sections_show_their_stored_reason() -> None:
 
 
 def test_watch_header_keeps_the_host_gpu_count() -> None:
-    # watch describes the host, so it is not capped by world size.
+    # System telemetry describes the host, so GPU count is not capped by
+    # process world size.
     doc = _card(
         profile="watch",
-        system=_watch_system(
+        system=_system_single(
             cpu_percent=1.0,
             ram_bytes=4.0e9,
             ram_percent=25.0,
@@ -3941,15 +4000,21 @@ def test_watch_header_keeps_the_host_gpu_count() -> None:
             gpu_mem_bytes=0.5e9,
             gpu_mem_percent=3.1,
             gpu_temp_c=34.0,
+            gpus_observed=4,
         ),
-        process=_watch_process(2.0e8),
+        process=_NORMAL_PROCESS,
         step_time=_WATCH_STEP_TIME,
         step_memory=_WATCH_STEP_MEMORY,
-        meta=_meta(world_size=1, nodes_observed=1, gpus_observed=4),
+        meta=_meta(
+            run_name="watch",
+            world_size=1,
+            nodes_observed=1,
+            gpus_observed=4,
+        ),
         duration_s=2.0,
         artifact_hint="logs/watch/final_summary.json",
     )
-    assert "1 machine · 4 GPUs · observed for 2.0s" in card_to_plain(doc)
+    assert "watch · 1 rank · 4 GPUs observed · 2.0s" in card_to_plain(doc)
 
 
 def test_other_findings_skip_section_primaries_and_keep_later_issues() -> None:
@@ -4186,41 +4251,289 @@ def test_terminal_style_contract_colours_primary_status_values() -> None:
         (")", STYLE_PLAIN),
     ]
 
-    normal = _spans_for_line(CASES["watch_healthy"](), "Host health:")
-    assert [(span.text, span.style) for span in normal] == [
-        ("Host health: ", STYLE_BOLD),
+    normal = _resource_pane_spans(
+        _spans_for_line(CASES["watch_healthy"](), "SYSTEM METRICS:"),
+        right=False,
+    )
+    assert [(span.text, span.style) for span in normal[:2]] == [
+        ("SYSTEM METRICS: ", STYLE_BOLD),
         ("NORMAL", STYLE_OK),
     ]
 
-    warning = _spans_for_line(
-        CASES["watch_memory_pressure"](),
-        "Host health:",
+    warning = _resource_pane_spans(
+        _spans_for_line(
+            CASES["watch_memory_pressure"](),
+            "SYSTEM METRICS:",
+        ),
+        right=False,
     )
-    assert [(span.text, span.style) for span in warning] == [
-        ("Host health: ", STYLE_BOLD),
+    assert [(span.text, span.style) for span in warning[:2]] == [
+        ("SYSTEM METRICS: ", STYLE_BOLD),
         ("MEMORY PRESSURE  (WARNING)", STYLE_WARN),
     ]
 
-    multi_normal = _spans_for_line(
-        CASES["watch_multi_node"](),
-        "Host health:",
+    multi_normal = _resource_pane_spans(
+        _spans_for_line(CASES["watch_multi_node"](), "SYSTEM METRICS:"),
+        right=False,
     )
     assert [(span.text, span.style) for span in multi_normal] == [
-        ("Host health: ", STYLE_BOLD),
-        ("NORMAL on all 3 nodes", STYLE_OK),
+        ("SYSTEM METRICS: ", STYLE_BOLD),
+        ("NORMAL", STYLE_OK),
+        (" · 2/2 nodes", STYLE_PLAIN),
     ]
 
 
 @pytest.mark.parametrize("name", WATCH_CASES)
-def test_watch_cards_never_mention_step_timing(name: str) -> None:
+def test_watch_cards_offer_run_as_the_step_timing_next_step(name: str) -> None:
     text = plain(name)
+    next_step = (
+        "Next: Wrap your step with trace_step(model), then traceml run."
+    )
+    assert text.count(next_step) == 1
+    assert text.index(next_step) < text.index("Full evidence:")
     for banned in (
+        "Verdict:",
+        "Why:",
+        "Host health:",
+        "Observation:",
         "Step Time",
         "Step Memory",
+        "STEP TIMING",
+        "STEP MEMORY",
         "INSUFFICIENT",
         "steps analyzed",
+        "common steps",
+        "Watch monitors",
+        "traceml run <your-script>.py",
     ):
         assert banned not in text
+
+
+@pytest.mark.parametrize("name", WATCH_CASES)
+def test_watch_resource_rows_keep_the_shared_fixed_divider(name: str) -> None:
+    pane_lines = [line for line in plain(name).splitlines() if "||" in line]
+
+    assert pane_lines
+    assert all(len(line) == 156 for line in pane_lines)
+    assert all(line.count("||") == 1 for line in pane_lines)
+    assert {line.index("||") for line in pane_lines} == {64}
+
+
+def test_watch_headers_use_process_rank_coverage_without_steps() -> None:
+    expected = {
+        "watch_healthy": "watch-single · 1 rank · 1 GPU observed · 5m 12s",
+        "watch_low_gpu_utilization": (
+            "watch-ddp · 4/4 ranks · 4 GPUs observed · 1/1 node · 5m 12s"
+        ),
+        "watch_multi_node": (
+            "watch-multinode · 4/4 ranks · 4 GPUs observed · "
+            "2/2 nodes · 12m 40s"
+        ),
+        "watch_cpu_only_partial": (
+            "watch-cpu-partial · 1/4 ranks · CPU only (no GPU detected) · "
+            "1/1 node · 21.1s"
+        ),
+    }
+
+    for name, header in expected.items():
+        text = plain(name)
+        assert header in text
+        assert "steps" not in text.splitlines()[2]
+
+
+@pytest.mark.parametrize(
+    ("metadata", "world_size", "expected"),
+    [
+        ({}, 4, "0/4 ranks"),
+        ({"global_ranks_used": 0}, 1, "0/1 rank"),
+    ],
+)
+def test_watch_header_and_process_pane_share_degraded_rank_coverage(
+    metadata: Dict[str, Any], world_size: int, expected: str
+) -> None:
+    process = _section(
+        diagnosis=_issue(
+            "NO_DATA",
+            "NO DATA",
+            summary="Process telemetry was not measured.",
+        ),
+        metadata=metadata,
+    )
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=_system_single(cpu_percent=10.0),
+            process=process,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(run_name="degraded-process", world_size=world_size),
+            duration_s=2.0,
+            artifact_hint="logs/degraded-process/final_summary.json",
+        )
+    )
+
+    assert expected in text.splitlines()[2]
+    process_heading = next(
+        line for line in text.splitlines() if "PROCESS METRICS:" in line
+    )
+    assert expected in process_heading
+
+
+def test_watch_rank_coverage_falls_back_to_grouped_rows() -> None:
+    process = _section(
+        diagnosis=_issue("NORMAL", "NORMAL"),
+        rows=_rank_rows(0),
+    )
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=_system_single(cpu_percent=10.0),
+            process=process,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(run_name="row-coverage", world_size=4),
+            duration_s=2.0,
+            artifact_hint="logs/row-coverage/final_summary.json",
+        )
+    )
+
+    assert "row-coverage · 1/4 ranks" in text
+    assert "PROCESS METRICS: NORMAL · 1/4 ranks" in text
+
+
+def test_watch_node_coverage_and_scope_survive_degraded_process() -> None:
+    system = _section(
+        diagnosis=_issue("NORMAL", "NORMAL"),
+        metadata={
+            "nodes_observed": 2,
+            "nodes_expected": 2,
+            "nodes_coverage": "2/2",
+        },
+        average={"cpu_percent": 15.0},
+        median={"cpu_percent": _point(10.0, "0")},
+        worst={"cpu_percent": _point(20.0, "1")},
+        rows=_node_rows(
+            0,
+            1,
+            metrics_by_node={
+                0: {"cpu_percent": 10.0},
+                1: {"cpu_percent": 20.0},
+            },
+        ),
+        by="node_rank",
+    )
+    process = _section(diagnosis=_issue("NO_DATA", "NO DATA"))
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=system,
+            process=process,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(
+                run_name="node-coverage",
+                mode="multi_node",
+                world_size=None,
+                nodes_observed=2,
+            ),
+            duration_s=2.0,
+            artifact_hint="logs/node-coverage/final_summary.json",
+        )
+    )
+
+    assert "node-coverage · 2/2 nodes · 2.0s" in text
+    assert "20%, N1" in text
+    assert "Scope: N = node · R = global rank · G = GPU index" in text
+
+
+def test_watch_single_gpu_evidence_emits_scope_legend() -> None:
+    diagnosis = _issue(
+        "HIGH_GPU_POWER",
+        "HIGH GPU POWER",
+        severity="warn",
+        evidence={
+            "gpu_power_avg_limit_percent": 95.0,
+            "scope": {"level": "gpu", "node_rank": 0, "gpu_idx": 0},
+        },
+    )
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=_system_single(
+                diagnosis=diagnosis,
+                cpu_percent=5.0,
+                gpu_power_w=250.0,
+            ),
+            process=_NORMAL_PROCESS,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(run_name="single-scope"),
+            duration_s=2.0,
+            artifact_hint="logs/single-scope/final_summary.json",
+        )
+    )
+
+    assert "Evidence: GPU power 95.0% of limit · N0/G0" in text
+    assert "Scope: N = node · R = global rank · G = GPU index" in text
+
+
+def test_watch_scope_legend_requires_emitted_scope() -> None:
+    text = plain("watch_cpu_only_partial")
+
+    assert "Scope: N = node · R = global rank · G = GPU index" not in text
+    assert not re.search(r"\b[NRG]\d+\b", text)
+
+
+def test_run_and_watch_share_identical_system_process_panes() -> None:
+    inputs = _coherent_multi_inputs()
+
+    run_text = card_to_plain(_card(**inputs))
+    inputs["profile"] = "watch"
+    watch_text = card_to_plain(_card(**inputs))
+
+    def resource_rows(text: str) -> Tuple[str, ...]:
+        lines = text.splitlines()
+        start = next(
+            index
+            for index, line in enumerate(lines)
+            if "SYSTEM METRICS:" in line
+        )
+        return tuple(line for line in lines[start:] if "||" in line)
+
+    assert resource_rows(watch_text) == resource_rows(run_text)
+
+
+def test_watch_other_findings_use_only_system_and_process_issues() -> None:
+    inputs = _coherent_multi_inputs()
+    inputs["profile"] = "watch"
+    system_issue = _issue(
+        "HIGH_GPU_POWER",
+        "HIGH GPU POWER",
+        severity="warn",
+        summary="Stored secondary System warning.",
+    )
+    process_issue = _issue(
+        "HIGH_PROCESS_CPU",
+        "HIGH PROCESS CPU",
+        severity="critical",
+        summary="Stored secondary Process critical finding.",
+    )
+    memory_issue = _issue(
+        "MEMORY_CREEP",
+        "MEMORY CREEP",
+        severity="critical",
+        summary="Step Memory must stay outside Watch findings.",
+    )
+    inputs["system"]["issues"].append(system_issue)
+    inputs["process"]["issues"].append(process_issue)
+    inputs["step_memory"]["issues"].append(memory_issue)
+
+    text = card_to_plain(_card(**inputs))
+
+    assert "Other findings:" in text
+    assert "Stored secondary System warning." in text
+    assert "Stored secondary Process critical finding." in text
+    assert "Step Memory must stay outside Watch findings." not in text
 
 
 @pytest.mark.parametrize("name", SINGLE_MACHINE_CASES)
@@ -4228,12 +4541,9 @@ def test_single_machine_cards_avoid_multi_rank_vocabulary(
     name: str,
 ) -> None:
     text = plain(name)
-    if name.startswith("run_"):
-        assert "1 rank" in text.splitlines()[2]
-        # Why/Next now preserve the stored primary-diagnosis wording, which
-        # may explicitly say that rank skew was not identified.
-        banned_words = ("node",)
-    else:
-        banned_words = ("rank", "node", "skew")
+    assert "1 rank" in text.splitlines()[2]
+    # Why/Next now preserve the stored Run primary-diagnosis wording, which
+    # may explicitly say that rank skew was not identified.
+    banned_words = ("node",)
     for banned in banned_words:
         assert not re.search(rf"\b{banned}", text, re.IGNORECASE), banned

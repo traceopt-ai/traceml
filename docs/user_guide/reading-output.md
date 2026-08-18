@@ -86,10 +86,13 @@ window-average Step Time is closest to the cross-rank median. Every displayed
 phase comes from that selected rank row; TraceML does not combine unrelated
 per-metric medians. System and Process averages cover each section's own
 telemetry observation window; they are not aligned to the Step Time window.
-The Run card is twice the width of the Watch card. Step Timing and Step Memory
-share fixed upper panes, and System and Process share fixed lower panes. Their
-divider stays in the same column for single-rank, one-node distributed, and
-multi-node distributed runs.
+Run and Watch share the same 156-column System/Process layout. Run also shows
+Step Timing, Step Memory, and a diagnostic `Verdict`/`Why`/`Next`. Watch omits
+those performance sections and instead points to `trace_step(model)` and
+`traceml run` for step-time measurement. Watch gets rank coverage from Process
+telemetry and node coverage from System telemetry; missing Process data stays
+at zero observed ranks rather than borrowing the expected world size. Its
+scope legend appears only when the card uses an `N`, `R`, or `G` identity.
 In the multi-node System table, each metric uses the median and worst
 node-average points already stored in the summary. “Worst” is not a temporal
 maximum, and different rows can identify different nodes. RAM and GPU-memory
@@ -110,6 +113,8 @@ of inferring new evidence.
 
 Detailed section prose remains in the `system.card`, `process.card`,
 `step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
+If terminal-card rendering itself fails during shutdown, TraceML prints a
+minimal failure card and directs the user to the structured JSON evidence.
 
 ### Shareable HTML report
 

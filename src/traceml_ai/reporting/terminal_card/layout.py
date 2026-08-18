@@ -7,9 +7,9 @@
 """Terminal-card primitives and fixed-pane layout.
 
 This module is deliberately payload-agnostic.  It owns the styled document
-model, plain/ANSI rendering, and the shared Run-card pane compositor.  Section
+model, plain/ANSI rendering, and the shared summary-card pane compositor. Section
 modules provide ``CardDoc`` content; this module makes that content fit the
-same fixed geometry in every Run topology.
+same fixed geometry in every Run and Watch topology.
 """
 
 from __future__ import annotations
@@ -174,12 +174,13 @@ class CardDoc:
 
 @dataclass
 class PaneStages:
-    """Heading, evidence, spacer, and table documents for one resource pane."""
+    """Rendered groups and presentation metadata for one resource pane."""
 
     heading: CardDoc
     evidence: CardDoc
     spacer: CardDoc
     table: CardDoc
+    uses_scope: bool = False
 
 
 def new_pane_stages(width: int) -> PaneStages:
@@ -278,20 +279,21 @@ def append_table_row(
     multi: bool,
     label_width: int = 28,
     median_width: int = 20,
-) -> None:
-    """Append one Run resource row while preserving measured zero.
+) -> bool:
+    """Append one resource row and report whether its scope was emitted.
 
     A long worst-rank/node scope is continued below its values instead of
     leaking across, or silently clipping at, the fixed pane boundary.
     """
     if multi:
+        uses_scope = bool(worst and worst_scope)
         worst_cell = (
             f"{worst}, {worst_scope}"
             if worst and worst_scope
             else (worst or "")
         )
         if median is None and not worst_cell:
-            return
+            return False
         body = (
             f"{label:<{label_width}}"
             f"{(median or ''):<{median_width}}"
@@ -299,7 +301,7 @@ def append_table_row(
         )
         if len(body) <= doc.inner_width:
             doc.text(body)
-            return
+            return uses_scope
         values = (
             f"{label:<{label_width}}"
             f"{(median or ''):<{median_width}}"
@@ -310,9 +312,10 @@ def append_table_row(
             doc.text(f"{'':<{label_width + median_width}}({worst_scope})")
         else:
             doc.wrapped(body)
-        return
+        return uses_scope
     if average is not None:
         doc.text(f"{label:<{label_width}}{average}")
+    return False
 
 
 def _split_pane_line(line: CardLine, width: int) -> List[CardLine]:

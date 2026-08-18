@@ -213,9 +213,13 @@ Not yet.
 ## What is the difference between `watch` and `run`?
 
 `watch`
+
 - zero-code system and process visibility
+- the same terminal System/Process panes as `run`, without a performance
+  verdict or step measurements
 
 `run`
+
 - the default command
 - step-aware bottleneck diagnosis
 - the best place to start for most users
