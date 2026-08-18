@@ -86,6 +86,7 @@ FINAL_SUMMARY_HTML_NAME = "final_summary.html"
 
 RUN_TITLE = "TraceML Run Summary"
 WATCH_TITLE = "TraceML Watch Summary"
+WATCH_NEXT_ACTION = "Wrap your step with trace_step(model), then traceml run."
 
 # These style names were directly importable from the former monolithic module.
 # Keep that established import surface on the public façade without changing
@@ -387,7 +388,7 @@ def _append_watch_body(
     process_summary: Mapping[str, Any],
     meta: Mapping[str, Any],
 ) -> None:
-    """Append Watch as the System/Process subset of the Run card."""
+    """Append Watch resource panes and its transition to step timing."""
     system_pane, process_pane = _build_resource_panes(
         system_summary=system_summary,
         process_summary=process_summary,
@@ -404,6 +405,8 @@ def _append_watch_body(
         process_pane=process_pane,
         finding_sections=(system_summary, process_summary),
     )
+    doc.blank()
+    doc.wrapped(WATCH_NEXT_ACTION, label="Next: ", style=STYLE_NEXT)
 
 
 def build_summary_card(

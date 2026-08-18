@@ -60,7 +60,9 @@ narrower than section-level health/resource diagnoses.
 renders `Verdict`, `Why`, and `Next`, followed by fixed Step Timing/Step Memory
 and System/Process panes. Watch uses the same 156-column header, System/Process
 panes, scope legend, secondary findings, and footer, but omits the performance
-verdict and both step sections. Its rank coverage comes from Process metadata;
+verdict and both step sections. A short `Next` line before the footer directs
+users to `trace_step(model)` and `traceml run` for step-time measurement. Its
+rank coverage comes from Process metadata;
 when that count is unavailable, grouped Process rows provide the observed
 count, and an empty Process section represents zero observed ranks rather than
 borrowing `meta.world_size`. System node coverage is resolved independently.

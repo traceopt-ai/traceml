@@ -2593,6 +2593,8 @@ GOLDENS = {
 |  GPU temperature        61C                                   ||                                                                                         |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
 |  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
     "watch_low_gpu_utilization": """\
@@ -2614,6 +2616,8 @@ GOLDENS = {
 |  GPU temperature        42C                                   ||                                                                                         |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
 |  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
     "watch_memory_pressure": """\
@@ -2633,6 +2637,8 @@ GOLDENS = {
 |  GPU memory/device      14.9 GB (93%)                         ||  CUDA reserved        3.2 GB (20%)                                                      |
 |  GPU temperature        79C                                   ||                                                                                         |
 |                                                                                                                                                          |
+|                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
@@ -2656,6 +2662,8 @@ GOLDENS = {
 |  GPU power              220W              280W, N0            ||                                                                                         |
 |                                                                                                                                                          |
 |                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
+|                                                                                                                                                          |
 |  Full evidence: logs/watch_20260806/final_summary.json  (--html-report)                                                                                  |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
     "watch_cpu_only_partial": """\
@@ -2671,6 +2679,8 @@ GOLDENS = {
 |  CPU                    7%                                    ||  CPU capacity         14%                                                               |
 |  RAM used               8.3 GB (32%)                          ||  RSS used             3.1 GB (10%)                                                      |
 |                                                                                                                                                          |
+|                                                                                                                                                          |
+|  Next: Wrap your step with trace_step(model), then traceml run.                                                                                          |
 |                                                                                                                                                          |
 |  Full evidence: logs/watch-cpu-partial/final_summary.json  (--html-report)                                                                               |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+""",
@@ -4274,12 +4284,16 @@ def test_terminal_style_contract_colours_primary_status_values() -> None:
 
 
 @pytest.mark.parametrize("name", WATCH_CASES)
-def test_watch_cards_never_mention_step_timing(name: str) -> None:
+def test_watch_cards_offer_run_as_the_step_timing_next_step(name: str) -> None:
     text = plain(name)
+    next_step = (
+        "Next: Wrap your step with trace_step(model), then traceml run."
+    )
+    assert text.count(next_step) == 1
+    assert text.index(next_step) < text.index("Full evidence:")
     for banned in (
         "Verdict:",
         "Why:",
-        "Next:",
         "Host health:",
         "Observation:",
         "Step Time",

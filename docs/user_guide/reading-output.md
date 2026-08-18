@@ -86,18 +86,13 @@ window-average Step Time is closest to the cross-rank median. Every displayed
 phase comes from that selected rank row; TraceML does not combine unrelated
 per-metric medians. System and Process averages cover each section's own
 telemetry observation window; they are not aligned to the Step Time window.
-Run and Watch use the same 156-column frame. Run shows Step Timing and Step
-Memory in the upper panes, followed by System and Process in the lower panes.
-Watch is the System/Process subset: it omits performance `Verdict`, `Why`,
-`Next`, Step Timing, and Step Memory. Its header gets rank coverage from the
-Process section and does not show a step count. Missing Process telemetry is
-reported as zero observed ranks rather than inferred from the expected world
-size. Node coverage comes independently from System telemetry, so it remains
-visible when Process telemetry is degraded. Both profiles use the same
-System/Process pane builders, footer, and fixed divider for single-rank,
-one-node distributed, and multi-node distributed output. On Watch, the compact
-scope legend appears only when a resource pane emits an `N`, `R`, or `G`
-identity.
+Run and Watch share the same 156-column System/Process layout. Run also shows
+Step Timing, Step Memory, and a diagnostic `Verdict`/`Why`/`Next`. Watch omits
+those performance sections and instead points to `trace_step(model)` and
+`traceml run` for step-time measurement. Watch gets rank coverage from Process
+telemetry and node coverage from System telemetry; missing Process data stays
+at zero observed ranks rather than borrowing the expected world size. Its
+scope legend appears only when the card uses an `N`, `R`, or `G` identity.
 In the multi-node System table, each metric uses the median and worst
 node-average points already stored in the summary. “Worst” is not a temporal
 maximum, and different rows can identify different nodes. RAM and GPU-memory

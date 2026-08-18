@@ -132,7 +132,11 @@ def test_watch_profile_renders_the_watch_card(
     } == {64}
     assert "Verdict:" not in text
     assert "Why:" not in text
-    assert "Next:" not in text
+    assert (
+        "Next: Wrap your step with trace_step(model), then traceml run."
+        in text
+    )
+    assert text.index("Next:") < text.index("Full evidence:")
     assert "Host health:" not in text
     assert "Step Time" not in text
     assert "Step Memory" not in text
