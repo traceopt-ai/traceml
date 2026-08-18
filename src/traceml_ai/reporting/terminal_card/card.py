@@ -34,6 +34,7 @@ from traceml_ai.reporting.terminal_card.common import (
     metadata,
     pack_segments,
     plural,
+    rank_coverage,
     resolve_multi_process,
     severity,
     severity_label,
@@ -57,6 +58,7 @@ from traceml_ai.reporting.terminal_card.layout import (
     STYLE_WARN,
     CardDoc,
     CardLine,
+    PaneStages,
     Span,
     append_parallel_panes,
     append_staged_panes,
@@ -101,43 +103,43 @@ def _rank_coverage_text(
     *,
     meta: Mapping[str, Any],
     rank_summary: Mapping[str, Any],
-    multi: bool,
 ) -> Optional[str]:
     """Return rank topology/coverage without inventing missing counts."""
-    used = as_int(metadata(rank_summary).get("global_ranks_used"))
-    world_size = as_int(meta.get("world_size"))
-    if multi:
-        if used is not None and world_size is not None:
-            return f"{used}/{world_size} ranks"
-        count = world_size if world_size is not None else used
-        return plural(count, "rank") if count is not None else None
-    if world_size is not None or used is not None:
-        return "1 rank"
-    return None
+    return rank_coverage(rank_summary, meta=meta).header_text()
 
 
 def _node_coverage_text(
     *,
     system_summary: Mapping[str, Any],
     meta: Mapping[str, Any],
-    multi: bool,
+    distributed: bool,
 ) -> Optional[str]:
-    """Return System node coverage for a multi-process card."""
-    if not multi:
-        return None
+    """Return informative System coverage independently of rank routing."""
     section_metadata = metadata(system_summary)
     coverage = str(section_metadata.get("nodes_coverage") or "").strip()
     expected = as_int(section_metadata.get("nodes_expected"))
     observed = as_int(section_metadata.get("nodes_observed"))
     if not coverage and observed is not None and expected is not None:
         coverage = f"{observed}/{expected}"
+    if observed is None:
+        observed = as_int(meta.get("nodes_observed"))
+    informative = (
+        distributed
+        or bool(observed is not None and observed > 1)
+        or bool(expected is not None and expected > 1)
+        or bool(
+            observed is not None
+            and expected is not None
+            and observed != expected
+        )
+        or bool(coverage and coverage != "1/1")
+    )
+    if not informative:
+        return None
     if coverage:
         singular = expected == 1 or coverage.endswith("/1")
         return f"{coverage} {'node' if singular else 'nodes'}"
-    nodes = observed
-    if nodes is None:
-        nodes = as_int(meta.get("nodes_observed"))
-    return plural(nodes, "node") if nodes is not None else None
+    return plural(observed, "node") if observed is not None else None
 
 
 def _step_coverage_text(step_time_summary: Mapping[str, Any]) -> Optional[str]:
@@ -158,7 +160,7 @@ def _summary_header_meta(
     rank_summary: Mapping[str, Any],
     step_time_summary: Optional[Mapping[str, Any]],
     duration_s: Optional[float],
-    multi: bool,
+    distributed: bool,
 ) -> str:
     """Compose shared identity, topology, and optional step coverage."""
     gpus = observed_gpu_count(system_summary)
@@ -167,7 +169,6 @@ def _summary_header_meta(
         _rank_coverage_text(
             meta=meta,
             rank_summary=rank_summary,
-            multi=multi,
         ),
     ]
     if gpus == 0:
@@ -178,7 +179,7 @@ def _summary_header_meta(
         _node_coverage_text(
             system_summary=system_summary,
             meta=meta,
-            multi=multi,
+            distributed=distributed,
         )
     )
     steps = (
@@ -272,9 +273,9 @@ def _footer_line(
     return f"Full evidence: {path}  (--html-report)"
 
 
-def _append_scope_legend(doc: CardDoc, *, multi: bool) -> None:
-    """Append compact distributed identity labels when ranks are present."""
-    if multi:
+def _append_scope_legend(doc: CardDoc, *, uses_scope: bool) -> None:
+    """Explain compact identities only when card content uses them."""
+    if uses_scope:
         doc.text(
             "Scope: N = node · R = global rank · G = GPU index", STYLE_DIM
         )
@@ -298,20 +299,28 @@ def _append_other_findings(
         )
 
 
-def _append_resource_body(
-    doc: CardDoc,
+def _build_resource_panes(
     *,
     system_summary: Mapping[str, Any],
     process_summary: Mapping[str, Any],
     meta: Mapping[str, Any],
-    finding_sections: Sequence[Mapping[str, Any]],
-) -> None:
-    """Append the shared System/Process panes and secondary findings."""
-    append_staged_panes(
-        doc,
+) -> Tuple[PaneStages, PaneStages]:
+    """Build shared resource panes once so composition can use their metadata."""
+    return (
         build_system_pane(system_summary),
         build_process_pane(process_summary, meta=meta),
     )
+
+
+def _append_resource_body(
+    doc: CardDoc,
+    *,
+    system_pane: PaneStages,
+    process_pane: PaneStages,
+    finding_sections: Sequence[Mapping[str, Any]],
+) -> None:
+    """Append the shared System/Process panes and secondary findings."""
+    append_staged_panes(doc, system_pane, process_pane)
     doc.blank()
     _append_other_findings(doc, sections=finding_sections)
 
@@ -330,6 +339,11 @@ def _append_run_body(
     """Append the Run body inside the public header/footer frame."""
     why, action = run_why_and_next(primary, step_time_summary)
     degraded = str(primary.get("kind") or "") == "INSUFFICIENT_STEP_TIME_DATA"
+    system_pane, process_pane = _build_resource_panes(
+        system_summary=system_summary,
+        process_summary=process_summary,
+        meta=meta,
+    )
 
     doc.blank()
     _append_verdict(doc, primary)
@@ -337,7 +351,10 @@ def _append_run_body(
         doc.wrapped(why, label="Why: ")
     if action:
         doc.wrapped(action, label="Next: ", style=STYLE_NEXT)
-    _append_scope_legend(doc, multi=multi)
+    _append_scope_legend(
+        doc,
+        uses_scope=multi or system_pane.uses_scope or process_pane.uses_scope,
+    )
     doc.blank()
 
     _append_run_timing_memory_blocks(
@@ -353,9 +370,8 @@ def _append_run_body(
 
     _append_resource_body(
         doc,
-        system_summary=system_summary,
-        process_summary=process_summary,
-        meta=meta,
+        system_pane=system_pane,
+        process_pane=process_pane,
         finding_sections=(
             system_summary,
             process_summary,
@@ -370,18 +386,22 @@ def _append_watch_body(
     system_summary: Mapping[str, Any],
     process_summary: Mapping[str, Any],
     meta: Mapping[str, Any],
-    multi: bool,
 ) -> None:
     """Append Watch as the System/Process subset of the Run card."""
-    doc.blank()
-    _append_scope_legend(doc, multi=multi)
-    if multi:
-        doc.blank()
-    _append_resource_body(
-        doc,
+    system_pane, process_pane = _build_resource_panes(
         system_summary=system_summary,
         process_summary=process_summary,
         meta=meta,
+    )
+    doc.blank()
+    uses_scope = system_pane.uses_scope or process_pane.uses_scope
+    _append_scope_legend(doc, uses_scope=uses_scope)
+    if uses_scope:
+        doc.blank()
+    _append_resource_body(
+        doc,
+        system_pane=system_pane,
+        process_pane=process_pane,
         finding_sections=(system_summary, process_summary),
     )
 
@@ -410,7 +430,7 @@ def build_summary_card(
     watch = str(profile or RUN_PROFILE).strip().lower() == WATCH_PROFILE
     doc = CardDoc(width=RUN_CARD_WIDTH)
     if watch:
-        multi = resolve_multi_process(run_meta, (process,))
+        process_coverage = rank_coverage(process, meta=run_meta)
         _append_header(
             doc,
             title=WATCH_TITLE,
@@ -420,7 +440,7 @@ def build_summary_card(
                 rank_summary=process,
                 step_time_summary=None,
                 duration_s=duration_s,
-                multi=multi,
+                distributed=process_coverage.distributed,
             ),
         )
         _append_watch_body(
@@ -428,7 +448,6 @@ def build_summary_card(
             system_summary=system,
             process_summary=process,
             meta=run_meta,
-            multi=multi,
         )
     else:
         multi = resolve_multi_process(
@@ -443,7 +462,7 @@ def build_summary_card(
                 rank_summary=step_time,
                 step_time_summary=step_time,
                 duration_s=duration_s,
-                multi=multi,
+                distributed=multi,
             ),
         )
         _append_run_body(
@@ -482,6 +501,11 @@ def build_fallback_card(
     if not watch:
         doc.blank()
         _append_verdict(doc, primary)
+    doc.blank()
+    doc.wrapped(
+        "Summary card rendering failed; inspect Full evidence below.",
+        style=STYLE_DIM,
+    )
     doc.blank()
     doc.wrapped(_footer_line(artifact_hint, html_hint), style=STYLE_DIM)
     doc.rule()
@@ -526,9 +550,12 @@ def card_hints(
 
 
 def card_profile_from_text(text: str) -> str:
-    """Infer the profile of a stored card from its title line."""
+    """Infer a stored card profile from an exact canonical title row."""
     for line in str(text).splitlines()[:4]:
-        if WATCH_TITLE in line:
+        title = line.strip().strip("|").strip()
+        if title == RUN_TITLE:
+            return RUN_PROFILE
+        if title == WATCH_TITLE:
             return WATCH_PROFILE
     return RUN_PROFILE
 

@@ -40,12 +40,14 @@ def test_terminal_card_facade_keeps_its_public_symbols() -> None:
     assert all(hasattr(terminal_card, name) for name in terminal_card.__all__)
     rendered = terminal_card.card_to_plain(terminal_card.build_fallback_card())
     assert "TraceML Run Summary" in rendered
+    assert "Summary card rendering failed" in rendered
 
     watch = terminal_card.card_to_plain(
         terminal_card.build_fallback_card(profile="watch")
     )
     assert "TraceML Watch Summary" in watch
     assert "Verdict:" not in watch
+    assert "Summary card rendering failed" in watch
     assert all(len(line) == 156 for line in watch.splitlines())
 
 
@@ -292,20 +294,33 @@ def test_sdk_print_path_is_plain_without_a_tty(
     assert printed == _stored(session_root) + "\n"
 
 
+@pytest.mark.parametrize(
+    ("profile", "title", "has_verdict"),
+    [
+        ("run", "TraceML Run Summary", True),
+        ("watch", "TraceML Watch Summary", False),
+    ],
+)
 def test_card_failure_degrades_to_a_minimal_card(
-    session: Path, tmp_path: Path, monkeypatch
+    session: Path,
+    tmp_path: Path,
+    monkeypatch,
+    profile: str,
+    title: str,
+    has_verdict: bool,
 ) -> None:
     def _boom(**kwargs):
         raise RuntimeError("card exploded")
 
     monkeypatch.setattr(reporting_final, "build_card_from_payload", _boom)
 
-    text = _run(session, tmp_path)["text"]
+    text = _run(session, tmp_path, profile=profile)["text"]
 
     lines = text.splitlines()
     assert lines[0].startswith("+---")
-    assert "TraceML Run Summary" in text
-    assert "Verdict:" in text
+    assert title in text
+    assert ("Verdict:" in text) is has_verdict
+    assert "Summary card rendering failed" in text
     assert "final_summary.json" in text
     for line in lines:
         assert len(line) == 156

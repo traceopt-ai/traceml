@@ -24,9 +24,8 @@ from traceml_ai.reporting.terminal_card.common import (
     format_capacity,
     format_scope,
     group_row,
-    group_rows,
-    metadata,
     point,
+    rank_count,
     status_spans,
 )
 from traceml_ai.reporting.terminal_card.evidence import format_section_evidence
@@ -40,30 +39,11 @@ _LABEL_WIDTH = 28
 _MEDIAN_WIDTH = 20
 
 
-def _rank_count(step_memory_summary: Mapping[str, Any]) -> int:
-    """Return Step Memory ranks from stored metadata or grouped rows."""
-    used = as_int(metadata(step_memory_summary).get("global_ranks_used"))
-    if used is not None:
-        return max(0, used)
-
-    ranks = set()
-    anonymous_rows = 0
-    for raw_row in group_rows(step_memory_summary).values():
-        rank = as_int(
-            as_mapping(as_mapping(raw_row).get("identity")).get("global_rank")
-        )
-        if rank is None:
-            anonymous_rows += 1
-        else:
-            ranks.add(rank)
-    return len(ranks) + anonymous_rows
-
-
 def _coverage_text(
     step_memory_summary: Mapping[str, Any], *, meta: Mapping[str, Any]
 ) -> Optional[str]:
     """Return observed/expected Step Memory rank coverage."""
-    observed = _rank_count(step_memory_summary)
+    observed = rank_count(step_memory_summary)
     expected = as_int(meta.get("world_size"))
     if expected is not None and expected > 0:
         if observed == expected == 1:
@@ -120,7 +100,7 @@ def build_run_step_memory_pane(
     """Build the Run Step Memory pane using only stored rank rollups."""
     doc = CardDoc(width=width)
     section_diagnosis = diagnosis(step_memory_summary)
-    multi_rank = _rank_count(step_memory_summary) > 1
+    multi_rank = rank_count(step_memory_summary) > 1
     median_row = _selected_row(step_memory_summary, "median")
     worst_row = _selected_row(step_memory_summary, "worst")
     median_metrics = as_mapping(median_row.get("metrics"))

@@ -32,7 +32,7 @@ from traceml_ai.reporting.terminal_card.common import (
     point_value,
     status_spans,
 )
-from traceml_ai.reporting.terminal_card.evidence import format_section_evidence
+from traceml_ai.reporting.terminal_card.evidence import build_section_evidence
 from traceml_ai.reporting.terminal_card.layout import (
     RUN_LEFT_PANE_WIDTH,
     CardDoc,
@@ -139,14 +139,14 @@ def _append_scalar_metric(
     metric: str,
     suffix: str,
     multi_node: bool,
-) -> None:
+) -> bool:
     """Append one scalar System metric from stored average/point fields."""
     average_text = format_percent(average(system_summary, metric))
     median, _ = _scalar_point(system_summary, "median", metric, suffix=suffix)
     worst, worst_node = _scalar_point(
         system_summary, "worst", metric, suffix=suffix
     )
-    append_table_row(
+    return append_table_row(
         doc,
         label=label,
         average=(
@@ -169,7 +169,7 @@ def _append_memory_metric(
     bytes_metric: str,
     percent_metric: str,
     multi_node: bool,
-) -> None:
+) -> bool:
     """Append a coherent System memory pair from stored node-average fields."""
     average_metrics = as_mapping(
         as_mapping(system_summary.get("global")).get("average")
@@ -180,7 +180,7 @@ def _append_memory_metric(
     worst_metrics, worst_node = _point_metrics(
         system_summary, "worst", anchors=(percent_metric, bytes_metric)
     )
-    append_table_row(
+    return append_table_row(
         doc,
         label=label,
         average=format_memory_value(
@@ -254,7 +254,7 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
             label_width=_SYSTEM_LABEL_WIDTH,
             median_width=_SYSTEM_MEDIAN_WIDTH,
         )
-        _append_scalar_metric(
+        stages.uses_scope |= _append_scalar_metric(
             stages.table,
             system_summary,
             label="CPU",
@@ -262,7 +262,7 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
             suffix="%",
             multi_node=multi_node,
         )
-        _append_memory_metric(
+        stages.uses_scope |= _append_memory_metric(
             stages.table,
             system_summary,
             label="RAM used",
@@ -271,7 +271,7 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
             multi_node=multi_node,
         )
         if show_gpu:
-            _append_scalar_metric(
+            stages.uses_scope |= _append_scalar_metric(
                 stages.table,
                 system_summary,
                 label="GPU util",
@@ -279,7 +279,7 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
                 suffix="%",
                 multi_node=multi_node,
             )
-            _append_memory_metric(
+            stages.uses_scope |= _append_memory_metric(
                 stages.table,
                 system_summary,
                 label="GPU memory/device",
@@ -287,7 +287,7 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
                 percent_metric="gpu_mem_percent",
                 multi_node=multi_node,
             )
-            _append_scalar_metric(
+            stages.uses_scope |= _append_scalar_metric(
                 stages.table,
                 system_summary,
                 label="GPU temperature",
@@ -295,7 +295,7 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
                 suffix="C",
                 multi_node=multi_node,
             )
-            _append_scalar_metric(
+            stages.uses_scope |= _append_scalar_metric(
                 stages.table,
                 system_summary,
                 label="GPU power",
@@ -304,9 +304,10 @@ def build_system_pane(system_summary: Mapping[str, Any]) -> PaneStages:
                 multi_node=multi_node,
             )
 
-    evidence = format_section_evidence("system", system_summary)
-    if evidence:
-        stages.evidence.wrapped(evidence, label="Evidence: ")
+    evidence = build_section_evidence("system", system_summary)
+    if evidence.text:
+        stages.evidence.wrapped(evidence.text, label="Evidence: ")
+        stages.uses_scope |= evidence.uses_scope
     else:
         stages.evidence.blank()
     stages.spacer.blank()

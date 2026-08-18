@@ -90,10 +90,14 @@ Run and Watch use the same 156-column frame. Run shows Step Timing and Step
 Memory in the upper panes, followed by System and Process in the lower panes.
 Watch is the System/Process subset: it omits performance `Verdict`, `Why`,
 `Next`, Step Timing, and Step Memory. Its header gets rank coverage from the
-Process section and does not show a step count. Both profiles use the same
-System/Process pane builders, footer, distributed scope legend, and fixed
-divider for single-rank, one-node distributed, and multi-node distributed
-output.
+Process section and does not show a step count. Missing Process telemetry is
+reported as zero observed ranks rather than inferred from the expected world
+size. Node coverage comes independently from System telemetry, so it remains
+visible when Process telemetry is degraded. Both profiles use the same
+System/Process pane builders, footer, and fixed divider for single-rank,
+one-node distributed, and multi-node distributed output. On Watch, the compact
+scope legend appears only when a resource pane emits an `N`, `R`, or `G`
+identity.
 In the multi-node System table, each metric uses the median and worst
 node-average points already stored in the summary. “Worst” is not a temporal
 maximum, and different rows can identify different nodes. RAM and GPU-memory
@@ -114,6 +118,8 @@ of inferring new evidence.
 
 Detailed section prose remains in the `system.card`, `process.card`,
 `step_time.card`, and `step_memory.card` fields inside `final_summary.json`.
+If terminal-card rendering itself fails during shutdown, TraceML prints a
+minimal failure card and directs the user to the structured JSON evidence.
 
 ### Shareable HTML report
 

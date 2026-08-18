@@ -170,6 +170,28 @@ def test_view_summary_re_render_infers_the_watch_profile(tmp_path) -> None:
     assert "Step Time" not in text
 
 
+def test_view_summary_re_render_ignores_watch_title_in_run_name(
+    tmp_path,
+) -> None:
+    stored = (
+        "+---+\n"
+        "|  TraceML Run Summary  |\n"
+        "|  TraceML Watch Summary · 1 rank  |\n"
+        "+---+"
+    )
+    summary_path = tmp_path / "summary.json"
+    payload = _payload_with_stored_card(stored)
+    payload["meta"]["run_name"] = "TraceML Watch Summary"
+    _write_json(summary_path, payload)
+
+    text = view_summary(summary_path, print_to_stdout=False, re_render=True)
+
+    lines = text.splitlines()
+    assert "TraceML Run Summary" in lines[1]
+    assert "TraceML Watch Summary" in lines[2]
+    assert "Verdict: INPUT-BOUND" in text
+
+
 def test_view_summary_re_render_survives_a_bare_payload(tmp_path) -> None:
     """An unversioned payload keeps its stored card rather than raising."""
     summary_path = tmp_path / "summary.json"

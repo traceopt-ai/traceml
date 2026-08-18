@@ -2664,8 +2664,6 @@ GOLDENS = {
 |  watch-cpu-partial · 1/4 ranks · CPU only (no GPU detected) · 1/1 node · 21.1s                                                                           |
 +----------------------------------------------------------------------------------------------------------------------------------------------------------+
 |                                                                                                                                                          |
-|  Scope: N = node · R = global rank · G = GPU index                                                                                                       |
-|                                                                                                                                                          |
 |  SYSTEM METRICS: NORMAL                                       ||  PROCESS METRICS: NORMAL · 1/4 ranks                                                    |
 |                                                               ||                                                                                         |
 |                                                               ||                                                                                         |
@@ -4327,6 +4325,149 @@ def test_watch_headers_use_process_rank_coverage_without_steps() -> None:
         text = plain(name)
         assert header in text
         assert "steps" not in text.splitlines()[2]
+
+
+@pytest.mark.parametrize(
+    ("metadata", "world_size", "expected"),
+    [
+        ({}, 4, "0/4 ranks"),
+        ({"global_ranks_used": 0}, 1, "0/1 rank"),
+    ],
+)
+def test_watch_header_and_process_pane_share_degraded_rank_coverage(
+    metadata: Dict[str, Any], world_size: int, expected: str
+) -> None:
+    process = _section(
+        diagnosis=_issue(
+            "NO_DATA",
+            "NO DATA",
+            summary="Process telemetry was not measured.",
+        ),
+        metadata=metadata,
+    )
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=_system_single(cpu_percent=10.0),
+            process=process,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(run_name="degraded-process", world_size=world_size),
+            duration_s=2.0,
+            artifact_hint="logs/degraded-process/final_summary.json",
+        )
+    )
+
+    assert expected in text.splitlines()[2]
+    process_heading = next(
+        line for line in text.splitlines() if "PROCESS METRICS:" in line
+    )
+    assert expected in process_heading
+
+
+def test_watch_rank_coverage_falls_back_to_grouped_rows() -> None:
+    process = _section(
+        diagnosis=_issue("NORMAL", "NORMAL"),
+        rows=_rank_rows(0),
+    )
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=_system_single(cpu_percent=10.0),
+            process=process,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(run_name="row-coverage", world_size=4),
+            duration_s=2.0,
+            artifact_hint="logs/row-coverage/final_summary.json",
+        )
+    )
+
+    assert "row-coverage · 1/4 ranks" in text
+    assert "PROCESS METRICS: NORMAL · 1/4 ranks" in text
+
+
+def test_watch_node_coverage_and_scope_survive_degraded_process() -> None:
+    system = _section(
+        diagnosis=_issue("NORMAL", "NORMAL"),
+        metadata={
+            "nodes_observed": 2,
+            "nodes_expected": 2,
+            "nodes_coverage": "2/2",
+        },
+        average={"cpu_percent": 15.0},
+        median={"cpu_percent": _point(10.0, "0")},
+        worst={"cpu_percent": _point(20.0, "1")},
+        rows=_node_rows(
+            0,
+            1,
+            metrics_by_node={
+                0: {"cpu_percent": 10.0},
+                1: {"cpu_percent": 20.0},
+            },
+        ),
+        by="node_rank",
+    )
+    process = _section(diagnosis=_issue("NO_DATA", "NO DATA"))
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=system,
+            process=process,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(
+                run_name="node-coverage",
+                mode="multi_node",
+                world_size=None,
+                nodes_observed=2,
+            ),
+            duration_s=2.0,
+            artifact_hint="logs/node-coverage/final_summary.json",
+        )
+    )
+
+    assert "node-coverage · 2/2 nodes · 2.0s" in text
+    assert "20%, N1" in text
+    assert "Scope: N = node · R = global rank · G = GPU index" in text
+
+
+def test_watch_single_gpu_evidence_emits_scope_legend() -> None:
+    diagnosis = _issue(
+        "HIGH_GPU_POWER",
+        "HIGH GPU POWER",
+        severity="warn",
+        evidence={
+            "gpu_power_avg_limit_percent": 95.0,
+            "scope": {"level": "gpu", "node_rank": 0, "gpu_idx": 0},
+        },
+    )
+    text = card_to_plain(
+        _card(
+            profile="watch",
+            system=_system_single(
+                diagnosis=diagnosis,
+                cpu_percent=5.0,
+                gpu_power_w=250.0,
+            ),
+            process=_NORMAL_PROCESS,
+            step_time=_WATCH_STEP_TIME,
+            step_memory=_WATCH_STEP_MEMORY,
+            meta=_meta(run_name="single-scope"),
+            duration_s=2.0,
+            artifact_hint="logs/single-scope/final_summary.json",
+        )
+    )
+
+    assert "Evidence: GPU power 95.0% of limit · N0/G0" in text
+    assert "Scope: N = node · R = global rank · G = GPU index" in text
+
+
+def test_watch_scope_legend_requires_emitted_scope() -> None:
+    text = plain("watch_cpu_only_partial")
+
+    assert "Scope: N = node · R = global rank · G = GPU index" not in text
+    assert not re.search(r"\b[NRG]\d+\b", text)
 
 
 def test_run_and_watch_share_identical_system_process_panes() -> None:

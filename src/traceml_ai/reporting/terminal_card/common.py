@@ -13,6 +13,7 @@ new aggregation.  Section modules use them to select and format stored values.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Sequence, Tuple
 
 from traceml_ai.reporting.summaries.summary_formatting import bytes_to_gb
@@ -40,6 +41,43 @@ SEVERITY_STYLES = {
     "warning": STYLE_WARN,
 }
 SEVERITY_RANK = {"crit": 0, "critical": 0, "warn": 1, "warning": 1}
+
+
+@dataclass(frozen=True)
+class RankCoverage:
+    """Ranks represented by a section and the optional expected world size."""
+
+    observed: int
+    expected: Optional[int]
+
+    @property
+    def distributed(self) -> bool:
+        """Return whether observed or expected coverage spans multiple ranks."""
+        return self.observed > 1 or bool(self.expected and self.expected > 1)
+
+    def header_text(self) -> Optional[str]:
+        """Format truthful header coverage without inventing observations."""
+        if self.expected is not None:
+            if self.observed == self.expected == 1:
+                return "1 rank"
+            unit = "rank" if self.expected == 1 else "ranks"
+            return f"{self.observed}/{self.expected} {unit}"
+        if self.observed <= 0:
+            return None
+        unit = "rank" if self.observed == 1 else "ranks"
+        return f"{self.observed} {unit}"
+
+    def detail_text(self) -> Optional[str]:
+        """Format section coverage, omitting an uninformative complete 1/1."""
+        if self.expected is not None:
+            if self.observed == self.expected == 1:
+                return None
+            unit = "rank" if self.expected == 1 else "ranks"
+            return f"{self.observed}/{self.expected} {unit}"
+        if self.observed <= 0:
+            return None
+        unit = "rank" if self.observed == 1 else "ranks"
+        return f"{self.observed} {unit} observed"
 
 
 def as_mapping(value: Any) -> Mapping[str, Any]:
@@ -111,6 +149,34 @@ def point_value(
 def group_rows(section: Mapping[str, Any]) -> Mapping[str, Any]:
     """Return the grouped summary rows for a section."""
     return as_mapping(as_mapping(section.get("groups")).get("rows"))
+
+
+def rank_count(section: Mapping[str, Any]) -> int:
+    """Return ranks represented by metadata or grouped section rows."""
+    used = as_int(metadata(section).get("global_ranks_used"))
+    if used is not None:
+        return max(0, used)
+
+    ranks = set()
+    anonymous_rows = 0
+    for raw_row in group_rows(section).values():
+        row_identity = as_mapping(as_mapping(raw_row).get("identity"))
+        rank = as_int(row_identity.get("global_rank"))
+        if rank is None:
+            anonymous_rows += 1
+        else:
+            ranks.add(rank)
+    return len(ranks) + anonymous_rows
+
+
+def rank_coverage(
+    section: Mapping[str, Any], *, meta: Mapping[str, Any]
+) -> RankCoverage:
+    """Return represented section ranks and expected run topology."""
+    expected = as_int(meta.get("world_size"))
+    if expected is not None and expected <= 0:
+        expected = None
+    return RankCoverage(observed=rank_count(section), expected=expected)
 
 
 def group_row(section: Mapping[str, Any], idx: Any) -> Mapping[str, Any]:
@@ -355,6 +421,7 @@ def steps_analyzed(step_time_summary: Mapping[str, Any]) -> Optional[int]:
 
 __all__ = [
     "DOT",
+    "RankCoverage",
     "SEVERITY_RANK",
     "analysis_window",
     "as_float",
@@ -384,6 +451,8 @@ __all__ = [
     "plural",
     "point",
     "point_value",
+    "rank_count",
+    "rank_coverage",
     "resolve_multi_process",
     "section_block",
     "severity",

@@ -9,6 +9,7 @@ the fallback.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 from traceml_ai.reporting.terminal_card.common import (
@@ -21,6 +22,14 @@ from traceml_ai.reporting.terminal_card.common import (
 )
 
 _NORMAL_KINDS = frozenset({"NORMAL", "BALANCED"})
+
+
+@dataclass(frozen=True)
+class SectionEvidence:
+    """Evidence text plus whether it contains a compact scope identity."""
+
+    text: Optional[str]
+    uses_scope: bool = False
 
 
 def _system_scope(diagnosis: Mapping[str, Any]) -> Optional[str]:
@@ -85,15 +94,20 @@ def _bytes(value: Any) -> Optional[str]:
     return f"{sign}{magnitude / 1e9:.1f} GB"
 
 
-def _scope_text(text: Optional[str], scope: Optional[str]) -> Optional[str]:
+def _scope_text(
+    text: Optional[str], scope: Optional[str]
+) -> Optional[SectionEvidence]:
     if not text:
         return None
-    return f"{text} · {scope}" if scope else text
+    return SectionEvidence(
+        text=f"{text} · {scope}" if scope else text,
+        uses_scope=bool(scope),
+    )
 
 
 def _system_evidence(
     diagnosis: Mapping[str, Any], evidence: Mapping[str, Any]
-) -> Optional[str]:
+) -> Optional[SectionEvidence]:
     kind = str(diagnosis.get("kind") or "")
     fields = {
         "VERY_HIGH_GPU_MEMORY": ("gpu_mem_peak_percent", "GPU memory peak"),
@@ -127,7 +141,7 @@ def _process_evidence(
     section: Mapping[str, Any],
     diagnosis: Mapping[str, Any],
     evidence: Mapping[str, Any],
-) -> Optional[str]:
+) -> Optional[SectionEvidence]:
     kind = str(diagnosis.get("kind") or "")
     metric = str(diagnosis.get("metric") or "")
     scope = _rank_scope(section, _diagnosis_rank(diagnosis, evidence))
@@ -177,11 +191,13 @@ def _step_memory_evidence(
     section: Mapping[str, Any],
     diagnosis: Mapping[str, Any],
     evidence: Mapping[str, Any],
-) -> Optional[str]:
+) -> Optional[SectionEvidence]:
     kind = str(diagnosis.get("kind") or "")
     if kind == "NO_GPU":
         # The heading already states NO GPU; keep its card evidence compact.
-        return "Step memory uses torch-based GPU memory telemetry."
+        return SectionEvidence(
+            "Step memory uses torch-based GPU memory telemetry."
+        )
     metric = str(diagnosis.get("metric") or "")
     family = "CUDA reserved" if "reserved" in metric else "CUDA allocated"
     scope = _rank_scope(section, _diagnosis_rank(diagnosis, evidence))
@@ -234,21 +250,22 @@ def _step_memory_evidence(
     return None
 
 
-def format_section_evidence(
+def build_section_evidence(
     section_name: str,
     section: Mapping[str, Any],
-) -> Optional[str]:
-    """Return compact card evidence from an existing section payload.
+) -> SectionEvidence:
+    """Build compact evidence and its presentation metadata.
 
     ``section_name`` selects only presentation terminology.  No diagnosis or
-    aggregate is recalculated. Healthy sections return ``None`` so panes can
-    leave the evidence row blank. Unknown, incomplete, and older payloads keep
-    their stored diagnosis summary, which is the stable compatibility path.
+    aggregate is recalculated. Healthy sections carry no evidence text so panes
+    can leave the evidence row blank. Unknown, incomplete, and older payloads
+    keep their stored diagnosis summary, which is the stable compatibility
+    path.
     """
     diagnosis = as_mapping(section.get("diagnosis"))
     if str(diagnosis.get("kind") or "NO_DATA") in _NORMAL_KINDS:
         # NORMAL/BALANCED headings and metric tables need no evidence filler.
-        return None
+        return SectionEvidence(None)
     evidence = as_mapping(diagnosis.get("evidence"))
     if section_name == "system":
         compact = _system_evidence(diagnosis, evidence)
@@ -278,7 +295,19 @@ def format_section_evidence(
         if section_name == "system"
         else _rank_scope(section, _diagnosis_rank(diagnosis, evidence))
     )
-    return _scope_text(summary, scope)
+    return _scope_text(summary, scope) or SectionEvidence(None)
 
 
-__all__ = ["format_section_evidence"]
+def format_section_evidence(
+    section_name: str,
+    section: Mapping[str, Any],
+) -> Optional[str]:
+    """Return compact evidence text for compatibility with existing callers."""
+    return build_section_evidence(section_name, section).text
+
+
+__all__ = [
+    "SectionEvidence",
+    "build_section_evidence",
+    "format_section_evidence",
+]
