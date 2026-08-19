@@ -1,6 +1,6 @@
 import socket
 
-from traceml_ai.transport.tcp_transport import TCPConfig, TCPServer
+from traceml_ai.transport.tcp_transport import TCPClient, TCPConfig, TCPServer
 
 
 class _FakeSocket:
@@ -23,6 +23,25 @@ class _FakeSocket:
 
     def accept(self):
         raise OSError("closed")
+
+    def close(self):
+        self.closed = True
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.errors = []
+
+    def error(self, message, *args):
+        self.errors.append(message % args)
+
+
+class _FailingSendSocket:
+    def __init__(self):
+        self.closed = False
+
+    def sendall(self, _data):
+        raise ConnectionResetError("connection reset by peer")
 
     def close(self):
         self.closed = True
@@ -91,3 +110,22 @@ def test_tcp_server_starts_when_so_reuseport_is_rejected(
         assert server.port == 54321
     finally:
         server.stop()
+
+
+def test_tcp_client_logs_send_failure_and_remains_best_effort() -> None:
+    client = TCPClient(TCPConfig(host="10.0.0.8", port=29765))
+    sock = _FailingSendSocket()
+    logger = _RecordingLogger()
+    client._sock = sock
+    client._connected = True
+    client.logger = logger
+
+    client.send_batch([{"sample": 1}])
+
+    assert sock.closed
+    assert client._connected is False
+    assert client._sock is None
+    assert logger.errors == [
+        "[TraceML] TCP telemetry send_batch failed for 10.0.0.8:29765: "
+        "ConnectionResetError: connection reset by peer"
+    ]
