@@ -159,6 +159,16 @@ def main() -> None:
             f"{DATASET_SPLIT} contains {len(dataset)}."
         )
     dataset = dataset.shuffle(seed=SEED).select(range(args.dataset_samples))
+    if "messages" not in dataset.column_names:
+        raise ValueError(
+            f"Expected a 'messages' column in {DATASET_ID}/{DATASET_SPLIT}, "
+            f"but found {dataset.column_names}."
+        )
+    # UltraChat also carries a metadata column named ``prompt``. TRL uses the
+    # presence of that name to identify prompt-completion datasets, which must
+    # also contain ``completion``. This workload uses the conversational
+    # language-modeling format, so pass only its structured messages.
+    dataset = dataset.select_columns(["messages"])
 
     lora_config = LoraConfig(
         r=16,
