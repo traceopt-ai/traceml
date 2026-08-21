@@ -84,10 +84,6 @@ def format_span(seconds: Optional[float]) -> str:
     return f"last {seconds / 60.0:.0f} min"
 
 
-# Per-GPU utilisation below this reads as idle in the rows' header.
-IDLE_UTIL_PCT = 20.0
-
-
 def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
     """A level against its capacity: ('6.3', '/ 16.1 GB')."""
     used = theme.gb(used_bytes) if used_bytes is not None else None
@@ -101,15 +97,16 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
     return (num, f"/ {total_s} GB")
 
 
-def disclosure_text(
-    gpus: List[Dict[str, Any]], *, over: bool, is_open: bool
-) -> str:
-    """Header of the per-GPU rows, in GPU words: what the user needs to know.
+def disclosure_text(gpus: List[Dict[str, Any]], *, is_open: bool) -> str:
+    """Header of the per-GPU rows: the utilisation range, and nothing else.
 
-    ``over`` is the trigger's verdict (the across-GPU spread crossed the
-    bar); the words say what that means on this node, never how it was
-    computed. The tail follows the rows' real state, which a click may have
-    changed: the rows open on their own only on a rising edge.
+    It states what the GPUs read, low to high, and leaves the reading to
+    the person or to the diagnosis engine. An earlier version said "1 of 4
+    GPUs busy, 3 idle" off a 20 % bar invented here, while the engine calls
+    anything under 30 % low (``GPUUtilizationBands``): one page, two
+    thresholds, and a word this layer had no standing to say. The trigger
+    that opens the rows is unchanged and stays off the screen. The tail
+    follows the rows' real state, which a click may have changed.
     """
     utils = []
     for g in gpus:
@@ -124,15 +121,8 @@ def disclosure_text(
     tail = " · click to close" if is_open else " · click to open"
     if n == 1:
         return "1 GPU" + tail
-    if over:
-        idle = sum(1 for u in utils if u < IDLE_UTIL_PCT)
-        if idle:
-            head = f"{n - idle} of {n} GPUs busy, {idle} idle"
-        else:
-            head = "uneven load across GPUs"
-    else:
-        head = f"all {n} GPUs alike"
-    return head + tail
+    lo, hi = min(utils), max(utils)
+    return f"{n} GPUs · util {lo:.0f} to {hi:.0f}%" + tail
 
 
 def node_scope_text(ctx: Dict[str, Any]) -> str:
@@ -824,6 +814,6 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         panel["rows"].value = True
     panel["_over"] = over
     panel["rows_hint"].text = disclosure_text(
-        gpus, over=over, is_open=bool(panel["rows"].value)
+        gpus, is_open=bool(panel["rows"].value)
     )
     panel["rows_html"].content = rows_html(gpus, pseries, spread=spread)

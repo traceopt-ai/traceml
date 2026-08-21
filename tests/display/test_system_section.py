@@ -19,7 +19,6 @@ import pytest
 pytest.importorskip("nicegui")
 
 from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E402,E501
-    SPREAD_EXPAND_PTS,
     cpu_axis_max,
     disclosure_text,
     format_gb_pair,
@@ -51,44 +50,46 @@ def test_levels_carry_their_denominator() -> None:
     assert format_gb_pair(0.47 * GB, None) == ("0.5", "GB")
 
 
-def test_disclosure_text_speaks_in_gpu_words() -> None:
-    def g(i, u):
-        return {"gpu_idx": i, "util_p50": u}
+def test_disclosure_text_states_the_range_and_no_verdict() -> None:
+    """The header reads the GPUs out, it does not judge them.
+
+    Calling a GPU "idle" needs a threshold, and the one this layer used
+    (20 %) disagreed with the diagnosis engine's low band (30 %), which is
+    the surface inventing vocabulary the engine owns. The range says the
+    same thing to a person without either.
+    """
+
+    def g(idx, util):
+        return {"gpu_idx": idx, "util_p50": util, "util_now": util}
 
     one_busy = [g(0, 100), g(1, 0), g(2, 0), g(3, 0)]
-    all_busy = [g(i, 100) for i in range(4)]
-    ramp = [g(0, 98), g(1, 100), g(2, 100), g(3, 100)]
-    # The trigger fired and GPUs sit idle: say which.
-    assert disclosure_text(one_busy, over=True, is_open=True) == (
-        "1 of 4 GPUs busy, 3 idle · click to close"
+    all_busy = [g(i, 99) for i in range(4)]
+    ramp = [g(0, 100), g(1, 60), g(2, 55), g(3, 40)]
+
+    assert disclosure_text(one_busy, is_open=True) == (
+        "4 GPUs · util 0 to 100% · click to close"
     )
-    # A user closed the rows while the spread stays over the bar: the
-    # words keep the fact, the tail follows the real state.
-    assert disclosure_text(one_busy, over=True, is_open=False) == (
-        "1 of 4 GPUs busy, 3 idle · click to open"
+    assert disclosure_text(one_busy, is_open=False) == (
+        "4 GPUs · util 0 to 100% · click to open"
     )
-    # The trigger fired on a ramp (nobody idle): honest, no mechanism.
-    assert disclosure_text(ramp, over=True, is_open=True) == (
-        "uneven load across GPUs · click to close"
+    assert disclosure_text(ramp, is_open=True) == (
+        "4 GPUs · util 40 to 100% · click to close"
     )
-    assert disclosure_text(all_busy, over=False, is_open=False) == (
-        "all 4 GPUs alike · click to open"
+    assert disclosure_text(all_busy, is_open=False) == (
+        "4 GPUs · util 99 to 99% · click to open"
     )
-    assert disclosure_text(all_busy, over=False, is_open=True) == (
-        "all 4 GPUs alike · click to close"
+    # One GPU has no range to speak of, and no rows worth naming.
+    assert (
+        disclosure_text([g(0, 99)], is_open=False) == "1 GPU · click to open"
     )
-    assert disclosure_text([g(0, 99)], over=False, is_open=False) == (
-        "1 GPU · click to open"
-    )
-    assert disclosure_text([], over=False, is_open=False) == ""
-    # No mechanism words anywhere in the header.
+    assert disclosure_text([], is_open=False) == ""
+    # No word anywhere claims a verdict the engine owns.
     for text in (
-        disclosure_text(one_busy, over=True, is_open=True),
-        disclosure_text(all_busy, over=False, is_open=False),
+        disclosure_text(one_busy, is_open=True),
+        disclosure_text(all_busy, is_open=False),
     ):
-        for banned in ("spread", "auto", ">", "20"):
-            assert banned not in text
-    assert SPREAD_EXPAND_PTS == 20.0
+        for word in ("idle", "busy", "alike", "uneven", "low", "healthy"):
+            assert word not in text
 
 
 def test_rows_open_on_the_rising_edge_only() -> None:
@@ -445,7 +446,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     assert panel["cpu_value"].text == "8%"
     assert panel["rows"].value is True  # spread 100 crossed the bar
     assert (
-        panel["rows_hint"].text == "1 of 2 GPUs busy, 1 idle · click to close"
+        panel["rows_hint"].text == "2 GPUs · util 0 to 100% · click to close"
     )
     # The window is named once in each chart's label, never on the axis.
     assert (
@@ -477,9 +478,7 @@ def test_section_builds_and_updates_without_a_browser() -> None:
     panel["power_chart"].update = lambda: sent.append("power")
     update_system_section(panel, payload)
     assert panel["rows"].value is False
-    assert (
-        panel["rows_hint"].text == "1 of 2 GPUs busy, 1 idle · click to open"
-    )
+    assert panel["rows_hint"].text == "2 GPUs · util 0 to 100% · click to open"
     assert sent == []
 
     # The limit disappears on a later tick: the mark line is cleared
