@@ -280,7 +280,10 @@ def test_section_builds_and_updates_without_a_browser() -> None:
         panel["rows_hint"].text == "1 of 2 GPUs busy, 1 idle · click to close"
     )
     # The window is named once in each chart's label, never on the axis.
-    assert panel["cpu_label"].text == "host cpu % · last 3 min"
+    assert (
+        panel["cpu_label"].text
+        == "host cpu util · avg across cores · last 3 min"
+    )
     assert panel["power_label"].text.endswith("70 W limit · last 3 min")
     assert panel["cpu_chart"].options["xAxis"]["axisLabel"]["show"] is False
     assert ":formatter" in (

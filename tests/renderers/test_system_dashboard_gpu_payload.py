@@ -19,6 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import pytest
+
 from tests.sqlite_fixtures import (
     init_summary_schema,
     insert_system_sample,
@@ -331,3 +333,93 @@ def test_rows_without_a_hostname_are_not_a_node(tmp_path: Path) -> None:
         "node_rank": 0,
         "nodes_in_window": 1,
     }
+
+
+def test_whole_run_series_are_decimated_and_keep_peaks(tmp_path: Path) -> None:
+    """The window says what the host is doing now; these say what it did.
+
+    Both are decimated in SQL so the payload stays a fixed size however long
+    the run is, and every slice keeps its max as well as its mean, because a
+    mean alone erases what matters: a CPU spike, a power peak.
+    """
+    db = tmp_path / "run.db"
+    ticks = 600  # 20 minutes at a 2 s cadence
+    with sqlite_database(db, init_summary_schema) as conn:
+        for seq in range(ticks):
+            cpu = 10.0 + 30.0 * (seq / ticks)  # drifts 10 -> 40%
+            if seq % 50 == 0:
+                cpu = 95.0  # with a periodic spike
+            insert_system_sample(
+                conn,
+                row_id=seq + 1,
+                rank=0,
+                ts=1000.0 + 2.0 * seq,
+                gpu_available=True,
+                gpu_count=1,
+                seq=seq,
+                cpu_percent=cpu,
+                ram_used_bytes=9.0 * GB,
+                ram_total_bytes=200.0 * GB,
+                gpu_samples=[
+                    _gpu(
+                        0,
+                        100.0,
+                        60.0 if seq % 2 else 100.0,  # a sawtooth
+                        temp=54.0,
+                        mem_used=6.3 * GB,
+                    )
+                ],
+            )
+    out = _payload(db)
+
+    run = out["series"]["cpu_run"]
+    assert 2 < len(run["t"]) <= 181  # decimated, not one point per sample
+    assert len(run["avg"]) == len(run["t"]) == len(run["max"])
+    assert run["span_s"] == pytest.approx(2.0 * (ticks - 1))
+    # The drift survives. Measured against the run's floor, not slice 0:
+    # the spike at tick 0 lands inside the first slice and lifts its mean.
+    assert run["avg"][-1] > min(run["avg"]) + 20
+    assert max(run["max"]) >= 95.0  # and so do the spikes
+    assert max(run["avg"]) < 95.0  # which the mean alone would have hidden
+
+    power = out["series"]["gpu_power_run"]
+    assert [p["gpu_idx"] for p in power] == [0]
+    e = power[0]
+    assert 2 < len(e["t"]) <= 181
+    assert max(e["max"]) == pytest.approx(100.0)  # the sawtooth's peak
+    assert 60.0 < max(e["avg"]) < 100.0  # its mean sits between the levels
+    assert e["span_s"] == pytest.approx(2.0 * (ticks - 1))
+
+
+def test_whole_run_series_follow_the_node_scope(tmp_path: Path) -> None:
+    """A two-host window shows one node, and its whole-run view must too."""
+    db = tmp_path / "n.db"
+    with sqlite_database(db, init_summary_schema) as conn:
+        row_id = 0
+        for seq in range(60):
+            for node, (host, cpu) in enumerate(
+                (("node-a", 10.0), ("node-b", 90.0))
+            ):
+                row_id += 1
+                insert_system_sample(
+                    conn,
+                    row_id=row_id,
+                    rank=node,
+                    ts=1000.0 + 2.0 * seq + 0.3 * node,
+                    gpu_available=True,
+                    gpu_count=1,
+                    global_rank=node,
+                    node_rank=node,
+                    hostname=host,
+                    seq=seq,
+                    cpu_percent=cpu,
+                    ram_used_bytes=2.0 * GB,
+                    ram_total_bytes=16.0 * GB,
+                    gpu_samples=[
+                        _gpu(0, 100.0, 66.0, temp=45.0, mem_used=6.3 * GB)
+                    ],
+                )
+    out = _payload(db)
+    assert out["rollups"]["ctx"]["system_node"]["hostname"] == "node-a"
+    # node-a alone: never blended with node-b's 90%
+    assert max(out["series"]["cpu_run"]["max"]) == pytest.approx(10.0)

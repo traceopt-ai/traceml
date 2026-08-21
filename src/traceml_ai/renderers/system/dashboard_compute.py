@@ -299,6 +299,13 @@ class SystemDashboardComputer:
         }
 
         x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]
+        host = (
+            system_node["hostname"]
+            if system_node["nodes_in_window"] > 1
+            else None
+        )
+        cpu_run = self._db.fetch_cpu_run_history(conn, hostname=host)
+        power_run = self._db.fetch_gpu_power_run_history(conn, hostname=host)
 
         return SystemDashboardPayload(
             window_len=len(samples),
@@ -318,6 +325,10 @@ class SystemDashboardComputer:
                     if gpu_available
                     else []
                 ),
+                # Whole-run views (decimated in SQL): the window says what
+                # the host is doing now, these say what it has done.
+                "cpu_run": cpu_run,
+                "gpu_power_run": power_run if gpu_available else [],
             },
         ).to_dict()
 

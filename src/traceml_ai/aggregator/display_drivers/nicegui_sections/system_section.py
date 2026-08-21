@@ -233,6 +233,21 @@ def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
     return high if len(high) <= len(low) else low
 
 
+# The host CPU series is psutil.cpu_percent(): the MEAN utilisation across
+# all logical cores, so 100% is every core saturated and one busy core of
+# ten reads 10%. Measured 2026-08-21 on a 10-core box with one core
+# spinning: cpu_percent() == mean(percpu) == 36.6%, sum(percpu) == 366.5%.
+# The wording mirrors the GPU tile's "avg of 4 GPUs", and it has to be
+# explicit because the Process block on the same page reports PER-RANK cpu
+# from psutil.Process.cpu_percent(), which sums across cores and can pass
+# 100%. (The sampler reads psutil.cpu_count() but never puts it on the
+# wire; carrying it would let this read "avg of 10 cores".)
+CPU_LABEL = "host cpu util · avg across cores"
+
+# A run longer than the window by this factor is charted whole rather than
+# as its last 100 samples; below it, the window IS the whole run.
+RUN_VIEW_FACTOR = 1.2
+
 # Absent value marker. "n/a" rather than a dash: the Process card on the
 # same page already reads "N/A", and one page should not spell absence two
 # ways.
@@ -375,7 +390,7 @@ def build_system_section() -> Dict[str, Any]:
             .classes("w-full items-baseline")
             .style("gap:8px; margin:2px 0 2px;")
         ):
-            panel["cpu_label"] = ui.label("host cpu %").classes("estlabel")
+            panel["cpu_label"] = ui.label(CPU_LABEL).classes("estlabel")
             ui.element("div").style("flex:1;")
             panel["cpu_value"] = ui.label("").style(
                 f"{_MONO} font-size:13px; font-weight:600; color:var(--ink);"
@@ -383,6 +398,13 @@ def build_system_section() -> Dict[str, Any]:
         panel["cpu_chart"] = ui.echart(
             theme.span_line_options(theme.C_CPU, "%")
         ).style("height:92px; width:100%;")
+        # Faint upper trace: each slice's peak, so decimating the whole run
+        # cannot hide a spike.
+        panel["cpu_peak"] = theme.line_series(
+            "peak", theme.C_CPU, [], width=0.9
+        )
+        panel["cpu_peak"]["lineStyle"]["opacity"] = 0.3
+        panel["cpu_chart"].options["series"].append(panel["cpu_peak"])
 
         panel["power_head"] = (
             ui.row()
@@ -480,13 +502,32 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
     # Host CPU: a small zero-anchored series, the window median as its
     # one number.
     cpu = series.get("cpu", []) or []
+    run = series.get("cpu_run") or {}
+    run_t = run.get("t") or []
+    run_avg = run.get("avg") or []
+    run_max = run.get("max") or []
+    run_span = float(run.get("span_s") or 0.0)
+    cpu_whole = len(run_t) > 2 and run_span > span * RUN_VIEW_FACTOR
     chart = panel["cpu_chart"]
-    if changed:
+    peak = panel.get("cpu_peak")
+    if changed and cpu_whole:
+        newest = run_t[-1]
+        chart.options["series"][0]["data"] = [
+            [t - newest, v] for t, v in zip(run_t, run_avg)
+        ]
+        if peak is not None:
+            peak["data"] = [[t - newest, v] for t, v in zip(run_t, run_max)]
+        _apply_span_axis(chart.options["xAxis"], run_span)
+        ymax = cpu_axis_max(run_max)
+    elif changed:
         chart.options["series"][0]["data"] = [
             [s, v] for s, v in zip(secs, cpu) if s is not None
         ]
+        if peak is not None:
+            peak["data"] = []
         _apply_span_axis(chart.options["xAxis"], span)
         ymax = cpu_axis_max(cpu)
+    if changed:
         chart.options["yAxis"]["max"] = ymax
         chart.options["yAxis"]["interval"] = ymax / 2.0
         chart.update()
@@ -507,9 +548,14 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         notes.append("waiting for data")
     panel["note"].text = " · ".join(notes)
     span_words = format_span(span)
-    panel["cpu_label"].text = (
-        f"host cpu % · {span_words}" if span_words else "host cpu %"
-    )
+    if cpu_whole:
+        panel["cpu_label"].text = (
+            f"{CPU_LABEL} · whole run, {format_span(run_span)[5:]}"
+        )
+    else:
+        panel["cpu_label"].text = (
+            f"{CPU_LABEL} · {span_words}" if span_words else CPU_LABEL
+        )
     if not gpu_on:
         seen = bool(data.get("window_len"))
         for key in ("util", "mem", "temp"):
@@ -559,25 +605,43 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
 
     # GPU power per GPU against the board limit.
     flat = [v for p in pseries for v in (p.get("values") or [])]
+    prun = series.get("gpu_power_run") or []
+    prun_span = float(prun[0].get("span_s") or 0.0) if prun else 0.0
+    power_whole = bool(prun) and prun_span > span * RUN_VIEW_FACTOR
     pchart = panel["power_chart"]
     if not any(v is not None for v in flat):
         pchart.style("display:none;")
         panel["power_label"].text = "gpu power · not reported"
     elif changed:
         lines = []
-        for p in pseries:
-            idx = int(p.get("gpu_idx", 0))
-            lines.append(
-                theme.line_series(
-                    f"gpu{idx}",
-                    gpu_color(idx),
-                    [
-                        [s, v]
-                        for s, v in zip(secs, p.get("values") or [])
-                        if s is not None
-                    ],
+        if power_whole:
+            # Each slice's PEAK, never its mean: averaging a 60-100 W
+            # sawtooth over 30 s collapses it to a flat ribbon and erases
+            # the peaks the limit line exists to be compared against.
+            newest = max(e["t"][-1] for e in prun if e.get("t"))
+            for e in prun:
+                idx = int(e.get("gpu_idx", 0))
+                lines.append(
+                    theme.line_series(
+                        f"gpu{idx}",
+                        gpu_color(idx),
+                        [[t - newest, v] for t, v in zip(e["t"], e["max"])],
+                    )
                 )
-            )
+        else:
+            for p in pseries:
+                idx = int(p.get("gpu_idx", 0))
+                lines.append(
+                    theme.line_series(
+                        f"gpu{idx}",
+                        gpu_color(idx),
+                        [
+                            [s, v]
+                            for s, v in zip(secs, p.get("values") or [])
+                            if s is not None
+                        ],
+                    )
+                )
         if lines:
             # An explicit empty markLine clears a previous limit line:
             # ECharts merges options, so omitting the key would keep it.
@@ -589,21 +653,32 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
                 else {"data": []}
             )
         pchart.options["series"] = lines
-        lo, hi, tick = power_axis_bounds(flat, limit)
+        bounds_src = (
+            [v for e in prun for v in e["max"]] if power_whole else flat
+        )
+        lo, hi, tick = power_axis_bounds(bounds_src, limit)
         pchart.options["yAxis"]["min"] = lo
         pchart.options["yAxis"]["max"] = hi
         pchart.options["yAxis"]["interval"] = tick
-        _apply_span_axis(pchart.options["xAxis"], span)
+        _apply_span_axis(
+            pchart.options["xAxis"], prun_span if power_whole else span
+        )
         pchart.style("display:block;")
         pchart.update()
+        per = "per GPU peak" if power_whole else "per GPU"
         head = (
-            f"gpu power · per GPU vs {float(limit):.0f} W limit"
+            f"gpu power · {per} vs {float(limit):.0f} W limit"
             if limit is not None
-            else "gpu power · per GPU"
+            else f"gpu power · {per}"
         )
-        panel["power_label"].text = (
-            f"{head} · {span_words}" if span_words else head
-        )
+        if power_whole:
+            panel["power_label"].text = (
+                f"{head} · whole run, {format_span(prun_span)[5:]}"
+            )
+        else:
+            panel["power_label"].text = (
+                f"{head} · {span_words}" if span_words else head
+            )
 
     # Per-GPU rows, opened by the spread on its rising edge; the hint
     # follows the rows' real state, which a click may have changed.

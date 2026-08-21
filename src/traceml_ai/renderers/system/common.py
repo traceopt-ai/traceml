@@ -171,6 +171,143 @@ class SystemMetricsDB:
         """
         return conn.execute(sql, (*bound, int(limit))).fetchall()
 
+    def fetch_cpu_run_history(
+        self,
+        conn: sqlite3.Connection,
+        buckets: int = 180,
+        hostname: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Whole-run host CPU, decimated to ``buckets`` equal time slices.
+
+        The window series answers "what is CPU doing now"; this answers
+        "what has it done over the run", which is the only form that can
+        show a drift (the 96-minute reference run climbs about 25%).
+        Decimation happens in SQL so the payload stays a fixed size no
+        matter how long the run is: one row per slice carrying the slice's
+        mean and its max, because a mean alone would erase the spikes that
+        a stalling dataloader produces.
+        """
+        empty: Dict[str, Any] = {"t": [], "avg": [], "max": [], "span_s": 0.0}
+        where_sql, params = self.node_rank_filter()
+        bound: List[Any] = list(params)
+        if hostname is not None:
+            where_sql = (
+                f"{where_sql} AND hostname IS ?"
+                if where_sql
+                else "WHERE hostname IS ?"
+            )
+            bound.append(str(hostname))
+        try:
+            row = conn.execute(
+                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM "
+                f"system_samples {where_sql}",
+                tuple(bound),
+            ).fetchone()
+        except sqlite3.Error:
+            return empty
+        if not row or row[0] is None or row[1] is None:
+            return empty
+        first, last = float(row[0]), float(row[1])
+        span = last - first
+        if span <= 0:
+            return empty
+        width = span / float(max(1, int(buckets)))
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    MIN(sample_ts_s),
+                    AVG(cpu_percent),
+                    MAX(cpu_percent)
+                FROM system_samples
+                {where_sql}
+                {'AND' if where_sql else 'WHERE'} cpu_percent IS NOT NULL
+                GROUP BY CAST((sample_ts_s - ?) / ? AS INTEGER)
+                ORDER BY 1 ASC
+                """,
+                (*bound, first, width),
+            ).fetchall()
+        except sqlite3.Error:
+            return empty
+        return {
+            "t": [float(r[0]) for r in rows],
+            "avg": [float(r[1]) for r in rows],
+            "max": [float(r[2]) for r in rows],
+            "span_s": span,
+        }
+
+    def fetch_gpu_power_run_history(
+        self,
+        conn: sqlite3.Connection,
+        buckets: int = 180,
+        hostname: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Whole-run per-GPU power, decimated to ``buckets`` time slices.
+
+        Same shape as ``fetch_cpu_run_history`` but grouped per GPU. The
+        window view shows the oscillation between steps; this shows what
+        the oscillation DOES over the run (a declining ceiling is thermal
+        throttling, a dropping floor is a stall), which the step-time
+        block cannot answer because it is about watts, not seconds.
+        Each slice carries its mean and its max so the decimation cannot
+        hide a spike.
+        """
+        where_sql, params = self.node_rank_filter()
+        bound: List[Any] = list(params)
+        if hostname is not None:
+            where_sql = (
+                f"{where_sql} AND hostname IS ?"
+                if where_sql
+                else "WHERE hostname IS ?"
+            )
+            bound.append(str(hostname))
+        try:
+            row = conn.execute(
+                f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM "
+                f"system_gpu_samples {where_sql}",
+                tuple(bound),
+            ).fetchone()
+        except sqlite3.Error:
+            return []
+        if not row or row[0] is None or row[1] is None:
+            return []
+        first, last = float(row[0]), float(row[1])
+        span = last - first
+        if span <= 0:
+            return []
+        width = span / float(max(1, int(buckets)))
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    gpu_idx,
+                    MIN(sample_ts_s),
+                    AVG(power_usage_w),
+                    MAX(power_usage_w)
+                FROM system_gpu_samples
+                {where_sql}
+                {'AND' if where_sql else 'WHERE'} power_usage_w IS NOT NULL
+                GROUP BY gpu_idx, CAST((sample_ts_s - ?) / ? AS INTEGER)
+                ORDER BY gpu_idx ASC, 2 ASC
+                """,
+                (*bound, first, width),
+            ).fetchall()
+        except sqlite3.Error:
+            return []
+        by_gpu: Dict[int, Dict[str, Any]] = {}
+        for gpu_idx, ts, avg, mx in rows:
+            e = by_gpu.setdefault(
+                int(gpu_idx),
+                {"gpu_idx": int(gpu_idx), "t": [], "avg": [], "max": []},
+            )
+            e["t"].append(float(ts))
+            e["avg"].append(float(avg))
+            e["max"].append(float(mx))
+        out = [by_gpu[i] for i in sorted(by_gpu)]
+        for e in out:
+            e["span_s"] = span
+        return out
+
     def fetch_gpu_rows_for_sample(
         self,
         conn: sqlite3.Connection,
