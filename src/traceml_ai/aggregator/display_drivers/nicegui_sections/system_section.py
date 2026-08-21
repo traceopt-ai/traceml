@@ -372,17 +372,20 @@ def _relative_seconds(x_time: List[str]) -> List[Optional[float]]:
 
 
 def _apply_span_axis(
-    axis: Dict[str, Any], span: float, newest_epoch: Optional[float] = None
+    options: Dict[str, Any], span: float, newest_epoch: Optional[float] = None
 ) -> None:
-    """Pin the axis to the window and label it in wall-clock time.
+    """Pin a chart to its span and label it in wall-clock time.
 
     The x values are seconds before the newest sample, which keeps the
     series arithmetic simple, but a reader debugging a slowdown needs the
     clock: it is what their logs and every other dashboard are keyed on,
-    and it is what the Process card beside this one already shows. The
-    formatter converts on the fly from the newest sample's epoch.
+    and it is what the Process block beside this one already shows. The
+    formatters convert on the fly from the newest sample's epoch, and the
+    hover label carries both readings ("19:10 · 45 min ago") so the axis
+    and the tooltip never speak two different vocabularies.
     """
     span = max(float(span), 1.0)
+    axis = options["xAxis"]
     axis["min"] = -span
     axis["max"] = 0
     axis["interval"] = span / 3.0
@@ -390,13 +393,19 @@ def _apply_span_axis(
         axis["axisLabel"]["show"] = False
         return
     axis["axisLabel"]["show"] = True
-    seconds = "true" if span < 600 else "false"
-    axis["axisLabel"][":formatter"] = (
-        "v=>{const d=new Date((%f+v)*1000);"
-        "const p=n=>('0'+n).slice(-2);"
-        "return p(d.getHours())+':'+p(d.getMinutes())"
-        "+(%s?':'+p(d.getSeconds()):'');}" % (float(newest_epoch), seconds)
+    clock = (
+        "const d=new Date((%f+%%s)*1000);const q=n=>('0'+n).slice(-2);"
+        "const c=q(d.getHours())+':'+q(d.getMinutes())%s;"
+        % (float(newest_epoch), "+':'+q(d.getSeconds())" if span < 600 else "")
     )
+    axis["axisLabel"][":formatter"] = "v=>{%s return c;}" % (clock % "v")
+    pointer = options.get("tooltip", {}).get("axisPointer", {}).get("label")
+    if pointer is not None:
+        pointer[":formatter"] = (
+            "p=>{%s const s=Math.round(-p.value);"
+            "return c+(s<1?' · now':(s<120?' · '+s+' s ago':"
+            "' · '+Math.floor(s/60)+' min ago'));}" % (clock % "p.value")
+        )
 
 
 # --- build / update --------------------------------------------------------
@@ -580,7 +589,7 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         chart.options["series"][0]["data"] = [
             [t - newest, v] for t, v in zip(run_t, run_avg)
         ]
-        _apply_span_axis(chart.options["xAxis"], axis_span, newest)
+        _apply_span_axis(chart.options, axis_span, newest)
         # Headroom from the peaks the rolling mean smooths away, so a
         # spike is never drawn off the top of the chart.
         ymax = cpu_axis_max(run_max or run_avg)
@@ -588,7 +597,7 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         chart.options["series"][0]["data"] = [
             [s, v] for s, v in zip(secs, cpu) if s is not None
         ]
-        _apply_span_axis(chart.options["xAxis"], span, newest_epoch)
+        _apply_span_axis(chart.options, span, newest_epoch)
         ymax = cpu_axis_max(cpu)
     if changed:
         chart.options["yAxis"]["max"] = ymax
@@ -773,9 +782,9 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
                 max(e["t"][-1] for e in prun if e.get("t")),
                 prun_span,
             )
-            _apply_span_axis(pchart.options["xAxis"], axis_span, anchor)
+            _apply_span_axis(pchart.options, axis_span, anchor)
         else:
-            _apply_span_axis(pchart.options["xAxis"], span, newest_epoch)
+            _apply_span_axis(pchart.options, span, newest_epoch)
         pchart.style("display:block;")
         pchart.update()
         head = (
