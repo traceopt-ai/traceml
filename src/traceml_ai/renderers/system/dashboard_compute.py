@@ -51,6 +51,24 @@ def _gpu_reported(row: Any) -> bool:
     )
 
 
+def _empty_dashboard_series() -> Dict[str, Any]:
+    """Return the complete dashboard-series schema with no observations."""
+    return {
+        "x_time": [],
+        "cpu": [],
+        "gpu_avg": [],
+        "gpu_power": [],
+        "cpu_run": {
+            "t": [],
+            "avg": [],
+            "max": [],
+            "span_s": 0.0,
+            "window_s": 0.0,
+        },
+        "gpu_power_run": [],
+    }
+
+
 class SystemDashboardComputer:
     """Compute dashboard rollups and short time-series."""
 
@@ -468,12 +486,7 @@ class SystemDashboardComputer:
                     "rollups": rollups,
                     "series": cached.get(
                         "series",
-                        {
-                            "x_time": [],
-                            "cpu": [],
-                            "gpu_avg": [],
-                            "gpu_power": [],
-                        },
+                        _empty_dashboard_series(),
                     ),
                 }
 
@@ -481,12 +494,7 @@ class SystemDashboardComputer:
             "window_len": 0,
             "gpu_available": False,
             "rollups": {"status": "No fresh system data"},
-            "series": {
-                "x_time": [],
-                "cpu": [],
-                "gpu_avg": [],
-                "gpu_power": [],
-            },
+            "series": _empty_dashboard_series(),
         }
 
     def _empty_payload(self) -> Dict[str, Any]:
@@ -497,10 +505,5 @@ class SystemDashboardComputer:
             window_len=0,
             gpu_available=False,
             rollups={},
-            series={
-                "x_time": [],
-                "cpu": [],
-                "gpu_avg": [],
-                "gpu_power": [],
-            },
+            series=_empty_dashboard_series(),
         ).to_dict()

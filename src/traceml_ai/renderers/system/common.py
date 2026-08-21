@@ -81,7 +81,9 @@ class SystemDashboardPayload:
     window_len: int
     gpu_available: bool
     rollups: Dict[str, Any]
-    series: Dict[str, List[float]]
+    # Series includes both flat sample arrays and structured whole-run
+    # histories, so its values are intentionally heterogeneous.
+    series: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
         return {

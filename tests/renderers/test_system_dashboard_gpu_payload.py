@@ -208,6 +208,30 @@ def test_empty_database_payload_keeps_the_schema(tmp_path: Path) -> None:
     out = _payload(db)
     assert out["window_len"] == 0
     assert out["series"]["gpu_power"] == []
+    assert out["series"]["cpu_run"] == {
+        "t": [],
+        "avg": [],
+        "max": [],
+        "span_s": 0.0,
+        "window_s": 0.0,
+    }
+    assert out["series"]["gpu_power_run"] == []
+
+
+def test_failed_first_read_keeps_the_series_schema(tmp_path: Path) -> None:
+    db = tmp_path / "missing" / "run.db"
+    out = _payload(db)
+
+    assert out["window_len"] == 0
+    assert out["rollups"]["status"] == "No fresh system data"
+    assert out["series"]["cpu_run"] == {
+        "t": [],
+        "avg": [],
+        "max": [],
+        "span_s": 0.0,
+        "window_s": 0.0,
+    }
+    assert out["series"]["gpu_power_run"] == []
 
 
 def test_two_node_window_shows_the_leader_node_only(tmp_path: Path) -> None:
