@@ -338,10 +338,8 @@ class SystemDashboardComputer:
                 "now": power_max_hist[-1],
                 "p50": _median(power_max_hist),
                 "limit": power_limit,
-                # The lowest draw seen anywhere in the run. On almost any
-                # run that is the idle level (the sampler is up before the
-                # first step and after the last), which is what a starved
-                # GPU falls back to, so it is worth a reference line.
+                # Lowest reported power across the whole run, or across the
+                # recent window when whole-run aggregation is skipped.
                 "floor": (
                     run_power_floor
                     if run_power_floor is not None

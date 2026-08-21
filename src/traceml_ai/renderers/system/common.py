@@ -10,12 +10,8 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
-# Whole-run charts smooth with a ROLLING window, the way the metrics
-# notebook plots them, not with disjoint buckets. Consecutive points then
-# share most of their samples, so the line is smooth; disjoint buckets each
-# catch a different phase of a fast oscillation and stay jagged (measured:
-# mean absolute change per point 0.48 raw, 0.02 rolling over 30 samples).
-# The window is a duration, so it means the same thing at any cadence.
+# Whole-run CPU history uses a duration-based rolling window before sampling.
+# The duration keeps the aggregation consistent across sampling cadences.
 _ROLL_MIN_S = 30.0
 _ROLL_MAX_S = 300.0
 _ROLL_FRACTION = 50.0  # about a fiftieth of the run
@@ -201,15 +197,11 @@ class SystemMetricsDB:
         hostname: Optional[str] = None,
         min_span_s: float = 0.0,
     ) -> Dict[str, Any]:
-        """Whole-run host CPU, decimated to ``buckets`` equal time slices.
+        """Whole-run host CPU as rolling values sampled to a bounded series.
 
         The window series answers "what is CPU doing now"; this answers
-        "what has it done over the run", which is the only form that can
-        show a drift (the 96-minute reference run climbs about 25%).
-        Decimation happens in SQL so the payload stays a fixed size no
-        matter how long the run is: one row per slice carrying the slice's
-        mean and its max, because a mean alone would erase the spikes that
-        a stalling dataloader produces.
+        "what has it done over the run". SQL computes a rolling mean and
+        maximum, then samples the result so the payload remains bounded.
 
         Aggregation is skipped when the run does not exceed ``min_span_s``.
         """
@@ -310,21 +302,10 @@ class SystemMetricsDB:
         hostname: Optional[str] = None,
         min_span_s: float = 0.0,
     ) -> List[Dict[str, Any]]:
-        """Whole-run per-GPU power: each bucket's mean, floor and peak.
+        """Whole-run per-GPU power grouped into fixed-duration buckets.
 
-        Buckets are disjoint, unlike the rolling window the CPU series
-        uses, and deliberately: a rolling MIN or MAX holds one extreme
-        sample across the whole window and draws square plateaus, while a
-        per-bucket extreme varies with the run.
-
-        The display pairs the MEAN with the FLOOR, because that is the
-        pair that answers the questions this tool exists for. Sustained
-        draw well under the board limit means the GPU is not being fed
-        (measured on our own corpus: an input-straggler run averages
-        45.9 W against a compute-bound run's 61.9 W), and a floor that
-        falls to idle means the GPU went idle inside that window, which is
-        what a dataloader stall looks like in watts. The peak is kept for
-        callers that want it, but it barely moves on healthy work.
+        Each bucket carries mean, minimum and maximum power. The dashboard
+        draws the mean and minimum; the maximum remains available to callers.
 
         Aggregation is skipped when the run does not exceed ``min_span_s``.
         """

@@ -4,26 +4,15 @@
 # you may not use this file except in compliance with the License.
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-System block: the host and its GPUs, as four tiles, two charts and rows.
+"""System dashboard block: four resource tiles, two charts and GPU rows.
 
-Tiles (one plain number each): GPU utilisation = across-GPU average, a
-short-window median; GPU memory = the max-used GPU against its capacity;
-GPU temperature = the hottest GPU; host RAM = used against total. Levels
-always carry their denominator, rates carry the estimator in words.
+The tiles summarize GPU utilisation, memory and temperature plus host RAM.
+The CPU and GPU-power charts initially show recent raw samples. After the run
+outgrows that window, they use bounded whole-run series: rolling CPU values
+and fixed-duration GPU-power buckets. Both charts share a wall-clock axis.
 
-Charts: GPU power per GPU against the board limit (power is the one system
-metric that moves on every run), and host CPU as a small zero-anchored
-series (its shape drifts over long runs). Both label their gridlines and
-their window span, and neither narrates its mechanism.
-
-Rows: one line per GPU behind a disclosure that opens on its own when the
-across-GPU utilisation spread crosses ``SPREAD_EXPAND_PTS``. The average
-describes the node; the rows are what make it honest when one GPU of four
-is busy, so the two are one design, not two.
-
-No verdict words anywhere: judgement comes from the diagnosis engine or it
-does not appear.
+Per-GPU rows open when utilisation spread crosses ``SPREAD_EXPAND_PTS``.
+This section presents measurements and leaves verdicts to diagnostics.
 """
 
 from __future__ import annotations
@@ -36,9 +25,8 @@ from nicegui import ui
 
 from . import theme
 
-# Across-GPU utilisation spread (max - min, percentage points, window p95)
-# above which the per-GPU rows open on their own. Measured separation on
-# the reference runs is 0 (all busy) vs 100 (one busy of four).
+# Window-p95 GPU utilisation spread (max - min, percentage points) that
+# automatically opens the per-GPU rows.
 SPREAD_EXPAND_PTS = 20.0
 
 _GPU_COLORS = (
@@ -100,13 +88,8 @@ def format_gb_pair(used_bytes: Any, total_bytes: Any) -> Tuple[str, str]:
 def disclosure_text(gpus: List[Dict[str, Any]], *, is_open: bool) -> str:
     """Header of the per-GPU rows: the utilisation range, and nothing else.
 
-    It states what the GPUs read, low to high, and leaves the reading to
-    the person or to the diagnosis engine. An earlier version said "1 of 4
-    GPUs busy, 3 idle" off a 20 % bar invented here, while the engine calls
-    anything under 30 % low (``GPUUtilizationBands``): one page, two
-    thresholds, and a word this layer had no standing to say. The trigger
-    that opens the rows is unchanged and stays off the screen. The tail
-    follows the rows' real state, which a click may have changed.
+    The text reports the observed range without assigning a verdict. Its tail
+    reflects the disclosure's current state, including user changes.
     """
     utils = []
     for g in gpus:
@@ -215,9 +198,8 @@ def sparkline_svg(
 def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
     """GPU indices on the smaller side of the utilisation split.
 
-    Split at the midpoint between the highest and lowest per-GPU window
-    median; the smaller group is the anomaly (ties go to the busy side,
-    which keeps the 1-busy-of-N reference shape tinting the busy GPU).
+    Values split at the midpoint between the lowest and highest per-GPU
+    median. The smaller group is highlighted; ties select the higher group.
     """
     utils = []
     for g in gpus:
@@ -238,15 +220,8 @@ def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
     return high if len(high) <= len(low) else low
 
 
-# The host CPU series is psutil.cpu_percent(): the MEAN utilisation across
-# all logical cores, so 100% is every core saturated and one busy core of
-# ten reads 10%. Measured 2026-08-21 on a 10-core box with one core
-# spinning: cpu_percent() == mean(percpu) == 36.6%, sum(percpu) == 366.5%.
-# The wording mirrors the GPU tile's "avg of 4 GPUs", and it has to be
-# explicit because the Process block on the same page reports PER-RANK cpu
-# from psutil.Process.cpu_percent(), which sums across cores and can pass
-# 100%. (The sampler reads psutil.cpu_count() but never puts it on the
-# wire; carrying it would let this read "avg of 10 cores".)
+# Host CPU is psutil.cpu_percent(): the mean across logical cores, where 100%
+# means all cores are fully used. Process CPU uses per-rank semantics.
 CPU_LABEL = "host cpu util · avg across cores"
 
 # Absent value marker. "n/a" rather than a dash: the Process card on the
@@ -265,12 +240,9 @@ def rows_html(
     *,
     spread: Optional[float],
 ) -> str:
-    """Per-GPU table: util (window median), power trend, mem, temp, W/limit.
+    """Build GPU rows and highlight the smaller side of a wide util split.
 
-    When the spread is over the bar, the rows on the minority side of it
-    are tinted so the eye lands on the odd ones out: the one busy GPU of
-    four, or the one idle GPU of four. Absent values read as a dash,
-    never as a zero.
+    Absent values use ``NA`` and are never represented as zero.
     """
     series_by_idx = {
         int(p.get("gpu_idx", -1)): p.get("values") or []
@@ -452,8 +424,6 @@ def build_system_section() -> Dict[str, Any]:
         panel["cpu_chart"] = ui.echart(
             theme.span_line_options(theme.C_CPU, "%")
         ).style("height:92px; width:100%;")
-        # Faint upper trace: each slice's peak, so decimating the whole run
-        # cannot hide a spike.
 
         panel["power_head"] = (
             ui.row()
@@ -677,8 +647,7 @@ def _update_power_chart(
     run = series.get("gpu_power_run") or []
     run_span = float(run[0].get("span_s") or 0.0) if run else 0.0
     if whole_run:
-        # Whole-run mean shows sustained draw; its faint floor exposes idle
-        # intervals without adding a third peak trace that usually saturates.
+        # Draw each bucket's mean and minimum. The maximum stays in the payload.
         newest = (
             aligned or (max(item["t"][-1] for item in run if item.get("t")),)
         )[0]
