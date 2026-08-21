@@ -329,10 +329,20 @@ class SystemMetricsDB:
                 else "WHERE hostname IS ?"
             )
             bound.append(str(hostname))
+        # An all-zero capacity row is the sampler's NVML failure fallback,
+        # not a real 0 W observation.
+        reported_sql = """
+            power_usage_w IS NOT NULL
+            AND (
+                COALESCE(mem_total_bytes, 0) > 0
+                OR COALESCE(power_limit_w, 0) > 0
+            )
+        """
         try:
             row = conn.execute(
                 f"SELECT MIN(sample_ts_s), MAX(sample_ts_s) FROM "
-                f"system_gpu_samples {where_sql}",
+                f"system_gpu_samples {where_sql} "
+                f"{'AND' if where_sql else 'WHERE'} {reported_sql}",
                 tuple(bound),
             ).fetchone()
         except sqlite3.Error:
@@ -355,7 +365,7 @@ class SystemMetricsDB:
                     MAX(power_usage_w)
                 FROM system_gpu_samples
                 {where_sql}
-                {'AND' if where_sql else 'WHERE'} power_usage_w IS NOT NULL
+                {'AND' if where_sql else 'WHERE'} {reported_sql}
                 GROUP BY gpu_idx, CAST((sample_ts_s - ?) / ? AS INTEGER)
                 ORDER BY gpu_idx ASC, 2 ASC
                 """,

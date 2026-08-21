@@ -327,12 +327,29 @@ def test_sampler_zero_fallback_tick_is_unreported(tmp_path: Path) -> None:
     # The limit is a constant seen earlier in the window: it stays.
     assert roll["gpu_power"]["limit"] == LIMIT
     assert roll["gpu_power"]["now"] is None
+    assert roll["gpu_power"]["floor"] == 66.0
     for g in roll["gpus"]:
         assert g["power"] is None and g["power_limit"] is None
         assert g["mem_total"] is None and g["temp"] is None
         assert g["util_p50"] == 100.0
     assert out["series"]["gpu_power"][0]["values"][-1] is None
     assert out["series"]["gpu_power"][0]["values"][-2] == 66.0
+
+
+def test_reported_zero_power_remains_in_whole_run_history(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "zero-watts.db"
+    _write(
+        db,
+        lambda seq: [
+            _gpu(0, 0.0, 0.0, temp=35.0, mem_used=0.5 * GB),
+        ],
+    )
+
+    out = _payload(db)
+    assert out["rollups"]["gpu_power"]["floor"] == 0.0
+    assert out["series"]["gpu_power_run"][0]["min"] == [0.0, 0.0]
 
 
 def test_rows_without_a_hostname_are_not_a_node(tmp_path: Path) -> None:
