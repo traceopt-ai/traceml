@@ -422,22 +422,31 @@ def line_series(
     }
 
 
-def limit_mark_line(y: float, label: str, col: str) -> Dict[str, Any]:
-    """Dashed horizontal limit line with its label at the right end."""
+def mark_lines(entries: List[Any]) -> Dict[str, Any]:
+    """Several horizontal reference lines on one series.
+
+    Each entry is (y, label, colour); ECharts takes them as markLine data
+    with per-item style, so one series can carry a limit and a floor.
+    """
     return {
         "silent": True,
         "symbol": "none",
         "animation": False,
-        "lineStyle": {"color": col, "type": "dashed", "width": 1},
-        "label": {
-            "show": True,
-            "position": "insideEndTop",
-            "formatter": label,
-            "color": col,
-            "fontFamily": "Geist Mono",
-            "fontSize": 10,
-        },
-        "data": [{"yAxis": y}],
+        "data": [
+            {
+                "yAxis": y,
+                "lineStyle": {"color": col, "type": "dashed", "width": 1},
+                "label": {
+                    "show": True,
+                    "position": "insideEndTop",
+                    "formatter": label,
+                    "color": col,
+                    "fontFamily": "Geist Mono",
+                    "fontSize": 10,
+                },
+            }
+            for y, label, col in entries
+        ],
     }
 
 
@@ -449,7 +458,9 @@ def span_line_options(col: str, unit: str) -> Dict[str, Any]:
         "color": [col],
         "grid": {
             "left": 4,
-            "right": 12,
+            # room for the last clock label, which is centred on the axis
+            # maximum and would otherwise be cut in half by the card edge
+            "right": 26,
             "top": 8,
             "bottom": 4,
             "containLabel": True,
@@ -477,7 +488,9 @@ def multi_line_options(unit: str) -> Dict[str, Any]:
         "animationDuration": 300,
         "grid": {
             "left": 4,
-            "right": 12,
+            # room for the last clock label, which is centred on the axis
+            # maximum and would otherwise be cut in half by the card edge
+            "right": 26,
             "top": 10,
             "bottom": 4,
             "containLabel": True,

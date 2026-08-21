@@ -241,6 +241,14 @@ class SystemDashboardComputer:
             "Hot" if temp_now >= 85 else "Warm" if temp_now >= 80 else "OK"
         )
 
+        host = (
+            system_node["hostname"]
+            if system_node["nodes_in_window"] > 1
+            else None
+        )
+        cpu_run = self._db.fetch_cpu_run_history(conn, hostname=host)
+        power_run = self._db.fetch_gpu_power_run_history(conn, hostname=host)
+
         rollups = {
             "gpu_available": gpu_available,
             "cpu": {
@@ -282,6 +290,14 @@ class SystemDashboardComputer:
                 "now": power_max_hist[-1],
                 "p50": _median(power_max_hist),
                 "limit": power_limit,
+                # The lowest draw seen anywhere in the run. On almost any
+                # run that is the idle level (the sampler is up before the
+                # first step and after the last), which is what a starved
+                # GPU falls back to, so it is worth a reference line.
+                "floor": min(
+                    (v for e in power_run for v in (e.get("min") or [])),
+                    default=None,
+                ),
             },
             "gpus": (
                 self._gpu_rows(latest_rows, util_hist, power_hist)
@@ -299,13 +315,6 @@ class SystemDashboardComputer:
         }
 
         x_time = [self._format_time_iso(ts) for ts in ts_hist.tolist()]
-        host = (
-            system_node["hostname"]
-            if system_node["nodes_in_window"] > 1
-            else None
-        )
-        cpu_run = self._db.fetch_cpu_run_history(conn, hostname=host)
-        power_run = self._db.fetch_gpu_power_run_history(conn, hostname=host)
 
         return SystemDashboardPayload(
             window_len=len(samples),

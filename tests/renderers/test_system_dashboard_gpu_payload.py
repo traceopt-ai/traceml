@@ -110,7 +110,12 @@ def test_one_busy_of_four_reads_average_with_full_spread(
     assert roll["gpu_delta"]["p95"] == 100.0
 
     # Every aggregate cell is the max GPU, never a sum.
-    assert roll["gpu_power"] == {"now": 68.0, "p50": 68.0, "limit": LIMIT}
+    assert roll["gpu_power"] == {
+        "now": 68.0,
+        "p50": 68.0,
+        "limit": LIMIT,
+        "floor": 33.0,  # the idle GPUs' draw, the run's lowest
+    }
     assert roll["gpu_mem"]["now"] == 6.67 * GB
     assert roll["gpu_mem"]["total"] == 16.1 * GB
     assert roll["temp"]["now"] == 54.0
@@ -174,6 +179,7 @@ def test_no_gpu_payload_carries_empty_gpu_lists(tmp_path: Path) -> None:
         "now": None,
         "p50": None,
         "limit": None,
+        "floor": None,
     }
     assert out["series"]["gpu_power"] == []
     assert out["series"]["cpu"] == [8.0] * TICKS
@@ -187,6 +193,7 @@ def test_unreported_power_stays_none(tmp_path: Path) -> None:
         "now": None,
         "p50": None,
         "limit": None,
+        "floor": None,
     }
     assert out["rollups"]["gpus"][0]["power"] is None
     assert out["series"]["gpu_power"][0]["values"] == [None] * TICKS
@@ -380,7 +387,9 @@ def test_whole_run_series_are_decimated_and_keep_peaks(tmp_path: Path) -> None:
     # the spike at tick 0 lands inside the first slice and lifts its mean.
     assert run["avg"][-1] > min(run["avg"]) + 20
     assert max(run["max"]) >= 95.0  # and so do the spikes
-    assert max(run["avg"]) < 95.0  # which the mean alone would have hidden
+    # The rolling mean never reaches the spike: it is smoothed away
+    # there and preserved in "max", which is the point of carrying both.
+    assert max(run["avg"]) < 95.0
 
     power = out["series"]["gpu_power_run"]
     assert [p["gpu_idx"] for p in power] == [0]

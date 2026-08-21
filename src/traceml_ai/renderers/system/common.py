@@ -10,6 +10,28 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+# Whole-run charts smooth with a ROLLING window, the way the metrics
+# notebook plots them, not with disjoint buckets. Consecutive points then
+# share most of their samples, so the line is smooth; disjoint buckets each
+# catch a different phase of a fast oscillation and stay jagged (measured:
+# mean absolute change per point 0.48 raw, 0.02 rolling over 30 samples).
+# The window is a duration, so it means the same thing at any cadence.
+_ROLL_MIN_S = 30.0
+_ROLL_MAX_S = 300.0
+_ROLL_FRACTION = 50.0  # about a fiftieth of the run
+_MAX_RUN_POINTS = 120
+
+
+def choose_window_s(span_s: float) -> float:
+    """The rolling window for a run of ``span_s`` seconds, in round steps."""
+    if span_s <= 0:
+        return _ROLL_MIN_S
+    raw = max(_ROLL_MIN_S, min(_ROLL_MAX_S, span_s / _ROLL_FRACTION))
+    for step in (30.0, 60.0, 120.0, 300.0):
+        if raw <= step:
+            return step
+    return _ROLL_MAX_S
+
 
 @dataclass(frozen=True)
 class SystemCLISnapshot:
@@ -174,7 +196,6 @@ class SystemMetricsDB:
     def fetch_cpu_run_history(
         self,
         conn: sqlite3.Connection,
-        buckets: int = 180,
         hostname: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Whole-run host CPU, decimated to ``buckets`` equal time slices.
@@ -187,7 +208,13 @@ class SystemMetricsDB:
         mean and its max, because a mean alone would erase the spikes that
         a stalling dataloader produces.
         """
-        empty: Dict[str, Any] = {"t": [], "avg": [], "max": [], "span_s": 0.0}
+        empty: Dict[str, Any] = {
+            "t": [],
+            "avg": [],
+            "max": [],
+            "span_s": 0.0,
+            "window_s": 0.0,
+        }
         where_sql, params = self.node_rank_filter()
         bound: List[Any] = list(params)
         if hostname is not None:
@@ -211,46 +238,78 @@ class SystemMetricsDB:
         span = last - first
         if span <= 0:
             return empty
-        width = span / float(max(1, int(buckets)))
+        window_s = choose_window_s(span)
+        count = 0
+        try:
+            row = conn.execute(
+                f"SELECT COUNT(*) FROM system_samples {where_sql}",
+                tuple(bound),
+            ).fetchone()
+            count = int(row[0]) if row else 0
+        except sqlite3.Error:
+            return empty
+        if count < 2:
+            return empty
+        cadence = span / max(count - 1, 1)
+        preceding = max(1, int(round(window_s / max(cadence, 1e-6))) - 1)
+        # Only points whose rolling window is COMPLETE: the first rows
+        # have partial windows, so an early spike would show unsmoothed.
+        stride = max(1, count // _MAX_RUN_POINTS)
         try:
             rows = conn.execute(
                 f"""
-                SELECT
-                    MIN(sample_ts_s),
-                    AVG(cpu_percent),
-                    MAX(cpu_percent)
-                FROM system_samples
-                {where_sql}
-                {'AND' if where_sql else 'WHERE'} cpu_percent IS NOT NULL
-                GROUP BY CAST((sample_ts_s - ?) / ? AS INTEGER)
-                ORDER BY 1 ASC
+                WITH rolled AS (
+                    SELECT
+                        sample_ts_s AS t,
+                        AVG(cpu_percent) OVER w AS a,
+                        MAX(cpu_percent) OVER w AS m,
+                        ROW_NUMBER() OVER (ORDER BY sample_ts_s) AS rn
+                    FROM system_samples
+                    {where_sql}
+                    {'AND' if where_sql else 'WHERE'} cpu_percent IS NOT NULL
+                    WINDOW w AS (
+                        ORDER BY sample_ts_s
+                        ROWS BETWEEN {preceding} PRECEDING AND CURRENT ROW
+                    )
+                )
+                SELECT t, a, m FROM rolled
+                WHERE rn % ? = 0 AND rn > {preceding}
+                ORDER BY t ASC
                 """,
-                (*bound, first, width),
+                (*bound, stride),
             ).fetchall()
         except sqlite3.Error:
+            # Window functions need SQLite >= 3.25; without them the whole
+            # run view is simply unavailable and the window view stands.
             return empty
         return {
             "t": [float(r[0]) for r in rows],
             "avg": [float(r[1]) for r in rows],
             "max": [float(r[2]) for r in rows],
             "span_s": span,
+            "window_s": window_s,
         }
 
     def fetch_gpu_power_run_history(
         self,
         conn: sqlite3.Connection,
-        buckets: int = 180,
         hostname: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Whole-run per-GPU power, decimated to ``buckets`` time slices.
+        """Whole-run per-GPU power: each bucket's mean, floor and peak.
 
-        Same shape as ``fetch_cpu_run_history`` but grouped per GPU. The
-        window view shows the oscillation between steps; this shows what
-        the oscillation DOES over the run (a declining ceiling is thermal
-        throttling, a dropping floor is a stall), which the step-time
-        block cannot answer because it is about watts, not seconds.
-        Each slice carries its mean and its max so the decimation cannot
-        hide a spike.
+        Buckets are disjoint, unlike the rolling window the CPU series
+        uses, and deliberately: a rolling MIN or MAX holds one extreme
+        sample across the whole window and draws square plateaus, while a
+        per-bucket extreme varies with the run.
+
+        The display pairs the MEAN with the FLOOR, because that is the
+        pair that answers the questions this tool exists for. Sustained
+        draw well under the board limit means the GPU is not being fed
+        (measured on our own corpus: an input-straggler run averages
+        45.9 W against a compute-bound run's 61.9 W), and a floor that
+        falls to idle means the GPU went idle inside that window, which is
+        what a dataloader stall looks like in watts. The peak is kept for
+        callers that want it, but it barely moves on healthy work.
         """
         where_sql, params = self.node_rank_filter()
         bound: List[Any] = list(params)
@@ -275,7 +334,7 @@ class SystemMetricsDB:
         span = last - first
         if span <= 0:
             return []
-        width = span / float(max(1, int(buckets)))
+        width = choose_window_s(span)
         try:
             rows = conn.execute(
                 f"""
@@ -283,6 +342,7 @@ class SystemMetricsDB:
                     gpu_idx,
                     MIN(sample_ts_s),
                     AVG(power_usage_w),
+                    MIN(power_usage_w),
                     MAX(power_usage_w)
                 FROM system_gpu_samples
                 {where_sql}
@@ -295,17 +355,25 @@ class SystemMetricsDB:
         except sqlite3.Error:
             return []
         by_gpu: Dict[int, Dict[str, Any]] = {}
-        for gpu_idx, ts, avg, mx in rows:
+        for gpu_idx, ts, avg, mn, mx in rows:
             e = by_gpu.setdefault(
                 int(gpu_idx),
-                {"gpu_idx": int(gpu_idx), "t": [], "avg": [], "max": []},
+                {
+                    "gpu_idx": int(gpu_idx),
+                    "t": [],
+                    "avg": [],
+                    "min": [],
+                    "max": [],
+                },
             )
             e["t"].append(float(ts))
             e["avg"].append(float(avg))
+            e["min"].append(float(mn))
             e["max"].append(float(mx))
         out = [by_gpu[i] for i in sorted(by_gpu)]
         for e in out:
             e["span_s"] = span
+            e["window_s"] = width
         return out
 
     def fetch_gpu_rows_for_sample(

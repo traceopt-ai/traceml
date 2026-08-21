@@ -24,6 +24,7 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section impor
     disclosure_text,
     format_gb_pair,
     format_span,
+    format_window,
     gpu_color,
     odd_ones_out,
     power_axis_bounds,
@@ -228,6 +229,163 @@ def test_rows_table_shows_absence_not_zero() -> None:
     assert "0 / 0" not in html
 
 
+def test_whole_run_charts_share_one_clock_axis() -> None:
+    """A vertical read across the pair must land on the same moment.
+
+    The two series reach back different distances (the CPU rolling mean
+    drops its first partial window, the power buckets do not), so pinning
+    each chart to its own span would offset them by a window. The run's
+    length itself is not repeated in the labels: the context strip states
+    it once, and the axis now carries the clock.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    base = 1_755_000_000.0
+    cpu_t = [base + 120.0 + 60.0 * i for i in range(40)]  # starts later
+    pwr_t = [base + 30.0 * i for i in range(80)]  # starts earlier
+    with ui.element("div"):
+        panel = build_system_section()
+    payload = {
+        "window_len": 2,
+        "gpu_available": True,
+        "rollups": {
+            "gpu_available": True,
+            "cpu": {"now": 30.0, "p50": 32.0, "p95": 44.0},
+            "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+            "gpu_util": {"now": 99.0, "p50": 99.0, "p95": 99.0},
+            "gpu_delta": {"now": 0.0, "p95": 0.0},
+            "gpu_mem": {"now": 6.3 * GB, "total": 16.1 * GB},
+            "temp": {"now": 48.0, "status": "OK"},
+            "gpu_power": {
+                "now": 68.0,
+                "p50": 67.0,
+                "limit": 70.0,
+                "floor": 30.0,
+            },
+            "gpus": _gpus()[:1],
+            "ctx": {"gpu_count": 1},
+        },
+        "series": {
+            "x_time": [
+                "2026-08-21T10:00:00+00:00",
+                "2026-08-21T10:03:20+00:00",
+            ],
+            "cpu": [30.0, 31.0],
+            "gpu_avg": [99.0, 99.0],
+            "gpu_power": [{"gpu_idx": 0, "values": [66.0, 68.0]}],
+            "cpu_run": {
+                "t": cpu_t,
+                "avg": [30.0] * 40,
+                "max": [44.0] * 40,
+                "span_s": cpu_t[-1] - cpu_t[0],
+                "window_s": 120.0,
+            },
+            "gpu_power_run": [
+                {
+                    "gpu_idx": 0,
+                    "t": pwr_t,
+                    "avg": [67.0] * 80,
+                    "min": [57.0] * 80,
+                    "max": [69.0] * 80,
+                    "span_s": pwr_t[-1] - pwr_t[0],
+                    "window_s": 120.0,
+                }
+            ],
+        },
+    }
+    update_system_section(panel, payload)
+    cpu_axis = panel["cpu_chart"].options["xAxis"]
+    pwr_axis = panel["power_chart"].options["xAxis"]
+    assert (cpu_axis["min"], cpu_axis["max"]) == (
+        pwr_axis["min"],
+        pwr_axis["max"],
+    )
+    # The span reaches back to the earlier of the two starts.
+    assert cpu_axis["min"] == -(
+        max(cpu_t[-1], pwr_t[-1]) - min(cpu_t[0], pwr_t[0])
+    )
+    # Same clock in both formatters, so equal x means equal wall time.
+    assert (
+        cpu_axis["axisLabel"][":formatter"]
+        == pwr_axis["axisLabel"][":formatter"]
+    )
+    # The duration is the strip's fact; the labels say the view, not the
+    # length.
+    assert panel["cpu_label"].text == (
+        "host cpu util · avg across cores · whole run · rolling 2 min"
+    )
+    assert panel["power_label"].text == (
+        "gpu power · per GPU vs 70 W limit · whole run · "
+        "mean and floor of every 2 min"
+    )
+    assert "min," not in panel["cpu_label"].text
+
+
+def test_power_chart_draws_limit_and_floor_reference_lines() -> None:
+    """The band the GPUs actually work in needs both edges.
+
+    The limit alone says how much headroom is unused; the run's lowest
+    draw says where 'this GPU is waiting' sits on the same axis, so a
+    dip toward it reads as a stall rather than as a small number.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    def refs_for(power: dict) -> list:
+        with ui.element("div"):
+            panel = build_system_section()
+        payload = {
+            "window_len": 2,
+            "gpu_available": True,
+            "rollups": {
+                "gpu_available": True,
+                "cpu": {"now": 9.0, "p50": 8.0, "p95": 12.0},
+                "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                "gpu_util": {"now": 25.0, "p50": 25.0, "p95": 25.0},
+                "gpu_delta": {"now": 0.0, "p95": 0.0},
+                "gpu_mem": {"now": 6.67 * GB, "total": 16.1 * GB},
+                "temp": {"now": 54.0, "status": "OK"},
+                "gpu_power": power,
+                "gpus": _gpus(),
+                "ctx": {"gpu_count": 2},
+            },
+            "series": {
+                "x_time": [
+                    "2026-08-21T10:00:00+00:00",
+                    "2026-08-21T10:03:20+00:00",
+                ],
+                "cpu": [8.0, 9.0],
+                "gpu_avg": [25.0, 25.0],
+                "gpu_power": [{"gpu_idx": 0, "values": [66.0, 68.0]}],
+            },
+        }
+        update_system_section(panel, payload)
+        data = panel["power_chart"].options["series"][0]["markLine"]["data"]
+        return [(r["yAxis"], r["label"]["formatter"]) for r in data]
+
+    both = refs_for({"now": 68.0, "p50": 67.0, "limit": 70.0, "floor": 33.0})
+    assert both == [(70.0, "70 W limit"), (33.0, "33 W lowest seen")]
+    # The two lines carry different colours: the limit keeps the red.
+    # A floor that sits at the limit would draw two lines on top of each
+    # other and say nothing, so it is dropped.
+    assert refs_for(
+        {"now": 68.0, "p50": 67.0, "limit": 70.0, "floor": 69.0}
+    ) == [(70.0, "70 W limit")]
+    # A board that reports no limit still gets the floor.
+    assert refs_for(
+        {"now": 68.0, "p50": 67.0, "limit": None, "floor": 33.0}
+    ) == [(33.0, "33 W lowest seen")]
+
+
 def test_section_builds_and_updates_without_a_browser() -> None:
     from nicegui import ui
 
@@ -285,12 +443,19 @@ def test_section_builds_and_updates_without_a_browser() -> None:
         == "host cpu util · avg across cores · last 3 min"
     )
     assert panel["power_label"].text.endswith("70 W limit · last 3 min")
-    assert panel["cpu_chart"].options["xAxis"]["axisLabel"]["show"] is False
+    assert panel["cpu_chart"].options["xAxis"]["axisLabel"]["show"] is True
+    assert (
+        "getHours"
+        in panel["cpu_chart"].options["xAxis"]["axisLabel"][":formatter"]
+    )
     assert ":formatter" in (
         panel["cpu_chart"].options["tooltip"]["axisPointer"]["label"]
     )
-    assert panel["power_chart"].options["series"][0]["markLine"]["data"] == [
-        {"yAxis": 70.0}
+    # One reference line, the board limit, since this payload reports no
+    # run floor; each line carries its own colour and label.
+    refs = panel["power_chart"].options["series"][0]["markLine"]["data"]
+    assert [(r["yAxis"], r["label"]["formatter"]) for r in refs] == [
+        (70.0, "70 W limit")
     ]
 
     # The user closes the rows; the next identical tick must neither
@@ -462,3 +627,19 @@ def test_every_tile_keeps_a_qualifier_line() -> None:
         else:
             assert subs["util"] == "avg of 4 GPUs"
             assert subs["mem"] == "max GPU" and subs["temp"] == "max GPU"
+
+
+def test_rolling_window_is_spelled_out_not_named() -> None:
+    """A whole-run point smooths a stretch of the run; say how long it is.
+
+    "rolling 2 min" needs no glossary; "per slice" made a reader ask what a
+    slice was, and disjoint slices did not smooth a fast oscillation anyway.
+    """
+    from traceml_ai.renderers.system.common import choose_window_s
+
+    assert format_window(choose_window_s(96 * 60)) == "2 min"  # 96-min run
+    assert format_window(choose_window_s(178 * 60)) == "5 min"  # 3-hour
+    assert format_window(choose_window_s(23 * 60)) == "30 s"
+    assert format_window(choose_window_s(4 * 60)) == "30 s"  # the floor
+    assert format_window(choose_window_s(48 * 3600)) == "5 min"  # the cap
+    assert format_window(0.0) == ""
