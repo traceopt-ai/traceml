@@ -424,6 +424,60 @@ def test_whole_run_series_are_decimated_and_keep_peaks(tmp_path: Path) -> None:
     assert e["span_s"] == pytest.approx(2.0 * (ticks - 1))
 
 
+def test_cpu_whole_run_series_honors_point_cap(tmp_path: Path) -> None:
+    """A run inside the old floor-division gap never exceeds 120 points."""
+    db = tmp_path / "cpu-cap.db"
+    ticks = 200
+    with sqlite_database(db, init_summary_schema) as conn:
+        for seq in range(ticks):
+            insert_system_sample(
+                conn,
+                row_id=seq + 1,
+                rank=0,
+                ts=1000.0 + 2.0 * seq,
+                gpu_available=False,
+                gpu_count=0,
+                seq=seq,
+                cpu_percent=float(seq % 100),
+                ram_used_bytes=9.0 * GB,
+                ram_total_bytes=200.0 * GB,
+                gpu_samples=(),
+            )
+
+    run = _payload(db)["series"]["cpu_run"]
+    assert 2 < len(run["t"]) <= 120
+    assert len(run["t"]) == len(run["avg"]) == len(run["max"])
+
+
+def test_cpu_whole_run_keeps_all_eligible_points_under_cap(
+    tmp_path: Path,
+) -> None:
+    """Valid samples after the initial rolling window are not over-decimated."""
+    db = tmp_path / "cpu-near-cap.db"
+    ticks = 130
+    with sqlite_database(db, init_summary_schema) as conn:
+        for seq in range(ticks):
+            insert_system_sample(
+                conn,
+                row_id=seq + 1,
+                rank=0,
+                ts=1000.0 + 2.0 * seq,
+                gpu_available=False,
+                gpu_count=0,
+                seq=seq,
+                cpu_percent=float(seq % 100),
+                ram_used_bytes=9.0 * GB,
+                ram_total_bytes=200.0 * GB,
+                gpu_samples=(),
+            )
+
+    run = _payload(db)["series"]["cpu_run"]
+    # A 30-second rolling window at a 2-second cadence excludes the first
+    # 14 samples. The remaining 116 fit under the cap and should all survive.
+    assert len(run["t"]) == 116
+    assert len(run["t"]) == len(run["avg"]) == len(run["max"])
+
+
 def test_whole_run_series_follow_the_node_scope(tmp_path: Path) -> None:
     """A two-host window shows one node, and its whole-run view must too."""
     db = tmp_path / "n.db"

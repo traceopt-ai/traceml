@@ -254,9 +254,16 @@ class SystemMetricsDB:
             return empty
         cadence = span / max(count - 1, 1)
         preceding = max(1, int(round(window_s / max(cadence, 1e-6))) - 1)
-        # Only points whose rolling window is COMPLETE: the first rows
-        # have partial windows, so an early spike would show unsmoothed.
-        stride = max(1, count // _MAX_RUN_POINTS)
+        # The first ``preceding`` samples are valid telemetry, but they do not
+        # yet cover a complete rolling window and are excluded by the query
+        # below. Calculate the stride from only the remaining chart-eligible
+        # points: this guarantees the 120-point limit without unnecessarily
+        # discarding detail when the eligible series already fits.
+        eligible_count = max(0, count - preceding)
+        stride = max(
+            1,
+            (eligible_count + _MAX_RUN_POINTS - 1) // _MAX_RUN_POINTS,
+        )
         try:
             rows = conn.execute(
                 f"""
