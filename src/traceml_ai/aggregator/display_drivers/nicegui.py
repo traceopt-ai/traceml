@@ -32,6 +32,11 @@ Important reliability notes
 - Locks are held only for snapshots / swapping payload dicts:
   - We do NOT compute while holding the lock.
   - We do NOT update UI while holding the lock.
+- NiceGUI prints its "ready" banner from the ASGI lifespan, which runs
+  BEFORE the socket is bound. A server that never binds therefore looks
+  healthy in stdout. start() probes the socket, and if the bind is not
+  confirmed in time a watchdog keeps probing and logs an ERROR with the
+  server thread's stack, so the failure reaches the error log.
 
 Aggregator contract (required by trace_aggregator)
 --------------------------------------------------
@@ -42,6 +47,8 @@ Aggregator contract (required by trace_aggregator)
 
 from __future__ import annotations
 
+import importlib
+import sys
 import threading
 import time
 import traceback
@@ -60,8 +67,10 @@ from traceml_ai.aggregator.display_drivers.nicegui_sections.pages import (
 )
 from traceml_ai.aggregator.display_drivers.server_readiness import (
     ServerReadiness,
+    ServerWatchOutcome,
     socket_is_listening,
     wait_for_server_ready,
+    watch_server_startup,
 )
 from traceml_ai.aggregator.display_drivers.staleness import format_staleness
 from traceml_ai.renderers.base_renderer import DashboardRenderer
@@ -77,6 +86,23 @@ from traceml_ai.step_time.pipeline import LiveStepTimeSession
 # Max seconds start() waits to confirm the dashboard server is listening before
 # returning anyway. Training must never block on the dashboard (TRA-68).
 _SERVER_STARTUP_TIMEOUT_SEC = 10.0
+
+# After start() gave up waiting, a daemon watchdog keeps probing for this long
+# before logging an ERROR with diagnostics (a server that never binds is
+# otherwise indistinguishable from a slow one, and stays silent).
+_SERVER_STARTUP_GRACE_SEC = 60.0
+
+
+def _stack_versions() -> str:
+    """Versions of the serving stack, for startup log lines."""
+    parts = []
+    for name in ("nicegui", "uvicorn"):
+        try:
+            module = importlib.import_module(name)
+            parts.append(f"{name} {getattr(module, '__version__', '?')}")
+        except Exception:
+            parts.append(f"{name} ?")
+    return ", ".join(parts)
 
 
 @dataclass
@@ -131,6 +157,8 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
         self._lifespan_started = threading.Event()
         self._server_thread: Optional[threading.Thread] = None
         self._startup_timeout_sec: float = _SERVER_STARTUP_TIMEOUT_SEC
+        self._startup_grace_sec: float = _SERVER_STARTUP_GRACE_SEC
+        self._startup_watchdog: Optional[threading.Thread] = None
 
         # ---- Staleness (TRA-68): seconds since payloads last refreshed,
         # computed UI-side so a wedged display loop stops looking fresh. ----
@@ -211,11 +239,21 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
             timeout=self._startup_timeout_sec,
         )
         self._log_startup_result(result)
+        if result is ServerReadiness.TIMEOUT:
+            # Keep watching in the background: a slow bind becomes an INFO
+            # line, a bind that never happens becomes an ERROR with the
+            # server thread's stack (best effort, never blocks the caller).
+            self._startup_watchdog = threading.Thread(
+                target=self._watch_startup, daemon=True
+            )
+            self._startup_watchdog.start()
 
     def _log_startup_result(self, result: ServerReadiness) -> None:
         url = f"http://localhost:{self._port}"
         if result is ServerReadiness.READY:
-            self._logger.info(f"[TraceML] Dashboard ready at {url}")
+            self._logger.info(
+                f"[TraceML] Dashboard ready at {url} ({_stack_versions()})"
+            )
         elif result is ServerReadiness.FAILED:
             self._logger.error(
                 f"[TraceML] Dashboard server failed to start on port "
@@ -228,6 +266,60 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
                 f"{self._startup_timeout_sec:.0f}s; continuing. It may still "
                 f"come up at {url}."
             )
+
+    def _watch_startup(self) -> None:
+        """Daemon watchdog: settle a timed-out startup within the grace."""
+        url = f"http://localhost:{self._port}"
+        thread = self._server_thread
+        try:
+            started = time.monotonic()
+            outcome = watch_server_startup(
+                is_listening=lambda: socket_is_listening(
+                    "127.0.0.1", self._port
+                ),
+                is_alive=thread.is_alive if thread else (lambda: False),
+                lifespan_started=self._lifespan_started.is_set,
+                grace=self._startup_grace_sec,
+            )
+            elapsed = time.monotonic() - started + self._startup_timeout_sec
+            if outcome is ServerWatchOutcome.READY_LATE:
+                self._logger.info(
+                    f"[TraceML] Dashboard ready at {url} after "
+                    f"{elapsed:.0f}s ({_stack_versions()})"
+                )
+            elif outcome is ServerWatchOutcome.THREAD_DIED:
+                self._logger.error(
+                    f"[TraceML] Dashboard server thread exited without "
+                    f"binding port {self._port}; training continues without "
+                    f"the dashboard. Diagnostics:\n"
+                    + self._startup_diagnostics()
+                )
+            else:
+                self._logger.error(
+                    f"[TraceML] Dashboard still not listening on port "
+                    f"{self._port} after {elapsed:.0f}s; training continues "
+                    f"without the dashboard. Diagnostics:\n"
+                    + self._startup_diagnostics()
+                )
+        except Exception as e:  # the watchdog itself must never raise
+            self._logger.error(f"[TraceML] Dashboard startup watchdog: {e}")
+
+    def _startup_diagnostics(self) -> str:
+        """State of the serving thread, including its live Python stack."""
+        thread = self._server_thread
+        alive = bool(thread is not None and thread.is_alive())
+        lines = [
+            f"port={self._port}",
+            f"server_thread_alive={alive}",
+            f"lifespan_started={self._lifespan_started.is_set()}",
+            f"versions={_stack_versions()}",
+        ]
+        ident = getattr(thread, "ident", None)
+        frame = sys._current_frames().get(ident) if ident else None
+        if frame is not None:
+            stack = "".join(traceback.format_stack(frame, limit=12))
+            lines.append("server thread stack (innermost last):\n" + stack)
+        return "\n".join(lines)
 
     def tick(self) -> None:
         """
