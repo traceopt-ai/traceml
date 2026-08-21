@@ -1,8 +1,9 @@
-"""Dashboard pages (PR2 revamp): brand chrome + Step-Time-first bento grid."""
+"""Dashboard pages: context strip, then the sections the profile owns."""
 
 from nicegui import app, ui
 
 from traceml_ai.aggregator.display_drivers.layout import (
+    CONTEXT_LAYOUT,
     MODEL_COMBINED_LAYOUT,
     MODEL_DIAGNOSTICS_LAYOUT,
     MODEL_MEMORY_LAYOUT,
@@ -11,6 +12,12 @@ from traceml_ai.aggregator.display_drivers.layout import (
 )
 
 from . import theme
+from .context_section import (
+    build_context_section,
+    resolve_run_identity,
+    sections_for_profile,
+    update_context_section,
+)
 from .model_combined_section import (
     build_model_combined_section,
     update_model_combined_section,
@@ -33,71 +40,6 @@ from .system_section import (
 )
 
 
-def _run_context_text(payload) -> str:
-    """Run config (world_size / GPU count / host) from the system payload ctx."""
-    rollups = payload.get("rollups", {}) if isinstance(payload, dict) else {}
-    ctx = rollups.get("ctx") if isinstance(rollups, dict) else None
-    if not ctx:
-        return ""
-    ws = int(ctx.get("world_size") or 0)
-    gc = int(ctx.get("gpu_count") or 0)
-    host = str(ctx.get("hostname") or "").split(".")[0]
-    parts = []
-    if ws:
-        parts.append(f"world_size {ws}")
-    if gc:
-        parts.append(f"{gc}-GPU node")
-    if host:
-        parts.append(host)
-    return "  ·  ".join(parts)
-
-
-def build_header(cls, show_layers: bool):
-    """Brand run-context header: wordmark, run config, live-staleness chip."""
-    with ui.element("div").classes("glass reveal").style("padding:15px 22px;"):
-        with ui.row().classes("w-full items-center").style("gap:16px;"):
-            with ui.row().style("gap:0; align-items:baseline;"):
-                ui.label("Trace").classes("wm-trace")
-                ui.label("ML").classes("wm-ml")
-            ui.label("live training").classes("eyebrow")
-            ctx = ui.label("").style(
-                "font-family:var(--mono); font-size:11px; "
-                "color:var(--muted); display:none;"
-            )
-            if show_layers:
-                ui.link("layers", "/layers").style(
-                    "font-family:var(--mono); font-size:12px; color:var(--orange-strong); "
-                    "text-decoration:none; margin-left:4px;"
-                )
-            ui.element("div").style("flex:1;")
-            staleness = (
-                ui.label("").classes("staleband").style("display:none;")
-            )
-            cls.register_staleness_label(_StaleProxy(staleness))
-            with ui.row().classes("items-center").style("gap:7px;"):
-                ui.element("div").classes("livedot")
-                ui.label("live").style(
-                    "font-family:var(--mono); font-size:11px; color:#16a34a; font-weight:500;"
-                )
-    return ctx
-
-
-class _StaleProxy:
-    """Show the staleness chip only when there is text (hide when fresh)."""
-
-    def __init__(self, label) -> None:
-        self._label = label
-
-    @property
-    def text(self):
-        return self._label.text
-
-    @text.setter
-    def text(self, value) -> None:
-        self._label.text = value or ""
-        self._label.style(f"display:{'inline-block' if value else 'none'};")
-
-
 def _cell(flex: str):
     return ui.element("div").style(
         f"flex:{flex}; min-width:300px; display:flex; flex-direction:column;"
@@ -105,9 +47,12 @@ def _cell(flex: str):
 
 
 def define_pages(cls):
-    """Attach the NiceGUI pages with the revamped bento layout."""
+    """Attach the NiceGUI pages: context strip, then the profile's sections."""
     theme.register_static_fonts(app)
-    deep_enabled = getattr(cls._settings, "profile", "run") == "deep"
+    profile = str(getattr(cls._settings, "profile", "run") or "run")
+    deep_enabled = profile == "deep"
+    shown = sections_for_profile(profile)
+    identity = resolve_run_identity(cls._settings)
 
     @ui.page("/")
     def main_page():
@@ -119,81 +64,115 @@ def define_pages(cls):
                 "gap:16px; padding:22px 26px; max-width:1380px; margin:0 auto;"
             )
         ):
-            header_ctx = build_header(cls, deep_enabled)
+            strip = build_context_section(
+                identity,
+                cls.register_staleness_label,
+                show_layers=deep_enabled,
+                sampler_interval_s=getattr(
+                    cls._settings, "sampler_interval_sec", None
+                ),
+            )
+            cls.subscribe_layout(CONTEXT_LAYOUT, strip, update_context_section)
 
-            # Row 1: hero (step-time ribbon + verdict) | GPU gauge
-            with (
-                ui.row()
-                .classes("w-full items-stretch")
-                .style("gap:16px; flex-wrap:wrap;")
-            ):
-                with _cell("2.4"):
-                    hero_cards = build_model_combined_section()
-                    cls.subscribe_layout(
-                        MODEL_COMBINED_LAYOUT,
-                        hero_cards,
-                        update_model_combined_section,
-                    )
-                with _cell("1"):
-                    gauge_cards = build_gpu_gauge_section()
+            hero_cards = None
+            if "model_combined" in shown:
+                # Row 1: hero (step-time ribbon + verdict) | GPU gauge
+                with (
+                    ui.row()
+                    .classes("w-full items-stretch")
+                    .style("gap:16px; flex-wrap:wrap;")
+                ):
+                    with _cell("2.4"):
+                        hero_cards = build_model_combined_section()
+                        cls.subscribe_layout(
+                            MODEL_COMBINED_LAYOUT,
+                            hero_cards,
+                            update_model_combined_section,
+                        )
+                    with _cell("1"):
+                        gauge_cards = build_gpu_gauge_section()
 
-            # Row 2: System | Process
-            with (
-                ui.row()
-                .classes("w-full items-stretch")
-                .style("gap:16px; flex-wrap:wrap;")
-            ):
-                with _cell("2"):
-                    system_cards = build_system_section()
-                with _cell("1.3"):
-                    cards = build_process_section()
-                    cls.subscribe_layout(
-                        PROCESS_LAYOUT, cards, update_process_section
-                    )
+                # Row 2: System | Process
+                with (
+                    ui.row()
+                    .classes("w-full items-stretch")
+                    .style("gap:16px; flex-wrap:wrap;")
+                ):
+                    with _cell("2"):
+                        system_cards = build_system_section()
+                    with _cell("1.3"):
+                        cards = build_process_section()
+                        cls.subscribe_layout(
+                            PROCESS_LAYOUT, cards, update_process_section
+                        )
+            else:
+                # A watch session has no step loop, so no hero: the
+                # resource panes take the page. Row 1: System | GPU gauge,
+                # Row 2: Process.
+                with (
+                    ui.row()
+                    .classes("w-full items-stretch")
+                    .style("gap:16px; flex-wrap:wrap;")
+                ):
+                    with _cell("2"):
+                        system_cards = build_system_section()
+                    with _cell("1"):
+                        gauge_cards = build_gpu_gauge_section()
+                with (
+                    ui.row()
+                    .classes("w-full items-stretch")
+                    .style("gap:16px; flex-wrap:wrap;")
+                ):
+                    with _cell("1"):
+                        cards = build_process_section()
+                        cls.subscribe_layout(
+                            PROCESS_LAYOUT, cards, update_process_section
+                        )
 
-            # One SYSTEM_LAYOUT subscriber drives both the chart and the gauge
+            # One SYSTEM_LAYOUT subscriber drives the chart and the gauge
             # (two subscribers on one layout/client would evict each other).
-            def _update_system(
-                _c, d, _sc=system_cards, _gc=gauge_cards, _h=header_ctx
-            ):
+            def _update_system(_c, d, _sc=system_cards, _gc=gauge_cards):
                 update_system_section(_sc, d)
                 update_gpu_gauge_section(_gc, d)
-                txt = _run_context_text(d)
-                if txt:
-                    _h.text = txt
-                    _h.style(
-                        "font-family:var(--mono); font-size:11px; "
-                        "color:var(--muted); display:inline-block;"
-                    )
 
             cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
 
-            # Row 3: Step Memory | Diagnostics
-            with (
-                ui.row()
-                .classes("w-full items-stretch")
-                .style("gap:16px; flex-wrap:wrap;")
-            ):
-                with _cell("1.3"):
-                    cards = build_step_memory_section()
-                    cls.subscribe_layout(
-                        MODEL_MEMORY_LAYOUT, cards, update_step_memory_section
-                    )
-                with _cell("1"):
-                    diag_cards = build_model_diagnostics_section()
+            # Row 3: Step Memory | Diagnostics (training runs only)
+            if "step_memory" in shown or "model_diagnostics" in shown:
+                with (
+                    ui.row()
+                    .classes("w-full items-stretch")
+                    .style("gap:16px; flex-wrap:wrap;")
+                ):
+                    if "step_memory" in shown:
+                        with _cell("1.3"):
+                            cards = build_step_memory_section()
+                            cls.subscribe_layout(
+                                MODEL_MEMORY_LAYOUT,
+                                cards,
+                                update_step_memory_section,
+                            )
+                    if "model_diagnostics" in shown:
+                        with _cell("1"):
+                            diag_cards = build_model_diagnostics_section()
 
-                    # One MODEL_DIAGNOSTICS_LAYOUT subscriber drives BOTH the
-                    # rail and the hero verdict, so the hero shows the engine's
-                    # step-time status verbatim (single source of truth) and
-                    # auto-tracks any diagnosis-vocab change. Two subscribers on
-                    # one layout/client would evict each other.
-                    def _update_diag(_c, d, _dc=diag_cards, _hc=hero_cards):
-                        update_model_diagnostics_section(_dc, d)
-                        update_step_verdict(_hc, d)
+                            # One MODEL_DIAGNOSTICS_LAYOUT subscriber drives
+                            # BOTH the rail and the hero verdict, so the hero
+                            # shows the engine's step-time status verbatim
+                            # (single source of truth). Two subscribers on
+                            # one layout/client would evict each other.
+                            def _update_diag(
+                                _c, d, _dc=diag_cards, _hc=hero_cards
+                            ):
+                                update_model_diagnostics_section(_dc, d)
+                                if _hc is not None:
+                                    update_step_verdict(_hc, d)
 
-                    cls.subscribe_layout(
-                        MODEL_DIAGNOSTICS_LAYOUT, diag_cards, _update_diag
-                    )
+                            cls.subscribe_layout(
+                                MODEL_DIAGNOSTICS_LAYOUT,
+                                diag_cards,
+                                _update_diag,
+                            )
 
         cls.ensure_ui_timer(0.75)
         if not cls._ui_ready:

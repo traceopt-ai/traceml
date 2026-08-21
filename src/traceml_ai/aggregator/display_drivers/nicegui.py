@@ -74,6 +74,7 @@ from traceml_ai.aggregator.display_drivers.server_readiness import (
 )
 from traceml_ai.aggregator.display_drivers.staleness import format_staleness
 from traceml_ai.renderers.base_renderer import DashboardRenderer
+from traceml_ai.renderers.context.renderer import ContextRenderer
 from traceml_ai.renderers.model_diagnostics.renderer import (
     ModelDiagnosticsRenderer,
 )
@@ -192,6 +193,7 @@ class NiceGUIDisplayDriver(BaseDisplayDriver):
 
         # ---- Independent layout renderers ----
         self._renderers: List[DashboardRenderer] = [
+            ContextRenderer(db_path=self._settings.db_path),
             SystemRenderer(db_path=self._settings.db_path),
             ProcessRenderer(db_path=self._settings.db_path),
             StepMemoryRenderer(db_path=self._settings.db_path),
