@@ -78,7 +78,7 @@ def test_coverage_never_invents_a_missing_fact() -> None:
 def test_watch_profile_shows_no_step_sections() -> None:
     watch = sections_for_profile("watch")
     assert not set(watch) & set(STEP_SECTIONS)
-    assert {"system", "process", "gpu_gauge"} <= set(watch)
+    assert {"system", "process"} <= set(watch)
     assert sections_for_profile("run") == RUN_SECTIONS
     assert sections_for_profile("deep") == RUN_SECTIONS
     assert sections_for_profile("") == RUN_SECTIONS

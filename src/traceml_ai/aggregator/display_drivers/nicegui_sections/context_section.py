@@ -38,10 +38,9 @@ STEP_SECTIONS: Tuple[str, ...] = (
     "step_memory",
     "model_diagnostics",
 )
-RESOURCE_SECTIONS: Tuple[str, ...] = ("gpu_gauge", "system", "process")
+RESOURCE_SECTIONS: Tuple[str, ...] = ("system", "process")
 RUN_SECTIONS: Tuple[str, ...] = (
     "model_combined",
-    "gpu_gauge",
     "system",
     "process",
     "step_memory",

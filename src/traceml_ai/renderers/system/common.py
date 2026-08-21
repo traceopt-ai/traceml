@@ -137,14 +137,27 @@ class SystemMetricsDB:
         self,
         conn: sqlite3.Connection,
         limit: int,
+        hostname: Optional[str] = None,
     ) -> List[sqlite3.Row]:
         """
         Fetch the most recent system samples in ascending time order.
 
         The inner query limits the read size first, then the outer query
         restores ascending order for downstream time-series compute.
+        ``hostname`` narrows the window to one node: system telemetry is
+        per machine, and a window that interleaves two hosts is not a
+        series of anything.
         """
         where_sql, params = self.node_rank_filter()
+        bound: List[Any] = list(params)
+        if hostname is not None:
+            # IS, not =: a NULL hostname must round-trip as NULL.
+            where_sql = (
+                f"{where_sql} AND hostname IS ?"
+                if where_sql
+                else "WHERE hostname IS ?"
+            )
+            bound.append(str(hostname))
         sql = f"""
             SELECT *
             FROM (
@@ -156,7 +169,7 @@ class SystemMetricsDB:
             )
             ORDER BY id ASC;
         """
-        return conn.execute(sql, (*params, int(limit))).fetchall()
+        return conn.execute(sql, (*bound, int(limit))).fetchall()
 
     def fetch_gpu_rows_for_sample(
         self,

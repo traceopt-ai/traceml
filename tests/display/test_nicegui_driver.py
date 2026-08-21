@@ -158,14 +158,12 @@ def test_dashboard_sections_build_without_error() -> None:
         build_step_memory_section,
     )
     from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (
-        build_gpu_gauge_section,
         build_system_section,
     )
 
     # Smoke the actual section construction performed when a browser renders
     # the dashboard route. This catches NiceGUI element signature changes.
     build_model_combined_section()
-    build_gpu_gauge_section()
     build_system_section()
     build_process_section()
     build_step_memory_section()

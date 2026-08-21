@@ -32,12 +32,7 @@ from .step_memory_section import (
     build_step_memory_section,
     update_step_memory_section,
 )
-from .system_section import (
-    build_gpu_gauge_section,
-    build_system_section,
-    update_gpu_gauge_section,
-    update_system_section,
-)
+from .system_section import build_system_section, update_system_section
 
 
 def _cell(flex: str):
@@ -76,66 +71,47 @@ def define_pages(cls):
 
             hero_cards = None
             if "model_combined" in shown:
-                # Row 1: hero (step-time ribbon + verdict) | GPU gauge
+                # Row 1: hero (step-time ribbon + verdict). A watch session
+                # has no step loop, so no hero: the resource panes lead.
                 with (
                     ui.row()
                     .classes("w-full items-stretch")
                     .style("gap:16px; flex-wrap:wrap;")
                 ):
-                    with _cell("2.4"):
+                    with _cell("1"):
                         hero_cards = build_model_combined_section()
                         cls.subscribe_layout(
                             MODEL_COMBINED_LAYOUT,
                             hero_cards,
                             update_model_combined_section,
                         )
-                    with _cell("1"):
-                        gauge_cards = build_gpu_gauge_section()
 
-                # Row 2: System | Process
-                with (
-                    ui.row()
-                    .classes("w-full items-stretch")
-                    .style("gap:16px; flex-wrap:wrap;")
-                ):
-                    with _cell("2"):
-                        system_cards = build_system_section()
-                    with _cell("1.3"):
-                        cards = build_process_section()
-                        cls.subscribe_layout(
-                            PROCESS_LAYOUT, cards, update_process_section
-                        )
-            else:
-                # A watch session has no step loop, so no hero: the
-                # resource panes take the page. Row 1: System | GPU gauge,
-                # Row 2: Process.
-                with (
-                    ui.row()
-                    .classes("w-full items-stretch")
-                    .style("gap:16px; flex-wrap:wrap;")
-                ):
-                    with _cell("2"):
-                        system_cards = build_system_section()
-                    with _cell("1"):
-                        gauge_cards = build_gpu_gauge_section()
-                with (
-                    ui.row()
-                    .classes("w-full items-stretch")
-                    .style("gap:16px; flex-wrap:wrap;")
-                ):
-                    with _cell("1"):
-                        cards = build_process_section()
-                        cls.subscribe_layout(
-                            PROCESS_LAYOUT, cards, update_process_section
-                        )
+            # System | Process: the evidence pair (the node, its ranks),
+            # side by side at exactly half the width each. Heights are not
+            # stretched to match (items-start): the two blocks share one
+            # skeleton (a tiles row, fixed-height chart slots, one
+            # disclosure), so they are equal by construction while their
+            # disclosures are closed, and an opened disclosure grows only
+            # its own card. Process adopts the skeleton in its own PR; until
+            # then it is today's card. The System block carries the GPU
+            # headline itself (util tile + per-GPU rows), so there is no
+            # gauge.
+            with (
+                ui.row()
+                .classes("w-full items-start")
+                .style("gap:16px; flex-wrap:wrap;")
+            ):
+                with _cell("1 1 0"):
+                    system_cards = build_system_section()
+                with _cell("1 1 0"):
+                    cards = build_process_section()
+                    cls.subscribe_layout(
+                        PROCESS_LAYOUT, cards, update_process_section
+                    )
 
-            # One SYSTEM_LAYOUT subscriber drives the chart and the gauge
-            # (two subscribers on one layout/client would evict each other).
-            def _update_system(_c, d, _sc=system_cards, _gc=gauge_cards):
-                update_system_section(_sc, d)
-                update_gpu_gauge_section(_gc, d)
-
-            cls.subscribe_layout(SYSTEM_LAYOUT, system_cards, _update_system)
+            cls.subscribe_layout(
+                SYSTEM_LAYOUT, system_cards, update_system_section
+            )
 
             # Row 3: Step Memory | Diagnostics (training runs only)
             if "step_memory" in shown or "model_diagnostics" in shown:

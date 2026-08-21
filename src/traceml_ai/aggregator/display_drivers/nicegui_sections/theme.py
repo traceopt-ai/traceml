@@ -148,6 +148,15 @@ body{{
 .diagrow{{display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-top:1px solid rgba(17,24,39,0.07);}}
 .diagdot{{width:9px; height:9px; border-radius:999px; margin-top:5px; flex:none;}}
 .staleband{{font-family:var(--mono); font-size:11px; color:#b45309; background:rgba(239,108,0,0.10); border:1px solid rgba(239,108,0,0.22); padding:2px 9px; border-radius:999px;}}
+/* System block: estimator labels, per-GPU rows, disclosure header */
+.estlabel{{font-family:var(--mono); font-size:9.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted);}}
+.tml-gpus{{width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11px; color:var(--ink); font-variant-numeric:tabular-nums;}}
+.tml-gpus th{{font-size:9.5px; font-weight:500; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); text-align:left; padding:4px 8px 5px;}}
+.tml-gpus td{{padding:4px 8px; border-top:1px solid rgba(17,24,39,0.07); white-space:nowrap;}}
+.tml-gpus td.tml-util{{font-weight:700;}}
+.tml-gpus tr.tml-mark td{{background:rgba(255,140,0,0.08);}}
+.tml-exp .q-item{{padding:4px 2px; min-height:0;}}
+.tml-exp .q-expansion-item__content{{padding:0 0 4px;}}
 </style>
 """
 
@@ -322,6 +331,155 @@ def dual_line_options(
                 "rgba(255,140,0,0.06)",
             ),
         ],
+    }
+
+
+def _span_axis() -> Dict[str, Any]:
+    """Seconds-before-newest x axis; the section sets min/interval/labels."""
+    return {
+        "type": "value",
+        "min": -1,
+        "max": 0,
+        "interval": 1,
+        # No tick labels: the window is named once in the chart's label row.
+        "axisLabel": {"show": False},
+        "axisLine": {"lineStyle": {"color": _AXIS, "opacity": 0.5}},
+        "axisTick": {"show": False},
+        "splitLine": {"show": False},
+    }
+
+
+def _value_axis(unit: str, *, zero: bool) -> Dict[str, Any]:
+    ax: Dict[str, Any] = {
+        "type": "value",
+        "splitNumber": 2,
+        "axisLabel": {
+            "color": _TXT,
+            "fontFamily": "Geist Mono",
+            "fontSize": 10,
+            ":formatter": f"v=>v+'{unit}'",
+        },
+        "axisLine": {"show": False},
+        "axisTick": {"show": False},
+        "splitLine": {"lineStyle": {"color": _GRID}},
+    }
+    if zero:
+        ax["min"] = 0
+    return ax
+
+
+# The span x axis holds seconds before the newest sample (<= 0); the
+# tooltip header must read the same way as the axis ('42 s ago'), not
+# the raw float.
+_SPAN_POINTER_LABEL = (
+    "p=>{const s=Math.round(-p.value);return s<1?'now':"
+    "(s<120?s+' s ago':Math.floor(s/60)+' min '+(s%60)+' s ago');}"
+)
+
+
+def _tooltip(unit: str) -> Dict[str, Any]:
+    return {
+        "trigger": "axis",
+        "backgroundColor": "rgba(255,253,250,0.97)",
+        "borderColor": BORDER,
+        "textStyle": {
+            "color": INK,
+            "fontFamily": "Geist Mono",
+            "fontSize": 11,
+        },
+        "axisPointer": {
+            "type": "line",
+            "lineStyle": {"color": _AXIS, "type": "dashed"},
+            "label": {
+                "backgroundColor": INK,
+                "fontFamily": "Geist Mono",
+                "fontSize": 10,
+                ":formatter": _SPAN_POINTER_LABEL,
+            },
+        },
+        ":valueFormatter": f"v=>(v==null?'-':Math.round(v)+'{unit}')",
+    }
+
+
+def line_series(
+    name: str, col: str, data: List[Any], *, width: float = 1.6
+) -> Dict[str, Any]:
+    """One plain line (no area, no end label) for a multi-trace chart."""
+    return {
+        "name": name,
+        "type": "line",
+        "smooth": True,
+        "showSymbol": False,
+        "lineStyle": {"width": width, "color": col},
+        "itemStyle": {"color": col},
+        "data": data,
+    }
+
+
+def limit_mark_line(y: float, label: str, col: str) -> Dict[str, Any]:
+    """Dashed horizontal limit line with its label at the right end."""
+    return {
+        "silent": True,
+        "symbol": "none",
+        "animation": False,
+        "lineStyle": {"color": col, "type": "dashed", "width": 1},
+        "label": {
+            "show": True,
+            "position": "insideEndTop",
+            "formatter": label,
+            "color": col,
+            "fontFamily": "Geist Mono",
+            "fontSize": 10,
+        },
+        "data": [{"yAxis": y}],
+    }
+
+
+def span_line_options(col: str, unit: str) -> Dict[str, Any]:
+    """Small zero-anchored single series over a window-span x axis."""
+    return {
+        "backgroundColor": "transparent",
+        "animationDuration": 300,
+        "color": [col],
+        "grid": {
+            "left": 4,
+            "right": 12,
+            "top": 8,
+            "bottom": 4,
+            "containLabel": True,
+        },
+        "tooltip": _tooltip(unit),
+        "xAxis": _span_axis(),
+        "yAxis": _value_axis(unit, zero=True),
+        "series": [
+            {
+                **line_series("", col, []),
+                "areaStyle": {
+                    "color": _area(
+                        "rgba(37,99,235,0.14)", "rgba(37,99,235,0.03)"
+                    )
+                },
+            }
+        ],
+    }
+
+
+def multi_line_options(unit: str) -> Dict[str, Any]:
+    """Several plain traces over a window-span x axis (one per GPU)."""
+    return {
+        "backgroundColor": "transparent",
+        "animationDuration": 300,
+        "grid": {
+            "left": 4,
+            "right": 12,
+            "top": 10,
+            "bottom": 4,
+            "containLabel": True,
+        },
+        "tooltip": _tooltip(unit),
+        "xAxis": _span_axis(),
+        "yAxis": _value_axis(unit, zero=False),
+        "series": [],
     }
 
 
