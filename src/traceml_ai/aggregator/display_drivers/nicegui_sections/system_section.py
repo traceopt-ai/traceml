@@ -350,11 +350,7 @@ def build_system_section() -> Dict[str, Any]:
             ui.element("div").style("flex:1;")
             panel["note"] = ui.label("waiting for data").classes("cmeta")
 
-        with (
-            ui.row()
-            .classes("w-full")
-            .style("gap:9px; flex-wrap:wrap; margin-bottom:10px;")
-        ):
+        with ui.element("div").classes("tilerow").style("margin-bottom:10px;"):
             for key, label, acc in (
                 ("util", "gpu util", theme.C_GPU),
                 ("mem", "gpu mem", theme.C_GPU),
@@ -364,10 +360,7 @@ def build_system_section() -> Dict[str, Any]:
                 tile = (
                     ui.element("div")
                     .classes("kpi")
-                    .style(
-                        f"--acc:{acc}; flex:1 1 0; min-width:112px; "
-                        "max-width:320px;"
-                    )
+                    .style(f"--acc:{acc}; min-width:0;")
                 )
                 with tile:
                     ui.label(label).classes("klab")
@@ -541,8 +534,9 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
 
     util_p50 = (roll.get("gpu_util", {}) or {}).get("p50")
     panel["tiles"]["util"].content = theme.kval(_num(util_p50), "%")
+    one_gpu = n_gpus == 1
     panel["subs"]["util"].text = (
-        f"avg of {n_gpus} GPUs" if n_gpus != 1 else "1 GPU"
+        "1 GPU" if one_gpu else f"avg of {n_gpus} GPUs"
     )
 
     gm = roll.get("gpu_mem", {}) or {}
@@ -556,12 +550,12 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
         panel["tiles"]["mem"].content = theme.kval(
             num, f" {rest}" if rest else ""
         )
-        panel["subs"]["mem"].text = (
-            "max GPU" if n_gpus != 1 else "used / total"
-        )
+        panel["subs"]["mem"].text = "used / total" if one_gpu else "max GPU"
         temp_now = (roll.get("temp", {}) or {}).get("now")
         panel["tiles"]["temp"].content = theme.kval(_num(temp_now), " °C")
-        panel["subs"]["temp"].text = "max GPU" if n_gpus != 1 else ""
+        # Never blank: an empty qualifier made this tile a line shorter
+        # than its neighbours on a single-GPU host.
+        panel["subs"]["temp"].text = "1 GPU" if one_gpu else "max GPU"
 
     # GPU power per GPU against the board limit.
     flat = [v for p in pseries for v in (p.get("values") or [])]

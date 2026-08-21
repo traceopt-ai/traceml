@@ -388,3 +388,74 @@ def test_header_names_the_node_when_others_were_dropped() -> None:
     # Only the System payload's own facts are read: a strip-style
     # node_count on the dict changes nothing.
     assert node_scope_text({"system_node": one, "node_count": 2}) == ""
+
+
+def test_every_tile_keeps_a_qualifier_line() -> None:
+    """A blank qualifier made one tile a line shorter than its neighbours.
+
+    On a single-GPU host the temperature tile had nothing to say under it
+    ("max GPU" is meaningless with one GPU), so the box lost its third
+    line and the row of four read as uneven.
+    """
+    from nicegui import ui
+
+    from traceml_ai.aggregator.display_drivers.nicegui_sections.system_section import (  # noqa: E501
+        build_system_section,
+        update_system_section,
+    )
+
+    def payload(n_gpus: int) -> dict:
+        return {
+            "window_len": 2,
+            "gpu_available": True,
+            "rollups": {
+                "gpu_available": True,
+                "cpu": {"now": 9.0, "p50": 8.0},
+                "ram": {"now": 9.0 * GB, "total": 200.0 * GB},
+                "gpu_util": {"now": 99.0, "p50": 99.0},
+                "gpu_delta": {"now": 0.0, "p95": 0.0},
+                "gpu_mem": {"now": 6.3 * GB, "total": 16.1 * GB},
+                "temp": {"now": 48.0},
+                "gpu_power": {"now": 66.0, "p50": 66.0, "limit": 70.0},
+                "gpus": [
+                    {
+                        "gpu_idx": i,
+                        "util_now": 99.0,
+                        "util_p50": 99.0,
+                        "mem_used": 6.3 * GB,
+                        "mem_total": 16.1 * GB,
+                        "temp": 48.0,
+                        "power": 66.0,
+                        "power_limit": 70.0,
+                    }
+                    for i in range(n_gpus)
+                ],
+            },
+            "series": {
+                "x_time": [
+                    "2026-08-21T10:00:00+00:00",
+                    "2026-08-21T10:03:20+00:00",
+                ],
+                "cpu": [8.0, 9.0],
+                "gpu_avg": [99.0, 99.0],
+                "gpu_power": [
+                    {"gpu_idx": i, "values": [66.0, 66.0]}
+                    for i in range(n_gpus)
+                ],
+            },
+        }
+
+    for n in (1, 4):
+        with ui.element("div"):
+            panel = build_system_section()
+        update_system_section(panel, payload(n))
+        subs = {
+            k: panel["subs"][k].text for k in ("util", "mem", "temp", "ram")
+        }
+        assert all(subs.values()), (n, subs)
+        if n == 1:
+            assert subs["util"] == "1 GPU" and subs["temp"] == "1 GPU"
+            assert subs["mem"] == "used / total"
+        else:
+            assert subs["util"] == "avg of 4 GPUs"
+            assert subs["mem"] == "max GPU" and subs["temp"] == "max GPU"
