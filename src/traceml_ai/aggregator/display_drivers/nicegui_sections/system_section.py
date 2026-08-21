@@ -249,10 +249,6 @@ def odd_ones_out(gpus: List[Dict[str, Any]]) -> set:
 # wire; carrying it would let this read "avg of 10 cores".)
 CPU_LABEL = "host cpu util · avg across cores"
 
-# A run longer than the window by this factor is charted whole rather than
-# as its last 100 samples; below it, the window IS the whole run.
-RUN_VIEW_FACTOR = 1.2
-
 # Absent value marker. "n/a" rather than a dash: the Process card on the
 # same page already reads "N/A", and one page should not spell absence two
 # ways.
@@ -561,10 +557,10 @@ def update_system_section(panel: Dict[str, Any], data: Dict[str, Any]) -> None:
     run_avg = run.get("avg") or []
     run_max = run.get("max") or []
     run_span = float(run.get("span_s") or 0.0)
-    cpu_whole = len(run_t) > 2 and run_span > span * RUN_VIEW_FACTOR
+    cpu_whole = len(run_t) > 2
     prun = series.get("gpu_power_run") or []
     prun_span = float(prun[0].get("span_s") or 0.0) if prun else 0.0
-    power_whole = bool(prun) and prun_span > span * RUN_VIEW_FACTOR
+    power_whole = bool(prun)
     # The two whole-run charts sit one above the other, so they share one
     # anchor and one span: a dip in power and a rise in CPU at the same x
     # are then the same moment. Their own spans differ by a window (the

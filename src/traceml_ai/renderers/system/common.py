@@ -199,6 +199,7 @@ class SystemMetricsDB:
         self,
         conn: sqlite3.Connection,
         hostname: Optional[str] = None,
+        min_span_s: float = 0.0,
     ) -> Dict[str, Any]:
         """Whole-run host CPU, decimated to ``buckets`` equal time slices.
 
@@ -209,6 +210,8 @@ class SystemMetricsDB:
         matter how long the run is: one row per slice carrying the slice's
         mean and its max, because a mean alone would erase the spikes that
         a stalling dataloader produces.
+
+        Aggregation is skipped when the run does not exceed ``min_span_s``.
         """
         empty: Dict[str, Any] = {
             "t": [],
@@ -238,7 +241,9 @@ class SystemMetricsDB:
             return empty
         first, last = float(row[0]), float(row[1])
         span = last - first
-        if span <= 0:
+        # The recent window already represents short runs; avoid their
+        # rolling-history query until a whole-run view adds information.
+        if span <= max(0.0, float(min_span_s)):
             return empty
         window_s = choose_window_s(span)
         count = 0
@@ -303,6 +308,7 @@ class SystemMetricsDB:
         self,
         conn: sqlite3.Connection,
         hostname: Optional[str] = None,
+        min_span_s: float = 0.0,
     ) -> List[Dict[str, Any]]:
         """Whole-run per-GPU power: each bucket's mean, floor and peak.
 
@@ -319,6 +325,8 @@ class SystemMetricsDB:
         falls to idle means the GPU went idle inside that window, which is
         what a dataloader stall looks like in watts. The peak is kept for
         callers that want it, but it barely moves on healthy work.
+
+        Aggregation is skipped when the run does not exceed ``min_span_s``.
         """
         where_sql, params = self.node_rank_filter()
         bound: List[Any] = list(params)
@@ -351,7 +359,7 @@ class SystemMetricsDB:
             return []
         first, last = float(row[0]), float(row[1])
         span = last - first
-        if span <= 0:
+        if span <= max(0.0, float(min_span_s)):
             return []
         width = choose_window_s(span)
         try:

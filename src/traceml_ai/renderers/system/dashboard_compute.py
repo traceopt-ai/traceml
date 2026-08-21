@@ -16,6 +16,9 @@ import numpy as np
 
 from .common import SystemDashboardPayload, SystemMetricsDB
 
+# Whole-run charts add value only after the run outgrows the recent window.
+_RUN_VIEW_FACTOR = 1.2
+
 
 def _opt_float(value: Any) -> Optional[float]:
     """Float or None: an unreported column stays unreported, never 0."""
@@ -264,8 +267,35 @@ class SystemDashboardComputer:
             if system_node["nodes_in_window"] > 1
             else None
         )
-        cpu_run = self._db.fetch_cpu_run_history(conn, hostname=host)
-        power_run = self._db.fetch_gpu_power_run_history(conn, hostname=host)
+        window_span = max(float(ts_hist[-1] - ts_hist[0]), 0.0)
+        min_run_span = window_span * _RUN_VIEW_FACTOR
+        cpu_run = self._db.fetch_cpu_run_history(
+            conn,
+            hostname=host,
+            min_span_s=min_run_span,
+        )
+        power_run = (
+            self._db.fetch_gpu_power_run_history(
+                conn,
+                hostname=host,
+                min_span_s=min_run_span,
+            )
+            if gpu_available
+            else []
+        )
+        run_power_floor = min(
+            (v for e in power_run for v in (e.get("min") or [])),
+            default=None,
+        )
+        window_power_floor = min(
+            (
+                v
+                for values in power_hist.values()
+                for v in values
+                if v is not None
+            ),
+            default=None,
+        )
 
         rollups = {
             "gpu_available": gpu_available,
@@ -312,9 +342,10 @@ class SystemDashboardComputer:
                 # run that is the idle level (the sampler is up before the
                 # first step and after the last), which is what a starved
                 # GPU falls back to, so it is worth a reference line.
-                "floor": min(
-                    (v for e in power_run for v in (e.get("min") or [])),
-                    default=None,
+                "floor": (
+                    run_power_floor
+                    if run_power_floor is not None
+                    else window_power_floor
                 ),
             },
             "gpus": (

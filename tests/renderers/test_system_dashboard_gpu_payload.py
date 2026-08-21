@@ -74,9 +74,15 @@ def _all_busy() -> List[Dict[str, Any]]:
     ]
 
 
-def _write(path: Path, rows_for_tick, *, gpu_available: bool = True) -> None:
+def _write(
+    path: Path,
+    rows_for_tick,
+    *,
+    gpu_available: bool = True,
+    ticks: int = TICKS,
+) -> None:
     with sqlite_database(path, init_summary_schema) as conn:
-        for seq in range(TICKS):
+        for seq in range(ticks):
             insert_system_sample(
                 conn,
                 row_id=seq + 1,
@@ -140,6 +146,8 @@ def test_one_busy_of_four_reads_average_with_full_spread(
     assert power[0]["values"] == [68.0] * TICKS
     assert power[1]["values"] == [33.0] * TICKS
     assert len(out["series"]["x_time"]) == TICKS
+    assert out["series"]["cpu_run"]["t"] == []
+    assert out["series"]["gpu_power_run"] == []
 
 
 def test_all_busy_reads_zero_spread(tmp_path: Path) -> None:
@@ -345,11 +353,32 @@ def test_reported_zero_power_remains_in_whole_run_history(
         lambda seq: [
             _gpu(0, 0.0, 0.0, temp=35.0, mem_used=0.5 * GB),
         ],
+        ticks=130,
     )
 
     out = _payload(db)
     assert out["rollups"]["gpu_power"]["floor"] == 0.0
-    assert out["series"]["gpu_power_run"][0]["min"] == [0.0, 0.0]
+    assert set(out["series"]["gpu_power_run"][0]["min"]) == {0.0}
+
+
+def test_cpu_only_run_does_not_read_gpu_power_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db = tmp_path / "cpu-only.db"
+    _write(db, lambda seq: (), gpu_available=False)
+    computer = SystemDashboardComputer(str(db))
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("CPU-only runs must not query GPU power history")
+
+    monkeypatch.setattr(
+        computer._db,
+        "fetch_gpu_power_run_history",
+        fail_if_called,
+    )
+    out = computer.compute(window_n=100)
+    assert out["series"]["gpu_power_run"] == []
 
 
 def test_rows_without_a_hostname_are_not_a_node(tmp_path: Path) -> None:
@@ -469,7 +498,7 @@ def test_cpu_whole_run_series_honors_point_cap(tmp_path: Path) -> None:
 def test_cpu_whole_run_keeps_all_eligible_points_under_cap(
     tmp_path: Path,
 ) -> None:
-    """Valid samples after the initial rolling window are not over-decimated."""
+    """Do not over-decimate valid samples after the initial rolling window."""
     db = tmp_path / "cpu-near-cap.db"
     ticks = 130
     with sqlite_database(db, init_summary_schema) as conn:
@@ -500,7 +529,9 @@ def test_whole_run_series_follow_the_node_scope(tmp_path: Path) -> None:
     db = tmp_path / "n.db"
     with sqlite_database(db, init_summary_schema) as conn:
         row_id = 0
-        for seq in range(60):
+        # Longer than the recent 100-sample window, so whole-run mode is
+        # active and its node scoping is exercised rather than bypassed.
+        for seq in range(160):
             for node, (host, cpu) in enumerate(
                 (("node-a", 10.0), ("node-b", 90.0))
             ):
